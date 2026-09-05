@@ -1,17 +1,17 @@
 # Project Room
 
-Human + agents coordination spine. Spec and docs only until further owner go.
+A shared project workspace where people and agents discuss work, hand off tasks, and return to results with evidence and a clear next action.
 
-Public repo for the converged v0 contract from [dasha-desk #167](https://github.com/Uuriko/dasha-desk/pull/167): state machine + claims/lease, object model (Room / Member / Work Item / Artifact + Event / Policy), authority and verification guards, event fixtures, and negative-path walks.
+This repository currently contains a proposed v0 contract. Its first demonstration is two people and two agents reviewing one GitHub change without a human forwarding context.
 
-## Docs
+| Document | Purpose |
+| --- | --- |
+| [SPEC-v0](./docs/SPEC-v0.md) | Scope, one object model, membership, permissions, and acceptance criteria |
+| [First workflow](./docs/FIRST-WORKFLOW.md) | The first screen and a complete demonstration |
+| [Events and fixtures](./docs/EVENT-FIXTURES.md) | State changes, versioned checks, decisions, and recovery examples |
+| [Research](./docs/RESEARCH.md) | Sources, design inferences, and unverified comparison questions |
 
-| File | What |
-|------|------|
-| [docs/SPEC-v0.md](./docs/SPEC-v0.md) | Product spine: problem, users, objects, MVP loop, permissions |
-| [docs/EVENT-FIXTURES.md](./docs/EVENT-FIXTURES.md) | Normative transition table, fixtures (a)/(b), negative paths |
-| [docs/FIRST-WORKFLOW.md](./docs/FIRST-WORKFLOW.md) | Recommended first workflow (swarm/GitHub mailbox coordination) |
-| [docs/RESEARCH.md](./docs/RESEARCH.md) | Peers and patterns research |
+The [coordination thread](https://github.com/Uuriko/dasha-desk/pull/167) records the discussion. A source-linked revision of these documents is the reviewable contract; a claim that a draft exists on another machine is not a handoff.
 
 ## Status
 

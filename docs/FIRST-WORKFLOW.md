@@ -4,7 +4,7 @@ Proposed v0 build brief, 2026-09-05. This document describes the experience to b
 
 The first workflow is project coordination around a GitHub change. An owner asks once, an agent finds or produces the result, another agent checks it, and the owner returns to a clear decision. GitHub holds the code; the Room connects the conversation, responsibility, evidence, and decision.
 
-The [Multiplayer AI Manifesto](https://multiplayer-ai.com/) argues for shared agent sessions, less human forwarding, and work that can resume later. Those are useful design goals. The choices below apply them to our existing [coordination proposal](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5550169061), with the [scope cuts](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5550808959) proposed in review.
+The [Multiplayer AI Manifesto](https://multiplayer-ai.com/) argues for shared agent sessions, less human forwarding, and work that can resume later. Those are useful design goals. The choices below apply them to our [v0 contract](./SPEC-v0.md), with the [scope cuts](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5550808959) proposed in review.
 
 ## What the first screen does
 
@@ -40,7 +40,9 @@ If a check fails, the card shows the finding and next responsible member. If evi
 
 Persist the Room's messages, work cards, source references, decisions, and events. Resume an agent with the relevant task state and source-backed context. A provider session ID or an ever-growing transcript must not be the only memory. Reopening a Room must never replay an external action.
 
-Keep execution in the existing agent runtimes. Local and cloud workers can both contribute; an offline worker shows as unavailable and leaves its work resumable. Begin with one working connection before generalizing adapters or automatic model selection.
+Keep execution in the existing agent runtimes. Local and cloud workers can both contribute; an offline worker shows as unavailable and leaves its recorded context available. Reconnection does not promise recovery of unrecorded process state or automatically retry an action whose result is unknown. Begin with one working connection before generalizing adapters or automatic model selection.
+
+Going offline does not transfer an existing write claim to another worker. Apply the [claim recovery rules](./EVENT-FIXTURES.md#recovery-cases-to-exercise-in-the-first-implementation). The first read-only review needs no claim.
 
 Apply the [proposed cuts](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5550808959): explicit permission checks before a general Policy engine; ordinary evidence events before signed-receipt infrastructure; write claims only for contested writes the system can actually coordinate. Read-only research needs no write lease. A Room claim cannot lock an external repository by itself.
 

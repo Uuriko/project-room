@@ -1,49 +1,69 @@
-# Event fixtures (public-safe)
+# Events and fixtures
 
-Drafts only. Authoritative handoff is the #167 [Grok Bot] comment that posts these.
+Proposed v0 rules, 2026-09-05. The historical examples below adapt public coordination records; Project Room did not execute those events. The recovery cases are specified scenarios, not passing software tests.
 
-Every Event below shows: **actor**, **Policy decision** (allow/deny + rule), **causal parent**, **exact evidence reference**.
+## Work state and authority
 
-## Normative transition table (v0) — authorization + recovery
+Work states belong to one Work Item. Verification and human decisions are evidence about a particular result, not extra work states.
 
-| From | To | Who may transition | Required evidence |
-|------|-----|--------------------|-------------------|
-| (new) | proposed | human (steer) | outcome statement + owner gates enumerated |
-| proposed | accepted | accountable agent | ledger check for existing/superseding work; ownership accepted |
-| accepted | working | claim holder | claim Event (resource/scope, holder, acquisition, lease/expiry) |
-| working | blocked | claim holder | blocker reason + remaining action |
-| blocked | working | claim holder | unblock Event (blocker cleared + causal parent) |
-| working | completed | **accountable agent or Policy-authorized reducer only** (not “any satisfying executor”) | receipt Event: executor evidence (may be relayed) + exact immutable ref + checks *claimed* + required/designated verifier + remaining gate. Execution evidence ≠ transition authority. |
-| completed | independently_verified | designated verifier | independent fetch of exact immutable ref + **PASS** only. Verifier identity, check, and result live on this Event — not on the completion receipt. |
-| completed / independently_verified | working \| blocked | designated verifier or Policy | verification **FAIL** Event: findings + causal link to receipt |
-| independently_verified | owner_decided | owner human | one owner-decision Event: `approved` \| `changes_requested` \| `rejected`. `changes_requested` / `rejected` returns Work Item to `working` \| `blocked` with reason. |
-| *outcome* → | superseded | Policy-capable actor | `superseded_by` + reason/evidence (outcome replaced/moot only) |
-| claim `expired` / `released` / `superseded` → | acquired (new holder) | new holder under Policy | new claim Event citing prior claim as causal parent + Policy allow |
-| *claim attempt* → | claim_released / claim_superseded / claim_expired | holder or Policy | release, lease expiry, or superseded_by pointing at winning attempt |
+| Action | Work state before → after | Actor and required information |
+| --- | --- | --- |
+| Propose | New → proposed | Member with assignment capability; outcome, scope, completion requirements, and any required verifier or owner decision. |
+| Accept | Proposed → accepted | Assigned accountable member; acceptance and a check for existing work. |
+| Start or resume | Accepted or blocked → working | Accountable member or explicitly assigned executor; accepted attempt scope and, on resume, the resolved blocker. |
+| Report existing result | Accepted → completed | Accountable member; exact result reference and claimed checks. No new attempt is required. |
+| Report result | Working → completed | Accountable member; exact result reference and claimed checks. Another executor may supply the evidence. |
+| Block | Accepted, working, or completed → blocked | Accountable member; reason and next responsible actor. A designated verifier may block completed work with a failed check. |
+| Resolve without starting work | Blocked → accepted | Accountable member; blocker resolution, ready for a new attempt or an already-existing result. |
+| Replace the outcome | Any non-superseded state → superseded | Member with assignment capability; replacement Work Item and reason. |
 
-Guards: completion ≠ verification; replay rebuilds ledger + causality only; durable ownership ≠ write claim.
+A completion report is allowed from an authorized accountable executor; it cannot create independent verification. Read-only work requires no write claim. If a Room-coordinated contested write is later supported, starting or continuing that write additionally requires a current resource claim. Claim expiry ends that write authority, not the member's ability to report a blocker or release its attempt.
 
-## (a) #134 already-done-work path
+## Checks and decisions
 
-1. **proposed** — actor=owner human; Policy=steer allow; parent=null; evidence=Prefer-MLX kit / PR terms statement + gates (merge).
-2. **accepted** — actor=Codex (accountable); Policy=accept after ledger audit; parent=proposed; evidence=work already at `70053cc6cf9d86f3a43220dcfbb0af05797380c0` (no redundant rewrite).
-3. **completed** — actor=Codex (accountable reducer); Policy=complete allow (accountable); parent=accepted; evidence=receipt citing PR #134 + SHA `70053cc6cf9d86f3a43220dcfbb0af05797380c0` + checks *claimed* + designated verifier=Instinct + remaining gate=owner merge. (Executor may equal accountable agent here.)
-4. **independently_verified** — actor=Instinct; Policy=verify allow; parent=completed receipt; evidence=independent fetch of exact SHA + 28/28 PASS + invariant diff.
-5. **owner_decided: approved** — actor=owner; Policy=owner decision; parent=independently_verified; evidence=explicit merge approval — **PENDING**.
+| Event | Required evidence | Effect on the current view |
+| --- | --- | --- |
+| Verification PASS | Designated verifier, distinct from the executor for an independent check; completion event, exact artifact version, check, and result. | Record PASS for that version and keep the work state unchanged. PASS alone cannot clear an unresolved blocker. |
+| Verification FAIL | Designated verifier; exact completion/version, finding, and source evidence. | Current version becomes blocked; preserve its earlier completion and checks in history. A late result for an older version changes only that version's history. |
+| Owner approved | Designated human decision-maker; work is completed, current completion/version, and all required checks satisfied. | Show approval of that result and proposed next action. An external action still needs its own authorization and execution evidence. |
+| Owner requested changes or rejected | Designated human decision-maker; current result/version and reason. | Block remaining work or action; record the decision. New execution needs an accepted direction. |
+| New result version | Accountable member; replacement artifact/version and a fresh completion report through the work-state rules. | Checks and decisions for older versions remain historical and do not apply to the replacement. |
 
-## (b) Faucet competing-executor path
+Late evidence may be preserved for its original version but cannot clear a blocker or approve the current version. An ordinary discussion reply has no state effect by itself. An owner gate that was not required does not create a pending approval.
 
-1. **proposed → accepted** — actor=Codex; Policy=accept; parent=proposed; evidence=faucet no-JS H1 outcome + gates.
-2. **working** — actor=Codex; Policy=claim acquire allow; parent=accepted; evidence=claim Event (scope=faucet worker paths, holder=Codex, lease/expiry).
-3. **external execution Event** — actor=Grok Bot (executor); Policy=emit evidence allow (not complete); parent=working/claim; evidence=source-linked live Worker deploy ref (verifier-resolvable). Does **not** move Work Item state.
-4. **completed** — actor=Codex (accountable) **or** Policy-authorized reducer; Policy=complete allow citing external evidence; parent=external execution Event; evidence=receipt: Grok deploy ref + checks claimed + designated verifier + remaining gate. Codex claim attempt → `claim_superseded` (abandoned attempt), **not** outcome superseded.
-5. **independently_verified** — actor=designated verifier; Policy=verify; parent=completed; evidence=independent live faucet H1 fetch → PASS.
-6. **owner_decided** — n/a / already live; owner glance shows no merge pending for this outcome.
+## Historical fixture A: an existing result
 
-## Negative-path sketches (for Instinct to pressure-test)
+Source: the [#134 coordination fixture](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5550301667), referring to [PR #134](https://github.com/Uuriko/dasha-desk/pull/134) at `70053cc6cf9d86f3a43220dcfbb0af05797380c0`.
 
-### Verification FAIL
-After step (a)3 or (b)4: verifier Event FAIL (findings + causal link) → Work Item `working` or `blocked`; completion receipt remains in history; no `independently_verified`.
+| Recorded input | Room interpretation |
+| --- | --- |
+| Operator asks for the outcome. | Proposed Work Item with an owner merge decision required. |
+| Codex finds the existing change. | Accepted responsibility; preserve the exact revision and avoid a replacement patch. |
+| Codex returns that result. | Completion report; work is completed without a new write attempt or claim. |
+| Instinct reports 28/28 checks and an invariant comparison at that revision. | Separate verification evidence for that version, as reported in the source. |
+| The source says owner merge is pending. | Show the unresolved decision. Do not fabricate an approval or merge event. |
 
-### Expired claim → re-acquire
-After (b)2: lease expires → claim `expired`; new holder acquires under Policy with causal parent=expired claim; prior holder cannot mutate ledger without new Policy allow.
+These are historical inputs, not a fresh assertion about the PR's live status.
+
+## Historical fixture B: another executor satisfies the outcome
+
+Source: the [faucet walkthrough](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5550281808) and [failure-path discussion](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5550315649).
+
+Grok's external execution may satisfy the same outcome Codex was pursuing. Preserve the observed external result; the accountable member records its completion. The abandoned Codex attempt can be superseded without superseding the desired outcome. A separate verifier checks the exact external result.
+
+The public walkthrough does not supply a fully resolvable deployment receipt or a real claim-expiry event. It illustrates the intended mapping; it cannot serve as proof that Room claims prevented a collision. A future fixture must identify the deployment and check evidence before claiming verified completion.
+
+## Recovery cases to exercise in the first implementation
+
+| Case | Expected result |
+| --- | --- |
+| A second person joins. | An authorized member sees the goal, owner, recorded result, checks, and next action without a pasted recap. A source outside the shared audience is not introduced into that conversation. |
+| Worker becomes unavailable. | Preserve its last confirmed step and show availability. An unknown external action outcome remains unresolved; reconnecting does not blindly repeat it. |
+| Application restarts. | Reconstruct the same view from stored events and source references; issue no external actions during replay. |
+| The same receipt arrives twice. | Keep one logical receipt. Do not repeat a handoff or action. Reuse of the same source event ID with conflicting payload is rejected. |
+| Two actors update the same revision. | One revision-checked mutation wins. The stale mutation records no misleading state-change event and must refresh before proceeding. |
+| Artifact changes after PASS or approval. | Show that earlier evidence belongs to the old version. The current version needs its own completion, checks, and any required decision. |
+| Independent verification fails. | Show the finding and next responsible member, preserve prior evidence, and block the current work. A later PASS alone cannot restart work or close an unresolved blocker. |
+| A future coordinated write claim expires. | Stop authority to continue that write; require a new valid claim for another attempt. Preserve history. This case is outside the first read-only review loop. |
+
+These cases define acceptance behavior. Claiming they pass requires execution evidence from an implementation.
