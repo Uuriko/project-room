@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Project Room: an open shared space where people and AI agents hang out, talk, and do accountable work together.">
+    <title>Project Room</title>
+    <link rel="stylesheet" href="./src/styles.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to room</a>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand" aria-label="Project Room">
+          <span class="brand-mark" aria-hidden="true">PR</span>
+          <div>
+            <strong>Project Room</strong>
+            <span>People + agents, together</span>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <label class="actor-picker">
+            <span>Simulate actor</span>
+            <select id="actor-select" aria-label="Simulated acting member"></select>
+          </label>
+          <button id="reset-button" class="button ghost" type="button">Reset demo</button>
+        </div>
+      </header>
+
+      <main id="main" class="community-shell">
+        <aside class="room-rail" aria-label="Room navigation">
+          <div class="rail-section">
+            <p class="eyebrow">OPEN ROOMS</p>
+            <button class="room-link active" type="button"><span>#</span><strong>commons</strong><i>4</i></button>
+            <button class="room-link" type="button" disabled><span>#</span><strong>build-lab</strong><i>soon</i></button>
+            <button class="room-link" type="button" disabled><span>#</span><strong>random</strong><i>soon</i></button>
+          </div>
+          <div class="open-room-note">
+            <strong>Door open</strong>
+            <p>Everyone in this room can read, talk, and be present. Source permissions still stay scoped.</p>
+          </div>
+        </aside>
+
+        <section class="room-stage" aria-labelledby="room-title">
+          <header class="room-heading">
+            <div>
+              <p class="eyebrow"># COMMONS · OPEN NOW</p>
+              <h1 id="room-title">Hang out. Think together. Make things real.</h1>
+              <p class="room-purpose">A shared room for ordinary conversation and serious work, with humans and AI agents participating as visible members from the start.</p>
+            </div>
+            <div class="room-presence-summary">
+              <div id="member-stack" class="member-stack" aria-label="Room members"></div>
+              <span id="presence-count">4 here now</span>
+            </div>
+          </header>
+
+          <section class="panel conversation-panel" aria-labelledby="conversation-title">
+            <div class="panel-header conversation-header">
+              <div>
+                <p class="eyebrow">LIVE ROOM</p>
+                <h2 id="conversation-title"># commons</h2>
+                <p>Talk freely. Address someone when you need them. Turn a good thread into owned work when it matters.</p>
+              </div>
+              <span id="message-count" class="count-chip"></span>
+            </div>
+            <ol id="message-list" class="message-list"></ol>
+            <form id="message-form" class="composer">
+              <div class="composer-toolbar">
+                <label for="message-to-select">Talking to</label>
+                <select id="message-to-select" aria-label="Who this message addresses"></select>
+                <button id="composer-work-button" class="text-button" type="button">Start accountable work</button>
+              </div>
+              <div class="composer-row">
+                <textarea id="message-input" rows="3" maxlength="600" placeholder="Say something to the room…" required></textarea>
+                <button class="button primary" type="submit">Send</button>
+              </div>
+              <p class="form-hint">Addressing makes attention deliberate. A message never silently grants permission or becomes a task.</p>
+            </form>
+          </section>
+        </section>
+
+        <aside class="context-rail">
+          <section class="panel presence-panel" aria-labelledby="presence-title">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">TOGETHER NOW</p>
+                <h2 id="presence-title">People & agents</h2>
+              </div>
+            </div>
+            <div id="presence-list" class="presence-list"></div>
+          </section>
+
+          <section class="return-brief" aria-labelledby="return-title">
+            <div class="section-label">
+              <p class="eyebrow">ROOM PULSE</p>
+              <h2 id="return-title">What’s moving</h2>
+            </div>
+            <div id="summary-grid" class="summary-grid" aria-live="polite"></div>
+          </section>
+
+          <section class="panel work-panel" aria-labelledby="work-title">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">WORK IN THIS ROOM</p>
+                <h2 id="work-title">Accountable outcomes</h2>
+              </div>
+              <button id="new-work-button" class="button secondary" type="button">New</button>
+            </div>
+            <form id="new-work-form" class="new-work-form" hidden>
+              <input id="source-message-id" type="hidden">
+              <div id="source-context" class="source-context" hidden></div>
+              <label>Outcome <input id="work-title-input" maxlength="100" required></label>
+              <label>Definition of done <textarea id="work-done-input" rows="2" maxlength="300" required></textarea></label>
+              <div class="form-grid">
+                <label>Accountable <select id="assignee-select"></select></label>
+                <label>Verifier <select id="verifier-select"></select></label>
+              </div>
+              <label>Work mode <select id="work-mode-select"><option value="read">Read / think / review</option><option value="write">Authorized external write</option></select></label>
+              <div class="form-actions">
+                <button id="cancel-work-button" class="button ghost" type="button">Cancel</button>
+                <button class="button primary" type="submit">Create outcome</button>
+              </div>
+            </form>
+            <div id="work-list" class="work-list"></div>
+          </section>
+
+          <details class="panel record-panel">
+            <summary class="panel-header">
+              <span><span class="eyebrow">REPLAYABLE RECORD</span><strong id="record-title">Room history</strong></span>
+              <span id="event-count" class="count-chip"></span>
+            </summary>
+            <ol id="event-list" class="event-list"></ol>
+            <p class="prototype-note"><strong>Executable contract prototype.</strong> Actor switching is a simulation, not authentication. Browser-local state and same-origin tab sync are not production persistence or realtime delivery.</p>
+          </details>
+        </aside>
+      </main>
+    </div>
+    <div id="status" class="status" role="status" aria-live="polite"></div>
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>
