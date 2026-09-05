@@ -1,15 +1,16 @@
 {
   "name": "project-room",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "Executable v0 contract for a shared human and agent project room",
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test",
-    "check": "node --check src/events.js && node --check src/seed.js && node --check src/app.js && node --check server.mjs && npm test"
+    "check": "node scripts/check.mjs",
+    "provision": "node scripts/provision.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=24.19.0"
   }
 }

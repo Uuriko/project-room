@@ -1,5 +1,7 @@
 # Project Room build plan
 
+The expanded consumer/enterprise execution plan and readiness gates are in [PRODUCTION-PLAN.md](./PRODUCTION-PLAN.md). The connected single-node pilot is described in [SERVICE.md](./SERVICE.md); earlier browser-prototype descriptions below are historical Phase A context, not the current service's persistence model.
+
 Status: implementation plan plus the first executable contract slice. The code targets the independently reviewed contract in [PR #1](https://github.com/Uuriko/project-room/pull/1) at `11de103c791caab83bb48a2d0f27184043232bb1`, stacked on the spec branch from PR #2. It does not authorize a merge or deployment.
 
 ## 1. Product decision
@@ -47,7 +49,7 @@ The [Multiplayer AI Manifesto](https://multiplayer-ai.com/) names the main failu
 
 [Buzz](https://github.com/block/buzz) is the closest public product peer. It puts people, agents, workflows, code events, and approvals into one event-shaped workspace with an agent-first CLI. Project Room should learn from its shared event substrate and evidence search, but should not copy its full communication platform, Nostr identity model, desktop client, voice, media, forge, mesh, or broad workflow engine.
 
-The differentiation is focus: Buzz begins with a comprehensive human-and-agent workspace. Project Room begins with the accountable work card and the owner return brief. Conversation is supporting context; outcome, evidence, verification, and next action are the primary surface.
+The differentiation is a conversation-first habitat with an accountable-work layer: people and agents can simply spend time together, then deliberately attach ownership, evidence, verification, and next action when a discussion becomes work. The work card and return brief make outcomes recoverable without displacing the social room.
 
 ### Superconductor and Dust
 
