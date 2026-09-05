@@ -204,8 +204,10 @@ Representative rules:
 - Only the designated verifier may append the verification event.
 - Verification must name the same evidence version as the completion receipt. A newer artifact invalidates the previous verification for that newer version.
 - A verification failure retains the completion receipt and blocks the current version. A later PASS remains evidence for that version but cannot clear the unresolved blocker.
+- Verification evidence that arrives for a known older completion/version is retained in history only. It cannot change the current version, blocker, verification, or decision.
 - Only the explicitly designated authenticated human decision-maker may approve, request changes, or reject.
 - Approval requires successful independent verification when the Work Item requires it.
+- Completed work does not silently reopen. A voluntary replacement follows an explicit rework path: record the reason and next action as a blocker, accept its resolution, start the new attempt, then report a fresh completion. This keeps an earlier approval final until a visible rework request exists.
 - An exact duplicate event returns the already-recorded result without repeating side effects. Conflicting reuse of an event ID or idempotency key is rejected.
 - Every Work Item mutation includes the expected revision. A stale revision records neither a projection change nor a misleading event.
 
@@ -396,10 +398,12 @@ Exit condition: controlled cases require zero human context relays and cause zer
 - exact evidence-version match required
 - verification failure blocks the current version without losing its receipt
 - later PASS cannot clear an unresolved blocker
+- late verification for a known older completion is retained as history without changing the current version or gates
 - approval denied before required verification
 - only the designated human decision-maker records the v0 decision
 - approval remains a decision about completed work rather than a new work state
 - changes requested blocks the current version and requires accepted new direction
+- approved completed work requires the explicit blocked → accepted → working → completed rework path before replacement
 - a replacement result cannot inherit an older PASS or approval
 - stale expected revision leaves the event log and projection unchanged
 - conflicting duplicate event or idempotency keys are rejected
