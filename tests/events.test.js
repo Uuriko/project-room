@@ -25,6 +25,35 @@ test("an exact duplicate event is idempotent", () => {
   assert.equal(twice.messages.length, once.messages.length);
 });
 
+test("room conversation can address a human or agent without creating work", () => {
+  const state = baseState();
+  const workBefore = Object.keys(state.workItems).length;
+  const next = applyEvent(state, fixedEvent("directed-room-message", EVENT_TYPES.MESSAGE_POSTED, "maya", {
+    body: "Instinct, what do you think about this?",
+    toMemberId: "instinct"
+  }));
+  assert.equal(next.messages.at(-1).toMemberId, "instinct");
+  assert.equal(Object.keys(next.workItems).length, workBefore);
+});
+
+test("a room message can become linked accountable work without copied context", () => {
+  const state = baseState();
+  const next = applyEvent(state, fixedEvent("conversation-to-work", EVENT_TYPES.WORK_PROPOSED, "potter", {
+    workItemId: "work-from-conversation",
+    title: "Explore the room idea",
+    definitionOfDone: "Return a source-linked recommendation",
+    accountableMemberId: "maya",
+    verifierMemberId: "instinct",
+    independentVerificationRequired: true,
+    ownerDecisionRequired: true,
+    humanDecisionMakerId: "potter",
+    mode: "read",
+    sourceMessageId: "evt-message-2"
+  }));
+  assert.equal(next.workItems["work-from-conversation"].sourceMessageId, "evt-message-2");
+  assert.equal(next.messages.find((message) => message.id === "evt-message-2").body, "Yes. Conversation should be worth having here even before it becomes a task.");
+});
+
 test("conflicting reuse of an event id or idempotency key is rejected", () => {
   const state = applyEvent(baseState(), fixedEvent("conflict", EVENT_TYPES.MESSAGE_POSTED, "potter", { body: "First" }));
   assert.throws(() => applyEvent(state, fixedEvent("conflict", EVENT_TYPES.MESSAGE_POSTED, "potter", { body: "Changed" })), /Conflicting reuse of event id/);

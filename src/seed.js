@@ -16,15 +16,15 @@ const e = (id, type, actorId, minute, data, causationId = null) => ({
 export const seedEvents = [
   e("evt-room", EVENT_TYPES.ROOM_CREATED, "potter", 0, {
     roomId: ROOM_ID,
-    title: "Ship Project Room v0",
-    purpose: "Replace manual context routing with one accountable, source-backed record.",
+    title: "Project Room Commons",
+    purpose: "An open shared place where people and agents can hang out, think, and turn conversation into accountable work.",
     ownerId: "potter"
   }),
   e("evt-member-potter", EVENT_TYPES.MEMBER_ADDED, "potter", 1, {
     memberId: "potter",
     displayName: "Potter",
     kind: "human",
-    permissions: ["steer", "decide", "manage_members", "manage_claims"]
+    permissions: ["steer", "decide", "manage_members", "manage_claims", "accept_work", "complete_work", "verify"]
   }, "evt-room"),
   e("evt-member-codex", EVENT_TYPES.MEMBER_ADDED, "potter", 2, {
     memberId: "codex",
@@ -42,12 +42,28 @@ export const seedEvents = [
     memberId: "maya",
     displayName: "Maya",
     kind: "human",
-    permissions: ["steer"]
+    permissions: ["steer", "accept_work", "complete_work", "verify"]
   }, "evt-member-instinct"),
   e("evt-message-1", EVENT_TYPES.MESSAGE_POSTED, "potter", 5, {
-    body: "Build the smallest useful room where I can see what was asked, who owns it, the evidence, and what needs me next."
+    body: "Morning. I want this to feel like somewhere we would actually leave open all day, not a dashboard we visit only when something breaks."
   }),
-  e("evt-work-review", EVENT_TYPES.WORK_PROPOSED, "potter", 6, {
+  e("evt-message-2", EVENT_TYPES.MESSAGE_POSTED, "maya", 6, {
+    body: "Yes. Conversation should be worth having here even before it becomes a task.",
+    toMemberId: "potter",
+    replyToId: "evt-message-1"
+  }, "evt-message-1"),
+  e("evt-message-3", EVENT_TYPES.MESSAGE_POSTED, "codex", 7, {
+    body: "I can be present, listen, and join when addressed. I will not treat every room message as an instruction.",
+    toMemberId: "potter"
+  }, "evt-message-2"),
+  e("evt-message-4", EVENT_TYPES.MESSAGE_POSTED, "instinct", 8, {
+    body: "When a thread becomes real work, we can attach ownership and evidence without moving the conversation somewhere else."
+  }, "evt-message-3"),
+  e("evt-message-5", EVENT_TYPES.MESSAGE_POSTED, "potter", 9, {
+    body: "Good. Review the current contract together, then make the smallest version we can actually use.",
+    toMemberId: "codex"
+  }),
+  e("evt-work-review", EVENT_TYPES.WORK_PROPOSED, "potter", 10, {
     workItemId: "work-spec-review",
     title: "Review the Project Room v0 contract",
     definitionOfDone: "Exact spec revision is checked independently and any contradiction is source-linked.",
@@ -56,21 +72,23 @@ export const seedEvents = [
     independentVerificationRequired: true,
     ownerDecisionRequired: true,
     humanDecisionMakerId: "potter",
-    mode: "read"
-  }, "evt-message-1"),
-  e("evt-work-review-accepted", EVENT_TYPES.WORK_ACCEPTED, "codex", 7, {
+    mode: "read",
+    sourceMessageId: "evt-message-5"
+  }, "evt-message-5"),
+  e("evt-work-review-accepted", EVENT_TYPES.WORK_ACCEPTED, "codex", 11, {
     workItemId: "work-spec-review",
     expectedRevision: 0
   }, "evt-work-review"),
-  e("evt-work-review-started", EVENT_TYPES.WORK_STARTED, "codex", 8, {
+  e("evt-work-review-started", EVENT_TYPES.WORK_STARTED, "codex", 12, {
     workItemId: "work-spec-review",
     expectedRevision: 1
   }, "evt-work-review-accepted"),
-  e("evt-message-2", EVENT_TYPES.MESSAGE_POSTED, "codex", 9, {
+  e("evt-work-message-1", EVENT_TYPES.MESSAGE_POSTED, "codex", 13, {
     body: "I found the existing spec work and am reviewing that exact revision instead of creating a duplicate.",
-    workItemId: "work-spec-review"
+    workItemId: "work-spec-review",
+    toMemberId: "instinct"
   }, "evt-work-review-started"),
-  e("evt-work-review-completed", EVENT_TYPES.WORK_COMPLETED, "codex", 10, {
+  e("evt-work-review-completed", EVENT_TYPES.WORK_COMPLETED, "codex", 14, {
     workItemId: "work-spec-review",
     expectedRevision: 2,
     summary: "The core work-item model is sound; four consistency corrections are required before implementation.",
@@ -87,9 +105,10 @@ export const seedEvents = [
     evidenceVersion: "58875941ed50d01edacbdc91f1edebe85ba6b53e",
     summary: "Pressure-test reconstructed the active state and confirmed the strongest contradictions."
   }, "evt-work-review-completed"),
-  e("evt-message-3", EVENT_TYPES.MESSAGE_POSTED, "instinct", 31, {
+  e("evt-work-message-2", EVENT_TYPES.MESSAGE_POSTED, "instinct", 31, {
     body: "Verified the exact spec revision. Completion and independent verification remain separate; no manual context paste was needed.",
-    workItemId: "work-spec-review"
+    workItemId: "work-spec-review",
+    toMemberId: "potter"
   }, "evt-work-review-verified"),
   e("evt-work-build", EVENT_TYPES.WORK_PROPOSED, "potter", 32, {
     workItemId: "work-vertical-slice",
@@ -118,8 +137,9 @@ export const seedEvents = [
     workItemId: "work-vertical-slice",
     expectedRevision: 2
   }, "evt-work-build-claim"),
-  e("evt-message-4", EVENT_TYPES.MESSAGE_POSTED, "codex", 36, {
+  e("evt-work-message-3", EVENT_TYPES.MESSAGE_POSTED, "codex", 36, {
     body: "Implementation is in progress on a dedicated branch. The spec branch and its active documentation edit remain untouched.",
-    workItemId: "work-vertical-slice"
+    workItemId: "work-vertical-slice",
+    toMemberId: "instinct"
   }, "evt-work-build-started")
 ];

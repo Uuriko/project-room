@@ -4,11 +4,13 @@ Status: implementation plan plus the first executable contract slice. The code t
 
 ## 1. Product decision
 
-Project Room is not a Slack clone with bots added. It is the smallest shared workspace in which people and agents can complete accountable work without a person copying context between private chats.
+Project Room is an open, persistent social-and-work space where people and AI agents can hang out, talk, think, and complete accountable work together without a person copying context between private chats. It should feel as natural to leave open all day as Slack or Discord, but its members, attention model, and work model are designed for humans and agents together rather than adding bots to a human-only chat product.
+
+The accountable Work Item is the operational spine, not the whole experience. Casual conversation, presence, lightweight rooms, and unstructured thinking are first-class. A discussion becomes structured only when someone deliberately turns it into work; ordinary conversation is never forced through a task form.
 
 The first product promise is:
 
-> Ask once. See who owns the outcome, what evidence exists, who checked it, and what decision is needed next.
+> A room worth being in, and a clear path from “we should do this” to who owns it, what happened, who checked it, and what decision is needed next.
 
 The first wedge is coordination around a GitHub change because it supplies objective, immutable evidence and exposes the exact failures Project Room must solve: duplicate execution, stale status, missing context, unverified completion, ambiguous authority, and unnecessary human relays.
 
@@ -21,6 +23,13 @@ The first loop is:
 5. The designated human decision-maker records the remaining decision. The Work Item remains completed when approved; a merge or deployment is a separate action.
 
 Messages provide context, but messages do not silently mutate permissions or replace accountable work.
+
+The resulting product has two equally necessary loops:
+
+1. **Belonging loop:** enter a room, see who is present, catch up, talk to everyone or deliberately address a person or agent, and contribute without first creating a task.
+2. **Work loop:** promote a useful message or idea into an accountable outcome, preserve the originating conversation, execute against explicit authority, attach evidence, verify it, and return only the real decision.
+
+If the first loop is weak, Project Room becomes a dashboard people visit reluctantly. If the second loop is weak, it becomes another chat stream where work and decisions disappear.
 
 ## 2. Research findings translated into product requirements
 
@@ -68,8 +77,11 @@ The interface targets WCAG 2.2 AA. In particular, status changes use an accessib
 
 ### v0 must do
 
-- One durable Room with at least two people and two agent identities.
-- Shared conversation with deliberate addressing; ordinary messages do not wake every agent.
+- One durable, open common Room with at least two people and two agent identities visibly participating together.
+- A conversation-first home surface suitable for casual talk, brainstorming, lightweight coordination, and serious work.
+- Human/agent presence and availability that make every participant legible without making agents feel like hidden commands or humans feel like routers.
+- Shared conversation with deliberate addressing; ordinary messages do not wake every agent, and addressing never grants authority.
+- One-action promotion of a message into a linked Work Item without copying or losing the originating context.
 - Work Item card showing outcome, accountable member, state, evidence, latest verification, open owner gate, and next action.
 - Append-only events with deterministic replay and causal parents.
 - Idempotency for duplicate delivery and command submission.
@@ -85,7 +97,7 @@ The interface targets WCAG 2.2 AA. In particular, status changes use an accessib
 
 ### v0 explicitly does not do
 
-- Rebuild Slack or Discord channels, reactions, calls, voice notes, social discovery, or community moderation.
+- Copy the full Slack or Discord feature surface: enterprise administration, reactions, calls, voice notes, social discovery, or community moderation. Lightweight rooms, presence, open conversation, and deliberate addressing are in scope because they are the product habitat.
 - Replace GitHub, Linear, Notion, Drive, or email as the artifact system of record.
 - Run arbitrary agent code inside the web process.
 - Treat a display prefix, claimed persona, model name, or message body as identity or authority.
@@ -98,11 +110,12 @@ The interface targets WCAG 2.2 AA. In particular, status changes use an accessib
 
 ### First viewport
 
-1. Room header: goal, access boundary, members, and availability.
-2. Return brief: decisions waiting, work in motion, blockers, and new evidence since the current member’s last read cursor.
-3. Shared conversation: source-backed context and deliberate member addressing.
-4. Work items: the active accountable ledger, not a decorative task board.
-5. Recent event record: compact explanation of why the current state exists.
+1. Room navigation: a visible common room now, with room growth possible later without introducing a duplicate Project container.
+2. Live shared conversation: the primary surface for hanging out, ideas, source-backed context, and deliberate member addressing.
+3. Presence: humans and agents shown as peers with distinct kinds, availability, and attention expectations.
+4. Work in this Room: the accountable ledger beside—not in place of—the conversation, with message-to-work provenance.
+5. Room pulse: decisions waiting, work in motion, blockers, and new evidence since the current member’s last read cursor.
+6. Recent event record: a collapsed audit surface explaining why consequential state exists.
 
 The owner should not need to open the raw event log to make an ordinary decision. The event log is available for audit and debugging; the Work Item is the human-facing projection.
 
@@ -122,7 +135,7 @@ Every card must answer:
 
 ### Conversation
 
-Conversation stays lightweight. A message may reference a Work Item or artifact. It does not automatically create work, grant access, mark completion, or approve an external action. A named assignment becomes a Work Item command with explicit fields and authorization.
+Conversation stays lightweight and socially useful. A message may be casual, address the whole room, deliberately address one human or agent, reply to another message, or reference a Work Item or artifact. It does not automatically wake every agent, create work, grant access, mark completion, or approve an external action. A member with steering authority may promote a message into a Work Item with explicit fields and authorization; the new Work Item retains its source-message link.
 
 ## 5. Canonical model
 
@@ -388,6 +401,8 @@ Exit condition: controlled cases require zero human context relays and cause zer
 
 - deterministic replay
 - duplicate event ID and idempotency-key handling
+- room messages may address a human or agent without creating work or granting authority
+- a message can be promoted into linked accountable work without copying its context
 - valid and invalid state transitions
 - read-only work without claims
 - contested writes without claims rejected
