@@ -192,6 +192,84 @@ test("changes requested blocks the version and a replacement result drops old PA
   assert.equal(item.decisionHistory.at(-1).decision, "changes_requested");
 });
 
+test("approved completed work requires an explicit rework path before a replacement", () => {
+  let state = verifiedBuild();
+  let item = state.workItems["work-vertical-slice"];
+  state = applyEvent(state, ownerDecision("approved-v1", item.id, item.revision, item.receipt.eventId, item.receipt.evidenceVersion, "approved"));
+  item = state.workItems[item.id];
+
+  assert.throws(
+    () => applyEvent(state, workEvent("silent-restart", EVENT_TYPES.WORK_STARTED, "codex", item.id, item.revision)),
+    /Invalid transition from completed/
+  );
+
+  state = applyEvent(state, workEvent("rework-requested", EVENT_TYPES.WORK_BLOCKED, "codex", item.id, item.revision, {
+    reason: "A voluntary v2 is now requested",
+    nextAction: "Codex accepts the explicit v2 direction"
+  }));
+  item = state.workItems[item.id];
+  state = applyEvent(state, workEvent("rework-accepted", EVENT_TYPES.WORK_BLOCKER_RESOLVED, "codex", item.id, item.revision, {
+    resolution: "The v2 direction and scope are accepted"
+  }));
+  item = state.workItems[item.id];
+  state = applyEvent(state, workEvent("rework-started", EVENT_TYPES.WORK_STARTED, "codex", item.id, item.revision));
+  item = state.workItems[item.id];
+  state = applyEvent(state, workEvent("completed-v2", EVENT_TYPES.WORK_COMPLETED, "codex", item.id, item.revision, {
+    summary: "Voluntary replacement",
+    evidenceUrl: "https://github.com/Uuriko/project-room/pull/3",
+    evidenceVersion: "def456",
+    nextAction: "Instinct verifies v2"
+  }));
+
+  item = state.workItems[item.id];
+  assert.equal(item.state, WORK_STATES.COMPLETED);
+  assert.equal(item.receipt.evidenceVersion, "def456");
+  assert.equal(item.receiptHistory.at(-1).evidenceVersion, "abc123");
+  assert.equal(item.verification, null);
+  assert.equal(item.decision, null);
+});
+
+test("late evidence for a known older version is historical and cannot affect the current version", () => {
+  let state = verifiedBuild();
+  let item = state.workItems["work-vertical-slice"];
+  state = applyEvent(state, ownerDecision("approved-old", item.id, item.revision, item.receipt.eventId, item.receipt.evidenceVersion, "approved"));
+  item = state.workItems[item.id];
+  state = applyEvent(state, workEvent("old-rework-requested", EVENT_TYPES.WORK_BLOCKED, "codex", item.id, item.revision, {
+    reason: "Prepare v2",
+    nextAction: "Accept v2"
+  }));
+  item = state.workItems[item.id];
+  state = applyEvent(state, workEvent("old-rework-resolved", EVENT_TYPES.WORK_BLOCKER_RESOLVED, "codex", item.id, item.revision, {
+    resolution: "v2 accepted"
+  }));
+  item = state.workItems[item.id];
+  state = applyEvent(state, workEvent("old-rework-started", EVENT_TYPES.WORK_STARTED, "codex", item.id, item.revision));
+  item = state.workItems[item.id];
+  state = applyEvent(state, workEvent("current-completed", EVENT_TYPES.WORK_COMPLETED, "codex", item.id, item.revision, {
+    summary: "Current v2",
+    evidenceUrl: "https://github.com/Uuriko/project-room/pull/3",
+    evidenceVersion: "def456",
+    nextAction: "Verify v2"
+  }));
+  item = state.workItems[item.id];
+
+  state = applyEvent(state, workEvent("late-old-fail", EVENT_TYPES.VERIFICATION_RECORDED, "instinct", item.id, item.revision, {
+    result: "fail",
+    completionEventId: "verified-completed",
+    evidenceVersion: "abc123",
+    summary: "Late finding on v1"
+  }));
+
+  item = state.workItems[item.id];
+  assert.equal(item.state, WORK_STATES.COMPLETED);
+  assert.equal(item.receipt.evidenceVersion, "def456");
+  assert.equal(item.verification, null);
+  assert.equal(item.decision, null);
+  assert.equal(item.blocker, null);
+  assert.equal(item.verificationHistory.at(-1).eventId, "late-old-fail");
+  assert.equal(item.verificationHistory.at(-1).historical, true);
+});
+
 test("independent work cannot assign the accountable member as verifier", () => {
   const state = baseState();
   assert.throws(() => applyEvent(state, proposal("same-verifier", "work-self-verify", "codex", "codex", "read")), /different accountable member and verifier/);

@@ -299,13 +299,19 @@ function recordVerification(state, incoming) {
     throw new Error("Independent verification requires a different actor");
   }
   requireFields(incoming.data, ["result", "completionEventId", "evidenceVersion", "summary"]);
-  if (incoming.data.completionEventId !== item.receipt?.eventId || incoming.data.evidenceVersion !== item.receipt?.evidenceVersion) {
+  const matchesCurrentReceipt =
+    incoming.data.completionEventId === item.receipt?.eventId &&
+    incoming.data.evidenceVersion === item.receipt?.evidenceVersion;
+  const matchesHistoricalReceipt = item.receiptHistory.some((receipt) =>
+    incoming.data.completionEventId === receipt.eventId &&
+    incoming.data.evidenceVersion === receipt.evidenceVersion
+  );
+  if (!matchesCurrentReceipt && !matchesHistoricalReceipt) {
     throw new Error("Verification must identify the exact current completion and evidence version");
   }
   if (!["pass", "fail"].includes(incoming.data.result)) throw new Error("Verification result must be pass or fail");
 
-  if (item.verification) item.verificationHistory.push(item.verification);
-  item.verification = {
+  const verification = {
     verifierId: incoming.actorId,
     result: incoming.data.result,
     completionEventId: incoming.data.completionEventId,
@@ -313,6 +319,15 @@ function recordVerification(state, incoming) {
     summary: incoming.data.summary,
     eventId: incoming.id
   };
+
+  if (!matchesCurrentReceipt) {
+    item.verificationHistory.push({ ...verification, historical: true });
+    commitMutation(item, incoming);
+    return;
+  }
+
+  if (item.verification) item.verificationHistory.push(item.verification);
+  item.verification = verification;
   if (incoming.data.result === "fail") {
     item.state = WORK_STATES.BLOCKED;
     item.blocker = {
