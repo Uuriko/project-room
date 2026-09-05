@@ -27,10 +27,15 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const origin = `http://127.0.0.1:${server.address().port}`;
     let browser, page, other;
+    const capture = async suffix => {
+      mkdirSync("test-results", { recursive: true });
+      // Capture from the top so fixed/sticky UI is not drawn halfway down a full-page image.
+      await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+      await page.screenshot({ path: `test-results/conversation-${label}${suffix}.png`, fullPage: true });
+    };
     t.after(async () => {
       if (page && await page.locator("#main").isVisible().catch(() => false)) {
-        mkdirSync("test-results", { recursive: true });
-        await page.screenshot({ path: `test-results/conversation-${label}-last.png`, fullPage: true }).catch(() => {});
+        await capture("-last").catch(() => {});
       }
       await browser?.close(); server.closeStreams(); server.closeAllConnections();
       await new Promise(resolve => server.close(resolve)); store.close(); rmSync(directory, { recursive: true, force: true });
@@ -146,8 +151,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.getByText(/<strong>Literal text<\/strong>/).waitFor();
     assert.equal(await page.locator(".message-content p strong").count(), 0);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
-    mkdirSync("test-results", { recursive: true });
-    await page.screenshot({ path: `test-results/conversation-${label}.png`, fullPage: true });
+    await capture("");
 
     // Reload warning is a best-effort guard, not persistent draft storage.
     await input.fill("Reload discards this unsent thought");
