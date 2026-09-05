@@ -68,24 +68,40 @@
             <div class="panel-header conversation-header">
               <div>
                 <p class="eyebrow">ROOM CONVERSATION</p>
-                <h2 id="conversation-title"># commons</h2>
+                <h2 id="conversation-title" tabindex="-1"># commons</h2>
                 <p>Talk freely. Address someone when you need them. Turn a good thread into owned work when it matters.</p>
               </div>
               <span id="message-count" class="count-chip"></span>
             </div>
-            <ol id="message-list" class="message-list"></ol>
+            <form id="search-form" class="conversation-search" role="search" aria-label="Search this room">
+              <label for="message-search">Find a conversation</label>
+              <div class="search-row"><input id="message-search" type="search" maxlength="200" placeholder="Search messages or people…" autocomplete="off" aria-controls="search-results"><button id="clear-search" class="button ghost" type="button">Clear</button></div>
+            </form>
+            <section id="search-results" class="search-results" aria-label="Conversation search results" hidden>
+              <p id="search-count" role="status"></p>
+              <ol id="search-list"></ol>
+            </section>
+            <div id="thread-bar" class="thread-bar" hidden>
+              <button id="thread-back" class="button ghost" type="button">← Back to room</button>
+              <div><h3 id="thread-title" tabindex="-1"></h3><p id="thread-context"></p></div>
+            </div>
+            <p id="conversation-announcement" class="sr-only" role="status" aria-live="polite"></p>
+            <ol id="message-list" class="message-list" tabindex="0" aria-label="Conversation messages"></ol>
+            <button id="new-messages-button" class="new-messages-button" type="button" hidden></button>
             <div id="reply-bar" class="reply-bar" hidden><span id="reply-context"></span><button id="cancel-reply" type="button" class="button ghost">Cancel reply</button></div>
             <form id="message-form" class="composer">
+              <label id="composer-label" for="message-input">Message the room</label>
               <div class="composer-toolbar">
                 <label for="message-to-select">Talking to</label>
                 <select id="message-to-select" aria-label="Who this message addresses"></select>
                 <button id="composer-work-button" class="text-button" type="button">Start accountable work</button>
               </div>
               <div class="composer-row">
-                <textarea id="message-input" aria-label="Message to the room" rows="3" maxlength="4000" placeholder="Say something to the room…" required></textarea>
+                <textarea id="message-input" rows="3" maxlength="4000" placeholder="Say something to the room…" aria-describedby="draft-hint" required></textarea>
                 <button class="button primary" type="submit">Send</button>
               </div>
-              <p class="form-hint">Addressing does not prove listening or trigger an agent in this pilot. A message never grants permission or becomes a task. Unsent drafts stay in this tab only.</p>
+              <p id="draft-hint" class="form-hint">Enter for a new line · Ctrl/⌘ + Enter to send. Each discussion keeps its draft while this page stays open. Reloading, leaving, or signing out clears unsent drafts.</p>
+              <details class="conversation-boundaries"><summary>Who can see and respond?</summary><p>Messages, threads, and reactions are visible to active room members. Addressing an agent does not trigger it in this pilot. Conversation never grants permission, approves work, or proves someone read a message.</p></details>
             </form>
             <div class="cursor-row"><span id="cursor-label"></span><button id="caught-up-button" class="button ghost" type="button">Mark myself caught up</button></div>
           </section>

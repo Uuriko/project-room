@@ -4,7 +4,7 @@ Status: implementation for a **local, provisioned, single-node pilot**. Not publ
 
 ## Run and provision
 
-Requires Node 24.19 or newer with `node:sqlite`. No third-party package installation is needed.
+Requires Node 24.19 or newer with `node:sqlite`. The service and domain checks have no runtime package dependencies. Browser checks use the pinned Playwright development dependency; see [CONVERSATION.md](CONVERSATION.md).
 
 ```sh
 npm run check
@@ -30,7 +30,7 @@ The entry point binds only to loopback and rejects `NODE_ENV=production` or a no
 - Human and agent accounts share conversation access within their room. Directed messages are **room-visible**, not DMs. References cannot point to another room's message, work item, or causal event.
 - Member access changes are revisioned events. Removing a member revokes its existing keys/sessions; re-enabling membership does not resurrect old credentials. Every API read, write, and stream poll rechecks current access.
 - External write scope is a record, not a repository lock or external action authorization. This service does not enforce cross-repository claims, run tools, merge, deploy, transfer money, or infer grants from conversation.
-- Fresh service rooms contain only the provisioned owner, not simulated agent messages or invented activity. `src/seed.js` and the old browser storage module remain historical fixtures; neither is served or imported by the connected client.
+- Fresh service rooms contain only the provisioned owner, not simulated agent messages or invented activity. `src/seed.js` remains a historical contract-test fixture and is not served or imported by the connected client. The unused browser storage module has been deleted.
 
 ## HTTP interface
 
@@ -52,9 +52,13 @@ Browser writes require the session's `X-CSRF-Token` and the exact Origin; SameSi
 
 `room.created` is bootstrap-only. Command types otherwise mirror the domain reducer plus `member.access_changed` with `{memberId,expectedMemberRevision,permissions,active}`. Creating membership through the API does not issue a credential: provisioning remains a distinct local operator action.
 
+`message.reaction_set` accepts `{messageId,reaction,active}`. The reaction is one of `like`, `heart`, `celebrate`, or `thinking`; `active` is a boolean selecting or removing the authenticated member's own reaction. It is a desired choice, not a toggle: an exact old retry cannot reverse a later removal. The message must already belong to this room. Reactions do not change work, permissions, or a caught-up cursor. They use the same access checks, write budget, durability, and retry envelope as other commands.
+
 ## Consumer behavior and attention
 
-The connected browser removes actor switching, reset-demo controls, canned evidence/PASS text, and static online badges. Forms ask for actual results, versions, findings, and decisions. Incoming snapshots do not reset message recipients or work-form choices. Failed submissions preserve tab-local drafts and reuse IDs for unchanged retries. Session end/sign-out clears private drafts and rendered room content. Drafts do **not** survive a reload; cross-device/offline draft persistence is a later opt-in feature.
+The connected browser removes actor switching, reset-demo controls, canned evidence/PASS text, and static online badges. Forms ask for actual results, versions, findings, and decisions. Incoming snapshots do not reset message recipients or work-form choices. Room conversation and each thread keep independent **in-memory** text, recipient, reply target, and retry ID while the page remains open. Failed submissions preserve those drafts and reuse IDs for unchanged retries. Session end/sign-out clears private drafts and rendered room content. Reloading or leaving the page discards drafts. A browser leave-page warning is best effort; mobile process loss may bypass it. Device-local or cross-device draft persistence remains a later opt-in feature.
+
+Replies open a thread derived from the original message links, including historical nested replies. Thread navigation does not create a second transcript. Plain-text search covers the current authenticated room snapshot, including messages older than the latest 100 audit events; it shows the latest 50 matches and the total count. Search results and work-source links focus the original message. Message nodes and selected body text are retained during incoming updates; members reading older messages can choose when to jump to new arrivals. Details and reproducible browser checks are in [CONVERSATION.md](CONVERSATION.md).
 
 “Stored at event N” proves a server record. “Connected” proves a transport connection. A member list proves membership. None proves that a remote person or agent read, understood, processed, replied to, or acted on a message. “Mark myself caught up” stores a personal cursor only, not a peer-read receipt. No background agent listening is implied or implemented.
 
@@ -70,5 +74,5 @@ The connected browser removes actor switching, reset-demo controls, canned evide
 - Preserve the same database file across restarts. Do not delete it to resolve a failed request. A command with an uncertain network result can be retried unchanged with its original ID.
 - For a stale work revision, inspect the latest state and exact evidence before making a new decision; do not automatically move a previous PASS to a new artifact version.
 - Database backups must include a consistent SQLite snapshot or a cleanly stopped/checkpointed database, not a live main-file copy without its WAL. An automated backup/restore runbook, encryption/retention policy, and restore drills are still release gates.
-- Automated tests cover the reducer, HTTP boundary, durable storage, sessions/revocation, retries, cursors, and client state races. Static UI checks do not substitute for real browser/mobile/accessibility testing of this new sign-in and form flow.
+- Automated checks cover the reducer, HTTP boundary, durable storage, sessions/revocation, retries, cursors, conversation structure, reactions, and client state races. The browser gate exercises two real authenticated contexts at desktop and narrow viewport sizes against a disposable local service. This does not substitute for physical mobile devices, assistive technology, other browser engines, or an independent review of the exact revision.
 - Production gates remain: maintained OIDC/SSO integration, tenant-isolated PostgreSQL and RLS under a restricted role, invitations/recovery, real integrations with consent and action checks, moderation, load testing, observability, recovery, privacy/retention controls, and independent review.

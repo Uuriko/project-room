@@ -45,12 +45,15 @@ export class RoomClient {
     return flight.promise;
   }
   async send(command) {
+    const generation = this.generation;
     try {
       const receipt = await this.request(this.path("/commands"), { method: "POST", data: command });
       // A committed receipt remains a success even when the subsequent snapshot fetch fails.
-      try { await this.refresh(); } catch (error) { this.handleFailure(error); }
+      if (generation === this.generation && this.session) {
+        try { await this.refresh(); } catch (error) { if (generation === this.generation) this.handleFailure(error); }
+      }
       return receipt;
-    } catch (error) { if ([401, 403].includes(error.status)) this.handleFailure(error); throw error; }
+    } catch (error) { if (generation === this.generation && [401, 403].includes(error.status)) this.handleFailure(error); throw error; }
   }
   async caughtUp() { return this.request(this.path("/cursor"), { method: "POST", data: { sequence: this.sequence } }); }
   connect() {
