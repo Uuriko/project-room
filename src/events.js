@@ -135,12 +135,14 @@ function addMember(state, incoming) {
 function postMessage(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
   requireFields(incoming.data, ["body"]);
+  if (incoming.data.toMemberId) requireMember(state, incoming.data.toMemberId);
   state.messages.push({
     id: incoming.data.messageId || incoming.id,
     authorId: actor.id,
     body: incoming.data.body,
     workItemId: incoming.data.workItemId || null,
     replyToId: incoming.data.replyToId || null,
+    toMemberId: incoming.data.toMemberId || null,
     createdAt: incoming.at
   });
 }
@@ -158,6 +160,9 @@ function proposeWork(state, incoming) {
   if (incoming.data.independentVerificationRequired && incoming.data.accountableMemberId === incoming.data.verifierMemberId) {
     throw new Error("Independent verification requires a different accountable member and verifier");
   }
+  if (incoming.data.sourceMessageId && !state.messages.some((message) => message.id === incoming.data.sourceMessageId)) {
+    throw new Error("Source message must exist in this Room");
+  }
 
   state.workItems[incoming.data.workItemId] = {
     id: incoming.data.workItemId,
@@ -169,6 +174,7 @@ function proposeWork(state, incoming) {
     ownerDecisionRequired: incoming.data.ownerDecisionRequired === true,
     humanDecisionMakerId: incoming.data.humanDecisionMakerId || null,
     mode: incoming.data.mode || "read",
+    sourceMessageId: incoming.data.sourceMessageId || null,
     state: WORK_STATES.PROPOSED,
     revision: 0,
     claim: null,

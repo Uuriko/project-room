@@ -40,22 +40,37 @@ function render() {
 
 function renderActors() {
   const previous = activeActorId;
-  actorSelect.innerHTML = Object.values(state.members)
+  const members = Object.values(state.members);
+  actorSelect.innerHTML = members
     .map((member) => `<option value="${escapeHtml(member.id)}">${escapeHtml(member.displayName)} · ${escapeHtml(member.kind)}</option>`)
     .join("");
   if (state.members[previous]) actorSelect.value = previous;
 
-  const agents = Object.values(state.members).filter((member) => member.kind === "agent");
-  $("#assignee-select").innerHTML = agents.map(optionForMember).join("");
-  $("#verifier-select").innerHTML = agents.map(optionForMember).join("");
-  if (agents.length > 1) $("#verifier-select").value = agents[1].id;
+  $("#message-to-select").innerHTML = `<option value="">Everyone in #commons</option>${members.map(optionForMember).join("")}`;
+  const accountableMembers = members.filter((member) => member.permissions.includes("accept_work"));
+  const verifyingMembers = members.filter((member) => member.permissions.includes("verify"));
+  $("#assignee-select").innerHTML = accountableMembers.map(optionForMember).join("");
+  $("#verifier-select").innerHTML = verifyingMembers.map(optionForMember).join("");
+  if (accountableMembers.length) $("#assignee-select").value = accountableMembers.find((member) => member.kind === "agent")?.id || accountableMembers[0].id;
+  const verifier = verifyingMembers.find((member) => member.id !== $("#assignee-select").value);
+  if (verifier) $("#verifier-select").value = verifier.id;
 }
 
 function renderMembers() {
-  $("#member-stack").innerHTML = Object.values(state.members).map((member) => `
+  const members = Object.values(state.members);
+  const availableCount = members.filter((member) => member.availability === "available").length;
+  $("#presence-count").textContent = `${availableCount} here now`;
+  $("#member-stack").innerHTML = members.map((member) => `
     <div class="member-avatar ${member.kind}" title="${escapeHtml(member.displayName)} · ${escapeHtml(member.kind)}">
       <span>${initials(member.displayName)}</span>
       <i class="availability ${member.availability}" aria-hidden="true"></i>
+    </div>
+  `).join("");
+  $("#presence-list").innerHTML = members.map((member) => `
+    <div class="presence-member">
+      <div class="member-avatar ${member.kind}"><span>${initials(member.displayName)}</span><i class="availability ${member.availability}" aria-hidden="true"></i></div>
+      <div><strong>${escapeHtml(member.displayName)}</strong><span>${member.kind === "agent" ? "AI agent" : "Human"} · ${member.availability === "available" ? "here" : "away"}</span></div>
+      <span class="presence-state">${member.kind === "agent" ? "✦" : "●"}</span>
     </div>
   `).join("");
 }
@@ -78,15 +93,22 @@ function renderMessages() {
   $("#message-list").innerHTML = state.messages.map((message) => {
     const member = state.members[message.authorId];
     const linked = message.workItemId ? state.workItems[message.workItemId] : null;
-    return `<li class="message">
+    const addressed = message.toMemberId ? state.members[message.toMemberId] : null;
+    const canCreateWork = state.members[activeActorId].permissions.includes("steer");
+    return `<li id="message-${escapeHtml(message.id)}" class="message">
       <div class="message-avatar ${member.kind}">${initials(member.displayName)}</div>
       <div class="message-content">
         <div class="message-meta"><strong>${escapeHtml(member.displayName)}</strong><span>${escapeHtml(member.kind)}</span><time>${formatTime(message.createdAt)}</time></div>
+        <span class="audience-chip">${addressed ? `to ${escapeHtml(addressed.displayName)}` : "to everyone"}</span>
         <p>${escapeHtml(message.body)}</p>
-        ${linked ? `<a class="work-link" href="#${escapeHtml(linked.id)}">↳ ${escapeHtml(linked.title)}</a>` : ""}
+        <div class="message-links">
+          ${linked ? `<a class="work-link" href="#${escapeHtml(linked.id)}">↳ ${escapeHtml(linked.title)}</a>` : ""}
+          ${canCreateWork && !linked ? `<button class="message-to-work" type="button" data-message-id="${escapeHtml(message.id)}">Make this work</button>` : ""}
+        </div>
       </div>
     </li>`;
   }).join("");
+  document.querySelectorAll(".message-to-work").forEach((button) => button.addEventListener("click", () => openWorkForm(button.dataset.messageId)));
   const list = $("#message-list");
   list.scrollTop = list.scrollHeight;
 }
@@ -107,6 +129,7 @@ function renderWorkCard(item) {
       <span class="mode">${item.mode === "write" ? "write-scoped" : "read-only"} · r${item.revision}</span>
     </div>
     <h3>${escapeHtml(item.title)}</h3>
+    ${item.sourceMessageId ? `<a class="source-link" href="#message-${escapeHtml(item.sourceMessageId)}">From a room conversation</a>` : ""}
     <p class="definition">${escapeHtml(item.definitionOfDone)}</p>
     <dl class="work-facts">
       <div><dt>Accountable</dt><dd>${escapeHtml(accountable.displayName)}</dd></div>
@@ -179,6 +202,7 @@ function renderEvents() {
 
 actorSelect.addEventListener("change", () => {
   activeActorId = actorSelect.value;
+  renderMessages();
   renderWork();
   announce(`Acting as ${state.members[activeActorId].displayName}`);
 });
@@ -186,17 +210,22 @@ actorSelect.addEventListener("change", () => {
 $("#message-form").addEventListener("submit", (submitEvent) => {
   submitEvent.preventDefault();
   const input = $("#message-input");
-  append(event({ roomId: state.room.id, type: EVENT_TYPES.MESSAGE_POSTED, actorId: activeActorId, data: { body: input.value.trim() } }));
+  append(event({ roomId: state.room.id, type: EVENT_TYPES.MESSAGE_POSTED, actorId: activeActorId, data: { body: input.value.trim(), toMemberId: $("#message-to-select").value || null } }));
   input.value = "";
 });
 
-$("#new-work-button").addEventListener("click", () => {
-  $("#new-work-form").hidden = false;
-  $("#work-title-input").focus();
+$("#new-work-button").addEventListener("click", () => openWorkForm());
+$("#composer-work-button").addEventListener("click", () => openWorkForm());
+$("#assignee-select").addEventListener("change", () => {
+  if ($("#verifier-select").value === $("#assignee-select").value) {
+    const alternate = [...$("#verifier-select").options].find((option) => option.value !== $("#assignee-select").value);
+    if (alternate) $("#verifier-select").value = alternate.value;
+  }
 });
 
 $("#cancel-work-button").addEventListener("click", () => {
   $("#new-work-form").hidden = true;
+  clearWorkSource();
 });
 
 $("#new-work-form").addEventListener("submit", (submitEvent) => {
@@ -214,10 +243,12 @@ $("#new-work-form").addEventListener("submit", (submitEvent) => {
       independentVerificationRequired: true,
       ownerDecisionRequired: true,
       humanDecisionMakerId: state.room.ownerId,
-      mode: "read"
+      mode: $("#work-mode-select").value,
+      sourceMessageId: $("#source-message-id").value || null
     }
   }));
   submitEvent.currentTarget.reset();
+  clearWorkSource();
   submitEvent.currentTarget.hidden = true;
 });
 
@@ -235,6 +266,33 @@ render();
 
 function latestEventId(workItemId) {
   return [...state.eventLog].reverse().find((item) => item.data?.workItemId === workItemId)?.id || null;
+}
+
+function openWorkForm(messageId = null) {
+  if (!state.members[activeActorId].permissions.includes("steer")) {
+    announce(`${state.members[activeActorId].displayName} can talk here but cannot assign work`, true);
+    return;
+  }
+  const form = $("#new-work-form");
+  form.hidden = false;
+  clearWorkSource();
+  if (messageId) {
+    const message = state.messages.find((item) => item.id === messageId);
+    if (message) {
+      $("#source-message-id").value = message.id;
+      $("#source-context").hidden = false;
+      $("#source-context").textContent = `From ${state.members[message.authorId].displayName}: “${message.body}”`;
+      $("#work-title-input").value = message.body.length > 74 ? `${message.body.slice(0, 71)}…` : message.body;
+    }
+  }
+  form.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  $("#work-title-input").focus();
+}
+
+function clearWorkSource() {
+  $("#source-message-id").value = "";
+  $("#source-context").textContent = "";
+  $("#source-context").hidden = true;
 }
 
 function nextAction(item) {
