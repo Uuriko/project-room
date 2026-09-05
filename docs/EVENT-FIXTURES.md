@@ -11,13 +11,15 @@ Work states belong to one Work Item. Verification and human decisions are eviden
 | Propose | New → proposed | Member with assignment capability; outcome, scope, completion requirements, and any required verifier or owner decision. |
 | Accept | Proposed → accepted | Assigned accountable member; acceptance and a check for existing work. |
 | Start or resume | Accepted or blocked → working | Accountable member or explicitly assigned executor; accepted attempt scope and, on resume, the resolved blocker. |
-| Report existing result | Accepted → completed | Accountable member; exact result reference and claimed checks. No new attempt is required. |
+| Report existing result | Accepted → completed | Accountable member; exact result reference, claimed checks, and producer/provenance when known or explicitly unknown. No new attempt is required. |
 | Report result | Working → completed | Accountable member; exact result reference and claimed checks. Another executor may supply the evidence. |
 | Block | Accepted, working, or completed → blocked | Accountable member; reason and next responsible actor. A designated verifier may block completed work with a failed check. |
 | Resolve without starting work | Blocked → accepted | Accountable member; blocker resolution, ready for a new attempt or an already-existing result. |
 | Replace the outcome | Any non-superseded state → superseded | Member with assignment capability; replacement Work Item and reason. |
 
 A completion report is allowed from an authorized accountable executor; it cannot create independent verification. Read-only work requires no write claim. If a Room-coordinated contested write is later supported, starting or continuing that write additionally requires a current resource claim. Claim expiry ends that write authority, not the member's ability to report a blocker or release its attempt.
+
+For pre-existing results, keep the reporting member separate from the result's producer. Record the producer and source provenance when known; otherwise explicitly record unknown attribution. Unknown attribution is a visible evidence gap, not a guessed identity or evidence of independent verification.
 
 ## Checks and decisions
 
@@ -60,6 +62,7 @@ The public walkthrough does not supply a fully resolvable deployment receipt or 
 | A second person joins. | An authorized member sees the goal, owner, recorded result, checks, and next action without a pasted recap. A source outside the shared audience is not introduced into that conversation. |
 | Worker becomes unavailable. | Preserve its last confirmed step and show availability. An unknown external action outcome remains unresolved; reconnecting does not blindly repeat it. |
 | Application restarts. | Reconstruct the same view from stored events and source references; issue no external actions during replay. |
+| A pre-existing result has unknown producer attribution. | Preserve its exact reference and reporting member; show the producer/provenance gap explicitly. Do not infer the reporter produced it or call a check independent without evidence of independence. |
 | The same receipt arrives twice. | Keep one logical receipt. Do not repeat a handoff or action. Reuse of the same source event ID with conflicting payload is rejected. |
 | Two actors update the same revision. | One revision-checked mutation wins. The stale mutation records no misleading state-change event and must refresh before proceeding. |
 | Artifact changes after PASS or approval. | Show that earlier evidence belongs to the old version. The current version needs its own completion, checks, and any required decision. |

@@ -15,7 +15,7 @@ The [first workflow](./FIRST-WORKFLOW.md) defines the screen and review demonstr
 | Room | Project title, goal, membership, and explicitly shared sources. |
 | Member | Authenticated human or agent identity, display name, and explicit grants in this Room. An agent also has an accountable human. |
 | Work Item | Intended outcome, accountable member, current work state, revision, completion requirements, designated verifier if required, and any owner decision needed. |
-| Artifact | A result attached to a Work Item with a resolvable source and exact version, such as a URL plus full commit SHA. |
+| Artifact | A result attached to a Work Item with a resolvable source and exact version, such as a URL plus full commit SHA; producer/provenance is recorded when known and explicitly unknown otherwise. |
 | Event | A message, assignment, attempt, completion report, check, or decision with an ID, actor, time, and relevant source, artifact, and causal reference. |
 
 Messages are Events. Tasks are Work Items. Receipts, acceptance, verification, and decisions are Events on the same Work Item. No separate Outcome table, signed-receipt system, or general Policy engine is required.
