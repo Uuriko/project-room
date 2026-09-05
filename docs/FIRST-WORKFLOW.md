@@ -1,115 +1,57 @@
-# FIRST-WORKFLOW — What to replace first
+# First workflow: one project, people and agents working together
 
-**Principle check (multiplayer-ai.com):** People are not routers — humans decide; agents chase status and post receipts.
+Proposed v0 build brief, 2026-09-05. This document describes the experience to build; it does not describe working software.
 
-Goal: pick **one** concrete workflow where a Project Room beats Slack/Discord/email/agent-mailbox spaghetti. Prove the Assign→Act→Receipt→Decide loop (SPEC-v0).
+The first workflow is project coordination around a GitHub change. An owner asks once, an agent finds or produces the result, another agent checks it, and the owner returns to a clear decision. GitHub holds the code; the Room connects the conversation, responsibility, evidence, and decision.
 
----
+The [Multiplayer AI Manifesto](https://multiplayer-ai.com/) argues for shared agent sessions, less human forwarding, and work that can resume later. Those are useful design goals. The choices below apply them to our existing [coordination proposal](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5550169061), with the [scope cuts](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5550808959) proposed in review.
 
-## Candidate A — Swarm / GitHub mailbox coordination (e.g. #167-style)
+## What the first screen does
 
-**What it is today**
-Multi-agent or multi-session work against a GitHub issue/mailbox thread: status lives in issue comments, agent runs in Cursor/cloud UIs, pings land in Slack/Discord, operator forwards context so the next agent doesn’t cold-start. Classic split brain.
+| Surface | What a member sees or does |
+| --- | --- |
+| Room header | Project goal, access scope, and human and agent members. |
+| Conversation | Ask a named person or agent, discuss an artifact, or assign an outcome. Agent progress appears here beside the human discussion. |
+| Work card | Outcome, accountable member, current result, evidence, and next action. Expand it for attempts and checks. |
+| Return summary | What changed since the member last visited, what is blocked, and which decisions need them. Every claim opens its underlying event or artifact. |
 
-**Room-shaped replacement**
-- Project = that coordination effort (issue/mailbox as external link).
-- Tasks = slices assigned to specific agents (investigate, implement, verify).
-- Outcomes = PR URLs, test artifacts, “blocked on X” receipts.
-- Human decides merge / next slice in-room.
+Keep the transition table behind this view. People should be able to discuss a result without learning ledger terminology or turning every message into a task.
 
-**Pros**
-- Pain is acute and frequent for an agent-heavy operator.
-- Natural Outcomes (PR, logs, screenshots) — Cursor-like receipts already exist.
-- Matches spine: who-owns-what + visible outcomes.
-- Easy week-1 scoreboard: count closed loops per issue.
+## The first complete demonstration
 
-**Cons**
-- Temptation to rebuild GitHub (don’t).
-- If the only “agent” is one coding agent, loop is thinner than multi-agent claim.
-- Needs discipline: agent must post Receipt into Room, not only push a branch.
+Use the recorded [#134 review fixture](./EVENT-FIXTURES.md) at commit `70053cc6cf9d86f3a43220dcfbb0af05797380c0`. Its recorded results are fixture inputs, not a new assertion about today's PR status.
 
-**Fit to v0 must-have:** Strong.
+1. Potter asks Codex to check whether the linked change is ready for his review. The work card records that outcome and its scope.
+2. Codex reads the existing work and evidence. If the result already exists, it links that result and describes what still needs checking. It does not create a replacement patch just to show activity.
+3. Instinct receives the same work card for verification and fetches the exact revision. Its check result is attached separately from the executor's completion claim. Potter forwards nothing between agents.
+4. A second authorized person joins and asks, "What is waiting on us?" The selected agent answers from the shared work card and source evidence. Joining does not restart the task or require a transcript pasted into a new chat.
+5. Potter returns to the result, checks, and remaining decision in one view. Recording approval records a decision; a GitHub merge is a separate external action with its own authorization and evidence.
 
----
+If a check fails, the card shows the finding and next responsible member. If evidence cannot be fetched, it shows that gap instead of claiming verification.
 
-## Candidate B — Founder briefing agents
+## Collaboration rules that keep the room usable
 
-**What it is today**
-Operator asks research/ops agents for briefings (market, competitors, inbox triage, “what happened overnight”). Answers scatter across ChatGPT/Claude/Cursor chats, email digests, and Slack saves. Next day context is gone unless manually filed.
+- Address a named member when a response is needed. Ordinary updates do not wake every agent. Agent handoffs use the accepted assignment and send its evidence directly to the next responsible member; acknowledgments do not start further turns.
+- Members may ask questions and propose changes. An action uses the authenticated actor's explicit permissions and the accepted task scope. A message does not grant a new capability. An agent acknowledges an accepted change of direction before using it in a later step.
+- Start with sources explicitly shared with the Room. Every reader must be allowed to see that material; joining the Room cannot expose another member's private connector context. Handle a restricted source in a separate restricted context, including its derived summaries.
+- A completion claim may come from its authorized executor. Independent verification, when required, is a separate check by another actor against the exact artifact version. Display labels such as `[Instinct]` are not authentication.
 
-**Room-shaped replacement**
-- Project = “Operator briefings” (or per-theme projects).
-- Daily/on-demand Task → briefing agent.
-- Outcome = structured brief (doc link or in-room artifact) + sources.
-- Human marks decisions / follow-up Tasks in the same Room.
+## What to persist, and what to leave out
 
-**Pros**
-- Low engineering dependency; can dogfood with paste-in receipts.
-- High personal value; trains Outcome-as-artifact habit.
-- Clear human judgment step (decide what matters).
+Persist the Room's messages, work cards, source references, decisions, and events. Resume an agent with the relevant task state and source-backed context. A provider session ID or an ever-growing transcript must not be the only memory. Reopening a Room must never replay an external action.
 
-**Cons**
-- Weaker “collaboration” story — can feel like a notes app + cron.
-- Less pressure on multi-member identity and task ownership under conflict.
-- Success metric fuzzier than PR-merged.
+Keep execution in the existing agent runtimes. Local and cloud workers can both contribute; an offline worker shows as unavailable and leaves its work resumable. Begin with one working connection before generalizing adapters or automatic model selection.
 
-**Fit to v0 must-have:** Medium — proves shared context + outcomes, weaker on multi-agent ownership stress.
+Apply the [proposed cuts](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5550808959): explicit permission checks before a general Policy engine; ordinary evidence events before signed-receipt infrastructure; write claims only for contested writes the system can actually coordinate. Read-only research needs no write lease. A Room claim cannot lock an external repository by itself.
 
----
+Keep reusable corrections explicit and editable. Automatic skill creation, benchmarks, agent marketplaces, Slack bridges, calls, and community features can wait until this workflow demonstrates value. Briefings and hiring remain later candidates.
 
-## Candidate C — Hiring packet handoff
+## Build and evaluate in this order
 
-**What it is today**
-JD drafts, scorecards, candidate research, and email threads live in Docs + email + chat. Agents may draft packets; humans edit in parallel; “final packet” is whoever forwarded last.
+1. **Shared review:** two authenticated people can use the same durable conversation and work card, open evidence, and return after a restart.
+2. **Agent handoff:** connect an executor and verifier, pass the task and evidence directly, and display their results without human forwarding.
+3. **Ordinary recovery:** show a failed check, unavailable worker, duplicate delivery, and changed artifact revision honestly. Superseded evidence cannot verify a newer revision. Repeat delivery must not repeat the assignment or its action.
 
-**Room-shaped replacement**
-- Project = “Hire [role].”
-- Tasks = draft JD, source list, packet v1, reference check outline — assigned to human or agent.
-- Outcome = versioned hiring packet + decision Outcome (advance / reject / hold).
+Run the first five suitable handoffs through the Room. Record manual context relays, duplicated work, and whether each person can identify the result, responsible member, evidence, and next action without asking for a recap. The proposed pass condition is zero required human relays and zero repeated actions in these controlled cases, with failures visible and recoverable.
 
-**Pros**
-- Sharp ownership and decision receipts.
-- Mixed human+agent work is obvious (agent drafts, human decides).
-- Non-coding workflow diversifies the product thesis.
-
-**Cons**
-- Lower frequency than engineering coordination for some operators.
-- Sensitive data (candidates) → privacy/redaction open questions earlier.
-- External email with candidates still exists (Room won’t replace that in v0).
-
-**Fit to v0 must-have:** Medium-strong — excellent ownership/outcome semantics; slightly less daily dogfood volume.
-
----
-
-## Recommendation: **Candidate A — Swarm / GitHub mailbox coordination**
-
-**Why one**
-1. Hits the locked problem statement hardest: stop manual forwarding across agent UIs + chat + issue comments.
-2. Best stress test of Agent-as-member + Task assignee + Outcome/Receipt (PR/artifact).
-3. Week-1 success criteria in SPEC-v0 are objectively countable.
-4. Keeps v0 honest: Room is spine; GitHub remains system of record for code.
-
-**How to run week 1**
-- Create one Project/Room for the active coordination target (link the GitHub issue/mailbox in Room description).
-- Every agent slice = Task with named assignee.
-- No “done” without an Outcome (PR link, log, or blocked receipt).
-- Human merge/next-step decisions posted as Decision Outcomes.
-- Ban Slack/Discord for that project’s agent coordination for 5 days (stakeholder noise can stay elsewhere).
-
-**Park for v0.1+**
-- Briefings (B) as a second Room once the loop is muscle memory.
-- Hiring (C) when permissions/redaction answers exist.
-
-**Non-recommendation**
-Do not start with “rebuild #general” or “bridge Slack.” That violates the locked spine.
-
-
-## Codex fixture (2026-09-05)
-
-Reference receipt: [NodeBlink #134](https://github.com/Uuriko/dasha-desk/pull/134) @ `70053cc6cf9d86f3a43220dcfbb0af05797380c0` — “28/28, invariant comparison PASS, owner merge pending.” Second fixture: [Compute #132](https://github.com/Uuriko/dasha-desk/pull/132). v0 dogfood = productize that owner-steer loop without manual forwarding.
-
-## Instinct pressure-test (2026-09-05)
-
-#134 chronology: proposed → accepted (Codex audit, work already present) → completed + independently_verified (Instinct 28/28 @ exact SHA) → owner_approved PENDING.
-#132 chronology: proposed → working (Codex prep c7521057) → completed + independently_verified (Instinct 18/18 + live-kit) → owner_approved PENDING.
-State machine held. Acceptance checklist + five failure modes folded into SPEC-v0.md.
+Let people use their existing tools and record where they fall back. Remove the earlier five-day Slack/Discord ban: forced adoption cannot show that the Room is useful. Message volume and acknowledgment counts are not success measures.
