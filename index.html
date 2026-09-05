@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Project Room: people and agents coordinating accountable work in one durable record.">
+    <title>Project Room</title>
+    <link rel="stylesheet" href="./src/styles.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to room</a>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand" aria-label="Project Room">
+          <span class="brand-mark" aria-hidden="true">PR</span>
+          <div>
+            <strong>Project Room</strong>
+            <span>GitHub coordination pilot</span>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <label class="actor-picker">
+            <span>Simulate actor</span>
+            <select id="actor-select" aria-label="Simulated acting member"></select>
+          </label>
+          <button id="reset-button" class="button ghost" type="button">Reset demo</button>
+        </div>
+      </header>
+
+      <main id="main">
+        <section class="room-heading" aria-labelledby="room-title">
+          <div>
+            <p class="eyebrow">ROOM · ACTIVE</p>
+            <h1 id="room-title">Ship Project Room v0</h1>
+            <p class="room-purpose">One shared record for the request, accountable owner, exact evidence, independent check, and next decision.</p>
+          </div>
+          <div id="member-stack" class="member-stack" aria-label="Room members"></div>
+        </section>
+
+        <section class="return-brief" aria-labelledby="return-title">
+          <div class="section-label">
+            <p class="eyebrow">RETURN BRIEF</p>
+            <h2 id="return-title">What needs attention</h2>
+          </div>
+          <div id="summary-grid" class="summary-grid" aria-live="polite"></div>
+        </section>
+
+        <div class="workspace-grid">
+          <section class="panel conversation-panel" aria-labelledby="conversation-title">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">SHARED CONTEXT</p>
+                <h2 id="conversation-title">Conversation</h2>
+              </div>
+              <span id="message-count" class="count-chip"></span>
+            </div>
+            <ol id="message-list" class="message-list"></ol>
+            <form id="message-form" class="composer">
+              <label for="message-input">Post an update</label>
+              <div class="composer-row">
+                <textarea id="message-input" rows="2" maxlength="600" placeholder="Share evidence, a blocker, or a decision-relevant update" required></textarea>
+                <button class="button primary" type="submit">Post</button>
+              </div>
+              <p class="form-hint">Messages add context. Accountable work and decisions use the work cards.</p>
+            </form>
+          </section>
+
+          <section class="panel work-panel" aria-labelledby="work-title">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">ACCOUNTABLE WORK</p>
+                <h2 id="work-title">Work items</h2>
+              </div>
+              <button id="new-work-button" class="button secondary" type="button">New outcome</button>
+            </div>
+            <form id="new-work-form" class="new-work-form" hidden>
+              <label>Outcome <input id="work-title-input" maxlength="100" required></label>
+              <label>Definition of done <textarea id="work-done-input" rows="2" maxlength="300" required></textarea></label>
+              <div class="form-grid">
+                <label>Accountable <select id="assignee-select"></select></label>
+                <label>Verifier <select id="verifier-select"></select></label>
+              </div>
+              <div class="form-actions">
+                <button id="cancel-work-button" class="button ghost" type="button">Cancel</button>
+                <button class="button primary" type="submit">Create work item</button>
+              </div>
+            </form>
+            <div id="work-list" class="work-list"></div>
+          </section>
+
+          <aside class="panel record-panel" aria-labelledby="record-title">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">REPLAYABLE RECORD</p>
+                <h2 id="record-title">Recent events</h2>
+              </div>
+              <span id="event-count" class="count-chip"></span>
+            </div>
+            <ol id="event-list" class="event-list"></ol>
+            <p class="prototype-note"><strong>Executable contract prototype.</strong> Actor switching is a simulation, not authentication. State is stored in this browser and synchronized across same-origin tabs. Production identity, server persistence, connectors, and remote agent execution remain deliberately out of this slice.</p>
+          </aside>
+        </div>
+      </main>
+    </div>
+    <div id="status" class="status" role="status" aria-live="polite"></div>
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>
