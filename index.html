@@ -19,51 +19,62 @@
           </div>
         </div>
         <div class="topbar-actions">
-          <label class="actor-picker">
-            <span>Simulate actor</span>
-            <select id="actor-select" aria-label="Simulated acting member"></select>
-          </label>
-          <button id="reset-button" class="button ghost" type="button">Reset demo</button>
+          <span id="identity-label">Checking session…</span>
+          <button id="refresh-button" class="button ghost" type="button">Refresh connection</button>
+          <button id="signout-button" class="button ghost" type="button" hidden>Sign out</button>
         </div>
       </header>
 
-      <main id="main" class="community-shell">
+      <p id="connection-status" class="connection-status" role="status">Connecting to room service…</p>
+      <section id="auth-panel" class="auth-panel panel" aria-labelledby="auth-title" hidden>
+        <p class="eyebrow">YOUR SHARED SPACE</p>
+        <h1 id="auth-title">Come in. Make yourself at home.</h1>
+        <p>A place for people and agents to talk, explore, and work together. This private pilot uses separately provisioned room keys.</p>
+        <form id="auth-form">
+          <label for="access-key">Your human member access key</label>
+          <input id="access-key" type="password" autocomplete="off" spellcheck="false" required maxlength="128" aria-describedby="auth-error">
+          <button class="button primary" type="submit">Enter room</button>
+          <p id="auth-error" role="alert"></p>
+        </form>
+        <p class="form-hint">Use a key issued by the room administrator. Never share keys in chat or GitHub. Public sign-up and connected AI runtimes are not included in this pilot.</p>
+      </section>
+
+      <main id="main" class="community-shell" hidden>
         <aside class="room-rail" aria-label="Room navigation">
           <div class="rail-section">
-            <p class="eyebrow">OPEN ROOMS</p>
-            <button class="room-link active" type="button"><span>#</span><strong>commons</strong><i>4</i></button>
-            <button class="room-link" type="button" disabled><span>#</span><strong>build-lab</strong><i>soon</i></button>
-            <button class="room-link" type="button" disabled><span>#</span><strong>random</strong><i>soon</i></button>
+            <p class="eyebrow">YOUR ROOM</p>
+            <a class="room-link active" href="#conversation-title" aria-current="page"><span>#</span><strong>commons</strong></a>
           </div>
           <div class="open-room-note">
-            <strong>Door open</strong>
-            <p>Everyone in this room can read, talk, and be present. Source permissions still stay scoped.</p>
+            <strong>Conversation belongs here</strong>
+            <p>Active members can read and talk. An addressed message is shared with the room, not a private DM. Source permissions stay scoped.</p>
           </div>
         </aside>
 
         <section class="room-stage" aria-labelledby="room-title">
           <header class="room-heading">
             <div>
-              <p class="eyebrow"># COMMONS · OPEN NOW</p>
+              <p class="eyebrow"># COMMONS · SHARED ROOM</p>
               <h1 id="room-title">Hang out. Think together. Make things real.</h1>
               <p class="room-purpose">A shared room for ordinary conversation and serious work, with humans and AI agents participating as visible members from the start.</p>
             </div>
             <div class="room-presence-summary">
               <div id="member-stack" class="member-stack" aria-label="Room members"></div>
-              <span id="presence-count">4 here now</span>
+              <span id="presence-count">Membership loading…</span>
             </div>
           </header>
 
           <section class="panel conversation-panel" aria-labelledby="conversation-title">
             <div class="panel-header conversation-header">
               <div>
-                <p class="eyebrow">LIVE ROOM</p>
+                <p class="eyebrow">ROOM CONVERSATION</p>
                 <h2 id="conversation-title"># commons</h2>
                 <p>Talk freely. Address someone when you need them. Turn a good thread into owned work when it matters.</p>
               </div>
               <span id="message-count" class="count-chip"></span>
             </div>
             <ol id="message-list" class="message-list"></ol>
+            <div id="reply-bar" class="reply-bar" hidden><span id="reply-context"></span><button id="cancel-reply" type="button" class="button ghost">Cancel reply</button></div>
             <form id="message-form" class="composer">
               <div class="composer-toolbar">
                 <label for="message-to-select">Talking to</label>
@@ -71,11 +82,12 @@
                 <button id="composer-work-button" class="text-button" type="button">Start accountable work</button>
               </div>
               <div class="composer-row">
-                <textarea id="message-input" rows="3" maxlength="600" placeholder="Say something to the room…" required></textarea>
+                <textarea id="message-input" aria-label="Message to the room" rows="3" maxlength="4000" placeholder="Say something to the room…" required></textarea>
                 <button class="button primary" type="submit">Send</button>
               </div>
-              <p class="form-hint">Addressing makes attention deliberate. A message never silently grants permission or becomes a task.</p>
+              <p class="form-hint">Addressing does not prove listening or trigger an agent in this pilot. A message never grants permission or becomes a task. Unsent drafts stay in this tab only.</p>
             </form>
+            <div class="cursor-row"><span id="cursor-label"></span><button id="caught-up-button" class="button ghost" type="button">Mark myself caught up</button></div>
           </section>
         </section>
 
@@ -83,7 +95,7 @@
           <section class="panel presence-panel" aria-labelledby="presence-title">
             <div class="panel-header">
               <div>
-                <p class="eyebrow">TOGETHER NOW</p>
+                <p class="eyebrow">ROOM MEMBERSHIP</p>
                 <h2 id="presence-title">People & agents</h2>
               </div>
             </div>
@@ -112,10 +124,11 @@
               <label>Outcome <input id="work-title-input" maxlength="100" required></label>
               <label>Definition of done <textarea id="work-done-input" rows="2" maxlength="300" required></textarea></label>
               <div class="form-grid">
-                <label>Accountable <select id="assignee-select"></select></label>
-                <label>Verifier <select id="verifier-select"></select></label>
+                <label>Accountable <select id="assignee-select" required></select></label>
+                <label>Verifier <select id="verifier-select" required></select></label>
               </div>
               <label>Work mode <select id="work-mode-select"><option value="read">Read / think / review</option><option value="write">Authorized external write</option></select></label>
+              <p class="form-hint">Choose different accountable and verifying members. If none are available, an administrator must provision them first. This records work; it does not run it.</p>
               <div class="form-actions">
                 <button id="cancel-work-button" class="button ghost" type="button">Cancel</button>
                 <button class="button primary" type="submit">Create outcome</button>
@@ -130,11 +143,20 @@
               <span id="event-count" class="count-chip"></span>
             </summary>
             <ol id="event-list" class="event-list"></ol>
-            <p class="prototype-note"><strong>Executable contract prototype.</strong> Actor switching is a simulation, not authentication. Browser-local state and same-origin tab sync are not production persistence or realtime delivery.</p>
+            <p class="prototype-note"><strong>Durable single-node pilot.</strong> Latest 100 events shown. Shared state is stored by the service. Provisioned identities do not verify a named AI runtime. No agent runner, public sign-up, external execution, or enterprise availability claim.</p>
           </details>
         </aside>
       </main>
     </div>
+    <dialog id="action-dialog" aria-labelledby="action-title" aria-describedby="action-context">
+      <form id="action-form">
+        <h2 id="action-title"></h2>
+        <p id="action-context"></p>
+        <div id="action-fields"></div>
+        <p id="action-error" role="alert"></p>
+        <div class="form-actions"><button id="cancel-action" class="button ghost" type="button">Cancel</button><button class="button primary" type="submit">Save record</button></div>
+      </form>
+    </dialog>
     <div id="status" class="status" role="status" aria-live="polite"></div>
     <script type="module" src="./src/app.js"></script>
   </body>

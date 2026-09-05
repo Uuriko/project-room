@@ -1,363 +1,200 @@
-import { EVENT_TYPES, WORK_STATES, event, replay } from "./events.js";
-import { seedEvents } from "./seed.js";
-import { loadEvents, openRoomChannel, resetEvents, saveEvents } from "./storage.js";
+import { EVENT_TYPES as T, WORK_STATES as S } from "./events.js";
+import { RoomClient, draftCommand } from "./client.js";
 
-let events = loadEvents(seedEvents);
-let state = replay(events);
-let activeActorId = state.room.ownerId;
-
-const $ = (selector) => document.querySelector(selector);
-const actorSelect = $("#actor-select");
-const channel = openRoomChannel((incoming) => {
-  events = incoming;
-  state = replay(events);
-  render();
-  announce("Room updated from another tab");
-});
-
-function append(next) {
-  try {
-    const nextState = replay([...events, next]);
-    events = [...events, next];
-    state = nextState;
-    saveEvents(events);
-    channel.publish(events);
+const $ = selector => document.querySelector(selector);
+let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
+let workDraftId = null, replyToId = null, busy = false;
+const client = new RoomClient({
+  onSnapshot(snapshot, identity) {
+    state = snapshot.state; session = identity;
+    $("#main").hidden = false; $("#auth-panel").hidden = true; $("#signout-button").hidden = false;
+    $("#identity-label").textContent = `${state.members[session.member.id].displayName} · ${session.member.kind}`;
+    $("#cursor-label").textContent = `Your caught-up marker: ${snapshot.cursor} · room event ${snapshot.sequence}`;
     render();
-    announce(humanize(next.type));
-  } catch (error) {
-    announce(error.message, true);
+  },
+  onStatus(text) { $("#connection-status").textContent = text; },
+  onAccessEnded() {
+    state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null;
+    workDraftId = null; replyToId = null;
+    $("#main").hidden = true; $("#auth-panel").hidden = false; $("#signout-button").hidden = true;
+    $("#identity-label").textContent = "Not signed in";
+    for (const id of ["message-list", "work-list", "event-list", "presence-list", "member-stack", "summary-grid", "reply-context", "source-context", "action-context", "action-fields", "cursor-label", "presence-count", "message-count", "event-count"]) $(`#${id}`).replaceChildren();
+    for (const id of ["message-to-select", "assignee-select", "verifier-select"]) { $(`#${id}`).replaceChildren(); delete $(`#${id}`).dataset.signature; }
+    for (const form of document.querySelectorAll("form")) form.reset();
+    $("#action-dialog").close(); $("#new-work-form").hidden = true; $("#reply-bar").hidden = true;
+    $("#auth-error").textContent = "Sign in with an active room key. Session ended; private drafts were cleared.";
+    $("#connection-status").textContent = "Not connected";
   }
+});
+const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+const humanize = value => String(value).replaceAll("_", " ").replaceAll(".", " ");
+const name = id => state.members[id]?.displayName || "Unassigned";
+const can = capability => state?.members[session?.member.id]?.permissions.includes(capability);
+const initials = text => esc(text.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase());
+const time = value => new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(value));
+function safeUrl(value) { try { const u = new URL(value); return u.protocol === "https:" ? esc(u.href) : "#"; } catch { return "#"; } }
+function notice(text, error = false) { $("#status").textContent = text; $("#status").classList.add("visible"); $("#status").classList.toggle("error", error); if ($("#action-dialog").open) $("#action-error").textContent = error ? text : ""; }
+function selectOptions(selector, members, blank) {
+  const select = $(selector), previous = select.value;
+  const signature = JSON.stringify(members.map(m => [m.id, m.displayName]));
+  if (select.dataset.signature === signature) return;
+  select.innerHTML = `<option value="">${esc(blank)}</option>${members.map(m => `<option value="${esc(m.id)}">${esc(m.displayName)} · ${esc(m.kind)}</option>`).join("")}`;
+  if (previous && !members.some(m => m.id === previous)) select.insertAdjacentHTML("beforeend", `<option value="${esc(previous)}" disabled>Previously selected member unavailable — choose again</option>`);
+  if (previous) select.value = previous;
+  select.dataset.signature = signature;
 }
-
 function render() {
-  renderActors();
-  renderMembers();
-  renderSummary();
-  renderMessages();
-  renderWork();
-  renderEvents();
-}
-
-function renderActors() {
-  const previous = activeActorId;
-  const members = Object.values(state.members);
-  actorSelect.innerHTML = members
-    .map((member) => `<option value="${escapeHtml(member.id)}">${escapeHtml(member.displayName)} · ${escapeHtml(member.kind)}</option>`)
-    .join("");
-  if (state.members[previous]) actorSelect.value = previous;
-
-  $("#message-to-select").innerHTML = `<option value="">Everyone in #commons</option>${members.map(optionForMember).join("")}`;
-  const accountableMembers = members.filter((member) => member.permissions.includes("accept_work"));
-  const verifyingMembers = members.filter((member) => member.permissions.includes("verify"));
-  $("#assignee-select").innerHTML = accountableMembers.map(optionForMember).join("");
-  $("#verifier-select").innerHTML = verifyingMembers.map(optionForMember).join("");
-  if (accountableMembers.length) $("#assignee-select").value = accountableMembers.find((member) => member.kind === "agent")?.id || accountableMembers[0].id;
-  const verifier = verifyingMembers.find((member) => member.id !== $("#assignee-select").value);
-  if (verifier) $("#verifier-select").value = verifier.id;
-}
-
-function renderMembers() {
-  const members = Object.values(state.members);
-  const availableCount = members.filter((member) => member.availability === "available").length;
-  $("#presence-count").textContent = `${availableCount} here now`;
-  $("#member-stack").innerHTML = members.map((member) => `
-    <div class="member-avatar ${member.kind}" title="${escapeHtml(member.displayName)} · ${escapeHtml(member.kind)}">
-      <span>${initials(member.displayName)}</span>
-      <i class="availability ${member.availability}" aria-hidden="true"></i>
-    </div>
-  `).join("");
-  $("#presence-list").innerHTML = members.map((member) => `
-    <div class="presence-member">
-      <div class="member-avatar ${member.kind}"><span>${initials(member.displayName)}</span><i class="availability ${member.availability}" aria-hidden="true"></i></div>
-      <div><strong>${escapeHtml(member.displayName)}</strong><span>${member.kind === "agent" ? "AI agent" : "Human"} · ${member.availability === "available" ? "here" : "away"}</span></div>
-      <span class="presence-state">${member.kind === "agent" ? "✦" : "●"}</span>
-    </div>
-  `).join("");
-}
-
-function renderSummary() {
+  const members = Object.values(state.members), active = members.filter(m => m.active !== false);
+  selectOptions("#message-to-select", active, "Everyone in this room");
+  selectOptions("#assignee-select", active.filter(m => m.permissions.includes("accept_work") && m.permissions.includes("complete_work")), "Choose accountable member");
+  selectOptions("#verifier-select", active.filter(m => m.permissions.includes("verify")), "Choose independent verifier");
+  $("#presence-count").textContent = `${active.length} members · presence not measured`;
+  $("#member-stack").innerHTML = active.map(m => `<div class="member-avatar ${m.kind}" title="${esc(m.displayName)}"><span>${initials(m.displayName)}</span></div>`).join("");
+  $("#presence-list").innerHTML = members.map(m => `<div class="presence-member"><div class="member-avatar ${m.kind}"><span>${initials(m.displayName)}</span></div><div><strong>${esc(m.displayName)}</strong><span>${esc(m.kind)} · ${m.active === false ? "access revoked" : "presence unknown"}</span><details><summary>Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p></details></div></div>`).join("");
+  $("#new-work-button").disabled = !can("steer"); $("#composer-work-button").disabled = !can("steer");
   const items = Object.values(state.workItems);
-  const waiting = items.filter((item) => ownerDecisionIsReady(item)).length;
-  const moving = items.filter((item) => [WORK_STATES.ACCEPTED, WORK_STATES.WORKING, WORK_STATES.BLOCKED].includes(item.state) || (item.state === WORK_STATES.COMPLETED && !item.decision)).length;
-  const blocked = items.filter((item) => item.state === WORK_STATES.BLOCKED).length;
-  const evidence = items.filter((item) => item.receipt).length;
-  $("#summary-grid").innerHTML = [
-    summaryCard("Waiting on you", waiting, waiting ? "Verified work is ready for an owner decision" : "No owner decisions are waiting", "attention"),
-    summaryCard("In motion", moving, `${blocked} blocked · ${items.length} total work items`, "motion"),
-    summaryCard("Evidence", evidence, "Exact versions attached to completion receipts", "evidence")
-  ].join("");
-}
-
-function renderMessages() {
-  $("#message-count").textContent = String(state.messages.length);
-  $("#message-list").innerHTML = state.messages.map((message) => {
-    const member = state.members[message.authorId];
-    const linked = message.workItemId ? state.workItems[message.workItemId] : null;
-    const addressed = message.toMemberId ? state.members[message.toMemberId] : null;
-    const canCreateWork = state.members[activeActorId].permissions.includes("steer");
-    return `<li id="message-${escapeHtml(message.id)}" class="message">
-      <div class="message-avatar ${member.kind}">${initials(member.displayName)}</div>
-      <div class="message-content">
-        <div class="message-meta"><strong>${escapeHtml(member.displayName)}</strong><span>${escapeHtml(member.kind)}</span><time>${formatTime(message.createdAt)}</time></div>
-        <span class="audience-chip">${addressed ? `to ${escapeHtml(addressed.displayName)}` : "to everyone"}</span>
-        <p>${escapeHtml(message.body)}</p>
-        <div class="message-links">
-          ${linked ? `<a class="work-link" href="#${escapeHtml(linked.id)}">↳ ${escapeHtml(linked.title)}</a>` : ""}
-          ${canCreateWork && !linked ? `<button class="message-to-work" type="button" data-message-id="${escapeHtml(message.id)}">Make this work</button>` : ""}
-        </div>
-      </div>
-    </li>`;
-  }).join("");
-  document.querySelectorAll(".message-to-work").forEach((button) => button.addEventListener("click", () => openWorkForm(button.dataset.messageId)));
-  const list = $("#message-list");
-  list.scrollTop = list.scrollHeight;
-}
-
-function renderWork() {
-  const items = Object.values(state.workItems).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  $("#work-list").innerHTML = items.map(renderWorkCard).join("");
-  document.querySelectorAll("[data-action]").forEach((button) => button.addEventListener("click", handleWorkAction));
-}
-
-function renderWorkCard(item) {
-  const accountable = state.members[item.accountableMemberId];
-  const verifier = state.members[item.verifierMemberId];
-  const isOwnerGate = ownerDecisionIsReady(item);
-  return `<article id="${escapeHtml(item.id)}" class="work-card ${isOwnerGate ? "owner-gate" : ""}">
-    <div class="work-card-header">
-      <span class="state state-${escapeHtml(item.state)}">${escapeHtml(humanize(item.state))}</span>
-      <span class="mode">${item.mode === "write" ? "write-scoped" : "read-only"} · r${item.revision}</span>
-    </div>
-    <h3>${escapeHtml(item.title)}</h3>
-    ${item.sourceMessageId ? `<a class="source-link" href="#message-${escapeHtml(item.sourceMessageId)}">From a room conversation</a>` : ""}
-    <p class="definition">${escapeHtml(item.definitionOfDone)}</p>
-    <dl class="work-facts">
-      <div><dt>Accountable</dt><dd>${escapeHtml(accountable.displayName)}</dd></div>
-      <div><dt>Verifier</dt><dd>${escapeHtml(verifier.displayName)}</dd></div>
-      <div><dt>Next action</dt><dd>${escapeHtml(nextAction(item))}</dd></div>
-    </dl>
-    ${item.receipt ? renderReceipt(item) : ""}
-    ${item.decision ? `<div class="decision"><strong>${escapeHtml(humanize(item.decision.decision))}</strong><p>${escapeHtml(item.decision.reason)}</p></div>` : ""}
-    ${item.blocker ? `<div class="blocker"><strong>Blocked</strong><p>${escapeHtml(item.blocker.reason)}</p></div>` : ""}
-    ${item.claim?.status === "active" ? `<details class="claim"><summary>Active write claim</summary><p>${escapeHtml(item.claim.repository)}:${escapeHtml(item.claim.ref)}</p><p>${item.claim.paths.map(escapeHtml).join(", ")}</p></details>` : ""}
-    <div class="work-actions">${actionsFor(item).join("") || `<span class="no-action">No valid action for ${escapeHtml(state.members[activeActorId].displayName)}</span>`}</div>
-  </article>`;
-}
-
-function renderReceipt(item) {
-  const producer = state.members[item.receipt.producerId];
-  const verifier = item.verification ? state.members[item.verification.verifierId] : null;
-  return `<div class="receipt">
-    <p class="receipt-label">EVIDENCE RECEIPT</p>
-    <p>${escapeHtml(item.receipt.summary)}</p>
-    <a href="${safeUrl(item.receipt.evidenceUrl)}" target="_blank" rel="noreferrer">Open exact evidence ↗</a>
-    <code>${escapeHtml(shortVersion(item.receipt.evidenceVersion))}</code>
-    <div class="receipt-checks"><span>Reported by ${escapeHtml(producer.displayName)}</span>${verifier ? `<span class="verified">${item.verification.result.toUpperCase()} · ${escapeHtml(verifier.displayName)}</span>` : `<span>Awaiting ${escapeHtml(state.members[item.verifierMemberId].displayName)}</span>`}</div>
-  </div>`;
-}
-
-function actionsFor(item) {
-  const buttons = [];
-  if (item.state === WORK_STATES.PROPOSED && activeActorId === item.accountableMemberId) buttons.push(actionButton("accept", "Accept"));
-  if (item.state === WORK_STATES.ACCEPTED && activeActorId === item.accountableMemberId) {
-    if (item.mode === "write" && !item.claim) buttons.push(actionButton("claim", "Claim write scope"));
-    if (item.mode === "read" || item.claim?.status === "active") buttons.push(actionButton("start", "Start"));
-  }
-  if (item.state === WORK_STATES.BLOCKED && activeActorId === item.accountableMemberId) buttons.push(actionButton("resolve", "Accept revised direction"));
-  if (item.state === WORK_STATES.WORKING && activeActorId === item.accountableMemberId) buttons.push(actionButton("complete", "Post receipt"));
-  if (item.state === WORK_STATES.COMPLETED && !item.verification && activeActorId === item.verifierMemberId) {
-    buttons.push(actionButton("verify-pass", "Verify pass", "primary"));
-    buttons.push(actionButton("verify-fail", "Report finding"));
-  }
-  if (ownerDecisionIsReady(item) && activeActorId === item.humanDecisionMakerId) {
-    buttons.push(actionButton("approve", "Approve", "primary"));
-    buttons.push(actionButton("changes", "Request changes"));
-  }
-  return buttons.map((button) => button.replace("<button", `<button data-work-id="${escapeHtml(item.id)}"`));
-}
-
-function handleWorkAction({ currentTarget }) {
-  const item = state.workItems[currentTarget.dataset.workId];
-  const action = currentTarget.dataset.action;
-  const base = { roomId: state.room.id, actorId: activeActorId, causationId: latestEventId(item.id), data: { workItemId: item.id, expectedRevision: item.revision } };
-  if (action === "accept") append(event({ ...base, type: EVENT_TYPES.WORK_ACCEPTED }));
-  if (action === "claim") append(event({ ...base, type: EVENT_TYPES.CLAIM_ACQUIRED, data: { ...base.data, repository: "Uuriko/project-room", ref: "demo/claimed-work", paths: ["src/**"], expiresAt: new Date(Date.now() + 3_600_000).toISOString() } }));
-  if (action === "start") append(event({ ...base, type: EVENT_TYPES.WORK_STARTED }));
-  if (action === "resolve") append(event({ ...base, type: EVENT_TYPES.WORK_BLOCKER_RESOLVED, data: { ...base.data, resolution: "Accepted the revised direction for a new attempt." } }));
-  if (action === "complete") append(event({ ...base, type: EVENT_TYPES.WORK_COMPLETED, data: { ...base.data, summary: "Accountable member reports the defined outcome is complete.", evidenceUrl: "https://github.com/Uuriko/project-room", evidenceVersion: `demo-${Date.now()}`, checksClaimed: ["definition of done"], nextAction: `${state.members[item.verifierMemberId].displayName} independently checks this version` } }));
-  if (action === "verify-pass") append(event({ ...base, type: EVENT_TYPES.VERIFICATION_RECORDED, data: { ...base.data, result: "pass", completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion, summary: "Exact evidence version independently checked." } }));
-  if (action === "verify-fail") append(event({ ...base, type: EVENT_TYPES.VERIFICATION_RECORDED, data: { ...base.data, result: "fail", completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion, summary: "Evidence does not yet satisfy the definition of done.", nextAction: `${state.members[item.accountableMemberId].displayName} addresses the finding` } }));
-  if (action === "approve") append(event({ ...base, type: EVENT_TYPES.OWNER_DECISION_RECORDED, data: { ...base.data, decision: "approved", completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion, reason: "Verified result accepted." } }));
-  if (action === "changes") append(event({ ...base, type: EVENT_TYPES.OWNER_DECISION_RECORDED, data: { ...base.data, decision: "changes_requested", completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion, reason: "Revise against the owner feedback." } }));
-}
-
-function renderEvents() {
-  const recent = [...state.eventLog].reverse().slice(0, 12);
-  $("#event-count").textContent = String(state.eventLog.length);
-  $("#event-list").innerHTML = recent.map((item) => {
-    const actor = state.members[item.actorId];
-    return `<li><span class="event-node" aria-hidden="true"></span><div><strong>${escapeHtml(humanize(item.type))}</strong><p>${escapeHtml(actor?.displayName || item.actorId)} · ${formatTime(item.at)}</p></div></li>`;
-  }).join("");
-}
-
-actorSelect.addEventListener("change", () => {
-  activeActorId = actorSelect.value;
+  const waiting = items.filter(i => readyForDecision(i) && i.humanDecisionMakerId === session.member.id).length;
+  $("#summary-grid").innerHTML = `<article class="summary-card"><span>Your decisions</span><strong>${waiting}</strong><p>Completion, verification, and approval stay separate.</p></article><article class="summary-card"><span>Work in this room</span><strong>${items.length}</strong><p>${items.filter(i => i.state === S.BLOCKED).length} blocked. Conversation never creates work automatically.</p></article>`;
   renderMessages();
-  renderWork();
-  announce(`Acting as ${state.members[activeActorId].displayName}`);
-});
-
-$("#message-form").addEventListener("submit", (submitEvent) => {
-  submitEvent.preventDefault();
-  const input = $("#message-input");
-  append(event({ roomId: state.room.id, type: EVENT_TYPES.MESSAGE_POSTED, actorId: activeActorId, data: { body: input.value.trim(), toMemberId: $("#message-to-select").value || null } }));
-  input.value = "";
-});
-
-$("#new-work-button").addEventListener("click", () => openWorkForm());
-$("#composer-work-button").addEventListener("click", () => openWorkForm());
-$("#assignee-select").addEventListener("change", () => {
-  if ($("#verifier-select").value === $("#assignee-select").value) {
-    const alternate = [...$("#verifier-select").options].find((option) => option.value !== $("#assignee-select").value);
-    if (alternate) $("#verifier-select").value = alternate.value;
+  $("#work-list").innerHTML = items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(workCard).join("") || '<p class="empty-note">Nothing assigned. A room is useful before it has a task.</p>';
+  $("#event-count").textContent = `${client.sequence}`;
+  $("#event-list").innerHTML = [...state.eventLog].reverse().map(e => `<li><span>${esc(humanize(e.type))}</span><strong>${esc(name(e.actorId))}</strong><time>${esc(time(e.at))}</time><code>${esc(e.id)}</code></li>`).join("");
+}
+function renderMessages() {
+  const list = $("#message-list"), oldTop = list.scrollTop;
+  const nearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+  const focused = document.activeElement?.closest("[data-message-id]");
+  const focusId = focused?.dataset.messageId, focusAction = focused?.dataset.messageAction;
+  $("#message-count").textContent = state.messages.length;
+  list.innerHTML = state.messages.map(m => {
+    const author = state.members[m.authorId];
+    const linked = Object.values(state.workItems).filter(i => i.sourceMessageId === m.id || i.id === m.workItemId);
+    return `<li id="message-${esc(m.id)}" class="message"><div class="message-avatar ${author.kind}">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(author.displayName)}</strong><span>${esc(author.kind)}</span><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></div><span class="audience-chip">${m.toMemberId ? `to ${esc(name(m.toMemberId))} · no processing receipt` : "to everyone"}</span>${m.replyToId ? `<a class="source-link" href="#message-${esc(m.replyToId)}">In reply to a room message</a>` : ""}<p>${esc(m.body)}</p><div class="message-links">${linked.map(i => `<a class="work-link" href="#${esc(i.id)}">↳ ${esc(i.title)}</a>`).join("")}<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>${can("steer") ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : ""}</div></div></li>`;
+  }).join("") || '<li class="empty-note">Start with a hello, a thought, or a question. No task required.</li>';
+  list.scrollTop = nearBottom ? list.scrollHeight : oldTop;
+  if (focusId) [...list.querySelectorAll("[data-message-id]")].find(e => e.dataset.messageId === focusId && e.dataset.messageAction === focusAction)?.focus({ preventScroll: true });
+}
+function readyForDecision(i) { return i.ownerDecisionRequired && !i.decision && i.state === S.COMPLETED && (!i.independentVerificationRequired || i.verification?.result === "pass"); }
+function activeClaim(i) { return i.claim?.status === "active" && Date.parse(i.claim.expiresAt) > Date.now(); }
+function actions(i) {
+  const a = [], own = i.accountableMemberId === session.member.id;
+  if (own && i.state === S.PROPOSED && can("accept_work")) a.push(["accept", "Accept"]);
+  if (own && [S.ACCEPTED, S.WORKING, S.BLOCKED].includes(i.state) && i.mode === "write" && !activeClaim(i) && can("write_external")) a.push(["claim", "Record write scope"]);
+  if (own && i.state === S.ACCEPTED && can("accept_work") && (i.mode === "read" || (activeClaim(i) && can("write_external")))) a.push(["start", "Start"]);
+  if (own && i.state === S.BLOCKED) a.push(["resolve", "Resolve blocker"]);
+  if (own && [S.ACCEPTED, S.WORKING].includes(i.state)) {
+    a.push(["block", "Report blocker"]);
+    if (can("complete_work") && (i.mode === "read" || (activeClaim(i) && can("write_external")))) a.push(["complete", "Post evidence"]);
   }
-});
-
-$("#cancel-work-button").addEventListener("click", () => {
-  $("#new-work-form").hidden = true;
-  clearWorkSource();
-});
-
-$("#new-work-form").addEventListener("submit", (submitEvent) => {
-  submitEvent.preventDefault();
-  append(event({
-    roomId: state.room.id,
-    type: EVENT_TYPES.WORK_PROPOSED,
-    actorId: activeActorId,
-    data: {
-      workItemId: `work-${Date.now()}`,
-      title: $("#work-title-input").value.trim(),
-      definitionOfDone: $("#work-done-input").value.trim(),
-      accountableMemberId: $("#assignee-select").value,
-      verifierMemberId: $("#verifier-select").value,
-      independentVerificationRequired: true,
-      ownerDecisionRequired: true,
-      humanDecisionMakerId: state.room.ownerId,
-      mode: $("#work-mode-select").value,
-      sourceMessageId: $("#source-message-id").value || null
-    }
-  }));
-  submitEvent.currentTarget.reset();
-  clearWorkSource();
-  submitEvent.currentTarget.hidden = true;
-});
-
-$("#reset-button").addEventListener("click", () => {
-  events = resetEvents(seedEvents);
-  state = replay(events);
-  activeActorId = state.room.ownerId;
-  channel.publish(events);
-  render();
-  announce("Demo reset");
-});
-
-window.addEventListener("beforeunload", () => channel.close());
-render();
-
-function latestEventId(workItemId) {
-  return [...state.eventLog].reverse().find((item) => item.data?.workItemId === workItemId)?.id || null;
+  if (i.state === S.COMPLETED && session.member.id === i.verifierMemberId && can("verify") && !i.verification) a.push(["verify", "Record verification"]);
+  if (readyForDecision(i) && session.member.id === i.humanDecisionMakerId && can("decide")) a.push(["decide", "Record decision"]);
+  return a.map(([action, label]) => `<button type="button" class="button secondary" data-action="${action}" data-work-id="${esc(i.id)}"${busy ? " disabled" : ""}>${label}</button>`).join("");
 }
-
-function openWorkForm(messageId = null) {
-  if (!state.members[activeActorId].permissions.includes("steer")) {
-    announce(`${state.members[activeActorId].displayName} can talk here but cannot assign work`, true);
-    return;
+function workCard(i) {
+  return `<article id="${esc(i.id)}" class="work-card"><div class="work-card-header"><span class="state state-${i.state}">${esc(i.state)}</span><span class="mode">${esc(i.mode)} · revision ${i.revision}</span></div><h3>${esc(i.title)}</h3>${i.sourceMessageId ? `<a class="source-link" href="#message-${esc(i.sourceMessageId)}">From this conversation</a>` : ""}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(name(i.accountableMemberId))}</dd></div><div><dt>Verifier</dt><dd>${esc(name(i.verifierMemberId))}</dd></div></dl>${i.receipt ? `<div class="receipt"><p class="receipt-label">REPORTED COMPLETION · NOT AUTOMATIC VERIFICATION</p><p>${esc(i.receipt.summary)}</p><a href="${safeUrl(i.receipt.evidenceUrl)}" target="_blank" rel="noreferrer">Open submitted evidence ↗</a><code>${esc(i.receipt.evidenceVersion)}</code><p>${esc(i.receipt.nextAction)}</p>${i.verification ? `<p>${esc(i.verification.result.toUpperCase())} reported by ${esc(name(i.verification.verifierId))}: ${esc(i.verification.summary)}</p>` : "<p>No verification recorded.</p>"}</div>` : ""}${i.blocker ? `<div class="blocker"><strong>Blocked</strong><p>${esc(i.blocker.reason)}</p><p>${esc(i.blocker.nextAction)}</p></div>` : ""}${i.decision ? `<div class="decision"><strong>${esc(humanize(i.decision.decision))}</strong><p>${esc(i.decision.reason)}</p></div>` : ""}${i.claim ? `<details class="claim"><summary>Recorded scope · ${activeClaim(i) ? "not expired" : "expired or released"}</summary><p>${esc(i.claim.repository)}:${esc(i.claim.ref)}</p><p>${esc(i.claim.paths.join(", "))}</p><p>Expires ${esc(i.claim.expiresAt)}. This service does not execute external actions.</p></details>` : ""}<div class="work-actions">${actions(i)}</div></article>`;
+}
+async function submit(form, fn) {
+  if (busy) return;
+  busy = true; const controls = [...form.querySelectorAll("button, input, select, textarea")];
+  const disabled = controls.map(e => e.disabled); controls.forEach(e => e.disabled = true);
+  try { await fn(); }
+  catch (error) { notice(`${error.message}. ${state ? "Draft kept; refresh and review before retrying." : "Sign in again."}`, true); }
+  finally { busy = false; controls.forEach((e, i) => e.disabled = disabled[i]); if (state) render(); }
+}
+$("#auth-form").addEventListener("submit", async e => {
+  e.preventDefault(); $("#auth-error").textContent = "";
+  const accessKey = $("#access-key").value.trim();
+  await submit(e.currentTarget, async () => {
+    try { await client.login(accessKey); $("#access-key").value = ""; notice("Signed in. This identifies your provisioned account, not a named remote runtime."); }
+    catch (error) { $("#auth-error").textContent = error.message; throw error; }
+  });
+});
+$("#signout-button").addEventListener("click", async () => {
+  if (busy) return;
+  if ($("#message-input").value || !$("#new-work-form").hidden || $("#action-dialog").open) {
+    if (!window.confirm("Sign out and clear unsent drafts on this device?")) return;
   }
-  const form = $("#new-work-form");
-  form.hidden = false;
-  clearWorkSource();
-  if (messageId) {
-    const message = state.messages.find((item) => item.id === messageId);
-    if (message) {
-      $("#source-message-id").value = message.id;
-      $("#source-context").hidden = false;
-      $("#source-context").textContent = `From ${state.members[message.authorId].displayName}: “${message.body}”`;
-      $("#work-title-input").value = message.body.length > 74 ? `${message.body.slice(0, 71)}…` : message.body;
-    }
-  }
-  form.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  $("#work-title-input").focus();
+  try { await client.logout(); notice("Signed out. Private drafts cleared."); }
+  catch (error) { if ([401, 403].includes(error.status)) client.endAccess(); else notice("Sign-out could not be confirmed. Session may still be active; retry when connected.", true); }
+});
+$("#refresh-button").addEventListener("click", async () => {
+  try { if (!client.session) await client.restore(); else { await client.refresh(); client.connect(); } }
+  catch (error) { client.handleFailure(error); notice(error.message, true); }
+});
+$("#caught-up-button").addEventListener("click", async () => {
+  try { await client.caughtUp(); await client.refresh(); notice("Your caught-up position saved. No peer read or processing claim was created."); }
+  catch (error) { client.handleFailure(error); notice(error.message, true); }
+});
+$("#message-form").addEventListener("submit", e => {
+  e.preventDefault(); if (!state) return;
+  const data = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId };
+  if (!data.body) return;
+  pendingMessage = draftCommand(pendingMessage, T.MESSAGE_POSTED, data);
+  submit(e.currentTarget, async () => {
+    const receipt = await client.send(pendingMessage.command);
+    $("#message-input").value = ""; pendingMessage = null; clearReply();
+    notice(`Message stored once at event ${receipt.sequence}. Recipient processing is not confirmed.`);
+  });
+});
+$("#message-list").addEventListener("click", e => {
+  const button = e.target.closest("[data-message-id]"); if (!button || !state || busy) return;
+  if (button.dataset.messageAction === "work") openWork(button.dataset.messageId);
+  else { replyToId = button.dataset.messageId; $("#reply-context").textContent = `Replying to ${name(state.messages.find(m => m.id === replyToId).authorId)}`; $("#reply-bar").hidden = false; $("#message-input").focus(); }
+});
+function clearReply() { replyToId = null; $("#reply-bar").hidden = true; $("#reply-context").textContent = ""; }
+$("#cancel-reply").addEventListener("click", clearReply);
+function openWork(sourceId = null) {
+  if (!can("steer") || busy) return;
+  if (!$("#new-work-form").hidden) { $("#work-title-input").focus(); return; }
+  $("#new-work-form").hidden = false; workDraftId = `work-${crypto.randomUUID()}`;
+  $("#source-message-id").value = sourceId || "";
+  $("#source-context").textContent = sourceId ? `Source: ${state.messages.find(m => m.id === sourceId)?.body || ""}` : "";
+  $("#source-context").hidden = !sourceId; $("#work-title-input").focus();
 }
-
-function clearWorkSource() {
-  $("#source-message-id").value = "";
-  $("#source-context").textContent = "";
-  $("#source-context").hidden = true;
-}
-
-function nextAction(item) {
-  if (item.blocker) return item.blocker.nextAction;
-  if (item.state === WORK_STATES.PROPOSED) return `${state.members[item.accountableMemberId].displayName} accepts or declines`;
-  if (item.state === WORK_STATES.ACCEPTED) return `${state.members[item.accountableMemberId].displayName} starts work`;
-  if (item.state === WORK_STATES.WORKING) return `${state.members[item.accountableMemberId].displayName} posts evidence`;
-  if (item.state === WORK_STATES.COMPLETED && !item.verification) return `${state.members[item.verifierMemberId].displayName} checks ${shortVersion(item.receipt.evidenceVersion)}`;
-  if (ownerDecisionIsReady(item)) return `${state.members[item.humanDecisionMakerId].displayName} decides`;
-  if (item.decision?.decision === "approved") return "Loop complete; merge or deploy remains a separate action";
-  if (item.state === WORK_STATES.SUPERSEDED) return "Follow the replacement Work Item";
-  return "Review the latest event";
-}
-
-function ownerDecisionIsReady(item) {
-  if (!item.ownerDecisionRequired || item.decision || item.state !== WORK_STATES.COMPLETED) return false;
-  return !item.independentVerificationRequired || item.verification?.result === "pass";
-}
-
-function actionButton(action, label, style = "secondary") {
-  return `<button class="button ${style}" data-action="${action}" type="button">${label}</button>`;
-}
-
-function summaryCard(label, value, copy, tone) {
-  return `<article class="summary-card ${tone}"><span>${escapeHtml(label)}</span><strong>${value}</strong><p>${escapeHtml(copy)}</p></article>`;
-}
-
-function optionForMember(member) {
-  return `<option value="${escapeHtml(member.id)}">${escapeHtml(member.displayName)}</option>`;
-}
-
-function announce(message, error = false) {
-  const status = $("#status");
-  status.textContent = message;
-  status.classList.toggle("error", error);
-  status.classList.add("visible");
-  clearTimeout(announce.timeout);
-  announce.timeout = setTimeout(() => status.classList.remove("visible"), 2600);
-}
-
-function humanize(value) {
-  return String(value).replaceAll("_", " ").replaceAll(".", " ").replace(/\b\w/g, (character) => character.toUpperCase());
-}
-
-function initials(name) {
-  return name.split(/\s+/).map((word) => word[0]).join("").slice(0, 2).toUpperCase();
-}
-
-function shortVersion(version) {
-  return version.length > 14 ? `${version.slice(0, 10)}…` : version;
-}
-
-function formatTime(value) {
-  return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(value));
-}
-
-function safeUrl(value) {
-  try {
-    const parsed = new URL(value);
-    return ["https:", "http:"].includes(parsed.protocol) ? escapeHtml(parsed.href) : "#";
-  } catch {
-    return "#";
-  }
-}
-
-function escapeHtml(value) {
-  return String(value ?? "").replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[character]));
-}
+$("#new-work-button").addEventListener("click", () => openWork());
+$("#composer-work-button").addEventListener("click", () => openWork());
+$("#cancel-work-button").addEventListener("click", () => { $("#new-work-form").hidden = true; $("#new-work-form").reset(); pendingWork = null; workDraftId = null; });
+$("#new-work-form").addEventListener("submit", e => {
+  e.preventDefault(); if (!state) return;
+  const data = { workItemId: workDraftId, title: $("#work-title-input").value.trim(), definitionOfDone: $("#work-done-input").value.trim(), accountableMemberId: $("#assignee-select").value, verifierMemberId: $("#verifier-select").value, independentVerificationRequired: true, ownerDecisionRequired: true, humanDecisionMakerId: state.room.ownerId, mode: $("#work-mode-select").value, sourceMessageId: $("#source-message-id").value || null };
+  pendingWork = draftCommand(pendingWork, T.WORK_PROPOSED, data);
+  submit(e.currentTarget, async () => { await client.send(pendingWork.command); $("#new-work-form").reset(); $("#new-work-form").hidden = true; pendingWork = null; workDraftId = null; notice("Work proposed. The accountable member must accept it; no external action was authorized."); });
+});
+const field = (name, label, type = "text") => `<label>${esc(label)}<input name="${name}" type="${type}" required maxlength="2000"></label>`;
+const area = (name, label) => `<label>${esc(label)}<textarea name="${name}" required rows="3" maxlength="4000"></textarea></label>`;
+const actionSpecs = {
+  accept: [T.WORK_ACCEPTED, "Accept this work?", "<p>Accept responsibility for the stated outcome. This does not run any tools.</p>"],
+  start: [T.WORK_STARTED, "Record work starting", "<p>Record that you are starting this outcome. A record is not proof of external execution.</p>"],
+  block: [T.WORK_BLOCKED, "Report a blocker", area("reason", "What is blocked?") + area("nextAction", "What is needed next?")],
+  resolve: [T.WORK_BLOCKER_RESOLVED, "Resolve the blocker", area("resolution", "What changed or which direction did you accept?")],
+  complete: [T.WORK_COMPLETED, "Post actual evidence", area("summary", "What did you complete?") + field("evidenceUrl", "Evidence URL (HTTPS)", "url") + field("evidenceVersion", "Exact commit or artifact version") + area("nextAction", "Next handoff")],
+  claim: [T.CLAIM_ACQUIRED, "Record authorized write scope", field("repository", "Repository (owner/name)") + field("ref", "Branch or exact revision") + area("paths", "Exact paths, one per line") + field("expiresAt", "Expiry (ISO timestamp, with timezone)") + "<p>This records scope; it does not grant permission or execute tools.</p>"],
+  verify: [T.VERIFICATION_RECORDED, "Record an independent check", '<label>Result<select name="result" required><option value="">Choose after checking</option><option value="pass">Pass</option><option value="fail">Finding / fail</option></select></label>' + area("summary", "What did you check at this exact version?")],
+  decide: [T.OWNER_DECISION_RECORDED, "Record your decision", '<label>Decision<select name="decision" required><option value="">Choose</option><option value="approved">Approve</option><option value="changes_requested">Request changes</option><option value="rejected">Reject</option></select></label>' + area("reason", "Reason") + "<p>Approval does not merge, deploy, or spend money.</p>" ]
+};
+$("#work-list").addEventListener("click", e => {
+  const button = e.target.closest("[data-action]"); if (!button || busy) return;
+  const item = state.workItems[button.dataset.workId], action = button.dataset.action;
+  const [type, title, fields] = actionSpecs[action];
+  pendingAction = { type, action, workId: item.id, revision: item.revision, receipt: item.receipt ? { completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion } : null, retry: null };
+  $("#action-title").textContent = title;
+  $("#action-error").textContent = "";
+  $("#action-context").textContent = `${item.title} · revision ${item.revision}${item.receipt ? ` · evidence ${item.receipt.evidenceVersion}` : ""}`;
+  $("#action-fields").innerHTML = fields; $("#action-dialog").showModal();
+});
+$("#cancel-action").addEventListener("click", () => { $("#action-dialog").close(); pendingAction = null; });
+$("#action-dialog").addEventListener("cancel", e => { if (busy) e.preventDefault(); else pendingAction = null; });
+$("#action-form").addEventListener("submit", e => {
+  e.preventDefault(); if (!pendingAction || !state) return;
+  const entry = pendingAction, fields = Object.fromEntries(new FormData(e.currentTarget));
+  const data = { workItemId: entry.workId, expectedRevision: entry.revision, ...fields };
+  if (entry.action === "claim") data.paths = fields.paths.split("\n").map(p => p.trim()).filter(Boolean);
+  if (["verify", "decide"].includes(entry.action)) Object.assign(data, entry.receipt);
+  entry.retry = draftCommand(entry.retry, entry.type, data);
+  submit(e.currentTarget, async () => { await client.send(entry.retry.command); $("#action-dialog").close(); pendingAction = null; notice("Record saved. External execution and independent verification are separate facts."); });
+});
+window.addEventListener("beforeunload", () => client.disconnect());
+client.restore().catch(error => {
+  $("#auth-error").textContent = [401, 403].includes(error.status) ? "Use a provisioned human room key to enter. No demo identity is selected for you." : "Room service unavailable. Check the service and retry; no connection is claimed.";
+  $("#auth-panel").hidden = false;
+});
