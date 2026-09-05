@@ -1,35 +1,25 @@
-import { createReadStream, existsSync, statSync } from "node:fs";
-import { createServer } from "node:http";
-import { extname, join, normalize } from "node:path";
+import { mkdirSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { RoomStore } from "./server/store.mjs";
+import { createRoomServer } from "./server/http.mjs";
 
-const root = process.cwd();
+const host = process.env.HOST || "127.0.0.1";
 const port = Number(process.env.PORT || 4173);
-const types = {
-  ".css": "text/css; charset=utf-8",
-  ".html": "text/html; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".svg": "image/svg+xml"
-};
-
-createServer((request, response) => {
-  const url = new URL(request.url || "/", "http://localhost");
-  const requested = url.pathname === "/" ? "/index.html" : url.pathname;
-  const relative = normalize(requested).replace(/^[/\\]+/, "");
-  const file = join(root, relative);
-
-  if (!file.startsWith(root) || !existsSync(file) || !statSync(file).isFile()) {
-    response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
-    response.end("Not found");
-    return;
-  }
-
-  response.writeHead(200, {
-    "cache-control": "no-store",
-    "content-type": types[extname(file)] || "application/octet-stream",
-    "x-content-type-options": "nosniff"
-  });
-  createReadStream(file).pipe(response);
-}).listen(port, "127.0.0.1", () => {
-  console.log(`Project Room is available at http://127.0.0.1:${port}`);
-});
+if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid PORT");
+if (!["127.0.0.1", "::1", "localhost"].includes(host) || process.env.NODE_ENV === "production") throw new Error("This pilot binds only to loopback; production deployment requires a separate readiness review");
+const filename = resolve(process.env.ROOM_DB || ".data/room.sqlite");
+mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
+const store = new RoomStore(filename);
+const origin = process.env.ROOM_ORIGIN || `http://${host === "::1" ? "[::1]" : host}:${port}`;
+const server = createRoomServer({ store, origin });
+server.listen(port, host, () => console.log(`Project Room pilot: ${origin}. Provision members before signing in; see docs/SERVICE.md.`));
+let closing = false;
+function close() {
+  if (closing) return;
+  closing = true;
+  server.closeStreams();
+  server.close(() => { store.close(); process.exit(0); });
+  server.closeIdleConnections();
+}
+process.on("SIGINT", close);
+process.on("SIGTERM", close);

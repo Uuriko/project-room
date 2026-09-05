@@ -1,6 +1,7 @@
 export const EVENT_TYPES = Object.freeze({
   ROOM_CREATED: "room.created",
   MEMBER_ADDED: "member.added",
+  MEMBER_ACCESS_CHANGED: "member.access_changed",
   MESSAGE_POSTED: "message.posted",
   WORK_PROPOSED: "work.proposed",
   WORK_ACCEPTED: "work.accepted",
@@ -14,6 +15,12 @@ export const EVENT_TYPES = Object.freeze({
   VERIFICATION_RECORDED: "verification.recorded",
   OWNER_DECISION_RECORDED: "owner.decision_recorded"
 });
+
+export const PERMISSIONS = Object.freeze(["steer", "decide", "manage_members", "manage_claims", "accept_work", "complete_work", "verify", "write_external"]);
+
+export function validId(value) {
+  return typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(value) && !["constructor", "prototype", "__proto__"].includes(value);
+}
 
 export const WORK_STATES = Object.freeze({
   PROPOSED: "proposed",
@@ -79,6 +86,7 @@ export function applyEvent(current, incoming) {
   const handlers = {
     [EVENT_TYPES.ROOM_CREATED]: createRoom,
     [EVENT_TYPES.MEMBER_ADDED]: addMember,
+    [EVENT_TYPES.MEMBER_ACCESS_CHANGED]: changeMemberAccess,
     [EVENT_TYPES.MESSAGE_POSTED]: postMessage,
     [EVENT_TYPES.WORK_PROPOSED]: proposeWork,
     [EVENT_TYPES.WORK_ACCEPTED]: acceptWork,
@@ -93,7 +101,7 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.OWNER_DECISION_RECORDED]: recordOwnerDecision
   };
   const handler = handlers[incoming.type];
-  if (!handler) throw new Error(`Unsupported event type: ${incoming.type}`);
+  if (!Object.hasOwn(handlers, incoming.type)) throw new Error(`Unsupported event type: ${incoming.type}`);
   handler(state, incoming);
 
   state.eventLog.push(incoming);
@@ -107,12 +115,26 @@ function validateEnvelope(incoming) {
     if (!incoming?.[key]) throw new Error(`Event missing ${key}`);
   }
   if (Number.isNaN(Date.parse(incoming.at))) throw new Error("Event at must be an ISO date");
+  for (const key of ["id", "idempotencyKey", "roomId", "actorId"]) {
+    if (!validId(incoming[key])) throw new Error(`Invalid ${key}`);
+  }
+  if (!incoming.data || Array.isArray(incoming.data) || typeof incoming.data !== "object") throw new Error("Event data must be an object");
+  for (const [key, value] of Object.entries(incoming.data)) {
+    if (value === null) continue;
+    if (key.endsWith("Id") && !validId(value)) throw new Error(`Invalid ${key}`);
+    if (typeof value === "string" && (value.length > 4096 || !value.trim())) throw new Error(`Invalid ${key}`);
+    if (["expectedRevision", "expectedMemberRevision"].includes(key) && (!Number.isSafeInteger(value) || value < 0)) throw new Error(`Invalid ${key}`);
+    if (["independentVerificationRequired", "ownerDecisionRequired", "active"].includes(key) && typeof value !== "boolean") throw new Error(`Invalid ${key}`);
+    if (["permissions", "paths", "checksClaimed"].includes(key) && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !v.trim() || v.length > 512))) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed"].includes(key)) throw new Error(`Invalid ${key}`);
+  }
 }
 
 function createRoom(state, incoming) {
   if (state.room) throw new Error("Room already exists");
   requireFields(incoming.data, ["roomId", "title", "purpose", "ownerId"]);
   if (incoming.roomId !== incoming.data.roomId) throw new Error("Room event id mismatch");
+  if (incoming.actorId !== incoming.data.ownerId) throw new Error("Room must be created by its owner");
   state.room = { id: incoming.data.roomId, ...incoming.data, createdAt: incoming.at };
 }
 
@@ -121,21 +143,52 @@ function addMember(state, incoming) {
   const memberId = incoming.data.memberId;
   if (state.members[memberId]) throw new Error("Member already exists");
   const isBootstrapOwner = Object.keys(state.members).length === 0 && memberId === state.room.ownerId;
+  if (isBootstrapOwner && incoming.actorId !== memberId) throw new Error("Only the owner may bootstrap membership");
   if (!isBootstrapOwner) requirePermission(state, incoming.actorId, "manage_members");
+  if (!["human", "agent"].includes(incoming.data.kind)) throw new Error("Member kind must be human or agent");
+  validatePermissions(incoming.data.permissions, incoming.data.kind);
+  if (incoming.data.accountableHumanId && (!isBootstrapOwner || incoming.data.accountableHumanId !== memberId)) {
+    if (requireMember(state, incoming.data.accountableHumanId).kind !== "human") throw new Error("Accountable sponsor must be a human member");
+  }
+  if (isBootstrapOwner && (incoming.data.kind !== "human" || !incoming.data.permissions.includes("manage_members"))) throw new Error("Owner must retain membership administration");
   state.members[memberId] = {
     id: memberId,
     displayName: incoming.data.displayName,
     kind: incoming.data.kind,
     accountableHumanId: incoming.data.accountableHumanId || (incoming.data.kind === "human" ? memberId : state.room.ownerId),
     permissions: [...incoming.data.permissions],
-    availability: incoming.data.availability || "available"
+    availability: incoming.data.availability || "unknown",
+    active: true,
+    revision: 0
   };
+}
+
+function validatePermissions(permissions, kind) {
+  if (!Array.isArray(permissions) || permissions.some(p => !PERMISSIONS.includes(p)) || new Set(permissions).size !== permissions.length) throw new Error("Invalid permissions");
+  if (kind === "agent" && permissions.some(p => ["manage_members", "decide"].includes(p))) throw new Error("Human administration cannot be delegated to an agent");
+}
+
+function changeMemberAccess(state, incoming) {
+  requirePermission(state, incoming.actorId, "manage_members");
+  requireFields(incoming.data, ["memberId", "expectedMemberRevision", "permissions", "active"]);
+  const member = Object.hasOwn(state.members, incoming.data.memberId) && state.members[incoming.data.memberId];
+  if (!member) throw new Error("Unknown member");
+  if (member.revision !== incoming.data.expectedMemberRevision) throw new Error("Stale member revision");
+  validatePermissions(incoming.data.permissions, member.kind);
+  if (member.id === state.room.ownerId && (!incoming.data.active || !incoming.data.permissions.includes("manage_members"))) throw new Error("Owner must retain membership administration");
+  member.active = incoming.data.active;
+  member.permissions = [...incoming.data.permissions];
+  member.revision += 1;
 }
 
 function postMessage(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
   requireFields(incoming.data, ["body"]);
   if (incoming.data.toMemberId) requireMember(state, incoming.data.toMemberId);
+  if (typeof incoming.data.body !== "string") throw new Error("Message body must be text");
+  if (incoming.data.workItemId) requireWorkItem(state, incoming.data.workItemId);
+  if (incoming.data.replyToId && !state.messages.some(m => m.id === incoming.data.replyToId)) throw new Error("Reply must reference a message in this Room");
+  if (state.messages.some(m => m.id === (incoming.data.messageId || incoming.id))) throw new Error("Message already exists");
   state.messages.push({
     id: incoming.data.messageId || incoming.id,
     authorId: actor.id,
@@ -152,6 +205,9 @@ function proposeWork(state, incoming) {
   requireFields(incoming.data, ["workItemId", "title", "definitionOfDone", "accountableMemberId"]);
   if (state.workItems[incoming.data.workItemId]) throw new Error("Work Item already exists");
   requireMember(state, incoming.data.accountableMemberId);
+  if (incoming.data.mode && !["read", "write"].includes(incoming.data.mode)) throw new Error("Invalid work mode");
+  if (incoming.data.independentVerificationRequired && !incoming.data.verifierMemberId) throw new Error("Independent work requires a verifier");
+  if (incoming.data.ownerDecisionRequired && !incoming.data.humanDecisionMakerId) throw new Error("Owner decision requires a decision-maker");
   if (incoming.data.verifierMemberId) requireMember(state, incoming.data.verifierMemberId);
   if (incoming.data.humanDecisionMakerId) {
     const decisionMaker = requireMember(state, incoming.data.humanDecisionMakerId);
@@ -202,6 +258,8 @@ function acceptWork(state, incoming) {
 function startWork(state, incoming) {
   const item = mutableWorkItem(state, incoming, [WORK_STATES.ACCEPTED, WORK_STATES.BLOCKED]);
   if (incoming.actorId !== item.accountableMemberId) throw new Error("Only the accountable member may start work");
+  requirePermission(state, incoming.actorId, "accept_work");
+  if (item.mode === "write") requirePermission(state, incoming.actorId, "write_external");
   if (item.state === WORK_STATES.BLOCKED) requireFields(incoming.data, ["resolvedBlocker"]);
   if (item.mode === "write" && (!item.claim || !claimIsActive(item.claim, incoming.at) || item.claim.holderId !== incoming.actorId)) {
     throw new Error("Contested writes require a current exact-scope claim");
@@ -235,7 +293,15 @@ function completeWork(state, incoming) {
   const item = mutableWorkItem(state, incoming, [WORK_STATES.ACCEPTED, WORK_STATES.WORKING]);
   if (incoming.actorId !== item.accountableMemberId) throw new Error("Only the accountable member may report completion");
   requirePermission(state, incoming.actorId, "complete_work");
+  if (item.mode === "write") {
+    requirePermission(state, incoming.actorId, "write_external");
+    if (!item.claim || !claimIsActive(item.claim, incoming.at) || item.claim.holderId !== incoming.actorId) throw new Error("Completion requires a current exact-scope claim");
+  }
   requireFields(incoming.data, ["summary", "evidenceUrl", "evidenceVersion", "nextAction"]);
+  try {
+    const url = new URL(incoming.data.evidenceUrl);
+    if (url.protocol !== "https:" || url.username || url.password) throw new Error();
+  } catch { throw new Error("Evidence must be an HTTPS URL without credentials"); }
   if (item.receipt) item.receiptHistory.push(item.receipt);
   if (item.verification) item.verificationHistory.push(item.verification);
   if (item.decision) item.decisionHistory.push(item.decision);
@@ -272,7 +338,7 @@ function acquireClaim(state, incoming) {
   requirePermission(state, incoming.actorId, "write_external");
   requireFields(incoming.data, ["repository", "ref", "paths", "expiresAt"]);
   if (!Array.isArray(incoming.data.paths) || incoming.data.paths.length === 0) throw new Error("Claim paths must be explicit");
-  if (Date.parse(incoming.data.expiresAt) <= Date.parse(incoming.at)) throw new Error("Claim expiry must be in the future");
+  if (!Number.isFinite(Date.parse(incoming.data.expiresAt)) || Date.parse(incoming.data.expiresAt) <= Date.parse(incoming.at)) throw new Error("Claim expiry must be in the future");
   if (item.claim && claimIsActive(item.claim, incoming.at)) throw new Error("A current claim already exists");
   item.claim = {
     holderId: incoming.actorId,
@@ -384,6 +450,7 @@ function recordOwnerDecision(state, incoming) {
 }
 
 function mutableWorkItem(state, incoming, allowedStates) {
+  requireMember(state, incoming.actorId);
   requireFields(incoming.data, ["workItemId", "expectedRevision"]);
   const item = requireWorkItem(state, incoming.data.workItemId);
   if (!allowedStates.includes(item.state)) throw new Error(`Invalid transition from ${item.state}`);
@@ -401,13 +468,14 @@ function claimIsActive(claim, at) {
 }
 
 function requireMember(state, memberId) {
-  const member = state.members[memberId];
+  const member = Object.hasOwn(state.members, memberId) && state.members[memberId];
   if (!member) throw new Error(`Unknown member: ${memberId}`);
+  if (member.active === false) throw new Error("Member access revoked");
   return member;
 }
 
 function requireWorkItem(state, workItemId) {
-  const item = state.workItems[workItemId];
+  const item = Object.hasOwn(state.workItems, workItemId) && state.workItems[workItemId];
   if (!item) throw new Error(`Unknown Work Item: ${workItemId}`);
   return item;
 }
@@ -422,7 +490,7 @@ function hasPermission(state, memberId, permission) {
 
 function requireFields(data, fields) {
   for (const field of fields) {
-    if (data?.[field] === undefined || data?.[field] === null || data?.[field] === "") {
+    if (data?.[field] === undefined || data?.[field] === null || (typeof data[field] === "string" && !data[field].trim())) {
       throw new Error(`Event data missing ${field}`);
     }
   }
