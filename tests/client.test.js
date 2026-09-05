@@ -49,6 +49,18 @@ test("cookie account changes are detected before displaying an incorrectly attri
   client.session = identity(); await client.refresh();
   assert.equal(ended, true); assert.equal(shown, false);
 });
+test("a late command receipt never refreshes or ends a different session", async () => {
+  for (const status of [201, 401]) {
+    let release, calls = 0, ended = false;
+    const client = new RoomClient({ fetcher: () => { calls++; return new Promise(resolve => release = () => resolve(response(status === 201 ? { sequence: 9 } : { error: { message: "Old session ended" } }, status))); }, onAccessEnded: () => ended = true });
+    client.session = identity();
+    const sent = client.send({ id: "late", type: "message.posted", data: { body: "Old room" } });
+    client.disconnect(); client.session = identity("other");
+    release();
+    if (status === 201) await sent; else await assert.rejects(sent, /Old session/);
+    assert.equal(calls, 1); assert.equal(ended, false); assert.equal(client.session.member.id, "other");
+  }
+});
 test("connected UI hooks exist and demo controls are not exposed", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");

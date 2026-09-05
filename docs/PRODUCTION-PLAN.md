@@ -44,7 +44,9 @@ These sources inform our design choices; they do not certify this implementation
 
 ## 4. Execution order and stop conditions
 
-Implementation checkpoint, 5 September 2026: slice 10 now has a server-backed room, provisioned identity, revisioned/revocable access, protected commands, durable cursor reads and SSE, and a connected UI without simulated identity or seeded presence. Local checks pass 44/44, including real process-exit recovery and simultaneous HTTP work requests. Independent review and browser/mobile checks of this new slice are still pending; the prior PR #3 review does not cover it. No deployment or merge has occurred.
+Implementation checkpoint, 5 September 2026: slice 10 has a server-backed room, provisioned identity, revisioned/revocable access, protected commands, durable cursor reads and SSE, and a connected UI without simulated identity or seeded presence. [Instinct's review of PR #4](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5551311396) covers `17d2edb031c7aa4614d66fe5e54b2900127d331e`: its service assertions were executed; its rendered desktop/mobile checks covered signed-out entry only. Authenticated layout was source-inspected, not rendered. The supported service version remains Node 24.19 or newer.
+
+Slice 12a adds threads, actor-owned reactions, room search, separate in-memory discussion drafts, and retained message nodes. It clarifies draft lifetime and removes the unused browser storage module identified in that review. The local domain/service/client suite now passes 50/50. The authenticated desktop/mobile browser gate and exact-revision review receipt are required for this slice; prior version PASS results do not carry forward. No deployment or merge has occurred.
 
 ### Slice 10: authoritative single-room service
 
@@ -84,10 +86,12 @@ Proof: two organizations with similar names cannot leak across API, search, even
 
 ### Slice 12: consumer conversation quality
 
+Implemented in slice 12a: existing reply links form threads; reactions record each member's explicit choice; search returns original room messages; source-to-work links open their original discussion. Room/thread navigation keeps distinct in-memory drafts and retry IDs. Incoming message updates preserve the selected message body and the conversation's scroll anchor. [CONVERSATION.md](CONVERSATION.md) defines the behavior, browser gate, and remaining limits. Create/join/archive navigation, persistent drafts, unread presentation, pinning, moderation, notification delivery, and physical-device accessibility evaluation remain later work.
+
 - Replace inactive room placeholders with real create/join/leave/archive navigation once room membership is durable.
 - Threads/replies keep topic context without hiding decisions. “Make this work” links to a message/thread, never clones its transcript.
 - Add lightweight reactions with notification budgets, plain-text search, unread markers, pinning, and member mentions only where they reduce friction.
-- Draft persistence is device-local, scoped to identity and room, and opt-in for sensitive rooms. Never restore one member's private draft into another account.
+- Future draft persistence must be device-local, scoped to identity and room, and opt-in for sensitive rooms. The current in-memory drafts expire on leaving/reload/session end. Never restore one member's private draft into another account.
 - Incoming messages do not reset recipients, forms, selections, scroll, or keyboard focus.
 - Let members choose quiet notification defaults; social chat must not wake every agent.
 - Make onboarding, empty rooms, denied access, expired sessions, and reconnect recovery understandable without documentation.
@@ -177,4 +181,4 @@ The shared mailbox is [Dasha Desk PR #167](https://github.com/Uuriko/dasha-desk/
 
 ## 8. Definition of this iteration being done
 
-The long plan is saved, the durable service slice is implemented, the connected UI uses it, relevant automated checks pass, exact changed files and limitations are recorded, and the independent review handoff is posted. The product remains unfinished until later gates pass. There is no promise of continuous execution, instantaneous replies, or an unattended production release.
+The current conversation slice is implemented above the durable service, relevant domain and authenticated browser checks pass, exact changed files and limitations are recorded, and the independent review handoff is posted. The product remains unfinished until later gates pass. There is no promise of continuous execution, instantaneous replies, or an unattended production release.

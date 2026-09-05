@@ -15,6 +15,7 @@ const shapes = {
   [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId",
   [T.MEMBER_ACCESS_CHANGED]: "memberId expectedMemberRevision permissions active",
   [T.MESSAGE_POSTED]: "messageId body workItemId replyToId toMemberId",
+  [T.MESSAGE_REACTION_SET]: "messageId reaction active",
   [T.WORK_PROPOSED]: "workItemId title definitionOfDone accountableMemberId verifierMemberId independentVerificationRequired ownerDecisionRequired humanDecisionMakerId mode sourceMessageId",
   [T.WORK_ACCEPTED]: work,
   [T.WORK_STARTED]: `${work} resolvedBlocker`,

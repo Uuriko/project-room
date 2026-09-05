@@ -1,8 +1,11 @@
+import { REACTIONS } from "./conversation.js";
+
 export const EVENT_TYPES = Object.freeze({
   ROOM_CREATED: "room.created",
   MEMBER_ADDED: "member.added",
   MEMBER_ACCESS_CHANGED: "member.access_changed",
   MESSAGE_POSTED: "message.posted",
+  MESSAGE_REACTION_SET: "message.reaction_set",
   WORK_PROPOSED: "work.proposed",
   WORK_ACCEPTED: "work.accepted",
   WORK_STARTED: "work.started",
@@ -88,6 +91,7 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.MEMBER_ADDED]: addMember,
     [EVENT_TYPES.MEMBER_ACCESS_CHANGED]: changeMemberAccess,
     [EVENT_TYPES.MESSAGE_POSTED]: postMessage,
+    [EVENT_TYPES.MESSAGE_REACTION_SET]: setMessageReaction,
     [EVENT_TYPES.WORK_PROPOSED]: proposeWork,
     [EVENT_TYPES.WORK_ACCEPTED]: acceptWork,
     [EVENT_TYPES.WORK_STARTED]: startWork,
@@ -198,6 +202,20 @@ function postMessage(state, incoming) {
     toMemberId: incoming.data.toMemberId || null,
     createdAt: incoming.at
   });
+}
+
+function setMessageReaction(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  requireFields(incoming.data, ["messageId", "reaction", "active"]);
+  const { messageId, reaction, active } = incoming.data;
+  const message = state.messages.find(m => m.id === messageId);
+  if (!message) throw new Error("Reaction must reference a message in this Room");
+  if (!Object.hasOwn(REACTIONS, reaction) || typeof active !== "boolean") throw new Error("Invalid reaction choice");
+  const members = new Set(message.reactions?.[reaction] || []);
+  if (active) members.add(actor.id); else members.delete(actor.id);
+  message.reactions ||= {};
+  if (members.size) message.reactions[reaction] = [...members].sort();
+  else delete message.reactions[reaction];
 }
 
 function proposeWork(state, incoming) {
