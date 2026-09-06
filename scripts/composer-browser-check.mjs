@@ -41,6 +41,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
       await page.waitForFunction(() => !document.querySelector("#access-key").disabled);
     };
     await login(owner);
+    await page.locator("#remember-drafts").check();
     const input = page.locator("#message-input"), status = page.locator("#composer-status");
     const waitForFailure = () => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#composer-status").classList.contains("error"));
     const waitForSaved = () => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#message-input").value === "");
@@ -74,6 +75,10 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     assert.equal(await input.inputValue(), "Keep this thread reply");
     assert.equal(await page.locator("#message-to-select").inputValue(), "maya");
     assert.match(await page.locator("#reply-context").textContent(), /short story/);
+    page.once("dialog", dialog => dialog.accept());
+    await page.reload();
+    await page.locator("#main").waitFor({ state: "visible" });
+    assert.equal(await input.inputValue(), "Keep this thread reply");
     await input.focus();
     await page.keyboard.press("Control+Enter");
     await waitForSaved();
@@ -83,6 +88,19 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     const messages = store.snapshot(owner, "commons").state.messages.filter(m => m.body === "Keep this thread reply");
     assert.equal(messages.length, 1); assert.equal(messages[0].replyToId, "reply"); assert.equal(messages[0].toMemberId, "maya");
     await page.unroute("**/api/rooms/commons/commands");
+
+    // Explicit opt-in survives reload only after authenticating the same room.
+    await input.fill("Recover this thread after reload");
+    page.once("dialog", dialog => dialog.accept());
+    await page.reload();
+    await page.locator("#main").waitFor({ state: "visible" });
+    assert.equal(await input.inputValue(), "Recover this thread after reload");
+    assert.equal(await page.locator("#remember-drafts").isChecked(), true);
+    await page.locator("#thread-back").click();
+    assert.equal(await input.inputValue(), "A separate room draft");
+    await page.locator('#message-topic [data-message-action="thread"]').click();
+    await page.locator("#remember-drafts").uncheck();
+    assert.equal(await page.evaluate(() => sessionStorage.getItem("project-room:drafts:v1")), null);
 
     // Moving to search while a send is waiting is intentional focus movement.
     const intercepted = Promise.withResolvers(), release = Promise.withResolvers();
