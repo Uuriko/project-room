@@ -28,8 +28,7 @@ const client = new RoomClient({
   onStatus(text) { setConnectionStatus(text); },
   onAccessEnded() {
     const pendingSignout = signoutLoading;
-    if (submitControls) submitControls.controls.forEach((control, index) => control.disabled = submitControls.disabled[index]);
-    submitControls = null;
+    releaseSubmission(submitControls);
     submitOperationId += 1; busy = false;
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null;
     workDraftId = null; replyToId = null;
@@ -90,6 +89,17 @@ function setFormStatus(status, text, error = false) {
   status.textContent = text;
   status.classList.toggle("visible", Boolean(text));
   status.classList.toggle("error", Boolean(text) && error);
+}
+function renderComposerError() {
+  const text = drafts.get(currentThreadId).error;
+  const status = $("#composer-status");
+  if (status.textContent !== text) status.textContent = text;
+  status.classList.toggle("visible", Boolean(text));
+  status.classList.toggle("error", Boolean(text));
+}
+function setComposerError(text) {
+  drafts.save(currentThreadId, { error: text });
+  renderComposerError();
 }
 function clearNotice() {
   noticeVersion += 1;
@@ -290,7 +300,7 @@ function switchThread(threadId, focusComposer = false) {
     }
     select.value = draft.toMemberId; replyToId = draft.replyToId; pendingMessage = draft.pending;
   }
-  updateReply(); renderMessages();
+  updateReply(); renderMessages(); renderComposerError();
   if (focusComposer) $("#message-input").focus();
   else (currentThreadId ? $("#thread-title") : $("#conversation-title")).focus({ preventScroll: true });
 }
@@ -414,13 +424,36 @@ function workCard(i) {
 // Quiet Focus A4: a failed send reports beside the composer that holds the draft,
 // not only in the page-level status area; the Send button is the retry and the
 // draft clears only after the service acknowledges the retry.
+function releaseSubmission(ticket, { restoreFocus = false } = {}) {
+  if (!ticket) return;
+  ticket.controls.forEach((control, index) => control.disabled = ticket.disabled[index]);
+  ticket.form.removeAttribute("aria-busy");
+  if (submitControls === ticket) submitControls = null;
+  const target = ticket.focus;
+  if (!restoreFocus || ticket.form.id !== "message-form" || !state || !target?.isConnected || target.disabled
+    || target.closest("[hidden]") || !target.getClientRects().length || getComputedStyle(target).visibility === "hidden") return;
+  if (document.activeElement !== document.body && document.activeElement !== target) return;
+  if (document.activeElement !== target) target.focus({ preventScroll: true });
+  if (document.activeElement === target && ticket.selection && target.value === ticket.selection.value
+    && typeof target.setSelectionRange === "function") {
+    const end = target.value.length;
+    target.setSelectionRange(Math.min(ticket.selection.start, end), Math.min(ticket.selection.end, end), ticket.selection.direction);
+  }
+}
 async function submit(form, fn, { failureHint } = {}) {
   if (busy) return;
   const operationId = ++submitOperationId;
+  const focus = form.contains(document.activeElement) ? document.activeElement : null;
+  const selection = focus && typeof focus.selectionStart === "number" ? {
+    value: focus.value, start: focus.selectionStart, end: focus.selectionEnd, direction: focus.selectionDirection
+  } : null;
   busy = true; const controls = [...form.querySelectorAll("button, input, select, textarea")];
-  const disabled = controls.map(e => e.disabled); submitControls = { controls, disabled }; controls.forEach(e => e.disabled = true);
+  const disabled = controls.map(e => e.disabled);
+  const ticket = submitControls = { form, controls, disabled, focus, selection };
+  form.setAttribute("aria-busy", "true"); controls.forEach(e => e.disabled = true);
   const local = form.querySelector(".form-status");
-  if (local) setFormStatus(local, "");
+  if (form.id === "message-form") setComposerError("");
+  else if (local) setFormStatus(local, "");
   try { await fn(); }
   catch (error) {
     if (operationId !== submitOperationId) return;
@@ -428,13 +461,14 @@ async function submit(form, fn, { failureHint } = {}) {
     // One live-announcement owner per send result: when the form has its own status region
     // it owns the announcement (the visible composer error); the page-level region stays
     // silent so a screen reader announces the failure exactly once.
-    if (local && (!state && local.id !== "auth-error")) clearNotice();
+    if (form.id === "message-form") { clearNotice(); setComposerError(text); }
+    else if (local && (!state && local.id !== "auth-error")) clearNotice();
     else if (local) { clearNotice(); setFormStatus(local, text, true); }
     else notice(text, true);
   }
   finally {
     if (operationId !== submitOperationId) return;
-    busy = false; controls.forEach((e, i) => e.disabled = disabled[i]); submitControls = null; if (state) render();
+    busy = false; releaseSubmission(ticket, { restoreFocus: true }); if (state) render();
   }
 }
 $("#auth-form").addEventListener("submit", async e => {
@@ -574,7 +608,11 @@ $("#thread-back").addEventListener("click", () => switchThread(null));
 $("#message-input").addEventListener("input", saveComposer);
 $("#message-to-select").addEventListener("change", saveComposer);
 $("#message-input").addEventListener("keydown", e => {
-  if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.isComposing) { e.preventDefault(); $("#message-form").requestSubmit(); }
+  // Some IME confirmation keys arrive after compositionend; keyCode 229 is the
+  // legacy UI Events signal. Neither confirmation nor key repeat sends a message.
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.isComposing && e.keyCode !== 229 && !e.repeat) {
+    e.preventDefault(); $("#message-form").requestSubmit();
+  }
 });
 $("#search-form").addEventListener("submit", e => { e.preventDefault(); if (state) renderSearch(); });
 $("#message-search").addEventListener("input", () => { if (state) renderSearch(); });

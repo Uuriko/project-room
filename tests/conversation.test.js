@@ -103,14 +103,20 @@ test("search finds older replies outside the audit tail, is literal, bounded, an
 test("navigation preserves independent reply targets and retry IDs; a new session has no old drafts", () => {
   const drafts = new ConversationDrafts();
   const pending = draftCommand(null, T.MESSAGE_POSTED, { body: "Thread thought", replyToId: "reply" });
-  drafts.save(null, { body: "Room thought", toMemberId: "human" });
-  drafts.save("topic", { body: "Thread thought", toMemberId: "agent", replyToId: "reply", pending });
+  drafts.save(null, { body: "Room thought", toMemberId: "human", error: "Room send failed" });
+  drafts.save("topic", { body: "Thread thought", toMemberId: "agent", replyToId: "reply", pending, error: "Thread send failed" });
   drafts.save("second", { body: "Another thought" });
   assert.equal(drafts.get("topic").pending.command.id, pending.command.id);
   assert.equal(drafts.get("topic").replyToId, "reply");
+  assert.equal(drafts.get("topic").error, "Thread send failed");
+  assert.equal(drafts.get(null).error, "Room send failed");
   assert.equal(drafts.get(null).toMemberId, "human");
   drafts.clear("topic");
   assert.equal(drafts.get("topic").replyToId, "topic");
+  assert.equal(drafts.get("topic").error, "");
+  assert.equal(drafts.get(null).error, "Room send failed");
   assert.equal(drafts.get(null).body, "Room thought");
-  assert.equal(new ConversationDrafts().hasText(), false);
+  const nextSession = new ConversationDrafts();
+  assert.equal(nextSession.hasText(), false);
+  assert.equal(nextSession.get(null).error, "");
 });

@@ -245,6 +245,245 @@ test("a self-send has one live-announcement owner", { timeout: 90000 }, async t 
   assert.equal(store.snapshot(owner, "commons").state.messages.filter(message => message.body === body).length, 1);
 });
 
+test("composer failures stay discussion-scoped and keyboard sends preserve user focus", { timeout: 90000 }, async t => {
+  const { browser, origin, owner, store } = await startRoom(t, {
+    prepare({ owner, send }) {
+      send(owner, T.MESSAGE_POSTED, { messageId: "topic", body: "Composer boundary topic" });
+      send(owner, T.MESSAGE_POSTED, { messageId: "reply", body: "Composer boundary reply", replyToId: "topic" });
+    }
+  });
+  const page = await (await browser.newContext({ viewport: { width: 1100, height: 850 }, reducedMotion: "reduce" })).newPage();
+  await login(page, origin, owner, "Room owner");
+
+  let phase = "fail", captured = deferred(), release = deferred();
+  const commands = [];
+  t.after(() => release.resolve());
+  await page.route("**/api/rooms/commons/commands", async route => {
+    if (route.request().method() !== "POST") { await route.continue(); return; }
+    commands.push(route.request().postDataJSON());
+    if (phase === "fail") {
+      captured.resolve();
+      await release.promise;
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: { code: "temporarily_unavailable", message: "Composer temporarily unavailable" } })
+      });
+      return;
+    }
+    if (phase === "hold-success") {
+      const response = await route.fetch();
+      captured.resolve();
+      await release.promise;
+      await route.fulfill({ response });
+      return;
+    }
+    if (phase === "access-ended") {
+      captured.resolve();
+      await release.promise;
+      await route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        body: JSON.stringify({ error: { code: "access_revoked", message: "Access revoked" } })
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  const form = page.locator("#message-form"), input = page.locator("#message-input");
+  const roomDraft = "A separate room-level draft";
+  const threadDraft = "Thread draft remains private";
+  await input.fill(roomDraft);
+  await page.locator('[data-message-record-id="topic"] [data-message-action="thread"]').click();
+  await page.locator('[data-message-record-id="reply"] [data-message-action="reply"]').click();
+  await input.fill(threadDraft);
+  await input.evaluate(element => { element.focus(); element.setSelectionRange(7, 12, "backward"); });
+  await input.press("Control+Enter");
+  await captured.promise;
+  assert.equal(await form.getAttribute("aria-busy"), "true");
+  assert.equal(await input.isDisabled(), true);
+  assert.equal(await form.locator('button[type="submit"]').isDisabled(), true);
+
+  release.resolve();
+  const expectedError = "Composer temporarily unavailable. Draft kept; press Send to retry.";
+  await page.waitForFunction(text => document.querySelector("#composer-status")?.textContent === text, expectedError);
+  assert.equal(await form.getAttribute("aria-busy"), null);
+  assert.equal(await input.isDisabled(), false);
+  assert.deepEqual(await page.evaluate(() => ({
+    id: document.activeElement?.id,
+    value: document.querySelector("#message-input").value,
+    start: document.querySelector("#message-input").selectionStart,
+    end: document.querySelector("#message-input").selectionEnd,
+    direction: document.querySelector("#message-input").selectionDirection
+  })), { id: "message-input", value: threadDraft, start: 7, end: 12, direction: "backward" });
+  assert.equal((await page.locator("#status").textContent()).includes("Draft kept"), false,
+    "the composer owns the failure announcement");
+
+  await page.locator("#thread-back").click();
+  assert.equal(await input.inputValue(), roomDraft);
+  assert.equal(await page.locator("#composer-status").textContent(), "");
+  await page.locator('[data-message-record-id="topic"] [data-message-action="thread"]').click();
+  assert.equal(await input.inputValue(), threadDraft);
+  assert.equal(await page.locator("#composer-status").textContent(), expectedError);
+  await page.evaluate(() => {
+    window.composerStatusMutations = 0;
+    window.composerStatusObserver = new MutationObserver(records => { window.composerStatusMutations += records.length; });
+    window.composerStatusObserver.observe(document.querySelector("#composer-status"), { childList: true, characterData: true, subtree: true });
+  });
+  await page.locator('[data-message-record-id="reply"] [data-message-action="reply"]').click();
+  await page.waitForTimeout(0);
+  assert.equal(await page.evaluate(() => {
+    window.composerStatusObserver.disconnect();
+    return window.composerStatusMutations;
+  }), 0, "reselecting a reply in the same failed thread does not re-announce an unchanged error");
+
+  phase = "pass";
+  await input.focus();
+  await input.press("Control+Enter");
+  await page.waitForFunction(() => document.querySelector("#message-input")?.value === "");
+  assert.equal(commands.length, 2);
+  assert.equal(commands[1].id, commands[0].id, "an unchanged retry keeps its idempotency identity");
+  assert.equal(store.snapshot(owner, "commons").state.messages.filter(message => message.body === threadDraft).length, 1);
+  assert.equal(await page.locator("#composer-status").textContent(), "");
+  assert.equal(await page.evaluate(() => document.activeElement?.id), "message-input");
+
+  const deliberateFocusBody = "Completion must not steal deliberate focus";
+  phase = "hold-success"; captured = deferred(); release = deferred();
+  await input.fill(deliberateFocusBody);
+  await input.focus();
+  await input.press("Control+Enter");
+  await captured.promise;
+  await page.locator("#message-search").focus();
+  release.resolve();
+  await page.getByText(deliberateFocusBody, { exact: true }).waitFor();
+  await page.waitForFunction(() => !document.querySelector("#message-form")?.hasAttribute("aria-busy"));
+  assert.equal(await page.evaluate(() => document.activeElement?.id), "message-search");
+
+  phase = "pass";
+  const guardedBody = "One ordinary shortcut send";
+  await input.fill(guardedBody);
+  await input.focus();
+  const beforeGuards = commands.length;
+  for (const specification of [
+    { field: "isComposing", value: true },
+    { field: "keyCode", value: 229 },
+    { field: "repeat", value: true }
+  ]) {
+    const observed = await input.evaluate((element, spec) => {
+      const event = new KeyboardEvent("keydown", {
+        key: "Enter", ctrlKey: true, bubbles: true, cancelable: true,
+        isComposing: spec.field === "isComposing", repeat: spec.field === "repeat"
+      });
+      if (spec.field === "keyCode") Object.defineProperty(event, "keyCode", { configurable: true, value: spec.value });
+      element.dispatchEvent(event);
+      return { defaultPrevented: event.defaultPrevented, observed: event[spec.field] };
+    }, specification);
+    assert.equal(observed.observed, specification.value);
+    assert.equal(observed.defaultPrevented, false);
+  }
+  await page.waitForTimeout(75);
+  assert.equal(commands.length, beforeGuards, "IME and repeated-key events do not issue commands");
+  assert.equal(await input.inputValue(), guardedBody);
+  const ordinary = await input.evaluate(element => {
+    const event = new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true, cancelable: true });
+    element.dispatchEvent(event);
+    return { defaultPrevented: event.defaultPrevented, repeat: event.repeat, isComposing: event.isComposing, keyCode: event.keyCode };
+  });
+  assert.deepEqual(ordinary, { defaultPrevented: true, repeat: false, isComposing: false, keyCode: 0 });
+  await page.waitForFunction(() => document.querySelector("#message-input")?.value === "");
+  assert.equal(commands.length, beforeGuards + 1);
+  assert.equal(store.snapshot(owner, "commons").state.messages.filter(message => message.body === guardedBody).length, 1);
+
+  // Leave a failed room send offscreen so re-entry proves the entire discussion
+  // error map was replaced, not merely that the visible status node was reset.
+  phase = "fail"; captured = deferred(); release = deferred();
+  await page.locator("#thread-back").click();
+  await input.fill("This old-session room error must disappear");
+  await input.press("Control+Enter");
+  await captured.promise;
+  release.resolve();
+  await page.waitForFunction(text => document.querySelector("#composer-status")?.textContent === text, expectedError);
+  await page.locator('[data-message-record-id="topic"] [data-message-action="thread"]').click();
+  assert.equal(await page.locator("#composer-status").textContent(), "");
+
+  phase = "access-ended"; captured = deferred(); release = deferred();
+  await input.fill("This old-session draft must disappear");
+  await input.focus();
+  await input.press("Control+Enter");
+  await captured.promise;
+  assert.equal(await form.getAttribute("aria-busy"), "true");
+  await page.locator("#message-search").focus();
+  release.resolve();
+  await page.locator("#auth-panel").waitFor({ state: "visible" });
+  assert.equal(await form.getAttribute("aria-busy"), null);
+  assert.equal(await page.evaluate(() => document.activeElement?.id), "access-key",
+    "access termination focuses authentication, never the old composer");
+  await enterRoom(page, owner, "Room owner");
+  assert.equal(await input.inputValue(), "");
+  assert.equal(await page.locator("#composer-status").textContent(), "");
+  assert.equal(await form.getAttribute("aria-busy"), null);
+  await page.locator('[data-message-record-id="topic"] [data-message-action="thread"]').click();
+  assert.equal(await input.inputValue(), "", "access loss clears an offscreen thread draft, not only the visible form");
+  assert.equal(await page.locator("#composer-status").textContent(), "", "access loss clears an offscreen thread error");
+  await page.locator("#thread-back").click();
+  assert.equal(await input.inputValue(), "");
+  assert.equal(await page.locator("#composer-status").textContent(), "", "access loss clears an offscreen room error");
+});
+
+test("a late successful composer result cannot cross into a replacement session", { timeout: 90000 }, async t => {
+  const { browser, origin, owner, maya, store } = await startRoom(t, {
+    prepare({ store, owner, send }) {
+      send(owner, T.MEMBER_ADDED, {
+        memberId: "maya", displayName: "Maya", kind: "human",
+        permissions: ["accept_work", "complete_work", "verify"]
+      });
+      return { maya: store.issueAccessKey("commons", "maya") };
+    }
+  });
+  const page = await (await browser.newContext({ viewport: { width: 1100, height: 850 }, reducedMotion: "reduce" })).newPage();
+  await login(page, origin, owner, "Room owner");
+
+  const captured = deferred(), release = deferred(), delivered = deferred();
+  t.after(() => release.resolve());
+  await page.route("**/api/rooms/commons/commands", async route => {
+    const response = await route.fetch();
+    captured.resolve();
+    await release.promise;
+    await route.fulfill({ response });
+    delivered.resolve();
+  });
+
+  const oldBody = "Committed for the old session";
+  const replacementDraft = "Maya's private replacement draft";
+  const input = page.locator("#message-input"), form = page.locator("#message-form");
+  await input.fill(oldBody);
+  await input.press("Control+Enter");
+  await captured.promise;
+  assert.equal(await form.getAttribute("aria-busy"), "true");
+  store.issueAccessKey("commons", "owner");
+  await page.locator("#auth-panel").waitFor({ state: "visible" });
+  await enterRoom(page, maya, "Maya");
+  await input.fill(replacementDraft);
+  await page.locator("#message-search").focus();
+  await page.evaluate(() => {
+    window.replacementNotices = [];
+    new MutationObserver(() => window.replacementNotices.push(document.querySelector("#status").textContent))
+      .observe(document.querySelector("#status"), { childList: true, characterData: true, subtree: true });
+  });
+
+  release.resolve();
+  await delivered.promise;
+  await page.waitForTimeout(100);
+  assert.match(await page.locator("#identity-label").textContent(), /^Maya/);
+  assert.equal(await input.inputValue(), replacementDraft, "the old success cannot clear the replacement account's draft");
+  assert.equal(await page.evaluate(() => document.activeElement?.id), "message-search", "the old success cannot steal replacement focus");
+  assert.equal(await page.locator("#composer-status").textContent(), "");
+  assert.equal(await page.evaluate(() => window.replacementNotices.some(text => /Message saved/.test(text))), false,
+    "the old success cannot announce into the replacement session");
+  assert.equal(store.snapshot(maya, "commons").state.messages.filter(message => message.body === oldBody).length, 1);
+});
+
 test("a committed self-send is not re-announced as incoming after a delayed snapshot", { timeout: 90000 }, async t => {
   const { browser, origin, owner, store } = await startRoom(t);
   const page = await (await browser.newContext({ viewport: { width: 1100, height: 850 }, reducedMotion: "reduce" })).newPage();
