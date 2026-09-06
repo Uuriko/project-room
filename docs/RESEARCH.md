@@ -1,16 +1,18 @@
-# RESEARCH — peers and patterns (seed)
+# Research inputs
 
-Public-safe notes feeding SPEC-v0. Full box pack also at `/workspace/slack-discord-replacement/RESEARCH.md` (pre-repo draft).
+These notes separate useful inspiration from claims that still need evidence.
 
-## Takeaways for Project Room v0
+| Source | What it supports |
+| --- | --- |
+| [Multiplayer AI Manifesto](https://multiplayer-ai.com/) | A design argument for shared work, less human relaying, and resumable context. It is a vendor-authored manifesto, not validation that our product works. |
+| [Project Room coordination proposal](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5550169061) | The existing Room / Member / Work Item / Artifact model and source-linked results. |
+| [Scope cuts](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5550808959) | Explicit permissions, ordinary evidence events, selective write claims, and a compact first screen. |
+| [Historical event discussion](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5550301667) | Inputs for the already-done-work and competing-executor examples; see the limits in [EVENT-FIXTURES](./EVENT-FIXTURES.md). |
 
-1. **Room ≠ Slack clone.** Linear-style project spine + Discord Forum-ish persistent topic beats #general chat. Agents are members, not webhooks.
-2. **Assign → Act → Receipt → Decide** is the loop to prove. Outcomes/receipts must be first-class (PR URL, artifact, blocked note) — not buried in scroll.
-3. **Ownership visible.** Durable accountable owner ≠ temporary write claim/lease. Competing executors may satisfy work; only accountable agent / Policy reducer completes.
-4. **Verification separate from completion.** Designated verifier independently fetches exact immutable ref; PASS-only advances; FAIL returns to working/blocked.
-5. **Owner glance is a gate.** One owner-decision Event (`approved` | `changes_requested` | `rejected`). Merge/deploy/publish stay human.
-6. **Peers scanned (public):** Linear, Discord Forums, Slack canvas/agents, Notion agents, Cursor Cloud Agents, Fin, Dust, OpenClaw-ish bot rooms. Gaps: agent-as-member + claim/lease + independent verify in one product.
+Our design inference is to connect a shared conversation to durable work and evidence while using existing runtimes. A shared session need not mean one endlessly growing prompt or one model provider.
 
-## Sources
+The source's automatic skill generation, universal cloud-execution preference, and broad enterprise feature ambitions are not v0 requirements. The first workflow should earn repeat use with less operator coordination.
 
-Peer URLs and deeper notes live in the pre-seed RESEARCH draft on the box; this seed keeps the repo docs-only and short. Expand in follow-up docs PRs after owner merge of the spine.
+Buzz, Dust, Superconductor, Linear, Slack, and Discord Forums remain comparison candidates. This repository does not yet contain a sourced feature comparison or evidence of a unique market gap. Validate those claims with primary product sources and the same practical workflow before using them in positioning.
+
+The immediate product evidence comes from the first five handoffs: where context is relayed, where work repeats, and whether another person can join and understand the next action. Instinct's assigned trace and review should supply observations, with historical facts separated from simulations.
