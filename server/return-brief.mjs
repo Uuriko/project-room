@@ -38,6 +38,9 @@ export function resolveHistoryWindow({ sequence, storedCursor, horizon = null, a
   if (horizon > sequence) fail(409, "cursor_ahead", "Horizon exceeds room history; fetch a fresh return brief");
   if (!Number.isSafeInteger(after) || after < 0 || after > horizon) fail(422, "invalid_cursor", "Invalid continuation cursor");
   if (!Number.isSafeInteger(continuationCursor) || continuationCursor < 0) fail(422, "invalid_cursor", "Continuations must carry the frozen cursor");
+  // Malformed tuples are rejected before any cursor comparison: the frozen cursor opens the
+  // window, so a cursor past the continuation point (C > after) describes a backwards window.
+  if (continuationCursor > after) fail(422, "invalid_cursor", "Malformed continuation tuple: the frozen cursor must not exceed the continuation point");
   if (continuationCursor !== storedCursor) fail(409, "cursor_changed", "Your caught-up marker moved since this horizon froze; restart the return brief");
   return { H: horizon, startAfter: after, C: continuationCursor, limit };
 }

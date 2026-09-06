@@ -178,3 +178,20 @@ test("a cursor moved by another tab rejects the continuation with 409 cursor_cha
   assert.equal(second.history.cursor, 0); // frozen C reported on every page, not reread
   assert.equal(second.history.evaluatedThrough, first.history.evaluatedThrough);
 });
+
+test("a malformed continuation tuple (frozen cursor past the continuation point) rejects 422", t => {
+  const { store, human } = fixture(t);
+  postMessages(store, human, 10);
+  store.markCaughtUp(human, "commons", 5);
+  const page1 = store.returnBrief(human, "commons", { limit: 2 }); // freezes C=5
+  assert.equal(page1.history.cursor, 5);
+  const H = page1.history.evaluatedThrough;
+  // Hand-edited tuple: cursor 5 beyond the continuation point after=4 (C <= after violated).
+  assert.throws(() => store.returnBrief(human, "commons", { horizon: H, after: 4, cursor: 5, limit: 2 }),
+    error => error.status === 422 && error.code === "invalid_cursor");
+  // Boundaries hold: C == after and after == H are both well-formed.
+  const atCursor = store.returnBrief(human, "commons", { horizon: H, after: 5, cursor: 5, limit: 2 });
+  assert.equal(atCursor.history.cursor, 5);
+  const atHorizon = store.returnBrief(human, "commons", { horizon: H, after: H, cursor: 5, limit: 2 });
+  assert.equal(atHorizon.history.items.length, 0);
+});
