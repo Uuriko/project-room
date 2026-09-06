@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test",
-    "test:browser": "node --test scripts/browser-check.mjs",
+    "test:browser": "node --test scripts/browser-check.mjs scripts/composer-browser-check.mjs",
     "check": "node scripts/check.mjs",
     "provision": "node scripts/provision.mjs"
   },
