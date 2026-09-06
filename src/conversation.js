@@ -36,3 +36,41 @@ export class ConversationDrafts {
   clear(threadId) { this.entries.delete(threadId); }
   hasText() { return [...this.entries.values()].some(draft => draft.body.trim()); }
 }
+
+// Opt-in, tab-scoped recovery. Read only after an authenticated room snapshot.
+// No credentials or server receipts are stored. Browser storage is untrusted.
+export class DraftRecovery {
+  constructor(storage, now = Date.now) { this.storage = storage; this.now = now; this.key = "project-room:drafts:v1"; }
+  clear() { try { this.storage?.removeItem(this.key); } catch {} }
+  write(scope, drafts, threadId) {
+    try {
+      const entries = [...drafts.entries].filter(([, d]) => d.body.trim()).slice(-50).map(([id, d]) =>
+        [id, { body: d.body, toMemberId: d.toMemberId, replyToId: d.replyToId,
+          pending: d.pending ? { id: d.pending.command.id, contents: d.pending.contents } : null }]);
+      this.storage.setItem(this.key, JSON.stringify({ scope, expires: this.now() + 12 * 60 * 60 * 1000, threadId, entries }));
+      return true;
+    } catch { this.clear(); return false; }
+  }
+  read(scope, state) {
+    try {
+      const raw = this.storage?.getItem(this.key);
+      if (!raw) return null;
+      if (raw.length > 500000) throw new Error("size");
+      const saved = JSON.parse(raw);
+      if (saved.scope !== scope || !Number.isFinite(saved.expires) || saved.expires <= this.now() || saved.expires > this.now() + 12 * 60 * 60 * 1000 || !Array.isArray(saved.entries) || saved.entries.length > 50) throw new Error("scope or expiry");
+      const index = conversationIndex(state.messages), drafts = new ConversationDrafts();
+      for (const [id, d] of saved.entries) {
+        if (id !== null && !index.threads.has(id)) continue;
+        if (typeof d.body !== "string" || d.body.length > 4000 || typeof d.toMemberId !== "string") continue;
+        if (d.toMemberId && (!state.members[d.toMemberId] || state.members[d.toMemberId].active === false)) continue;
+        if (d.replyToId !== null && (!index.byId.has(d.replyToId) || index.rootById.get(d.replyToId) !== id)) continue;
+        const data = { body: d.body.trim(), toMemberId: d.toMemberId || null, replyToId: d.replyToId };
+        const contents = JSON.stringify({ type: "message.posted", data, causationId: null });
+        const pending = d.pending?.contents === contents && typeof d.pending.id === "string" && /^[a-zA-Z0-9-]{1,100}$/.test(d.pending.id)
+          ? { contents, command: { id: d.pending.id, type: "message.posted", data } } : null;
+        drafts.save(id, { ...data, body: d.body, toMemberId: d.toMemberId, pending });
+      }
+      return { drafts, threadId: drafts.entries.has(saved.threadId) ? saved.threadId : null };
+    } catch { this.clear(); return null; }
+  }
+}
