@@ -55,7 +55,16 @@ export class RoomClient {
       return receipt;
     } catch (error) { if (generation === this.generation && [401, 403].includes(error.status)) this.handleFailure(error); throw error; }
   }
-  async caughtUp() { return this.request(this.path("/cursor"), { method: "POST", data: { sequence: this.sequence } }); }
+  async caughtUp(sequence = this.sequence) { return this.request(this.path("/cursor"), { method: "POST", data: { sequence } }); }
+  // Return brief: history fixed through H (frozen on the first page, continuations carry it),
+  // current live through N. Fetching never acknowledges; only caughtUp() does, explicitly.
+  async returnBrief({ horizon = null, after = null, limit = null } = {}) {
+    const params = new URLSearchParams();
+    if (horizon !== null) { params.set("horizon", horizon); params.set("after", after); }
+    if (limit !== null) params.set("limit", limit);
+    const query = params.toString();
+    return this.request(this.path(`/return-brief${query ? `?${query}` : ""}`));
+  }
   connect() {
     this.stream?.close();
     if (!this.events || !this.session) { this.onStatus("Manual refresh available; live updates unavailable"); return; }

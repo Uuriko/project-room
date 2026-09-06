@@ -127,6 +127,30 @@
             <div id="summary-grid" class="summary-grid" aria-live="polite"></div>
           </section>
 
+          <details id="return-brief-panel" class="panel return-brief-panel">
+            <summary>
+              <span class="eyebrow">RETURN BRIEF</span>
+              <span id="return-brief-heading">Catch up on this room</span>
+            </summary>
+            <div class="return-brief-body">
+              <section aria-labelledby="rb-current-heading">
+                <h3 id="rb-current-heading">Needs your attention <span id="rb-current-boundary" class="rb-boundary"></span></h3>
+                <ul id="rb-attention-list" class="rb-list"></ul>
+                <h3 id="rb-involving-heading">Work involving you</h3>
+                <ul id="rb-involving-list" class="rb-list"></ul>
+              </section>
+              <section aria-labelledby="rb-history-heading">
+                <h3 id="rb-history-heading">What changed <span id="rb-history-boundary" class="rb-boundary"></span></h3>
+                <ul id="rb-history-list" class="rb-list rb-history"></ul>
+                <div class="rb-actions">
+                  <button id="rb-more-button" class="button secondary" type="button" hidden>Show earlier changes</button>
+                  <button id="rb-ack-button" class="button secondary" type="button">Mark caught up</button>
+                </div>
+                <p class="rb-note">Catching up moves only your own marker. It creates no peer read or processing claim.</p>
+              </section>
+            </div>
+          </details>
+
           <section class="panel work-panel" aria-labelledby="work-title">
             <div class="panel-header">
               <div>

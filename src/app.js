@@ -8,6 +8,7 @@ let workDraftId = null, replyToId = null, busy = false;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
 const viewPositions = new Map(), pendingReactions = new Map();
 let newVisibleMessages = 0;
+let returnBrief = null; // last fetched brief; history items accumulate across pages of one frozen horizon
 const client = new RoomClient({
   onSnapshot(snapshot, identity) {
     const firstSnapshot = !state;
@@ -16,6 +17,7 @@ const client = new RoomClient({
     $("#identity-label").textContent = `${state.members[session.member.id].displayName} · ${session.member.kind}`;
     $("#cursor-label").textContent = `Your caught-up marker: ${snapshot.cursor} · room event ${snapshot.sequence}`;
     render();
+    if (firstSnapshot) loadReturnBrief().catch(error => notice(error.message, true));
     if (firstSnapshot && location.hash.startsWith("#message-")) revealMessage(location.hash.slice(9));
   },
   onStatus(text) { $("#connection-status").textContent = text; },
@@ -23,10 +25,10 @@ const client = new RoomClient({
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null;
     workDraftId = null; replyToId = null;
     currentThreadId = null; conversation = null; drafts = new ConversationDrafts();
-    viewPositions.clear(); pendingReactions.clear(); newVisibleMessages = 0;
+    viewPositions.clear(); pendingReactions.clear(); newVisibleMessages = 0; returnBrief = null;
     $("#main").hidden = true; $("#auth-panel").hidden = false; $("#signout-button").hidden = true;
     $("#identity-label").textContent = "Not signed in";
-    for (const id of ["message-list", "work-list", "event-list", "presence-list", "member-stack", "summary-grid", "reply-context", "source-context", "action-context", "action-fields", "cursor-label", "presence-count", "message-count", "event-count"]) $(`#${id}`).replaceChildren();
+    for (const id of ["message-list", "work-list", "event-list", "presence-list", "member-stack", "summary-grid", "reply-context", "source-context", "action-context", "action-fields", "cursor-label", "presence-count", "message-count", "event-count", "rb-attention-list", "rb-involving-list", "rb-history-list"]) $(`#${id}`).replaceChildren();
     for (const id of ["message-to-select", "assignee-select", "verifier-select"]) { $(`#${id}`).replaceChildren(); delete $(`#${id}`).dataset.signature; }
     for (const form of document.querySelectorAll("form")) form.reset();
     $("#action-dialog").close(); $("#new-work-form").hidden = true; $("#reply-bar").hidden = true;
@@ -103,6 +105,7 @@ function render() {
   restoreDisclosures($("#presence-list"), presenceSnap);
   restoreDisclosures($("#work-list"), workSnap);
   $("#event-count").textContent = `${client.sequence}`;
+  renderReturnBrief();
   $("#event-list").innerHTML = [...state.eventLog].reverse().map(e => `<li><span>${esc(humanize(e.type))}</span><strong>${esc(name(e.actorId))}</strong><time>${esc(time(e.at))}</time><code>${esc(e.id)}</code></li>`).join("");
 }
 function renderMessages() {
@@ -410,6 +413,66 @@ window.addEventListener("beforeunload", e => {
 });
 window.addEventListener("pagehide", () => client.endAccess());
 window.addEventListener("pageshow", e => { if (e.persisted) client.restore().catch(error => client.handleFailure(error)); });
+// Return brief (disposition 5557850637): compact expandable rail entry. Fetch on return and
+// on open; history stays fixed through the frozen horizon H, the action sections are live
+// through N, and only the explicit button acknowledges - exactly H, never the latest event.
+async function loadReturnBrief(continuation = null) {
+  const brief = await client.returnBrief(continuation ? { horizon: continuation.horizon, after: continuation.after } : {});
+  if (!state) return;
+  if (continuation && returnBrief && returnBrief.history.evaluatedThrough === brief.history.evaluatedThrough) {
+    returnBrief.history.items = returnBrief.history.items.concat(brief.history.items);
+    returnBrief.history.hasMore = brief.history.hasMore;
+    returnBrief.history.continuation = brief.history.continuation;
+    returnBrief.current = brief.current; // the action sections are live on every fetch
+  } else returnBrief = brief;
+  renderReturnBrief();
+}
+const roleLabel = role => ({ accountableMemberId: "accountable", verifierMemberId: "verifier", humanDecisionMakerId: "decision maker" }[role] ?? humanize(role));
+function describeBriefEvent({ sequence, event }) {
+  const actor = esc(name(event.actorId));
+  const type = esc(humanize(event.type));
+  let detail = "";
+  if (event.type === T.MESSAGE_POSTED) detail = esc((event.data.body || "").slice(0, 80));
+  else if (event.type === T.VERIFICATION_RECORDED) detail = esc(`${event.data.result} · ${(event.data.summary || "").slice(0, 60)}`);
+  else if (event.type === T.OWNER_DECISION_RECORDED) detail = esc(humanize(event.data.decision));
+  else if (event.type?.startsWith("work.")) detail = esc(state.workItems[event.data.workItemId]?.title ?? event.data.workItemId ?? "");
+  return `<li class="rb-event"><span class="rb-seq">#${sequence}</span> <span class="rb-type">${type}</span> <span class="rb-actor">${actor}</span>${detail ? ` <span class="rb-detail">${detail}</span>` : ""}</li>`;
+}
+function renderReturnBrief() {
+  if (!returnBrief || !state) return;
+  const { history, current } = returnBrief;
+  $("#rb-current-boundary").textContent = `as of event ${current.evaluatedThrough}`;
+  $("#rb-history-boundary").textContent = history.evaluatedThrough === history.cursor
+    ? "· nothing new since your marker"
+    : `since marker ${history.cursor} · through event ${history.evaluatedThrough}`;
+  $("#rb-attention-list").innerHTML = current.needsAttention.map(i =>
+    `<li class="rb-event"><a class="work-link" href="#${esc(i.workItemId)}">${esc(i.action ?? i.workItemId)}</a> <span class="rb-detail">your step: ${esc(humanize(i.step))}</span></li>`).join("")
+    || '<li class="rb-empty">Nothing needs you right now.</li>';
+  $("#rb-involving-list").innerHTML = current.workInvolvingMe.map(i =>
+    `<li class="rb-event"><a class="work-link" href="#${esc(i.workItemId)}">${esc(i.action ?? i.workItemId)}</a> <span class="rb-detail">${esc(i.roles.map(roleLabel).join(", "))} · ${esc(i.state)}</span></li>`).join("")
+    || '<li class="rb-empty">No open work involves you.</li>';
+  $("#rb-history-list").innerHTML = history.items.map(describeBriefEvent).join("")
+    || '<li class="rb-empty">Nothing new since your marker.</li>';
+  $("#rb-more-button").hidden = !history.hasMore;
+  $("#rb-ack-button").textContent = history.evaluatedThrough === history.cursor ? "Already caught up" : `Mark caught up through event ${history.evaluatedThrough}`;
+  $("#rb-ack-button").disabled = history.evaluatedThrough === history.cursor;
+}
+$("#return-brief-panel").addEventListener("toggle", e => {
+  if (e.currentTarget.open && state) loadReturnBrief().catch(error => notice(error.message, true)); // reopening starts a fresh horizon
+});
+$("#rb-more-button").addEventListener("click", async () => {
+  try { if (returnBrief?.history.continuation) await loadReturnBrief(returnBrief.history.continuation); }
+  catch (error) { client.handleFailure(error); notice(error.message, true); }
+});
+$("#rb-ack-button").addEventListener("click", async () => {
+  try {
+    if (!returnBrief) return;
+    await client.caughtUp(returnBrief.history.evaluatedThrough); // acknowledges exactly H; H+1 stays new
+    await client.refresh();
+    await loadReturnBrief();
+    notice("Your caught-up position saved. No peer read or processing claim was created.");
+  } catch (error) { client.handleFailure(error); notice(error.message, true); }
+});
 client.restore().catch(error => {
   $("#auth-error").textContent = [401, 403].includes(error.status) ? "Use a provisioned human room key to enter. No demo identity is selected for you." : "Room service unavailable. Check the service and retry; no connection is claimed.";
   $("#auth-panel").hidden = false;

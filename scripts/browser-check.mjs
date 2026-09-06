@@ -176,3 +176,77 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.deepEqual(errors, []);
   });
 }
+
+for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["mobile", { width: 390, height: 844 }]]) {
+  test(`return brief ${label}: rail entry, frozen-horizon paging, live current, explicit ack`, { timeout: 90000 }, async t => {
+    const directory = mkdtempSync(join(tmpdir(), "room-browser-rb-"));
+    const store = new RoomStore(join(directory, "room.sqlite"));
+    store.initialize(initialRoom());
+    const owner = store.issueAccessKey("commons", "owner");
+    const send = (key, type, data) => store.command(key, "commons", { id: crypto.randomUUID(), type, data });
+    send(owner, T.MEMBER_ADDED, { memberId: "maya", displayName: "Maya", kind: "human", permissions: ["accept_work", "complete_work", "verify"] });
+    const human = store.issueAccessKey("commons", "maya");
+    for (let i = 1; i <= 55; i++) send(owner, T.MESSAGE_POSTED, { body: `catch-up note ${i}` });
+    send(owner, T.WORK_PROPOSED, { workItemId: "w-brief", title: "Read the briefing", definitionOfDone: "Summary posted", accountableMemberId: "maya" });
+    const server = createRoomServer({ store, streamInterval: 60 });
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    let browser, page;
+    t.after(async () => {
+      if (page && await page.locator("#main").isVisible().catch(() => false)) {
+        mkdirSync("test-results", { recursive: true });
+        await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" })).catch(() => {});
+        await page.screenshot({ path: `test-results/return-brief-${label}-last.png`, fullPage: true }).catch(() => {});
+      }
+      await browser?.close(); server.closeStreams(); server.closeAllConnections();
+      await new Promise(resolve => server.close(resolve)); store.close(); rmSync(directory, { recursive: true, force: true });
+    });
+    browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+    page = await (await browser.newContext({ viewport, reducedMotion: "reduce" })).newPage();
+    const errors = [];
+    page.on("pageerror", error => errors.push(error.message));
+    await page.goto(origin);
+    await page.locator("#access-key").fill(human);
+    await page.getByRole("button", { name: "Enter room", exact: true }).click();
+    await page.locator("#main").waitFor({ state: "visible" });
+
+    // The rail entry opens to live current sections and a frozen first page of history.
+    const panel = page.locator("#return-brief-panel");
+    await panel.locator("summary").click();
+    await page.locator("#rb-history-list .rb-event").first().waitFor();
+    await page.locator("#rb-attention-list", { hasText: "Read the briefing" }).waitFor();
+    assert.match(await page.locator("#rb-current-boundary").textContent(), /as of event \d+/);
+    assert.match(await page.locator("#rb-history-boundary").textContent(), /since marker 0 · through event \d+/);
+    assert.match(await page.locator("#rb-attention-list").textContent(), /your step: accept/);
+    assert.equal(await page.locator("#rb-history-list .rb-event").count(), 50); // bounded first page
+    await page.locator("#rb-more-button").click();
+    await page.waitForFunction(() => document.querySelectorAll("#rb-history-list .rb-event").length > 50);
+    assert.equal(await page.locator("#rb-history-list .rb-event").count(), 59); // every event drillable
+    assert.equal(await page.locator("#rb-more-button").isVisible(), false);
+    mkdirSync("test-results", { recursive: true });
+    await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+    await page.screenshot({ path: `test-results/return-brief-${label}-open.png`, fullPage: true });
+
+    // A late event stays out of the frozen history while current stays live on the next fetch.
+    send(owner, T.MESSAGE_POSTED, { body: "arrived while reading" });
+    await panel.evaluate(e => { e.open = false; }); await panel.locator("summary").click(); // reopen: fresh horizon
+    await page.waitForFunction(() => document.querySelector("#rb-history-boundary").textContent.includes("through event 60"));
+    assert.equal(await page.locator("#rb-history-list").textContent().then(t => t.includes("arrived while reading")), false); // still paged out
+    await page.locator("#rb-more-button").click(); // the continuation keeps the SAME frozen horizon
+    await page.waitForFunction(() => document.querySelector("#rb-history-list").textContent.includes("arrived while reading"));
+
+    // The explicit ack acknowledges exactly H; reading never did.
+    assert.equal(store.snapshot(human, "commons").cursor, 0);
+    await page.locator("#rb-ack-button").click();
+    await page.waitForFunction(() => document.querySelector("#rb-history-boundary").textContent.includes("nothing new"));
+    assert.equal(store.snapshot(human, "commons").cursor, 60);
+    await page.locator("#rb-attention-list", { hasText: "Read the briefing" }).waitFor(); // unresolved work survives catch-up
+    assert.equal(await page.locator("#rb-ack-button").isDisabled(), true);
+    // H+1 stays new: one more event after the ack is the only history item.
+    send(owner, T.MESSAGE_POSTED, { body: "after the marker" });
+    await panel.evaluate(e => { e.open = false; }); await panel.locator("summary").click();
+    await page.waitForFunction(() => document.querySelectorAll("#rb-history-list .rb-event").length === 1);
+    assert.match(await page.locator("#rb-history-list").textContent(), /after the marker/);
+    assert.deepEqual(errors, []);
+  });
+}
