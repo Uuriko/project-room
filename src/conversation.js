@@ -24,12 +24,12 @@ export function searchMessages(state, query, limit = 50) {
   return { messages: matches.slice(-limit).reverse(), total: matches.length };
 }
 
-// In-memory only: every thread has its own text, recipient, reply target, and retry ID.
+// In-memory only: every thread owns its text, recipient, reply target, retry ID, and send error.
 // The containing session discards the entire instance on sign-out or revoked access.
 export class ConversationDrafts {
   constructor() { this.entries = new Map(); }
   get(threadId = null) {
-    if (!this.entries.has(threadId)) this.entries.set(threadId, { body: "", toMemberId: "", replyToId: threadId, pending: null });
+    if (!this.entries.has(threadId)) this.entries.set(threadId, { body: "", toMemberId: "", replyToId: threadId, pending: null, error: "" });
     return this.entries.get(threadId);
   }
   save(threadId, values) { Object.assign(this.get(threadId), values); }

@@ -5,7 +5,7 @@ Project Room is a shared place for ordinary conversation and accountable work. A
 ## What members can do
 
 - **Follow a discussion.** Reply opens a thread with its original message and chronological replies. Older nested replies remain linked to their immediate parent and belong to the same root discussion. Back to room returns to the room draft and reading position.
-- **Keep separate thoughts.** The room and each thread have independent text, addressed member, reply target, and unchanged-request retry ID while the page remains open. Enter adds a line; Ctrl/Command + Enter sends. After a network error, retry submits the same command if the draft is unchanged.
+- **Keep separate thoughts.** The room and each thread have independent text, addressed member, reply target, unchanged-request retry ID, and send error while the page remains open. Enter adds a line; Ctrl/Command + Enter sends. Composition-confirmation and repeated keys do not send. After a network error, retry submits the same command if the draft is unchanged.
 - **React without making work.** Like, heart, celebrate, and thinking are explicit choices by the authenticated member. Each member can remove their own choice. Counts are shared room state; reactions do not grant authority, prove reading, or send notifications to agents.
 - **Find original context.** Search matches literal message text or author name within the authenticated room, including older messages outside the displayed audit tail. Results show the latest 50 matches and the total. A result, reply reference, timestamp link, or work-source link opens the original message.
 - **Turn a useful conversation into work.** Members with steering permission can link an outcome to the exact original message. Accountable member, verifier, evidence, and human decision remain separate. No transcript is copied and no tool is run.
@@ -19,6 +19,10 @@ Drafts live only in JavaScript memory. Snapshot refreshes, an unchanged failed s
 The app requests the browser's native leave-page warning when unsent text or an unfinished work form exists. This is a best-effort prompt, not storage or a recovery guarantee; browsers may omit it, especially when a mobile process is stopped. See [MDN's beforeunload limitations](https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event). Durable drafts require an explicit privacy and retention decision in a later slice.
 
 Incoming updates retain unchanged message nodes and the message body during reaction/reply-count updates. The composer retains focus, selection, text, and recipient. Readers away from the latest message keep their scroll anchor and get a jump-to-latest control. Thread navigation remembers each discussion's scroll position. These guarantees are scoped to conversation controls; the work-card and membership surfaces still need a broader focus-retention review.
+
+While sending, the form exposes its busy state and prevents duplicate submissions. When disabling a control displaced keyboard focus, completion restores that control unless focus has moved elsewhere. An unchanged failed send retains text selection as well as the draft. Returning to a thread restores its own error beside its draft; a different discussion does not inherit it. Access ending discards all saved errors and releases controls without restoring focus from the former session.
+
+The keyboard guard uses `isComposing` and the legacy IME value `keyCode === 229`, described in [UI Events, section 7.3.1](https://www.w3.org/TR/2026/WD-uievents-20260221/). The fallback covers confirmation events that arrive after composition ends. Synthetic keyboard events verify the guard; physical IME and WebKit behavior still require separate evaluation.
 
 ## Data contract
 
@@ -48,6 +52,8 @@ The browser command starts a disposable loopback service with a temporary SQLite
 3. Two members reacting independently, removing only their own choice, and keeping an existing message control focused during unrelated traffic.
 4. Search into a hidden reply, source-linked work creation, and returning to the original discussion.
 5. Literal text rendering, long-message reflow, leave-page warning, reload draft clearing, and credential revocation clearing private UI state.
+
+The additional composer scenarios at 1440×1000 and 320×780 verify keyboard-only retry after a committed response is lost, preserved selection/recipient/nested reply, per-discussion error recovery, focus retained in search during a delayed send, composition/repeat guards, ordinary Enter, narrow reflow, and draft/error cleanup after access ends. Both scenarios fail at the keyboard focus assertion on the PR #12 base, `c22e8bdd80e89cf421dfd5691bf21acf1f0e2519`, and pass with this correction. These tests deliberately use the page keyboard for retry so automatic locator focus cannot conceal the defect.
 
 GitHub Actions runs both gates and uploads synthetic screenshots as `conversation-browser-evidence`. A configured gate is not a PASS: the PR receipt must link a completed run for the exact head. Local browser download failures must be reported as unexecuted, not replaced by source inspection.
 
