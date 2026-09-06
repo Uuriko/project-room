@@ -137,7 +137,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (req.method === "DELETE") { store.revoke(token); setSessionCookie(res, "", 0); return json(res, 200, { signedOut: true }); }
         reject(405, "method_not_allowed", "Method not allowed");
       }
-      const match = /^\/api\/rooms\/([a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127})(?:\/(commands|events|stream|cursor))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127})(?:\/(commands|events|stream|cursor|return-brief))?$/.exec(url.pathname);
       if (!match) reject(404, "not_found", "Not found");
       const [, roomId, route] = match;
       store.authenticate(token, roomId);
@@ -147,6 +147,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "commands" && req.method === "POST") {
         const result = store.command(token, roomId, await body(req));
         return json(res, result.duplicate ? 200 : 201, result);
+      }
+      if (route === "return-brief" && req.method === "GET") {
+        const horizon = url.searchParams.get("horizon"), after = url.searchParams.get("after"), limit = url.searchParams.get("limit");
+        return json(res, 200, store.returnBrief(token, roomId, { horizon: horizon === null ? null : Number(horizon), after: after === null ? null : Number(after), limit: limit === null ? undefined : Number(limit) }));
       }
       if (route === "cursor" && req.method === "POST") {
         const data = await body(req);

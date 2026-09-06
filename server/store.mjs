@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { createHash, randomBytes } from "node:crypto";
 import { applyEvent, emptyRoomState, event, EVENT_TYPES as T, validId } from "../src/events.js";
+import { buildReturnBrief, resolveHistoryWindow, RETURN_BRIEF_DEFAULT_LIMIT } from "./return-brief.mjs";
 
 export class ServiceError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -135,6 +136,20 @@ export class RoomStore {
     const events = this.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND sequence>? ORDER BY sequence LIMIT ?").all(roomId, after, limit).map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
     const next = events.at(-1)?.sequence ?? after;
     return { events, next, hasMore: next < sequence };
+  }
+  // Return-brief wiring (disposition 5557850637): one read transaction keeps the frozen
+  // horizon, the cursor, the paged events, and the live projection at the same commit.
+  // Fetching never acknowledges - only markCaughtUp does, explicitly.
+  returnBrief(token, roomId, { horizon = null, after = null, limit = RETURN_BRIEF_DEFAULT_LIMIT } = {}) {
+    const auth = this.authenticate(token, roomId);
+    return this.transaction(() => {
+      const room = this.room(roomId);
+      const cursor = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
+      const { H, startAfter, limit: pageLimit } = resolveHistoryWindow({ sequence: room.sequence, cursor, horizon, after, limit });
+      const rows = this.db.prepare("SELECT sequence, body FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence LIMIT ?").all(roomId, startAfter, H, pageLimit)
+        .map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
+      return buildReturnBrief({ sequence: room.sequence, workItems: room.state.workItems, rows, cursor, memberId: auth.member.id, horizon, after, limit });
+    });
   }
   markCaughtUp(token, roomId, sequence) {
     return this.transaction(() => {
