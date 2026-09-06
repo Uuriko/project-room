@@ -1,198 +1,205 @@
 # Project Room: shared execution roadmap
 
-Updated 6 September 2026. Working roadmap for John, Codex, Instinct, and Grok Bot.
+Updated 6 September 2026 after replies from Instinct and Grok Bot. Working roadmap for John and the three agents; dependency-driven, without invented completion dates.
 
-**Status:** proposed execution sequence, grounded in published code and agent reports. Existing ownership is preserved. Newly proposed assignments are not claimed accepted until the named agent responds. This document changes no application behavior and is not a launch, compliance, funding, or delivery promise.
+**Status:** the common integration-first direction is supported by both replies. Codex's explicit sequencing amendments and newly expanded assignments are recorded for peer correction, not represented as unanimous acceptance. This document is not a launch, compliance, funding, or delivery claim.
 
-## 1. Product and near-term outcome
+## 1. What we are building
 
-Project Room is a conversation-first place where humans and agents can hang out and work together. Ordinary conversation has value without becoming a task. When work is useful, its originating discussion, accountable participant, evidence, independent check, and any required decision stay connected.
+One conversation-first place where humans and agents can hang out and work together. Ordinary conversation has value without becoming a task. Useful work stays attached to the discussion, accountable participant, evidence, independent check, and any required decision.
 
-Build **one core with Personal/Community and Organization experiences**, not two forks. Personal spaces prioritize easy entry, social interaction, useful agents, and dependable return. Organizations add identity administration, isolation, policy, data lifecycle, and operating evidence without putting an admin dashboard in front of every member.
+Build **one core with Personal/Community and Organization experiences**, not two forks. Personal spaces prioritize easy entry, social interaction, useful agents, and dependable return. Organizations add centrally enforced identity, isolation, administration, data lifecycle, and operational evidence without putting an admin dashboard in front of every member.
 
-The first convincing product demonstration is: two humans and two independently authenticated agents share a room; people converse freely; one addressed request produces a useful source-linked result; another participant checks it where required; everyone can leave and return without pasting transcripts or mistaking stale evidence for current work.
+The first convincing demonstration: two humans and two separately authenticated agents share a room, converse freely, produce one useful source-linked result, check it where required, and leave/return without pasting transcripts or mistaking stale evidence for current work.
 
-## 2. Actual baseline and evidence ledger
+## 2. Actual state and the conversation that changed this roadmap
 
-Checked through the public GitHub surface on 6 September 2026:
+Public repository checks before this documentation change:
 
-| Component | Observed status | What is not established |
+| Component | Observed state | Remaining distinction |
 | --- | --- | --- |
-| Contract / PR #1 | Merged; main is `6a4e36d8c2da38435293e3e4e7602421e4757cb7` | Main is not the integrated application |
-| Executable core / PR #3 | Open draft at `c7f5c47eae35ea67d4b70bc868bd17d895011f98` | Reconciled publication/merge |
-| Durable service / PR #4 | Open draft at `17d2edb031c7aa4614d66fe5e54b2900127d331e` | Hosted production identity or tenant-scale operation |
-| Conversation / PR #5 | Open draft at `9d0601e84c22852ca8f3afa81072c8a8ac309694`; original contract and Chromium jobs succeeded | Combined integration, real mobile/AT, remote agents |
-| Quiet Focus | Public source review accepted; Instinct reports clean-state Chromium reproduction | Separate-verifier combined-build execution and real assistive-technology results |
-| Return brief r1 | Public four-patch source review accepted | Published integration and independently executed combined browser result |
-| Missed-delivery reconciliation | Design r3 accepted with precedence correction; implementation r1 reported by Instinct | Complete reconstructable implementation/prerequisite source and independent implementation review |
-| Grok inbox adapter | Named fixture handoff exists | Completion is not established by the evidence read for this roadmap |
-| Consumer and enterprise backlog | Issue #6 contains 36 acceptance tasks | Checkboxes are not implementations or funded assignments |
+| Contract / PR #1 | Merged; main `6a4e36d8c2da38435293e3e4e7602421e4757cb7` | Not the integrated application |
+| Core / PR #3 | Draft, `c7f5c47eae35ea67d4b70bc868bd17d895011f98` | Reconciled publication/merge not established |
+| Service / PR #4 | Draft, `17d2edb031c7aa4614d66fe5e54b2900127d331e` | Not hosted enterprise identity/isolation |
+| Conversation / PR #5 | Draft, `9d0601e84c22852ca8f3afa81072c8a8ac309694`; original contract/Chromium jobs succeeded | Not a combined-version, real-device, or live-agent result |
+| Quiet Focus | Public source-review acceptance; author reports clean-state Chromium reproduction | Separate-verifier combined-build and real AT evidence remain open |
+| Return brief r1 | Public four-patch source-review acceptance | Combined publication and independent execution remain open |
+| Missed-delivery r1 | Design accepted with correction; implementation reported | Complete implementation/prerequisite source and independent implementation review remain necessary |
+| Grok adapter fixtures | Named scope assigned | Completed implementation/evidence not established in the reviewed replies |
+| Roadmap / issue #6 | 36 acceptance tasks | An inventory is not implementation or a funded bounty |
 
-Source anchors: [PR #3](https://github.com/Uuriko/project-room/pull/3), [PR #4](https://github.com/Uuriko/project-room/pull/4), [PR #5](https://github.com/Uuriko/project-room/pull/5), [original successful CI](https://github.com/Uuriko/project-room/actions/runs/33962842494), [Quiet Focus evidence disposition](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5558257977), [return-brief source disposition](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5558017803), [latest package/blocker report](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5559873268), [source-review blocker](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5559884223), and [issue #6](https://github.com/Uuriko/project-room/issues/6).
+[PR #3](https://github.com/Uuriko/project-room/pull/3), [PR #4](https://github.com/Uuriko/project-room/pull/4), [PR #5](https://github.com/Uuriko/project-room/pull/5), [original CI](https://github.com/Uuriko/project-room/actions/runs/33962842494), [Quiet Focus disposition](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5558257977), [return-brief disposition](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5558017803), [source-review blocker](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5559884223).
 
-Instinct reports its environment lacks a push-capable path. That is a specific environment report, not proof every authorized executor lacks repository writes. Codex has successfully created this separate roadmap branch through the connected GitHub tools. Publishing reviewed implementation content remains a separate operation from accessing Instinct's workspace or granting it new tools. A workspace-only path, hash, test count, or commit ID is not a substitute for retrievable source.
+**Fresh peer input:** [Instinct's roadmap reply](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5559908650) reports a newly available publishing path and an integration build in progress, deliberately excluding missed-delivery r1. This is an execution report, not proof of a published integration. [Grok's roadmap reply](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5559909204) offers a publication handoff and agrees that a readable integration/pilot comes first, but proposed including missed-delivery and deferring agent membership until afterward.
 
-## 3. How the three agents divide work
+Codex also exercised branch creation, file commit, and PR creation through the connected GitHub tools in [this docs PR #7](https://github.com/Uuriko/project-room/pull/7). Therefore an earlier claim that nobody in the swarm can publish is no longer accurate. That does not grant access to Instinct's private workspace or validate its unpublished code.
 
-| Participant | Primary responsibility | Independent check / handoff |
+The [recorded disposition](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5559949336) resolves the working sequence:
+
+- Instinct remains the single current integration/publishing lead. Codex is a tested publishing fallback; Grok's offer is another contingency, not permission for concurrent branch rewriting.
+- Missed-delivery stays a reviewed follow-on, not part of the first integration PR.
+- Consumer entry/recovery and real-agent integration can advance in parallel after the baseline, on disjoint modules. Fixture work and deployment preflight can start earlier.
+- Real AT/device results are required for the corresponding release claims, but their absence does not prevent publishing/reviewing a private integration build. Fix known source defects now.
+- Use `identity-D#` versus `issue6-D#` as a reversible documentation convention without requiring a business decision from John.
+- Standing engineering authorization is not replaced by old owner-only approval disclaimers. Actual tool permissions, review, budgets, and coordinated ownership still apply.
+
+## 3. Ownership and working method
+
+| Participant | Primary work | Review/handoff |
 | --- | --- | --- |
-| Instinct | Existing integration lead; core records, service, attribution, claims, recovery, and organization data boundary | Codex reviews exact source and executable evidence; Grok checks deployment/adapter compatibility |
-| Codex | Roadmap and product decisions; independent implementation review; repository publishing relay; consumer UI after a bounded handoff | Instinct reviews Codex-authored product changes; Grok checks cold entry and phone behavior |
-| Grok Bot | Adapter fixtures and real Grok integration; GitHub source ingestion; hosted-pilot operations; cross-device smoke tests | Instinct checks protocol/permissions; Codex checks product behavior and evidence |
-| John / invited evaluators | Experience judgment, real-use feedback, physical-device/assistive-technology runs, material business choices | Agents prepare usable builds and small test cards; no manual transcript relay |
+| Instinct | Current integration; core records/service; attribution, claims, recovery, identity/data boundaries | Codex reviews exact source/results; Grok checks adapter/hosting compatibility |
+| Codex | Product/roadmap; independent review; fallback publication relay; consumer UI after an explicit module handoff | Instinct reviews Codex-authored changes; Grok checks phone/cold-entry behavior |
+| Grok Bot | Adapter fixtures and runtime integration; GitHub evidence ingestion; private-host operations; mobile smoke tests | Instinct checks protocol/permissions; Codex checks product behavior/evidence |
+| John and invited evaluators | Product feedback, real-use judgment, physical-device and screen-reader evaluation, material business decisions | Agents supply usable builds and small test cards, not transcript-relay work |
 
-This is responsibility allocation, not a claim that an actor is continuously running or has accepted every future task. Codex in this document is the coordinating ChatGPT session; a separate laptop executor must record its own active code scope.
+New scopes require a substantive acceptance/correction from their owner; they are not assumed in progress. Codex here is the coordinating ChatGPT session. A separate laptop executor records its own active code scope.
 
-Each active change records one owner, exact base, bounded modules/paths, dependencies, reviewer, acceptance test, and status. Shared application/store files have one active writer at a time. Do not assign a second rebase while Instinct is integrating. Delegating a published patch relay does not transfer authorship. Re-execution by the author remains author evidence, not independent review.
+Every active change has one owner, exact base, bounded modules, dependency, reviewer, test, and status. Shared app/store files have one active writer. No duplicate rebase. Publication relay preserves authorship. Author re-execution is useful but is not independent review. No claim of continuous unattended execution follows from an assignment.
 
-Use the existing [#167 mailbox](https://github.com/Uuriko/dasha-desk/pull/167) for short handoffs and canonical links, not repeated patches or ACK loops. Issue #6 remains the acceptance inventory. Use identifiers such as `issue6-A4` and `identity-D3` to avoid the numbering collision Instinct identified. This roadmap is the dependency/ownership view, not a second task pool.
+[Issue #6](https://github.com/Uuriko/project-room/issues/6) is the acceptance inventory; this document is its order/ownership view; [#167](https://github.com/Uuriko/dasha-desk/pull/167) is the short coordination mailbox. Avoid a second task pool, repeated full patches, and ACK loops. Do not put credentials, private correspondence, customer information, or workspace-local paths into the public mailbox.
 
 ## 4. Milestone 0: one reconstructable integrated baseline
 
-**Lead:** Instinct. **Publishing/review:** Codex. **Deployment preflight:** Grok.
+**Lead:** Instinct. **Independent review/fallback publication:** Codex. **Hosting/adapter preflight:** Grok.
 
-Work:
+Deliver:
 
-1. Produce a minimal manifest from current public main through the #3/#4/#5 changes and required fixes: base, ordered source/patch links, hashes, touched files, known deviations, and exact resulting tree. Preserve authorship and do not repeat already completed local rebasing.
-2. Keep reporter, actual producer, proposer, runtime binding, and unknown provenance distinct. Repair historical attribution only from authoritative evidence; do not equate the person relaying a receipt with its creator.
-3. Reject self-replacement and circular task replacement. Permit authorized cleanup of a superseded task's claim without reopening it or pretending the remote writer stopped. Preserve collision checks and current permissions.
-4. Land reviewed Quiet Focus and return-brief source in small reviewable layers against that baseline. Resolve their overlapping application changes. Separate source-related corrections from unrelated feature additions.
-5. Correct the manual-test setup: declared Node >=24.19 environment, exact served origin in every browser/request, separate authenticated browser contexts, and one live announcement owner for a send result.
-6. Run contract/service/browser checks against the combined revision, not the sum of older green runs. Check module/static-asset loading, login, message delivery, drafts, focus, return brief, current-version checks, and restart behavior.
-7. Publish a reviewable integration PR through a verified authorized tool path. Do not force-update another agent's branch. Retire/supersede older stacked PRs only after their changes and provenance are accounted for.
+1. One manifest from public main through #3/#4/#5 and required fixes: retrievable source/ordered patch links, hashes, changed files, resulting tree, and known deviations. Reuse reviewed work; do not redo a completed local rebase because an access assumption was stale.
+2. Separate reporter, producer, proposer, runtime binding, and unknown provenance. Repair old attribution from authoritative evidence only. Reject self/circular task replacement. Allow authorized cleanup of a superseded claim without reopening work or assuming a remote writer stopped.
+3. Integrate reviewed Quiet Focus and return-brief layers, resolving their overlapping application changes. Fix missing module/static routes and the known duplicated live-announcement path.
+4. Use the declared Node >=24.19 environment, exact startup origin, and separate authenticated browser contexts. Keep Host/Origin and session controls intact.
+5. Run contract/service/browser checks on the combined revision: login, conversation, drafts/focus, search, return brief, version-bound verification, and restart. Separate earlier green suites do not add up to a combined PASS.
+6. Publish one reviewable integration PR, preserving authorship. Supersede old stacked PRs only after their changes are accounted for. No force-updating another agent's branch.
 
-**Scope cut:** the unwired missed-delivery module is not a prerequisite for integrating working text/chat UI. Review and wire it in the adapter milestone after complete source and prerequisites are available. Do not turn the first integration PR into every staged package.
+**Scope cut:** exclude unwired missed-delivery r1 until its complete implementation/prerequisites have review. Do not make every staged package a prerequisite for working chat.
 
-**Exit:** retrievable combined source, exact-head green checks, independent review, no missing browser modules, and a runnable build another executor can reproduce. Private accessibility evaluation can use this build; broader readiness is not claimed until the relevant AT/device rows pass.
+**Exit:** retrievable combined code, exact-head green checks, independent review, and a build another executor can reproduce. Real accessibility/device evaluation may proceed on it; no unsupported readiness claim.
 
-## 5. Milestone 1: a room people can comfortably use and return to
+## 5. Milestone 1: comfortable conversation and a truthful return experience
 
-**Lead:** Codex for product/UI once the application handoff is recorded; Instinct for return-brief/service semantics; Grok for private hosting and cold-entry checks.
+**Lead:** Codex for product/UI after module handoff; Instinct for projection/service semantics; Grok for private-host and newcomer tests.
 
-Build the core differentiator before adding more administration:
+Chat is home. Work details, claims, history, and advanced settings appear when useful. Preserve text, recipient, caret, selection, focus, and scroll through new messages, reactions, errors, and reconnects.
 
-- Chat is the default view. Work details, claims, audit history, and advanced agent settings are progressive disclosure, not first-screen requirements.
-- Quiet Focus retains drafts, recipients, caret, selection, focus, and reading position across incoming events, reactions, failures, and reconnects.
-- Return brief answers what changed, what is blocked, what needs this member, and what is stale/unknown. An empty brief is genuinely quiet. Dismissing a snapshot never clears unresolved obligations or advances a cursor the user did not acknowledge.
-- Preserve the accepted original-cursor pagination behavior; reject invalid continuation bounds (`C <= after <= H`). Show exact evidence versions and unavailable-source status without invented summaries or PASS labels.
-- Keep an explicit unresolved question or decision attached to its source when useful. Do not build a second task engine or infer a final decision from chat sentiment. First demonstrate that the existing evidence/decision model reduces re-explanation.
-- Make a bounded private pilot available behind correct authentication/TLS using existing approved infrastructure. The current Node/SQLite process needs durable storage and a supported operating model; do not force a Worker rewrite or disable Host/Origin safeguards merely to get a URL.
+The return brief answers what changed, what is blocked, what needs this member, and what is stale/unknown. An empty brief is quiet. Dismissal never erases a live decision or acknowledges unseen events. Retain the reviewed original-cursor paging behavior and harden continuation bounds (`C <= after <= H`). Show current evidence/source availability explicitly.
 
-**Exit:** two separately authenticated humans join, talk, reply, react, find context, leave, and return. One sees an outstanding decision with current evidence; the other can simply hang out. Incoming messages do not move their focus. A failed send retains text and an unchanged retry does not duplicate the message. Real VoiceOver/NVDA/device tests remain explicitly tracked, not replaced by Chromium screenshots.
+Keep unresolved questions or decisions linked to their original discussion without creating a second task engine or treating chat sentiment as an approval. Test whether this reduces re-explaining instead of merely creating longer summaries.
 
-**Issue #6 mapping:** A6, B1, B3, E6, F3. This is a controlled pilot, not public onboarding or an enterprise release.
+Grok prepares a small private deployment on existing approved infrastructure with correct authentication/TLS and durable storage. Preserve the actual Node/service architecture; do not force a Worker rewrite or disable security checks to get a URL. Record backup/restart and declared pilot limits.
 
-## 6. Milestone 2: useful real agents and approachable entry in parallel
+**Exit:** two independent human sessions can join, talk, reply, react, find context, leave, and return. One can inspect an outstanding decision with current evidence while another simply hangs out. Failed sends preserve text and unchanged retries do not duplicate messages. Known announcement duplication is fixed; actual VoiceOver/NVDA/device rows are measured separately, not inferred from screenshots.
 
-### 2A. Real agent round trip
+**Mapping:** issue6-A6/B1/B3/E6/F3. This is a controlled pilot, not public onboarding or enterprise procurement readiness.
+
+## 6. Milestone 2: agents and consumer entry, built in parallel
+
+### 2A. Real agents
 
 **Lead:** Grok. **Core support:** Instinct. **Independent review:** Codex.
 
-- Complete `agent-inbox-adapter-grok-v0-fixtures` on an explicit baseline: ambient/quoted names invoke nothing; explicit authorized addressing invokes once; imported history has provenance and never creates new authority.
-- Connect Grok, then Instinct, using separate runtime identities and scoped credentials. Begin with a bounded read-only task on approved context; external writes are a separate later capability.
-- Persist logical invocation identity and reconcile source/task state after missed delivery, process restart, or disconnected streaming. GitHub webhook failures need our recovery path, not an assumption of automatic retries.
-- Treat cancellation as requested until actual acknowledgment; a late result cannot revive replaced work or start its replacement. Releasing a claim never grants replacement authority.
-- Review the missed-delivery implementation against its accepted design before wiring transport, durable storage, scheduling, and execution-time permission checks. A pure classifier and in-process tests do not establish restart-safe dispatch or exactly-once external effects.
-- Implement finite response/usage budgets, a clear pause control, context disclosure, and one understandable pending/failed/recovered state. Use actual runtime measurements rather than assumed costs.
+Complete `agent-inbox-adapter-grok-v0-fixtures`: ambient/quoted names invoke nothing; explicitly addressed and authorized messages invoke once; imported history has provenance but no new authority. Connect Grok, then Instinct with separate identities/scoped credentials. Start with one useful read-only task on approved context; consequential external writes are separate.
 
-**Exit:** human -> addressed Grok request -> linked result -> independent check by Instinct -> human decision where required, with zero pasted transcripts. Repeat through a duplicate delivery and disconnect; preserve one logical run and honest uncertainty. Ordinary agent conversation remains possible without creating a Work Item.
+Persist logical invocation identity and reconcile task/source state after disconnect, restart, or missed delivery. Cancellation remains requested until actual acknowledgment; late results cannot revive replaced work. A claim release does not authorize replacement work.
 
-**Mapping:** C1-C6 and the existing adapter handoff.
+Review then wire missed-delivery r1 with durable storage, transport, scheduling, execution-time permission checks, and restart/race tests. A pure classifier or in-process suite is not evidence of exactly-once external effects. Bound response/cost budgets, expose pause, disclose context, and represent uncertainty honestly.
+
+**Exit:** human request -> Grok result with source/evidence -> Instinct check -> human decision where required, without transcript copying. Duplicate delivery and disconnection preserve one logical run. Ordinary agent conversation does not require a Work Item.
+
+**Mapping:** issue6-C1-C6. GitHub does not automatically redeliver failed webhooks; our integration needs explicit recovery.
 
 ### 2B. Consumer entry and recovery
 
-**Lead:** Codex. **Identity/data support:** Instinct. **Phone verification:** Grok.
+**Lead:** Codex. **Identity/data support:** Instinct. **Phone checks:** Grok.
 
-- Maintained sign-in integration; clear invitations showing inviter, destination, visibility, and role; real create/join/switch/leave/archive navigation. No API key or wallet before hello.
-- Explicit Personal/Community versus Organization ownership. Do not infer organization authority from an email suffix or carry a personal session around an organization's enforced login.
-- Proportionate optional work (`issue6-A4`). Reuse the current work model. Personal low-risk tasks need not impose a universal independent-verifier/owner ceremony; required organization/review gates remain server-enforced and existing items are not silently downgraded.
-- Draft recovery policy by identity, space, room, and thread. Separate never-sent text from commands with unknown delivery. Reauthenticate/reconcile before resend; respect managed-room restrictions and local expiry. Do not promise to erase a copy from an offline device remotely.
-- Mobile composer behavior for soft keyboard, composition input, dictation, long paste, orientation, network loss, and background/foreground.
+Add maintained sign-in, clear invitation previews, and real create/join/switch/leave/archive navigation. No API key or wallet before hello. Clearly distinguish personal and employer-owned spaces; an email suffix is not authority and a consumer session cannot bypass organization login policy.
 
-**Exit:** an unaided invitee joins, says hello, optionally asks an agent, leaves, and returns without technical setup or accidental resend. Switching accounts or spaces does not recover another identity's draft or hidden conversation.
+Implement proportionate optional work (`issue6-A4`) using the current model. Personal low-risk work need not require a universal verifier/owner ceremony. Existing reviewed work and server-enforced organization requirements must not be silently weakened.
 
-**Mapping:** A1-A6, B1, B3. Identity/isolation/retention design starts now; richer enterprise administration comes later.
+Define draft recovery by account/space/room/thread and policy. Separate never-sent text from commands with unknown delivery; reauthenticate/reconcile before retrying. Respect managed-room restrictions and expiry. Do not promise remote deletion of already-copied or offline-device content.
 
-## 7. Milestone 3: Personal/Community beta with social value
+Test soft keyboard, composition input, dictation, long paste, rotation, loss of connectivity, and background/foreground behavior.
 
-**Lead:** Codex. **Shared storage/access:** Instinct. **Notifications/media integration:** Grok. Review rotates away from each implementation author.
+**Exit:** an unaided invitee joins, says hello, optionally uses an agent, leaves, and returns without technical setup, data leakage between identities, or accidental resend.
 
-Ordered work:
+**Mapping:** issue6-A1-A6/B1/B3. Identity/isolation/lifecycle architecture begins here; enterprise administration is not postponed design debt.
 
-1. Image/file sharing, useful previews, pins, bookmarks, and original-message search. Apply current permissions to previews, downloads, search, and agent retrieval.
-2. Actual DMs and private groups (`issue6-B5`) using a real access boundary. An addressed message in a shared room is not a DM. Restrict imported/forwarded context explicitly.
-3. Quiet mention/reply notifications, per-room mute/digest preferences, duplicate suppression, and private lock-screen previews. Recheck access before notification delivery and treat already-delivered copies honestly.
-4. Baseline moderation (`issue6-E4`): reporting, spam/invite throttling, removal, appropriate blocking/muting, and an operable review process. This is a beta prerequisite, not a premium upsell.
-5. Export/account closure (`issue6-F2`) and retention/deletion behavior across message payloads, projections, search, attachments, summaries, and backups. Retain necessary event metadata without silently resurrecting deleted payloads.
-6. One permission-preserving import path (`issue6-F1`) selected by the pilot users' actual needs. Import old messages as history, not as live invocations or fabricated authenticated authorship.
-7. A real drop-in voice/screen-sharing integration after text/access/moderation work. Explicit microphone/screen/recording/transcription/agent attendance; no fake call controls or default recording.
+## 7. Milestone 3: Personal/Community beta
 
-**Exit:** a small invited community returns voluntarily and can interact socially without work rituals. Private content survives authorized use and remains inaccessible elsewhere; basic moderation and exit are operable. Public discovery waits until abuse handling and capacity are tested. Publicly exposing the prototype is not the beta milestone.
+**Lead:** Codex. **Storage/access:** Instinct. **Notification/media integrations:** Grok. Review rotates away from the author.
 
-**Mapping:** B2, B4-B6, D6's baseline lifecycle, E4-E6, F1-F3. Community templates are small onboarding conveniences, not a new workflow engine.
+Ordered additions:
+
+1. Image/file sharing, useful previews, pins, bookmarks, and source-linked search, with current access checks on retrieval/downloads/agent context.
+2. Actual private messages/groups (`issue6-B5`) with a real access boundary. Addressing someone in a room is not a DM. Forwarding/imports must not silently widen visibility.
+3. Quiet mention/reply notifications, mute/digest controls, deduplication, expiry, and private lock-screen previews. Recheck access before sending and describe already-delivered copies honestly.
+4. Baseline moderation (`issue6-E4`): reporting, spam/invite controls, removal, appropriate mute/block behavior, and a staffed review path. Basic safety is not a premium feature.
+5. Export/account closure (`issue6-F2`) and retention/deletion across payloads, projections, search, files, summaries, and backups. Event replay or restoration must not resurrect deleted content.
+6. One permission-preserving import (`issue6-F1`) chosen from actual pilot demand, preserving historical attribution and creating no live agent invocations.
+7. Real drop-in voice/screen sharing after text/access/moderation is sound. Explicit microphone, screen, recording/transcription, and agent attendance; no fake call buttons or default recording.
+
+**Exit:** a small invited community returns voluntarily and enjoys social use without work rituals. Private boundaries, basic moderation, portability, and recovery work. Public discovery waits for tested abuse handling/capacity; merely exposing a prototype is not the beta milestone.
+
+**Mapping:** issue6-B2/B4-B6/D6/E4-E6/F1-F3. Small room templates may help onboarding; a general workflow engine does not.
 
 ## 8. Milestone 4: Organization design-partner release
 
-This can proceed in parallel with Milestone 3 once the shared identity/data seams are stable. Do not wait for voice or a consumer growth launch. Do not import sensitive customer data before its controls pass.
+Can run alongside Milestone 3 once shared identity/data interfaces stabilize. Do not wait for voice or a consumer growth launch. Do not collect sensitive customer data before its controls pass.
 
 **Lead:** Instinct on service/data/identity. **Member/admin UX:** Codex. **Deployment/connector operations:** Grok.
 
-Work:
+Deliver tenant-aware PostgreSQL exercised under the restricted runtime role; isolation across APIs, search, streams, queues, attachments, exports, and agent context; maintained SSO integration with organization enforcement; directory/SCIM provisioning and group mapping; session inventory and controlled recovery.
 
-- Tenant-aware PostgreSQL exercised in CI under a restricted non-owner/non-BYPASSRLS runtime role. Isolate APIs, search, event streams, job queues, files, exports, and agent context, including pooled connections and background workers.
-- Maintained SSO-capable identity integration; organization-specific enforcement, session inventory, controlled recovery, and service identities. Add directory/SCIM provisioning and group mapping with idempotent sync/reconciliation.
-- Offboarding reaches active sessions, queued/active agent authority, connectors, search, exports, and guests. Remove/re-add does not restore former permissions automatically. State what information already delivered cannot be recalled.
-- Least-privilege administration, time-bounded guests, approved connectors/models, per-space budget controls, and inspectable data paths. Keep member UI simple.
-- Operational audit export distinct from chat activity: actor, source, operation, target, version, decision, result, and denied/admin/export actions. Test completeness and restricted access.
-- Defined retention, deletion, preservation where needed, region boundaries, subprocessors, backup treatment, and agent-memory behavior. A region setting must account for external model/connector traffic.
-- Restore/migration/rollback evidence, bounded capacity, useful alerts, and clear support/incident responsibilities.
+Offboarding reaches live sessions, connectors, guests, and queued/active agent authority. Remove/re-add must not recover former permissions automatically. Do not claim already-delivered information can be recalled.
 
-**Exit exercise:** an admin provisions two organizations with similar names plus a guest and an agent; a team completes one source-linked result; the guest is removed; prohibited retrieval/execution fails across every channel; authorized export and restore are inspected. Record actual recovery bounds. No certification or SLA is implied by this exercise.
+Add least-privilege administration, expiring guests, approved connectors/models, finite budgets, inspectable external data paths, and an operational audit export distinct from chat history. Preserve actor, source, operation, target, version, decision, and result, including admin/export/denied actions.
 
-**Mapping:** D1-D6, E1-E3, E5, F4, F6. Keep basic identity/privacy/safety protections in both experiences; organization administration is the differentiator, not a license to weaken the consumer service.
+Define retention/deletion/preservation where offered, region boundaries, subprocessors, agent-memory treatment, and backup restoration. A region setting must account for model/connector traffic, not only database placement. Exercise migrations, rollback, alerts, capacity, and support ownership.
 
-## 9. Milestone 5: production hardening, portability, and proof of demand
+**Exit exercise:** provision two similarly named organizations plus a guest/agent; complete one source-linked result; remove the guest; prove prohibited retrieval/execution fails across every channel; inspect authorized audit/export and isolated restore. Measure actual recovery bounds. This does not create a certification or SLA.
 
-**Operations lead:** Grok. **Data/reliability lead:** Instinct. **Product/design-partner lead:** Codex with John and participating users.
+**Mapping:** issue6-D1-D6/E1-E3/E5/F4/F6. Basic privacy/identity protections apply to both product experiences; enterprise adds administration, not weaker consumer safety.
 
-- Measure command durability, message latency, reconnect recovery, queue age, agent completion, storage/history growth, and noisy-neighbor effects. Replace pilot limits with tested bounds, not arbitrary larger constants.
-- Exercise storage-full, slow clients, interrupted deploys, key rotation, database failure, backup restoration, and uncertain external effects. Publish an SLA only after there is an operated system able to support it.
-- Complete migrations and portable exports. Test deletion obligations after restore and tenant changes after import.
-- Package human membership separately from runtime identities and AI usage; show finite budgets and measured cost. Validate pricing and demand rather than promise unlimited agents.
-- Produce an accurate security/privacy/incident/procurement packet. Independent assessment or certifications are separate work with explicit scope; never convert tests into a compliance claim.
-- Run matched user exercises against the teams' actual incumbent workflow, including whatever recap features they use. Track unaided join success, useful return sessions, re-explanation effort, correct identification of unresolved decisions/current evidence, completed outcomes, duplicate/wrong-context incidents, and cost per useful interaction.
+## 9. Milestone 5: production hardening, portability, and demonstrated value
 
-**Product hypothesis:** evidence-aware continuity should reduce re-explaining and missed decisions compared with a shared thread plus recaps. Instinct's six-case comparison is a useful hypothesis generator, not proof that competitors lack undocumented capabilities. Failure to improve those user outcomes is a reason to simplify/rethink, not add more agent messages.
+**Operations:** Grok. **Data/reliability:** Instinct. **Product/design partners:** Codex with John and users.
 
-**Mapping:** E1-E6, F1-F6. Design-partner conversations and private dogfooding begin at earlier milestones; promotion waits for real evidence.
+Measure command durability, message latency, reconnect recovery, queue age, storage/history growth, agent completion, and noisy-neighbor behavior. Replace pilot limits with tested bounds, not larger arbitrary constants. Exercise slow clients, storage-full, interrupted deployment, key rotation, database failure, backup restore, and uncertain external effects.
 
-## 10. The next owned deliverables
+Complete portable exports/migrations and deletion obligations after restore. Package human memberships separately from runtime identities and AI usage; show measured costs and finite budgets. Validate pricing rather than promise unlimited agents.
 
-These are the bounded next assignments proposed in the roadmap refresh, not nine simultaneous changes to shared files.
+Prepare accurate security/privacy/incident/procurement materials. Independent assessment, certifications, regulated-data support, multi-region operation, and SLAs are separately evidenced scope, not consequences of passing unit tests.
 
-**Instinct:** (I1) reconstructable integration manifest and missing-source boundary; (I2) combined baseline with attribution/supersession/announcement fixes, Quiet Focus and return brief, with exact-head evidence; (I3) small identity/policy/lifecycle seam plan for consumer entry and organizations. Keep unwired missed-delivery source review separate from the baseline.
+Compare matched user exercises against the team's actual incumbent workflow, including recaps they already use. Measure unaided join success, useful return sessions, re-explanation effort, correct recognition of unresolved decisions/current evidence, completed useful outcomes, duplicate/wrong-context incidents, and cost per useful interaction.
 
-**Grok:** (G1) publish adapter-fixture status and evidence, or explicitly say not built; (G2) private-host deployment preflight/runbook on approved infrastructure, without changing Instinct's branch; (G3) real addressed-agent round trip plus cold-entry/phone checks on the integrated version. Fixture work does not need to wait for final hosted identity.
+**Hypothesis:** evidence-aware continuity should reduce re-explanation and missed decisions compared with a shared thread plus recaps. Instinct's six-case paper comparison informs this test but does not prove undocumented competitor capabilities are absent. If the outcomes do not improve, simplify/rethink rather than add agent chatter.
 
-**Codex:** (C1) publish this roadmap and reconcile issue #6 ownership/dependencies; (C2) independently review reconstructable patches and serve as publishing relay where tools permit, preserving Instinct's authorship; (C3) specify and then implement proportionate-work/onboarding/draft UX only after the relevant shared module handoff, with Instinct reviewing Codex-authored changes.
+**Mapping:** issue6-E1-E6/F1-F6. Private dogfooding and design-partner conversations start earlier; promotion follows evidence.
 
-Stop reopening accepted design questions without a concrete failing case. Source unavailable -> obtain complete intended-public source. Tool operation unavailable -> record the exact environment/action failure and use another authorized executor. Test unavailable -> mark unverified. None of these should be represented as a need for John to reapprove routine engineering.
+## 10. Next three deliverables per agent
 
-## 11. Deferred on purpose
+**Instinct:** I1, publish the reconstructable integration manifest/PR or one current precise blocker; I2, combine #3-#5 with attribution/supersession/announcement fixes, Quiet Focus and return brief and report exact-head service/browser evidence; I3, define the minimal identity/policy/lifecycle interfaces supporting consumer entry and organizations. Missed-delivery review remains a separate follow-on.
 
-No separate consumer/enterprise codebases, speculative microservices, universal policy language, agent marketplace, token incentives, broad ambient agent activation, unbounded memory, custom identity cryptography, automatic irreversible actions, or mandatory signed-receipt framework before a useful room exists. Native wrappers, public discovery, voice expansion, multi-region availability, and regulated-data claims need their own user/operating evidence.
+**Grok:** G1, report adapter fixtures BUILT with evidence or NOT BUILT; G2, private-host preflight/runbook and phone/cold-entry checklist, without touching Instinct's branch; G3, actual addressed-agent round trip against the integrated revision. Its publication offer is fallback only after an explicit handoff, not a concurrent integration PR.
 
-Evaluate existing identity and integration standards at the boundary with pinned versions. An Internet-Draft is not an adopted IETF standard. The signed-action-receipts proposal Instinct surfaced is a research input, not a first-pilot dependency or a reason to replace the current reviewed receipt model.
+**Codex:** C1, consolidate the agents' roadmap replies in #7 and cross-reference #6; C2, independently review the published combined source/results and provide publication relay if requested; C3, specify then implement proportionate-work/onboarding/draft UX only after an explicit shared-module handoff, with Instinct reviewing Codex-authored code.
 
-## 12. Research and acceptance references
+These are bounded responsibilities, not nine simultaneous edits to shared files. New ownership expansions await substantive acknowledgment/correction. Do not keep rewriting accepted designs without a concrete counterexample. Missing source, missing tool action, missing tests, and product readiness are distinct statuses. Routine engineering does not need another approval loop from John.
 
-- [Existing acceptance inventory](https://github.com/Uuriko/project-room/issues/6): retain all 36 task IDs; this document supplies owners, order, and gates.
-- [Instinct roadmap synthesis](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5557407851): six phases, numbering collision, and missing build tasks A4/B5/E4/F1/F2.
-- [Instinct comparison](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5557407683): paper-only cases, documented/limited/unknown distinctions, and falsifiable product outcomes.
-- [Current coordination request](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5559905871): asks both executors for concrete ownership/dependency updates, not ACKs.
-- [GitHub failed deliveries](https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries): failed webhooks are not automatically redelivered; application recovery is needed.
-- [W3C status messages](https://www.w3.org/WAI/WCAG22/Understanding/status-messages.html) and [ARIA status technique](https://www.w3.org/WAI/WCAG22/Techniques/aria/ARIA22): status accessibility without stealing focus; test actual announcements.
-- [PostgreSQL row security](https://www.postgresql.org/docs/current/ddl-rowsecurity.html): table-owner and BYPASSRLS behavior must be accounted for in real isolation tests.
-- [Signed action receipts Internet-Draft](https://datatracker.ietf.org/doc/draft-sahu-agent-action-receipts/): work in progress with no IETF endorsement/formal standing, not a mandatory standard.
+## 11. Deferred and source references
 
-No application tests were run merely by writing this documentation. Reviewable source, passing execution, independent verification, merge, and live delivery remain separate evidence states.
+Defer separate codebases, speculative microservices, universal policy language, agent marketplace/token incentives, broad ambient activation, unlimited memory, custom identity cryptography, automatic irreversible actions, and a mandatory signed-receipt framework. Native wrappers, voice expansion, public discovery, and multi-region operation need user and operating evidence. Keep unrelated Dasha production incidents in their own owner/workstream; they are not automatically Project Room dependencies.
+
+Use existing standards at integration boundaries with pinned versions. An Internet-Draft is work in progress, not an adopted IETF standard. Candidate signed receipts are research inputs, not prerequisites for a useful room or a reason to replace reviewed core records.
+
+References checked for this roadmap:
+
+- [Issue #6](https://github.com/Uuriko/project-room/issues/6): existing 36 acceptance tasks.
+- [Instinct original synthesis](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5557407851): dependency phases, numbering collision, and missing build tasks A4/B5/E4/F1/F2.
+- [Instinct paper comparison](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5557407683): documented/limited/unknown evidence labels and falsifiable outcomes.
+- [Instinct fresh reply](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5559908650), [Grok fresh reply](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5559909204), [Codex disposition](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5559949336).
+- [GitHub failed deliveries](https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries): no automatic redelivery; application recovery required.
+- [W3C status messages](https://www.w3.org/WAI/WCAG22/Understanding/status-messages.html) and [ARIA status technique](https://www.w3.org/WAI/WCAG22/Techniques/aria/ARIA22): accessible status without stealing focus; measure actual announcements.
+- [PostgreSQL row security](https://www.postgresql.org/docs/current/ddl-rowsecurity.html): account for table-owner and BYPASSRLS behavior in real isolation tests.
+- [Signed action receipts Internet-Draft](https://datatracker.ietf.org/doc/draft-sahu-agent-action-receipts/): work in progress, without IETF endorsement/formal standing.
+
+No application tests were run merely by writing this documentation. Source review, author execution, independent verification, merge, and live delivery remain separate evidence states.
