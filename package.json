@@ -1,0 +1,20 @@
+{
+  "name": "project-room",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Executable v0 contract for a shared human and agent project room",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test",
+    "test:browser": "node --test scripts/browser-check.mjs",
+    "check": "node scripts/check.mjs",
+    "provision": "node scripts/provision.mjs"
+  },
+  "engines": {
+    "node": ">=24.19.0"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}
