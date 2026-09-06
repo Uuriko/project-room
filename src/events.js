@@ -249,6 +249,10 @@ function proposeWork(state, incoming) {
     humanDecisionMakerId: incoming.data.humanDecisionMakerId || null,
     mode: incoming.data.mode || "read",
     sourceMessageId: incoming.data.sourceMessageId || null,
+    // The proposer is the envelope actor alone (disposition 5557850637): replay recovers it
+    // wherever the envelope exists; it is never read from data and never inferred from the
+    // source message's author. Pre-field legacy rows simply lack the key and render unknown.
+    proposedById: incoming.actorId,
     state: WORK_STATES.PROPOSED,
     revision: 0,
     claim: null,
