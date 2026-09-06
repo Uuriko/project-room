@@ -236,12 +236,21 @@ function actions(i) {
 function workCard(i) {
   return `<article id="${esc(i.id)}" class="work-card" data-disclosure-host="${esc(i.id)}"><div class="work-card-header"><span class="state state-${i.state}">${esc(i.state)}</span><span class="mode">${esc(i.mode)} · revision ${i.revision}</span></div><h3>${esc(i.title)}</h3>${i.sourceMessageId ? `<a class="source-link" href="#message-${esc(i.sourceMessageId)}" data-open-message="${esc(i.sourceMessageId)}">From this conversation</a>` : ""}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(name(i.accountableMemberId))}</dd></div><div><dt>Verifier</dt><dd>${esc(name(i.verifierMemberId))}</dd></div></dl>${i.receipt ? `<div class="receipt"><p class="receipt-label">REPORTED COMPLETION · NOT AUTOMATIC VERIFICATION</p><p>${esc(i.receipt.summary)}</p><a href="${safeUrl(i.receipt.evidenceUrl)}" target="_blank" rel="noreferrer">Open submitted evidence ↗</a><code>${esc(i.receipt.evidenceVersion)}</code><p>${esc(i.receipt.nextAction)}</p>${i.verification ? `<p>${esc(i.verification.result.toUpperCase())} reported by ${esc(name(i.verification.verifierId))}: ${esc(i.verification.summary)}</p>` : "<p>No verification recorded.</p>"}</div>` : ""}${i.blocker ? `<div class="blocker"><strong>Blocked</strong><p>${esc(i.blocker.reason)}</p><p>${esc(i.blocker.nextAction)}</p></div>` : ""}${i.decision ? `<div class="decision"><strong>${esc(humanize(i.decision.decision))}</strong><p>${esc(i.decision.reason)}</p></div>` : ""}${i.claim ? `<details class="claim"><summary>Recorded scope · ${activeClaim(i) ? "not expired" : "expired or released"}</summary><p>${esc(i.claim.repository)}:${esc(i.claim.ref)}</p><p>${esc(i.claim.paths.join(", "))}</p><p>Expires ${esc(i.claim.expiresAt)}. This service does not execute external actions.</p></details>` : ""}<div class="work-actions">${actions(i)}</div></article>`;
 }
+// Quiet Focus A4: a failed send reports beside the composer that holds the draft,
+// not only in the page-level status area; the Send button is the retry and the
+// draft clears only after the service acknowledges the retry.
 async function submit(form, fn) {
   if (busy) return;
   busy = true; const controls = [...form.querySelectorAll("button, input, select, textarea")];
   const disabled = controls.map(e => e.disabled); controls.forEach(e => e.disabled = true);
+  const local = form.querySelector(".form-status");
+  if (local) { local.textContent = ""; local.classList.remove("visible", "error"); }
   try { await fn(); }
-  catch (error) { notice(`${error.message}. ${state ? "Draft kept; refresh and review before retrying." : "Sign in again."}`, true); }
+  catch (error) {
+    const text = `${error.message}. ${state ? "Draft kept; press Send to retry." : "Sign in again."}`;
+    notice(text, true);
+    if (local) { local.textContent = text; local.classList.add("visible", "error"); }
+  }
   finally { busy = false; controls.forEach((e, i) => e.disabled = disabled[i]); if (state) render(); }
 }
 $("#auth-form").addEventListener("submit", async e => {
