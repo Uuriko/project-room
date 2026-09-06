@@ -133,6 +133,7 @@
               <span id="return-brief-heading">Catch up on this room</span>
             </summary>
             <div class="return-brief-body">
+              <p id="rb-status" class="rb-note" role="status" aria-live="polite"></p>
               <section aria-labelledby="rb-current-heading">
                 <h3 id="rb-current-heading">Needs your attention <span id="rb-current-boundary" class="rb-boundary"></span></h3>
                 <ul id="rb-attention-list" class="rb-list"></ul>
@@ -143,6 +144,7 @@
                 <h3 id="rb-history-heading">What changed <span id="rb-history-boundary" class="rb-boundary"></span></h3>
                 <ul id="rb-history-list" class="rb-list rb-history"></ul>
                 <div class="rb-actions">
+                  <button id="rb-refresh-button" class="button secondary" type="button">Refresh catch-up</button>
                   <button id="rb-more-button" class="button secondary" type="button" hidden>Show more changes</button>
                   <button id="rb-ack-button" class="button secondary" type="button">Mark caught up</button>
                 </div>

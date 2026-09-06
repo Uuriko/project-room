@@ -49,6 +49,15 @@ test("cookie account changes are detected before displaying an incorrectly attri
   client.session = identity(); await client.refresh();
   assert.equal(ended, true); assert.equal(shown, false);
 });
+test("an obsolete snapshot failure is suppressed before a new session's error handler", async () => {
+  let reject;
+  const client = new RoomClient({ fetcher: () => new Promise((resolve, fail) => reject = fail) });
+  client.session = identity();
+  const old = client.refresh(); client.disconnect(); client.session = identity("other");
+  reject(Object.assign(new Error("Old session ended"), { status: 401 }));
+  await old;
+  assert.equal(client.session.member.id, "other");
+});
 test("a late command receipt never refreshes or ends a different session", async () => {
   for (const status of [201, 401]) {
     let release, calls = 0, ended = false;

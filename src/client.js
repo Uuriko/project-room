@@ -41,7 +41,8 @@ export class RoomClient {
         if (snapshot.viewerId !== this.session.member.id) { this.endAccess(); return; }
         if (snapshot.sequence >= this.sequence) { this.sequence = snapshot.sequence; this.onSnapshot(snapshot, this.session); }
       } while (flight.again);
-    })().finally(() => { if (this.flight === flight) this.flight = null; });
+    })().catch(error => { if (generation === this.generation && this.session) throw error; })
+      .finally(() => { if (this.flight === flight) this.flight = null; });
     return flight.promise;
   }
   async send(command) {
