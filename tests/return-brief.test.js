@@ -7,6 +7,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { needsAttention, workInvolvingMe } from "../server/return-selectors.mjs";
 
 // Return-brief wiring acceptance cases (disposition 5557850637, "next handoff" list):
 // fixed-H pagination beyond 100 events, H+1 after ack, N-versus-H boundary labeling,
@@ -108,6 +109,57 @@ test("verification and owner decisions are first-class history items and close t
   assert.equal(types.includes(T.OWNER_DECISION_RECORDED), true);
   assert.deepEqual(store.returnBrief(owner, "commons", {}).current.needsAttention, []); // approved: terminal, no attention
   assert.deepEqual(store.returnBrief(owner, "commons", {}).current.workInvolvingMe, []); // terminal is not ongoing involvement
+});
+
+for (const cause of ["block", "verification-failure"]) {
+  test(`approved work reopened by ${cause} remains visible through the next completion`, t => {
+    const { store, owner, human, agent } = fixture(t);
+    completeLifecycle(store, owner, human, agent, "rework");
+    const item = () => store.snapshot(owner, "commons").state.workItems.rework;
+    const old = item();
+    if (cause === "block") store.command(human, "commons", command(T.WORK_BLOCKED, { workItemId: "rework", expectedRevision: item().revision, reason: "New finding", nextAction: "Revise" }));
+    else store.command(agent, "commons", command(T.VERIFICATION_RECORDED, { workItemId: "rework", expectedRevision: item().revision, result: "fail", completionEventId: old.receipt.eventId, evidenceVersion: "v1", summary: "New finding" }));
+    assert.equal(item().decision, null);
+    assert.deepEqual(item().decisionHistory, [old.decision]);
+    assert.equal(store.returnBrief(human, "commons").current.needsAttention[0].step, "revise");
+    store.markCaughtUp(human, "commons", store.snapshot(human, "commons").sequence);
+    assert.equal(store.returnBrief(human, "commons").current.workInvolvingMe[0].workItemId, "rework");
+    store.command(human, "commons", command(T.WORK_BLOCKER_RESOLVED, { workItemId: "rework", expectedRevision: item().revision, resolution: "New direction" }));
+    assert.equal(store.returnBrief(human, "commons").current.needsAttention[0].step, "start");
+    store.command(human, "commons", command(T.WORK_STARTED, { workItemId: "rework", expectedRevision: item().revision }));
+    assert.deepEqual(store.returnBrief(human, "commons").current.needsAttention, []);
+    assert.equal(store.returnBrief(human, "commons").current.workInvolvingMe[0].state, "working");
+    const done = store.command(human, "commons", command(T.WORK_COMPLETED, { workItemId: "rework", expectedRevision: item().revision, summary: "Revised", evidenceUrl: "https://example.com/v2", evidenceVersion: "v2", nextAction: "Verify" }));
+    assert.equal(item().verification, null); assert.equal(item().decision, null);
+    assert.deepEqual(item().decisionHistory, [old.decision]);
+    assert.equal(store.returnBrief(agent, "commons").current.needsAttention[0].step, "verify");
+    store.command(agent, "commons", command(T.VERIFICATION_RECORDED, { workItemId: "rework", expectedRevision: item().revision, result: "pass", completionEventId: done.event.id, evidenceVersion: "v2", summary: "Checked v2" }));
+    store.command(owner, "commons", command(T.OWNER_DECISION_RECORDED, { workItemId: "rework", expectedRevision: item().revision, decision: "approved", completionEventId: done.event.id, evidenceVersion: "v2", reason: "Current result" }));
+    const approval = item().decision;
+    store.command(agent, "commons", command(T.VERIFICATION_RECORDED, { workItemId: "rework", expectedRevision: item().revision, result: "fail", completionEventId: old.receipt.eventId, evidenceVersion: "v1", summary: "Historical finding only" }));
+    assert.equal(item().state, "completed"); assert.deepEqual(item().decision, approval);
+    assert.deepEqual(item().decisionHistory, [old.decision]);
+    assert.deepEqual(store.returnBrief(human, "commons").current.workInvolvingMe, []);
+  });
+}
+
+test("defensive selectors never let stale approvals hide active or differently verified work", () => {
+  const base = { id: "w", title: "Reopened", accountableMemberId: "human", verifierMemberId: "agent", humanDecisionMakerId: "owner", ownerDecisionRequired: true, independentVerificationRequired: true,
+    receipt: { eventId: "completion2", evidenceVersion: "v2" }, verification: { result: "pass", completionEventId: "completion2", evidenceVersion: "v2" },
+    decision: { decision: "approved", completionEventId: "completion2", evidenceVersion: "v2" } };
+  for (const state of ["blocked", "accepted", "working"]) {
+    const workItems = { w: { ...base, state } };
+    assert.equal(workInvolvingMe({ workItems, memberId: "human" }).length, 1);
+    assert.deepEqual(needsAttention({ workItems, memberId: "human" }).map(i => i.step), state === "working" ? [] : [state === "blocked" ? "revise" : "start"]);
+  }
+  const workItems = { w: { ...base, state: "completed", verification: { result: "pass", completionEventId: "completion1", evidenceVersion: "v1" } } };
+  assert.equal(workInvolvingMe({ workItems, memberId: "human" }).length, 1);
+  assert.equal(needsAttention({ workItems, memberId: "agent" })[0].step, "verify");
+  workItems.w.verification = base.verification;
+  workItems.w.decision = { decision: "approved", completionEventId: "completion1", evidenceVersion: "v1" };
+  assert.equal(needsAttention({ workItems, memberId: "owner" })[0].step, "decide");
+  workItems.w.decision = base.decision;
+  assert.deepEqual(workInvolvingMe({ workItems, memberId: "human" }), []);
 });
 
 test("the proposer is drillable from history and the projection after replay; forged provenance never enters", t => {

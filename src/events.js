@@ -286,6 +286,7 @@ function startWork(state, incoming) {
   if (item.mode === "write" && (!item.claim || !claimIsActive(item.claim, incoming.at) || item.claim.holderId !== incoming.actorId)) {
     throw new Error("Contested writes require a current exact-scope claim");
   }
+  if (item.state === WORK_STATES.BLOCKED) archiveDecision(item);
   item.state = WORK_STATES.WORKING;
   item.blocker = null;
   commitMutation(item, incoming);
@@ -297,6 +298,7 @@ function blockWork(state, incoming) {
   const isVerifierOnCompletion = item.state === WORK_STATES.COMPLETED && incoming.actorId === item.verifierMemberId;
   if (!isAccountable && !isVerifierOnCompletion) throw new Error("Only the accountable member or completed-work verifier may block work");
   requireFields(incoming.data, ["reason", "nextAction"]);
+  archiveDecision(item);
   item.state = WORK_STATES.BLOCKED;
   item.blocker = { reason: incoming.data.reason, nextAction: incoming.data.nextAction, eventId: incoming.id };
   commitMutation(item, incoming);
@@ -306,6 +308,7 @@ function resolveBlocker(state, incoming) {
   const item = mutableWorkItem(state, incoming, [WORK_STATES.BLOCKED]);
   if (incoming.actorId !== item.accountableMemberId) throw new Error("Only the accountable member may resolve the blocker");
   requireFields(incoming.data, ["resolution"]);
+  archiveDecision(item);
   item.state = WORK_STATES.ACCEPTED;
   item.blocker = null;
   commitMutation(item, incoming);
@@ -348,6 +351,7 @@ function supersedeWork(state, incoming) {
   requirePermission(state, incoming.actorId, "steer");
   requireFields(incoming.data, ["supersededByWorkItemId", "reason"]);
   if (!state.workItems[incoming.data.supersededByWorkItemId]) throw new Error("Replacement Work Item must exist");
+  archiveDecision(item);
   item.state = WORK_STATES.SUPERSEDED;
   item.supersededBy = incoming.data.supersededByWorkItemId;
   commitMutation(item, incoming);
@@ -423,6 +427,7 @@ function recordVerification(state, incoming) {
   if (item.verification) item.verificationHistory.push(item.verification);
   item.verification = verification;
   if (incoming.data.result === "fail") {
+    archiveDecision(item);
     item.state = WORK_STATES.BLOCKED;
     item.blocker = {
       reason: incoming.data.summary,
@@ -483,6 +488,11 @@ function mutableWorkItem(state, incoming, allowedStates) {
 function commitMutation(item, incoming) {
   item.revision += 1;
   item.updatedAt = incoming.at;
+}
+
+function archiveDecision(item) {
+  if (item.decision) item.decisionHistory.push(item.decision);
+  item.decision = null;
 }
 
 function claimIsActive(claim, at) {

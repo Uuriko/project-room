@@ -1,8 +1,7 @@
 import { WORK_STATES } from "../src/events.js";
-// needsAttention / workInvolvingMe, ported VERBATIM from the reviewed r3 selector slice
-// (branch instinct/push/needs-attention-b3; review closed at 5557676251 - "wired unchanged"
-// per the return-brief wiring disposition 5557850637). Only the error class is local to this
-// module so the wired package does not depend on the unwired return-cursor contract module.
+import { terminalWork, verificationSatisfied, matchesReceipt } from "../src/work-status.js";
+// Based on the reviewed B3 selectors, with current-completion checks from
+// issue #11 disposition 5561110872. Historical approvals cannot hide active work.
 
 export class CursorError extends Error {
   constructor(code, message) {
@@ -38,12 +37,6 @@ const REQUEST_ROLES = ["accountableMemberId", "verifierMemberId", "humanDecision
 // verification requirement is satisfied (PASS) or absent. Terminal work stays
 // discoverable under the fixed-horizon "What changed" view and in record history -
 // it never masquerades as open work here.
-function involvementTerminal(item) {
-  if (item.supersededBy) return true;
-  if (item.ownerDecisionRequired) return item.decision?.decision === "approved";
-  return item.state === WORK_STATES.COMPLETED && (!item.independentVerificationRequired || item.verification?.result === "pass");
-}
-
 export function workInvolvingMe({ workItems, memberId }) {
   if (!workItems || typeof workItems !== "object" || Array.isArray(workItems)) throw new CursorError("cursor.work_items_required", "workInvolvingMe requires the current work-item projection map");
   if (!memberId) throw new CursorError("cursor.member_required", "workInvolvingMe requires a memberId");
@@ -51,7 +44,7 @@ export function workInvolvingMe({ workItems, memberId }) {
   for (const item of Object.values(workItems)) {
     if (!item || typeof item !== "object") continue;
     const roles = REQUEST_ROLES.filter(field => item[field] === memberId);
-    if (roles.length === 0 || involvementTerminal(item)) continue;
+    if (roles.length === 0 || terminalWork(item)) continue;
     out.push(Object.freeze({ workItemId: item.id, action: item.title ?? null, roles: Object.freeze(roles), state: item.state }));
   }
   return Object.freeze(out);
@@ -62,8 +55,7 @@ export function needsAttention({ workItems, memberId }) {
   if (!memberId) throw new CursorError("cursor.member_required", "needsAttention requires a memberId");
   const out = [];
   for (const item of Object.values(workItems)) {
-    if (!item || typeof item !== "object" || item.supersededBy) continue;
-    if (item.decision?.decision === "approved") continue;
+    if (!item || typeof item !== "object" || terminalWork(item)) continue;
     const push = (role, step) => out.push(Object.freeze({ workItemId: item.id, action: item.title ?? null, role, step }));
     if (item.accountableMemberId === memberId) {
       if (item.state === WORK_STATES.PROPOSED) push("accountable", "accept");
@@ -71,9 +63,9 @@ export function needsAttention({ workItems, memberId }) {
       else if (item.state === WORK_STATES.BLOCKED) push("accountable", "revise");
     }
     if (item.state === WORK_STATES.COMPLETED) {
-      const verificationSatisfied = !item.independentVerificationRequired || item.verification?.result === "pass";
-      if (item.verifierMemberId === memberId && item.independentVerificationRequired && !verificationSatisfied) push("verifier", "verify");
-      if (item.humanDecisionMakerId === memberId && item.ownerDecisionRequired && verificationSatisfied && !item.decision) push("decision_maker", "decide");
+      const verified = verificationSatisfied(item);
+      if (item.verifierMemberId === memberId && item.independentVerificationRequired && !verified) push("verifier", "verify");
+      if (item.humanDecisionMakerId === memberId && item.ownerDecisionRequired && verified && !matchesReceipt(item.decision, item.receipt)) push("decision_maker", "decide");
     }
   }
   return Object.freeze(out);

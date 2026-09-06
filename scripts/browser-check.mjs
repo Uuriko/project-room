@@ -214,15 +214,32 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
 
     // The rail entry opens to live current sections and a frozen first page of history.
     const panel = page.locator("#return-brief-panel");
-    await panel.locator("summary").click();
+    await page.waitForFunction(() => document.querySelector("#rb-current-boundary").textContent && !document.querySelector("#rb-refresh-button").disabled);
+    await Promise.all([
+      page.waitForResponse(response => response.url().endsWith("/return-brief")),
+      panel.locator("summary").click()
+    ]);
     await page.locator("#rb-history-list .rb-event").first().waitFor();
     await page.locator("#rb-attention-list", { hasText: "Read the briefing" }).waitFor();
     assert.match(await page.locator("#rb-current-boundary").textContent(), /as of event \d+/);
     assert.match(await page.locator("#rb-history-boundary").textContent(), /since marker 0 · through event \d+/);
     assert.match(await page.locator("#rb-attention-list").textContent(), /your step: accept/);
     assert.equal(await page.locator("#rb-history-list .rb-event").count(), 50); // bounded first page
+    // Rapid clicks admit one continuation; a failed fetch exposes a usable retry.
+    let pageRequests = 0, failPage = true;
+    await page.route("**/return-brief?*", async route => {
+      pageRequests++;
+      if (failPage) { failPage = false; await route.abort("failed"); }
+      else await route.continue();
+    });
     await page.locator("#rb-more-button").click();
+    await page.waitForFunction(() => document.querySelector("#rb-status").textContent.includes("could not load"));
+    assert.equal(await page.locator("#rb-history-list .rb-event").count(), 50);
+    await page.locator("#rb-more-button").evaluate(e => { e.click(); e.click(); });
     await page.waitForFunction(() => document.querySelectorAll("#rb-history-list .rb-event").length > 50);
+    assert.equal(pageRequests, 2); // One failure, one retry, no duplicate page.
+    assert.doesNotMatch(await page.locator("#connection-status").textContent(), /interrupted/);
+    await page.unroute("**/return-brief?*");
     assert.equal(await page.locator("#rb-history-list .rb-event").count(), 59); // every event drillable
     assert.equal(await page.locator("#rb-more-button").isVisible(), false);
     mkdirSync("test-results", { recursive: true });
@@ -249,6 +266,85 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await panel.evaluate(e => { e.open = false; }); await panel.locator("summary").click();
     await page.waitForFunction(() => document.querySelectorAll("#rb-history-list .rb-event").length === 1);
     assert.match(await page.locator("#rb-history-list").textContent(), /after the marker/);
+    assert.deepEqual(errors, []);
+  });
+}
+
+for (const outcome of ["success", "failure"]) {
+  test(`late ${outcome}: catch-up and form results cannot affect a replacement session`, { timeout: 90000 }, async t => {
+    const directory = mkdtempSync(join(tmpdir(), "room-session-ui-"));
+    const store = new RoomStore(join(directory, "room.sqlite"));
+    store.initialize(initialRoom());
+    let key = store.issueAccessKey("commons", "owner");
+    const server = createRoomServer({ store, streamInterval: 30 });
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+    t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); rmSync(directory, { recursive: true, force: true }); });
+    const page = await browser.newPage(); const errors = [];
+    page.setDefaultTimeout(5000);
+    await page.addInitScript(() => {
+      window.heldReads = {};
+      const fetch = window.fetch.bind(window);
+      window.fetch = async (...args) => {
+        const response = await fetch(...args), json = response.json.bind(response);
+        response.json = async () => {
+          try { return await json(); }
+          finally { if (response.headers.has("x-test-held")) window.heldReads[response.headers.get("x-test-held")] = true; }
+        };
+        return response;
+      };
+    });
+    page.on("pageerror", error => errors.push(error.message));
+    const enter = async () => {
+      await page.locator("#auth-panel").waitFor({ state: "visible" });
+      await page.locator("#access-key").fill(key);
+      await page.getByRole("button", { name: "Enter room", exact: true }).click();
+      await page.locator("#main").waitFor({ state: "visible" });
+      await page.waitForFunction(() => document.querySelector("#rb-current-boundary").textContent.includes("as of event"));
+    };
+    await page.goto(origin); await enter();
+    await Promise.all([
+      page.waitForResponse(response => response.url().endsWith("/return-brief")),
+      page.locator("#return-brief-panel summary").click()
+    ]);
+    await page.waitForFunction(() => !document.querySelector("#rb-refresh-button").disabled);
+    let release, arrived;
+    const held = new Promise(resolve => arrived = resolve);
+    let first = true;
+    await page.route("**/return-brief", async route => {
+      if (!first) return route.continue(); first = false;
+      const response = await route.fetch(); const body = await response.json();
+      body.current.needsAttention = [{ workItemId: "old", action: "Obsolete session content", role: "accountable", step: "accept" }];
+      await new Promise(resolve => { release = resolve; arrived(); });
+      await route.fulfill({ status: outcome === "success" ? 200 : 401, headers: { "x-test-held": "brief" }, contentType: "application/json", body: JSON.stringify(outcome === "success" ? body : { error: { message: "Obsolete failure" } }) });
+    });
+    await page.locator("#rb-refresh-button").click(); await held;
+    key = store.issueAccessKey("commons", "owner"); await enter();
+    release();
+    await page.waitForFunction(() => window.heldReads.brief);
+    assert.equal(await page.locator("#main").isVisible(), true);
+    assert.doesNotMatch(await page.locator("#return-brief-panel").textContent(), /Obsolete/);
+    await page.unroute("**/return-brief");
+
+    // A revoked form's completion must neither erase a new draft nor keep its controls locked.
+    let releaseForm, formArrived;
+    const formHeld = new Promise(resolve => formArrived = resolve);
+    await page.route("**/commands", async route => {
+      const response = await route.fetch();
+      await new Promise(resolve => { releaseForm = resolve; formArrived(); });
+      if (outcome === "success") await route.fulfill({ response, headers: { ...response.headers(), "x-test-held": "form" } });
+      else await route.fulfill({ status: 401, headers: { "x-test-held": "form" }, contentType: "application/json", body: JSON.stringify({ error: { message: "Obsolete form failure" } }) });
+    });
+    await page.locator("#message-input").fill("Old submission");
+    await page.locator('#message-form button[type="submit"]').click(); await formHeld;
+    key = store.issueAccessKey("commons", "owner"); await enter();
+    await page.locator("#message-input").fill("New session draft");
+    releaseForm(); await page.waitForFunction(() => window.heldReads.form);
+    assert.equal(await page.locator("#message-input").inputValue(), "New session draft");
+    assert.equal(await page.locator('#message-form button[type="submit"]').isDisabled(), false);
+    assert.equal(await page.locator("#composer-status").textContent(), "");
+    assert.doesNotMatch(await page.locator("#status").textContent(), /Obsolete/);
     assert.deepEqual(errors, []);
   });
 }

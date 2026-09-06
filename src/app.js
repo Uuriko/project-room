@@ -1,14 +1,16 @@
 import { EVENT_TYPES as T, WORK_STATES as S } from "./events.js";
 import { RoomClient, draftCommand } from "./client.js";
+import { ReturnBrief } from "./return-brief.js";
+import { verificationSatisfied, matchesReceipt } from "./work-status.js";
 import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts } from "./conversation.js";
 
 const $ = selector => document.querySelector(selector);
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
 let workDraftId = null, replyToId = null, busy = false;
+let submission = null;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
 const viewPositions = new Map(), pendingReactions = new Map();
 let newVisibleMessages = 0;
-let returnBrief = null; // last fetched brief; history items accumulate across pages of one frozen horizon
 const client = new RoomClient({
   onSnapshot(snapshot, identity) {
     const firstSnapshot = !state;
@@ -17,15 +19,16 @@ const client = new RoomClient({
     $("#identity-label").textContent = `${state.members[session.member.id].displayName} · ${session.member.kind}`;
     $("#cursor-label").textContent = `Your caught-up marker: ${snapshot.cursor} · room event ${snapshot.sequence}`;
     render();
-    if (firstSnapshot) loadReturnBrief().catch(error => notice(error.message, true));
+    if (!briefView.owns(briefView.chain)) loadReturnBrief();
     if (firstSnapshot && location.hash.startsWith("#message-")) revealMessage(location.hash.slice(9));
   },
   onStatus(text) { $("#connection-status").textContent = text; },
   onAccessEnded() {
+    releaseSubmission();
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null;
     workDraftId = null; replyToId = null;
     currentThreadId = null; conversation = null; drafts = new ConversationDrafts();
-    viewPositions.clear(); pendingReactions.clear(); newVisibleMessages = 0; returnBrief = null;
+    viewPositions.clear(); pendingReactions.clear(); newVisibleMessages = 0; briefView.reset();
     $("#main").hidden = true; $("#auth-panel").hidden = false; $("#signout-button").hidden = true;
     $("#identity-label").textContent = "Not signed in";
     for (const id of ["message-list", "work-list", "event-list", "presence-list", "member-stack", "summary-grid", "reply-context", "source-context", "action-context", "action-fields", "cursor-label", "presence-count", "message-count", "event-count", "rb-attention-list", "rb-involving-list", "rb-history-list"]) $(`#${id}`).replaceChildren();
@@ -40,6 +43,12 @@ const client = new RoomClient({
     $("#auth-error").textContent = "Sign in with an active room key. Session ended; private drafts were cleared.";
     $("#connection-status").textContent = "Not connected";
   }
+});
+const briefView = new ReturnBrief(client, {
+  onChange: renderReturnBrief,
+  // A recoverable catch-up error belongs to its own status region. It does not
+  // establish that the room's separate live connection has disconnected.
+  onError: error => { if ([401, 403].includes(error.status)) client.handleFailure(error); }
 });
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 const humanize = value => String(value).replaceAll("_", " ").replaceAll(".", " ");
@@ -221,7 +230,7 @@ function revealMessage(id) {
   const row = document.getElementById(`message-${id}`);
   row?.focus({ preventScroll: true }); row?.scrollIntoView({ block: "nearest", behavior: "instant" });
 }
-function readyForDecision(i) { return i.ownerDecisionRequired && !i.decision && i.state === S.COMPLETED && (!i.independentVerificationRequired || i.verification?.result === "pass"); }
+function readyForDecision(i) { return i.ownerDecisionRequired && !matchesReceipt(i.decision, i.receipt) && i.state === S.COMPLETED && verificationSatisfied(i); }
 function activeClaim(i) { return i.claim?.status === "active" && Date.parse(i.claim.expiresAt) > Date.now(); }
 function actions(i) {
   const a = [], own = i.accountableMemberId === session.member.id;
@@ -243,14 +252,21 @@ function workCard(i) {
 // Quiet Focus A4: a failed send reports beside the composer that holds the draft,
 // not only in the page-level status area; the Send button is the retry and the
 // draft clears only after the service acknowledges the retry.
+function releaseSubmission() {
+  if (submission) submission.controls.forEach((e, i) => e.disabled = submission.disabled[i]);
+  submission = null; busy = false;
+}
 async function submit(form, fn) {
   if (busy) return;
   busy = true; const controls = [...form.querySelectorAll("button, input, select, textarea")];
   const disabled = controls.map(e => e.disabled); controls.forEach(e => e.disabled = true);
+  const ticket = submission = { controls, disabled, generation: client.generation };
+  const current = () => submission === ticket && (form.id === "auth-form" || ticket.generation === client.generation);
   const local = form.querySelector(".form-status");
   if (local) { local.textContent = ""; local.classList.remove("visible", "error"); }
-  try { await fn(); }
+  try { await fn(current); }
   catch (error) {
+    if (!current()) return;
     const text = `${error.message}. ${state ? "Draft kept; press Send to retry." : "Sign in again."}`;
     // One live-announcement owner per send result: when the form has its own status region
     // it owns the announcement (the visible composer error); the page-level region stays
@@ -258,14 +274,14 @@ async function submit(form, fn) {
     if (local) { local.textContent = text; local.classList.add("visible", "error"); }
     else notice(text, true);
   }
-  finally { busy = false; controls.forEach((e, i) => e.disabled = disabled[i]); if (state) render(); }
+  finally { if (current()) { releaseSubmission(); if (state) render(); } }
 }
 $("#auth-form").addEventListener("submit", async e => {
   e.preventDefault(); $("#auth-error").textContent = "";
   const accessKey = $("#access-key").value.trim();
-  await submit(e.currentTarget, async () => {
-    try { await client.login(accessKey); $("#access-key").value = ""; $("#message-input").focus(); notice("Signed in. Welcome to your room."); }
-    catch (error) { $("#auth-error").textContent = error.message; throw error; }
+  await submit(e.currentTarget, async current => {
+    try { await client.login(accessKey); if (!current() || !client.session) return; $("#access-key").value = ""; $("#message-input").focus(); notice("Signed in. Welcome to your room."); }
+    catch (error) { if (current()) $("#auth-error").textContent = error.message; throw error; }
   });
   if (state && location.hash.startsWith("#message-")) revealMessage(location.hash.slice(9));
 });
@@ -374,7 +390,7 @@ $("#new-work-form").addEventListener("submit", e => {
   e.preventDefault(); if (!state) return;
   const data = { workItemId: workDraftId, title: $("#work-title-input").value.trim(), definitionOfDone: $("#work-done-input").value.trim(), accountableMemberId: $("#assignee-select").value, verifierMemberId: $("#verifier-select").value, independentVerificationRequired: true, ownerDecisionRequired: true, humanDecisionMakerId: state.room.ownerId, mode: $("#work-mode-select").value, sourceMessageId: $("#source-message-id").value || null };
   pendingWork = draftCommand(pendingWork, T.WORK_PROPOSED, data);
-  submit(e.currentTarget, async () => { await client.send(pendingWork.command); $("#new-work-form").reset(); $("#new-work-form").hidden = true; pendingWork = null; workDraftId = null; notice("Work proposed. The accountable member must accept it; no external action was authorized."); });
+  submit(e.currentTarget, async current => { await client.send(pendingWork.command); if (!current()) return; $("#new-work-form").reset(); $("#new-work-form").hidden = true; pendingWork = null; workDraftId = null; notice("Work proposed. The accountable member must accept it; no external action was authorized."); });
 });
 const field = (name, label, type = "text") => `<label>${esc(label)}<input name="${name}" type="${type}" required maxlength="2000"></label>`;
 const area = (name, label) => `<label>${esc(label)}<textarea name="${name}" required rows="3" maxlength="4000"></textarea></label>`;
@@ -407,7 +423,7 @@ $("#action-form").addEventListener("submit", e => {
   if (entry.action === "claim") data.paths = fields.paths.split("\n").map(p => p.trim()).filter(Boolean);
   if (["verify", "decide"].includes(entry.action)) Object.assign(data, entry.receipt);
   entry.retry = draftCommand(entry.retry, entry.type, data);
-  submit(e.currentTarget, async () => { await client.send(entry.retry.command); $("#action-dialog").close(); pendingAction = null; notice("Record saved. External execution and independent verification are separate facts."); });
+  submit(e.currentTarget, async current => { await client.send(entry.retry.command); if (!current()) return; $("#action-dialog").close(); pendingAction = null; notice("Record saved. External execution and independent verification are separate facts."); });
 });
 window.addEventListener("beforeunload", e => {
   if (!state) return;
@@ -419,17 +435,7 @@ window.addEventListener("pageshow", e => { if (e.persisted) client.restore().cat
 // Return brief (disposition 5557850637): compact expandable rail entry. Fetch on return and
 // on open; history stays fixed through the frozen horizon H, the action sections are live
 // through N, and only the explicit button acknowledges - exactly H, never the latest event.
-async function loadReturnBrief(continuation = null) {
-  const brief = await client.returnBrief(continuation ? { horizon: continuation.horizon, after: continuation.after, cursor: continuation.cursor } : {});
-  if (!state) return;
-  if (continuation && returnBrief && returnBrief.history.evaluatedThrough === brief.history.evaluatedThrough) {
-    returnBrief.history.items = returnBrief.history.items.concat(brief.history.items);
-    returnBrief.history.hasMore = brief.history.hasMore;
-    returnBrief.history.continuation = brief.history.continuation;
-    returnBrief.current = brief.current; // the action sections are live on every fetch
-  } else returnBrief = brief;
-  renderReturnBrief();
-}
+function loadReturnBrief() { return briefView.refresh(); }
 const roleLabel = role => ({ accountableMemberId: "accountable", verifierMemberId: "verifier", humanDecisionMakerId: "decision maker" }[role] ?? humanize(role));
 function describeBriefEvent({ sequence, event }) {
   const actor = esc(name(event.actorId));
@@ -442,7 +448,17 @@ function describeBriefEvent({ sequence, event }) {
   return `<li class="rb-event"><span class="rb-seq">#${sequence}</span> <span class="rb-type">${type}</span> <span class="rb-actor">${actor}</span>${detail ? ` <span class="rb-detail">${detail}</span>` : ""}</li>`;
 }
 function renderReturnBrief() {
-  if (!returnBrief || !state) return;
+  const returnBrief = briefView.owns(briefView.chain) ? briefView.brief : null;
+  $("#rb-status").textContent = state ? briefView.message : "";
+  $("#rb-refresh-button").disabled = !state || briefView.busy;
+  $("#rb-more-button").disabled = briefView.busy;
+  $("#rb-ack-button").disabled = true;
+  $("#rb-more-button").hidden = true;
+  if (!returnBrief || !state) {
+    for (const id of ["rb-current-boundary", "rb-history-boundary", "rb-attention-list", "rb-involving-list", "rb-history-list"]) $(`#${id}`).replaceChildren();
+    $("#rb-ack-button").textContent = "Mark caught up";
+    return;
+  }
   const { history, current } = returnBrief;
   $("#rb-current-boundary").textContent = `as of event ${current.evaluatedThrough}`;
   $("#rb-history-boundary").textContent = history.evaluatedThrough === history.cursor
@@ -458,28 +474,14 @@ function renderReturnBrief() {
     || '<li class="rb-empty">Nothing new since your marker.</li>';
   $("#rb-more-button").hidden = !history.hasMore;
   $("#rb-ack-button").textContent = history.evaluatedThrough === history.cursor ? "Already caught up" : `Mark caught up through event ${history.evaluatedThrough}`;
-  $("#rb-ack-button").disabled = history.evaluatedThrough === history.cursor;
+  $("#rb-ack-button").disabled = briefView.busy || history.evaluatedThrough === history.cursor;
 }
 $("#return-brief-panel").addEventListener("toggle", e => {
-  if (e.currentTarget.open && state) loadReturnBrief().catch(error => notice(error.message, true)); // reopening starts a fresh horizon
+  if (e.currentTarget.open && state) loadReturnBrief(); // reopening replaces the pagination chain
 });
-$("#rb-more-button").addEventListener("click", async () => {
-  try { if (returnBrief?.history.continuation) await loadReturnBrief(returnBrief.history.continuation); }
-  catch (error) {
-    if (error.code === "cursor_changed") { // another tab moved the marker: restart on a fresh horizon
-      try { await loadReturnBrief(); notice("Your marker moved elsewhere; the brief restarted on a fresh horizon."); } catch (retry) { client.handleFailure(retry); notice(retry.message, true); }
-    } else { client.handleFailure(error); notice(error.message, true); }
-  }
-});
-$("#rb-ack-button").addEventListener("click", async () => {
-  try {
-    if (!returnBrief) return;
-    await client.caughtUp(returnBrief.history.evaluatedThrough); // acknowledges exactly H; H+1 stays new
-    await client.refresh();
-    await loadReturnBrief();
-    notice("Your caught-up position saved. No peer read or processing claim was created.");
-  } catch (error) { client.handleFailure(error); notice(error.message, true); }
-});
+$("#rb-refresh-button").addEventListener("click", loadReturnBrief);
+$("#rb-more-button").addEventListener("click", () => briefView.more());
+$("#rb-ack-button").addEventListener("click", () => briefView.acknowledge());
 client.restore().catch(error => {
   $("#auth-error").textContent = [401, 403].includes(error.status) ? "Use a provisioned human room key to enter. No demo identity is selected for you." : "Room service unavailable. Check the service and retry; no connection is claimed.";
   $("#auth-panel").hidden = false;
