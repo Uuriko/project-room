@@ -10,20 +10,20 @@ Additive-only test harness for the Project Room pilot, pinned to the Phase 0 pub
 
 ## Commands and verified results
 
-Run from the repository root. Results below are from a clean-clone execution of these exact files at this commit (2026-09-06, ~08:39-08:42 PDT).
+Run from the repository root. Results below are from execution of these exact files at this commit.
 
 | Pass | File | Command | Result |
 |---|---|---|---|
 | 26 return-brief endpoint | adversarial/adv-rb-check.mjs | `node adversarial/adv-rb-check.mjs` | 31 pass / 0 fail |
-| 27 hostile ids/text | adversarial/adv-hostile-check.mjs | `node adversarial/adv-hostile-check.mjs` | 17 pass / 0 fail (incl. esc()-removal mutation proof; restores the file) |
+| 27 hostile ids/text | adversarial/adv-hostile-check.mjs | `node adversarial/adv-hostile-check.mjs` | 21 pass / 0 fail (includes isolated esc()-removal red/green; production `src/app.js` is never written). `MODE=mutant node adversarial/adv-hostile-check.mjs` serves only the isolated identity-`esc` copy and MUST exit non-zero |
 | 28 events ceiling | adversarial/adv-caps-events.mjs | `node adversarial/adv-caps-events.mjs` | 4 pass / 0 fail (seeds 10,000 events, ~160s) |
 | 28 member/work/credential/size caps | adversarial/adv-caps-rest.mjs | `node adversarial/adv-caps-rest.mjs` | 12 pass / 0 fail |
 | 29 rate limits + stream caps | adversarial/adv-rate-check.mjs | `node adversarial/adv-rate-check.mjs` | 13 pass / 0 fail (includes a real 61s window-reset wait) |
 | 30 CSRF/Origin/Host matrix | adversarial/adv-websec-check.mjs | `node adversarial/adv-websec-check.mjs` | 21 pass / 0 fail |
 | 31 session cascade fuzz | adversarial/adv-cascade-check.mjs | `node adversarial/adv-cascade-check.mjs` | 29 pass / 0 fail (500 seeded ops, 146 tokens, model-matched sweeps) |
-| 32 E2 restore drill | adversarial/adv-restore-check.mjs | `node adversarial/adv-restore-check.mjs` | 12 pass / 0 fail |
+| 32 E2 restore drill | adversarial/adv-restore-check.mjs | `node adversarial/adv-restore-check.mjs` | 12 pass / 0 fail when the WAL stale-copy hazard is exhibited (`walExists && copiedSeq < liveSeq`). If that condition is not exhibited, D2 prints `INCONCLUSIVE` and does not count a stale-copy pass |
 
-Total: 139 checks, 0 failures. Every check asserts a guard's exact boundary, so a regressed guard fails the suite (inherent red-green sensitivity); pass 27 additionally carries an explicit mutation proof.
+Total: 143 checks, 0 failures when the WAL hazard is exhibited (pass 27 is 21 rather than 17 because the isolated mutant proof is four real checks). Every check asserts a guard's exact boundary, so a regressed guard fails the suite. Pass 27 additionally proves that removing `esc()` in an isolated asset copy injects `img[src=x]` and stops rendering the hostile displayName as inert text; CSP still blocks the `__pwned*` inline handlers on both clean and mutant, so those flags are not the mutant signal.
 
 ## Documented not-tested
 
@@ -31,4 +31,4 @@ Total: 139 checks, 0 failures. Every check asserts a guard's exact boundary, so 
 
 ## Drill finding folded into the D6 runbook
 
-Pass 32 demonstrates that a .db-only file copy of the RUNNING service is consistent but stale (live sequence 32 vs copy sequence 2; uncheckpointed pages live in -wal). Backup procedure lives in the D6 runbook r2 (dasha-desk #167, comment 5560292237): online backup API or VACUUM INTO hot, or quiesced checkpoint+copy; honest RPO = last verified backup.
+Pass 32 requires a .db-only file copy of the RUNNING service to be strictly stale while a WAL file is present (observed: live sequence 32 vs copy sequence 2). If the environment checkpoints the writes into the main file, the drill reports `INCONCLUSIVE` instead of claiming the hazard. Backup procedure lives in the D6 runbook r2 (dasha-desk #167, comment 5560292237): online backup API or VACUUM INTO hot, or quiesced checkpoint+copy; honest RPO = last verified backup.

@@ -1,19 +1,45 @@
-// Pass 27: hostile-id / hostile-text injection matrix. MODE=mutant runs against an esc-less
-// app.js and MUST fail (teeth proof); default run MUST pass.
-import { mkdtempSync, rmSync } from "node:fs";
+// Pass 27: hostile-id / hostile-text injection matrix.
+// Default: clean assets MUST pass, then an isolated esc()-identity mutant MUST go red
+// on the escaping-dependent DOM checks (teeth). Production src/app.js is never written.
+// MODE=mutant: serve only the isolated mutant and apply the same green assertions; that
+// run MUST fail (the advertised teeth proof).
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
+const mutantOnly = process.env.MODE === "mutant";
+const repoRoot = new URL("../", import.meta.url);
+const appJsPath = new URL("src/app.js", repoRoot);
+const ESC = `const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));`;
+const IDENTITY = `const esc = value => String(value ?? "");`;
+
 let pass = 0, failCount = 0;
 const check = (name, cond, detail = "") => {
   if (cond) { pass++; console.log(`ok   ${name}`); }
   else { failCount++; console.log(`FAIL ${name} ${detail}`); }
 };
+
+function isolateMutantAssets() {
+  const dir = mkdtempSync(join(tmpdir(), "adv-hostile-mutant-"));
+  writeFileSync(join(dir, "index.html"), readFileSync(new URL("index.html", repoRoot)));
+  mkdirSync(join(dir, "src"));
+  for (const name of ["app.js", "client.js", "events.js", "conversation.js", "styles.css"]) {
+    let text = readFileSync(new URL(`src/${name}`, repoRoot), "utf8");
+    if (name === "app.js") {
+      if (!text.includes(ESC)) throw new Error("esc() definition not found; isolated mutation cannot be applied");
+      text = text.replace(ESC, IDENTITY);
+      if (text.includes(ESC) || !text.includes(IDENTITY)) throw new Error("isolated esc() mutation did not apply");
+    }
+    writeFileSync(join(dir, "src", name), text);
+  }
+  return { dir, assetRoot: pathToFileURL(dir + "/") };
+}
 
 const directory = mkdtempSync(join(tmpdir(), "adv-hostile-"));
 const store = new RoomStore(join(directory, "room.sqlite"));
@@ -38,48 +64,98 @@ const hostile = store.issueAccessKey('commons', 'hostile');
 send(hostile, T.MESSAGE_POSTED, { messageId: 'hm-1', body: '"><svg onload="window.__pwned2=1"></svg>' });
 send(hostile, T.MESSAGE_POSTED, { messageId: 'hm-2', body: '<script>window.__pwned3=1</script>' });
 
-const server = createRoomServer({ store, streamInterval: 60 });
-await new Promise(r => server.listen(0, "127.0.0.1", r));
-const origin = `http://127.0.0.1:${server.address().port}`;
-const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
-const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce" });
-const otherContext = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
-const page = await context.newPage();
-const other = await otherContext.newPage();
-const errors = [];
-page.on("pageerror", e => errors.push(e.message));
+const chrome = process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {};
+const browser = await chromium.launch({ headless: true, ...chrome });
 
-const login = async (p, key) => {
-  await p.goto(origin);
-  await p.locator("#auth-panel").waitFor({ state: "visible" });
-  await p.locator("#access-key").fill(key);
-  await p.getByRole("button", { name: "Enter room", exact: true }).click();
-  await p.locator("#main").waitFor({ state: "visible" });
-};
-await login(page, owner);
-await login(other, hostile);
+async function observeUi(assetRoot, withDisclosure) {
+  const server = createRoomServer({ store, streamInterval: 60, ...(assetRoot ? { assetRoot } : {}) });
+  await new Promise(r => server.listen(0, "127.0.0.1", r));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce" });
+  const page = await context.newPage();
+  const errors = [];
+  page.on("pageerror", e => errors.push(e.message));
+  await page.goto(origin);
+  await page.locator("#auth-panel").waitFor({ state: "visible" });
+  await page.locator("#access-key").fill(owner);
+  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await page.locator("#main").waitFor({ state: "visible" });
+  const obs = {
+    pwned1: await page.evaluate(() => window.__pwned1 === undefined),
+    pwned2: await page.evaluate(() => window.__pwned2 === undefined),
+    pwned3: await page.evaluate(() => window.__pwned3 === undefined),
+    imgCount: await page.locator('img[src="x"]').count(),
+    displayNameAsText: await page.locator("#presence-list").innerText().then(t => t.includes('<img src=x onerror="window.__pwned1=1">')),
+    errors
+  };
+  if (withDisclosure) {
+    const otherContext = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+    const other = await otherContext.newPage();
+    await other.goto(origin);
+    await other.locator("#auth-panel").waitFor({ state: "visible" });
+    await other.locator("#access-key").fill(hostile);
+    await other.getByRole("button", { name: "Enter room", exact: true }).click();
+    await other.locator("#main").waitFor({ state: "visible" });
+    const card = page.locator('[data-disclosure-host="hostile"]');
+    await card.locator("summary").click();
+    obs.disclosureOpened = await card.locator("details").evaluate(d => d.open);
+    await card.locator("summary").focus();
+    await other.locator("#message-input").fill("background traffic");
+    await other.getByRole("button", { name: "Send", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector("#message-list")?.textContent.includes("background traffic"));
+    obs.disclosureStayed = await card.locator("details").evaluate(d => d.open);
+    obs.focusStayed = await page.evaluate(() => document.activeElement?.tagName === "SUMMARY");
+    await otherContext.close();
+  }
+  await context.close();
+  server.closeStreams(); server.closeAllConnections();
+  await new Promise(r => server.close(r));
+  return obs;
+}
 
-// 3. No injection executed, hostile strings rendered as inert text.
-check("no onerror handler fired (displayName)", await page.evaluate(() => window.__pwned1 === undefined));
-check("no onload handler fired (body svg)", await page.evaluate(() => window.__pwned2 === undefined));
-check("no script executed (body)", await page.evaluate(() => window.__pwned3 === undefined));
-check("no injected img[src=x] node", await page.locator('img[src="x"]').count() === 0);
-check("hostile displayName rendered as text", await page.locator("#presence-list").innerText().then(t => t.includes('<img src=x onerror="window.__pwned1=1">')));
+function checkGreenUi(obs) {
+  check("no onerror handler fired (displayName)", obs.pwned1);
+  check("no onload handler fired (body svg)", obs.pwned2);
+  check("no script executed (body)", obs.pwned3);
+  check("no injected img[src=x] node", obs.imgCount === 0, `count=${obs.imgCount}`);
+  check("hostile displayName rendered as text", obs.displayNameAsText);
+}
 
-// 4. Disclosure + focus restore survive a background update, hostile member's own card.
-const card = page.locator('[data-disclosure-host="hostile"]');
-await card.locator('summary').click();
-check("disclosure opened", await card.locator('details').evaluate(d => d.open));
-await card.locator('summary').focus();
-await other.locator("#message-input").fill("background traffic");
-await other.getByRole("button", { name: "Send", exact: true }).click();
-await page.waitForFunction(() => document.querySelector("#message-list")?.textContent.includes("background traffic"));
-check("disclosure stayed open across background update", await card.locator('details').evaluate(d => d.open));
-check("focus stayed on the disclosure summary", await page.evaluate(() => document.activeElement?.tagName === "SUMMARY"));
-check("no page errors", errors.length === 0, errors.join("; "));
+function checkDisclosure(obs) {
+  check("disclosure opened", obs.disclosureOpened);
+  check("disclosure stayed open across background update", obs.disclosureStayed);
+  check("focus stayed on the disclosure summary", obs.focusStayed);
+  check("no page errors", obs.errors.length === 0, obs.errors.join("; "));
+}
 
-await browser.close();
-server.closeStreams(); server.closeAllConnections();
-await new Promise(r => server.close(r)); store.close(); rmSync(directory, { recursive: true, force: true });
+const appBefore = readFileSync(appJsPath);
+let mutantDir;
+try {
+  if (mutantOnly) {
+    const mutant = isolateMutantAssets();
+    mutantDir = mutant.dir;
+    const obs = await observeUi(mutant.assetRoot, true);
+    checkGreenUi(obs);
+    checkDisclosure(obs);
+    console.log("     [mutant] isolated esc-identity assets; green XSS/DOM assertions must fail");
+  } else {
+    const green = await observeUi(undefined, true);
+    checkGreenUi(green);
+    checkDisclosure(green);
+    const mutant = isolateMutantAssets();
+    mutantDir = mutant.dir;
+    const mutantApp = readFileSync(join(mutant.dir, "src/app.js"), "utf8");
+    check("isolated mutant replaced esc() with identity", mutantApp.includes(IDENTITY) && !mutantApp.includes(ESC));
+    const red = await observeUi(mutant.assetRoot, false);
+    check("isolated mutant injects img[src=x] (esc-removal teeth)", red.imgCount > 0, `count=${red.imgCount}`);
+    check("isolated mutant does not render hostile displayName as text", red.displayNameAsText === false);
+    check("production src/app.js unchanged", Buffer.from(readFileSync(appJsPath)).equals(Buffer.from(appBefore)));
+  }
+} finally {
+  await browser.close();
+  store.close();
+  rmSync(directory, { recursive: true, force: true });
+  if (mutantDir) rmSync(mutantDir, { recursive: true, force: true });
+}
 console.log(`\n${pass} pass / ${failCount} fail`);
 process.exit(failCount ? 1 : 0);

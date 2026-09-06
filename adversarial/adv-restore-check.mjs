@@ -62,6 +62,7 @@ const pageAll = (store, token, roomId) => {
   const storeA = new RoomStore(fileA);
   storeA.initialize(initialRoom());
   const owner = storeA.issueAccessKey("commons", "owner");
+  storeA.db.exec("PRAGMA wal_autocheckpoint=0");
   storeA.db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); // force a clean checkpoint baseline
   const baseline = storeA.room("commons").sequence;
   for (let i = 0; i < 30; i++) storeA.command(owner, "commons", cmd(T.MESSAGE_POSTED, { body: `wal${i}` }));
@@ -72,9 +73,13 @@ const pageAll = (store, token, roomId) => {
   copyFileSync(fileA, fileC); // .db only, no -wal: the classic bad backup
   const storeC = new RoomStore(fileC);
   const copiedSeq = storeC.room("commons").sequence;
-  check("bad backup (no -wal) opens CONSISTENT but possibly stale", copiedSeq >= baseline && copiedSeq <= liveSeq, `copied=${copiedSeq} live=${liveSeq}`);
+  check("db-only copy opens with sequence in [baseline, live]", copiedSeq >= baseline && copiedSeq <= liveSeq, `copied=${copiedSeq} baseline=${baseline} live=${liveSeq}`);
   console.log(`     [drill finding] live sequence ${liveSeq}, .db-only copy sequence ${copiedSeq}, wal present: ${walExists} -> backups must checkpoint/close or include -wal`);
-  check("drill documents staleness honestly", true);
+  if (walExists && copiedSeq < liveSeq) {
+    check("db-only copy is stale vs live while WAL present", copiedSeq < liveSeq && walExists, `copied=${copiedSeq} live=${liveSeq}`);
+  } else {
+    console.log(`INCONCLUSIVE stale-copy hazard not exhibited: walExists=${walExists} copied=${copiedSeq} live=${liveSeq} baseline=${baseline}`);
+  }
   storeC.close(); storeA.close(); rmSync(dirA, { recursive: true, force: true }); rmSync(dirC, { recursive: true, force: true });
 }
 // D3: corruption - a damaged store fails loudly and is never silently reset.
