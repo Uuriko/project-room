@@ -8,28 +8,32 @@ Requires Node 24.19 or newer with `node:sqlite`. The service and domain checks h
 
 ```sh
 npm run check
-npm run provision -- --init --member owner
+npm run provision -- --init --member owner --account account-owner
 npm run provision -- --member reviewer --name Reviewer
 npm run provision -- --member room-agent --name Room-agent --kind agent
 npm start
 ```
 
-Each provisioning command prints a private seven-day access key once. Only an operator with local database access can provision or rotate keys. Never commit keys, send them to the mailbox, put them in URLs, or include them in logs. Reissuing a member's key invalidates its previous keys and browser sessions. The owner has all room capabilities; additional members default to accept/complete/verify, not steering, membership administration, or external-write capability. Explicit grants use `--permissions` with comma-separated known capabilities. Agent accounts cannot receive human administration or decision authority.
+Each provisioning command prints a private seven-day access key once. Only an operator with local database access can provision or rotate keys. Never commit keys, send them to the mailbox, put them in URLs, or include them in logs. Reissuing a member's key invalidates its previous keys and browser sessions. The owner has all room capabilities; additional members default to accept/complete/verify, not steering, membership administration, or external-write capability. Explicit grants use `--permissions` with comma-separated known capabilities. Agent members cannot receive human administration or decision authority.
 
-The browser exchanges a **human** key for an eight-hour maximum HttpOnly, SameSite=Strict session. The key is not saved in localStorage. Agent accounts use their own bearer key through the API; provisioned account names do **not** verify that a particular AI runtime is attached. No agent runner is attached by these commands.
+`--account` names the pilot's canonical human account. The same explicit account may be bound to one human membership in each of several Rooms; the binding is immutable. Omitting it creates a deterministic provisional account for that one Room membership. The `acct-legacy-` namespace is reserved and cannot be supplied to bind a different membership. Matching member IDs, display names, or provisional accounts are never treated as evidence that two Room memberships belong to the same person. These locally asserted IDs are not verified login identities, public registration, OIDC, SSO, or account recovery.
+
+The browser exchanges a **human** key for an eight-hour maximum HttpOnly, SameSite=Strict session. The key is not saved in localStorage. Human credentials snapshot the canonical account and its authorization epoch; every authentication rechecks the live account, immutable Room binding, active Room membership, credential, and parent credential. Browser reads also echo an opaque, non-authorizing session binding so a tab can reject a response produced through a replacement session for the same account and clear its private in-memory state. Agent members instead use account-free bearer credentials through the API. A provisioned agent name does **not** verify that a particular AI runtime is attached. No agent runner is attached by these commands.
 
 The entry point binds only to loopback and rejects `NODE_ENV=production` or a non-loopback `HOST`. Defaults: `127.0.0.1:4173`, database `.data/room.sqlite`. `PORT`, `HOST`, `ROOM_DB`, and a fixed `ROOM_ORIGIN` can be supplied by the operator. Non-loopback origins must be HTTPS; hosting behind a proxy is a separate deployment decision. Host/Origin are compared with the configured origin, not blindly trusted forwarded headers. Cookies get Secure when the configured origin is HTTPS. Nothing in this change deploys a service.
 
 ## Data and authority
 
-- SQLite WAL, foreign keys, synchronous FULL, prepared statements, schema version 2, and immediate transactions. Version 2 separates authenticated completion reporters from explicit producer attribution and makes older binaries fail closed after migration.
+- SQLite WAL, foreign keys, synchronous FULL, prepared statements, schema version 3, and explicit transactions. Version 2 separated authenticated completion reporters from explicit producer attribution. Version 3 adds canonical human accounts, immutable Room-member bindings, authorization epochs, and account-wide credential revocation. Older binaries fail closed after migration.
 - A v1 upgrade writes an immutable, conservatively repaired projection checkpoint in the same transaction as the v2 version marker. Recovery for an upgraded room starts at that trusted checkpoint and strictly replays the append-only v2 tail; native-v2 rooms rebuild from their full event log. Legacy event bodies are never rewritten.
+- A v1 or v2 identity upgrade creates a separate provisional account for every historical human Room membership, then binds its existing access keys and child sessions to epoch 0 without changing raw credentials or event bodies. It never guesses cross-Room identity from names or member IDs. Provisional accounts cannot yet be safely reconciled or merged.
 - Events, the current room projection, and command-id deduplication commit together. Rejected commands leave all three unchanged.
 - Each command has a client-generated ID, type, data, and optional causal event ID. The server derives actor, room binding, time, event ID, and idempotency key from the authenticated request.
 - Idempotency is scoped to room + actor + command ID. Exact retry returns the original committed event. Changed content with the same ID conflicts. Membership/credential revocation is checked even on retries.
 - Work mutations require their expected revision. The server rejects stale or invalid transitions; it does not merge conflicting decisions or silently retry them against new evidence.
-- Human and agent accounts share conversation access within their room. Directed messages are **room-visible**, not DMs. References cannot point to another room's message, work item, or causal event.
+- A human account is a global authenticated principal; a member remains the Room-local actor and permission holder. An account grants no Room access by itself. Human and agent members share conversation access within their Room. Directed messages are **room-visible**, not DMs. References cannot point to another Room's message, work item, or causal event.
 - Member access changes are revisioned events. Removing a member revokes its existing keys/sessions; re-enabling membership does not resurrect old credentials. Every API read, write, and stream poll rechecks current access.
+- Account access changes are separately revisioned, increment the authorization epoch, revoke that account's credentials in every Room, and commit an account audit row atomically. Reactivation requires new credentials and never revives an older epoch. This checkpoint provides the durable store primitive only; an authenticated administration surface, operator attribution, identity-provider proof, invitations, and recovery remain future gates.
 - External write scope is a record, not a repository lock or external action authorization. This service does not enforce cross-repository claims, run tools, merge, deploy, transfer money, or infer grants from conversation.
 - Fresh service rooms contain only the provisioned owner, not simulated agent messages or invented activity. `src/seed.js` remains a historical contract-test fixture and is not served or imported by the connected client. The unused browser storage module has been deleted.
 
@@ -41,13 +45,14 @@ All API responses are JSON except the event stream. Non-success responses have `
 | --- | --- |
 | `GET /api/health` | Process responds; not a database restore or availability guarantee |
 | `POST /api/session` | Exchange `{accessKey}` for a human browser session; exact Origin required |
-| `GET /api/session` | Current member, room, expiry, and session CSRF confirmation |
+| `GET /api/session` | For a human browser session: current canonical account and authorization epoch, opaque response binding, Room member, Room, expiry, and session CSRF confirmation. Account, epoch, session-binding, and CSRF fields are null for an agent bearer credential. |
 | `DELETE /api/session` | Revoke the current credential. The revoked HttpOnly cookie is left inert so a delayed response from one tab cannot erase a newer login cookie from another; the next login overwrites it. |
-| `GET /api/rooms/:room` | Consistent state, event sequence, viewer identity, latest 100 audit events, and own caught-up cursor |
+| `GET /api/rooms/:room` | Consistent state, event sequence, latest 100 audit events, own caught-up cursor, and browser response ownership by Room/member/account/epoch/session. Account, epoch, and session fields are null for an agent bearer credential. |
 | `POST /api/rooms/:room/commands` | Submit `{id,type,data,causationId?}`; 201 committed, 200 exact duplicate |
 | `GET /api/rooms/:room/events?after=0&limit=100` | Ordered events, next cursor, and hasMore; limit 1–100 |
 | `GET /api/rooms/:room/stream?after=0` | SSE `room-event`, durable sequence IDs, Last-Event-ID resume |
 | `POST /api/rooms/:room/cursor` | Save `{sequence}` as the current member's monotonic caught-up position |
+| `GET /api/rooms/:room/return-brief` | Frozen history window plus current accountable work, with the same browser ownership tuple; account, epoch, and session fields are null for an agent bearer credential |
 
 Browser writes require the session's `X-CSRF-Token` and the exact Origin; SameSite is not the only protection. Bearer clients omit the cookie and supply `Authorization: Bearer ...`; a supplied Origin must still match. CSRF values are not credentials and are never accepted as identity. Credentials are stored as hashes only; child sessions remain bound to their parent key's validity.
 
@@ -73,6 +78,7 @@ Replies open a thread derived from the original message links, including histori
 - In-memory per-process budgets: 10 login attempts/minute per connection IP; 60 writes and 600 reads/minute per credential; up to 100 streams overall, three per credential. A 429 includes Retry-After. These are pilot limits, not distributed abuse controls; counters reset on restart.
 - Streams poll committed events every second, rechecking revocation before emission. Slow streams close and resume via cursor rather than accumulating an unbounded in-memory queue. Client stream availability is not a user-presence signal.
 - Preserve the same database file across restarts. Do not delete it to resolve a failed request. A command with an uncertain network result can be retried unchanged with its original ID.
+- Canonical account suspension/reactivation currently requires trusted local code using the revision-checked store primitive. There is no HTTP or polished operator command for it, and the audit row does not yet identify an authenticated administrator. Treat both as release blockers, not implied operations support.
 - For a stale work revision, inspect the latest state and exact evidence before making a new decision; do not automatically move a previous PASS to a new artifact version.
 - Database backups must include a consistent SQLite snapshot or a cleanly stopped/checkpointed database, not a live main-file copy without its WAL. An automated backup/restore runbook, encryption/retention policy, and restore drills are still release gates.
 - Automated checks cover the reducer, HTTP boundary, durable storage, sessions/revocation, retries, cursors, conversation structure, reactions, and client state races. The browser gate exercises two real authenticated contexts at desktop and narrow viewport sizes against a disposable local service. This does not substitute for physical mobile devices, assistive technology, other browser engines, or an independent review of the exact revision.

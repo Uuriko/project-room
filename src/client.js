@@ -61,6 +61,14 @@ export class RoomClient {
     if (generation === this.generation && this.session === session) this.endAccess();
   }
   path(suffix = "") { return `/api/rooms/${encodeURIComponent(this.session.roomId)}${suffix}`; }
+  ownsResponse(payload, session = this.session) {
+    return Boolean(session?.account && typeof session.account.id === "string" && Number.isSafeInteger(session.account.authEpoch) && typeof session.sessionBinding === "string")
+      && payload.roomId === session.roomId
+      && payload.viewerId === session.member.id
+      && payload.viewerAccountId === session.account.id
+      && payload.viewerAuthEpoch === session.account.authEpoch
+      && payload.viewerSessionBinding === session.sessionBinding;
+  }
   refresh() {
     const generation = this.generation;
     if (this.flight?.generation === generation) { this.flight.again = true; return this.flight.promise; }
@@ -72,7 +80,7 @@ export class RoomClient {
           flight.again = false;
           const snapshot = await this.request(this.path());
           if (generation !== this.generation || !this.session) return;
-          if (snapshot.viewerId !== this.session.member.id) { this.endAccess(); return; }
+          if (!this.ownsResponse(snapshot)) { this.endAccess(); return; }
           if (snapshot.sequence >= this.sequence) { this.sequence = snapshot.sequence; this.onSnapshot(snapshot, this.session); }
         } while (flight.again);
       } catch (error) {
@@ -104,7 +112,7 @@ export class RoomClient {
     const query = params.toString();
     const brief = await this.request(this.path(`/return-brief${query ? `?${query}` : ""}`));
     if (generation !== this.generation || this.session !== session) return null;
-    if (brief.viewerId !== session?.member.id || brief.roomId !== session?.roomId) {
+    if (!this.ownsResponse(brief, session)) {
       this.endAccess();
       return null;
     }

@@ -10,7 +10,14 @@ const assets = new Map([
   ["/src/styles.css", ["src/styles.css", "text/css"]]
 ]);
 const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
-const sessionView = auth => ({ member: auth.member, roomId: auth.roomId, csrf: auth.csrf, expiresAt: auth.expiresAt });
+const sessionView = auth => ({
+  account: auth.account ? { id: auth.account.id, revision: auth.account.revision, authEpoch: auth.account.authEpoch } : null,
+  member: auth.member,
+  roomId: auth.roomId,
+  csrf: auth.csrf,
+  sessionBinding: auth.sessionBinding,
+  expiresAt: auth.expiresAt
+});
 
 export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = 1000 }) {
   if (origin) {

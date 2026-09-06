@@ -4,8 +4,10 @@ import { readFileSync } from "node:fs";
 import { RoomClient, draftCommand } from "../src/client.js";
 
 const response = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
-const snapshot = (sequence, viewerId = "human") => ({ sequence, state: {}, cursor: 0, viewerId });
-const identity = (id = "human") => ({ member: { id }, roomId: "commons", csrf: "session-confirmation" });
+const accountId = memberId => `account-${memberId}`;
+const sessionBinding = memberId => `session-${memberId}`;
+const snapshot = (sequence, viewerId = "human", viewerAccountId = accountId(viewerId), viewerAuthEpoch = 0, roomId = "commons", viewerSessionBinding = sessionBinding(viewerId)) => ({ sequence, roomId, state: {}, cursor: 0, viewerId, viewerAccountId, viewerAuthEpoch, viewerSessionBinding });
+const identity = (id = "human", account = accountId(id), authEpoch = 0, binding = sessionBinding(id)) => ({ account: { id: account, authEpoch }, member: { id }, roomId: "commons", csrf: "session-confirmation", sessionBinding: binding });
 const deferred = () => {
   let resolve;
   const promise = new Promise(done => { resolve = done; });
@@ -53,6 +55,27 @@ test("cookie account changes are detected before displaying an incorrectly attri
   const client = new RoomClient({ fetcher: async () => response(snapshot(8, "other")), onAccessEnded: () => ended = true, onSnapshot: () => shown = true });
   client.session = identity(); await client.refresh();
   assert.equal(ended, true); assert.equal(shown, false);
+});
+test("a matching Room member cannot own a response from another account, auth epoch, Room, or browser session", async () => {
+  for (const wrong of [
+    snapshot(8, "human", "account-other", 0),
+    snapshot(8, "human", "account-human", 1),
+    snapshot(8, "human", "account-human", 0, "elsewhere"),
+    snapshot(8, "human", "account-human", 0, "commons", "replacement-session")
+  ]) {
+    let ended = false, shown = false;
+    const client = new RoomClient({ fetcher: async () => response(wrong), onAccessEnded: () => ended = true, onSnapshot: () => shown = true });
+    client.session = identity(); await client.refresh();
+    assert.equal(ended, true); assert.equal(shown, false);
+  }
+});
+test("a browser session without canonical account ownership fails closed", async () => {
+  let ended = 0;
+  const client = new RoomClient({ fetcher: async () => response({ ...snapshot(4), viewerAccountId: undefined, viewerAuthEpoch: undefined }), onAccessEnded: () => { ended++; } });
+  client.session = { member: { id: "human" }, roomId: "commons", csrf: "session-confirmation" };
+  await client.refresh();
+  assert.equal(ended, 1);
+  assert.equal(client.session, null);
 });
 test("a late command receipt never refreshes or ends a different session", async () => {
   for (const status of [201, 401]) {
@@ -142,8 +165,14 @@ test("a coalesced refresh failure clears a snapshot already exposed during login
     assert.equal(client.sequence, 0);
   }
 });
-test("return briefs are bound to the current viewer and room", async () => {
-  for (const mismatch of [{ viewerId: "other", roomId: "commons" }, { viewerId: "human", roomId: "elsewhere" }]) {
+test("return briefs are bound to the current viewer, account epoch, Room, and browser session", async () => {
+  for (const mismatch of [
+    { viewerId: "other", viewerAccountId: "account-human", viewerAuthEpoch: 0, viewerSessionBinding: "session-human", roomId: "commons" },
+    { viewerId: "human", viewerAccountId: "account-other", viewerAuthEpoch: 0, viewerSessionBinding: "session-human", roomId: "commons" },
+    { viewerId: "human", viewerAccountId: "account-human", viewerAuthEpoch: 1, viewerSessionBinding: "session-human", roomId: "commons" },
+    { viewerId: "human", viewerAccountId: "account-human", viewerAuthEpoch: 0, viewerSessionBinding: "session-human", roomId: "elsewhere" },
+    { viewerId: "human", viewerAccountId: "account-human", viewerAuthEpoch: 0, viewerSessionBinding: "replacement-session", roomId: "commons" }
+  ]) {
     let ended = 0;
     const client = new RoomClient({
       fetcher: async () => response({ ...mismatch, history: {}, current: {} }),

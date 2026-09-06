@@ -200,6 +200,9 @@ test("HTTP: query parsing, auth, and response shape over the wire", async t => {
   const body = await ok.json();
   assert.equal(body.roomId, "commons");
   assert.equal(body.viewerId, "human");
+  assert.equal(body.viewerAccountId, store.authenticate(human).account.id);
+  assert.equal(body.viewerAuthEpoch, 0);
+  assert.equal(body.viewerSessionBinding, null, "bearer callers do not claim browser-session ownership");
   assert.equal(body.history.items.length, 2);
   assert.equal(body.history.hasMore, true);
   assert.equal(typeof body.current.evaluatedThrough, "number");

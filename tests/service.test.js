@@ -4,6 +4,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
@@ -69,6 +71,10 @@ test("work concurrency admits one revision winner across two database connection
 
 test("server identity, room boundaries, command schema and causal references are enforced", t => {
   const { store, owner, human } = fixture(t);
+  const snapshot = store.snapshot(human, "commons");
+  assert.equal(snapshot.roomId, "commons");
+  assert.equal(snapshot.viewerAccountId, store.authenticate(human).account.id);
+  assert.equal(snapshot.viewerSessionBinding, null, "bearer reads do not claim browser-session ownership");
   store.initialize(initialRoom("separate", "other-owner"));
   assert.throws(() => store.snapshot(human, "separate"), /does not grant access/);
   assert.throws(() => store.eventsAfter(human, "separate", 0), /does not grant access/);
@@ -100,6 +106,99 @@ test("key rotation invalidates child sessions and stores only hashed credentials
   assert.throws(() => store.authenticate(human), /revoked/);
 });
 
+test("one canonical human account spans Rooms and suspension revokes every credential epoch", t => {
+  const { store, owner } = fixture(t);
+  store.command(owner, "commons", command(T.MEMBER_ADDED, { memberId: "shared-human", displayName: "Shared human", kind: "human", permissions: [] }));
+  const accountId = "account-shared-human";
+  store.bindHumanAccount("commons", "shared-human", accountId);
+  const firstKey = store.issueAccessKey("commons", "shared-human");
+  const firstSession = store.createSession(firstKey).token;
+  store.initialize(initialRoom("second", "second-owner"));
+  const secondOwner = store.issueAccessKey("second", "second-owner");
+  store.command(secondOwner, "second", command(T.MEMBER_ADDED, { memberId: "second-human", displayName: "Second room identity", kind: "human", permissions: [] }));
+  store.bindHumanAccount("second", "second-human", accountId);
+  const secondKey = store.issueAccessKey("second", "second-human");
+  const secondSession = store.createSession(secondKey).token;
+
+  assert.equal(store.snapshot(secondKey, "second").viewerAccountId, accountId);
+  const suspended = store.changeAccountAccess(accountId, { expectedRevision: 0, active: false, reason: "Security suspension" });
+  assert.deepEqual(suspended, { id: accountId, active: false, revision: 1, authEpoch: 1 });
+  for (const token of [firstKey, firstSession, secondKey, secondSession]) assert.throws(() => store.authenticate(token), /account access ended|revoked/);
+  assert.equal(store.room("commons").state.members["shared-human"].active, true, "account suspension does not rewrite Room membership history");
+  assert.equal(store.accountForMember("second", "second-human").id, accountId);
+  assert.deepEqual(store.db.prepare("SELECT revision,active,auth_epoch,reason FROM account_access_events WHERE account_id=?").all(accountId).map(row => ({ ...row })), [
+    { revision: 1, active: 0, auth_epoch: 1, reason: "Security suspension" }
+  ]);
+
+  const restored = store.changeAccountAccess(accountId, { expectedRevision: 1, active: true, reason: "Identity owner recovered" });
+  assert.deepEqual(restored, { id: accountId, active: true, revision: 2, authEpoch: 2 });
+  for (const token of [firstKey, firstSession, secondKey, secondSession]) assert.throws(() => store.authenticate(token), /expired|revoked|account access ended/);
+  const replacement = store.issueAccessKey("commons", "shared-human");
+  assert.equal(store.authenticate(replacement).account.authEpoch, 2);
+  assert.equal(store.command(owner, "commons", command(T.MESSAGE_POSTED, { body: "Owner remains separate" })).event.actorId, "owner");
+});
+
+test("an event page cannot cross the account authorization snapshot that admitted it", t => {
+  const { store, filename, human, agent } = fixture(t);
+  const other = new RoomStore(filename);
+  t.after(() => other.close());
+  const account = store.authenticate(human).account;
+  const after = store.room("commons").sequence;
+  const authenticate = store.authenticate.bind(store);
+  let interposed = false;
+  store.authenticate = (...args) => {
+    const auth = authenticate(...args);
+    if (!interposed) {
+      interposed = true;
+      other.changeAccountAccess(account.id, { expectedRevision: account.revision, active: false, reason: "Concurrent suspension" });
+      other.command(agent, "commons", command(T.MESSAGE_POSTED, { body: "Committed after suspension" }));
+    }
+    return auth;
+  };
+
+  const page = store.eventsAfter(human, "commons", after);
+  assert.deepEqual(page.events, [], "the authorized read remains on its pre-suspension snapshot");
+  assert.equal(page.hasMore, false);
+  assert.throws(() => store.authenticate(human), /account access ended|revoked/);
+  assert.equal(other.room("commons").state.messages.at(-1).body, "Committed after suspension");
+});
+
+test("account binding is immutable and account access changes are revisioned atomically", t => {
+  const { store, human } = fixture(t);
+  const accountId = store.authenticate(human).account.id;
+  const beforeAccounts = store.db.prepare("SELECT count(*) AS n FROM accounts").get().n;
+  assert.throws(() => store.bindHumanAccount("commons", "human", ""), /Invalid account id/);
+  assert.throws(() => store.bindHumanAccount("commons", "human", "different-account"), /already belongs/);
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM accounts").get().n, beforeAccounts);
+  assert.throws(() => store.changeAccountAccess(accountId, { expectedRevision: 1, active: false, reason: "Stale operator" }), /Stale account revision/);
+  assert.equal(store.authenticate(human).account.authEpoch, 0);
+
+  store.db.exec("CREATE TRIGGER abort_account_audit BEFORE INSERT ON account_access_events BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END");
+  assert.throws(() => store.changeAccountAccess(accountId, { expectedRevision: 0, active: false, reason: "Must roll back" }), /audit unavailable/);
+  assert.deepEqual(store.account(accountId), { id: accountId, active: true, revision: 0, authEpoch: 0 });
+  assert.equal(store.authenticate(human).account.id, accountId, "credential revocation rolled back with account state");
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM account_access_events WHERE account_id=?").get(accountId).n, 0);
+  store.db.exec("DROP TRIGGER abort_account_audit");
+});
+
+test("operator-supplied accounts cannot collide with the one-membership provisional namespace", t => {
+  const { store, owner } = fixture(t);
+  store.command(owner, "commons", command(T.MEMBER_ADDED, { memberId: "unbound-human", displayName: "Unbound human", kind: "human", permissions: [] }));
+  const reserved = `acct-legacy-${createHash("sha256").update("commons\0unbound-human").digest("hex").slice(0, 32)}`;
+  store.initialize(initialRoom("second", "second-owner"));
+  const secondOwner = store.issueAccessKey("second", "second-owner");
+  store.command(secondOwner, "second", command(T.MEMBER_ADDED, { memberId: "other-human", displayName: "Other human", kind: "human", permissions: [] }));
+
+  assert.throws(() => store.bindHumanAccount("second", "other-human", reserved), /reserved for one Room membership/);
+  store.bindHumanAccount("second", "other-human", "account-other-human");
+  const firstKey = store.issueAccessKey("commons", "unbound-human");
+  const secondKey = store.issueAccessKey("second", "other-human");
+  assert.equal(store.authenticate(firstKey).account.id, reserved);
+  assert.equal(store.authenticate(secondKey).account.id, "account-other-human");
+  store.changeAccountAccess(reserved, { expectedRevision: 0, active: false, reason: "Isolated suspension" });
+  assert.equal(store.authenticate(secondKey).account.id, "account-other-human", "an unrelated explicit account remains active");
+});
+
 test("cursor reads paginate and caught-up positions are monotonic, not peer-read claims", t => {
   const { store, human, agent } = fixture(t);
   for (let i = 0; i < 3; i++) store.command(human, "commons", command(T.MESSAGE_POSTED, { body: `Message ${i}` }));
@@ -115,19 +214,28 @@ test("cursor reads paginate and caught-up positions are monotonic, not peer-read
 });
 
 test("HTTP session exchange protects cookie writes, rejects agent browser sessions, and logs out", async t => {
-  const { request, human, agent, origin } = await http(t);
+  const { store, request, human, agent, origin } = await http(t);
   assert.equal((await request("/api/session", { token: null, method: "POST", data: { accessKey: human } })).status, 403);
   const login = await request("/api/session", { token: null, method: "POST", headers: { Origin: origin }, data: { accessKey: human } });
   assert.equal(login.status, 201);
   const cookie = login.headers.get("set-cookie");
   assert.match(cookie, /HttpOnly/); assert.match(cookie, /SameSite=Strict/);
   const session = await login.json();
+  const authenticatedAccount = store.authenticate(human).account;
+  assert.deepEqual(session.account, { id: authenticatedAccount.id, revision: authenticatedAccount.revision, authEpoch: authenticatedAccount.authEpoch });
+  assert.match(session.sessionBinding, /^[a-f0-9]{64}$/);
   const headers = { Cookie: cookie.split(";")[0], Origin: origin };
+  const browserSnapshot = await request("/api/rooms/commons", { token: null, headers });
+  assert.equal((await browserSnapshot.json()).viewerSessionBinding, session.sessionBinding);
   const data = command(T.MESSAGE_POSTED, { body: "From browser session" });
   assert.equal((await request("/api/rooms/commons/commands", { token: null, method: "POST", data, headers })).status, 403);
   headers["X-CSRF-Token"] = session.csrf;
   assert.equal((await request("/api/rooms/commons/commands", { token: null, method: "POST", data, headers })).status, 201);
   assert.equal((await request("/api/session", { token: null, method: "POST", headers: { Origin: origin }, data: { accessKey: agent } })).status, 403);
+  const agentSessionView = await (await request("/api/session", { token: agent })).json();
+  assert.equal(agentSessionView.account, null);
+  assert.equal(agentSessionView.csrf, null);
+  assert.equal(agentSessionView.sessionBinding, null);
   const logout = await request("/api/session", { token: null, method: "DELETE", headers });
   assert.equal(logout.status, 200);
   assert.equal(logout.headers.get("set-cookie"), null, "a delayed logout response must not erase a newer cross-tab cookie");
@@ -167,6 +275,84 @@ test("expiry applies to established sessions and no token is included in public 
   assert.equal(JSON.stringify(store.snapshot(session.token, "commons")).includes(session.token), false);
   store.now = () => Date.now() + 9 * 3600000;
   assert.throws(() => store.authenticate(session.token), /expired/);
+});
+
+test("v2 migration preserves credentials and never merges matching Room member ids into one account", t => {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-v2-account-migration-"));
+  const filename = join(directory, "room.sqlite");
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const legacy = new DatabaseSync(filename);
+  legacy.exec(`PRAGMA foreign_keys=ON; BEGIN IMMEDIATE;
+    CREATE TABLE rooms (id TEXT PRIMARY KEY, sequence INTEGER NOT NULL, projection TEXT NOT NULL);
+    CREATE TABLE events (room_id TEXT NOT NULL REFERENCES rooms(id), sequence INTEGER NOT NULL, id TEXT NOT NULL UNIQUE, body TEXT NOT NULL, PRIMARY KEY(room_id, sequence));
+    CREATE TABLE commands (room_id TEXT NOT NULL REFERENCES rooms(id), actor_id TEXT NOT NULL, id TEXT NOT NULL, fingerprint TEXT NOT NULL, sequence INTEGER NOT NULL, PRIMARY KEY(room_id, actor_id, id), FOREIGN KEY(room_id, sequence) REFERENCES events(room_id, sequence));
+    CREATE TABLE credentials (hash TEXT PRIMARY KEY, room_id TEXT NOT NULL REFERENCES rooms(id), member_id TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('access','session')), parent_hash TEXT REFERENCES credentials(hash), expires_at INTEGER NOT NULL, revoked INTEGER NOT NULL DEFAULT 0);
+    CREATE INDEX credential_member ON credentials(room_id, member_id);
+    CREATE TABLE cursors (room_id TEXT NOT NULL REFERENCES rooms(id), member_id TEXT NOT NULL, sequence INTEGER NOT NULL, PRIMARY KEY(room_id, member_id));
+    CREATE TABLE projection_checkpoints (room_id TEXT PRIMARY KEY REFERENCES rooms(id), sequence INTEGER NOT NULL, projection TEXT NOT NULL);
+    PRAGMA user_version=2; COMMIT;`);
+  const tokens = [], sessions = [], deniedTokens = [];
+  const eventBodies = [];
+  const legacyNow = Date.now();
+  for (const roomId of ["alpha", "beta"]) {
+    const events = initialRoom(roomId, "alex"), state = events.reduce((current, next) => {
+      const copy = structuredClone(current);
+      if (next.type === T.ROOM_CREATED) copy.room = { id: roomId, ...next.data, createdAt: next.at };
+      else copy.members.alex = { id: "alex", displayName: "Room owner", kind: "human", accountableHumanId: "alex", permissions: [...next.data.permissions], availability: "unknown", active: true, revision: 0 };
+      return copy;
+    }, { room: null, members: {}, messages: [], workItems: {}, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} });
+    legacy.prepare("INSERT INTO rooms VALUES(?,?,?)").run(roomId, events.length, JSON.stringify(state));
+    events.forEach((roomEvent, index) => {
+      const body = JSON.stringify(roomEvent); eventBodies.push(body);
+      legacy.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, index + 1, roomEvent.id, body);
+    });
+    const token = randomBytes(32).toString("base64url"); tokens.push(token);
+    const accessHash = createHash("sha256").update(token).digest("hex");
+    legacy.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at) VALUES(?,?,?,?,NULL,?)")
+      .run(accessHash, roomId, "alex", "access", legacyNow + 86400000);
+    const session = randomBytes(32).toString("base64url"); sessions.push(session);
+    legacy.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at) VALUES(?,?,?,?,?,?)")
+      .run(createHash("sha256").update(session).digest("hex"), roomId, "alex", "session", accessHash, legacyNow + 3600000);
+    const revoked = randomBytes(32).toString("base64url"), expired = randomBytes(32).toString("base64url");
+    deniedTokens.push(revoked, expired);
+    legacy.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,revoked) VALUES(?,?,?,?,NULL,?,1)")
+      .run(createHash("sha256").update(revoked).digest("hex"), roomId, "alex", "access", legacyNow + 86400000);
+    legacy.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at) VALUES(?,?,?,?,NULL,?)")
+      .run(createHash("sha256").update(expired).digest("hex"), roomId, "alex", "access", legacyNow - 1);
+    if (roomId === "alpha") {
+      legacy.prepare("INSERT INTO cursors VALUES(?,?,?)").run(roomId, "alex", 1);
+      legacy.prepare("INSERT INTO commands VALUES(?,?,?,?,?)").run(roomId, "alex", "legacy-command", "legacy-fingerprint", events.length);
+    }
+  }
+  const credentialColumns = "hash,room_id,member_id,kind,parent_hash,expires_at,revoked";
+  const credentialsBefore = legacy.prepare(`SELECT ${credentialColumns} FROM credentials ORDER BY hash`).all().map(row => ({ ...row }));
+  legacy.close();
+
+  let store = new RoomStore(filename);
+  const alpha = store.authenticate(tokens[0]), beta = store.authenticate(tokens[1]);
+  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 3);
+  assert.notEqual(alpha.account.id, beta.account.id, "matching legacy member ids are not identity proof across Rooms");
+  assert.equal(alpha.account.authEpoch, 0); assert.equal(beta.account.authEpoch, 0);
+  assert.equal(store.authenticate(sessions[0]).account.id, alpha.account.id);
+  assert.equal(store.authenticate(sessions[1]).account.id, beta.account.id);
+  for (const token of deniedTokens) assert.throws(() => store.authenticate(token), /expired|revoked/);
+  assert.deepEqual(store.db.prepare("SELECT body FROM events ORDER BY room_id,sequence").all().map(row => row.body).sort(), [...eventBodies].sort());
+  assert.deepEqual(store.db.prepare(`SELECT ${credentialColumns} FROM credentials ORDER BY hash`).all().map(row => ({ ...row })), credentialsBefore,
+    "migration preserves credential hashes, parent chains, expiry, and revocation state");
+  assert.deepEqual({ ...store.db.prepare("SELECT * FROM cursors WHERE room_id='alpha'").get() }, { room_id: "alpha", member_id: "alex", sequence: 1 });
+  assert.equal(store.db.prepare("SELECT fingerprint FROM commands WHERE id='legacy-command'").get().fingerprint, "legacy-fingerprint");
+  assert.deepEqual(store.db.prepare("SELECT DISTINCT origin FROM accounts ORDER BY origin").all().map(row => row.origin), ["legacy-v2"]);
+  assert.deepEqual(store.db.prepare("SELECT DISTINCT origin FROM member_accounts ORDER BY origin").all().map(row => row.origin), ["legacy-v2"]);
+  assert.deepEqual(store.db.prepare("PRAGMA foreign_key_check").all(), []);
+  assert.equal(store.db.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
+  const migratedIds = [alpha.account.id, beta.account.id];
+  store.close();
+  store = new RoomStore(filename);
+  try {
+    assert.deepEqual([store.authenticate(tokens[0]).account.id, store.authenticate(tokens[1]).account.id], migratedIds);
+    assert.deepEqual([store.authenticate(sessions[0]).account.id, store.authenticate(sessions[1]).account.id], migratedIds);
+  }
+  finally { store.close(); }
 });
 
 test("committed room state survives an actual process exit and new-process reopen", t => {
