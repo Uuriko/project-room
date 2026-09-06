@@ -1,8 +1,8 @@
 import { EVENT_TYPES as T, WORK_STATES as S } from "./events.js";
 import { RoomClient, draftCommand } from "./client.js";
 import { ReturnBrief } from "./return-brief.js";
-import { verificationSatisfied, matchesReceipt } from "./work-status.js";
-import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts } from "./conversation.js";
+import { verificationSatisfied, matchesReceipt, workStatus } from "./work-status.js";
+import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery } from "./conversation.js";
 
 const $ = selector => document.querySelector(selector);
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
@@ -11,6 +11,10 @@ let submission = null;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
 const viewPositions = new Map(), pendingReactions = new Map();
 let newVisibleMessages = 0;
+let recovery;
+let leavingPage = false;
+try { recovery = new DraftRecovery(window.sessionStorage); } catch { recovery = new DraftRecovery(null); }
+const draftScope = identity => JSON.stringify([identity.roomId, identity.member.id]);
 const client = new RoomClient({
   onSnapshot(snapshot, identity) {
     const firstSnapshot = !state;
@@ -19,11 +23,24 @@ const client = new RoomClient({
     $("#identity-label").textContent = `${state.members[session.member.id].displayName} · ${session.member.kind}`;
     $("#cursor-label").textContent = `Your caught-up marker: ${snapshot.cursor} · room event ${snapshot.sequence}`;
     render();
+    if (firstSnapshot) {
+      const saved = recovery.read(draftScope(identity), state);
+      if (saved) {
+        drafts = saved.drafts; currentThreadId = saved.threadId;
+        const draft = drafts.get(currentThreadId);
+        $("#message-input").value = draft.body; $("#message-to-select").value = draft.toMemberId;
+        replyToId = draft.replyToId; pendingMessage = draft.pending;
+        $("#remember-drafts").checked = true;
+        updateReply(); renderMessages();
+        $("#draft-recovery-status").textContent = "Recovered drafts for this room. Review before sending.";
+      }
+    }
     if (!briefView.owns(briefView.chain)) loadReturnBrief();
     if (firstSnapshot && location.hash.startsWith("#message-")) revealMessage(location.hash.slice(9));
   },
   onStatus(text) { $("#connection-status").textContent = text; },
   onAccessEnded() {
+    if (!leavingPage) recovery.clear();
     releaseSubmission();
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null;
     workDraftId = null; replyToId = null;
@@ -112,6 +129,15 @@ function render() {
   renderMessages();
   renderSearch();
   $("#work-list").innerHTML = items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(workCard).join("") || '<p class="empty-note">Nothing assigned. A room is useful before it has a task.</p>';
+  for (const item of items) {
+    const card = document.getElementById(item.id), status = workStatus(item);
+    card.querySelector(".state").textContent = status.label;
+    const next = document.createElement("p"); next.className = "work-next";
+    next.textContent = `${status.owner ? `Next: ${name(status.owner)}. ` : ""}${status.next}`;
+    const updated = document.createElement("p"); updated.className = "form-hint";
+    updated.textContent = `Last recorded update: ${new Date(item.updatedAt).toLocaleString()}. Live execution is not measured.`;
+    card.querySelector(".work-facts").after(next, updated);
+  }
   restoreDisclosures($("#presence-list"), presenceSnap);
   restoreDisclosures($("#work-list"), workSnap);
   $("#event-count").textContent = `${client.sequence}`;
@@ -205,6 +231,12 @@ function renderSearch() {
 }
 function saveComposer() {
   drafts.save(currentThreadId, { body: $("#message-input").value, toMemberId: $("#message-to-select").value, replyToId, pending: pendingMessage });
+  persistDrafts();
+}
+function persistDrafts() {
+  if (!session || !$("#remember-drafts").checked) return;
+  const saved = recovery.write(draftScope(session), drafts, currentThreadId);
+  $("#draft-recovery-status").textContent = saved ? "Draft recovery enabled in this tab for 12 hours. Sign-out clears it." : "Draft recovery unavailable. Keep this page open to retain unsent text.";
 }
 function renderComposerError() {
   const text = drafts.get(currentThreadId).error || "", local = $("#composer-status");
@@ -338,6 +370,7 @@ $("#message-form").addEventListener("submit", e => {
     if (generation !== client.generation || !state) return;
     drafts.clear(threadId);
     $("#message-input").value = ""; pendingMessage = null; clearReply();
+    persistDrafts();
     notice(`Message saved${threadId ? " in this thread" : " to the room"}.`);
   });
 });
@@ -360,6 +393,10 @@ function clearReply() { replyToId = currentThreadId; updateReply(); }
 $("#cancel-reply").addEventListener("click", clearReply);
 $("#thread-back").addEventListener("click", () => switchThread(null));
 $("#message-input").addEventListener("input", saveComposer);
+$("#remember-drafts").addEventListener("change", () => {
+  if ($("#remember-drafts").checked) saveComposer();
+  else { recovery.clear(); $("#draft-recovery-status").textContent = "Draft recovery off. Drafts stay only while this page is open."; }
+});
 $("#message-to-select").addEventListener("change", saveComposer);
 $("#message-input").addEventListener("keydown", e => {
   // Some IME confirmation keys arrive after compositionend; keyCode 229 is the
@@ -456,7 +493,12 @@ window.addEventListener("beforeunload", e => {
   saveComposer();
   if (drafts.hasText() || !$("#new-work-form").hidden || $("#action-dialog").open) { e.preventDefault(); e.returnValue = ""; }
 });
-window.addEventListener("pagehide", () => client.endAccess());
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden" && state) saveComposer(); });
+window.addEventListener("pagehide", () => {
+  if (state) saveComposer();
+  leavingPage = true;
+  try { client.endAccess(); } finally { leavingPage = false; }
+});
 window.addEventListener("pageshow", e => { if (e.persisted) client.restore().catch(error => client.handleFailure(error)); });
 // Return brief (disposition 5557850637): compact expandable rail entry. Fetch on return and
 // on open; history stays fixed through the frozen horizon H, the action sections are live
@@ -509,6 +551,7 @@ $("#rb-refresh-button").addEventListener("click", loadReturnBrief);
 $("#rb-more-button").addEventListener("click", () => briefView.more());
 $("#rb-ack-button").addEventListener("click", () => briefView.acknowledge());
 client.restore().catch(error => {
+  if ([401, 403].includes(error.status)) recovery.clear();
   $("#auth-error").textContent = [401, 403].includes(error.status) ? "Use a provisioned human room key to enter. No demo identity is selected for you." : "Room service unavailable. Check the service and retry; no connection is claimed.";
   $("#auth-panel").hidden = false;
 });
