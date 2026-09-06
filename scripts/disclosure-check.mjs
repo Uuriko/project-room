@@ -74,6 +74,18 @@ test("background updates preserve open disclosures, focus, draft and recipient",
   await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
   await page.screenshot({ path: "test-results/disclosure-open-after-update.png", fullPage: true });
 
+  // A1 caret: a background update while the COMPOSER is focused preserves
+  // activeElement and the exact selection, not only the draft text.
+  await input.focus();
+  await input.evaluate(e => e.setSelectionRange(6, 13));
+  const before = await input.evaluate(e => [document.activeElement === e, e.selectionStart, e.selectionEnd]);
+  await other.locator("#message-input").fill("caret background ping");
+  await other.locator('#message-form button[type="submit"]').click();
+  await page.getByText("caret background ping", { exact: true }).waitFor();
+  const after = await input.evaluate(e => [document.activeElement === e, e.selectionStart, e.selectionEnd]);
+  assert.deepEqual(before, [true, 6, 13], "caret anchored before the update");
+  assert.deepEqual(after, [true, 6, 13], "caret preserved exactly through the update");
+
   // A2 reversible: closing the disclosure stays closed across the next background update
   await summary.click();
   assert.equal(await details.evaluate(d => d.open), false);

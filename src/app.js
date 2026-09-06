@@ -66,21 +66,22 @@ function disclosureKey(details) {
 function captureDisclosures(container) {
   const openKeys = new Set();
   container.querySelectorAll("details[open]").forEach(d => openKeys.add(disclosureKey(d)));
+  // Focus restoration is deliberately scoped to a disclosure summary only: host+tag
+  // cannot identify one exact control when a card holds several links or buttons.
+  // Matching iterates dataset keys - no record id is ever interpolated into a selector.
   const active = document.activeElement;
-  let focusSelector = null;
-  if (active && container.contains(active)) {
-    const host = active.closest("[data-disclosure-host]");
-    const tag = active.tagName.toLowerCase();
-    focusSelector = host ? `[data-disclosure-host="${host.dataset.disclosureHost}"] ${tag}` : null;
+  let focusKey = null;
+  if (active && active.tagName === "SUMMARY" && container.contains(active)) {
+    const details = active.closest("details");
+    if (details && container.contains(details)) focusKey = disclosureKey(details);
   }
-  return { openKeys, focusSelector };
+  return { openKeys, focusKey };
 }
 function restoreDisclosures(container, snap) {
-  container.querySelectorAll("details").forEach(d => { if (snap.openKeys.has(disclosureKey(d))) d.open = true; });
-  if (snap.focusSelector) {
-    const target = container.querySelector(snap.focusSelector);
-    if (target) target.focus({ preventScroll: true });
-  }
+  container.querySelectorAll("details").forEach(d => {
+    if (snap.openKeys.has(disclosureKey(d))) d.open = true;
+    if (snap.focusKey && disclosureKey(d) === snap.focusKey) d.querySelector("summary")?.focus({ preventScroll: true });
+  });
 }
 function render() {
   conversation = conversationIndex(state.messages);

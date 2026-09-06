@@ -79,14 +79,33 @@ test("A3/A4: keyboard disclosures, narrow composer, composer-local failure + ret
   assert.equal(await input.inputValue(), "", "draft clears after ack");
   assert.equal(await composerStatus.isVisible(), false, "composer error clears after ack");
 
-  // A4: lost stream is labeled reconnecting/interrupted, never silently operational.
+  assert.deepEqual(errors, []);
+});
+
+test("A4: a stream that cannot connect is labeled reconnecting, never silently operational", { timeout: 60000 }, async t => {
+  const directory = mkdtempSync(join(tmpdir(), "room-a34-dc-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  store.initialize(initialRoom());
+  const owner = store.issueAccessKey("commons", "owner");
+  const server = createRoomServer({ store, streamInterval: 60 });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  let browser, page;
+  t.after(async () => {
+    await browser?.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve)); store.close(); rmSync(directory, { recursive: true, force: true });
+  });
+  browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  page = await (await browser.newContext({ viewport: { width: 390, height: 844 }, reducedMotion: "reduce" })).newPage();
+  // The stream fails from the very first attempt - no race with a live connection.
   await page.route("**/api/rooms/commons/stream**", route => route.abort("failed"));
-  await page.route("**/api/rooms/commons", route => route.abort("failed"));
-  await page.evaluate(() => window.dispatchEvent(new Event("offline")));
-  await page.locator("#connection-status").evaluate(e => e.textContent = e.textContent); // settle
+  await page.goto(origin);
+  await page.locator("#auth-panel").waitFor({ state: "visible" });
+  await page.locator("#access-key").fill(owner);
+  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await page.locator("#main").waitFor({ state: "visible" });
   await page.waitForFunction(() => /Reconnecting|interrupted|unavailable/.test(document.querySelector("#connection-status").textContent), null, { timeout: 15000 });
   const statusText = await page.locator("#connection-status").textContent();
   assert.doesNotMatch(statusText, /^Connected/, "a lost connection never reads as connected");
   await page.screenshot({ path: "test-results/a4-disconnected.png", fullPage: true });
-  assert.deepEqual(errors, []);
 });
