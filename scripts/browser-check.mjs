@@ -69,15 +69,15 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.deepEqual(await input.evaluate(e => [e === document.activeElement, e.selectionStart, e.selectionEnd]), [true, 5, 7]);
 
     // A reply opens a thread, and navigating away preserves each draft independently.
-    await page.locator('#message-book-club [data-message-action="reply"]').click();
+    await page.locator('[data-message-record-id="book-club"] [data-message-action="reply"]').click();
     await input.fill("Keep my thread thought");
     await page.locator("#message-to-select").selectOption("room-agent");
     await page.locator("#thread-back").click();
     assert.equal(await input.inputValue(), "Keep my room thought");
-    await page.locator('#message-book-club [data-message-action="thread"]').click();
+    await page.locator('[data-message-record-id="book-club"] [data-message-action="thread"]').click();
     assert.equal(await input.inputValue(), "Keep my thread thought");
     assert.equal(await page.locator("#message-to-select").inputValue(), "room-agent");
-    await page.locator('#message-book-reply [data-message-action="reply"]').click();
+    await page.locator('[data-message-record-id="book-reply"] [data-message-action="reply"]').click();
     await input.fill("The paperback edition sounds good.");
 
     // The first request commits but loses its response. The browser retries the same ID.
@@ -94,7 +94,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.waitForFunction(() => document.querySelector("#composer-status").textContent.includes("Draft kept") && !document.querySelector("#status").textContent.includes("Draft kept"));
     await page.locator("#thread-back").click();
     assert.equal(await input.inputValue(), "Keep my room thought");
-    await page.locator('#message-book-club [data-message-action="thread"]').click();
+    await page.locator('[data-message-record-id="book-club"] [data-message-action="thread"]').click();
     assert.equal(await input.inputValue(), "The paperback edition sounds good.");
     assert.match(await page.locator("#reply-context").textContent(), /Room agent/);
     await input.press("Control+Enter");
@@ -106,23 +106,23 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(posted[0].toMemberId, "room-agent");
 
     await page.locator("#thread-back").click();
-    const heart = p => p.locator('#message-book-club [data-reaction="heart"]');
+    const heart = p => p.locator('[data-message-record-id="book-club"] [data-reaction="heart"]');
     await heart(page).click();
-    await page.waitForFunction(() => document.querySelector('#message-book-club [data-reaction="heart"]').getAttribute("aria-pressed") === "true");
-    const selectedBody = await page.locator('#message-book-club .message-content p').evaluate(e => {
+    await page.waitForFunction(() => document.querySelector('[data-message-record-id="book-club"] [data-reaction="heart"]').getAttribute("aria-pressed") === "true");
+    const selectedBody = await page.locator('[data-message-record-id="book-club"] .message-content p').evaluate(e => {
       const range = document.createRange(); range.selectNodeContents(e);
       const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
       return selection.toString();
     });
     await heart(other).click();
-    await page.waitForFunction(() => document.querySelector('#message-book-club [data-reaction="heart"]').getAttribute("aria-label").includes(", 2"));
+    await page.waitForFunction(() => document.querySelector('[data-message-record-id="book-club"] [data-reaction="heart"]').getAttribute("aria-label").includes(", 2"));
     assert.equal(await page.evaluate(() => window.getSelection().toString()), selectedBody);
     await heart(page).click();
-    await page.waitForFunction(() => document.querySelector('#message-book-club [data-reaction="heart"]').getAttribute("aria-pressed") === "false");
+    await page.waitForFunction(() => document.querySelector('[data-message-record-id="book-club"] [data-reaction="heart"]').getAttribute("aria-pressed") === "false");
     assert.deepEqual(store.snapshot(owner, "commons").state.messages[0].reactions.heart, ["maya"]);
 
     // Unrelated live traffic retains the exact message DOM node and focused control.
-    const focusedReply = page.locator('#message-book-club [data-message-action="reply"]');
+    const focusedReply = page.locator('[data-message-record-id="book-club"] [data-message-action="reply"]');
     await focusedReply.focus();
     await focusedReply.evaluate(e => { window.retainedControl = e; });
     send(agent, T.MESSAGE_POSTED, { body: "Another topic, without a task." });
@@ -133,9 +133,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.locator("#message-search").fill("paperback edition");
     await page.locator(`#search-list [data-open-message="${posted[0].id}"]`).click();
     assert.equal(await page.locator("#thread-bar").isVisible(), true);
-    assert.equal(await page.evaluate(() => document.activeElement.id), `message-${posted[0].id}`);
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.messageRecordId), posted[0].id);
     await page.locator("#clear-search").click();
-    await page.locator(`#message-${posted[0].id} [data-message-action="work"]`).click();
+    await page.locator(`[data-message-record-id="${posted[0].id}"] [data-message-action="work"]`).click();
     await page.locator("#work-title-input").fill("Pick our first book");
     await page.locator("#work-done-input").fill("A shared reading choice with its original discussion.");
     await page.locator("#assignee-select").selectOption("maya");
@@ -146,7 +146,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(work.length, 1); assert.equal(work[0].sourceMessageId, posted[0].id);
     await page.locator("#thread-back").click();
     await page.locator('#work-list [data-open-message]').click();
-    assert.equal(await page.evaluate(() => document.activeElement.id), `message-${posted[0].id}`);
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.messageRecordId), posted[0].id);
 
     // Literal markup is text, and long text still reflows at this viewport.
     send(human, T.MESSAGE_POSTED, { body: "<strong>Literal text</strong> " + "longword".repeat(35), replyToId: "book-club" });
@@ -188,7 +188,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const send = (key, type, data) => store.command(key, "commons", { id: crypto.randomUUID(), type, data });
     send(owner, T.MEMBER_ADDED, { memberId: "maya", displayName: "Maya", kind: "human", permissions: ["accept_work", "complete_work", "verify"] });
     const human = store.issueAccessKey("commons", "maya");
-    for (let i = 1; i <= 55; i++) send(owner, T.MESSAGE_POSTED, { body: `catch-up note ${i}` });
+    for (let i = 1; i <= 55; i++) send(owner, T.MESSAGE_POSTED, { messageId: `catch-up-${i}`, body: `catch-up note ${i}` });
     send(owner, T.WORK_PROPOSED, { workItemId: "w-brief", title: "Read the briefing", definitionOfDone: "Summary posted", accountableMemberId: "maya" });
     const server = createRoomServer({ store, streamInterval: 60 });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -225,6 +225,12 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.waitForFunction(() => document.querySelectorAll("#rb-history-list .rb-event").length > 50);
     assert.equal(await page.locator("#rb-history-list .rb-event").count(), 59); // every event drillable
     assert.equal(await page.locator("#rb-more-button").isVisible(), false);
+    const historyMessage = page.locator('#rb-history-list [data-open-message="catch-up-55"]');
+    assert.equal(await historyMessage.count(), 1, "history exposes the underlying message");
+    await historyMessage.click();
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.messageRecordId), "catch-up-55", "history drill-through focuses the message");
+    await page.locator('#rb-attention-list [data-open-work="w-brief"]').click();
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.workRecordId), "w-brief", "current action drill-through focuses the work card");
     mkdirSync("test-results", { recursive: true });
     await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
     await page.screenshot({ path: `test-results/return-brief-${label}-open.png`, fullPage: true });

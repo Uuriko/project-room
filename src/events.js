@@ -293,10 +293,10 @@ function startWork(state, incoming) {
 
 function blockWork(state, incoming) {
   const item = mutableWorkItem(state, incoming, [WORK_STATES.ACCEPTED, WORK_STATES.WORKING, WORK_STATES.COMPLETED]);
-  const isAccountable = incoming.actorId === item.accountableMemberId;
-  const isVerifierOnCompletion = item.state === WORK_STATES.COMPLETED && incoming.actorId === item.verifierMemberId;
-  if (!isAccountable && !isVerifierOnCompletion) throw new Error("Only the accountable member or completed-work verifier may block work");
+  if (incoming.actorId !== item.accountableMemberId) throw new Error("Only the accountable member may block work; verifier findings use verification.recorded");
+  requirePermission(state, incoming.actorId, "accept_work");
   requireFields(incoming.data, ["reason", "nextAction"]);
+  if (item.state === WORK_STATES.COMPLETED) retireApproval(item, incoming, "rework");
   item.state = WORK_STATES.BLOCKED;
   item.blocker = { reason: incoming.data.reason, nextAction: incoming.data.nextAction, eventId: incoming.id };
   commitMutation(item, incoming);
@@ -305,6 +305,7 @@ function blockWork(state, incoming) {
 function resolveBlocker(state, incoming) {
   const item = mutableWorkItem(state, incoming, [WORK_STATES.BLOCKED]);
   if (incoming.actorId !== item.accountableMemberId) throw new Error("Only the accountable member may resolve the blocker");
+  requirePermission(state, incoming.actorId, "accept_work");
   requireFields(incoming.data, ["resolution"]);
   item.state = WORK_STATES.ACCEPTED;
   item.blocker = null;
@@ -324,11 +325,19 @@ function completeWork(state, incoming) {
     const url = new URL(incoming.data.evidenceUrl);
     if (url.protocol !== "https:" || url.username || url.password) throw new Error();
   } catch { throw new Error("Evidence must be an HTTPS URL without credentials"); }
+  const producerId = incoming.data.producerId ?? null;
+  if (producerId !== null) knownMember(state, producerId);
   if (item.receipt) item.receiptHistory.push(item.receipt);
   if (item.verification) item.verificationHistory.push(item.verification);
   if (item.decision) item.decisionHistory.push(item.decision);
   item.receipt = {
-    producerId: incoming.actorId,
+    // The authenticated envelope actor reports completion. Producer attribution is a
+    // separate, nullable assertion: omission is explicitly unknown, never guessed from
+    // the reporter. This also lets verification enforce independence when a producer is
+    // actually known.
+    reportedById: incoming.actorId,
+    producerId,
+    producerAttribution: producerId === null ? "unknown" : "reported",
     summary: incoming.data.summary,
     evidenceUrl: incoming.data.evidenceUrl,
     evidenceVersion: incoming.data.evidenceVersion,
@@ -347,7 +356,14 @@ function supersedeWork(state, incoming) {
   const item = mutableWorkItem(state, incoming, [WORK_STATES.PROPOSED, WORK_STATES.ACCEPTED, WORK_STATES.WORKING, WORK_STATES.BLOCKED, WORK_STATES.COMPLETED]);
   requirePermission(state, incoming.actorId, "steer");
   requireFields(incoming.data, ["supersededByWorkItemId", "reason"]);
-  if (!state.workItems[incoming.data.supersededByWorkItemId]) throw new Error("Replacement Work Item must exist");
+  const replacement = requireWorkItem(state, incoming.data.supersededByWorkItemId);
+  if (replacement.id === item.id) throw new Error("A Work Item cannot supersede itself");
+  if (replacement.state === WORK_STATES.SUPERSEDED || replacement.supersededBy) throw new Error("Replacement Work Item must not already be superseded");
+  if (item.claim && claimIsActive(item.claim, incoming.at)) {
+    item.claim.status = "superseded";
+    item.claim.supersededAt = incoming.at;
+  }
+  retireApproval(item, incoming, "superseded");
   item.state = WORK_STATES.SUPERSEDED;
   item.supersededBy = incoming.data.supersededByWorkItemId;
   commitMutation(item, incoming);
@@ -403,6 +419,13 @@ function recordVerification(state, incoming) {
   if (!matchesCurrentReceipt && !matchesHistoricalReceipt) {
     throw new Error("Verification must identify the exact current completion and evidence version");
   }
+  const matchedReceipt = matchesCurrentReceipt
+    ? item.receipt
+    : item.receiptHistory.find((receipt) => incoming.data.completionEventId === receipt.eventId && incoming.data.evidenceVersion === receipt.evidenceVersion);
+  const producerKnown = receiptHasKnownProducer(matchedReceipt);
+  if (item.independentVerificationRequired && producerKnown && matchedReceipt.producerId === incoming.actorId) {
+    throw new Error("Independent verification requires a verifier different from the known producer");
+  }
   if (!["pass", "fail"].includes(incoming.data.result)) throw new Error("Verification result must be pass or fail");
 
   const verification = {
@@ -411,6 +434,9 @@ function recordVerification(state, incoming) {
     completionEventId: incoming.data.completionEventId,
     evidenceVersion: incoming.data.evidenceVersion,
     summary: incoming.data.summary,
+    // A useful exact-version check may still be recorded when the producer is unknown,
+    // but only an explicitly attributed, different producer establishes independence.
+    independenceConfirmed: producerKnown && matchedReceipt.producerId !== incoming.actorId,
     eventId: incoming.id
   };
 
@@ -423,6 +449,7 @@ function recordVerification(state, incoming) {
   if (item.verification) item.verificationHistory.push(item.verification);
   item.verification = verification;
   if (incoming.data.result === "fail") {
+    retireApproval(item, incoming, "verification_failed");
     item.state = WORK_STATES.BLOCKED;
     item.blocker = {
       reason: incoming.data.summary,
@@ -447,8 +474,8 @@ function recordOwnerDecision(state, incoming) {
   if (incoming.data.completionEventId !== item.receipt?.eventId || incoming.data.evidenceVersion !== item.receipt?.evidenceVersion) {
     throw new Error("Decision must identify the exact current completion and evidence version");
   }
-  if (incoming.data.decision === "approved" && item.independentVerificationRequired && item.verification?.result !== "pass") {
-    throw new Error("Approval requires the designated independent PASS");
+  if (incoming.data.decision === "approved" && item.independentVerificationRequired && !hasConfirmedIndependentPass(item)) {
+    throw new Error("Approval requires the designated independent PASS with confirmed producer independence");
   }
 
   if (item.decision) item.decisionHistory.push(item.decision);
@@ -485,14 +512,40 @@ function commitMutation(item, incoming) {
   item.updatedAt = incoming.at;
 }
 
+function retireApproval(item, incoming, reason) {
+  if (item.decision?.decision !== "approved") return;
+  item.decisionHistory.push({ ...item.decision, historical: true, invalidatedByEventId: incoming.id, invalidatedReason: reason });
+  item.decision = null;
+}
+
 function claimIsActive(claim, at) {
   return claim.status === "active" && Date.parse(claim.expiresAt) > Date.parse(at);
 }
 
+function receiptHasKnownProducer(receipt) {
+  return receipt?.producerAttribution === "reported" && receipt.producerId != null;
+}
+
+function hasConfirmedIndependentPass(item) {
+  const { receipt, verification } = item;
+  return verification?.result === "pass" &&
+    verification.independenceConfirmed === true &&
+    verification.verifierId === item.verifierMemberId &&
+    verification.completionEventId === receipt?.eventId &&
+    verification.evidenceVersion === receipt?.evidenceVersion &&
+    receiptHasKnownProducer(receipt) &&
+    receipt.producerId !== verification.verifierId;
+}
+
 function requireMember(state, memberId) {
+  const member = knownMember(state, memberId);
+  if (member.active === false) throw new Error("Member access revoked");
+  return member;
+}
+
+function knownMember(state, memberId) {
   const member = Object.hasOwn(state.members, memberId) && state.members[memberId];
   if (!member) throw new Error(`Unknown member: ${memberId}`);
-  if (member.active === false) throw new Error("Member access revoked");
   return member;
 }
 

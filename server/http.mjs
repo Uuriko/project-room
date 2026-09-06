@@ -134,7 +134,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === "/api/session") {
         if (req.method === "GET") return json(res, 200, sessionView(auth));
-        if (req.method === "DELETE") { store.revoke(token); setSessionCookie(res, "", 0); return json(res, 200, { signedOut: true }); }
+        if (req.method === "DELETE") {
+          // Server-side revocation is authoritative. Do not emit an unconditional cookie
+          // deletion: a delayed response from one tab must not erase a newer login cookie
+          // established by another tab. A later login overwrites the revoked cookie.
+          store.revoke(token);
+          return json(res, 200, { signedOut: true });
+        }
         reject(405, "method_not_allowed", "Method not allowed");
       }
       const match = /^\/api\/rooms\/([a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127})(?:\/(commands|events|stream|cursor|return-brief))?$/.exec(url.pathname);

@@ -61,7 +61,7 @@ The public walkthrough does not supply a fully resolvable deployment receipt or 
 | --- | --- |
 | A second person joins. | An authorized member sees the goal, owner, recorded result, checks, and next action without a pasted recap. A source outside the shared audience is not introduced into that conversation. |
 | Worker becomes unavailable. | Preserve its last confirmed step and show availability. An unknown external action outcome remains unresolved; reconnecting does not blindly repeat it. |
-| Application restarts. | Reconstruct the same view from stored events and source references; issue no external actions during replay. |
+| Application restarts. | Reconstruct the same view from the native event log, or from an immutable schema-migration checkpoint plus its strict event tail; issue no external actions during replay. |
 | A pre-existing result has unknown producer attribution. | Preserve its exact reference and reporting member; show the producer/provenance gap explicitly. Do not infer the reporter produced it or call a check independent without evidence of independence. |
 | The same receipt arrives twice. | Keep one logical receipt. Do not repeat a handoff or action. Reuse of the same source event ID with conflicting payload is rejected. |
 | Two actors update the same revision. | One revision-checked mutation wins. The stale mutation records no misleading state-change event and must refresh before proceeding. |

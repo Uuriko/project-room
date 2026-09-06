@@ -22,7 +22,7 @@ const shapes = {
   [T.WORK_STARTED]: `${work} resolvedBlocker`,
   [T.WORK_BLOCKED]: `${work} reason nextAction`,
   [T.WORK_BLOCKER_RESOLVED]: `${work} resolution`,
-  [T.WORK_COMPLETED]: `${work} summary evidenceUrl evidenceVersion nextAction checksClaimed`,
+  [T.WORK_COMPLETED]: `${work} summary evidenceUrl evidenceVersion nextAction checksClaimed producerId`,
   [T.WORK_SUPERSEDED]: `${work} supersededByWorkItemId reason`,
   [T.CLAIM_ACQUIRED]: `${work} repository ref paths expiresAt`,
   [T.CLAIM_RELEASED]: work,
@@ -51,7 +51,7 @@ export class RoomStore {
     this.db = new DatabaseSync(filename);
     this.db.exec("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=3000;");
     const version = this.db.prepare("PRAGMA user_version").get().user_version;
-    if (version > 1) throw new Error("Database schema is newer than this service");
+    if (version > 2) throw new Error("Database schema is newer than this service");
     if (version === 0) this.db.exec(`BEGIN IMMEDIATE;
       CREATE TABLE rooms (id TEXT PRIMARY KEY, sequence INTEGER NOT NULL, projection TEXT NOT NULL);
       CREATE TABLE events (room_id TEXT NOT NULL REFERENCES rooms(id), sequence INTEGER NOT NULL, id TEXT NOT NULL UNIQUE, body TEXT NOT NULL, PRIMARY KEY(room_id, sequence));
@@ -59,32 +59,141 @@ export class RoomStore {
       CREATE TABLE credentials (hash TEXT PRIMARY KEY, room_id TEXT NOT NULL REFERENCES rooms(id), member_id TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('access','session')), parent_hash TEXT REFERENCES credentials(hash), expires_at INTEGER NOT NULL, revoked INTEGER NOT NULL DEFAULT 0);
       CREATE INDEX credential_member ON credentials(room_id, member_id);
       CREATE TABLE cursors (room_id TEXT NOT NULL REFERENCES rooms(id), member_id TEXT NOT NULL, sequence INTEGER NOT NULL, PRIMARY KEY(room_id, member_id));
-      PRAGMA user_version=1; COMMIT;`);
-    this.repairProposalProvenance();
+      CREATE TABLE projection_checkpoints (room_id TEXT PRIMARY KEY REFERENCES rooms(id), sequence INTEGER NOT NULL, projection TEXT NOT NULL);
+      PRAGMA user_version=2; COMMIT;`);
+    this.repairProjectionProvenance({ upgradeV1: version === 1 });
   }
-  // Deterministic upgrade repair (review 5557940819): persisted projections are never
-  // replayed, so a pre-upgrade work item recovers its proposer from its OWN authoritative
-  // work.proposed envelope. Items with no envelope in the log stay honestly unknown.
-  // Idempotent: a repaired or current projection has no missing keys and is left untouched.
-  repairProposalProvenance() {
+  // Deterministic upgrade repair: persisted projections are not replayed on startup. Recover
+  // proposers and authenticated completion reporters from their own authoritative envelopes,
+  // then backfill verification independence only where explicit producer attribution proves it.
+  // The legacy reducer guessed that every reporter was also the producer, so legacy receipts
+  // deliberately migrate to explicit unknown producer attribution unless their event carried
+  // the newer producerId field. Idempotent current projections are left untouched.
+  repairProjectionProvenance({ upgradeV1 = false } = {}) {
     this.transaction(() => {
-      const findProposal = this.db.prepare("SELECT body FROM events WHERE room_id=? ORDER BY sequence");
-      for (const { id, projection } of this.db.prepare("SELECT id, projection FROM rooms").all()) {
+      // A v1 projection was produced under v1 transition rules. Preserve its repaired,
+      // conservative form as an immutable recovery checkpoint; all later v2 events replay
+      // normally from there. This keeps legacy event bodies byte-for-byte append-only without
+      // weakening the current reducer to accept rules that no longer apply.
+      this.db.exec("CREATE TABLE IF NOT EXISTS projection_checkpoints (room_id TEXT PRIMARY KEY REFERENCES rooms(id), sequence INTEGER NOT NULL, projection TEXT NOT NULL)");
+      const findEvents = this.db.prepare("SELECT body FROM events WHERE room_id=? ORDER BY sequence");
+      const saveCheckpoint = this.db.prepare("INSERT INTO projection_checkpoints(room_id,sequence,projection) VALUES(?,?,?)");
+      for (const { id, sequence, projection } of this.db.prepare("SELECT id, sequence, projection FROM rooms ORDER BY id").all()) {
         const state = JSON.parse(projection);
         const missing = Object.values(state.workItems ?? {}).filter(item => item && !Object.hasOwn(item, "proposedById"));
-        if (missing.length === 0) continue;
+        const workItems = Object.values(state.workItems ?? {}).filter(item => item && typeof item === "object");
+        const legacyReceipts = workItems.flatMap(item => [...(item.receiptHistory ?? []), item.receipt].filter(Boolean))
+          .filter(receipt => !Object.hasOwn(receipt, "reportedById") || !Object.hasOwn(receipt, "producerId") || !Object.hasOwn(receipt, "producerAttribution"));
+        const legacyVerifications = workItems.flatMap(item => [...(item.verificationHistory ?? []), item.verification].filter(Boolean)
+          .map(verification => ({ item, verification })))
+          .filter(({ verification }) => !Object.hasOwn(verification, "independenceConfirmed"));
+        const approvalsToCheck = workItems.filter(item => item.decision?.decision === "approved");
+        const legacySupersededClaims = workItems.filter(item => item.state === "superseded" && item.claim?.status === "active");
+        const hasInvalidSupersession = item => {
+          if (item.state !== "superseded" || !item.supersededBy) return false;
+          const visited = new Set([item.id]);
+          let nextId = item.supersededBy;
+          while (nextId) {
+            if (visited.has(nextId)) return true;
+            visited.add(nextId);
+            const next = state.workItems[nextId];
+            if (!next) return true;
+            nextId = next.supersededBy;
+          }
+          return false;
+        };
+        const invalidSupersessions = workItems.filter(hasInvalidSupersession);
         const proposers = new Map();
-        for (const row of findProposal.all(id)) {
+        const completions = new Map();
+        const verifications = new Map();
+        const decisions = new Map();
+        const supersessions = new Map();
+        for (const row of findEvents.all(id)) {
           const parsed = JSON.parse(row.body);
           if (parsed.type === T.WORK_PROPOSED && parsed.data?.workItemId && !proposers.has(parsed.data.workItemId)) proposers.set(parsed.data.workItemId, parsed.actorId ?? null);
+          if (parsed.type === T.WORK_COMPLETED && parsed.id) completions.set(parsed.id, parsed);
+          if (parsed.type === T.VERIFICATION_RECORDED && parsed.id) verifications.set(parsed.id, parsed);
+          if (parsed.type === T.OWNER_DECISION_RECORDED && parsed.id) decisions.set(parsed.id, parsed);
+          if (parsed.type === T.WORK_SUPERSEDED && parsed.data?.workItemId) supersessions.set(parsed.data.workItemId, parsed);
         }
         let changed = false;
         for (const item of missing) {
           const proposer = proposers.get(item.id);
           if (proposer) { item.proposedById = proposer; changed = true; }
         }
+        for (const receipt of legacyReceipts) {
+          const completion = completions.get(receipt.eventId);
+          const producerId = completion?.data && Object.hasOwn(completion.data, "producerId") ? completion.data.producerId : null;
+          receipt.reportedById = completion?.actorId ?? null;
+          receipt.producerId = producerId ?? null;
+          receipt.producerAttribution = producerId == null ? "unknown" : "reported";
+          changed = true;
+        }
+        for (const { item, verification } of legacyVerifications) {
+          const receipt = [...(item.receiptHistory ?? []), item.receipt].filter(Boolean)
+            .find(candidate => candidate.eventId === verification.completionEventId && candidate.evidenceVersion === verification.evidenceVersion);
+          const verificationEvent = verifications.get(verification.eventId);
+          const producerKnown = receipt?.producerAttribution === "reported" && receipt.producerId != null;
+          const verifierAuthenticated = verificationEvent?.actorId === verification.verifierId && verificationEvent.actorId === item.verifierMemberId;
+          const exactReceipt = verificationEvent?.data?.completionEventId === receipt?.eventId && verificationEvent?.data?.evidenceVersion === receipt?.evidenceVersion;
+          verification.independenceConfirmed = producerKnown && verifierAuthenticated && exactReceipt && receipt.producerId !== verificationEvent.actorId;
+          changed = true;
+        }
+        for (const item of approvalsToCheck) {
+          const receipt = item.receipt, verification = item.verification, decision = item.decision;
+          const decisionEvent = decisions.get(decision.eventId);
+          const approvalStillCurrent = item.state === "completed";
+          const approvalProvenanceSatisfied = decision.actorId === item.humanDecisionMakerId
+            && decision.completionEventId === receipt?.eventId
+            && decision.evidenceVersion === receipt?.evidenceVersion
+            && decisionEvent?.actorId === decision.actorId
+            && decisionEvent?.data?.workItemId === item.id
+            && decisionEvent?.data?.decision === "approved"
+            && decisionEvent?.data?.completionEventId === receipt?.eventId
+            && decisionEvent?.data?.evidenceVersion === receipt?.evidenceVersion
+            && decisionEvent?.data?.reason === decision.reason;
+          const independentGateSatisfied = !item.independentVerificationRequired || (
+            verification?.result === "pass" && verification.independenceConfirmed === true
+            && verification.verifierId === item.verifierMemberId
+            && verification.completionEventId === receipt?.eventId
+            && verification.evidenceVersion === receipt?.evidenceVersion
+            && receipt?.producerAttribution === "reported" && receipt.producerId != null
+            && receipt.producerId !== verification.verifierId
+          );
+          const confirmed = approvalStillCurrent && approvalProvenanceSatisfied && independentGateSatisfied;
+          if (!confirmed) {
+            item.decisionHistory ||= [];
+            const invalidatedByRepair = !approvalStillCurrent ? "approval_not_current"
+              : !approvalProvenanceSatisfied ? "approval_provenance_unconfirmed"
+              : "producer_independence_unconfirmed";
+            item.decisionHistory.push({
+              ...decision,
+              historical: true,
+              invalidatedByRepair,
+              ...(!approvalStillCurrent ? { invalidatedState: item.state } : {})
+            });
+            item.decision = null;
+            changed = true;
+          }
+        }
+        for (const item of legacySupersededClaims) {
+          const supersession = supersessions.get(item.id);
+          item.claim.status = "superseded";
+          item.claim.supersededAt = supersession?.at ?? item.updatedAt;
+          changed = true;
+        }
+        for (const item of invalidSupersessions) {
+          item.supersessionRepair = { previousTargetId: item.supersededBy, reason: "invalid_legacy_link" };
+          item.supersededBy = null;
+          changed = true;
+        }
         if (changed) this.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify(state), id);
+        if (upgradeV1) saveCheckpoint.run(id, sequence, JSON.stringify(state));
       }
+      // v2 marks the producer/reporter/verification-independence projection contract.
+      // Commit its marker atomically with every v1 projection repair so older binaries
+      // either see untouched v1 or reject the fully upgraded database.
+      if (upgradeV1) this.db.exec("PRAGMA user_version=2");
     });
   }
   close() { this.db.close(); }
@@ -97,6 +206,20 @@ export class RoomStore {
     const row = this.db.prepare("SELECT * FROM rooms WHERE id=?").get(roomId);
     if (!row) fail(404, "room_not_found", "Room not found");
     return { sequence: row.sequence, state: JSON.parse(row.projection) };
+  }
+  rebuildProjection(roomId) {
+    const room = this.room(roomId);
+    const checkpoint = this.db.prepare("SELECT sequence,projection FROM projection_checkpoints WHERE room_id=?").get(roomId);
+    let state = checkpoint ? JSON.parse(checkpoint.projection) : emptyRoomState();
+    let sequence = checkpoint?.sequence ?? 0;
+    const rows = this.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND sequence>? ORDER BY sequence").all(roomId, sequence);
+    for (const row of rows) {
+      if (row.sequence !== sequence + 1) throw new Error("Event sequence is not contiguous");
+      state = applyEvent(state, JSON.parse(row.body));
+      sequence = row.sequence;
+    }
+    if (sequence !== room.sequence) throw new Error("Event sequence does not reach the room projection");
+    return { sequence, state: compact(state) };
   }
   // Administrative bootstrap, never exposed over HTTP. Historical demo events are test fixtures only.
   initialize(events) {
@@ -167,14 +290,14 @@ export class RoomStore {
   // horizon, the cursor, the paged events, and the live projection at the same commit.
   // Fetching never acknowledges - only markCaughtUp does, explicitly.
   returnBrief(token, roomId, { horizon = null, after = null, cursor: frozenCursor = null, limit = RETURN_BRIEF_DEFAULT_LIMIT } = {}) {
-    const auth = this.authenticate(token, roomId);
     return this.transaction(() => {
+      const auth = this.authenticate(token, roomId);
       const room = this.room(roomId);
       const cursor = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
       const { H, startAfter, C, limit: pageLimit } = resolveHistoryWindow({ sequence: room.sequence, storedCursor: cursor, horizon, after, continuationCursor: frozenCursor, limit });
       const rows = this.db.prepare("SELECT sequence, body FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence LIMIT ?").all(roomId, startAfter, H, pageLimit)
         .map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
-      return buildReturnBrief({ sequence: room.sequence, workItems: room.state.workItems, rows, H, startAfter, C, memberId: auth.member.id });
+      return { roomId, viewerId: auth.member.id, ...buildReturnBrief({ sequence: room.sequence, workItems: room.state.workItems, rows, H, startAfter, C, memberId: auth.member.id }) };
     });
   }
   markCaughtUp(token, roomId, sequence) {

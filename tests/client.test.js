@@ -6,6 +6,11 @@ import { RoomClient, draftCommand } from "../src/client.js";
 const response = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
 const snapshot = (sequence, viewerId = "human") => ({ sequence, state: {}, cursor: 0, viewerId });
 const identity = (id = "human") => ({ member: { id }, roomId: "commons", csrf: "session-confirmation" });
+const deferred = () => {
+  let resolve;
+  const promise = new Promise(done => { resolve = done; });
+  return { promise, resolve };
+};
 test("unchanged draft retries retain ID and content changes require a new ID", () => {
   const first = draftCommand(null, "message.posted", { body: "hello" });
   assert.equal(draftCommand(first, "message.posted", { body: "hello" }), first);
@@ -60,6 +65,108 @@ test("a late command receipt never refreshes or ends a different session", async
     if (status === 201) await sent; else await assert.rejects(sent, /Old session/);
     assert.equal(calls, 1); assert.equal(ended, false); assert.equal(client.session.member.id, "other");
   }
+});
+test("a delayed restore cannot replace a newer explicit login", async () => {
+  const oldRestore = deferred();
+  const seen = [];
+  const client = new RoomClient({
+    events: null,
+    fetcher: async (path, options) => {
+      if (path === "/api/session" && options.method === "GET") return oldRestore.promise;
+      if (path === "/api/session" && options.method === "POST") return response(identity("other"), 201);
+      if (path === "/api/rooms/commons") return response(snapshot(7, "other"));
+      throw new Error(`Unexpected request: ${options.method} ${path}`);
+    },
+    onSnapshot: (value, current) => seen.push([value.sequence, current.member.id])
+  });
+
+  const restoring = client.restore();
+  const loggedIn = await client.login("new-account-key");
+  oldRestore.resolve(response(identity("human")));
+  assert.equal(await restoring, null);
+  assert.equal(loggedIn.member.id, "other");
+  assert.equal(client.session.member.id, "other");
+  assert.deepEqual(seen, [[7, "other"]]);
+});
+test("a stale refresh failure cannot end or mutate a replacement session", async () => {
+  const oldRefresh = deferred();
+  let ended = 0;
+  const client = new RoomClient({ fetcher: async () => oldRefresh.promise, onAccessEnded: () => { ended++; } });
+  client.session = identity();
+  const pending = client.refresh();
+  client.disconnect();
+  client.session = identity("other");
+  client.sequence = 3;
+  oldRefresh.resolve(response({ error: { message: "Old session revoked" } }, 401));
+  await pending;
+  assert.equal(ended, 0);
+  assert.equal(client.session.member.id, "other");
+  assert.equal(client.sequence, 3);
+});
+test("restore and login clear partial identity when their current refresh fails", async () => {
+  for (const method of ["restore", "login"]) {
+    let calls = 0;
+    const client = new RoomClient({
+      events: null,
+      fetcher: async () => calls++ === 0
+        ? response(identity())
+        : response({ error: { message: "Snapshot unavailable" } }, 503)
+    });
+    await assert.rejects(method === "restore" ? client.restore() : client.login("key"), /Snapshot unavailable/);
+    assert.equal(client.session, null);
+    assert.equal(client.sequence, 0);
+  }
+});
+test("a coalesced refresh failure clears a snapshot already exposed during login or restore", async () => {
+  for (const method of ["restore", "login"]) {
+    let calls = 0, shown = 0, cleared = 0;
+    let client;
+    client = new RoomClient({
+      events: null,
+      fetcher: async () => {
+        calls++;
+        if (calls === 1) return response(identity());
+        if (calls === 2) return response(snapshot(1));
+        return response({ error: { message: "Follow-up snapshot failed" } }, 503);
+      },
+      onSnapshot: () => {
+        shown++;
+        client.refresh(); // coalesce one more read into the active refresh flight
+      },
+      onAccessEnded: () => { cleared++; }
+    });
+    await assert.rejects(method === "restore" ? client.restore() : client.login("key"), /Follow-up snapshot failed/);
+    assert.equal(shown, 1);
+    assert.equal(cleared, 1);
+    assert.equal(client.session, null);
+    assert.equal(client.sequence, 0);
+  }
+});
+test("return briefs are bound to the current viewer and room", async () => {
+  for (const mismatch of [{ viewerId: "other", roomId: "commons" }, { viewerId: "human", roomId: "elsewhere" }]) {
+    let ended = 0;
+    const client = new RoomClient({
+      fetcher: async () => response({ ...mismatch, history: {}, current: {} }),
+      onAccessEnded: () => { ended++; }
+    });
+    client.session = identity();
+    assert.equal(await client.returnBrief(), null);
+    assert.equal(ended, 1);
+    assert.equal(client.session, null);
+  }
+});
+test("a delayed logout response cannot end a replacement session", async () => {
+  const deletion = deferred();
+  let ended = 0;
+  const client = new RoomClient({ fetcher: async () => deletion.promise, onAccessEnded: () => { ended++; } });
+  client.session = identity();
+  const loggingOut = client.logout();
+  client.disconnect();
+  client.session = identity("other");
+  deletion.resolve(response({ ok: true }));
+  await loggingOut;
+  assert.equal(ended, 0);
+  assert.equal(client.session.member.id, "other");
 });
 test("connected UI hooks exist and demo controls are not exposed", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");

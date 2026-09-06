@@ -94,6 +94,7 @@ export const seedEvents = [
     summary: "The core work-item model is sound; four consistency corrections are required before implementation.",
     evidenceUrl: "https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5550878240",
     evidenceVersion: "58875941ed50d01edacbdc91f1edebe85ba6b53e",
+    producerId: "codex",
     checksClaimed: ["object model", "authority boundaries", "failure recovery"],
     nextAction: "Instinct checks the same revision"
   }, "evt-work-review-started"),

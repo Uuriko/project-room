@@ -17,15 +17,48 @@ export class RoomClient {
       return body;
     } finally { clearTimeout(timer); }
   }
-  async restore() { this.disconnect(); this.sequence = 0; this.session = await this.request("/api/session"); await this.refresh(); this.connect(); return this.session; }
+  async restore() {
+    this.disconnect(); this.sequence = 0; this.session = null;
+    const generation = this.generation;
+    try {
+      const restored = await this.request("/api/session");
+      if (generation !== this.generation) return null;
+      this.session = restored;
+      await this.refresh();
+      if (generation !== this.generation || this.session !== restored) return null;
+      this.connect(); return this.session;
+    } catch (error) {
+      if (generation !== this.generation) return null;
+      // refresh() may already have exposed one snapshot before a coalesced follow-up
+      // fails. Fail closed through the UI clearing callback whenever identity existed.
+      if (this.session) this.endAccess();
+      else { this.session = null; this.sequence = 0; }
+      throw error;
+    }
+  }
   async login(accessKey) {
-    this.disconnect(); this.sequence = 0;
-    this.session = await this.request("/api/session", { method: "POST", data: { accessKey } });
-    await this.refresh(); this.connect(); return this.session;
+    this.disconnect(); this.sequence = 0; this.session = null;
+    const generation = this.generation;
+    try {
+      const loggedIn = await this.request("/api/session", { method: "POST", data: { accessKey } });
+      if (generation !== this.generation) return null;
+      this.session = loggedIn;
+      await this.refresh();
+      if (generation !== this.generation || this.session !== loggedIn) return null;
+      this.connect(); return this.session;
+    } catch (error) {
+      if (generation !== this.generation) return null;
+      if (this.session) this.endAccess();
+      else { this.session = null; this.sequence = 0; }
+      throw error;
+    }
   }
   async logout() {
+    const generation = this.generation, session = this.session;
     await this.request("/api/session", { method: "DELETE" });
-    this.endAccess();
+    // A delayed response belongs only to the session that issued it. An access-ended
+    // stream may already have exposed sign-in and allowed a different account to enter.
+    if (generation === this.generation && this.session === session) this.endAccess();
   }
   path(suffix = "") { return `/api/rooms/${encodeURIComponent(this.session.roomId)}${suffix}`; }
   refresh() {
@@ -34,13 +67,18 @@ export class RoomClient {
     const flight = { generation, again: false };
     this.flight = flight;
     flight.promise = (async () => {
-      do {
-        flight.again = false;
-        const snapshot = await this.request(this.path());
-        if (generation !== this.generation || !this.session) return;
-        if (snapshot.viewerId !== this.session.member.id) { this.endAccess(); return; }
-        if (snapshot.sequence >= this.sequence) { this.sequence = snapshot.sequence; this.onSnapshot(snapshot, this.session); }
-      } while (flight.again);
+      try {
+        do {
+          flight.again = false;
+          const snapshot = await this.request(this.path());
+          if (generation !== this.generation || !this.session) return;
+          if (snapshot.viewerId !== this.session.member.id) { this.endAccess(); return; }
+          if (snapshot.sequence >= this.sequence) { this.sequence = snapshot.sequence; this.onSnapshot(snapshot, this.session); }
+        } while (flight.again);
+      } catch (error) {
+        if (generation !== this.generation) return;
+        throw error;
+      }
     })().finally(() => { if (this.flight === flight) this.flight = null; });
     return flight.promise;
   }
@@ -59,11 +97,18 @@ export class RoomClient {
   // Return brief: history fixed through H (frozen on the first page, continuations carry it),
   // current live through N. Fetching never acknowledges; only caughtUp() does, explicitly.
   async returnBrief({ horizon = null, after = null, cursor = null, limit = null } = {}) {
+    const generation = this.generation, session = this.session;
     const params = new URLSearchParams();
     if (horizon !== null) { params.set("horizon", horizon); params.set("after", after); params.set("cursor", cursor); }
     if (limit !== null) params.set("limit", limit);
     const query = params.toString();
-    return this.request(this.path(`/return-brief${query ? `?${query}` : ""}`));
+    const brief = await this.request(this.path(`/return-brief${query ? `?${query}` : ""}`));
+    if (generation !== this.generation || this.session !== session) return null;
+    if (brief.viewerId !== session?.member.id || brief.roomId !== session?.roomId) {
+      this.endAccess();
+      return null;
+    }
+    return brief;
   }
   connect() {
     this.stream?.close();

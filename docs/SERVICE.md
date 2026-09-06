@@ -22,7 +22,8 @@ The entry point binds only to loopback and rejects `NODE_ENV=production` or a no
 
 ## Data and authority
 
-- SQLite WAL, foreign keys, synchronous FULL, prepared statements, schema version 1, and immediate transactions.
+- SQLite WAL, foreign keys, synchronous FULL, prepared statements, schema version 2, and immediate transactions. Version 2 separates authenticated completion reporters from explicit producer attribution and makes older binaries fail closed after migration.
+- A v1 upgrade writes an immutable, conservatively repaired projection checkpoint in the same transaction as the v2 version marker. Recovery for an upgraded room starts at that trusted checkpoint and strictly replays the append-only v2 tail; native-v2 rooms rebuild from their full event log. Legacy event bodies are never rewritten.
 - Events, the current room projection, and command-id deduplication commit together. Rejected commands leave all three unchanged.
 - Each command has a client-generated ID, type, data, and optional causal event ID. The server derives actor, room binding, time, event ID, and idempotency key from the authenticated request.
 - Idempotency is scoped to room + actor + command ID. Exact retry returns the original committed event. Changed content with the same ID conflicts. Membership/credential revocation is checked even on retries.
@@ -41,7 +42,7 @@ All API responses are JSON except the event stream. Non-success responses have `
 | `GET /api/health` | Process responds; not a database restore or availability guarantee |
 | `POST /api/session` | Exchange `{accessKey}` for a human browser session; exact Origin required |
 | `GET /api/session` | Current member, room, expiry, and session CSRF confirmation |
-| `DELETE /api/session` | Revoke the current credential and clear browser cookie |
+| `DELETE /api/session` | Revoke the current credential. The revoked HttpOnly cookie is left inert so a delayed response from one tab cannot erase a newer login cookie from another; the next login overwrites it. |
 | `GET /api/rooms/:room` | Consistent state, event sequence, viewer identity, latest 100 audit events, and own caught-up cursor |
 | `POST /api/rooms/:room/commands` | Submit `{id,type,data,causationId?}`; 201 committed, 200 exact duplicate |
 | `GET /api/rooms/:room/events?after=0&limit=100` | Ordered events, next cursor, and hasMore; limit 1–100 |

@@ -276,7 +276,7 @@ Use PostgreSQL with:
 - `inbox_deliveries`
 - `member_read_cursors`
 
-The event log and revision-checked Work Item projection are committed in one transaction. The projection is the ordinary read surface and may be rebuilt from supporting events; neither can advance alone. Messages can use the same event envelope while retaining a query-friendly table.
+The event log and revision-checked Work Item projection are committed in one transaction. The projection is the ordinary read surface and may be rebuilt from native-schema events, or from an immutable repaired migration checkpoint plus its strict event tail; neither can advance alone. Messages can use the same event envelope while retaining a query-friendly table.
 
 ### Agent gateway
 
@@ -324,7 +324,7 @@ These are never collapsed into one generic “done” state.
 - Enforce a unique `(source, idempotency_key)` constraint.
 - Use optimistic concurrency with expected aggregate version.
 - Store external action intent before execution and result afterward; retries inspect the source before repeating an action.
-- A restart rebuilds projections from events and resumes from durable commands. It does not replay completed side effects.
+- A restart rebuilds projections from native-schema events, or from a trusted schema-migration checkpoint plus its append-only tail, and resumes from durable commands. It does not replay completed side effects.
 - A worker heartbeat changes availability only. It does not silently reassign accountability.
 - Expired claims become explicit events; a new claim cites the expired claim as its causal parent.
 - Failed verification returns to a recoverable state and keeps the failed receipt visible.

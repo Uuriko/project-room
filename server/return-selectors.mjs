@@ -1,8 +1,7 @@
 import { WORK_STATES } from "../src/events.js";
-// needsAttention / workInvolvingMe, ported VERBATIM from the reviewed r3 selector slice
-// (branch instinct/push/needs-attention-b3; review closed at 5557676251 - "wired unchanged"
-// per the return-brief wiring disposition 5557850637). Only the error class is local to this
-// module so the wired package does not depend on the unwired return-cursor contract module.
+// needsAttention / workInvolvingMe originated in the reviewed r3 selector slice and now
+// include the frozen provenance and explicit-rework refinements. The error class stays local
+// so the wired package does not depend on the unwired return-cursor contract module.
 
 export class CursorError extends Error {
   constructor(code, message) {
@@ -12,6 +11,22 @@ export class CursorError extends Error {
 }
 
 const REQUEST_ROLES = ["accountableMemberId", "verifierMemberId", "humanDecisionMakerId"];
+
+function producerKnown(item) {
+  return item.receipt?.producerAttribution === "reported" && item.receipt.producerId != null;
+}
+
+function verificationSatisfied(item) {
+  if (!item.independentVerificationRequired) return true;
+  const { receipt, verification } = item;
+  return verification?.result === "pass" &&
+    verification.independenceConfirmed === true &&
+    verification.verifierId === item.verifierMemberId &&
+    verification.completionEventId === receipt?.eventId &&
+    verification.evidenceVersion === receipt?.evidenceVersion &&
+    producerKnown(item) &&
+    receipt.producerId !== verification.verifierId;
+}
 
 // Two independent return facts (matrix refinement 4): unread-since-cursor and
 // unresolved-work-involving-me are SEPARATE derivations. The cursor governs what is
@@ -28,7 +43,8 @@ const REQUEST_ROLES = ["accountableMemberId", "verifierMemberId", "humanDecision
 //   accountable -> accept (proposed), start (accepted), revise (blocked: includes
 //   verification-failure blocks and rejected/changes-requested decisions, whose
 //   reducer path already routes the next action to the accountable member);
-//   designated verifier -> verify (current completion unchecked);
+//   accountable -> establish producer provenance or resolve a verifier/producer conflict;
+//   designated verifier -> verify (producer known and distinct, gate not yet satisfied);
 //   designated human -> decide (current completion's verification gate satisfied,
 //   no current decision). A normally running item and a completed item with no
 //   remaining required gate produce NO attention.
@@ -39,9 +55,12 @@ const REQUEST_ROLES = ["accountableMemberId", "verifierMemberId", "humanDecision
 // discoverable under the fixed-horizon "What changed" view and in record history -
 // it never masquerades as open work here.
 function involvementTerminal(item) {
-  if (item.supersededBy) return true;
-  if (item.ownerDecisionRequired) return item.decision?.decision === "approved";
-  return item.state === WORK_STATES.COMPLETED && (!item.independentVerificationRequired || item.verification?.result === "pass");
+  if (item.state === WORK_STATES.SUPERSEDED || item.supersededBy) return true;
+  // An approval is terminal only while its exact completion remains completed. The
+  // explicit rework path retires that decision to history, and BLOCKED / ACCEPTED /
+  // WORKING remain visible until a replacement result completes the gates again.
+  if (item.ownerDecisionRequired) return item.state === WORK_STATES.COMPLETED && verificationSatisfied(item) && item.decision?.decision === "approved";
+  return item.state === WORK_STATES.COMPLETED && verificationSatisfied(item);
 }
 
 export function workInvolvingMe({ workItems, memberId }) {
@@ -62,8 +81,8 @@ export function needsAttention({ workItems, memberId }) {
   if (!memberId) throw new CursorError("cursor.member_required", "needsAttention requires a memberId");
   const out = [];
   for (const item of Object.values(workItems)) {
-    if (!item || typeof item !== "object" || item.supersededBy) continue;
-    if (item.decision?.decision === "approved") continue;
+    if (!item || typeof item !== "object" || item.state === WORK_STATES.SUPERSEDED || item.supersededBy) continue;
+    if (item.state === WORK_STATES.COMPLETED && verificationSatisfied(item) && item.decision?.decision === "approved") continue;
     const push = (role, step) => out.push(Object.freeze({ workItemId: item.id, action: item.title ?? null, role, step }));
     if (item.accountableMemberId === memberId) {
       if (item.state === WORK_STATES.PROPOSED) push("accountable", "accept");
@@ -71,9 +90,15 @@ export function needsAttention({ workItems, memberId }) {
       else if (item.state === WORK_STATES.BLOCKED) push("accountable", "revise");
     }
     if (item.state === WORK_STATES.COMPLETED) {
-      const verificationSatisfied = !item.independentVerificationRequired || item.verification?.result === "pass";
-      if (item.verifierMemberId === memberId && item.independentVerificationRequired && !verificationSatisfied) push("verifier", "verify");
-      if (item.humanDecisionMakerId === memberId && item.ownerDecisionRequired && verificationSatisfied && !item.decision) push("decision_maker", "decide");
+      const verified = verificationSatisfied(item);
+      if (item.independentVerificationRequired && !producerKnown(item)) {
+        if (item.accountableMemberId === memberId) push("accountable", "establish_provenance");
+      } else if (item.independentVerificationRequired && item.receipt.producerId === item.verifierMemberId) {
+        if (item.accountableMemberId === memberId) push("accountable", "resolve_independence");
+      } else if (item.verifierMemberId === memberId && item.independentVerificationRequired && !verified) {
+        push("verifier", "verify");
+      }
+      if (item.humanDecisionMakerId === memberId && item.ownerDecisionRequired && verified && !item.decision) push("decision_maker", "decide");
     }
   }
   return Object.freeze(out);

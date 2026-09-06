@@ -12,6 +12,8 @@ test("seed replay reconstructs the reviewed contract deterministically", () => {
   assert.deepEqual(first, second);
   assert.equal(first.workItems["work-spec-review"].state, WORK_STATES.COMPLETED);
   assert.equal(first.workItems["work-spec-review"].verification.result, "pass");
+  assert.equal(first.workItems["work-spec-review"].receipt.producerId, "codex");
+  assert.equal(first.workItems["work-spec-review"].verification.independenceConfirmed, true);
   assert.equal(first.workItems["work-spec-review"].decision, null);
   assert.equal(first.workItems["work-vertical-slice"].state, WORK_STATES.WORKING);
 });
@@ -116,11 +118,35 @@ test("read-only work rejects a write claim", () => {
 });
 
 test("completion records a result but not verification", () => {
-  const state = completeBuild(baseState(), "abc123", "build-completed");
+  const state = completeBuild(baseState(), "abc123", "build-completed", { producerId: null });
   const item = state.workItems["work-vertical-slice"];
   assert.equal(item.state, WORK_STATES.COMPLETED);
   assert.equal(item.verification, null);
   assert.equal(item.receipt.evidenceVersion, "abc123");
+  assert.equal(item.receipt.reportedById, "codex");
+  assert.equal(item.receipt.producerId, null);
+  assert.equal(item.receipt.producerAttribution, "unknown");
+});
+
+test("completion keeps the authenticated reporter separate from reported producer attribution", () => {
+  const state = completeBuild(baseState(), "abc123", "produced-completed", { producerId: "maya" });
+  const receipt = state.workItems["work-vertical-slice"].receipt;
+  assert.equal(receipt.reportedById, "codex");
+  assert.equal(receipt.producerId, "maya");
+  assert.equal(receipt.producerAttribution, "reported");
+  assert.throws(() => completeBuild(baseState(), "abc123", "outsider-completed", { producerId: "outsider" }), /Unknown member: outsider/);
+});
+
+test("a known producer cannot independently verify their own result", () => {
+  const state = completeBuild(baseState(), "abc123", "self-produced", { producerId: "instinct" });
+  const item = state.workItems["work-vertical-slice"];
+  assert.throws(() => applyEvent(state, workEvent("self-verification", EVENT_TYPES.VERIFICATION_RECORDED, "instinct", item.id, item.revision, {
+    result: "pass",
+    completionEventId: item.receipt.eventId,
+    evidenceVersion: item.receipt.evidenceVersion,
+    summary: "Checking my own output"
+  })), /different from the known producer/);
+  assert.equal(item.verification, null);
 });
 
 test("PASS is separate per-version evidence and does not become a work state", () => {
@@ -132,8 +158,37 @@ test("PASS is separate per-version evidence and does not become a work state", (
     evidenceVersion: "abc123",
     summary: "Exact version passes"
   }));
-  assert.equal(state.workItems["work-vertical-slice"].state, WORK_STATES.COMPLETED);
-  assert.equal(state.workItems["work-vertical-slice"].verification.result, "pass");
+  const item = state.workItems["work-vertical-slice"];
+  assert.equal(item.state, WORK_STATES.COMPLETED);
+  assert.equal(item.verification.result, "pass");
+  assert.equal(item.receipt.producerId, "codex");
+  assert.equal(item.receipt.producerAttribution, "reported");
+  assert.equal(item.verification.independenceConfirmed, true);
+});
+
+test("a PASS against an unknown producer remains non-independent and cannot unlock approval", () => {
+  let state = completeBuild(baseState(), "abc123", "unknown-producer-completed", { producerId: null });
+  let item = state.workItems["work-vertical-slice"];
+  state = applyEvent(state, workEvent("unknown-producer-pass", EVENT_TYPES.VERIFICATION_RECORDED, "instinct", item.id, item.revision, {
+    result: "pass",
+    completionEventId: item.receipt.eventId,
+    evidenceVersion: item.receipt.evidenceVersion,
+    summary: "The exact artifact passed, but its producer is unknown"
+  }));
+  item = state.workItems[item.id];
+  assert.equal(item.verification.result, "pass");
+  assert.equal(item.verification.independenceConfirmed, false);
+  assert.equal(item.receipt.producerAttribution, "unknown");
+  assert.throws(
+    () => applyEvent(state, ownerDecision("unknown-producer-approval", item.id, item.revision, item.receipt.eventId, item.receipt.evidenceVersion, "approved")),
+    /confirmed producer independence/
+  );
+  const inconsistent = structuredClone(state);
+  inconsistent.workItems[item.id].verification.independenceConfirmed = true;
+  assert.throws(
+    () => applyEvent(inconsistent, ownerDecision("forged-independence-approval", item.id, item.revision, item.receipt.eventId, item.receipt.evidenceVersion, "approved")),
+    /confirmed producer independence/
+  );
 });
 
 test("only the designated verifier may check the exact current completion", () => {
@@ -237,6 +292,11 @@ test("approved completed work requires an explicit rework path before a replacem
     nextAction: "Codex accepts the explicit v2 direction"
   }));
   item = state.workItems[item.id];
+  assert.equal(item.decision, null);
+  assert.equal(item.decisionHistory.length, 1);
+  assert.equal(item.decisionHistory[0].decision, "approved");
+  assert.equal(item.decisionHistory[0].historical, true);
+  assert.equal(item.decisionHistory[0].invalidatedReason, "rework");
   state = applyEvent(state, workEvent("rework-accepted", EVENT_TYPES.WORK_BLOCKER_RESOLVED, "codex", item.id, item.revision, {
     resolution: "The v2 direction and scope are accepted"
   }));
@@ -256,6 +316,45 @@ test("approved completed work requires an explicit rework path before a replacem
   assert.equal(item.receiptHistory.at(-1).evidenceVersion, "abc123");
   assert.equal(item.verification, null);
   assert.equal(item.decision, null);
+});
+
+test("a current verification failure retires an earlier approval exactly once", () => {
+  let state = verifiedBuild();
+  let item = state.workItems["work-vertical-slice"];
+  state = applyEvent(state, ownerDecision("approved-before-fail", item.id, item.revision, item.receipt.eventId, item.receipt.evidenceVersion, "approved"));
+  item = state.workItems[item.id];
+  state = applyEvent(state, workEvent("current-fail-after-approval", EVENT_TYPES.VERIFICATION_RECORDED, "instinct", item.id, item.revision, {
+    result: "fail",
+    completionEventId: item.receipt.eventId,
+    evidenceVersion: item.receipt.evidenceVersion,
+    summary: "The current evidence no longer passes",
+    nextAction: "Revise the current result"
+  }));
+  item = state.workItems[item.id];
+  assert.equal(item.state, WORK_STATES.BLOCKED);
+  assert.equal(item.verification.result, "fail");
+  assert.equal(item.decision, null);
+  assert.equal(item.decisionHistory.length, 1);
+  assert.equal(item.decisionHistory[0].eventId, "approved-before-fail");
+  assert.equal(item.decisionHistory[0].invalidatedByEventId, "current-fail-after-approval");
+  assert.equal(item.decisionHistory[0].invalidatedReason, "verification_failed");
+});
+
+test("superseding approved work retires its approval", () => {
+  let state = verifiedBuild();
+  let item = state.workItems["work-vertical-slice"];
+  state = applyEvent(state, ownerDecision("approved-before-supersede", item.id, item.revision, item.receipt.eventId, item.receipt.evidenceVersion, "approved"));
+  state = applyEvent(state, proposal("approved-replacement", "work-approved-replacement", "maya", "instinct", "read"));
+  item = state.workItems[item.id];
+  state = applyEvent(state, workEvent("supersede-approved", EVENT_TYPES.WORK_SUPERSEDED, "potter", item.id, item.revision, {
+    supersededByWorkItemId: "work-approved-replacement",
+    reason: "Use the replacement"
+  }));
+  item = state.workItems[item.id];
+  assert.equal(item.state, WORK_STATES.SUPERSEDED);
+  assert.equal(item.decision, null);
+  assert.equal(item.decisionHistory.length, 1);
+  assert.equal(item.decisionHistory[0].invalidatedReason, "superseded");
 });
 
 test("late evidence for a known older version is historical and cannot affect the current version", () => {
@@ -304,6 +403,38 @@ test("independent work cannot assign the accountable member as verifier", () => 
   assert.throws(() => applyEvent(state, proposal("same-verifier", "work-self-verify", "codex", "codex", "read")), /different accountable member and verifier/);
 });
 
+test("supersession rejects self-links and cycles and retires an active claim", () => {
+  let state = baseState();
+  state = applyEvent(state, proposal("supersede-source", "work-supersede-source", "codex", "instinct", "write"));
+  state = applyEvent(state, workEvent("supersede-accepted", EVENT_TYPES.WORK_ACCEPTED, "codex", "work-supersede-source", 0));
+  state = applyEvent(state, workEvent("supersede-claim", EVENT_TYPES.CLAIM_ACQUIRED, "codex", "work-supersede-source", 1, {
+    repository: "Uuriko/project-room",
+    ref: "codex/supersede-source",
+    paths: ["src/events.js"],
+    expiresAt: "2026-09-06T10:00:00.000Z"
+  }));
+  state = applyEvent(state, proposal("supersede-replacement", "work-supersede-replacement", "maya", "instinct", "read"));
+
+  assert.throws(() => applyEvent(state, workEvent("self-supersede", EVENT_TYPES.WORK_SUPERSEDED, "potter", "work-supersede-source", 2, {
+    supersededByWorkItemId: "work-supersede-source",
+    reason: "invalid self replacement"
+  })), /cannot supersede itself/);
+
+  state = applyEvent(state, workEvent("valid-supersede", EVENT_TYPES.WORK_SUPERSEDED, "potter", "work-supersede-source", 2, {
+    supersededByWorkItemId: "work-supersede-replacement",
+    reason: "replacement outcome"
+  }));
+  const source = state.workItems["work-supersede-source"];
+  assert.equal(source.state, WORK_STATES.SUPERSEDED);
+  assert.equal(source.claim.status, "superseded");
+  assert.equal(source.claim.supersededAt, "2026-09-05T10:00:00.000Z");
+
+  assert.throws(() => applyEvent(state, workEvent("cyclic-supersede", EVENT_TYPES.WORK_SUPERSEDED, "potter", "work-supersede-replacement", 0, {
+    supersededByWorkItemId: "work-supersede-source",
+    reason: "invalid cycle"
+  })), /must not already be superseded/);
+});
+
 test("event helper creates the required Room-scoped envelope", () => {
   const created = event({ roomId: ROOM_ID, type: EVENT_TYPES.MESSAGE_POSTED, actorId: "potter", data: { body: "hello" } });
   assert.ok(created.id);
@@ -325,13 +456,15 @@ function proposal(id, workItemId, accountableMemberId, verifierMemberId, mode) {
   });
 }
 
-function completeBuild(state, evidenceVersion, completionEventId) {
+function completeBuild(state, evidenceVersion, completionEventId, extra = {}) {
   const item = state.workItems["work-vertical-slice"];
   return applyEvent(state, workEvent(completionEventId, EVENT_TYPES.WORK_COMPLETED, "codex", item.id, item.revision, {
     summary: "Prototype complete",
     evidenceUrl: "https://github.com/Uuriko/project-room/pull/3",
     evidenceVersion,
-    nextAction: "Instinct verifies"
+    nextAction: "Instinct verifies",
+    producerId: "codex",
+    ...extra
   }));
 }
 

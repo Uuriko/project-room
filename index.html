@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="./src/styles.css">
   </head>
   <body>
-    <a class="skip-link" href="#main">Skip to room</a>
+    <a id="skip-link" class="skip-link" href="#connection-status">Skip to content</a>
     <div class="app-shell">
       <header class="topbar">
         <div class="brand" aria-label="Project Room">
@@ -25,7 +25,7 @@
         </div>
       </header>
 
-      <p id="connection-status" class="connection-status" role="status">Connecting to room service…</p>
+      <p id="connection-status" class="connection-status" role="status" tabindex="-1">Connecting to room service…</p>
       <section id="auth-panel" class="auth-panel panel" aria-labelledby="auth-title" hidden>
         <p class="eyebrow">YOUR SHARED SPACE</p>
         <h1 id="auth-title">Come in. Make yourself at home.</h1>
@@ -34,7 +34,7 @@
           <label for="access-key">Your human member access key</label>
           <input id="access-key" type="password" autocomplete="off" spellcheck="false" required maxlength="128" aria-describedby="auth-error">
           <button class="button primary" type="submit">Enter room</button>
-          <p id="auth-error" role="alert"></p>
+          <p id="auth-error" class="status form-status" role="alert"></p>
         </form>
         <p class="form-hint">Use a key issued by the room administrator. Never share keys in chat or GitHub. Public sign-up and connected AI runtimes are not included in this pilot.</p>
       </section>
@@ -55,11 +55,11 @@
           <header class="room-heading">
             <div>
               <p class="eyebrow"># COMMONS · SHARED ROOM</p>
-              <h1 id="room-title">Hang out. Think together. Make things real.</h1>
+              <h1 id="room-title" tabindex="-1">Hang out. Think together. Make things real.</h1>
               <p class="room-purpose">A shared room for ordinary conversation and serious work, with humans and AI agents participating as visible members from the start.</p>
             </div>
             <div class="room-presence-summary">
-              <div id="member-stack" class="member-stack" aria-label="Room members"></div>
+              <div id="member-stack" class="member-stack" aria-hidden="true"></div>
               <span id="presence-count">Membership loading…</span>
             </div>
           </header>
@@ -124,7 +124,7 @@
               <p class="eyebrow">ROOM PULSE</p>
               <h2 id="return-title">What’s moving</h2>
             </div>
-            <div id="summary-grid" class="summary-grid" aria-live="polite"></div>
+            <div id="summary-grid" class="summary-grid" aria-live="polite" aria-atomic="true"></div>
           </section>
 
           <details id="return-brief-panel" class="panel return-brief-panel">
@@ -155,7 +155,7 @@
             <div class="panel-header">
               <div>
                 <p class="eyebrow">WORK IN THIS ROOM</p>
-                <h2 id="work-title">Accountable outcomes</h2>
+                <h2 id="work-title" tabindex="-1">Accountable outcomes</h2>
               </div>
               <button id="new-work-button" class="button secondary" type="button">New</button>
             </div>
@@ -170,6 +170,7 @@
               </div>
               <label>Work mode <select id="work-mode-select"><option value="read">Read / think / review</option><option value="write">Authorized external write</option></select></label>
               <p class="form-hint">Choose different accountable and verifying members. If none are available, an administrator must provision them first. This records work; it does not run it.</p>
+              <p id="new-work-status" class="status form-status" role="alert"></p>
               <div class="form-actions">
                 <button id="cancel-work-button" class="button ghost" type="button">Cancel</button>
                 <button class="button primary" type="submit">Create outcome</button>
@@ -178,7 +179,7 @@
             <div id="work-list" class="work-list"></div>
           </section>
 
-          <details class="panel record-panel">
+          <details id="record-panel" class="panel record-panel">
             <summary class="panel-header">
               <span><span class="eyebrow">REPLAYABLE RECORD</span><strong id="record-title">Room history</strong></span>
               <span id="event-count" class="count-chip"></span>
@@ -194,7 +195,7 @@
         <h2 id="action-title"></h2>
         <p id="action-context"></p>
         <div id="action-fields"></div>
-        <p id="action-error" role="alert"></p>
+        <p id="action-error" class="status form-status" role="alert"></p>
         <div class="form-actions"><button id="cancel-action" class="button ghost" type="button">Cancel</button><button class="button primary" type="submit">Save record</button></div>
       </form>
     </dialog>

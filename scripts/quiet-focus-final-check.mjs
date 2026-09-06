@@ -37,6 +37,11 @@ test("post-connect loss: Connected first, established stream killed, reconnect b
   const status = page.locator("#connection-status");
   // 1. observe the exact Connected label first
   await page.waitForFunction(() => document.querySelector("#connection-status").textContent.startsWith("Connected to room service"), null, { timeout: 10000 });
+  await page.evaluate(() => {
+    window.connectionTransitions = [];
+    new MutationObserver(() => window.connectionTransitions.push(document.querySelector("#connection-status").textContent))
+      .observe(document.querySelector("#connection-status"), { childList: true, characterData: true, subtree: true });
+  });
   // 2. block any reconnect/refresh success, THEN terminate the established stream server-side
   await page.route("**/api/rooms/commons/stream**", route => route.abort("failed"));
   await page.route("**/api/rooms/commons", route => route.abort("failed"));
@@ -49,6 +54,8 @@ test("post-connect loss: Connected first, established stream killed, reconnect b
   await page.waitForTimeout(4000);
   const late = await status.textContent();
   assert.doesNotMatch(late, /^Connected/, "no silent return to Connected without evidence");
+  const lossTransitions = await page.evaluate(() => window.connectionTransitions.filter(text => text.startsWith("Connection interrupted")));
+  assert.deepEqual(lossTransitions, ["Connection interrupted · reconnecting; displayed history may be stale"], "one meaningful live-region transition per sustained loss");
   await page.screenshot({ path: "test-results/final-post-connect-loss.png", fullPage: true });
 });
 

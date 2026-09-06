@@ -32,7 +32,7 @@ function completeLifecycle(store, owner, human, agent, workItemId) {
   store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId, title: `title-${workItemId}`, definitionOfDone: "done", accountableMemberId: "human", verifierMemberId: "agent", independentVerificationRequired: true, ownerDecisionRequired: true, humanDecisionMakerId: "owner" }));
   store.command(human, "commons", command(T.WORK_ACCEPTED, { workItemId, expectedRevision: 0 }));
   store.command(human, "commons", command(T.WORK_STARTED, { workItemId, expectedRevision: 1 }));
-  const done = store.command(human, "commons", command(T.WORK_COMPLETED, { workItemId, expectedRevision: 2, summary: "s", evidenceUrl: "https://example.com/e", evidenceVersion: "v1", nextAction: "verify" }));
+  const done = store.command(human, "commons", command(T.WORK_COMPLETED, { workItemId, expectedRevision: 2, producerId: "human", summary: "s", evidenceUrl: "https://example.com/e", evidenceVersion: "v1", nextAction: "verify" }));
   store.command(agent, "commons", command(T.VERIFICATION_RECORDED, { workItemId, expectedRevision: 3, result: "pass", completionEventId: done.event.id, evidenceVersion: "v1", summary: "checked" }));
   store.command(owner, "commons", command(T.OWNER_DECISION_RECORDED, { workItemId, expectedRevision: 4, decision: "approved", completionEventId: done.event.id, evidenceVersion: "v1", reason: "good" }));
 }
@@ -110,6 +110,52 @@ test("verification and owner decisions are first-class history items and close t
   assert.deepEqual(store.returnBrief(owner, "commons", {}).current.workInvolvingMe, []); // terminal is not ongoing involvement
 });
 
+test("an unknown producer PASS stays visible for accountable provenance and cannot unlock approval", t => {
+  const { store, owner, human, agent } = fixture(t);
+  store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "w-unknown-producer", title: "Unknown producer", definitionOfDone: "Independent evidence", accountableMemberId: "human", verifierMemberId: "agent", independentVerificationRequired: true, ownerDecisionRequired: true, humanDecisionMakerId: "owner" }));
+  store.command(human, "commons", command(T.WORK_ACCEPTED, { workItemId: "w-unknown-producer", expectedRevision: 0 }));
+  const done = store.command(human, "commons", command(T.WORK_COMPLETED, { workItemId: "w-unknown-producer", expectedRevision: 1, summary: "Existing result", evidenceUrl: "https://example.com/unknown", evidenceVersion: "v1", nextAction: "Check exact evidence" }));
+  store.command(agent, "commons", command(T.VERIFICATION_RECORDED, { workItemId: "w-unknown-producer", expectedRevision: 2, result: "pass", completionEventId: done.event.id, evidenceVersion: "v1", summary: "Exact evidence passed; producer remains unknown" }));
+
+  const item = store.snapshot(owner, "commons").state.workItems["w-unknown-producer"];
+  assert.equal(item.verification.result, "pass");
+  assert.equal(item.verification.independenceConfirmed, false);
+  assert.throws(() => store.command(owner, "commons", command(T.OWNER_DECISION_RECORDED, { workItemId: item.id, expectedRevision: 3, decision: "approved", completionEventId: done.event.id, evidenceVersion: "v1", reason: "Looks good" })), /confirmed producer independence/);
+  assert.deepEqual(store.returnBrief(human, "commons", {}).current.needsAttention.map(i => [i.workItemId, i.step]), [[item.id, "establish_provenance"]]);
+  assert.deepEqual(store.returnBrief(agent, "commons", {}).current.needsAttention, []); // repeating the same check cannot establish provenance
+  assert.deepEqual(store.returnBrief(owner, "commons", {}).current.needsAttention, []); // no decision until independence is confirmed
+  assert.deepEqual(store.returnBrief(human, "commons", {}).current.workInvolvingMe.map(i => i.workItemId), [item.id]);
+});
+
+test("a verifier named as producer routes independence resolution to the accountable member", t => {
+  const { store, owner, human, agent } = fixture(t);
+  store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "w-producer-conflict", title: "Producer conflict", definitionOfDone: "Independent evidence", accountableMemberId: "human", verifierMemberId: "agent", independentVerificationRequired: true }));
+  store.command(human, "commons", command(T.WORK_ACCEPTED, { workItemId: "w-producer-conflict", expectedRevision: 0 }));
+  store.command(human, "commons", command(T.WORK_COMPLETED, { workItemId: "w-producer-conflict", expectedRevision: 1, producerId: "agent", summary: "Verifier produced this result", evidenceUrl: "https://example.com/conflict", evidenceVersion: "v1", nextAction: "Assign independent evidence" }));
+  assert.deepEqual(store.returnBrief(human, "commons", {}).current.needsAttention.map(i => [i.workItemId, i.step]), [["w-producer-conflict", "resolve_independence"]]);
+  assert.deepEqual(store.returnBrief(agent, "commons", {}).current.needsAttention, []);
+});
+
+test("an approved completion reopened for explicit rework remains visible and actionable", t => {
+  const { store, owner, human, agent } = fixture(t);
+  completeLifecycle(store, owner, human, agent, "w-rework");
+  store.command(human, "commons", command(T.WORK_BLOCKED, { workItemId: "w-rework", expectedRevision: 5, reason: "A v2 was requested", nextAction: "Accept the v2 direction" }));
+
+  let brief = store.returnBrief(human, "commons", {});
+  assert.deepEqual(brief.current.needsAttention.map(i => [i.workItemId, i.step]), [["w-rework", "revise"]]);
+  assert.deepEqual(brief.current.workInvolvingMe.map(i => [i.workItemId, i.state]), [["w-rework", "blocked"]]);
+
+  store.command(human, "commons", command(T.WORK_BLOCKER_RESOLVED, { workItemId: "w-rework", expectedRevision: 6, resolution: "v2 direction accepted" }));
+  brief = store.returnBrief(human, "commons", {});
+  assert.deepEqual(brief.current.needsAttention.map(i => [i.workItemId, i.step]), [["w-rework", "start"]]);
+  assert.deepEqual(brief.current.workInvolvingMe.map(i => [i.workItemId, i.state]), [["w-rework", "accepted"]]);
+
+  store.command(human, "commons", command(T.WORK_STARTED, { workItemId: "w-rework", expectedRevision: 7 }));
+  brief = store.returnBrief(human, "commons", {});
+  assert.deepEqual(brief.current.needsAttention, []); // working is context, not an attention badge
+  assert.deepEqual(brief.current.workInvolvingMe.map(i => [i.workItemId, i.state]), [["w-rework", "working"]]);
+});
+
 test("the proposer is drillable from history and the projection after replay; forged provenance never enters", t => {
   const { store, owner, human } = fixture(t);
   store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "w-prop", title: "provenance", definitionOfDone: "done", accountableMemberId: "human" }));
@@ -152,6 +198,8 @@ test("HTTP: query parsing, auth, and response shape over the wire", async t => {
   const ok = await get("/api/rooms/commons/return-brief?limit=2", human);
   assert.equal(ok.status, 200);
   const body = await ok.json();
+  assert.equal(body.roomId, "commons");
+  assert.equal(body.viewerId, "human");
   assert.equal(body.history.items.length, 2);
   assert.equal(body.history.hasMore, true);
   assert.equal(typeof body.current.evaluatedThrough, "number");

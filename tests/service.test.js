@@ -128,7 +128,9 @@ test("HTTP session exchange protects cookie writes, rejects agent browser sessio
   headers["X-CSRF-Token"] = session.csrf;
   assert.equal((await request("/api/rooms/commons/commands", { token: null, method: "POST", data, headers })).status, 201);
   assert.equal((await request("/api/session", { token: null, method: "POST", headers: { Origin: origin }, data: { accessKey: agent } })).status, 403);
-  assert.equal((await request("/api/session", { token: null, method: "DELETE", headers })).status, 200);
+  const logout = await request("/api/session", { token: null, method: "DELETE", headers });
+  assert.equal(logout.status, 200);
+  assert.equal(logout.headers.get("set-cookie"), null, "a delayed logout response must not erase a newer cross-tab cookie");
   assert.equal((await request("/api/session", { token: null, headers })).status, 401);
 });
 
@@ -195,6 +197,41 @@ test("new work mutations recheck capability changes and preserve the original wo
   store.command(owner, "commons", command(T.MEMBER_ACCESS_CHANGED, { memberId: "human", expectedMemberRevision: 0, permissions: [], active: true }));
   const before = store.snapshot(owner, "commons");
   assert.throws(() => store.command(human, "commons", command(T.WORK_STARTED, { workItemId: "grant", expectedRevision: 1 })), /lacks accept_work/);
+  assert.throws(() => store.command(human, "commons", command(T.WORK_BLOCKED, { workItemId: "grant", expectedRevision: 1, reason: "No grant", nextAction: "Restore authority" })), /lacks accept_work/);
+  assert.deepEqual(store.snapshot(owner, "commons"), before);
+
+  store.command(owner, "commons", command(T.MEMBER_ACCESS_CHANGED, { memberId: "human", expectedMemberRevision: 1, permissions: ["accept_work"], active: true }));
+  store.command(human, "commons", command(T.WORK_BLOCKED, { workItemId: "grant", expectedRevision: 1, reason: "Direction needed", nextAction: "Accept a revision" }));
+  store.command(owner, "commons", command(T.MEMBER_ACCESS_CHANGED, { memberId: "human", expectedMemberRevision: 2, permissions: [], active: true }));
+  const blocked = store.snapshot(owner, "commons");
+  assert.throws(() => store.command(human, "commons", command(T.WORK_BLOCKER_RESOLVED, { workItemId: "grant", expectedRevision: 2, resolution: "Direction accepted" })), /lacks accept_work/);
+  assert.deepEqual(store.snapshot(owner, "commons"), blocked);
+});
+
+test("verifier findings cannot bypass the exact verification command or a revoked verify grant", t => {
+  const { store, owner, human, agent } = fixture(t);
+  store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "verified-only", title: "Evidence-bound finding", definitionOfDone: "Exact evidence", accountableMemberId: "human", verifierMemberId: "agent", independentVerificationRequired: true }));
+  store.command(human, "commons", command(T.WORK_ACCEPTED, { workItemId: "verified-only", expectedRevision: 0 }));
+  const done = store.command(human, "commons", command(T.WORK_COMPLETED, { workItemId: "verified-only", expectedRevision: 1, producerId: "human", summary: "Result", evidenceUrl: "https://example.com/result", evidenceVersion: "v1", nextAction: "Verify" }));
+  const beforeGeneric = store.snapshot(owner, "commons");
+  assert.throws(() => store.command(agent, "commons", command(T.WORK_BLOCKED, { workItemId: "verified-only", expectedRevision: 2, reason: "Versionless finding", nextAction: "Redo" })), /verifier findings use verification\.recorded/);
+  assert.deepEqual(store.snapshot(owner, "commons"), beforeGeneric);
+
+  store.command(owner, "commons", command(T.MEMBER_ACCESS_CHANGED, { memberId: "agent", expectedMemberRevision: 0, permissions: [], active: true }));
+  const beforeRevoked = store.snapshot(owner, "commons");
+  assert.throws(() => store.command(agent, "commons", command(T.VERIFICATION_RECORDED, { workItemId: "verified-only", expectedRevision: 2, result: "fail", completionEventId: done.event.id, evidenceVersion: "v1", summary: "Exact finding" })), /lacks verify/);
+  assert.deepEqual(store.snapshot(owner, "commons"), beforeRevoked);
+});
+
+test("the service rejects independent verification by a receipt's reported producer", t => {
+  const { store, owner, human, agent } = fixture(t);
+  store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "producer-bound", title: "Producer-bound result", definitionOfDone: "Independent check", accountableMemberId: "human", verifierMemberId: "agent", independentVerificationRequired: true }));
+  store.command(human, "commons", command(T.WORK_ACCEPTED, { workItemId: "producer-bound", expectedRevision: 0 }));
+  const done = store.command(human, "commons", command(T.WORK_COMPLETED, { workItemId: "producer-bound", expectedRevision: 1, producerId: "agent", summary: "Agent-produced result reported by human", evidenceUrl: "https://example.com/agent-result", evidenceVersion: "v1", nextAction: "Verify independently" }));
+  const before = store.snapshot(owner, "commons");
+  assert.equal(before.state.workItems["producer-bound"].receipt.reportedById, "human");
+  assert.equal(before.state.workItems["producer-bound"].receipt.producerId, "agent");
+  assert.throws(() => store.command(agent, "commons", command(T.VERIFICATION_RECORDED, { workItemId: "producer-bound", expectedRevision: 2, result: "pass", completionEventId: done.event.id, evidenceVersion: "v1", summary: "My own result passes" })), /different from the known producer/);
   assert.deepEqual(store.snapshot(owner, "commons"), before);
 });
 

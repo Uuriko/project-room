@@ -20,6 +20,8 @@ test("background updates preserve open disclosures, focus, draft and recipient",
   const send = (key, type, data) => store.command(key, "commons", { id: crypto.randomUUID(), type, data });
   send(owner, T.MEMBER_ADDED, { memberId: "maya", displayName: "Maya", kind: "human", permissions: ["accept_work", "complete_work", "verify"] });
   send(owner, T.MEMBER_ADDED, { memberId: "room-agent", displayName: "Room agent", kind: "agent", permissions: [] });
+  send(owner, T.WORK_PROPOSED, { workItemId: "focus-work", title: "Keep the work control focused", definitionOfDone: "The focused action survives unrelated traffic", accountableMemberId: "owner", verifierMemberId: "maya", independentVerificationRequired: true, ownerDecisionRequired: true, humanDecisionMakerId: "owner", mode: "read" });
+  send(owner, T.WORK_PROPOSED, { workItemId: "focus-work-fallback", title: "Fall back to the changed work card", definitionOfDone: "Dismissal finds the card after its opener disappears", accountableMemberId: "owner", verifierMemberId: "maya", independentVerificationRequired: true, ownerDecisionRequired: true, humanDecisionMakerId: "owner", mode: "read" });
   const human = store.issueAccessKey("commons", "maya");
   const server = createRoomServer({ store, streamInterval: 60 });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -85,6 +87,49 @@ test("background updates preserve open disclosures, focus, draft and recipient",
   const after = await input.evaluate(e => [document.activeElement === e, e.selectionStart, e.selectionEnd]);
   assert.deepEqual(before, [true, 6, 13], "caret anchored before the update");
   assert.deepEqual(after, [true, 6, 13], "caret preserved exactly through the update");
+
+  // A2 applies to the accountable-work rail too: unrelated traffic may replace a
+  // card's markup, but it must restore the exact still-available action. Unchanged
+  // summary counts must not mutate their polite live region on every room event.
+  const accept = page.locator('[data-work-record-id="focus-work"] [data-action="accept"]');
+  await accept.focus();
+  await page.evaluate(() => {
+    window.summaryMutations = 0;
+    new MutationObserver(records => { window.summaryMutations += records.length; })
+      .observe(document.querySelector("#summary-grid"), { childList: true, subtree: true, characterData: true });
+  });
+  await other.locator("#message-input").fill("work focus background ping");
+  await other.locator('#message-form button[type="submit"]').click();
+  await page.getByText("work focus background ping", { exact: true }).waitFor();
+  assert.deepEqual(await page.evaluate(() => [document.activeElement.dataset.workId, document.activeElement.dataset.action]), ["focus-work", "accept"], "focused work action restored");
+  assert.equal(await page.evaluate(() => window.summaryMutations), 0, "unchanged live summary stays quiet");
+
+  // The original dialog opener may be replaced by a live render while the
+  // modal is open. Both dismissal paths resolve the equivalent current action
+  // by its stable key (or fall back to the work card if that action disappears).
+  await accept.click();
+  await page.locator("#action-dialog").waitFor({ state: "visible" });
+  await other.locator("#message-input").fill("dialog cancel background ping");
+  await other.locator('#message-form button[type="submit"]').click();
+  await page.getByText("dialog cancel background ping", { exact: true }).waitFor();
+  await page.locator("#cancel-action").click();
+  await page.waitForFunction(() => document.activeElement?.dataset.focusKey === "work-action:focus-work:accept");
+
+  await accept.click();
+  await page.locator("#action-dialog").waitFor({ state: "visible" });
+  await other.locator("#message-input").fill("dialog escape background ping");
+  await other.locator('#message-form button[type="submit"]').click();
+  await page.getByText("dialog escape background ping", { exact: true }).waitFor();
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => document.activeElement?.dataset.focusKey === "work-action:focus-work:accept");
+
+  const fallbackAccept = page.locator('[data-work-record-id="focus-work-fallback"] [data-action="accept"]');
+  await fallbackAccept.click();
+  await page.locator("#action-dialog").waitFor({ state: "visible" });
+  send(owner, T.WORK_ACCEPTED, { workItemId: "focus-work-fallback", expectedRevision: 0 });
+  await page.waitForFunction(() => document.querySelector('[data-work-record-id="focus-work-fallback"] .state')?.textContent === "accepted");
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => document.activeElement?.dataset.workRecordId === "focus-work-fallback");
 
   // A2 reversible: closing the disclosure stays closed across the next background update
   await summary.click();
