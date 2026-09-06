@@ -89,7 +89,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
       else await route.continue();
     });
     await page.locator('#message-form button[type="submit"]').click();
-    await page.waitForFunction(() => document.querySelector("#status").textContent.includes("Draft kept"));
+    // One live-announcement owner per send result: the composer-local region owns the
+    // failure; the page-level #status must NOT duplicate it (screen readers would announce twice).
+    await page.waitForFunction(() => document.querySelector("#composer-status").textContent.includes("Draft kept") && !document.querySelector("#status").textContent.includes("Draft kept"));
     await page.locator("#thread-back").click();
     assert.equal(await input.inputValue(), "Keep my room thought");
     await page.locator('#message-book-club [data-message-action="thread"]').click();

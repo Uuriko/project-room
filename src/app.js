@@ -252,8 +252,11 @@ async function submit(form, fn) {
   try { await fn(); }
   catch (error) {
     const text = `${error.message}. ${state ? "Draft kept; press Send to retry." : "Sign in again."}`;
-    notice(text, true);
+    // One live-announcement owner per send result: when the form has its own status region
+    // it owns the announcement (the visible composer error); the page-level region stays
+    // silent so a screen reader announces the failure exactly once.
     if (local) { local.textContent = text; local.classList.add("visible", "error"); }
+    else notice(text, true);
   }
   finally { busy = false; controls.forEach((e, i) => e.disabled = disabled[i]); if (state) render(); }
 }
