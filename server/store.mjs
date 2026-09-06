@@ -60,6 +60,32 @@ export class RoomStore {
       CREATE INDEX credential_member ON credentials(room_id, member_id);
       CREATE TABLE cursors (room_id TEXT NOT NULL REFERENCES rooms(id), member_id TEXT NOT NULL, sequence INTEGER NOT NULL, PRIMARY KEY(room_id, member_id));
       PRAGMA user_version=1; COMMIT;`);
+    this.repairProposalProvenance();
+  }
+  // Deterministic upgrade repair (review 5557940819): persisted projections are never
+  // replayed, so a pre-upgrade work item recovers its proposer from its OWN authoritative
+  // work.proposed envelope. Items with no envelope in the log stay honestly unknown.
+  // Idempotent: a repaired or current projection has no missing keys and is left untouched.
+  repairProposalProvenance() {
+    this.transaction(() => {
+      const findProposal = this.db.prepare("SELECT body FROM events WHERE room_id=? ORDER BY sequence");
+      for (const { id, projection } of this.db.prepare("SELECT id, projection FROM rooms").all()) {
+        const state = JSON.parse(projection);
+        const missing = Object.values(state.workItems ?? {}).filter(item => item && !Object.hasOwn(item, "proposedById"));
+        if (missing.length === 0) continue;
+        const proposers = new Map();
+        for (const row of findProposal.all(id)) {
+          const parsed = JSON.parse(row.body);
+          if (parsed.type === T.WORK_PROPOSED && parsed.data?.workItemId && !proposers.has(parsed.data.workItemId)) proposers.set(parsed.data.workItemId, parsed.actorId ?? null);
+        }
+        let changed = false;
+        for (const item of missing) {
+          const proposer = proposers.get(item.id);
+          if (proposer) { item.proposedById = proposer; changed = true; }
+        }
+        if (changed) this.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify(state), id);
+      }
+    });
   }
   close() { this.db.close(); }
   transaction(fn) {
@@ -140,15 +166,15 @@ export class RoomStore {
   // Return-brief wiring (disposition 5557850637): one read transaction keeps the frozen
   // horizon, the cursor, the paged events, and the live projection at the same commit.
   // Fetching never acknowledges - only markCaughtUp does, explicitly.
-  returnBrief(token, roomId, { horizon = null, after = null, limit = RETURN_BRIEF_DEFAULT_LIMIT } = {}) {
+  returnBrief(token, roomId, { horizon = null, after = null, cursor: frozenCursor = null, limit = RETURN_BRIEF_DEFAULT_LIMIT } = {}) {
     const auth = this.authenticate(token, roomId);
     return this.transaction(() => {
       const room = this.room(roomId);
       const cursor = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
-      const { H, startAfter, limit: pageLimit } = resolveHistoryWindow({ sequence: room.sequence, cursor, horizon, after, limit });
+      const { H, startAfter, C, limit: pageLimit } = resolveHistoryWindow({ sequence: room.sequence, storedCursor: cursor, horizon, after, continuationCursor: frozenCursor, limit });
       const rows = this.db.prepare("SELECT sequence, body FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence LIMIT ?").all(roomId, startAfter, H, pageLimit)
         .map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
-      return buildReturnBrief({ sequence: room.sequence, workItems: room.state.workItems, rows, cursor, memberId: auth.member.id, horizon, after, limit });
+      return buildReturnBrief({ sequence: room.sequence, workItems: room.state.workItems, rows, H, startAfter, C, memberId: auth.member.id });
     });
   }
   markCaughtUp(token, roomId, sequence) {

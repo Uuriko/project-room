@@ -149,8 +149,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, result.duplicate ? 200 : 201, result);
       }
       if (route === "return-brief" && req.method === "GET") {
-        const horizon = url.searchParams.get("horizon"), after = url.searchParams.get("after"), limit = url.searchParams.get("limit");
-        return json(res, 200, store.returnBrief(token, roomId, { horizon: horizon === null ? null : Number(horizon), after: after === null ? null : Number(after), limit: limit === null ? undefined : Number(limit) }));
+        const horizon = url.searchParams.get("horizon"), after = url.searchParams.get("after"), cursor = url.searchParams.get("cursor"), limit = url.searchParams.get("limit");
+        return json(res, 200, store.returnBrief(token, roomId, { horizon: horizon === null ? null : Number(horizon), after: after === null ? null : Number(after), cursor: cursor === null ? null : Number(cursor), limit: limit === null ? undefined : Number(limit) }));
       }
       if (route === "cursor" && req.method === "POST") {
         const data = await body(req);

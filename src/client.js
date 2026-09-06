@@ -58,9 +58,9 @@ export class RoomClient {
   async caughtUp(sequence = this.sequence) { return this.request(this.path("/cursor"), { method: "POST", data: { sequence } }); }
   // Return brief: history fixed through H (frozen on the first page, continuations carry it),
   // current live through N. Fetching never acknowledges; only caughtUp() does, explicitly.
-  async returnBrief({ horizon = null, after = null, limit = null } = {}) {
+  async returnBrief({ horizon = null, after = null, cursor = null, limit = null } = {}) {
     const params = new URLSearchParams();
-    if (horizon !== null) { params.set("horizon", horizon); params.set("after", after); }
+    if (horizon !== null) { params.set("horizon", horizon); params.set("after", after); params.set("cursor", cursor); }
     if (limit !== null) params.set("limit", limit);
     const query = params.toString();
     return this.request(this.path(`/return-brief${query ? `?${query}` : ""}`));

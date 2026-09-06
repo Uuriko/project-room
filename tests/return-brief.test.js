@@ -45,12 +45,12 @@ test("history pages keep the frozen horizon beyond 100 events; mid-pagination ar
   assert.equal(page1.history.cursor, 0);
   assert.equal(page1.history.items.length, 50);
   assert.equal(page1.history.hasMore, true);
-  assert.deepEqual(page1.history.continuation, { horizon: H, after: page1.history.items.at(-1).sequence });
+  assert.deepEqual(page1.history.continuation, { horizon: H, after: page1.history.items.at(-1).sequence, cursor: 0 }); // the frozen cursor travels with the horizon
   postMessages(store, human, 5, "late-"); // 5 events arrive AFTER the horizon froze
-  const page2 = store.returnBrief(human, "commons", { horizon: page1.history.continuation.horizon, after: page1.history.continuation.after, limit: 50 });
+  const page2 = store.returnBrief(human, "commons", { ...page1.history.continuation, limit: 50 });
   assert.equal(page2.history.evaluatedThrough, H); // frozen, not the new N
   assert.equal(page2.history.items.at(-1).sequence <= H, true);
-  const page3 = store.returnBrief(human, "commons", { horizon: H, after: page2.history.items.at(-1).sequence, limit: 50 });
+  const page3 = store.returnBrief(human, "commons", { horizon: H, after: page2.history.items.at(-1).sequence, cursor: 0, limit: 50 });
   assert.equal(page3.history.hasMore, false);
   assert.equal(page3.history.continuation, null);
   const seen = [...page1.history.items, ...page2.history.items, ...page3.history.items];
@@ -81,7 +81,7 @@ test("history stops at H while current stays live through N, both labeled", t =>
   const page1 = store.returnBrief(human, "commons", { limit: 50 });
   const H = page1.history.evaluatedThrough;
   store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "w-late", title: "late work", definitionOfDone: "done", accountableMemberId: "human" }));
-  const page2 = store.returnBrief(human, "commons", { horizon: H, after: page1.history.items.at(-1).sequence, limit: 50 });
+  const page2 = store.returnBrief(human, "commons", { horizon: H, after: page1.history.items.at(-1).sequence, cursor: page1.history.cursor, limit: 50 });
   assert.equal(page2.history.evaluatedThrough, H);
   assert.equal(page2.history.items.some(i => i.event.type === T.WORK_PROPOSED), false); // the proposal is past H
   assert.equal(page2.current.evaluatedThrough, H + 1); // N moved
@@ -155,10 +155,26 @@ test("HTTP: query parsing, auth, and response shape over the wire", async t => {
   assert.equal(body.history.items.length, 2);
   assert.equal(body.history.hasMore, true);
   assert.equal(typeof body.current.evaluatedThrough, "number");
-  const cont = await get(`/api/rooms/commons/return-brief?horizon=${body.history.continuation.horizon}&after=${body.history.continuation.after}&limit=50`, human);
+  const cont = await get(`/api/rooms/commons/return-brief?horizon=${body.history.continuation.horizon}&after=${body.history.continuation.after}&cursor=${body.history.continuation.cursor}&limit=50`, human);
   assert.equal(cont.status, 200);
   const bad = await get("/api/rooms/commons/return-brief?limit=abc", human);
   assert.equal(bad.status, 422); // NaN limit fails safe-integer validation
   const anon = await get("/api/rooms/commons/return-brief");
   assert.equal([401, 403].includes(anon.status), true);
+});
+
+test("a cursor moved by another tab rejects the continuation with 409 cursor_changed", t => {
+  const { store, human } = fixture(t);
+  postMessages(store, human, 10);
+  const page1 = store.returnBrief(human, "commons", { limit: 5 }); // tab A freezes H and C=0
+  store.markCaughtUp(human, "commons", 5); // tab B acknowledges while A is still paging
+  assert.throws(() => store.returnBrief(human, "commons", { ...page1.history.continuation, limit: 5 }),
+    error => error.status === 409 && error.code === "cursor_changed");
+  // The same continuation with the cursor still in place succeeds and reports the frozen C.
+  const { store: s2, human: h2 } = fixture(t);
+  postMessages(s2, h2, 10);
+  const first = s2.returnBrief(h2, "commons", { limit: 5 });
+  const second = s2.returnBrief(h2, "commons", { ...first.history.continuation, limit: 5 });
+  assert.equal(second.history.cursor, 0); // frozen C reported on every page, not reread
+  assert.equal(second.history.evaluatedThrough, first.history.evaluatedThrough);
 });

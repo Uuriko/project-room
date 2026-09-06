@@ -27,32 +27,34 @@ export const RETURN_BRIEF_MAX_LIMIT = 100;    // same ceiling as the events endp
 
 // Validates the request and resolves the paging window. First page: H freezes at N and the
 // window opens at the member's stored cursor C (never client-supplied). Continuations carry
-// H plus the last sequence; an H beyond current history can only come from a stale or forged
-// continuation and is rejected.
-export function resolveHistoryWindow({ sequence, cursor, horizon = null, after = null, limit = RETURN_BRIEF_DEFAULT_LIMIT }) {
+// H, the last sequence, AND the frozen C: if another tab has since acknowledged (the stored
+// cursor moved), the frozen window is internally inconsistent ("since marker 120 through
+// event 100") and is rejected 409 cursor_changed so the client restarts on a fresh horizon.
+export function resolveHistoryWindow({ sequence, storedCursor, horizon = null, after = null, continuationCursor = null, limit = RETURN_BRIEF_DEFAULT_LIMIT }) {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > RETURN_BRIEF_MAX_LIMIT) fail(422, "invalid_cursor", "Invalid return-brief limit");
-  if (!Number.isSafeInteger(cursor) || cursor < 0) fail(422, "invalid_cursor", "Invalid stored cursor");
-  if (horizon === null) return { H: sequence, startAfter: cursor, limit };
+  if (!Number.isSafeInteger(storedCursor) || storedCursor < 0) fail(422, "invalid_cursor", "Invalid stored cursor");
+  if (horizon === null) return { H: sequence, startAfter: storedCursor, C: storedCursor, limit };
   if (!Number.isSafeInteger(horizon) || horizon < 0) fail(422, "invalid_cursor", "Invalid history horizon");
   if (horizon > sequence) fail(409, "cursor_ahead", "Horizon exceeds room history; fetch a fresh return brief");
   if (!Number.isSafeInteger(after) || after < 0 || after > horizon) fail(422, "invalid_cursor", "Invalid continuation cursor");
-  return { H: horizon, startAfter: after, limit };
+  if (!Number.isSafeInteger(continuationCursor) || continuationCursor < 0) fail(422, "invalid_cursor", "Continuations must carry the frozen cursor");
+  if (continuationCursor !== storedCursor) fail(409, "cursor_changed", "Your caught-up marker moved since this horizon froze; restart the return brief");
+  return { H: horizon, startAfter: after, C: continuationCursor, limit };
 }
 
 // Assembles the response. rows are the room's events with startAfter < sequence <= H in
 // ascending sequence order, already capped at limit by the store query.
-export function buildReturnBrief({ sequence, workItems, rows, cursor, memberId, horizon = null, after = null, limit = RETURN_BRIEF_DEFAULT_LIMIT }) {
-  const { H, startAfter } = resolveHistoryWindow({ sequence, cursor, horizon, after, limit });
+export function buildReturnBrief({ sequence, workItems, rows, H, startAfter, C, memberId }) {
   const items = rows.map(r => ({ sequence: r.sequence, event: r.event }));
   const last = items.at(-1)?.sequence ?? startAfter;
   const hasMore = last < H;
   return {
     history: {
-      cursor,
+      cursor: C, // frozen on the first page, reported unchanged on every continuation
       evaluatedThrough: H,
       items,
       hasMore,
-      continuation: hasMore ? { horizon: H, after: last } : null
+      continuation: hasMore ? { horizon: H, after: last, cursor: C } : null
     },
     current: {
       evaluatedThrough: sequence,

@@ -417,7 +417,7 @@ window.addEventListener("pageshow", e => { if (e.persisted) client.restore().cat
 // on open; history stays fixed through the frozen horizon H, the action sections are live
 // through N, and only the explicit button acknowledges - exactly H, never the latest event.
 async function loadReturnBrief(continuation = null) {
-  const brief = await client.returnBrief(continuation ? { horizon: continuation.horizon, after: continuation.after } : {});
+  const brief = await client.returnBrief(continuation ? { horizon: continuation.horizon, after: continuation.after, cursor: continuation.cursor } : {});
   if (!state) return;
   if (continuation && returnBrief && returnBrief.history.evaluatedThrough === brief.history.evaluatedThrough) {
     returnBrief.history.items = returnBrief.history.items.concat(brief.history.items);
@@ -462,7 +462,11 @@ $("#return-brief-panel").addEventListener("toggle", e => {
 });
 $("#rb-more-button").addEventListener("click", async () => {
   try { if (returnBrief?.history.continuation) await loadReturnBrief(returnBrief.history.continuation); }
-  catch (error) { client.handleFailure(error); notice(error.message, true); }
+  catch (error) {
+    if (error.code === "cursor_changed") { // another tab moved the marker: restart on a fresh horizon
+      try { await loadReturnBrief(); notice("Your marker moved elsewhere; the brief restarted on a fresh horizon."); } catch (retry) { client.handleFailure(retry); notice(retry.message, true); }
+    } else { client.handleFailure(error); notice(error.message, true); }
+  }
 });
 $("#rb-ack-button").addEventListener("click", async () => {
   try {

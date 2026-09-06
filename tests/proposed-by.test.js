@@ -56,3 +56,40 @@ test("source pin: proposedById is assigned from the envelope only", () => {
   assert.match(src, /proposedById:\s*incoming\.actorId/);
   assert.equal(src.includes("data.proposedById"), false);
 });
+
+test("reopening a pre-upgrade database repairs provenance from each item's own proposal envelope", () => {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-repair-"));
+  const filename = join(directory, "room.sqlite");
+  let store = new RoomStore(filename);
+  store.initialize(initialRoom());
+  const owner = store.issueAccessKey("commons", "owner");
+  store.command(owner, "commons", { id: crypto.randomUUID(), type: T.MEMBER_ADDED, data: { memberId: "human", displayName: "human", kind: "human", permissions: ["accept_work"] } });
+  store.command(owner, "commons", { id: crypto.randomUUID(), type: T.WORK_PROPOSED, data: { workItemId: "w-legacy", title: "Legacy item", definitionOfDone: "done", accountableMemberId: "human" } });
+  // Simulate the pre-upgrade persisted shape: projection row without the field, envelope intact.
+  store.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify((() => { const s = store.room("commons").state; delete s.workItems["w-legacy"].proposedById; return s; })()), "commons");
+  store.close();
+  store = new RoomStore(filename); // reopen: repair must run deterministically, without replaying the log
+  try {
+    const item = store.snapshot(owner, "commons").state.workItems["w-legacy"];
+    assert.equal(item.proposedById, "owner"); // recovered from its own work.proposed envelope
+    assert.notEqual(item.proposedById, item.accountableMemberId);
+  } finally { store.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("an item with no authoritative proposal envelope stays honestly unknown after reopen", () => {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-repair-"));
+  const filename = join(directory, "room.sqlite");
+  let store = new RoomStore(filename);
+  store.initialize(initialRoom());
+  const owner = store.issueAccessKey("commons", "owner");
+  // Inject an imported legacy item with NO proposal envelope anywhere in the log.
+  const state = store.room("commons").state;
+  state.workItems["w-imported"] = { id: "w-imported", title: "Imported", state: "proposed", accountableMemberId: "owner" };
+  store.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify(state), "commons");
+  store.close();
+  store = new RoomStore(filename);
+  try {
+    const item = store.snapshot(owner, "commons").state.workItems["w-imported"];
+    assert.equal(Object.hasOwn(item, "proposedById"), false); // repair fabricates nothing
+  } finally { store.close(); rmSync(directory, { recursive: true, force: true }); }
+});
