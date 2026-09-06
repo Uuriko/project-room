@@ -56,6 +56,32 @@ function selectOptions(selector, members, blank) {
   if (previous) select.value = previous;
   select.dataset.signature = signature;
 }
+// Quiet Focus A1/A2: a background snapshot must not collapse open disclosures or
+// steal focus. Capture keyed disclosure + focus state before replacing list
+// contents, restore it after. Keys are stable per host record, never positional.
+function disclosureKey(details) {
+  const host = details.closest("[data-disclosure-host]");
+  return (host ? host.dataset.disclosureHost : "root") + ">" + (details.className || "details");
+}
+function captureDisclosures(container) {
+  const openKeys = new Set();
+  container.querySelectorAll("details[open]").forEach(d => openKeys.add(disclosureKey(d)));
+  const active = document.activeElement;
+  let focusSelector = null;
+  if (active && container.contains(active)) {
+    const host = active.closest("[data-disclosure-host]");
+    const tag = active.tagName.toLowerCase();
+    focusSelector = host ? `[data-disclosure-host="${host.dataset.disclosureHost}"] ${tag}` : null;
+  }
+  return { openKeys, focusSelector };
+}
+function restoreDisclosures(container, snap) {
+  container.querySelectorAll("details").forEach(d => { if (snap.openKeys.has(disclosureKey(d))) d.open = true; });
+  if (snap.focusSelector) {
+    const target = container.querySelector(snap.focusSelector);
+    if (target) target.focus({ preventScroll: true });
+  }
+}
 function render() {
   conversation = conversationIndex(state.messages);
   const members = Object.values(state.members), active = members.filter(m => m.active !== false);
@@ -64,7 +90,8 @@ function render() {
   selectOptions("#verifier-select", active.filter(m => m.permissions.includes("verify")), "Choose independent verifier");
   $("#presence-count").textContent = `${active.length} members · presence not measured`;
   $("#member-stack").innerHTML = active.map(m => `<div class="member-avatar ${m.kind}" title="${esc(m.displayName)}"><span>${initials(m.displayName)}</span></div>`).join("");
-  $("#presence-list").innerHTML = members.map(m => `<div class="presence-member"><div class="member-avatar ${m.kind}"><span>${initials(m.displayName)}</span></div><div><strong>${esc(m.displayName)}</strong><span>${esc(m.kind)} · ${m.active === false ? "access revoked" : "presence unknown"}</span><details><summary>Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p></details></div></div>`).join("");
+  const presenceSnap = captureDisclosures($("#presence-list")), workSnap = captureDisclosures($("#work-list"));
+  $("#presence-list").innerHTML = members.map(m => `<div class="presence-member" data-disclosure-host="${esc(m.id)}"><div class="member-avatar ${m.kind}"><span>${initials(m.displayName)}</span></div><div><strong>${esc(m.displayName)}</strong><span>${esc(m.kind)} · ${m.active === false ? "access revoked" : "presence unknown"}</span><details><summary>Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p></details></div></div>`).join("");
   $("#new-work-button").disabled = !can("steer"); $("#composer-work-button").disabled = !can("steer");
   const items = Object.values(state.workItems);
   const waiting = items.filter(i => readyForDecision(i) && i.humanDecisionMakerId === session.member.id).length;
@@ -72,6 +99,8 @@ function render() {
   renderMessages();
   renderSearch();
   $("#work-list").innerHTML = items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(workCard).join("") || '<p class="empty-note">Nothing assigned. A room is useful before it has a task.</p>';
+  restoreDisclosures($("#presence-list"), presenceSnap);
+  restoreDisclosures($("#work-list"), workSnap);
   $("#event-count").textContent = `${client.sequence}`;
   $("#event-list").innerHTML = [...state.eventLog].reverse().map(e => `<li><span>${esc(humanize(e.type))}</span><strong>${esc(name(e.actorId))}</strong><time>${esc(time(e.at))}</time><code>${esc(e.id)}</code></li>`).join("");
 }
@@ -205,7 +234,7 @@ function actions(i) {
   return a.map(([action, label]) => `<button type="button" class="button secondary" data-action="${action}" data-work-id="${esc(i.id)}"${busy ? " disabled" : ""}>${label}</button>`).join("");
 }
 function workCard(i) {
-  return `<article id="${esc(i.id)}" class="work-card"><div class="work-card-header"><span class="state state-${i.state}">${esc(i.state)}</span><span class="mode">${esc(i.mode)} · revision ${i.revision}</span></div><h3>${esc(i.title)}</h3>${i.sourceMessageId ? `<a class="source-link" href="#message-${esc(i.sourceMessageId)}" data-open-message="${esc(i.sourceMessageId)}">From this conversation</a>` : ""}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(name(i.accountableMemberId))}</dd></div><div><dt>Verifier</dt><dd>${esc(name(i.verifierMemberId))}</dd></div></dl>${i.receipt ? `<div class="receipt"><p class="receipt-label">REPORTED COMPLETION · NOT AUTOMATIC VERIFICATION</p><p>${esc(i.receipt.summary)}</p><a href="${safeUrl(i.receipt.evidenceUrl)}" target="_blank" rel="noreferrer">Open submitted evidence ↗</a><code>${esc(i.receipt.evidenceVersion)}</code><p>${esc(i.receipt.nextAction)}</p>${i.verification ? `<p>${esc(i.verification.result.toUpperCase())} reported by ${esc(name(i.verification.verifierId))}: ${esc(i.verification.summary)}</p>` : "<p>No verification recorded.</p>"}</div>` : ""}${i.blocker ? `<div class="blocker"><strong>Blocked</strong><p>${esc(i.blocker.reason)}</p><p>${esc(i.blocker.nextAction)}</p></div>` : ""}${i.decision ? `<div class="decision"><strong>${esc(humanize(i.decision.decision))}</strong><p>${esc(i.decision.reason)}</p></div>` : ""}${i.claim ? `<details class="claim"><summary>Recorded scope · ${activeClaim(i) ? "not expired" : "expired or released"}</summary><p>${esc(i.claim.repository)}:${esc(i.claim.ref)}</p><p>${esc(i.claim.paths.join(", "))}</p><p>Expires ${esc(i.claim.expiresAt)}. This service does not execute external actions.</p></details>` : ""}<div class="work-actions">${actions(i)}</div></article>`;
+  return `<article id="${esc(i.id)}" class="work-card" data-disclosure-host="${esc(i.id)}"><div class="work-card-header"><span class="state state-${i.state}">${esc(i.state)}</span><span class="mode">${esc(i.mode)} · revision ${i.revision}</span></div><h3>${esc(i.title)}</h3>${i.sourceMessageId ? `<a class="source-link" href="#message-${esc(i.sourceMessageId)}" data-open-message="${esc(i.sourceMessageId)}">From this conversation</a>` : ""}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(name(i.accountableMemberId))}</dd></div><div><dt>Verifier</dt><dd>${esc(name(i.verifierMemberId))}</dd></div></dl>${i.receipt ? `<div class="receipt"><p class="receipt-label">REPORTED COMPLETION · NOT AUTOMATIC VERIFICATION</p><p>${esc(i.receipt.summary)}</p><a href="${safeUrl(i.receipt.evidenceUrl)}" target="_blank" rel="noreferrer">Open submitted evidence ↗</a><code>${esc(i.receipt.evidenceVersion)}</code><p>${esc(i.receipt.nextAction)}</p>${i.verification ? `<p>${esc(i.verification.result.toUpperCase())} reported by ${esc(name(i.verification.verifierId))}: ${esc(i.verification.summary)}</p>` : "<p>No verification recorded.</p>"}</div>` : ""}${i.blocker ? `<div class="blocker"><strong>Blocked</strong><p>${esc(i.blocker.reason)}</p><p>${esc(i.blocker.nextAction)}</p></div>` : ""}${i.decision ? `<div class="decision"><strong>${esc(humanize(i.decision.decision))}</strong><p>${esc(i.decision.reason)}</p></div>` : ""}${i.claim ? `<details class="claim"><summary>Recorded scope · ${activeClaim(i) ? "not expired" : "expired or released"}</summary><p>${esc(i.claim.repository)}:${esc(i.claim.ref)}</p><p>${esc(i.claim.paths.join(", "))}</p><p>Expires ${esc(i.claim.expiresAt)}. This service does not execute external actions.</p></details>` : ""}<div class="work-actions">${actions(i)}</div></article>`;
 }
 async function submit(form, fn) {
   if (busy) return;
