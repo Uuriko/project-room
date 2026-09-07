@@ -54,6 +54,14 @@ work starting is not evidence that an agent executed a task. `--return` checks
 the privately saved guest session; `--invite-user` creates a separate invitation
 for voluntary human testing and saves it privately, never to source control.
 
+Hosted verification passed for source `0e20615` on September 7, 2026 at
+https://project-room-staging.getdasha.workers.dev. Existing guest identity/messages
+survived the update. Real HTTPS guest-to-work acceptance passed, including explicit
+review choice, owner accepting/starting, and the guest seeing progress. Current
+Worker version: `5b052420-ec55-4fe3-8a35-7f0ac1347bcb`. Hosted desktop/mobile/return
+screenshots are in `cloudflare/test-results/` and were inspected. No DNS or
+main-website changes were made.
+
 ## Five-minute human test
 
 Use an unused guest invitation. Tell the participant the room contains synthetic

@@ -101,8 +101,11 @@ The return check passed after bootstrap settings were removed: the same guest
 identity and messages survived redeployment. A signed-out room read returned 401.
 `test-results/hosted-return.png` records the returning guest. This is deployment
 persistence evidence, not a provider restore or disaster-recovery test.
-Current deployed version after bootstrap removal:
-`6575030d-d72f-4e8e-b256-fc18ecc6719b`.
+Current deployed version after the first-use interface update:
+`5b052420-ec55-4fe3-8a35-7f0ac1347bcb` (source `0e20615`).
+Existing guest-session return and the new hosted suggestion-to-work flow passed;
+see [first-use testing](../docs/FIRST-USE-TESTING-2026-09-07.md). The earlier
+bootstrap-removal version was `6575030d-d72f-4e8e-b256-fc18ecc6719b`.
 The runtime source at `7c9292a` passed the existing remote CI workflow; the
 Cloudflare and hosted operator suites were run separately as described above.
 
