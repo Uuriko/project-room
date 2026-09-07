@@ -5,22 +5,35 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
-const { values } = parseArgs({ options: { init: { type: "boolean" }, room: { type: "string", default: "commons" }, member: { type: "string", default: "owner" }, account: { type: "string" }, name: { type: "string" }, kind: { type: "string", default: "human" }, permissions: { type: "string", default: "accept_work,complete_work,verify" } } });
+const { values } = parseArgs({ options: { init: { type: "boolean" }, "account-key": { type: "boolean" }, room: { type: "string", default: "commons" }, member: { type: "string", default: "owner" }, account: { type: "string" }, name: { type: "string" }, kind: { type: "string", default: "human" }, permissions: { type: "string", default: "accept_work,complete_work,verify" } } });
 const filename = resolve(process.env.ROOM_DB || ".data/room.sqlite");
 mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
 const store = new RoomStore(filename);
 try {
   if (values.init) store.initialize(initialRoom(values.room, values.member));
-  const { state } = store.room(values.room);
-  if (!Object.hasOwn(state.members, values.member)) {
-    if (!values.name) throw new Error("New members require --name");
-    // Local database administration is intentionally separate from the public HTTP API.
-    const admin = store.insertCredential(values.room, state.room.ownerId, "access", null, Date.now() + 60000);
-    try { store.command(admin, values.room, { id: crypto.randomUUID(), type: T.MEMBER_ADDED, data: { memberId: values.member, displayName: values.name, kind: values.kind, permissions: values.permissions ? values.permissions.split(",") : [] } }); }
-    finally { store.revoke(admin); }
+  if (values["account-key"]) {
+    if (!values.account) throw new Error("Account-key provisioning requires --account");
+    let account;
+    try { account = store.account(values.account); }
+    catch (error) {
+      if (error.code !== "account_not_found") throw error;
+      account = store.createAccount(values.account);
+    }
+    const accessKey = store.issueAccountAccessKey(account.id);
+    process.stdout.write(`New account key for ${account.id}; previous account keys and account browser sessions revoked. Auth epoch ${account.authEpoch}. Expires in seven days. This does not grant Room membership. Keep private; never put it in a URL, chat, logs, or GitHub.\n${accessKey}\n`);
+    process.exitCode = 0;
+  } else {
+    const { state } = store.room(values.room);
+    if (!Object.hasOwn(state.members, values.member)) {
+      if (!values.name) throw new Error("New members require --name");
+      // Local database administration is intentionally separate from the public HTTP API.
+      const admin = store.insertCredential(values.room, state.room.ownerId, "access", null, Date.now() + 60000);
+      try { store.command(admin, values.room, { id: crypto.randomUUID(), type: T.MEMBER_ADDED, data: { memberId: values.member, displayName: values.name, kind: values.kind, permissions: values.permissions ? values.permissions.split(",") : [] } }); }
+      finally { store.revoke(admin); }
+    }
+    const accessKey = store.issueAccessKey(values.room, values.member, 7 * 86400000, values.account ?? null);
+    const account = store.accountForMember(values.room, values.member);
+    const ownership = account ? ` Canonical account: ${account.id}; auth epoch ${account.authEpoch}.` : " Agent credential; no human account is attached.";
+    process.stdout.write(`New key for ${values.member} in ${values.room}; previous keys and sessions revoked.${ownership} Expires in seven days. Keep private; never paste into GitHub.\n${accessKey}\n`);
   }
-  const accessKey = store.issueAccessKey(values.room, values.member, 7 * 86400000, values.account ?? null);
-  const account = store.accountForMember(values.room, values.member);
-  const ownership = account ? ` Canonical account: ${account.id}; auth epoch ${account.authEpoch}.` : " Agent credential; no human account is attached.";
-  process.stdout.write(`New key for ${values.member} in ${values.room}; previous keys and sessions revoked.${ownership} Expires in seven days. Keep private; never paste into GitHub.\n${accessKey}\n`);
 } finally { store.close(); }

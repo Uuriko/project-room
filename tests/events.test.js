@@ -38,6 +38,29 @@ test("room conversation can address a human or agent without creating work", () 
   assert.equal(Object.keys(next.workItems).length, workBefore);
 });
 
+test("invitation acceptance records the joining human as actor without granting its inviter's authority", () => {
+  const state = baseState();
+  const joined = fixedEvent("joined-from-invitation", EVENT_TYPES.MEMBER_JOINED_VIA_INVITATION, "new-human", {
+    memberId: "new-human",
+    displayName: "New human",
+    role: "guest",
+    permissions: [],
+    invitedByMemberId: "potter",
+    invitationId: "invite-new-human",
+    rolePolicyVersion: 1,
+    authorityPolicyVersion: 2
+  });
+  const next = applyEvent(state, joined);
+  assert.deepEqual(next.members["new-human"], {
+    id: "new-human", displayName: "New human", kind: "human", role: "guest",
+    accountableHumanId: "new-human", permissions: [], availability: "unknown", active: true, revision: 0,
+    membershipOrigin: { kind: "invitation", invitationId: "invite-new-human", invitedByMemberId: "potter" }
+  });
+  assert.equal(next.eventLog.at(-1).actorId, "new-human");
+  assert.throws(() => applyEvent(state, { ...joined, id: "wrong-actor", idempotencyKey: "wrong-actor", actorId: "potter" }), /join as themself/);
+  assert.throws(() => applyEvent(state, { ...joined, id: "wrong-grants", idempotencyKey: "wrong-grants", data: { ...joined.data, permissions: ["manage_members"] } }), /role permissions/);
+});
+
 test("a room message can become linked accountable work without copied context", () => {
   const state = baseState();
   const next = applyEvent(state, fixedEvent("conversation-to-work", EVENT_TYPES.WORK_PROPOSED, "potter", {

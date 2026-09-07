@@ -1,6 +1,6 @@
 # Project Room: consumer and enterprise readiness plan
 
-Working plan, 5 September 2026. This is an execution contract, not a claim that the product is finished, certified, highly available, or production deployed. Each gate below needs recorded evidence. The current reviewed reference is [PR #3](https://github.com/Uuriko/project-room/pull/3) at `c7f5c47eae35ea67d4b70bc868bd17d895011f98`; [Instinct's independent review](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5551116929) covers that version only.
+Working plan, 6 September 2026. This is an execution contract, not a claim that the product is finished, certified, highly available, or production deployed. Each gate below needs recorded evidence. The current reviewed reference is [PR #3](https://github.com/Uuriko/project-room/pull/3) at `c7f5c47eae35ea67d4b70bc868bd17d895011f98`; [Instinct's independent review](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5551116929) covers that version only.
 
 ## 1. The product we are actually building
 
@@ -27,7 +27,7 @@ Consumer quality means the experience is welcoming, fast, understandable, access
 
 The reviewed prototype has a useful room UI and six-state work reducer. Its browser log, actor selector, canned receipt buttons, and BroadcastChannel are demonstrations, not a shared service. The immediate slice moves the record and identity checks to the server and removes those demonstration shortcuts from the connected experience.
 
-Use Node 24 and its SQLite interface for a bounded, single-node pilot that can be run without provisioning a paid service. Transactions serialize commands; durable events, command deduplication, and the current projection commit together. Persist only hashes of randomly generated access/session tokens. Use separately provisioned accounts for pilot humans and agents. Human browser access exchanges a key for a short-lived HttpOnly session; agents authenticate using their own key. This is not public account registration, organizational SSO, or a verified connection to a named AI runtime.
+Use Node 24 and its SQLite interface for a bounded, single-node pilot that can be run without provisioning a paid service. Transactions serialize commands; durable events, command deduplication, and the current projection commit together. Persist only hashes of randomly generated access/session/invitation tokens. Use separately provisioned local accounts for pilot humans and separately provisioned Room credentials for agents. The original human Room login exchanges a Room key for a short-lived HttpOnly session. Schema v4's invitation path instead uses a local account key to compare-and-swap a stable account-session slot, then resolves that account to its Room membership. Neither key path is public account registration, OIDC/organizational SSO, account recovery, or a verified connection to a named AI runtime.
 
 The production target remains PostgreSQL plus a real identity provider and organization isolation. Do not hide the pilot's synchronous SQLite calls, single-host storage, provisioned keys, or full-room projections behind a claim of enterprise scalability. Do not create a second database implementation until it can be exercised against a real database in CI.
 
@@ -47,6 +47,21 @@ These sources inform our design choices; they do not certify this implementation
 Implementation checkpoint, 5 September 2026: slice 10 has a server-backed room, provisioned identity, revisioned/revocable access, protected commands, durable cursor reads and SSE, and a connected UI without simulated identity or seeded presence. [Instinct's review of PR #4](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5551311396) covers `17d2edb031c7aa4614d66fe5e54b2900127d331e`: its service assertions were executed; its rendered desktop/mobile checks covered signed-out entry only. Authenticated layout was source-inspected, not rendered. The supported service version remains Node 24.19 or newer.
 
 Slice 12a adds threads, actor-owned reactions, room search, separate in-memory discussion drafts, and retained message nodes. It clarifies draft lifetime and removes the unused browser storage module identified in that review. The local domain/service/client suite now passes 50/50. The authenticated desktop/mobile browser gate and exact-revision review receipt are required for this slice; prior version PASS results do not carry forward. No deployment or merge has occurred.
+
+### Current schema-v4 bridge into slice 11: local account sessions and Room invitations
+
+Schema v4 introduces a deliberately narrow local invitation primitive, not completion of production identity or onboarding:
+
+- A stable HttpOnly account-session slot begins anonymous. Login and logout require the client's current slot revision and mutate that same server-side row; its CSRF value and response binding change with the revision. Initial slot creation or replacement of an expired/invalid slot sets the cookie. Login and acceptance do not emit `Set-Cookie`, so delayed responses cannot overwrite a newer slot cookie. Account-key rotation clears authenticated account slots but does not revoke legacy Room-scoped keys; account suspension and authorization-epoch change are the compromise-response primitive that revokes both across Rooms.
+- An administrator with a current account session and `manage_members` can store an immutable invitation for one existing active local account, one new Room member ID, one versioned human role/permission snapshot, and an expiry. Issuance does not create membership. Preview is read-only and omits the target account ID. Explicit acceptance by the matching account rechecks current issuer and target authority, then commits the joined Room event, projection, immutable account/member binding, accepted status, and audit row together.
+- A browser invitation link uses `/#invite/<token>`, keeping the raw token only in the fragment. The implemented flow moves a valid token immediately into ephemeral memory, scrubs valid and malformed invitation fragments with `history.replaceState`, previews with credentials omitted, and sends the token only in no-store JSON bodies; it must never enter a path/query, referrer/analytics log, DOM text, browser storage, or persisted draft. The account key never belongs in the URL. The current UI completes fragment preview, local-account login, explicit acceptance, and entry to the accepted Room through the stable account session.
+- Stored issuance is not delivery, token possession/preview is not a read receipt, and neither is acceptance proof that later Room messages were read or processed. No email, notification, delivery provider, or invitation read receipt exists in this pilot.
+- Exact issuance retries are deduplicated by issuer/request ID and scope fingerprint. Exact acceptance retries are deduplicated by redemption ID and return the original joined event while the intended account can still authenticate as the active invited member; otherwise reconciliation fails closed. Revocation currently has no idempotency key or successful replay: after the first pending-to-revoked transition, a retry conflicts and must be reconciled from current state.
+- The invitation and invitation-audit relational tables participate directly in authorization and are an explicit trust boundary. Only acceptance is linked into the Room event log; issuance and revocation are not yet independently replayable there. Independent event-log verification of the full lifecycle remains a release gate.
+
+The v3-to-v4 schema step is additive and transactional: failure leaves a v3 input at version 3 without partial v4 tables. A successful step makes older binaries fail closed. Rollback after successful migration requires a consistent pre-migration database restore, not dropping the authority tables or editing the schema marker. On 6 September 2026, focused schema-v4 store, client, and HTTP suites passed. A dedicated local real-browser invitation suite passed 2/2, covering fragment/DOM/storage/referrer/request-URL secrecy, zero-write preview, draft/focus/backward-selection preservation, 390 px controls/overflow, stable cookies, and a held-response cross-tab account switch with exact acceptance replay. This is evidence for the local invitation slice only: physical-device and other-browser behavior, full assistive-technology support, provider delivery, production operation, independent invitation-log verification, and independent review of the exact revision remain gates. See [SERVICE.md](SERVICE.md) for the current route and storage contract.
+
+The schema-v4 local checkpoint now passes 118 core checks and 24 Chromium scenarios. See [INVITATION-CHECKPOINT.md](INVITATION-CHECKPOINT.md) for commands, visual inspection, fixes, and the still-pending independent final review. The full Project Room goal remains active.
 
 ### Slice 10: authoritative single-room service
 
@@ -72,12 +87,13 @@ Boundaries: this slice does not connect real remote agents, run their tools, cre
 
 ### Slice 11: production identity and organization isolation
 
-- Select a maintained OIDC provider integration rather than writing password authentication.
-- Define account, organization, room membership, invitation, and service-account lifecycles without conflating them.
+- Replace locally asserted account IDs and local account keys with a maintained OIDC provider integration rather than turning the pilot keys into password authentication.
+- Carry the explicit account, organization, Room membership, invitation, and service-account boundaries into provider-backed lifecycles without conflating them.
 - Support passkey/SSO-capable sign-in through that provider. Verify issuer, audience, signature, nonce/state, and logout behavior.
 - Start with owner, moderator, member, guest, and explicit agent grants; map those to capabilities rather than scattering role-name checks.
 - Organization-specific domain/SSO enforcement must be explicit, not inferred from email suffix alone.
-- Add member removal, agent-key rotation, session inventory, and account recovery; revoke active streams and refresh rights consistently.
+- Add provider-backed invitation delivery, member removal, agent-key rotation, session inventory, and account recovery; revoke active streams and refresh rights consistently.
+- Make invitation issuance/revocation independently verifiable from an authority log, and define idempotent revocation/reconciliation before external delivery retries are possible.
 - Move to PostgreSQL with a restricted runtime role and RLS tested under the actual non-owner connection.
 - Migrate pilot events without changing their identifiers or retroactively attributing simulated activity to verified accounts.
 - Add organization/room access policies to every search, export, attachment, queue, and realtime path.

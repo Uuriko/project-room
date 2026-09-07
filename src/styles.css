@@ -272,7 +272,7 @@ body { font-size: 16px; }
 .auth-panel { max-width: 38rem; margin: clamp(1rem, 6vw, 5rem) auto; padding: clamp(1rem, 4vw, 2.5rem); }
 .auth-panel h1 { font-size: clamp(1.7rem, 4vw, 2.5rem); line-height: 1.12; }
 .auth-panel p, dialog p { line-height: 1.6; }
-.auth-panel form, #action-fields, #action-form { display: grid; gap: 1rem; }
+.auth-panel form, #action-fields, #action-form, #invitation-account-form, .invitation-shell { display: grid; gap: 1rem; }
 .auth-panel label, dialog label { display: grid; gap: .45rem; }
 #auth-error { color: var(--red); min-height: 1.5rem; margin: 0; }
 #identity-label { align-self: center; overflow-wrap: anywhere; }
@@ -294,10 +294,25 @@ dialog h2 { margin: 0; }
 dialog p { margin: 0; color: var(--muted); }
 button, .button, .message-to-work { min-height: 44px; }
 .status { max-width: min(40rem, calc(100vw - 2rem)); overflow-wrap: anywhere; pointer-events: none; }
+.invitation-dialog { width: min(42rem, calc(100vw - 1.5rem)); }
+.invitation-dialog[aria-busy="true"] { cursor: wait; }
+.invitation-boundary { padding: .8rem .9rem; border-left: 3px solid var(--blue); background: #101f36; color: #c8d9f6; }
+.invitation-details { display: grid; gap: .65rem; margin: 0; padding: .9rem; border: 1px solid var(--line); background: #0d1117; }
+.invitation-details[hidden] { display: none; }
+.invitation-details > div { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: .75rem; }
+.invitation-details dt { color: var(--muted); font-size: .76rem; font-weight: 650; }
+.invitation-details dd { min-width: 0; margin: 0; color: var(--text); font-size: .9rem; line-height: 1.45; overflow-wrap: anywhere; }
+.invitation-details code { display: block; margin-top: .2rem; color: var(--muted); font-size: .76rem; overflow-wrap: anywhere; }
+.invitation-feedback { min-height: 1.35rem; color: var(--green) !important; overflow-wrap: anywhere; }
+.invitation-feedback.error { color: var(--red) !important; }
+.invitation-feedback:empty { display: none; }
+.invitation-actions { margin-top: .25rem; }
 @media (max-width: 500px) {
   .auth-panel { margin: 1rem .75rem; }
   .cursor-row, .reply-bar { align-items: stretch; flex-direction: column; }
   .context-rail .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .invitation-details > div { grid-template-columns: 1fr; gap: .2rem; }
+  .invitation-actions { flex-direction: column-reverse; align-items: stretch; }
 }
 
 /* Conversations stay navigable without replacing the composer during live updates. */

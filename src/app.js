@@ -1,8 +1,23 @@
 import { EVENT_TYPES as T, WORK_STATES as S } from "./events.js";
-import { RoomClient, draftCommand } from "./client.js";
+import { AccountClient, RoomClient, draftCommand } from "./client.js";
 import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts } from "./conversation.js";
 
 const $ = selector => document.querySelector(selector);
+const invitationTokenPattern = /^[A-Za-z0-9_-]{43}$/;
+const roomIdPattern = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
+function consumeInvitationFragment() {
+  if (!location.hash.startsWith("#invite/")) return null;
+  const candidate = location.hash.slice("#invite/".length);
+  history.replaceState(history.state, "", `${location.pathname}${location.search}`);
+  return invitationTokenPattern.test(candidate)
+    ? { valid: true, secret: candidate }
+    : { valid: false, secret: null };
+}
+function selectedRoomFromLocation() {
+  const values = new URLSearchParams(location.search).getAll("room");
+  return values.length === 1 && roomIdPattern.test(values[0]) ? values[0] : null;
+}
+const initialInvitationFragment = consumeInvitationFragment();
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
 let workDraftId = null, replyToId = null, busy = false;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
@@ -13,10 +28,35 @@ let returnBriefRequestId = 0, returnBriefLoading = false, cursorOperationId = 0,
 let signoutOperationId = 0, signoutLoading = false;
 let refreshOperationId = 0, submitOperationId = 0;
 let submitControls = null, noticeTimer = null, noticeVersion = 0, workFormOpener = null;
+let accessEndContext = null;
+let lastComposerSelection = null;
+let lastInvitationOpener = null;
+const invitation = {
+  phase: "idle", version: 0, secret: null, preview: null, redemptionId: null,
+  opener: null, openerSelection: null, sourceRoomSession: null, sourceAccountSession: null
+};
+const accountClient = new AccountClient();
+document.addEventListener("focusin", event => {
+  if (!$("#invitation-dialog").contains(event.target)
+    && event.target.matches?.("button, input, textarea, select, a[href], [tabindex]")) lastInvitationOpener = event.target;
+});
+document.addEventListener("pointerdown", event => {
+  if (event.target !== $("#message-input") && !$("#invitation-dialog").contains(event.target)) lastComposerSelection = null;
+});
+document.addEventListener("keydown", event => {
+  if (event.key === "Tab" && event.target === $("#message-input")) lastComposerSelection = null;
+});
 const client = new RoomClient({
+  accountClient,
   onSnapshot(snapshot, identity) {
     const firstSnapshot = !state;
     state = snapshot.state; session = identity;
+    const roomId = state.room?.id ?? identity.roomId;
+    $(".room-link strong").textContent = roomId;
+    $(".room-heading .eyebrow").textContent = `# ${roomId.toUpperCase()} · SHARED ROOM`;
+    $("#room-title").textContent = state.room?.title ?? roomId;
+    $(".room-purpose").textContent = state.room?.purpose ?? "";
+    $("#conversation-title").textContent = `# ${roomId}`;
     $("#main").hidden = false; $("#auth-panel").hidden = true; $("#auth-panel").setAttribute("aria-busy", "false");
     $("#signout-button").hidden = false; $("#signout-button").disabled = signoutLoading;
     $("#identity-label").textContent = `${memberLabel(session.member.id)} · ${session.member.kind}`;
@@ -27,6 +67,8 @@ const client = new RoomClient({
   },
   onStatus(text) { setConnectionStatus(text); },
   onAccessEnded() {
+    const endedContext = accessEndContext;
+    accessEndContext = null;
     const pendingSignout = signoutLoading;
     releaseSubmission(submitControls);
     submitOperationId += 1; busy = false;
@@ -57,9 +99,23 @@ const client = new RoomClient({
     $("#rb-current-boundary").textContent = ""; $("#rb-history-boundary").textContent = "";
     $("#rb-ack-button").textContent = "Mark caught up"; $("#return-brief-panel").open = false;
     updateReturnBriefControls();
-    setFormStatus($("#auth-error"), "Sign in with an active room key. Session ended; private drafts were cleared.", true);
-    setConnectionStatus("Not connected");
-    if (!pendingSignout) queueMicrotask(() => $("#access-key").focus({ preventScroll: true }));
+    const openingAcceptedRoom = endedContext === "accepted-room-switch";
+    const openingInvitedRoom = endedContext === "invited-room-switch";
+    const switchedAccount = endedContext === "account-switch";
+    setFormStatus($("#auth-error"), openingAcceptedRoom
+      ? "Membership accepted. Opening the conversation…"
+      : openingInvitedRoom ? "Checking membership and opening the conversation…"
+        : switchedAccount ? "The browser account changed; private Room state and drafts were cleared."
+          : "Sign in with an active key. Session ended; private drafts were cleared.", !openingAcceptedRoom && !openingInvitedRoom);
+    setConnectionStatus(openingAcceptedRoom || openingInvitedRoom ? "Opening Room…" : "Not connected");
+    if ($("#invitation-dialog").open && invitation.preview) {
+      if (!accountClient.session?.authenticated && ["ready", "wrong-account", "changed-account"].includes(invitation.phase)) invitation.phase = "needs-account";
+      renderInvitation();
+    }
+    if (!pendingSignout) queueMicrotask(() => {
+      if ($("#invitation-dialog").open) $("#invitation-title").focus({ preventScroll: true });
+      else $("#access-key").focus({ preventScroll: true });
+    });
   }
 });
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
@@ -130,6 +186,197 @@ function notice(text, error = false) {
 function handleFailureNotice(error) {
   client.handleFailure(error);
   if (state) notice(error.message, true);
+}
+let accountRestoreFlight = null;
+function ensureAccountSession() {
+  if (accountClient.session) return Promise.resolve(accountClient.session);
+  if (accountRestoreFlight) return accountRestoreFlight;
+  accountRestoreFlight = accountClient.restore().finally(() => { accountRestoreFlight = null; });
+  return accountRestoreFlight;
+}
+function sameAccountTuple(left, right) {
+  return Boolean(left?.account && right?.account)
+    && left.account.id === right.account.id
+    && left.account.authEpoch === right.account.authEpoch
+    && left.sessionRevision === right.sessionRevision
+    && left.sessionBinding === right.sessionBinding;
+}
+function currentInvitation(version, secret) {
+  return invitation.version === version && invitation.secret === secret && $("#invitation-dialog").open;
+}
+function setInvitationFeedback(text, error = false) {
+  $("#invitation-status").textContent = error ? "" : text;
+  $("#invitation-error").textContent = error ? text : "";
+}
+function configureAuthPanel(roomId = selectedRoomFromLocation()) {
+  const accountMode = Boolean(roomId);
+  $("#access-key-label").textContent = accountMode ? "Your account access key" : "Your human member access key";
+  $("#auth-description").textContent = accountMode
+    ? `Sign in to open #${roomId} with a canonical account that already has membership there.`
+    : "A place for people and agents to talk, explore, and work together. This private pilot uses separately provisioned room keys.";
+  $("#auth-hint").textContent = accountMode
+    ? "An account key proves the account; it does not itself grant Room membership. Never put a key in a URL, chat, logs, or GitHub."
+    : "Use a key issued by the room administrator. Never share keys in chat or GitHub. Public sign-up and connected AI runtimes are not included in this pilot.";
+  $("#auth-form button[type='submit']").textContent = accountMode ? "Open room" : "Enter room";
+}
+function renderInvitation() {
+  const preview = invitation.preview;
+  const phase = invitation.phase;
+  const pending = preview?.status === "pending";
+  const accepted = preview?.status === "accepted";
+  const authenticated = Boolean(accountClient.session?.authenticated && accountClient.session.account);
+  const switchingAccount = ["wrong-account", "changed-account"].includes(phase);
+  const loading = ["previewing", "authenticating", "accepting", "opening"].includes(phase);
+  $("#invitation-dialog").setAttribute("aria-busy", loading ? "true" : "false");
+  $("#invitation-details").hidden = !preview;
+  if (preview) {
+    $("#invitation-room").textContent = preview.roomTitle || preview.roomId;
+    $("#invitation-purpose").textContent = preview.roomPurpose || "No Room purpose was provided.";
+    $("#invitation-display-name").textContent = preview.displayName;
+    $("#invitation-member-id").textContent = preview.memberId;
+    $("#invitation-role").textContent = humanize(preview.role);
+    $("#invitation-permissions").textContent = preview.permissions.length
+      ? preview.permissions.map(humanize).join(", ")
+      : "Conversation access only; no additional capabilities";
+    $("#invitation-issuer").textContent = preview.invitedByDisplayName || "Room administrator";
+    const expiry = new Date(preview.expiresAt);
+    $("#invitation-expires").dateTime = expiry.toISOString();
+    $("#invitation-expires").textContent = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(expiry);
+  }
+  let summary = phase === "terminal" ? "This invitation is unavailable." : "Loading the invitation’s exact Room and membership scope…";
+  if (preview) summary = pending
+    ? `${preview.displayName} is invited to join ${preview.roomTitle || preview.roomId} as ${humanize(preview.role)}.`
+    : accepted ? "This invitation has already been accepted. Sign in with an authorized account to open the Room."
+      : preview.status === "expired" ? "This invitation has expired. Ask a current Room administrator for a new one."
+        : preview.status === "revoked" ? "This invitation was revoked. Ask a current Room administrator if you still need access."
+          : "The inviter’s authority changed. Ask a current Room administrator for a new invitation.";
+  $("#invitation-summary").textContent = summary;
+  const mayAuthenticate = Boolean(preview && (pending || accepted));
+  $("#invitation-account-form").hidden = !mayAuthenticate || (authenticated && !switchingAccount) || phase === "accepting" || phase === "opening";
+  for (const control of $("#invitation-account-form").querySelectorAll("input, button")) control.disabled = loading;
+  const action = $("#invitation-accept");
+  action.hidden = !(authenticated && (pending || accepted) && !switchingAccount);
+  action.disabled = loading;
+  action.textContent = accepted ? "Open room" : phase === "unknown" ? "Check acceptance again" : "Accept and open room";
+  $("#invitation-dismiss").disabled = phase === "accepting" || phase === "opening";
+}
+function closeInvitation({ returnFocus = true } = {}) {
+  if (["accepting", "opening"].includes(invitation.phase)) return;
+  const opener = invitation.opener;
+  invitation.version += 1;
+  const selection = invitation.openerSelection;
+  Object.assign(invitation, { phase: "idle", secret: null, preview: null, redemptionId: null, opener: null, openerSelection: null, sourceRoomSession: null, sourceAccountSession: null });
+  setInvitationFeedback("");
+  $("#invitation-account-form").reset();
+  if ($("#invitation-dialog").open) $("#invitation-dialog").close();
+  if (returnFocus) queueMicrotask(() => {
+    const usable = node => node?.isConnected && !node.disabled && !node.hidden && node.getClientRects().length > 0;
+    const fallback = state ? $("#message-input") : $("#access-key");
+    const target = usable(opener) ? opener : fallback;
+    target?.focus({ preventScroll: true });
+    const retainedSelection = selection || (target === $("#message-input") ? lastComposerSelection : null);
+    if (retainedSelection && typeof target?.setSelectionRange === "function" && target.value === retainedSelection.value) {
+      target.setSelectionRange(retainedSelection.start, retainedSelection.end, retainedSelection.direction);
+    }
+  });
+}
+async function openInvitation(fragment) {
+  invitation.version += 1;
+  const version = invitation.version;
+  const active = document.activeElement === document.body ? null : document.activeElement;
+  const composer = $("#message-input");
+  const selectedComposer = state && lastComposerSelection?.value === composer.value ? composer : null;
+  const opener = selectedComposer || (lastInvitationOpener?.isConnected ? lastInvitationOpener : active);
+  const liveSelection = opener && typeof opener.selectionStart === "number"
+    ? { value: opener.value, start: opener.selectionStart, end: opener.selectionEnd, direction: opener.selectionDirection }
+    : null;
+  // Some browsers collapse a textarea selection as the hash changes, before the
+  // hashchange handler runs. Retain the last non-collapsed user selection for this
+  // exact composer value; user input/pointer/keyboard events clear stale captures.
+  const openerSelection = opener === $("#message-input") && liveSelection?.start === liveSelection?.end
+    && lastComposerSelection?.value === opener.value ? lastComposerSelection : liveSelection;
+  Object.assign(invitation, {
+    phase: fragment.valid ? "previewing" : "terminal",
+    secret: fragment.secret,
+    preview: null,
+    redemptionId: null,
+    opener,
+    openerSelection,
+    sourceRoomSession: session,
+    sourceAccountSession: accountClient.session
+  });
+  setInvitationFeedback(fragment.valid ? "Checking the invitation without joining the Room…" : "This invitation link is unavailable.", !fragment.valid);
+  renderInvitation();
+  if (!$("#invitation-dialog").open) $("#invitation-dialog").showModal();
+  queueMicrotask(() => $("#invitation-title").focus({ preventScroll: true }));
+  if (!fragment.valid) return;
+  try {
+    const [preview] = await Promise.all([
+      accountClient.previewInvitation(fragment.secret),
+      ensureAccountSession().catch(() => null)
+    ]);
+    if (!currentInvitation(version, fragment.secret)) return;
+    invitation.preview = preview;
+    invitation.phase = preview.status === "pending"
+      ? (accountClient.session?.authenticated ? "ready" : "needs-account")
+      : preview.status === "accepted" ? (accountClient.session?.authenticated ? "ready" : "needs-account") : "terminal";
+    setInvitationFeedback(preview.status === "pending"
+      ? (accountClient.session?.authenticated ? "Review the exact scope, then accept only if it is right." : "Sign in with the separately provisioned account key to continue.")
+      : preview.status === "accepted" ? "This invitation has already been accepted. Sign in with an authorized account to open the Room."
+        : preview.status === "expired" ? "This invitation has expired. Ask a current Room administrator for a new one."
+          : preview.status === "revoked" ? "This invitation was revoked. Ask a current Room administrator if you still need access."
+            : "The inviter’s authority changed. Ask a current Room administrator for a new invitation.", invitation.phase === "terminal");
+    renderInvitation();
+  } catch (error) {
+    if (!currentInvitation(version, fragment.secret)) return;
+    invitation.phase = "terminal";
+    setInvitationFeedback("This invitation is unavailable. It may be invalid, expired, revoked, or no longer authorized.", true);
+    renderInvitation();
+  }
+}
+async function moveCurrentRoomToAccount(loggedIn) {
+  if (!state || !session) return;
+  const roomId = session.roomId;
+  const sameAccount = session.account?.id === loggedIn.account.id && session.account?.authEpoch === loggedIn.account.authEpoch;
+  if (!sameAccount) {
+    accessEndContext = "account-switch";
+    client.endAccess();
+    return;
+  }
+  try {
+    const restored = await client.restore(roomId);
+    if (!restored) throw new Error("The browser account changed while the Room was reopening");
+  } catch (error) {
+    accessEndContext = "account-switch";
+    client.endAccess();
+    throw error;
+  }
+}
+async function openAcceptedRoom(roomId, message, { acceptanceConfirmed = true } = {}) {
+  invitation.phase = "opening";
+  invitation.secret = null;
+  renderInvitation();
+  $("#invitation-dialog").close();
+  $("#invitation-account-form").reset();
+  accessEndContext = acceptanceConfirmed ? "accepted-room-switch" : "invited-room-switch";
+  client.endAccess();
+  history.replaceState(history.state, "", `${location.pathname}?room=${encodeURIComponent(roomId)}`);
+  configureAuthPanel(roomId);
+  try {
+    const restored = await client.restore(roomId);
+    if (!restored) throw new Error("The browser account changed before the Room could open");
+    Object.assign(invitation, { phase: "idle", preview: null, redemptionId: null, opener: null, openerSelection: null, sourceRoomSession: null, sourceAccountSession: null });
+    notice(message);
+    queueMicrotask(() => $("#conversation-title").focus({ preventScroll: true }));
+  } catch (error) {
+    Object.assign(invitation, { phase: "terminal", preview: null, redemptionId: null, opener: null, openerSelection: null, sourceRoomSession: null, sourceAccountSession: null });
+    setFormStatus($("#auth-error"), acceptanceConfirmed
+      ? "Your membership was accepted, but the conversation could not be loaded. Refresh or sign in with the same account; do not accept the invitation again."
+      : "This account could not open the invited Room. Sign in with the account that accepted the invitation.", true);
+    setConnectionStatus(acceptanceConfirmed ? "Membership accepted · conversation not loaded" : "Invited Room not opened");
+    $("#auth-panel").hidden = false;
+    queueMicrotask(() => $("#access-key").focus({ preventScroll: true }));
+  }
 }
 function selectOptions(selector, members, blank) {
   const select = $(selector), previous = select.value;
@@ -471,19 +718,170 @@ async function submit(form, fn, { failureHint } = {}) {
     busy = false; releaseSubmission(ticket, { restoreFocus: true }); if (state) render();
   }
 }
+$("#invitation-dismiss").addEventListener("click", () => closeInvitation());
+$("#invitation-dialog").addEventListener("cancel", e => {
+  e.preventDefault();
+  if (!["accepting", "opening"].includes(invitation.phase)) closeInvitation();
+});
+$("#invitation-account-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  if (!invitation.secret || !invitation.preview || ["authenticating", "accepting", "opening"].includes(invitation.phase)) return;
+  const version = invitation.version, secret = invitation.secret;
+  const accessKey = $("#invitation-account-key").value.trim();
+  const roomBefore = state && session ? session : null;
+  if (roomBefore) { saveComposer(); client.disconnect(); }
+  invitation.phase = "authenticating";
+  setInvitationFeedback("Confirming the account. This does not accept the invitation…");
+  renderInvitation();
+  try {
+    await ensureAccountSession();
+    if (!currentInvitation(version, secret)) return;
+    const loggedIn = await accountClient.login(accessKey);
+    if (!currentInvitation(version, secret)) return;
+    if (!loggedIn?.authenticated || !loggedIn.account) {
+      accessEndContext = "account-switch";
+      if (state) client.endAccess();
+      invitation.phase = "changed-account";
+      setInvitationFeedback("The browser account changed before sign-in could be confirmed. Sign in again to continue safely.", true);
+      renderInvitation();
+      return;
+    }
+    $("#invitation-account-key").value = "";
+    await moveCurrentRoomToAccount(loggedIn);
+    if (!currentInvitation(version, secret)) return;
+    invitation.sourceAccountSession = loggedIn;
+    invitation.phase = "ready";
+    setInvitationFeedback(invitation.preview.status === "accepted"
+      ? "Account confirmed. Open the Room only if this is the membership you expected."
+      : "Account confirmed. Review the exact scope before accepting.");
+    renderInvitation();
+    $("#invitation-accept").focus({ preventScroll: true });
+  } catch (error) {
+    if (!currentInvitation(version, secret)) return;
+    if (Number.isSafeInteger(error.status) && roomBefore && client.session === roomBefore) client.connect();
+    else if (roomBefore && state) {
+      accessEndContext = "account-switch";
+      client.endAccess();
+    }
+    invitation.phase = accountClient.session?.authenticated ? "ready" : "needs-account";
+    setInvitationFeedback(Number.isSafeInteger(error.status)
+      ? `${error.message}. The invitation was not accepted.`
+      : "Account sign-in could not be confirmed. The invitation was not accepted; restore the connection and try again.", true);
+    renderInvitation();
+  }
+});
+$("#invitation-accept").addEventListener("click", async () => {
+  const preview = invitation.preview;
+  const accountSession = accountClient.session;
+  if (!invitation.secret || !preview || !accountSession?.authenticated || !accountSession.account || ["accepting", "opening"].includes(invitation.phase)) return;
+  const version = invitation.version, secret = invitation.secret;
+  if (preview.status === "accepted") {
+    invitation.phase = "opening";
+    setInvitationFeedback("Confirming this browser account before opening the Room…");
+    renderInvitation();
+    if (state) client.disconnect();
+    try {
+      const fresh = await accountClient.restore();
+      if (!currentInvitation(version, secret)) return;
+      if (!sameAccountTuple(accountSession, fresh)) {
+        if (state) { accessEndContext = "account-switch"; client.endAccess(); }
+        invitation.phase = "changed-account";
+        setInvitationFeedback("The browser account changed. Sign in with the account that accepted this invitation.", true);
+        renderInvitation();
+        return;
+      }
+      await openAcceptedRoom(preview.roomId, "Room opened with your current membership.", { acceptanceConfirmed: false });
+    } catch (error) {
+      if (!currentInvitation(version, secret)) return;
+      if (state) { accessEndContext = "account-switch"; client.endAccess(); }
+      invitation.phase = "changed-account";
+      setInvitationFeedback("The browser account could not be confirmed. Sign in again before opening the Room.", true);
+      renderInvitation();
+    }
+    return;
+  }
+  if (preview.status !== "pending") return;
+  invitation.redemptionId ||= crypto.randomUUID();
+  const redemptionId = invitation.redemptionId;
+  invitation.phase = "accepting";
+  setInvitationFeedback("Accepting the exact membership scope…");
+  renderInvitation();
+  let receipt = null;
+  try {
+    receipt = await accountClient.acceptInvitation({ invitationToken: secret, redemptionId, expectedRevision: preview.revision });
+    if (!currentInvitation(version, secret)) return;
+    if (!receipt) {
+      if (state) { accessEndContext = "account-switch"; client.endAccess(); }
+      invitation.phase = "changed-account";
+      setInvitationFeedback("We could not safely attribute the response because the browser account changed. Sign in again to reconcile this invitation.", true);
+      renderInvitation();
+      return;
+    }
+    if (state) client.disconnect();
+    const fresh = await accountClient.restore();
+    if (!currentInvitation(version, secret)) return;
+    if (!sameAccountTuple(accountSession, fresh) || !sameAccountTuple(receipt.session, fresh)) {
+      if (state) { accessEndContext = "account-switch"; client.endAccess(); }
+      invitation.phase = "changed-account";
+      setInvitationFeedback("We could not safely attribute the acceptance because the browser account changed. Sign in again to reconcile it.", true);
+      renderInvitation();
+      return;
+    }
+    await openAcceptedRoom(receipt.invitation.roomId, receipt.duplicate
+      ? "Invitation already accepted; the Room is now open."
+      : "Membership accepted. Welcome to the Room.");
+  } catch (error) {
+    if (!currentInvitation(version, secret)) return;
+    if (error.code === "invitation_account_mismatch") {
+      invitation.phase = "wrong-account";
+      setInvitationFeedback("This invitation is for another account. Sign in with the separately provisioned account key intended for it.", true);
+    } else if (error.code === "invitation_already_used") {
+      if (state) client.disconnect();
+      try {
+        const fresh = await accountClient.restore();
+        if (!currentInvitation(version, secret)) return;
+        if (!sameAccountTuple(accountSession, fresh)) throw new Error("Browser account changed");
+        await openAcceptedRoom(preview.roomId, "Invitation already accepted; the Room is now open.");
+        return;
+      } catch {
+        if (!currentInvitation(version, secret)) return;
+        if (state) { accessEndContext = "account-switch"; client.endAccess(); }
+        invitation.phase = "changed-account";
+        setInvitationFeedback("The invitation may already be accepted, but this browser account could not be confirmed. Sign in again to reconcile it.", true);
+      }
+    } else if (["invitation_expired", "invitation_revoked", "invitation_authority_changed", "stale_invitation_revision"].includes(error.code)) {
+      invitation.phase = "terminal";
+      setInvitationFeedback(`${error.message}. No membership was created by this request.`, true);
+    } else if (!Number.isSafeInteger(error.status)) {
+      invitation.phase = "unknown";
+      setInvitationFeedback("We could not confirm whether acceptance completed. Retry uses the same redemption ID and will not create a second membership.", true);
+    } else {
+      invitation.phase = "ready";
+      setInvitationFeedback(`${error.message}. No success is claimed; review and try again.`, true);
+    }
+    renderInvitation();
+  }
+});
 $("#auth-form").addEventListener("submit", async e => {
   if (signoutLoading) { e.preventDefault(); return; }
   e.preventDefault(); setFormStatus($("#auth-error"), "");
   const accessKey = $("#access-key").value.trim();
+  const requestedRoom = selectedRoomFromLocation();
   await submit(e.currentTarget, async () => {
-    const identity = await client.login(accessKey);
+    let identity;
+    if (requestedRoom) {
+      await ensureAccountSession();
+      const account = await accountClient.login(accessKey);
+      if (!account) return;
+      identity = await client.restore(requestedRoom);
+    } else identity = await client.login(accessKey);
     if (!identity || !state || session?.member.id !== identity.member.id || session?.roomId !== identity.roomId) return;
     $("#access-key").value = ""; $("#message-input").focus(); notice("Signed in. Welcome to your room.");
-  }, { failureHint: "Check the access key and try again." });
+  }, { failureHint: requestedRoom ? "Check the account key and Room membership, then try again." : "Check the access key and try again." });
   if (state) revealLocationHash();
 });
 $("#signout-button").addEventListener("click", async () => {
-  if (busy || signoutLoading || !state || !session) return;
+  if (busy || signoutLoading || !state || !session || ["accepting", "opening"].includes(invitation.phase)) return;
   saveComposer();
   if (drafts.hasText() || !$("#new-work-form").hidden || $("#action-dialog").open) {
     if (!window.confirm("Sign out and clear unsent drafts on this device?")) return;
@@ -504,9 +902,10 @@ $("#signout-button").addEventListener("click", async () => {
       for (const control of document.querySelectorAll("#auth-form input, #auth-form button")) control.disabled = false;
       if (state) $("#signout-button").disabled = false;
       else {
-        const ended = "Sign in with an active room key. Session ended; private drafts were cleared.";
+        configureAuthPanel();
+        const ended = "Sign in with an active key. Session ended; private drafts were cleared.";
         if ($("#auth-error").textContent !== ended) setFormStatus($("#auth-error"), ended, true);
-        queueMicrotask(() => $("#access-key").focus({ preventScroll: true }));
+        if (!$("#invitation-dialog").open) queueMicrotask(() => $("#access-key").focus({ preventScroll: true }));
       }
     }
   }
@@ -515,7 +914,14 @@ $("#refresh-button").addEventListener("click", async () => {
   const operationId = ++refreshOperationId;
   const generation = client.generation, roomId = session?.roomId, memberId = session?.member.id;
   try {
-    if (!client.session) await client.restore();
+    if (!client.session) {
+      const requestedRoom = selectedRoomFromLocation();
+      if (requestedRoom) {
+        const account = await ensureAccountSession();
+        if (!account?.authenticated) throw Object.assign(new Error("Account sign-in required"), { status: 401 });
+        await client.restore(requestedRoom);
+      } else await client.restore();
+    }
     else {
       await client.refresh();
       if (operationId !== refreshOperationId || !sameSession(generation, roomId, memberId)) return;
@@ -605,7 +1011,16 @@ function updateReply() {
 function clearReply() { replyToId = currentThreadId; updateReply(); }
 $("#cancel-reply").addEventListener("click", () => { clearReply(); $("#message-input").focus({ preventScroll: true }); });
 $("#thread-back").addEventListener("click", () => switchThread(null));
-$("#message-input").addEventListener("input", saveComposer);
+function rememberComposerSelection({ clearCollapsed = false } = {}) {
+  const input = $("#message-input");
+  if (input.selectionStart !== input.selectionEnd) {
+    lastComposerSelection = { value: input.value, start: input.selectionStart, end: input.selectionEnd, direction: input.selectionDirection };
+  } else if (clearCollapsed) lastComposerSelection = null;
+}
+$("#message-input").addEventListener("select", () => rememberComposerSelection());
+document.addEventListener("selectionchange", () => { if (document.activeElement === $("#message-input")) rememberComposerSelection(); });
+for (const type of ["keyup", "mouseup", "touchend"]) $("#message-input").addEventListener(type, () => rememberComposerSelection({ clearCollapsed: true }));
+$("#message-input").addEventListener("input", () => { lastComposerSelection = null; saveComposer(); });
 $("#message-to-select").addEventListener("change", saveComposer);
 $("#message-input").addEventListener("keydown", e => {
   // Some IME confirmation keys arrive after compositionend; keyCode 229 is the
@@ -639,7 +1054,11 @@ $("#main").addEventListener("click", e => {
     revealRoom();
   }
 });
-window.addEventListener("hashchange", revealLocationHash);
+window.addEventListener("hashchange", () => {
+  const fragment = consumeInvitationFragment();
+  if (fragment) openInvitation(fragment);
+  else revealLocationHash();
+});
 $("#new-messages-button").addEventListener("click", () => {
   const list = $("#message-list"); list.scrollTop = list.scrollHeight; newVisibleMessages = 0;
   $("#new-messages-button").hidden = true; list.focus({ preventScroll: true });
@@ -773,12 +1192,16 @@ $("#action-form").addEventListener("submit", e => {
   }, { failureHint: "Your entries were kept; try again." });
 });
 window.addEventListener("beforeunload", e => {
-  if (!state) return;
-  saveComposer();
-  if (drafts.hasText() || !$("#new-work-form").hidden || $("#action-dialog").open) { e.preventDefault(); e.returnValue = ""; }
+  if (state) saveComposer();
+  if ((state && (drafts.hasText() || !$("#new-work-form").hidden || $("#action-dialog").open))
+    || ["accepting", "unknown"].includes(invitation.phase)) { e.preventDefault(); e.returnValue = ""; }
 });
 window.addEventListener("pagehide", () => client.endAccess());
-window.addEventListener("pageshow", e => { if (e.persisted) client.restore().catch(handleFailureNotice); });
+window.addEventListener("pageshow", e => {
+  if (!e.persisted) return;
+  const roomId = selectedRoomFromLocation();
+  (roomId ? ensureAccountSession().then(account => account.authenticated ? client.restore(roomId) : null) : client.restore()).catch(handleFailureNotice);
+});
 // Return brief (disposition 5557850637): compact expandable rail entry. Fetch on return and
 // on open; history stays fixed through the frozen horizon H, the action sections are live
 // through N, and only the explicit button acknowledges - exactly H, never the latest event.
@@ -961,10 +1384,30 @@ $("#rb-ack-button").addEventListener("click", async () => {
     }
   }
 });
-client.restore().catch(error => {
+configureAuthPanel();
+if (initialInvitationFragment) openInvitation(initialInvitationFragment);
+(async () => {
+  const requestedRoom = selectedRoomFromLocation();
+  if (requestedRoom) {
+    const account = await ensureAccountSession();
+    if (!account?.authenticated) {
+      setFormStatus($("#auth-error"), `Sign in with a canonical account that has membership in #${requestedRoom}.`, true);
+      setConnectionStatus("Not connected · account sign-in required");
+      $("#auth-panel").hidden = false;
+      if (!$("#invitation-dialog").open) queueMicrotask(() => $("#access-key").focus({ preventScroll: true }));
+      return;
+    }
+    await client.restore(requestedRoom);
+    return;
+  }
+  await client.restore();
+})().catch(error => {
   const signedOut = [401, 403].includes(error.status);
-  setFormStatus($("#auth-error"), signedOut ? "Use a provisioned human room key to enter. No demo identity is selected for you." : "Room service unavailable. Check the service and retry; no connection is claimed.", true);
+  const requestedRoom = selectedRoomFromLocation();
+  setFormStatus($("#auth-error"), signedOut
+    ? requestedRoom ? `This account cannot open #${requestedRoom}. Use an account with active membership there.` : "Use a provisioned human room key to enter. No demo identity is selected for you."
+    : "Room service unavailable. Check the service and retry; no connection is claimed.", true);
   setConnectionStatus(signedOut ? "Not connected · sign in required" : "Room service unavailable · not connected");
   $("#auth-panel").hidden = false;
-  queueMicrotask(() => $("#access-key").focus({ preventScroll: true }));
+  if (!$("#invitation-dialog").open) queueMicrotask(() => $("#access-key").focus({ preventScroll: true }));
 });

@@ -3,6 +3,7 @@ import { REACTIONS } from "./conversation.js";
 export const EVENT_TYPES = Object.freeze({
   ROOM_CREATED: "room.created",
   MEMBER_ADDED: "member.added",
+  MEMBER_JOINED_VIA_INVITATION: "member.joined_via_invitation",
   MEMBER_ACCESS_CHANGED: "member.access_changed",
   MESSAGE_POSTED: "message.posted",
   MESSAGE_REACTION_SET: "message.reaction_set",
@@ -20,6 +21,19 @@ export const EVENT_TYPES = Object.freeze({
 });
 
 export const PERMISSIONS = Object.freeze(["steer", "decide", "manage_members", "manage_claims", "accept_work", "complete_work", "verify", "write_external"]);
+
+// Roles are human-readable presets. The stored permission snapshot remains the
+// authority so a later role-policy change cannot silently widen an invitation.
+export const INVITATION_ROLE_POLICIES = Object.freeze({
+  1: Object.freeze({
+    moderator: Object.freeze(["steer", "manage_members", "manage_claims", "accept_work", "complete_work", "verify"]),
+    member: Object.freeze(["accept_work", "complete_work", "verify"]),
+    guest: Object.freeze([])
+  })
+});
+export const INVITATION_ROLE_POLICY_VERSION = 1;
+export const INVITATION_ROLES = INVITATION_ROLE_POLICIES[INVITATION_ROLE_POLICY_VERSION];
+export const MEMBERSHIP_AUTHORITY_POLICY_VERSION = 2;
 
 export function validId(value) {
   return typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(value) && !["constructor", "prototype", "__proto__"].includes(value);
@@ -89,6 +103,7 @@ export function applyEvent(current, incoming) {
   const handlers = {
     [EVENT_TYPES.ROOM_CREATED]: createRoom,
     [EVENT_TYPES.MEMBER_ADDED]: addMember,
+    [EVENT_TYPES.MEMBER_JOINED_VIA_INVITATION]: joinMemberViaInvitation,
     [EVENT_TYPES.MEMBER_ACCESS_CHANGED]: changeMemberAccess,
     [EVENT_TYPES.MESSAGE_POSTED]: postMessage,
     [EVENT_TYPES.MESSAGE_REACTION_SET]: setMessageReaction,
@@ -151,6 +166,11 @@ function addMember(state, incoming) {
   if (!isBootstrapOwner) requirePermission(state, incoming.actorId, "manage_members");
   if (!["human", "agent"].includes(incoming.data.kind)) throw new Error("Member kind must be human or agent");
   validatePermissions(incoming.data.permissions, incoming.data.kind);
+  if (!isBootstrapOwner && incoming.data.authorityPolicyVersion === MEMBERSHIP_AUTHORITY_POLICY_VERSION) {
+    requireScopedMemberAdministration(state, incoming.actorId, memberId, null, incoming.data.permissions);
+  } else if (incoming.data.authorityPolicyVersion != null && incoming.data.authorityPolicyVersion !== 1) {
+    throw new Error("Unsupported membership authority policy");
+  }
   if (incoming.data.accountableHumanId && (!isBootstrapOwner || incoming.data.accountableHumanId !== memberId)) {
     if (requireMember(state, incoming.data.accountableHumanId).kind !== "human") throw new Error("Accountable sponsor must be a human member");
   }
@@ -167,6 +187,34 @@ function addMember(state, incoming) {
   };
 }
 
+function joinMemberViaInvitation(state, incoming) {
+  requireFields(incoming.data, ["memberId", "displayName", "role", "permissions", "invitedByMemberId", "invitationId", "rolePolicyVersion", "authorityPolicyVersion"]);
+  const { memberId, invitedByMemberId, invitationId, role, permissions, rolePolicyVersion, authorityPolicyVersion } = incoming.data;
+  if (incoming.actorId !== memberId) throw new Error("An invited member must join as themself");
+  if (state.members[memberId]) throw new Error("Member already exists");
+  requirePermission(state, invitedByMemberId, "manage_members");
+  const rolePolicy = INVITATION_ROLE_POLICIES[rolePolicyVersion];
+  const rolePermissions = rolePolicy && Object.hasOwn(rolePolicy, role) && rolePolicy[role];
+  if (!rolePermissions || permissions.length !== rolePermissions.length || permissions.some((permission, index) => permission !== rolePermissions[index])) {
+    throw new Error("Invitation role permissions do not match the stored role policy");
+  }
+  if (authorityPolicyVersion !== MEMBERSHIP_AUTHORITY_POLICY_VERSION) throw new Error("Unsupported membership authority policy");
+  validatePermissions(permissions, "human");
+  requireScopedMemberAdministration(state, invitedByMemberId, memberId, null, permissions);
+  state.members[memberId] = {
+    id: memberId,
+    displayName: incoming.data.displayName,
+    kind: "human",
+    role,
+    accountableHumanId: memberId,
+    permissions: [...permissions],
+    availability: "unknown",
+    active: true,
+    revision: 0,
+    membershipOrigin: { kind: "invitation", invitationId, invitedByMemberId }
+  };
+}
+
 function validatePermissions(permissions, kind) {
   if (!Array.isArray(permissions) || permissions.some(p => !PERMISSIONS.includes(p)) || new Set(permissions).size !== permissions.length) throw new Error("Invalid permissions");
   if (kind === "agent" && permissions.some(p => ["manage_members", "decide"].includes(p))) throw new Error("Human administration cannot be delegated to an agent");
@@ -179,10 +227,25 @@ function changeMemberAccess(state, incoming) {
   if (!member) throw new Error("Unknown member");
   if (member.revision !== incoming.data.expectedMemberRevision) throw new Error("Stale member revision");
   validatePermissions(incoming.data.permissions, member.kind);
+  if (incoming.data.authorityPolicyVersion === MEMBERSHIP_AUTHORITY_POLICY_VERSION) {
+    requireScopedMemberAdministration(state, incoming.actorId, member.id, member, incoming.data.permissions);
+  } else if (incoming.data.authorityPolicyVersion != null && incoming.data.authorityPolicyVersion !== 1) {
+    throw new Error("Unsupported membership authority policy");
+  }
   if (member.id === state.room.ownerId && (!incoming.data.active || !incoming.data.permissions.includes("manage_members"))) throw new Error("Owner must retain membership administration");
   member.active = incoming.data.active;
   member.permissions = [...incoming.data.permissions];
   member.revision += 1;
+}
+
+function requireScopedMemberAdministration(state, actorId, targetId, currentTarget, nextPermissions) {
+  if (actorId === state.room.ownerId) return;
+  if (targetId === state.room.ownerId) throw new Error("Only the Room owner may change owner authority");
+  const actor = requireMember(state, actorId);
+  const affected = new Set([...(currentTarget?.permissions ?? []), ...nextPermissions]);
+  if ([...affected].some(permission => !actor.permissions.includes(permission))) {
+    throw new Error("A membership administrator cannot grant or remove authority they do not hold");
+  }
 }
 
 function postMessage(state, incoming) {

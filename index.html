@@ -29,14 +29,14 @@
       <section id="auth-panel" class="auth-panel panel" aria-labelledby="auth-title" hidden>
         <p class="eyebrow">YOUR SHARED SPACE</p>
         <h1 id="auth-title">Come in. Make yourself at home.</h1>
-        <p>A place for people and agents to talk, explore, and work together. This private pilot uses separately provisioned room keys.</p>
+        <p id="auth-description">A place for people and agents to talk, explore, and work together. This private pilot uses separately provisioned room keys.</p>
         <form id="auth-form">
-          <label for="access-key">Your human member access key</label>
+          <label id="access-key-label" for="access-key">Your human member access key</label>
           <input id="access-key" type="password" autocomplete="off" spellcheck="false" required maxlength="128" aria-describedby="auth-error">
           <button class="button primary" type="submit">Enter room</button>
           <p id="auth-error" class="status form-status" role="alert"></p>
         </form>
-        <p class="form-hint">Use a key issued by the room administrator. Never share keys in chat or GitHub. Public sign-up and connected AI runtimes are not included in this pilot.</p>
+        <p id="auth-hint" class="form-hint">Use a key issued by the room administrator. Never share keys in chat or GitHub. Public sign-up and connected AI runtimes are not included in this pilot.</p>
       </section>
 
       <main id="main" class="community-shell" hidden>
@@ -198,6 +198,35 @@
         <p id="action-error" class="status form-status" role="alert"></p>
         <div class="form-actions"><button id="cancel-action" class="button ghost" type="button">Cancel</button><button class="button primary" type="submit">Save record</button></div>
       </form>
+    </dialog>
+    <dialog id="invitation-dialog" class="invitation-dialog" aria-labelledby="invitation-title" aria-describedby="invitation-summary invitation-boundary">
+      <div class="invitation-shell">
+        <p class="eyebrow">ROOM INVITATION</p>
+        <h2 id="invitation-title" tabindex="-1">Review this invitation</h2>
+        <p id="invitation-summary">Loading the invitation’s exact Room and membership scope…</p>
+        <p id="invitation-boundary" class="invitation-boundary">Opening this invitation does not join the room or tell anyone it was read.</p>
+        <dl id="invitation-details" class="invitation-details" hidden>
+          <div><dt>Room</dt><dd id="invitation-room"></dd></div>
+          <div><dt>Purpose</dt><dd id="invitation-purpose"></dd></div>
+          <div><dt>Your membership</dt><dd><span id="invitation-display-name"></span> <code id="invitation-member-id"></code></dd></div>
+          <div><dt>Role</dt><dd id="invitation-role"></dd></div>
+          <div><dt>Capabilities</dt><dd id="invitation-permissions"></dd></div>
+          <div><dt>Created by</dt><dd id="invitation-issuer"></dd></div>
+          <div><dt>Expires</dt><dd><time id="invitation-expires"></time></dd></div>
+        </dl>
+        <form id="invitation-account-form" hidden>
+          <label for="invitation-account-key">Your account access key</label>
+          <input id="invitation-account-key" type="password" autocomplete="off" spellcheck="false" required maxlength="128" aria-describedby="invitation-account-hint invitation-error">
+          <p id="invitation-account-hint" class="form-hint">The invitation offers Room membership; your separately provisioned account key proves which account is accepting it.</p>
+          <button class="button secondary" type="submit">Sign in to review acceptance</button>
+        </form>
+        <p id="invitation-status" class="invitation-feedback" role="status" aria-live="polite"></p>
+        <p id="invitation-error" class="invitation-feedback error" role="alert"></p>
+        <div class="form-actions invitation-actions">
+          <button id="invitation-dismiss" class="button ghost" type="button">Not now</button>
+          <button id="invitation-accept" class="button primary" type="button" hidden>Accept and open room</button>
+        </div>
+      </div>
     </dialog>
     <div id="status" class="status" role="status" aria-live="polite"></div>
     <script type="module" src="./src/app.js"></script>

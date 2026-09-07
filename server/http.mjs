@@ -1,23 +1,39 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { ServiceError } from "./store.mjs";
 
-const cookieName = "room_session";
+const roomCookieName = "room_session";
+const accountCookieName = "account_session";
+const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
+const bindingPattern = /^[a-f0-9]{64}$/;
 const assets = new Map([
   ["/", ["index.html", "text/html"]], ["/index.html", ["index.html", "text/html"]],
   ...["app.js", "client.js", "events.js", "conversation.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
   ["/src/styles.css", ["src/styles.css", "text/css"]]
 ]);
 const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
+const accountView = auth => ({
+  authenticated: Boolean(auth.account),
+  account: auth.account ? { id: auth.account.id, revision: auth.account.revision, authEpoch: auth.account.authEpoch } : null,
+  csrf: auth.csrf,
+  sessionBinding: auth.sessionBinding,
+  sessionRevision: auth.sessionRevision,
+  expiresAt: auth.expiresAt,
+  authenticatedUntil: auth.authenticatedUntil ?? null
+});
 const sessionView = auth => ({
+  authMode: auth.credentialScope === "account-session" ? "account" : "room",
   account: auth.account ? { id: auth.account.id, revision: auth.account.revision, authEpoch: auth.account.authEpoch } : null,
   member: auth.member,
   roomId: auth.roomId,
   csrf: auth.csrf,
   sessionBinding: auth.sessionBinding,
+  sessionRevision: auth.sessionRevision ?? null,
   expiresAt: auth.expiresAt
 });
+const exact = (value, fields) => Object.keys(value).length === fields.length && fields.every(field => Object.hasOwn(value, field));
+const rateHash = value => createHash("sha256").update(String(value)).digest("hex");
 
 export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = 1000 }) {
   if (origin) {
@@ -37,27 +53,41 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     rates.set(id, entry);
     if (entry.n > maximum) reject(429, "rate_limited", "Too many requests; retry after a minute");
   }
-  function credentials(req) {
-    if (req.headers.authorization) {
-      const match = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(req.headers.authorization);
-      if (!match) reject(401, "unauthenticated", "Invalid Authorization header");
-      return { token: match[1], bearer: true };
-    }
-    const token = (req.headers.cookie || "").split(";").map(x => x.trim()).find(x => x.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
-    return { token, bearer: false };
+  function cookie(req, name) {
+    return (req.headers.cookie || "").split(";").map(value => value.trim()).find(value => value.startsWith(`${name}=`))?.slice(name.length + 1);
+  }
+  function bearer(req) {
+    if (!req.headers.authorization) return null;
+    const match = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(req.headers.authorization);
+    if (!match) reject(401, "unauthenticated", "Invalid Authorization header");
+    return match[1];
+  }
+  function roomCredentials(req, url) {
+    const bearerToken = bearer(req);
+    if (bearerToken) return { token: bearerToken, bearer: true, mode: "room" };
+    const requested = req.headers["x-project-room-auth"] ?? url.searchParams.get("auth") ?? "room";
+    if (!["room", "account"].includes(requested)) reject(422, "invalid_auth_mode", "Invalid Room authentication mode");
+    return { token: cookie(req, requested === "account" ? accountCookieName : roomCookieName), bearer: false, mode: requested };
+  }
+  function expectedBinding(req) {
+    const value = req.headers["x-session-binding"];
+    if (value === undefined) return null;
+    if (typeof value !== "string" || !bindingPattern.test(value)) reject(422, "invalid_session_binding", "Invalid session response binding");
+    return value;
   }
   function checkOrigin(req, required = false) {
     if ((required || req.headers.origin) && req.headers.origin !== expectedOrigin()) reject(403, "origin_denied", "Request origin is not allowed");
   }
-  function protectWrite(req, auth, bearer) {
-    checkOrigin(req, !bearer);
-    if (!bearer) {
+  function protectWrite(req, auth, isBearer) {
+    checkOrigin(req, !isBearer);
+    if (!isBearer) {
       const csrf = req.headers["x-csrf-token"];
-      if (auth.kind !== "session" || typeof csrf !== "string" || !/^[a-f0-9]{64}$/.test(csrf) || !auth.csrf || !timingSafeEqual(Buffer.from(csrf), Buffer.from(auth.csrf))) reject(403, "csrf_denied", "Session confirmation required; sign in again");
+      if (auth.kind !== "session" || typeof csrf !== "string" || !bindingPattern.test(csrf) || !auth.csrf
+        || !timingSafeEqual(Buffer.from(csrf), Buffer.from(auth.csrf))) reject(403, "csrf_denied", "Session confirmation required; sign in again");
     }
   }
-  function setSessionCookie(res, token, maxAge) {
-    res.setHeader("Set-Cookie", `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${expectedOrigin().startsWith("https:") ? "; Secure" : ""}`);
+  function setCookie(res, name, token, maxAge) {
+    res.setHeader("Set-Cookie", `${name}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${expectedOrigin().startsWith("https:") ? "; Secure" : ""}`);
   }
   function json(res, status, value) {
     res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
@@ -80,19 +110,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     try { const value = JSON.parse(text); if (!value || Array.isArray(value) || typeof value !== "object") throw new Error(); return value; }
     catch { reject(400, "invalid_json", "Expected a JSON object"); }
   }
-  function stream(req, res, token, roomId, after) {
-    const auth = store.authenticate(token, roomId);
-    store.eventsAfter(token, roomId, after);
-    if (streams.size >= 100 || [...streams].filter(s => s.credentialHash === auth.credentialHash).length >= 3) reject(429, "stream_limit", "Close another room connection before opening more");
+  function stream(req, res, token, roomId, after, auth) {
+    const binding = auth.sessionBinding;
+    store.eventsAfter(token, roomId, after, 100, binding);
+    if (streams.size >= 100 || [...streams].filter(item => item.credentialHash === auth.credentialHash).length >= 3) reject(429, "stream_limit", "Close another room connection before opening more");
     res.writeHead(200, { "Content-Type": "text/event-stream", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
     res.flushHeaders();
-    const entry = { credentialHash: auth.credentialHash, res };
+    const entry = { credentialHash: auth.credentialHash, sessionBinding: binding, res };
     streams.add(entry);
     let cursor = after;
     const pump = () => {
       if (res.destroyed || res.writableEnded) return;
       try {
-        const batch = store.eventsAfter(token, roomId, cursor);
+        const batch = store.eventsAfter(token, roomId, cursor, 100, binding);
         if (!batch.events.length && !res.write(": connected transport only\n\n")) res.end();
         for (const item of batch.events) {
           if (!res.write(`id: ${item.sequence}\nevent: room-event\ndata: ${JSON.stringify(item)}\n\n`)) { res.end(); break; }
@@ -121,54 +151,135 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.writeHead(200, { "Content-Type": `${type}; charset=utf-8` });
         return res.end(req.method === "HEAD" ? undefined : data);
       }
+      if (url.pathname === "/api/account-session") {
+        const slotToken = cookie(req, accountCookieName);
+        if (req.method === "GET") {
+          if (!slotToken) {
+            rate(`account-slot:${req.socket.remoteAddress}`, 20);
+            const created = store.createAccountSessionSlot();
+            setCookie(res, accountCookieName, created.token, Math.max(0, Math.floor((created.session.expiresAt - store.now()) / 1000)));
+            return json(res, 200, accountView(created.session));
+          }
+          let slot;
+          try { slot = store.authenticateAccountSession(slotToken); }
+          catch (error) {
+            if (error.status !== 401) throw error;
+            try { slot = store.accountSessionSlot(slotToken); }
+            catch (slotError) {
+              if (slotError.status !== 401) throw slotError;
+              rate(`account-slot:${req.socket.remoteAddress}`, 20);
+              const created = store.createAccountSessionSlot();
+              setCookie(res, accountCookieName, created.token, Math.max(0, Math.floor((created.session.expiresAt - store.now()) / 1000)));
+              slot = created.session;
+            }
+          }
+          return json(res, 200, accountView(slot));
+        }
+        checkOrigin(req, true);
+        if (!slotToken) reject(401, "account_session_required", "Start an account browser session before signing in");
+        const slot = store.accountSessionSlot(slotToken);
+        protectWrite(req, slot, false);
+        const data = await body(req);
+        if (req.method === "POST") {
+          if (!exact(data, ["accountAccessKey", "expectedSessionRevision"]) || typeof data.accountAccessKey !== "string") reject(422, "invalid_login", "An account key and current session revision are required");
+          rate(`account-login:${req.socket.remoteAddress}:${slot.credentialHash}`, 10);
+          const oldRoomToken = cookie(req, roomCookieName);
+          const loggedIn = store.loginAccountSession(slotToken, data.accountAccessKey, data.expectedSessionRevision, {
+            revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null
+          });
+          return json(res, 201, accountView(loggedIn));
+        }
+        if (req.method === "DELETE") {
+          if (!exact(data, ["expectedSessionRevision"])) reject(422, "invalid_logout", "Current session revision required");
+          return json(res, 200, accountView(store.logoutAccountSession(slotToken, data.expectedSessionRevision)));
+        }
+        reject(405, "method_not_allowed", "Method not allowed");
+      }
+      if (url.pathname === "/api/invitations/preview" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`invitation-preview:${req.socket.remoteAddress}`, 30);
+        const data = await body(req);
+        if (!exact(data, ["invitationToken"]) || typeof data.invitationToken !== "string") reject(422, "invalid_invitation", "Invitation token required");
+        return json(res, 200, store.previewInvitation(data.invitationToken));
+      }
+      if (url.pathname === "/api/invitations/accept" && req.method === "POST") {
+        checkOrigin(req, true);
+        const slotToken = cookie(req, accountCookieName);
+        const auth = store.authenticateAccountSession(slotToken);
+        protectWrite(req, auth, false);
+        const data = await body(req);
+        if (!exact(data, ["invitationToken", "redemptionId", "expectedRevision"]) || typeof data.invitationToken !== "string" || typeof data.redemptionId !== "string") reject(422, "invalid_invitation_acceptance", "Invitation token, redemption ID, and expected revision required");
+        rate(`invitation-accept:${auth.credentialHash}:${rateHash(data.invitationToken)}`, 20);
+        const result = store.acceptInvitation(slotToken, data.invitationToken, { redemptionId: data.redemptionId, expectedRevision: data.expectedRevision, expectedSessionBinding: auth.sessionBinding });
+        return json(res, result.duplicate ? 200 : 201, result);
+      }
       if (url.pathname === "/api/session" && req.method === "POST") {
         checkOrigin(req, true);
         rate(`login:${req.socket.remoteAddress}`, 10);
         const data = await body(req);
-        if (Object.keys(data).length !== 1 || typeof data.accessKey !== "string") reject(422, "invalid_login", "An access key is required");
+        if (!exact(data, ["accessKey"]) || typeof data.accessKey !== "string") reject(422, "invalid_login", "An access key is required");
         const { token, session } = store.createSession(data.accessKey);
-        setSessionCookie(res, token, Math.max(0, Math.floor((session.expiresAt - store.now()) / 1000)));
+        setCookie(res, roomCookieName, token, Math.max(0, Math.floor((session.expiresAt - store.now()) / 1000)));
         return json(res, 201, sessionView(session));
       }
       if (!url.pathname.startsWith("/api/")) reject(404, "not_found", "Not found");
-      const { token, bearer } = credentials(req);
-      const auth = store.authenticate(token);
-      if (!bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
-      rate(`read:${auth.credentialHash}`, 600);
-      if (!["GET", "HEAD"].includes(req.method)) {
-        protectWrite(req, auth, bearer);
-        rate(`write:${auth.credentialHash}`, 60);
-      }
       if (url.pathname === "/api/session") {
+        const selectedRoom = url.searchParams.get("room");
+        const authMode = selectedRoom !== null || req.headers["x-project-room-auth"] === "account" ? "account" : "room";
+        const token = authMode === "account" ? cookie(req, accountCookieName) : (bearer(req) ?? cookie(req, roomCookieName));
+        const auth = authMode === "account" ? store.authenticateAccountSession(token, selectedRoom) : store.authenticate(token);
+        const isBearer = Boolean(req.headers.authorization);
+        if (!isBearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
         if (req.method === "GET") return json(res, 200, sessionView(auth));
         if (req.method === "DELETE") {
-          // Server-side revocation is authoritative. Do not emit an unconditional cookie
-          // deletion: a delayed response from one tab must not erase a newer login cookie
-          // established by another tab. A later login overwrites the revoked cookie.
-          store.revoke(token);
+          protectWrite(req, auth, isBearer);
+          if (authMode === "account") store.logoutAccountSession(token, auth.sessionRevision);
+          else store.revoke(token);
           return json(res, 200, { signedOut: true });
         }
         reject(405, "method_not_allowed", "Method not allowed");
       }
-      const match = /^\/api\/rooms\/([a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127})(?:\/(commands|events|stream|cursor|return-brief))?$/.exec(url.pathname);
-      if (!match) reject(404, "not_found", "Not found");
-      const [, roomId, route] = match;
-      store.authenticate(token, roomId);
-      if (!route && req.method === "GET") return json(res, 200, store.snapshot(token, roomId));
-      if (route === "events" && req.method === "GET") return json(res, 200, store.eventsAfter(token, roomId, Number(url.searchParams.get("after") || 0), Number(url.searchParams.get("limit") || 100)));
-      if (route === "stream" && req.method === "GET") return stream(req, res, token, roomId, Number(req.headers["last-event-id"] ?? url.searchParams.get("after") ?? 0));
+      const revokeMatch = /^\/api\/rooms\/([a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127})\/invitations\/([a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127})\/revoke$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127})(?:\/(commands|events|stream|cursor|return-brief|invitations))?$/.exec(url.pathname);
+      if (!match && !revokeMatch) reject(404, "not_found", "Not found");
+      const roomId = (match ?? revokeMatch)[1];
+      const route = match ? (match[2] ?? "") : "invitation-revoke";
+      const selected = roomCredentials(req, url);
+      const fence = expectedBinding(req);
+      const auth = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence) : store.authenticate(selected.token, roomId, fence);
+      if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
+      if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
+      rate(`read:${auth.credentialHash}`, 600);
+      if (!["GET", "HEAD"].includes(req.method)) { protectWrite(req, auth, selected.bearer); rate(`write:${auth.credentialHash}`, 60); }
+      if (!route && req.method === "GET") return json(res, 200, store.snapshot(selected.token, roomId, fence));
+      if (route === "events" && req.method === "GET") return json(res, 200, store.eventsAfter(selected.token, roomId, Number(url.searchParams.get("after") || 0), Number(url.searchParams.get("limit") || 100), fence));
+      if (route === "stream" && req.method === "GET") return stream(req, res, selected.token, roomId, Number(req.headers["last-event-id"] ?? url.searchParams.get("after") ?? 0), auth);
       if (route === "commands" && req.method === "POST") {
-        const result = store.command(token, roomId, await body(req));
+        const result = store.command(selected.token, roomId, await body(req), fence);
         return json(res, result.duplicate ? 200 : 201, result);
       }
       if (route === "return-brief" && req.method === "GET") {
         const horizon = url.searchParams.get("horizon"), after = url.searchParams.get("after"), cursor = url.searchParams.get("cursor"), limit = url.searchParams.get("limit");
-        return json(res, 200, store.returnBrief(token, roomId, { horizon: horizon === null ? null : Number(horizon), after: after === null ? null : Number(after), cursor: cursor === null ? null : Number(cursor), limit: limit === null ? undefined : Number(limit) }));
+        return json(res, 200, store.returnBrief(selected.token, roomId, { horizon: horizon === null ? null : Number(horizon), after: after === null ? null : Number(after), cursor: cursor === null ? null : Number(cursor), limit: limit === null ? undefined : Number(limit), expectedSessionBinding: fence }));
       }
       if (route === "cursor" && req.method === "POST") {
         const data = await body(req);
-        if (Object.keys(data).length !== 1) reject(422, "invalid_cursor", "Supply sequence only");
-        return json(res, 200, store.markCaughtUp(token, roomId, data.sequence));
+        if (!exact(data, ["sequence"])) reject(422, "invalid_cursor", "Supply sequence only");
+        return json(res, 200, store.markCaughtUp(selected.token, roomId, data.sequence, fence));
+      }
+      if (route === "invitations" && req.method === "POST") {
+        if (selected.mode !== "account" || selected.bearer) reject(403, "account_session_required", "Invitation administration requires an account browser session");
+        const data = await body(req);
+        const fields = ["requestId", "invitationToken", "intendedAccountId", "intendedMemberId", "displayName", "role", "expiresAt", "expectedIssuerMemberRevision"];
+        if (!exact(data, fields)) reject(422, "invalid_invitation", "Supply the exact invitation scope");
+        const result = store.issueInvitation(selected.token, roomId, { requestId: data.requestId, token: data.invitationToken, intendedAccountId: data.intendedAccountId, intendedMemberId: data.intendedMemberId, displayName: data.displayName, role: data.role, expiresAt: data.expiresAt, expectedIssuerMemberRevision: data.expectedIssuerMemberRevision, expectedSessionBinding: auth.sessionBinding });
+        return json(res, result.duplicate ? 200 : 201, result);
+      }
+      if (route === "invitation-revoke" && req.method === "POST") {
+        if (selected.mode !== "account" || selected.bearer) reject(403, "account_session_required", "Invitation administration requires an account browser session");
+        const data = await body(req);
+        if (!exact(data, ["expectedRevision", "reason"])) reject(422, "invalid_invitation_change", "Invitation revision and reason required");
+        return json(res, 200, store.revokeInvitation(selected.token, revokeMatch[2], { expectedRevision: data.expectedRevision, reason: data.reason, expectedSessionBinding: auth.sessionBinding }));
       }
       reject(405, "method_not_allowed", "Method not allowed");
     } catch (error) {

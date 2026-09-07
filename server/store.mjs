@@ -1,6 +1,10 @@
 import { DatabaseSync } from "node:sqlite";
-import { createHash, randomBytes } from "node:crypto";
-import { applyEvent, emptyRoomState, event, EVENT_TYPES as T, validId } from "../src/events.js";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import {
+  applyEvent, emptyRoomState, event, EVENT_TYPES as T, INVITATION_ROLE_POLICIES,
+  INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES,
+  MEMBERSHIP_AUTHORITY_POLICY_VERSION, validId
+} from "../src/events.js";
 import { buildReturnBrief, resolveHistoryWindow, RETURN_BRIEF_DEFAULT_LIMIT } from "./return-brief.mjs";
 
 export class ServiceError extends Error {
@@ -13,6 +17,109 @@ const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(
 const provisionalAccountPrefix = "acct-legacy-";
 const provisionalAccountId = (roomId, memberId) => `${provisionalAccountPrefix}${hash(`${roomId}\0${memberId}`).slice(0, 32)}`;
 const accountView = row => row ? { id: row.id, active: Boolean(row.active), revision: row.revision, authEpoch: row.auth_epoch } : null;
+const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
+const redemptionPattern = /^(?:[A-Za-z0-9_-]{43}|[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
+const invitationStatus = (row, now) => row.status === "pending" && row.expires_at <= now ? "expired" : row.status;
+const invitationView = (row, now, { includeScope = false } = {}) => ({
+  id: row.id,
+  roomId: row.room_id,
+  displayName: row.intended_display_name,
+  role: row.intended_role,
+  expiresAt: row.expires_at,
+  revision: row.revision,
+  status: invitationStatus(row, now),
+  ...(includeScope ? {
+    intendedAccountId: row.intended_account_id,
+    intendedMemberId: row.intended_member_id,
+    permissions: JSON.parse(row.intended_permissions_json),
+    invitedByMemberId: row.issuer_member_id
+  } : {})
+});
+const invitationSchema = `
+  CREATE TABLE IF NOT EXISTS account_credentials (
+    hash TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL REFERENCES accounts(id),
+    account_auth_epoch INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)),
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS account_credential_account ON account_credentials(account_id);
+  CREATE TABLE IF NOT EXISTS account_session_slots (
+    hash TEXT PRIMARY KEY,
+    revision INTEGER NOT NULL DEFAULT 0 CHECK(revision>=0),
+    account_id TEXT REFERENCES accounts(id),
+    account_auth_epoch INTEGER,
+    parent_credential_hash TEXT REFERENCES account_credentials(hash),
+    expires_at INTEGER NOT NULL,
+    authenticated_until INTEGER,
+    created_at INTEGER NOT NULL,
+    CHECK(
+      (account_id IS NULL AND account_auth_epoch IS NULL AND parent_credential_hash IS NULL AND authenticated_until IS NULL)
+      OR
+      (account_id IS NOT NULL AND account_auth_epoch IS NOT NULL AND parent_credential_hash IS NOT NULL AND authenticated_until IS NOT NULL AND authenticated_until<=expires_at)
+    )
+  );
+  CREATE INDEX IF NOT EXISTS account_session_slot_account ON account_session_slots(account_id);
+  CREATE TABLE IF NOT EXISTS membership_invitations (
+    id TEXT PRIMARY KEY,
+    token_hash TEXT NOT NULL UNIQUE CHECK(length(token_hash)=64),
+    room_id TEXT NOT NULL REFERENCES rooms(id),
+    intended_account_id TEXT NOT NULL REFERENCES accounts(id),
+    intended_member_id TEXT NOT NULL,
+    intended_display_name TEXT NOT NULL,
+    intended_role TEXT NOT NULL CHECK(intended_role IN ('moderator','member','guest')),
+    intended_permissions_json TEXT NOT NULL CHECK(json_valid(intended_permissions_json) AND json_type(intended_permissions_json)='array'),
+    role_policy_version INTEGER NOT NULL CHECK(role_policy_version=${INVITATION_ROLE_POLICY_VERSION}),
+    issuer_account_id TEXT NOT NULL REFERENCES accounts(id),
+    issuer_member_id TEXT NOT NULL,
+    issuer_account_auth_epoch INTEGER NOT NULL,
+    issuer_member_revision INTEGER NOT NULL,
+    issue_request_id TEXT NOT NULL,
+    issue_fingerprint TEXT NOT NULL CHECK(length(issue_fingerprint)=64),
+    revision INTEGER NOT NULL DEFAULT 0 CHECK(revision>=0),
+    status TEXT NOT NULL CHECK(status IN ('pending','accepted','revoked')),
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    accepted_at INTEGER,
+    accepted_by_account_id TEXT REFERENCES accounts(id),
+    redemption_id TEXT,
+    joined_event_id TEXT UNIQUE REFERENCES events(id),
+    revoked_at INTEGER,
+    revoked_by_account_id TEXT REFERENCES accounts(id),
+    revoked_by_member_id TEXT,
+    revoke_reason TEXT,
+    CHECK(expires_at>created_at),
+    CHECK(
+      (status='pending' AND revision=0 AND accepted_at IS NULL AND accepted_by_account_id IS NULL AND redemption_id IS NULL AND joined_event_id IS NULL AND revoked_at IS NULL AND revoked_by_account_id IS NULL AND revoked_by_member_id IS NULL AND revoke_reason IS NULL)
+      OR
+      (status='accepted' AND revision=1 AND accepted_at IS NOT NULL AND accepted_by_account_id=intended_account_id AND redemption_id IS NOT NULL AND joined_event_id IS NOT NULL AND revoked_at IS NULL AND revoked_by_account_id IS NULL AND revoked_by_member_id IS NULL AND revoke_reason IS NULL)
+      OR
+      (status='revoked' AND revision=1 AND accepted_at IS NULL AND accepted_by_account_id IS NULL AND redemption_id IS NULL AND joined_event_id IS NULL AND revoked_at IS NOT NULL AND revoked_by_account_id IS NOT NULL AND revoked_by_member_id IS NOT NULL AND revoke_reason IS NOT NULL)
+    )
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS membership_invitation_issue_request ON membership_invitations(room_id,issuer_account_id,issue_request_id);
+  CREATE INDEX IF NOT EXISTS membership_invitation_target ON membership_invitations(room_id,intended_account_id,intended_member_id);
+  CREATE TABLE IF NOT EXISTS membership_invitation_events (
+    invitation_id TEXT NOT NULL REFERENCES membership_invitations(id),
+    sequence INTEGER NOT NULL CHECK(sequence>0),
+    type TEXT NOT NULL CHECK(type IN ('issued','accepted','revoked')),
+    actor_account_id TEXT REFERENCES accounts(id),
+    actor_member_id TEXT,
+    actor_auth_epoch INTEGER,
+    actor_session_revision INTEGER,
+    invitation_revision INTEGER NOT NULL,
+    at INTEGER NOT NULL,
+    room_event_id TEXT REFERENCES events(id),
+    reason TEXT,
+    PRIMARY KEY(invitation_id,sequence)
+  );
+  CREATE TRIGGER IF NOT EXISTS membership_invitation_scope_immutable
+    BEFORE UPDATE OF token_hash,room_id,intended_account_id,intended_member_id,intended_display_name,intended_role,intended_permissions_json,role_policy_version,issuer_account_id,issuer_member_id,issuer_account_auth_epoch,issuer_member_revision,issue_request_id,issue_fingerprint,created_at,expires_at
+    ON membership_invitations BEGIN SELECT RAISE(ABORT,'invitation scope is immutable'); END;
+  CREATE TRIGGER IF NOT EXISTS membership_invitation_events_append_only_update BEFORE UPDATE ON membership_invitation_events BEGIN SELECT RAISE(ABORT,'invitation audit is append-only'); END;
+  CREATE TRIGGER IF NOT EXISTS membership_invitation_events_append_only_delete BEFORE DELETE ON membership_invitation_events BEGIN SELECT RAISE(ABORT,'invitation audit is append-only'); END;
+`;
 const compact = state => ({ ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} });
 const work = "workItemId expectedRevision";
 const shapes = {
@@ -53,11 +160,11 @@ export class RoomStore {
     this.now = now;
     this.db = new DatabaseSync(filename);
     const version = this.db.prepare("PRAGMA user_version").get().user_version;
-    const supported = new Set([0, 1, 2, 3]);
+    const supported = new Set([0, 1, 2, 3, 4]);
     const hasSchema = version === 0 && Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' LIMIT 1").get());
     if (!supported.has(version) || hasSchema) {
       this.db.close();
-      throw new Error(version > 3 ? "Database schema is newer than this service" : "Database schema version is unsupported");
+      throw new Error(version > 4 ? "Database schema is newer than this service" : "Database schema version is unsupported");
     }
     this.db.exec("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=3000;");
     if (version === 0) this.db.exec(`BEGIN IMMEDIATE;
@@ -72,9 +179,11 @@ export class RoomStore {
       CREATE INDEX credential_account ON credentials(account_id);
       CREATE TABLE cursors (room_id TEXT NOT NULL REFERENCES rooms(id), member_id TEXT NOT NULL, sequence INTEGER NOT NULL, PRIMARY KEY(room_id, member_id));
       CREATE TABLE projection_checkpoints (room_id TEXT PRIMARY KEY REFERENCES rooms(id), sequence INTEGER NOT NULL, projection TEXT NOT NULL);
-      PRAGMA user_version=3; COMMIT;`);
+      ${invitationSchema}
+      PRAGMA user_version=4; COMMIT;`);
     this.repairProjectionProvenance({ upgradeV1: version === 1 });
     if (version === 1 || version === 2) this.migrateIdentityV3(version);
+    if (version === 1 || version === 2 || version === 3) this.migrateInvitationsV4();
   }
 
   // v2 had only Room-local member identities. Give each historical human membership its
@@ -111,6 +220,12 @@ export class RoomStore {
         account_auth_epoch=(SELECT a.auth_epoch FROM member_accounts m JOIN accounts a ON a.id=m.account_id WHERE m.room_id=credentials.room_id AND m.member_id=credentials.member_id)
         WHERE EXISTS (SELECT 1 FROM member_accounts m WHERE m.room_id=credentials.room_id AND m.member_id=credentials.member_id)`);
       this.db.exec("PRAGMA user_version=3");
+    });
+  }
+  migrateInvitationsV4() {
+    this.transaction(() => {
+      this.db.exec(invitationSchema);
+      this.db.exec("PRAGMA user_version=4");
     });
   }
   // Deterministic upgrade repair: persisted projections are not replayed on startup. Recover
@@ -296,6 +411,134 @@ export class RoomStore {
     const row = this.db.prepare("SELECT a.* FROM member_accounts m JOIN accounts a ON a.id=m.account_id WHERE m.room_id=? AND m.member_id=?").get(roomId, memberId);
     return accountView(row);
   }
+  createAccount(accountId, origin = "local-provisioning") {
+    if (!validId(accountId) || accountId.startsWith(provisionalAccountPrefix)) fail(422, "invalid_account", "Invalid or reserved account id");
+    if (typeof origin !== "string" || !origin.trim() || origin.length > 128) fail(422, "invalid_account", "A bounded account origin is required");
+    return this.transaction(() => {
+      if (this.db.prepare("SELECT 1 FROM accounts WHERE id=?").get(accountId)) fail(409, "account_exists", "Account already exists");
+      this.db.prepare("INSERT INTO accounts(id,active,revision,auth_epoch,origin,created_at) VALUES(?,1,0,0,?,?)").run(accountId, origin.trim(), this.now());
+      return this.account(accountId);
+    });
+  }
+  issueAccountAccessKey(accountId, lifetimeMs = 7 * 86400000) {
+    return this.transaction(() => {
+      const account = this.account(accountId);
+      if (!account.active) fail(403, "access_denied", "Active account required");
+      if (!Number.isSafeInteger(lifetimeMs) || lifetimeMs <= 0 || lifetimeMs > 30 * 86400000) fail(422, "invalid_expiry", "Account access keys expire within 30 days");
+      this.db.prepare("UPDATE account_credentials SET revoked=1 WHERE account_id=?").run(accountId);
+      this.db.prepare("UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?").run(accountId);
+      return this.insertAccountCredential(accountId, this.now() + lifetimeMs);
+    });
+  }
+  insertAccountCredential(accountId, expiresAt) {
+    const count = this.db.prepare("SELECT count(*) AS n FROM account_credentials WHERE account_id=?").get(accountId).n;
+    if (count >= 5000) fail(409, "pilot_limit", "Account credential retention limit reached; administrator maintenance required");
+    if (!Number.isSafeInteger(expiresAt) || expiresAt <= this.now()) fail(422, "invalid_credential", "Invalid account credential");
+    const account = this.account(accountId);
+    if (!account.active) fail(403, "access_denied", "Active account required");
+    const token = key();
+    this.db.prepare("INSERT INTO account_credentials(hash,account_id,account_auth_epoch,expires_at,created_at) VALUES(?,?,?,?,?)")
+      .run(hash(token), accountId, account.authEpoch, expiresAt, this.now());
+    return token;
+  }
+  authenticateAccountAccessKey(token) {
+    if (typeof token !== "string" || !tokenPattern.test(token)) fail(401, "unauthenticated", "Sign in with an active account key");
+    const row = this.db.prepare(`SELECT c.*,a.active AS account_active,a.revision AS account_revision,a.auth_epoch AS current_account_auth_epoch
+      FROM account_credentials c JOIN accounts a ON a.id=c.account_id WHERE c.hash=?`).get(hash(token));
+    if (!row || row.revoked || row.expires_at <= this.now() || row.account_active !== 1 || row.account_auth_epoch !== row.current_account_auth_epoch) {
+      fail(401, "unauthenticated", "Account key expired, revoked, or account access ended");
+    }
+    return {
+      account: { id: row.account_id, active: true, revision: row.account_revision, authEpoch: row.current_account_auth_epoch },
+      member: null, roomId: null, credentialHash: row.hash, credentialScope: "account-access", kind: "access", expiresAt: row.expires_at,
+      csrf: null, sessionBinding: null, sessionRevision: null
+    };
+  }
+  createAccountSessionSlot(lifetimeMs = 30 * 86400000) {
+    if (!Number.isSafeInteger(lifetimeMs) || lifetimeMs <= 0 || lifetimeMs > 90 * 86400000) fail(422, "invalid_expiry", "Account session slots expire within 90 days");
+    return this.transaction(() => {
+      if (this.db.prepare("SELECT count(*) AS n FROM account_session_slots").get().n >= 10000) fail(409, "pilot_limit", "Account session slot limit reached; administrator maintenance required");
+      const token = key(), now = this.now();
+      this.db.prepare("INSERT INTO account_session_slots(hash,revision,expires_at,created_at) VALUES(?,0,?,?)").run(hash(token), now + lifetimeMs, now);
+      return { token, session: this.accountSessionSlot(token) };
+    });
+  }
+  accountSessionSlot(token) {
+    if (typeof token !== "string" || !tokenPattern.test(token)) fail(401, "unauthenticated", "Invalid account session slot");
+    const row = this.db.prepare("SELECT * FROM account_session_slots WHERE hash=?").get(hash(token));
+    if (!row || row.expires_at <= this.now()) fail(401, "unauthenticated", "Account session slot expired");
+    return {
+      account: null, member: null, roomId: null, credentialHash: row.hash, credentialScope: "account-session", kind: "session",
+      expiresAt: row.expires_at, authenticatedUntil: null, sessionRevision: row.revision,
+      csrf: hash(`account-csrf:${token}:${row.revision}`),
+      sessionBinding: hash(`account-session-binding:${token}:${row.revision}`)
+    };
+  }
+  sessionOwnership(auth) {
+    return {
+      account: auth.account,
+      member: auth.member,
+      roomId: auth.roomId,
+      csrf: auth.csrf,
+      sessionBinding: auth.sessionBinding,
+      sessionRevision: auth.sessionRevision,
+      expiresAt: auth.expiresAt
+    };
+  }
+  loginAccountSession(slotToken, accountAccessKey, expectedRevision, { revokeRoomToken = null } = {}) {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) fail(422, "invalid_session_revision", "A current account session revision is required");
+    return this.transaction(() => {
+      const slot = this.accountSessionSlot(slotToken);
+      if (slot.sessionRevision !== expectedRevision) fail(409, "stale_session_revision", "Account session changed; refresh before signing in");
+      const access = this.authenticateAccountAccessKey(accountAccessKey);
+      const revision = expectedRevision + 1;
+      this.db.prepare(`UPDATE account_session_slots SET revision=?,account_id=?,account_auth_epoch=?,parent_credential_hash=?,authenticated_until=?
+        WHERE hash=? AND revision=?`).run(revision, access.account.id, access.account.authEpoch, access.credentialHash, Math.min(access.expiresAt, this.now() + 8 * 3600000), slot.credentialHash, expectedRevision);
+      // Switching browser identity and retiring its former Room credential are one
+      // commit. A storage failure must not report a rejected login after switching.
+      if (revokeRoomToken !== null) {
+        if (typeof revokeRoomToken !== "string" || !tokenPattern.test(revokeRoomToken)) fail(422, "invalid_credential", "Invalid prior Room credential");
+        this.revoke(revokeRoomToken);
+      }
+      return this.authenticateAccountSession(slotToken);
+    });
+  }
+  logoutAccountSession(slotToken, expectedRevision) {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) fail(422, "invalid_session_revision", "A current account session revision is required");
+    return this.transaction(() => {
+      const slot = this.accountSessionSlot(slotToken);
+      if (slot.sessionRevision !== expectedRevision) fail(409, "stale_session_revision", "Account session changed; refresh before signing out");
+      const changed = this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,parent_credential_hash=NULL,authenticated_until=NULL
+        WHERE hash=? AND revision=?`).run(slot.credentialHash, expectedRevision).changes;
+      if (changed !== 1) fail(409, "stale_session_revision", "Account session changed; refresh before signing out");
+      return this.accountSessionSlot(slotToken);
+    });
+  }
+  authenticateAccountSession(token, roomId = null, expectedSessionBinding = null) {
+    if (typeof token !== "string" || !tokenPattern.test(token)) fail(401, "unauthenticated", "Invalid account session");
+    const row = this.db.prepare(`SELECT s.*,c.revoked AS parent_revoked,c.expires_at AS parent_expiry,c.account_id AS parent_account_id,c.account_auth_epoch AS parent_account_auth_epoch,
+      a.active AS account_active,a.revision AS account_revision,a.auth_epoch AS current_account_auth_epoch
+      FROM account_session_slots s LEFT JOIN account_credentials c ON c.hash=s.parent_credential_hash LEFT JOIN accounts a ON a.id=s.account_id WHERE s.hash=?`).get(hash(token));
+    const invalid = !row || row.expires_at <= this.now() || row.account_id === null || row.authenticated_until <= this.now()
+      || row.parent_revoked !== 0 || row.parent_expiry <= this.now() || row.parent_account_id !== row.account_id || row.parent_account_auth_epoch !== row.account_auth_epoch
+      || row.account_active !== 1 || row.account_auth_epoch !== row.current_account_auth_epoch;
+    if (invalid) fail(401, "unauthenticated", "Account session expired, revoked, or account access ended");
+    const sessionBinding = hash(`account-session-binding:${token}:${row.revision}`);
+    if (expectedSessionBinding !== null && expectedSessionBinding !== sessionBinding) fail(409, "session_binding_changed", "Account session changed; discard the stale response or stream");
+    const auth = {
+      account: { id: row.account_id, active: true, revision: row.account_revision, authEpoch: row.current_account_auth_epoch },
+      member: null, roomId: null, credentialHash: row.hash, credentialScope: "account-session", kind: "session",
+      expiresAt: Math.min(row.expires_at, row.authenticated_until), authenticatedUntil: row.authenticated_until, sessionRevision: row.revision,
+      csrf: hash(`account-csrf:${token}:${row.revision}`), sessionBinding
+    };
+    if (roomId === null) return auth;
+    if (!validId(roomId)) fail(422, "invalid_room", "Invalid Room id");
+    const binding = this.db.prepare("SELECT member_id FROM member_accounts WHERE room_id=? AND account_id=?").get(roomId, auth.account.id);
+    if (!binding) fail(403, "access_denied", "This account has no membership in that Room");
+    const member = this.room(roomId).state.members[binding.member_id];
+    if (!member || member.kind !== "human" || member.active === false) fail(403, "access_denied", "Active human Room membership required");
+    return { ...auth, member, roomId };
+  }
   ensureHumanAccountBinding(roomId, memberId, requestedAccountId = null, origin = "local-provisioning") {
     const members = this.room(roomId).state.members;
     const member = validId(memberId) && Object.hasOwn(members, memberId) && members[memberId];
@@ -320,6 +563,197 @@ export class RoomStore {
   bindHumanAccount(roomId, memberId, accountId) {
     return this.transaction(() => this.ensureHumanAccountBinding(roomId, memberId, accountId));
   }
+  issueInvitation(accountSessionToken, roomId, details) {
+    const {
+      requestId, token, intendedAccountId, intendedMemberId, displayName, role, expiresAt,
+      expectedIssuerMemberRevision, expectedSessionBinding
+    } = details ?? {};
+    if (!validId(roomId) || !validId(requestId) || !tokenPattern.test(token ?? "") || !validId(intendedAccountId) || !validId(intendedMemberId)) {
+      fail(422, "invalid_invitation", "Invitation requires valid Room, request, token, account, and member identifiers");
+    }
+    if (typeof displayName !== "string" || !displayName.trim() || displayName.length > 256 || !Object.hasOwn(INVITATION_ROLES, role)) {
+      fail(422, "invalid_invitation", "Invitation requires a bounded display name and known human role");
+    }
+    if (!Number.isSafeInteger(expiresAt) || !Number.isSafeInteger(expectedIssuerMemberRevision) || expectedIssuerMemberRevision < 0) {
+      fail(422, "invalid_invitation", "Invitation requires an expiry and current issuer member revision");
+    }
+    if (typeof expectedSessionBinding !== "string" || !/^[a-f0-9]{64}$/.test(expectedSessionBinding)) fail(422, "invalid_session_binding", "Current account session binding required");
+    const tokenHash = hash(token);
+    const permissions = [...INVITATION_ROLES[role]];
+    const fingerprint = hash(canonical({ roomId, requestId, tokenHash, intendedAccountId, intendedMemberId, displayName: displayName.trim(), role, permissions, expiresAt, expectedIssuerMemberRevision }));
+    return this.transaction(() => {
+      const issuer = this.authenticateAccountSession(accountSessionToken, roomId, expectedSessionBinding);
+      if (!issuer.member.permissions.includes("manage_members")) fail(403, "access_denied", "Current membership administration grant required");
+      const prior = this.db.prepare("SELECT * FROM membership_invitations WHERE room_id=? AND issuer_account_id=? AND issue_request_id=?")
+        .get(roomId, issuer.account.id, requestId);
+      if (prior) {
+        if (prior.issue_fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Invitation request ID already used for different scope");
+        return { invitation: invitationView(prior, this.now(), { includeScope: true }), duplicate: true };
+      }
+      const now = this.now();
+      if (expiresAt <= now || expiresAt > now + 30 * 86400000) fail(422, "invalid_expiry", "Invitations expire within 30 days");
+      if (issuer.member.revision !== expectedIssuerMemberRevision) fail(409, "stale_member_revision", "Issuer membership changed; review the invitation again");
+      const room = this.room(roomId);
+      if (issuer.member.id !== room.state.room.ownerId && permissions.some(permission => !issuer.member.permissions.includes(permission))) {
+        fail(403, "access_denied", "A membership administrator cannot offer authority they do not hold");
+      }
+      const targetAccount = this.account(intendedAccountId);
+      if (!targetAccount.active) fail(403, "access_denied", "Invitation target account is inactive");
+      if (Object.hasOwn(room.state.members, intendedMemberId)) fail(409, "membership_conflict", "That Room member already exists");
+      if (this.db.prepare("SELECT 1 FROM member_accounts WHERE room_id=? AND account_id=?").get(roomId, intendedAccountId)) fail(409, "membership_conflict", "That account already has a membership in this Room");
+      if (this.db.prepare(`SELECT 1 FROM membership_invitations WHERE room_id=? AND status='pending' AND expires_at>? AND (intended_member_id=? OR intended_account_id=?) LIMIT 1`)
+        .get(roomId, now, intendedMemberId, intendedAccountId)) fail(409, "invitation_conflict", "An active invitation already reserves that Room identity");
+      if (this.db.prepare("SELECT 1 FROM membership_invitations WHERE token_hash=?").get(tokenHash)
+        || this.db.prepare("SELECT 1 FROM credentials WHERE hash=?").get(tokenHash)
+        || this.db.prepare("SELECT 1 FROM account_credentials WHERE hash=?").get(tokenHash)
+        || this.db.prepare("SELECT 1 FROM account_session_slots WHERE hash=?").get(tokenHash)) fail(409, "token_conflict", "Invitation token is already registered");
+      const invitationId = randomUUID();
+      this.db.prepare(`INSERT INTO membership_invitations(
+        id,token_hash,room_id,intended_account_id,intended_member_id,intended_display_name,intended_role,intended_permissions_json,role_policy_version,
+        issuer_account_id,issuer_member_id,issuer_account_auth_epoch,issuer_member_revision,issue_request_id,issue_fingerprint,revision,status,created_at,expires_at
+      ) VALUES(?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,0,'pending',?,?)`).run(
+        invitationId, tokenHash, roomId, intendedAccountId, intendedMemberId, displayName.trim(), role, JSON.stringify(permissions),
+        INVITATION_ROLE_POLICY_VERSION,
+        issuer.account.id, issuer.member.id, issuer.account.authEpoch, issuer.member.revision, requestId, fingerprint, now, expiresAt
+      );
+      this.db.prepare(`INSERT INTO membership_invitation_events(
+        invitation_id,sequence,type,actor_account_id,actor_member_id,actor_auth_epoch,actor_session_revision,invitation_revision,at,room_event_id,reason
+      ) VALUES(?,1,'issued',?,?,?,?,0,?,NULL,NULL)`).run(invitationId, issuer.account.id, issuer.member.id, issuer.account.authEpoch, issuer.sessionRevision, now);
+      const row = this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(invitationId);
+      return { invitation: invitationView(row, now, { includeScope: true }), duplicate: false };
+    });
+  }
+  previewInvitation(token) {
+    if (typeof token !== "string" || !tokenPattern.test(token)) fail(404, "invitation_unavailable", "Invitation is unavailable");
+    return this.readTransaction(() => {
+      const row = this.db.prepare("SELECT i.*,r.projection FROM membership_invitations i JOIN rooms r ON r.id=i.room_id WHERE i.token_hash=?").get(hash(token));
+      if (!row) fail(404, "invitation_unavailable", "Invitation is unavailable");
+      const room = JSON.parse(row.projection);
+      let status = invitationStatus(row, this.now());
+      if (status === "pending") {
+        const issuerAccount = this.db.prepare("SELECT active,auth_epoch FROM accounts WHERE id=?").get(row.issuer_account_id);
+        const targetAccount = this.db.prepare("SELECT active FROM accounts WHERE id=?").get(row.intended_account_id);
+        const issuerBinding = this.db.prepare("SELECT account_id FROM member_accounts WHERE room_id=? AND member_id=?").get(row.room_id, row.issuer_member_id);
+        const issuerMember = room.members?.[row.issuer_member_id];
+        if (!issuerAccount || issuerAccount.active !== 1 || issuerAccount.auth_epoch !== row.issuer_account_auth_epoch
+          || targetAccount?.active !== 1 || issuerBinding?.account_id !== row.issuer_account_id || !issuerMember || issuerMember.active === false
+          || issuerMember.revision !== row.issuer_member_revision || !issuerMember.permissions.includes("manage_members")) status = "stale";
+      }
+      return {
+        ...invitationView(row, this.now()),
+        status,
+        memberId: row.intended_member_id,
+        permissions: JSON.parse(row.intended_permissions_json),
+        invitedByDisplayName: room.members?.[row.issuer_member_id]?.displayName ?? "Room administrator",
+        roomTitle: room.room?.title ?? "Project Room",
+        roomPurpose: room.room?.purpose ?? ""
+      };
+    });
+  }
+  revokeInvitation(accountSessionToken, invitationId, { expectedRevision, reason, expectedSessionBinding } = {}) {
+    if (!validId(invitationId) || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || typeof reason !== "string" || !reason.trim() || reason.length > 4096) {
+      fail(422, "invalid_invitation_change", "Invitation revocation requires its current revision and a reason");
+    }
+    if (typeof expectedSessionBinding !== "string" || !/^[a-f0-9]{64}$/.test(expectedSessionBinding)) fail(422, "invalid_session_binding", "Current account session binding required");
+    return this.transaction(() => {
+      const row = this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(invitationId);
+      if (!row) fail(404, "invitation_not_found", "Invitation not found");
+      const actor = this.authenticateAccountSession(accountSessionToken, row.room_id, expectedSessionBinding);
+      if (!actor.member.permissions.includes("manage_members")) fail(403, "access_denied", "Current membership administration grant required");
+      if (row.revision !== expectedRevision) fail(409, "stale_invitation_revision", "Invitation changed; refresh before revoking it");
+      if (row.status !== "pending") fail(409, "invitation_not_pending", "Only a pending invitation can be revoked");
+      const revision = row.revision + 1, now = this.now();
+      const changed = this.db.prepare(`UPDATE membership_invitations SET revision=?,status='revoked',revoked_at=?,revoked_by_account_id=?,revoked_by_member_id=?,revoke_reason=?
+        WHERE id=? AND revision=? AND status='pending'`).run(revision, now, actor.account.id, actor.member.id, reason.trim(), invitationId, expectedRevision).changes;
+      if (changed !== 1) fail(409, "stale_invitation_revision", "Invitation changed; refresh before revoking it");
+      this.db.prepare(`INSERT INTO membership_invitation_events(
+        invitation_id,sequence,type,actor_account_id,actor_member_id,actor_auth_epoch,actor_session_revision,invitation_revision,at,room_event_id,reason
+      ) VALUES(?,2,'revoked',?,?,?,?,?,?,NULL,?)`).run(invitationId, actor.account.id, actor.member.id, actor.account.authEpoch, actor.sessionRevision, revision, now, reason.trim());
+      return { invitation: invitationView(this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(invitationId), now, { includeScope: true }), duplicate: false };
+    });
+  }
+  acceptInvitation(accountSessionToken, token, { redemptionId, expectedRevision, expectedSessionBinding } = {}) {
+    if (typeof token !== "string" || !tokenPattern.test(token) || typeof redemptionId !== "string" || !redemptionPattern.test(redemptionId) || expectedRevision !== 0) {
+      fail(422, "invalid_invitation_acceptance", "Invitation acceptance requires its token, redemption ID, and expected revision zero");
+    }
+    if (typeof expectedSessionBinding !== "string" || !/^[a-f0-9]{64}$/.test(expectedSessionBinding)) fail(422, "invalid_session_binding", "Current account session binding required");
+    return this.transaction(() => {
+      const accountSession = this.authenticateAccountSession(accountSessionToken, null, expectedSessionBinding);
+      const row = this.db.prepare("SELECT * FROM membership_invitations WHERE token_hash=?").get(hash(token));
+      if (!row) fail(404, "invitation_unavailable", "Invitation is unavailable");
+      if (row.intended_account_id !== accountSession.account.id) fail(403, "invitation_account_mismatch", "Invitation belongs to a different account");
+      if (row.status === "accepted") {
+        if (row.redemption_id !== redemptionId) fail(409, "invitation_already_used", "Invitation was already accepted by this account through another request");
+        const auth = this.authenticateAccountSession(accountSessionToken, row.room_id, expectedSessionBinding);
+        const stored = this.db.prepare("SELECT body,sequence FROM events WHERE id=? AND room_id=?").get(row.joined_event_id, row.room_id);
+        if (!stored || auth.member.id !== row.intended_member_id) fail(409, "invitation_receipt_unavailable", "Accepted invitation cannot be reconciled safely");
+        return { invitation: invitationView(row, this.now(), { includeScope: true }), sequence: stored.sequence, event: JSON.parse(stored.body), session: this.sessionOwnership(auth), duplicate: true };
+      }
+      if (row.status === "revoked") fail(410, "invitation_revoked", "Invitation was revoked");
+      if (row.revision !== expectedRevision) fail(409, "stale_invitation_revision", "Invitation changed; preview it again");
+      const now = this.now();
+      if (now >= row.expires_at) fail(410, "invitation_expired", "Invitation expired");
+      const room = this.room(row.room_id);
+      const issuerAccount = this.db.prepare("SELECT active,auth_epoch FROM accounts WHERE id=?").get(row.issuer_account_id);
+      const issuerBinding = this.db.prepare("SELECT account_id FROM member_accounts WHERE room_id=? AND member_id=?").get(row.room_id, row.issuer_member_id);
+      const issuerMember = room.state.members[row.issuer_member_id];
+      if (!issuerAccount || issuerAccount.active !== 1 || issuerAccount.auth_epoch !== row.issuer_account_auth_epoch
+        || issuerBinding?.account_id !== row.issuer_account_id || !issuerMember || issuerMember.active === false
+        || issuerMember.revision !== row.issuer_member_revision || !issuerMember.permissions.includes("manage_members")) {
+        fail(409, "invitation_authority_changed", "Inviter authority changed; ask a current Room administrator for a new invitation");
+      }
+      if (Object.hasOwn(room.state.members, row.intended_member_id)
+        || this.db.prepare("SELECT 1 FROM member_accounts WHERE room_id=? AND (member_id=? OR account_id=?) LIMIT 1").get(row.room_id, row.intended_member_id, row.intended_account_id)) {
+        fail(409, "membership_conflict", "Invitation target already has a Room identity");
+      }
+      const permissions = JSON.parse(row.intended_permissions_json);
+      const rolePolicy = INVITATION_ROLE_POLICIES[row.role_policy_version];
+      const rolePermissions = rolePolicy?.[row.intended_role];
+      if (!rolePermissions || permissions.length !== rolePermissions.length || permissions.some((permission, index) => permission !== rolePermissions[index])) {
+        fail(409, "invitation_scope_invalid", "Stored invitation grants no longer match its immutable role policy");
+      }
+      if (room.sequence >= 10000 || Object.keys(room.state.members).length >= 100) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
+      const incoming = event({
+        id: randomUUID(),
+        idempotencyKey: hash(`invitation-accept:${row.id}:${redemptionId}`),
+        type: T.MEMBER_JOINED_VIA_INVITATION,
+        roomId: row.room_id,
+        actorId: row.intended_member_id,
+        at: new Date(now).toISOString(),
+        data: {
+          memberId: row.intended_member_id,
+          displayName: row.intended_display_name,
+          role: row.intended_role,
+          permissions,
+          invitedByMemberId: row.issuer_member_id,
+          invitationId: row.id,
+          rolePolicyVersion: row.role_policy_version,
+          authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION
+        }
+      });
+      let state;
+      try { state = compact(applyEvent(room.state, incoming)); }
+      catch (error) { fail(409, "invitation_rejected", error.message); }
+      const projection = JSON.stringify(state);
+      if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
+      const sequence = room.sequence + 1;
+      this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
+      this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
+      this.db.prepare("INSERT INTO member_accounts(room_id,member_id,account_id,origin) VALUES(?,?,?,?)")
+        .run(row.room_id, row.intended_member_id, row.intended_account_id, `invitation:${row.id}`);
+      const changed = this.db.prepare(`UPDATE membership_invitations SET revision=1,status='accepted',accepted_at=?,accepted_by_account_id=?,redemption_id=?,joined_event_id=?
+        WHERE id=? AND revision=0 AND status='pending'`).run(now, accountSession.account.id, redemptionId, incoming.id, row.id).changes;
+      if (changed !== 1) fail(409, "stale_invitation_revision", "Invitation changed while it was being accepted");
+      this.db.prepare(`INSERT INTO membership_invitation_events(
+        invitation_id,sequence,type,actor_account_id,actor_member_id,actor_auth_epoch,actor_session_revision,invitation_revision,at,room_event_id,reason
+      ) VALUES(?,2,'accepted',?,?,?,?,1,?,?,NULL)`).run(row.id, accountSession.account.id, row.intended_member_id, accountSession.account.authEpoch, accountSession.sessionRevision, now, incoming.id);
+      const authorized = this.authenticateAccountSession(accountSessionToken, row.room_id, expectedSessionBinding);
+      return {
+        invitation: invitationView(this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(row.id), now, { includeScope: true }),
+        sequence, event: incoming, session: this.sessionOwnership(authorized), duplicate: false
+      };
+    });
+  }
   changeAccountAccess(accountId, { expectedRevision, active, reason }) {
     if (!validId(accountId)) fail(422, "invalid_account", "Invalid account id");
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || typeof active !== "boolean" || typeof reason !== "string" || !reason.trim() || reason.length > 4096) fail(422, "invalid_account_change", "Account change requires a current revision, active state, and reason");
@@ -331,6 +765,8 @@ export class RoomStore {
       const revision = row.revision + 1, authEpoch = row.auth_epoch + 1, at = this.now();
       this.db.prepare("UPDATE accounts SET active=?,revision=?,auth_epoch=? WHERE id=?").run(active ? 1 : 0, revision, authEpoch, accountId);
       this.db.prepare("UPDATE credentials SET revoked=1 WHERE account_id=?").run(accountId);
+      this.db.prepare("UPDATE account_credentials SET revoked=1 WHERE account_id=?").run(accountId);
+      this.db.prepare("UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?").run(accountId);
       this.db.prepare("INSERT INTO account_access_events(account_id,revision,active,auth_epoch,reason,at) VALUES(?,?,?,?,?,?)").run(accountId, revision, active ? 1 : 0, authEpoch, reason.trim(), at);
       return this.account(accountId);
     });
@@ -360,14 +796,18 @@ export class RoomStore {
     this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,?,?,?,?,?)").run(hash(token), roomId, memberId, kind, parent, expiresAt, account?.id ?? null, account?.authEpoch ?? null);
     return token;
   }
-  authenticate(token, roomId) {
-    if (typeof token !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(token)) fail(401, "unauthenticated", "Sign in with an active room key");
+  authenticate(token, roomId, expectedSessionBinding = null) {
+    if (typeof token !== "string" || !tokenPattern.test(token)) fail(401, "unauthenticated", "Sign in with an active room key");
     const row = this.db.prepare(`SELECT c.*, p.revoked AS parent_revoked, p.expires_at AS parent_expiry, p.account_id AS parent_account_id, p.account_auth_epoch AS parent_account_auth_epoch,
       m.account_id AS bound_account_id, a.active AS account_active, a.revision AS account_revision, a.auth_epoch AS current_account_auth_epoch
       FROM credentials c LEFT JOIN credentials p ON p.hash=c.parent_hash
       LEFT JOIN member_accounts m ON m.room_id=c.room_id AND m.member_id=c.member_id
       LEFT JOIN accounts a ON a.id=m.account_id WHERE c.hash=?`).get(hash(token));
-    if (!row || row.revoked || row.expires_at <= this.now() || (row.parent_hash && (row.parent_revoked !== 0 || row.parent_expiry <= this.now()))) fail(401, "unauthenticated", "Session or key expired or revoked");
+    if (!row) {
+      if (this.db.prepare("SELECT 1 FROM account_session_slots WHERE hash=?").get(hash(token))) return this.authenticateAccountSession(token, roomId ?? null, expectedSessionBinding);
+      fail(401, "unauthenticated", "Session or key expired or revoked");
+    }
+    if (row.revoked || row.expires_at <= this.now() || (row.parent_hash && (row.parent_revoked !== 0 || row.parent_expiry <= this.now()))) fail(401, "unauthenticated", "Session or key expired or revoked");
     if (roomId && row.room_id !== roomId) fail(403, "access_denied", "This credential does not grant access to that room");
     const members = this.room(row.room_id).state.members;
     const member = Object.hasOwn(members, row.member_id) && members[row.member_id];
@@ -380,34 +820,36 @@ export class RoomStore {
       if (invalidAccount) fail(401, "unauthenticated", "Session or key expired, revoked, or account access ended");
       account = { id: row.account_id, active: true, revision: row.account_revision, authEpoch: row.current_account_auth_epoch };
     } else if (row.account_id !== null || row.account_auth_epoch !== null) fail(401, "unauthenticated", "Agent credential has an invalid human account binding");
-    return {
-      account, member, roomId: row.room_id, credentialHash: row.hash, kind: row.kind, expiresAt: row.expires_at,
+    const auth = {
+      account, member, roomId: row.room_id, credentialHash: row.hash, credentialScope: "room", kind: row.kind, expiresAt: row.expires_at,
       csrf: row.kind === "session" ? hash(`csrf:${token}`) : null,
       sessionBinding: row.kind === "session" ? hash(`session-binding:${token}`) : null
     };
+    if (expectedSessionBinding !== null && expectedSessionBinding !== auth.sessionBinding) fail(409, "session_binding_changed", "Session changed; discard the stale response or stream");
+    return auth;
   }
   createSession(accessKey) {
     return this.transaction(() => {
       const auth = this.authenticate(accessKey);
-      if (auth.kind !== "access" || auth.member.kind !== "human") fail(403, "access_denied", "Browser sessions require a human access key");
+      if (auth.credentialScope !== "room" || auth.kind !== "access" || auth.member.kind !== "human") fail(403, "access_denied", "Browser sessions require a human Room access key");
       const token = this.insertCredential(auth.roomId, auth.member.id, "session", auth.credentialHash, Math.min(auth.expiresAt, this.now() + 8 * 3600000));
       return { token, session: this.authenticate(token) };
     });
   }
   revoke(token) { this.db.prepare("UPDATE credentials SET revoked=1 WHERE hash=?").run(hash(token)); }
-  snapshot(token, roomId) {
+  snapshot(token, roomId, expectedSessionBinding = null) {
     // One read transaction keeps sequence, projection, and audit tail at the same commit.
     return this.transaction(() => {
-      const auth = this.authenticate(token, roomId);
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const room = this.room(roomId);
       const rows = this.db.prepare("SELECT body FROM events WHERE room_id=? ORDER BY sequence DESC LIMIT 100").all(roomId);
       const cursor = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
-      return { ...room, roomId, state: { ...room.state, eventLog: rows.reverse().map(r => JSON.parse(r.body)) }, cursor, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding };
+      return { ...room, roomId, state: { ...room.state, eventLog: rows.reverse().map(r => JSON.parse(r.body)) }, cursor, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
   }
-  eventsAfter(token, roomId, after = 0, limit = 100) {
+  eventsAfter(token, roomId, after = 0, limit = 100, expectedSessionBinding = null) {
     return this.readTransaction(() => {
-      this.authenticate(token, roomId);
+      this.authenticate(token, roomId, expectedSessionBinding);
       if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) fail(422, "invalid_cursor", "Invalid event cursor or limit");
       const sequence = this.room(roomId).sequence;
       if (after > sequence) fail(409, "cursor_ahead", "Cursor exceeds room history; fetch a fresh snapshot");
@@ -419,29 +861,29 @@ export class RoomStore {
   // Return-brief wiring (disposition 5557850637): one read transaction keeps the frozen
   // horizon, the cursor, the paged events, and the live projection at the same commit.
   // Fetching never acknowledges - only markCaughtUp does, explicitly.
-  returnBrief(token, roomId, { horizon = null, after = null, cursor: frozenCursor = null, limit = RETURN_BRIEF_DEFAULT_LIMIT } = {}) {
+  returnBrief(token, roomId, { horizon = null, after = null, cursor: frozenCursor = null, limit = RETURN_BRIEF_DEFAULT_LIMIT, expectedSessionBinding = null } = {}) {
     return this.transaction(() => {
-      const auth = this.authenticate(token, roomId);
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const room = this.room(roomId);
       const cursor = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
       const { H, startAfter, C, limit: pageLimit } = resolveHistoryWindow({ sequence: room.sequence, storedCursor: cursor, horizon, after, continuationCursor: frozenCursor, limit });
       const rows = this.db.prepare("SELECT sequence, body FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence LIMIT ?").all(roomId, startAfter, H, pageLimit)
         .map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
-      return { roomId, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, ...buildReturnBrief({ sequence: room.sequence, workItems: room.state.workItems, rows, H, startAfter, C, memberId: auth.member.id }) };
+      return { roomId, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null, ...buildReturnBrief({ sequence: room.sequence, workItems: room.state.workItems, rows, H, startAfter, C, memberId: auth.member.id }) };
     });
   }
-  markCaughtUp(token, roomId, sequence) {
+  markCaughtUp(token, roomId, sequence, expectedSessionBinding = null) {
     return this.transaction(() => {
-      const auth = this.authenticate(token, roomId);
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (!Number.isSafeInteger(sequence) || sequence < 0 || sequence > this.room(roomId).sequence) fail(422, "invalid_cursor", "Invalid caught-up cursor");
       this.db.prepare("INSERT INTO cursors VALUES(?,?,?) ON CONFLICT(room_id,member_id) DO UPDATE SET sequence=max(cursors.sequence,excluded.sequence)").run(roomId, auth.member.id, sequence);
       return { cursor: this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id).sequence };
     });
   }
-  command(token, roomId, command) {
+  command(token, roomId, command, expectedSessionBinding = null) {
     validateCommand(command);
     return this.transaction(() => {
-      const auth = this.authenticate(token, roomId);
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const fingerprint = hash(canonical(command));
       const prior = this.db.prepare("SELECT c.fingerprint,e.sequence,e.body FROM commands c JOIN events e ON e.room_id=c.room_id AND e.sequence=c.sequence WHERE c.room_id=? AND c.actor_id=? AND c.id=?").get(roomId, auth.member.id, command.id);
       if (prior) {
@@ -451,7 +893,12 @@ export class RoomStore {
       if (command.causationId && !this.db.prepare("SELECT 1 FROM events WHERE room_id=? AND id=?").get(roomId, command.causationId)) fail(422, "invalid_cause", "Causation event must exist in this room");
       const room = this.room(roomId);
       if (room.sequence >= 10000 || (command.type === T.MEMBER_ADDED && Object.keys(room.state.members).length >= 100) || (command.type === T.WORK_PROPOSED && Object.keys(room.state.workItems).length >= 500)) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
-      const incoming = event({ type: command.type, roomId, actorId: auth.member.id, at: new Date(this.now()).toISOString(), idempotencyKey: hash(`${auth.member.id}:${command.id}`), causationId: command.causationId, data: command.data });
+      const memberAuthorityEvent = [T.MEMBER_ADDED, T.MEMBER_ACCESS_CHANGED].includes(command.type);
+      const incoming = event({
+        type: command.type, roomId, actorId: auth.member.id, at: new Date(this.now()).toISOString(),
+        idempotencyKey: hash(`${auth.member.id}:${command.id}`), causationId: command.causationId,
+        data: memberAuthorityEvent ? { ...command.data, authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION } : command.data
+      });
       let state;
       try { state = compact(applyEvent(room.state, incoming)); }
       catch (error) { fail(/Stale|already exists|Invalid transition/.test(error.message) ? 409 : 422, "command_rejected", error.message); }
