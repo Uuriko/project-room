@@ -11,6 +11,6 @@ try {
   const result = store.verifyInvitationAudit();
   process.stdout.write(`${JSON.stringify({ ...result, completeJournalHistory: result.legacyBaselines === 0 })}\n`);
 } catch {
-  process.stderr.write("Invitation audit could not establish consistency. No repair was attempted. Keep the service closed and reconcile with a consistent backup; a schema-v5 database is required.\n");
+  process.stderr.write("Invitation audit could not establish consistency. No repair was attempted. Keep the service closed and reconcile with a consistent backup; a schema-v7 database is required.\n");
   process.exitCode = 1;
 } finally { store?.close(); }

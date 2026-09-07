@@ -1,4 +1,5 @@
 import { WORK_STATES } from "../src/events.js";
+import { verificationSatisfied, nextWorkStep } from "../src/workflow.js";
 // needsAttention / workInvolvingMe originated in the reviewed r3 selector slice and now
 // include the frozen provenance and explicit-rework refinements. The error class stays local
 // so the wired package does not depend on the unwired return-cursor contract module.
@@ -11,22 +12,6 @@ export class CursorError extends Error {
 }
 
 const REQUEST_ROLES = ["accountableMemberId", "verifierMemberId", "humanDecisionMakerId"];
-
-function producerKnown(item) {
-  return item.receipt?.producerAttribution === "reported" && item.receipt.producerId != null;
-}
-
-function verificationSatisfied(item) {
-  if (!item.independentVerificationRequired) return true;
-  const { receipt, verification } = item;
-  return verification?.result === "pass" &&
-    verification.independenceConfirmed === true &&
-    verification.verifierId === item.verifierMemberId &&
-    verification.completionEventId === receipt?.eventId &&
-    verification.evidenceVersion === receipt?.evidenceVersion &&
-    producerKnown(item) &&
-    receipt.producerId !== verification.verifierId;
-}
 
 // Two independent return facts (matrix refinement 4): unread-since-cursor and
 // unresolved-work-involving-me are SEPARATE derivations. The cursor governs what is
@@ -81,25 +66,9 @@ export function needsAttention({ workItems, memberId }) {
   if (!memberId) throw new CursorError("cursor.member_required", "needsAttention requires a memberId");
   const out = [];
   for (const item of Object.values(workItems)) {
-    if (!item || typeof item !== "object" || item.state === WORK_STATES.SUPERSEDED || item.supersededBy) continue;
-    if (item.state === WORK_STATES.COMPLETED && verificationSatisfied(item) && item.decision?.decision === "approved") continue;
-    const push = (role, step) => out.push(Object.freeze({ workItemId: item.id, action: item.title ?? null, role, step }));
-    if (item.accountableMemberId === memberId) {
-      if (item.state === WORK_STATES.PROPOSED) push("accountable", "accept");
-      else if (item.state === WORK_STATES.ACCEPTED) push("accountable", "start");
-      else if (item.state === WORK_STATES.BLOCKED) push("accountable", "revise");
-    }
-    if (item.state === WORK_STATES.COMPLETED) {
-      const verified = verificationSatisfied(item);
-      if (item.independentVerificationRequired && !producerKnown(item)) {
-        if (item.accountableMemberId === memberId) push("accountable", "establish_provenance");
-      } else if (item.independentVerificationRequired && item.receipt.producerId === item.verifierMemberId) {
-        if (item.accountableMemberId === memberId) push("accountable", "resolve_independence");
-      } else if (item.verifierMemberId === memberId && item.independentVerificationRequired && !verified) {
-        push("verifier", "verify");
-      }
-      if (item.humanDecisionMakerId === memberId && item.ownerDecisionRequired && verified && !item.decision) push("decision_maker", "decide");
-    }
+    if (!item || typeof item !== "object") continue;
+    const next = nextWorkStep(item);
+    if (next.needsAttention && next.memberId === memberId) out.push(Object.freeze({ workItemId: item.id, action: item.title ?? null, role: next.role, step: next.action }));
   }
   return Object.freeze(out);
 }

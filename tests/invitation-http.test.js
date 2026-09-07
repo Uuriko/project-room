@@ -4,13 +4,14 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { request as httpRequest } from "node:http";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
 const token = () => randomBytes(32).toString("base64url");
 
-async function fixture(t) {
+async function fixture(t, trustedOrigin = null) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-invitation-http-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
   store.initialize(initialRoom());
@@ -23,7 +24,7 @@ async function fixture(t) {
     other: store.issueAccountAccessKey("account-other")
   };
 
-  const server = createRoomServer({ store, streamInterval: 15 });
+  const server = createRoomServer({ store, streamInterval: 15, ...(trustedOrigin ? { origin: trustedOrigin } : {}) });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   t.after(async () => {
@@ -34,14 +35,26 @@ async function fixture(t) {
     rmSync(directory, { recursive: true, force: true });
   });
 
-  const request = (path, { method = "GET", data, headers = {} } = {}) => fetch(`${origin}${path}`, {
-    method,
-    headers: {
+  const request = (path, { method = "GET", data, headers = {} } = {}) => {
+    const options = { method, headers: {
       ...(data === undefined ? {} : { "Content-Type": "application/json" }),
+      ...(trustedOrigin ? { Host: new URL(trustedOrigin).host } : {}),
       ...headers
-    },
-    ...(data === undefined ? {} : { body: JSON.stringify(data) })
-  });
+    } };
+    // Model a local TLS-terminating proxy's Host header using the core HTTP client;
+    // fetch may replace Host with the socket destination. No external host is contacted.
+    if (trustedOrigin) return new Promise((resolve, reject) => {
+      const req = httpRequest(`${origin}${path}`, options, res => {
+        const chunks = [];
+        res.on("data", chunk => chunks.push(chunk));
+        res.on("error", reject);
+        res.on("end", () => resolve(new Response(Buffer.concat(chunks), { status: res.statusCode, headers: res.headers })));
+      });
+      req.on("error", reject);
+      req.end(data === undefined ? undefined : JSON.stringify(data));
+    });
+    return fetch(`${origin}${path}`, { ...options, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
+  };
   return { store, origin, request, accountKeys };
 }
 
@@ -83,6 +96,36 @@ function accountRoomHeaders(account, { write = false } = {}) {
     ...(write ? { "X-CSRF-Token": account.session.csrf } : {})
   };
 }
+
+test("account Room routes require a current binding and retain explicit credential scope", async t => {
+  const { request, origin, accountKeys } = await fixture(t);
+  const owner = await loginAccount(request, origin, accountKeys.owner);
+  const missing = { Cookie: owner.cookie, "X-Project-Room-Auth": "account" };
+  for (const path of ["/api/rooms/commons", "/api/session?room=commons"]) {
+    await errorCode(await request(path, { headers: missing }), 422, "session_binding_required");
+    await errorCode(await request(path, { headers: { ...missing, "X-Session-Binding": "0".repeat(64) } }), 409, "session_binding_changed");
+    assert.equal((await request(path, { headers: accountRoomHeaders(owner) })).status, 200);
+  }
+  await errorCode(await request("/api/rooms/commons/cursor", {
+    method: "POST", headers: { ...missing, Origin: origin, "X-CSRF-Token": owner.session.csrf }, data: { sequence: 2 }
+  }), 422, "session_binding_required");
+  await errorCode(await request("/api/rooms/commons", {
+    headers: { Cookie: owner.cookie.replace("account_session=", "room_session=") }
+  }), 401, "unauthenticated");
+});
+
+test("HTTPS configuration uses host-only secure cookie names and rejects ambiguous session cookies", async t => {
+  const { request } = await fixture(t, "https://project-room.example");
+  const response = await request("/api/account-session");
+  assert.equal(response.status, 200);
+  const setCookie = response.headers.get("set-cookie");
+  assert.match(setCookie, /^__Host-account_session=[A-Za-z0-9_-]{43}; Path=\/;/);
+  assert.match(setCookie, /; Secure$/);
+  assert.equal(/Domain=/i.test(setCookie), false);
+  const cookie = setCookie.split(";", 1)[0];
+  assert.equal((await request("/api/account-session", { headers: { Cookie: cookie } })).headers.get("set-cookie"), null);
+  await errorCode(await request("/api/account-session", { headers: { Cookie: `${cookie}; ${cookie}` } }), 401, "ambiguous_session_cookie");
+});
 
 function invitationState(store, invitationId) {
   return {

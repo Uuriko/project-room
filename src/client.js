@@ -106,6 +106,38 @@ export class AccountClient {
     // Preview deliberately sends neither the current account cookie nor its CSRF/binding.
     return this.request("/api/invitations/preview", { method: "POST", credentials: "omit", data: { invitationToken } });
   }
+  async joinShareLink({ linkToken, displayName, redemptionId }) {
+    const session = this.currentSession("joining a room");
+    // An authenticated join adds membership, not a new browser identity. Keep
+    // existing Room ownership intact just as targeted acceptance does.
+    const generation = session.authenticated ? this.generation : ++this.generation;
+    try {
+      const result = await this.request("/api/share-links/join", { method: "POST", session,
+        data: { linkToken, displayName, redemptionId, expectedSessionRevision: session.sessionRevision } });
+      if (!this.owns(generation, session)) return null;
+      if (result.roomMode === true) return result;
+      const next = result.session;
+      const valid = next?.account && next.roomId === result.roomId && next.member?.kind === "human"
+        && (session.authenticated ? sameAccountSession(next, session) : next.sessionRevision === session.sessionRevision + 1);
+      if (!valid) { this.invalidate(generation, session); return null; }
+      if (!session.authenticated) this.session = { ...next, authenticated: true };
+      return result;
+    } catch (error) {
+      if (!this.owns(generation, session)) return null;
+      // Anonymous joins may switch identity even if their response was lost.
+      // Authenticated joins cannot switch identity; a rejected link must not
+      // discard the unrelated open Room's ownership and private drafts.
+      if (!session.authenticated || error.status === 401
+        || ["session_binding_changed", "csrf_denied", "account_session_required"].includes(error.code)) this.invalidate(generation, session);
+      throw error;
+    }
+  }
+  async prepareShareLink(linkToken) {
+    const preview = await this.request("/api/share-links/preview", { method: "POST", credentials: "omit", data: { linkToken } });
+    // Preview/cancel is not consent to replace an already-open account context.
+    const session = this.session ?? await this.restore();
+    return { preview, session };
+  }
   async acceptInvitation({ invitationToken, redemptionId, expectedRevision }) {
     const session = this.currentSession("accepting an invitation", { authenticated: true });
     const generation = this.generation;
@@ -319,7 +351,7 @@ export class RoomClient {
     this.stream?.close();
     if (!this.events || !this.session) { this.onStatus("Manual refresh available; live updates unavailable"); return; }
     if (this.session.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); return; }
-    const stream = new this.events(`${this.path("/stream")}?after=${this.sequence}${this.session.authMode === "account" ? "&auth=account" : ""}`);
+    const stream = new this.events(`${this.path("/stream")}?after=${this.sequence}${this.session.authMode === "account" ? `&auth=account&binding=${encodeURIComponent(this.session.sessionBinding)}` : ""}`);
     this.stream = stream;
     stream.addEventListener("open", () => {
       if (this.stream !== stream) return;

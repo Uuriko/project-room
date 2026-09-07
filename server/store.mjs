@@ -7,6 +7,9 @@ import {
 } from "../src/events.js";
 import { buildReturnBrief, resolveHistoryWindow, RETURN_BRIEF_DEFAULT_LIMIT } from "./return-brief.mjs";
 import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal } from "./invitation-journal.mjs";
+import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
+import { STORE_SCHEMA_VERSION, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
+import { ShareLinks, shareLinkSchema } from "./share-links.mjs";
 
 export class ServiceError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -160,23 +163,31 @@ export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false } = {}) {
     this.now = now;
     this.db = new DatabaseSync(filename, { readOnly });
+    this.shareLinks = new ShareLinks(this);
     const version = this.db.prepare("PRAGMA user_version").get().user_version;
-    const supported = new Set([0, 1, 2, 3, 4, 5]);
+    const supported = new Set([0, 1, 2, 3, 4, 5, 6, STORE_SCHEMA_VERSION]);
     const hasSchema = version === 0 && Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' LIMIT 1").get());
     if (!supported.has(version) || hasSchema) {
       this.db.close();
-      throw new Error(version > 5 ? "Database schema is newer than this service" : "Database schema version is unsupported");
+      throw new Error(version > STORE_SCHEMA_VERSION ? "Database schema is newer than this service" : "Database schema version is unsupported");
     }
     if (readOnly) {
       try {
-        if (version !== 5) throw new Error("Read-only invitation audit requires schema v5; migrate a backed-up database through the service first");
+        if (version !== STORE_SCHEMA_VERSION) throw new Error("Read-only invitation audit requires schema v7; migrate a backed-up database through the service first");
         this.db.exec("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=3000;");
+        verifyWriterFence(this.db);
         this.verifyInvitationAudit();
+        this.shareLinks.verify();
         return;
       } catch (error) { this.db.close(); throw error; }
     }
     this.db.exec("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=3000;");
-    if (version === 0) this.db.exec(`BEGIN IMMEDIATE;
+    registerWriter(this.db);
+    try { this.transaction(() => {
+    // Reread under the write lock: another startup may have upgraded while we waited.
+    if (this.db.prepare("PRAGMA user_version").get().user_version !== version) throw new Error("Database changed during startup; retry with the current service");
+    if (version === STORE_SCHEMA_VERSION) verifyWriterFence(this.db);
+    if (version === 0) this.db.exec(`
       CREATE TABLE rooms (id TEXT PRIMARY KEY, sequence INTEGER NOT NULL, projection TEXT NOT NULL);
       CREATE TABLE events (room_id TEXT NOT NULL REFERENCES rooms(id), sequence INTEGER NOT NULL, id TEXT NOT NULL UNIQUE, body TEXT NOT NULL, PRIMARY KEY(room_id, sequence));
       CREATE TABLE commands (room_id TEXT NOT NULL REFERENCES rooms(id), actor_id TEXT NOT NULL, id TEXT NOT NULL, fingerprint TEXT NOT NULL, sequence INTEGER NOT NULL, PRIMARY KEY(room_id, actor_id, id), FOREIGN KEY(room_id, sequence) REFERENCES events(room_id, sequence));
@@ -189,14 +200,16 @@ export class RoomStore {
       CREATE TABLE cursors (room_id TEXT NOT NULL REFERENCES rooms(id), member_id TEXT NOT NULL, sequence INTEGER NOT NULL, PRIMARY KEY(room_id, member_id));
       CREATE TABLE projection_checkpoints (room_id TEXT PRIMARY KEY REFERENCES rooms(id), sequence INTEGER NOT NULL, projection TEXT NOT NULL);
       ${invitationSchema}
-      PRAGMA user_version=4; COMMIT;`);
+      PRAGMA user_version=4;`);
     this.repairProjectionProvenance({ upgradeV1: version === 1 });
     if (version === 1 || version === 2) this.migrateIdentityV3(version);
     if (version === 1 || version === 2 || version === 3) this.migrateInvitationsV4();
-    try {
       if (version < 5) this.migrateInvitationJournalV5();
+      if (version < 7) this.db.exec(shareLinkSchema);
+      if (version < STORE_SCHEMA_VERSION) installWriterFence(this.db);
       this.verifyInvitationAudit();
-    } catch (error) { this.db.close(); throw error; }
+      this.shareLinks.verify();
+    }); } catch (error) { this.db.close(); throw error; }
   }
 
   // v2 had only Room-local member identities. Give each historical human membership its
@@ -269,21 +282,9 @@ export class RoomStore {
       if (canonicalInvitationData(stored) !== canonicalInvitationData(replayed.record)
         || canonicalInvitationData(audits) !== canonicalInvitationData(replayed.audits)) throw new Error("Projection differs from journal");
       if (stored.status === "accepted") {
-        const linked = this.db.prepare("SELECT body,room_id FROM events WHERE id=?").get(stored.joined_event_id);
-        const joined = linked && JSON.parse(linked.body);
+        const linked = this.db.prepare("SELECT id,sequence,body,room_id FROM events WHERE id=?").get(stored.joined_event_id);
         const binding = this.db.prepare("SELECT account_id,origin FROM member_accounts WHERE room_id=? AND member_id=?").get(stored.room_id, stored.intended_member_id);
-        const member = this.room(stored.room_id).state.members[stored.intended_member_id];
-        const expectedOrigin = { kind: "invitation", invitationId: stored.id, invitedByMemberId: stored.issuer_member_id };
-        if (!joined || linked.room_id !== stored.room_id || joined.roomId !== stored.room_id
-          || joined.id !== stored.joined_event_id || joined.type !== T.MEMBER_JOINED_VIA_INVITATION || joined.actorId !== stored.intended_member_id
-          || joined.at !== new Date(stored.accepted_at).toISOString()
-          || canonicalInvitationData(joined.data) !== canonicalInvitationData({
-            memberId: stored.intended_member_id, displayName: stored.intended_display_name, role: stored.intended_role,
-            permissions: JSON.parse(stored.intended_permissions_json), invitedByMemberId: stored.issuer_member_id,
-            invitationId: stored.id, rolePolicyVersion: stored.role_policy_version, authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION
-          }) || binding?.account_id !== stored.intended_account_id || binding.origin !== `invitation:${stored.id}`
-          || member?.id !== stored.intended_member_id || member.kind !== "human"
-          || canonicalInvitationData(member.membershipOrigin) !== canonicalInvitationData(expectedOrigin)) throw new Error("Membership evidence differs from journal");
+        assertInvitationMembershipEvidence(stored, linked, binding, this.room(stored.room_id));
       }
       return replayed;
     } catch { fail(503, "invitation_integrity_error", "Invitation record requires operator reconciliation"); }
@@ -450,11 +451,14 @@ export class RoomStore {
   }
   close() { this.db.close(); }
   transaction(fn) {
+    // Nested startup helpers share the outer migration transaction and its rollback.
+    if (this.db.isTransaction) return fn();
     this.db.exec("BEGIN IMMEDIATE");
     try { const result = fn(); this.db.exec("COMMIT"); return result; }
     catch (error) { this.db.exec("ROLLBACK"); throw error; }
   }
   readTransaction(fn) {
+    if (this.db.isTransaction) return fn();
     this.db.exec("BEGIN");
     try { const result = fn(); this.db.exec("COMMIT"); return result; }
     catch (error) { this.db.exec("ROLLBACK"); throw error; }
@@ -741,14 +745,15 @@ export class RoomStore {
       };
     });
   }
-  revokeInvitation(accountSessionToken, invitationId, { expectedRevision, reason, expectedSessionBinding } = {}) {
+  revokeInvitation(accountSessionToken, invitationId, { expectedRevision, reason, expectedSessionBinding, expectedRoomId = null } = {}) {
     if (!validId(invitationId) || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || typeof reason !== "string" || !reason.trim() || reason.length > 4096) {
       fail(422, "invalid_invitation_change", "Invitation revocation requires its current revision and a reason");
     }
     if (typeof expectedSessionBinding !== "string" || !/^[a-f0-9]{64}$/.test(expectedSessionBinding)) fail(422, "invalid_session_binding", "Current account session binding required");
+    if (expectedRoomId !== null && !validId(expectedRoomId)) fail(422, "invalid_room", "Invalid Room id");
     return this.transaction(() => {
       const row = this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(invitationId);
-      if (!row) fail(404, "invitation_not_found", "Invitation not found");
+      if (!row || (expectedRoomId !== null && row.room_id !== expectedRoomId)) fail(404, "invitation_not_found", "Invitation not found in this Room");
       const actor = this.authenticateAccountSession(accountSessionToken, row.room_id, expectedSessionBinding);
       if (!actor.member.permissions.includes("manage_members")) fail(403, "access_denied", "Current membership administration grant required");
       this.verifyInvitationRecord(row.id);
@@ -808,24 +813,7 @@ export class RoomStore {
         fail(409, "invitation_scope_invalid", "Stored invitation grants no longer match its immutable role policy");
       }
       if (room.sequence >= 10000 || Object.keys(room.state.members).length >= 100) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
-      const incoming = event({
-        id: randomUUID(),
-        idempotencyKey: hash(`invitation-accept:${row.id}:${redemptionId}`),
-        type: T.MEMBER_JOINED_VIA_INVITATION,
-        roomId: row.room_id,
-        actorId: row.intended_member_id,
-        at: new Date(now).toISOString(),
-        data: {
-          memberId: row.intended_member_id,
-          displayName: row.intended_display_name,
-          role: row.intended_role,
-          permissions,
-          invitedByMemberId: row.issuer_member_id,
-          invitationId: row.id,
-          rolePolicyVersion: row.role_policy_version,
-          authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION
-        }
-      });
+      const incoming = invitationJoinedEvent({ ...row, joined_event_id: randomUUID(), accepted_at: now, redemption_id: redemptionId });
       let state;
       try { state = compact(applyEvent(room.state, incoming)); }
       catch (error) { fail(409, "invitation_rejected", error.message); }
@@ -892,7 +880,7 @@ export class RoomStore {
     this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,?,?,?,?,?)").run(hash(token), roomId, memberId, kind, parent, expiresAt, account?.id ?? null, account?.authEpoch ?? null);
     return token;
   }
-  authenticate(token, roomId, expectedSessionBinding = null) {
+  authenticate(token, roomId, expectedSessionBinding = null, { allowAccountSession = true } = {}) {
     if (typeof token !== "string" || !tokenPattern.test(token)) fail(401, "unauthenticated", "Sign in with an active room key");
     const row = this.db.prepare(`SELECT c.*, p.revoked AS parent_revoked, p.expires_at AS parent_expiry, p.account_id AS parent_account_id, p.account_auth_epoch AS parent_account_auth_epoch,
       m.account_id AS bound_account_id, a.active AS account_active, a.revision AS account_revision, a.auth_epoch AS current_account_auth_epoch
@@ -900,7 +888,7 @@ export class RoomStore {
       LEFT JOIN member_accounts m ON m.room_id=c.room_id AND m.member_id=c.member_id
       LEFT JOIN accounts a ON a.id=m.account_id WHERE c.hash=?`).get(hash(token));
     if (!row) {
-      if (this.db.prepare("SELECT 1 FROM account_session_slots WHERE hash=?").get(hash(token))) return this.authenticateAccountSession(token, roomId ?? null, expectedSessionBinding);
+      if (allowAccountSession && this.db.prepare("SELECT 1 FROM account_session_slots WHERE hash=?").get(hash(token))) return this.authenticateAccountSession(token, roomId ?? null, expectedSessionBinding);
       fail(401, "unauthenticated", "Session or key expired or revoked");
     }
     if (row.revoked || row.expires_at <= this.now() || (row.parent_hash && (row.parent_revoked !== 0 || row.parent_expiry <= this.now()))) fail(401, "unauthenticated", "Session or key expired or revoked");

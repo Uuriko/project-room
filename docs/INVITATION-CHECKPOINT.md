@@ -2,6 +2,8 @@
 
 6 September 2026. Branch: `codex/project-room-canonical-20260906`, based on canonical account checkpoint `4d26afd`. This is a local implementation checkpoint awaiting independent review of the final revision; it is not a release approval.
 
+Follow-up: resumed review of `a88a0c7` found actionable dialog, account-boundary, cookie-scope, and recovery issues. The original passing checks below did not cover those cases. See [INVITATION-REVIEW-FIXES.md](INVITATION-REVIEW-FIXES.md) for corrective work; do not treat a88a0c7 as an approved release candidate.
+
 ## Acceptance and result
 
 The implemented flow provisions a local account without membership, previews an invitation without recording delivery or reading, signs into that account, explicitly accepts the offered role in one Room, and opens the conversation. A matching retry returns the original receipt without adding membership again. Acceptance, its Room event/projection, immutable account/member binding, and audit row commit together.

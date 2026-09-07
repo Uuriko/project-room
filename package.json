@@ -10,7 +10,9 @@
     "test:browser": "node --test --test-concurrency=1 scripts/browser-check.mjs scripts/disclosure-check.mjs scripts/quiet-focus-a34-check.mjs scripts/quiet-focus-final-check.mjs scripts/accessibility-check.mjs scripts/session-boundary-check.mjs scripts/invitation-check.mjs",
     "check": "node scripts/check.mjs",
     "provision": "node scripts/provision.mjs",
-    "audit:invitations": "node scripts/audit-invitations.mjs"
+    "audit:invitations": "node scripts/audit-invitations.mjs",
+    "test:handoff": "node --test tests/agent-handoff.test.js",
+    "agent:inbox": "node scripts/agent-inbox.mjs"
   },
   "engines": {
     "node": ">=24.19.0"

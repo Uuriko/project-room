@@ -62,6 +62,10 @@ test("private journal independently reconstructs issuance and acceptance without
 
 test("revocation is reconstructed and journal storage failure leaves the offer pending", t => {
   const f = fixture(t);
+  assert.throws(() => f.store.revokeInvitation(f.owner.token, f.id, {
+    expectedRevision: 0, reason: "Offer withdrawn", expectedSessionBinding: f.owner.session.sessionBinding, expectedRoomId: "another-room"
+  }), { code: "invitation_not_found" });
+  assert.equal(f.record().status, "pending", "the explicitly requested Room must match the offer before revocation");
   const append = f.store.appendInvitationJournal;
   f.store.appendInvitationJournal = () => { throw new Error("Simulated journal disk failure"); };
   assert.throws(f.revoke, /disk failure/);
@@ -109,7 +113,7 @@ for (const status of ["pending", "accepted", "revoked"]) test(`v4 ${status} migr
   f.store.db.exec("DROP TABLE membership_invitation_journal; PRAGMA user_version=4");
   f.close();
   const migrated = f.reopen();
-  assert.equal(migrated.db.prepare("PRAGMA user_version").get().user_version, 5);
+  assert.equal(migrated.db.prepare("PRAGMA user_version").get().user_version, 7);
   assert.deepEqual({ ...f.record() }, record);
   assert.deepEqual(migrated.db.prepare("SELECT * FROM membership_invitation_events WHERE invitation_id=? ORDER BY sequence").all(f.id).map(row => ({ ...row })), audits);
   assert.deepEqual(migrated.db.prepare("SELECT * FROM events ORDER BY room_id,sequence").all().map(row => ({ ...row })), events);
@@ -178,7 +182,7 @@ test("read-only audit refuses a v4 input without migrating or creating a journal
   const f = fixture(t);
   f.store.db.exec("DROP TABLE membership_invitation_journal; PRAGMA user_version=4");
   f.close();
-  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v5/);
+  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v7/);
   const raw = new DatabaseSync(f.filename, { readOnly: true });
   try {
     assert.equal(raw.prepare("PRAGMA user_version").get().user_version, 4);

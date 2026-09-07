@@ -82,7 +82,8 @@ async function fixture(t) {
     rmSync(directory, { recursive: true, force: true });
   });
   browser = await chromium.launch({ headless: true, ...chromiumOptions });
-  return { browser, store, origin, targetRoomKey, targetAccountKey, otherAccountKey, invitationToken, invitationId: issued.invitation.id };
+  return { browser, store, origin, targetRoomKey, targetAccountKey, otherAccountKey, invitationToken, invitationId: issued.invitation.id,
+    revoke: () => store.revokeInvitation(ownerSlot.token, issued.invitation.id, { expectedRevision: 0, reason: "Offer withdrawn", expectedSessionBinding: ownerSession.sessionBinding }) };
 }
 
 async function switchAccount(page, key) {
@@ -136,7 +137,7 @@ test("invitation preview and acceptance preserve privacy, drafts, authority, and
   assert.deepEqual(browserLeak, { dom: false, local: false, session: false, resources: false });
   assert.equal(requestEvidence.some(item => item.url.includes(invitationToken) || item.referer.includes(invitationToken)), false);
   assert.equal(requestEvidence.filter(item => item.body.includes(invitationToken)).length, 1, "only the preview POST body carries the invitation secret");
-  assert.match(await page.locator("#invitation-boundary").textContent(), /does not join.*or tell anyone it was read/i);
+  assert.match(await page.locator("#invitation-boundary").textContent(), /does not join.*or create a notification or read receipt/i);
   assert.match(await page.locator("#invitation-room").textContent(), /Studio/);
   assert.deepEqual(counts(store, invitationId), beforePreview, "preview creates no event, membership, audit, or status write");
   mkdirSync("test-results", { recursive: true });
@@ -164,6 +165,7 @@ test("invitation preview and acceptance preserve privacy, drafts, authority, and
   await page.screenshot({ path: "test-results/invitation-mobile-actions.png" });
 
   await page.locator("#invitation-account-key").fill(targetAccountKey);
+  page.once("dialog", dialog => dialog.accept());
   await page.getByRole("button", { name: "Sign in to review acceptance", exact: true }).click();
   await page.getByRole("button", { name: "Accept and open room", exact: true }).waitFor();
   assert.equal(await composer.inputValue(), "Keep this private lobby draft", "same-account transition retains the current Room draft before acceptance");
@@ -228,4 +230,99 @@ test("malformed invitation fragments are scrubbed locally and never sent", { tim
   assert.match(await page.locator("#invitation-error").textContent(), /unavailable/i);
   assert.equal(await page.locator("#invitation-summary").textContent(), "This invitation is unavailable.");
   assert.equal(bodies.some(body => body.includes(malformed)), false);
+});
+
+test("account confirmation keeps the modal open and warns before a draft-sensitive sign-in", { timeout: 90000 }, async t => {
+  const f = await fixture(t);
+  const page = await (await f.browser.newContext()).newPage();
+  await page.goto(f.origin);
+  await page.locator("#access-key").fill(f.targetRoomKey);
+  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await page.locator("#main").waitFor({ state: "visible" });
+  await page.locator("#message-input").fill("Retain this draft until I choose to switch");
+  await page.evaluate(token => { location.hash = `invite/${token}`; }, f.invitationToken);
+  await page.locator("#invitation-account-key").waitFor({ state: "visible" });
+  assert.match(await page.locator("#invitation-account-warning").textContent(), /different account clears.*drafts/i);
+  for (let index = 0; index < 6; index++) {
+    await page.keyboard.press("Tab");
+    assert.equal(await page.evaluate(() => document.querySelector("#invitation-dialog").contains(document.activeElement)), true);
+  }
+  await page.locator("#invitation-account-key").fill(f.targetAccountKey);
+  let confirmations = 0;
+  page.once("dialog", async dialog => { confirmations++; assert.match(dialog.message(), /clears.*unsent drafts/i); await dialog.dismiss(); });
+  await page.getByRole("button", { name: "Sign in to review acceptance", exact: true }).click();
+  assert.equal(confirmations, 1);
+  assert.equal(await page.locator("#message-input").inputValue(), "Retain this draft until I choose to switch");
+  const held = deferred(), release = deferred();
+  t.after(() => release.resolve());
+  await page.route("**/api/account-session", async route => {
+    if (route.request().method() !== "POST") return route.continue();
+    const response = await route.fetch();
+    held.resolve();
+    await release.promise;
+    await route.fulfill({ response });
+  });
+  page.once("dialog", dialog => dialog.accept());
+  await page.getByRole("button", { name: "Sign in to review acceptance", exact: true }).click();
+  await held.promise;
+  await page.keyboard.press("Escape");
+  assert.equal(await page.locator("#invitation-dialog").evaluate(element => element.open), true);
+  assert.equal(await page.locator("#invitation-dismiss").isDisabled(), true);
+  release.resolve();
+  await page.getByRole("button", { name: "Accept and open room", exact: true }).waitFor();
+  await page.waitForFunction(() => document.activeElement?.id === "invitation-accept");
+  assert.equal(await page.locator("#message-input").inputValue(), "Retain this draft until I choose to switch");
+});
+
+test("an invalidated offer removes acceptance controls and returns keyboard focus to dismissal", { timeout: 90000 }, async t => {
+  const f = await fixture(t);
+  const page = await (await f.browser.newContext()).newPage();
+  await page.goto(`${f.origin}/#invite/${f.invitationToken}`);
+  await page.locator("#invitation-account-key").fill(f.targetAccountKey);
+  await page.getByRole("button", { name: "Sign in to review acceptance", exact: true }).click();
+  await page.getByRole("button", { name: "Accept and open room", exact: true }).waitFor();
+  f.revoke();
+  await page.locator("#invitation-accept").click();
+  await page.waitForFunction(() => document.querySelector("#invitation-error").textContent.includes("revoked"));
+  assert.equal(await page.locator("#invitation-accept").isVisible(), false);
+  assert.equal(await page.locator("#invitation-account-form").isVisible(), false);
+  assert.equal(await page.locator("#invitation-summary").textContent(), "This invitation is unavailable.");
+  await page.waitForFunction(() => document.activeElement?.id === "invitation-dismiss");
+  await page.keyboard.press("Escape");
+  assert.equal(await page.locator("#invitation-dialog").evaluate(element => element.open), false);
+});
+
+test("account mismatch focuses the account field for recovery", { timeout: 90000 }, async t => {
+  const f = await fixture(t);
+  const page = await (await f.browser.newContext()).newPage();
+  await page.goto(`${f.origin}/#invite/${f.invitationToken}`);
+  await page.locator("#invitation-account-key").fill(f.otherAccountKey);
+  await page.getByRole("button", { name: "Sign in to review acceptance", exact: true }).click();
+  await page.getByRole("button", { name: "Accept and open room", exact: true }).click();
+  await page.waitForFunction(() => document.activeElement?.id === "invitation-account-key" && document.querySelector("#invitation-error").textContent.includes("another account"));
+  assert.equal(await page.locator("#invitation-accept").isVisible(), false);
+});
+
+test("uncertain acceptance retains its retry on cancelled dismissal and accepted Room-load failure stays neutral", { timeout: 90000 }, async t => {
+  const f = await fixture(t);
+  const page = await (await f.browser.newContext()).newPage();
+  await page.goto(`${f.origin}/#invite/${f.invitationToken}`);
+  await page.locator("#invitation-account-key").fill(f.targetAccountKey);
+  await page.getByRole("button", { name: "Sign in to review acceptance", exact: true }).click();
+  await page.route("**/api/invitations/accept", route => route.abort());
+  await page.getByRole("button", { name: "Accept and open room", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector("#invitation-error").textContent.includes("could not confirm"));
+  await page.waitForFunction(() => document.activeElement?.id === "invitation-accept");
+  page.once("dialog", async dialog => { assert.match(dialog.message(), /clears this tab’s retry information/); await dialog.dismiss(); });
+  await page.keyboard.press("Escape");
+  assert.equal(await page.locator("#invitation-dialog").evaluate(element => element.open), true);
+  await page.unroute("**/api/invitations/accept");
+  await page.getByRole("button", { name: "Check acceptance again", exact: true }).click();
+  await page.locator("#main").waitFor({ state: "visible" });
+  await page.goto(`${f.origin}/#invite/${f.invitationToken}`);
+  await page.getByRole("button", { name: "Open room", exact: true }).waitFor();
+  await page.route("**/api/session?room=studio", route => route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "temporarily_unavailable", message: "Room temporarily unavailable" } }) }));
+  await page.getByRole("button", { name: "Open room", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector("#auth-error").textContent.includes("already accepted, but the Room could not be loaded"));
+  assert.equal(await page.locator("#auth-error").textContent().then(text => text.includes("account that accepted")), false);
 });

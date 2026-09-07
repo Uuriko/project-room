@@ -18,6 +18,63 @@ const accountSession = (id, sessionRevision, suffix = sessionRevision) => ({
   authenticatedUntil: id === null ? null : 888888
 });
 
+test("a delayed link join cannot replace a newer browser identity", async () => {
+  const waiting = deferred(), replacement = accountSession("replacement", 3);
+  const client = new AccountClient({ fetcher: async path => path === "/api/share-links/join" ? waiting.promise : response(replacement) });
+  client.session = accountSession(null, 0);
+  const joining = client.joinShareLink({ linkToken: "test-link", displayName: "Guest", redemptionId: "test-redemption" });
+  await client.restore();
+  waiting.resolve(response({ roomId: "commons", session: { ...accountSession("old-guest", 1), roomId: "commons", member: { id: "old-guest", kind: "human" } } }));
+  assert.equal(await joining, null);
+  assert.equal(client.session, replacement);
+});
+
+test("an uncertain link join invalidates the client view before a same-ID retry", async () => {
+  const client = new AccountClient({ fetcher: async () => { throw new Error("Simulated lost response"); } });
+  client.session = accountSession(null, 0);
+  await assert.rejects(client.joinShareLink({ linkToken: "test-link", displayName: "Guest", redemptionId: "test-redemption" }), /lost response/);
+  assert.equal(client.session, null);
+});
+
+test("invitation preview preserves existing account ownership and sends no credentials", async () => {
+  const current = accountSession("current", 2), calls = [];
+  const client = new AccountClient({ fetcher: async (path, options) => {
+    calls.push({ path, options }); return response({ room: { id: "commons" } });
+  } });
+  client.session = current; client.generation = 4;
+  const prepared = await client.prepareShareLink("preview-token");
+  assert.equal(prepared.session, current); assert.equal(client.session, current);
+  assert.equal(client.generation, 4); assert.equal(calls.length, 1);
+  assert.equal(calls[0].path, "/api/share-links/preview");
+  assert.equal(calls[0].options.credentials, "omit");
+  assert.equal(calls[0].options.headers["X-CSRF-Token"], undefined);
+});
+
+test("preparing an invitation without a client session restores a browser slot once", async () => {
+  const restored = accountSession(null, 0), calls = [];
+  const client = new AccountClient({ fetcher: async path => {
+    calls.push(path); return response(path === "/api/account-session" ? restored : { room: { id: "commons" } });
+  } });
+  const result = await client.prepareShareLink("preview-token");
+  assert.equal(result.session, restored);
+  assert.deepEqual(calls, ["/api/share-links/preview", "/api/account-session"]);
+});
+
+test("authenticated link acceptance and ordinary link rejection retain open Room ownership", async () => {
+  const current = accountSession("current", 2);
+  let rejectLink = false;
+  const client = new AccountClient({ fetcher: async () => rejectLink
+    ? response({ error: { code: "link_unavailable", message: "Link expired" } }, 410)
+    : response({ roomId: "commons", session: { ...current, roomId: "commons", member: { id: "human", kind: "human" } } }) });
+  client.session = current; client.generation = 5;
+  const join = () => client.joinShareLink({ linkToken: "test-link", displayName: "Human", redemptionId: "test-redemption" });
+  assert.equal((await join()).roomId, "commons");
+  assert.equal(client.session, current); assert.equal(client.generation, 5);
+  rejectLink = true;
+  await assert.rejects(join(), /Link expired/);
+  assert.equal(client.session, current); assert.equal(client.generation, 5);
+});
+
 test("account bootstrap, login, and logout use the stable cookie slot with CSRF and revision CAS", async () => {
   const bootstrap = accountSession(null, 0);
   const loggedIn = accountSession("account-human", 1);
@@ -189,7 +246,7 @@ test("Room account mode carries auth and binding through restore, writes, and SS
     assert.equal(call.options.headers["X-Project-Room-Auth"], "account");
     assert.equal(call.options.headers["X-Session-Binding"], owner.sessionBinding);
   }
-  assert.equal(streamUrls[0], "/api/rooms/room%3Aone/stream?after=7&auth=account");
+  assert.equal(streamUrls[0], "/api/rooms/room%3Aone/stream?after=7&auth=account&binding=binding-room-owner");
 
   assert.deepEqual(await client.caughtUp(7), { cursor: 7 });
   assert.equal(calls[2].options.headers["X-Project-Room-Auth"], "account");

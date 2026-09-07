@@ -9,7 +9,7 @@ const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 const bindingPattern = /^[a-f0-9]{64}$/;
 const assets = new Map([
   ["/", ["index.html", "text/html"]], ["/index.html", ["index.html", "text/html"]],
-  ...["app.js", "client.js", "events.js", "conversation.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
+  ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
   ["/src/styles.css", ["src/styles.css", "text/css"]]
 ]);
 const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -42,6 +42,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     if (url.protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) throw new Error("Non-loopback origins require HTTPS");
   }
   const expectedOrigin = () => origin || `http://127.0.0.1:${server.address().port}`;
+  const scopedCookieName = name => expectedOrigin().startsWith("https:") ? `__Host-${name}` : name;
   const streams = new Set();
   const rates = new Map();
   function rate(id, maximum) {
@@ -54,7 +55,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     if (entry.n > maximum) reject(429, "rate_limited", "Too many requests; retry after a minute");
   }
   function cookie(req, name) {
-    return (req.headers.cookie || "").split(";").map(value => value.trim()).find(value => value.startsWith(`${name}=`))?.slice(name.length + 1);
+    const scoped = scopedCookieName(name);
+    const matches = (req.headers.cookie || "").split(";").map(value => value.trim()).filter(value => value.startsWith(`${scoped}=`));
+    if (matches.length > 1) reject(401, "ambiguous_session_cookie", "Conflicting browser session cookies; clear this site's cookies and sign in again");
+    return matches[0]?.slice(scoped.length + 1);
   }
   function bearer(req) {
     if (!req.headers.authorization) return null;
@@ -75,6 +79,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     if (typeof value !== "string" || !bindingPattern.test(value)) reject(422, "invalid_session_binding", "Invalid session response binding");
     return value;
   }
+  function accountBinding(req, url = null) {
+    const header = expectedBinding(req);
+    const values = url?.searchParams.getAll("binding") ?? [];
+    if (values.length > 1 || (values.length && !bindingPattern.test(values[0]))
+      || (header && values.length && header !== values[0])) reject(422, "invalid_session_binding", "Invalid session response binding");
+    const binding = header ?? values[0];
+    if (!binding) reject(422, "session_binding_required", "Current account session binding required");
+    return binding;
+  }
   function checkOrigin(req, required = false) {
     if ((required || req.headers.origin) && req.headers.origin !== expectedOrigin()) reject(403, "origin_denied", "Request origin is not allowed");
   }
@@ -87,7 +100,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     }
   }
   function setCookie(res, name, token, maxAge) {
-    res.setHeader("Set-Cookie", `${name}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${expectedOrigin().startsWith("https:") ? "; Secure" : ""}`);
+    res.setHeader("Set-Cookie", `${scopedCookieName(name)}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${expectedOrigin().startsWith("https:") ? "; Secure" : ""}`);
   }
   function json(res, status, value) {
     res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
@@ -195,6 +208,26 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         reject(405, "method_not_allowed", "Method not allowed");
       }
+      if (url.pathname === "/api/share-links/preview" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`link-preview:${req.socket.remoteAddress}`, 30);
+        const data = await body(req);
+        if (!exact(data, ["linkToken"])) reject(422, "invalid_link", "Invitation link required");
+        return json(res, 200, store.shareLinks.preview(data.linkToken));
+      }
+      if (url.pathname === "/api/share-links/join" && req.method === "POST") {
+        checkOrigin(req, true);
+        const token = cookie(req, accountCookieName), slot = store.accountSessionSlot(token);
+        protectWrite(req, slot, false);
+        const binding = accountBinding(req);
+        const data = await body(req);
+        if (!exact(data, ["linkToken", "displayName", "redemptionId", "expectedSessionRevision"])) reject(422, "invalid_join", "Supply the invitation link and your name");
+        rate(`link-join:${req.socket.remoteAddress}`, 20);
+        const oldRoomToken = cookie(req, roomCookieName);
+        const result = store.shareLinks.join(token, data.linkToken, { ...data, expectedSessionBinding: binding,
+          revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null });
+        return json(res, result.duplicate ? 200 : 201, result);
+      }
       if (url.pathname === "/api/invitations/preview" && req.method === "POST") {
         checkOrigin(req, true);
         rate(`invitation-preview:${req.socket.remoteAddress}`, 30);
@@ -226,8 +259,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/session") {
         const selectedRoom = url.searchParams.get("room");
         const authMode = selectedRoom !== null || req.headers["x-project-room-auth"] === "account" ? "account" : "room";
+        if (authMode === "account" && req.headers.authorization) reject(403, "access_denied", "Account browser sessions do not use bearer authorization");
         const token = authMode === "account" ? cookie(req, accountCookieName) : (bearer(req) ?? cookie(req, roomCookieName));
-        const auth = authMode === "account" ? store.authenticateAccountSession(token, selectedRoom) : store.authenticate(token);
+        const auth = authMode === "account" ? store.authenticateAccountSession(token, selectedRoom, accountBinding(req))
+          : store.authenticate(token, undefined, expectedBinding(req), { allowAccountSession: false });
         const isBearer = Boolean(req.headers.authorization);
         if (!isBearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
         if (req.method === "GET") return json(res, 200, sessionView(auth));
@@ -240,18 +275,31 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         reject(405, "method_not_allowed", "Method not allowed");
       }
       const revokeMatch = /^\/api\/rooms\/([a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127})\/invitations\/([a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127})\/revoke$/.exec(url.pathname);
-      const match = /^\/api\/rooms\/([a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127})(?:\/(commands|events|stream|cursor|return-brief|invitations))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127})(?:\/(commands|events|stream|cursor|return-brief|invitations|share-links|share-links-cancel))?$/.exec(url.pathname);
       if (!match && !revokeMatch) reject(404, "not_found", "Not found");
       const roomId = (match ?? revokeMatch)[1];
       const route = match ? (match[2] ?? "") : "invitation-revoke";
       const selected = roomCredentials(req, url);
-      const fence = expectedBinding(req);
-      const auth = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence) : store.authenticate(selected.token, roomId, fence);
+      const fence = selected.mode === "account" ? accountBinding(req, route === "stream" ? url : null) : expectedBinding(req);
+      const auth = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
+        : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
       if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
       if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
       rate(`read:${auth.credentialHash}`, 600);
       if (!["GET", "HEAD"].includes(req.method)) { protectWrite(req, auth, selected.bearer); rate(`write:${auth.credentialHash}`, 60); }
       if (!route && req.method === "GET") return json(res, 200, store.snapshot(selected.token, roomId, fence));
+      if (route === "share-links" && req.method === "GET") return json(res, 200, store.shareLinks.list(selected.token, roomId, fence));
+      if (route === "share-links" && req.method === "POST") {
+        const data = await body(req);
+        if (!exact(data, ["requestId", "linkToken", "expiresAt", "maxJoins", "expectedMemberRevision"])) reject(422, "invalid_link", "Supply the exact invitation link settings");
+        const result = store.shareLinks.create(selected.token, roomId, data, fence);
+        return json(res, result.duplicate ? 200 : 201, result);
+      }
+      if (route === "share-links-cancel" && req.method === "POST") {
+        const data = await body(req);
+        if (!exact(data, ["linkId"])) reject(422, "invalid_link", "Select one invitation link to cancel");
+        return json(res, 200, store.shareLinks.cancel(selected.token, roomId, data.linkId, fence));
+      }
       if (route === "events" && req.method === "GET") return json(res, 200, store.eventsAfter(selected.token, roomId, Number(url.searchParams.get("after") || 0), Number(url.searchParams.get("limit") || 100), fence));
       if (route === "stream" && req.method === "GET") return stream(req, res, selected.token, roomId, Number(req.headers["last-event-id"] ?? url.searchParams.get("after") ?? 0), auth);
       if (route === "commands" && req.method === "POST") {
@@ -279,7 +327,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (selected.mode !== "account" || selected.bearer) reject(403, "account_session_required", "Invitation administration requires an account browser session");
         const data = await body(req);
         if (!exact(data, ["expectedRevision", "reason"])) reject(422, "invalid_invitation_change", "Invitation revision and reason required");
-        return json(res, 200, store.revokeInvitation(selected.token, revokeMatch[2], { expectedRevision: data.expectedRevision, reason: data.reason, expectedSessionBinding: auth.sessionBinding }));
+        return json(res, 200, store.revokeInvitation(selected.token, revokeMatch[2], { expectedRevision: data.expectedRevision, reason: data.reason, expectedSessionBinding: auth.sessionBinding, expectedRoomId: roomId }));
       }
       reject(405, "method_not_allowed", "Method not allowed");
     } catch (error) {

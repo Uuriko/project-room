@@ -1,6 +1,8 @@
 import { EVENT_TYPES as T, WORK_STATES as S } from "./events.js";
 import { AccountClient, RoomClient, draftCommand } from "./client.js";
 import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts } from "./conversation.js";
+import { nextWorkStep, verificationSatisfied } from "./workflow.js";
+import { consumeJoinFragment, installShareLinks } from "./share-links.js";
 
 const $ = selector => document.querySelector(selector);
 const invitationTokenPattern = /^[A-Za-z0-9_-]{43}$/;
@@ -17,7 +19,9 @@ function selectedRoomFromLocation() {
   const values = new URLSearchParams(location.search).getAll("room");
   return values.length === 1 && roomIdPattern.test(values[0]) ? values[0] : null;
 }
+const initialJoinFragment = consumeJoinFragment();
 const initialInvitationFragment = consumeInvitationFragment();
+let shareLinksUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
 let workDraftId = null, replyToId = null, busy = false;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
@@ -35,6 +39,7 @@ const invitation = {
   phase: "idle", version: 0, secret: null, preview: null, redemptionId: null,
   opener: null, openerSelection: null, sourceRoomSession: null, sourceAccountSession: null
 };
+const invitationIsCommitting = () => ["authenticating", "accepting", "opening"].includes(invitation.phase);
 const accountClient = new AccountClient();
 document.addEventListener("focusin", event => {
   if (!$("#invitation-dialog").contains(event.target)
@@ -62,6 +67,7 @@ const client = new RoomClient({
     $("#identity-label").textContent = `${memberLabel(session.member.id)} · ${session.member.kind}`;
     $("#cursor-label").textContent = `Your caught-up marker: ${snapshot.cursor} · room event ${snapshot.sequence}`;
     render();
+    shareLinksUI?.sync();
     if (firstSnapshot) loadReturnBrief().catch(handleFailureNotice);
     if (firstSnapshot) revealLocationHash();
   },
@@ -73,6 +79,7 @@ const client = new RoomClient({
     releaseSubmission(submitControls);
     submitOperationId += 1; busy = false;
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null;
+    shareLinksUI?.resetManagement();
     workDraftId = null; replyToId = null;
     currentThreadId = null; conversation = null; drafts = new ConversationDrafts();
     viewPositions.clear(); pendingReactions.clear(); locallyOwnedMessageIds.clear(); newVisibleMessages = 0; returnBrief = null; returnBriefRequestId += 1; returnBriefLoading = false;
@@ -102,19 +109,16 @@ const client = new RoomClient({
     const openingAcceptedRoom = endedContext === "accepted-room-switch";
     const openingInvitedRoom = endedContext === "invited-room-switch";
     const switchedAccount = endedContext === "account-switch";
-    setFormStatus($("#auth-error"), openingAcceptedRoom
-      ? "Membership accepted. Opening the conversation…"
-      : openingInvitedRoom ? "Checking membership and opening the conversation…"
-        : switchedAccount ? "The browser account changed; private Room state and drafts were cleared."
-          : "Sign in with an active key. Session ended; private drafts were cleared.", !openingAcceptedRoom && !openingInvitedRoom);
+    setFormStatus($("#auth-error"), openingAcceptedRoom || openingInvitedRoom || $("#invitation-dialog").open ? ""
+      : switchedAccount ? "The browser account changed; private Room state and drafts were cleared."
+        : "Sign in with an active key. Session ended; private drafts were cleared.", true);
     setConnectionStatus(openingAcceptedRoom || openingInvitedRoom ? "Opening Room…" : "Not connected");
     if ($("#invitation-dialog").open && invitation.preview) {
       if (!accountClient.session?.authenticated && ["ready", "wrong-account", "changed-account"].includes(invitation.phase)) invitation.phase = "needs-account";
       renderInvitation();
     }
     if (!pendingSignout) queueMicrotask(() => {
-      if ($("#invitation-dialog").open) $("#invitation-title").focus({ preventScroll: true });
-      else $("#access-key").focus({ preventScroll: true });
+      if (!$("#invitation-dialog").open) $("#access-key").focus({ preventScroll: true });
     });
   }
 });
@@ -207,23 +211,32 @@ function currentInvitation(version, secret) {
 function setInvitationFeedback(text, error = false) {
   $("#invitation-status").textContent = error ? "" : text;
   $("#invitation-error").textContent = error ? text : "";
+  if (error && text) {
+    const version = invitation.version;
+    queueMicrotask(() => {
+      if (version !== invitation.version || !$("#invitation-dialog").open || $("#invitation-error").textContent !== text) return;
+      const usable = element => !element.disabled && element.getClientRects().length > 0;
+      const target = [$("#invitation-account-key"), $("#invitation-accept"), $("#invitation-dismiss")].find(usable) ?? $("#invitation-title");
+      target.focus({ preventScroll: false });
+    });
+  }
 }
 function configureAuthPanel(roomId = selectedRoomFromLocation()) {
   const accountMode = Boolean(roomId);
   $("#access-key-label").textContent = accountMode ? "Your account access key" : "Your human member access key";
   $("#auth-description").textContent = accountMode
     ? `Sign in to open #${roomId} with a canonical account that already has membership there.`
-    : "A place for people and agents to talk, explore, and work together. This private pilot uses separately provisioned room keys.";
+    : "Have an invitation link? Open it, choose your name, and join. No access key needed.";
   $("#auth-hint").textContent = accountMode
     ? "An account key proves the account; it does not itself grant Room membership. Never put a key in a URL, chat, logs, or GitHub."
-    : "Use a key issued by the room administrator. Never share keys in chat or GitHub. Public sign-up and connected AI runtimes are not included in this pilot.";
+    : "No link yet? Ask a room administrator to use ‘Invite people.’ Existing members can still use their own access key above. Never share your personal key.";
   $("#auth-form button[type='submit']").textContent = accountMode ? "Open room" : "Enter room";
 }
 function renderInvitation() {
   const preview = invitation.preview;
   const phase = invitation.phase;
-  const pending = preview?.status === "pending";
-  const accepted = preview?.status === "accepted";
+  const pending = preview?.status === "pending" && phase !== "terminal";
+  const accepted = preview?.status === "accepted" && phase !== "terminal";
   const authenticated = Boolean(accountClient.session?.authenticated && accountClient.session.account);
   const switchingAccount = ["wrong-account", "changed-account"].includes(phase);
   const loading = ["previewing", "authenticating", "accepting", "opening"].includes(phase);
@@ -244,24 +257,34 @@ function renderInvitation() {
     $("#invitation-expires").textContent = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(expiry);
   }
   let summary = phase === "terminal" ? "This invitation is unavailable." : "Loading the invitation’s exact Room and membership scope…";
-  if (preview) summary = pending
+  if (preview && phase !== "terminal") summary = pending
     ? `${preview.displayName} is invited to join ${preview.roomTitle || preview.roomId} as ${humanize(preview.role)}.`
     : accepted ? "This invitation has already been accepted. Sign in with an authorized account to open the Room."
       : preview.status === "expired" ? "This invitation has expired. Ask a current Room administrator for a new one."
         : preview.status === "revoked" ? "This invitation was revoked. Ask a current Room administrator if you still need access."
           : "The inviter’s authority changed. Ask a current Room administrator for a new invitation.";
+  if (phase === "unknown") summary = "Acceptance has not been confirmed. Check the result before leaving this invitation.";
   $("#invitation-summary").textContent = summary;
   const mayAuthenticate = Boolean(preview && (pending || accepted));
   $("#invitation-account-form").hidden = !mayAuthenticate || (authenticated && !switchingAccount) || phase === "accepting" || phase === "opening";
   for (const control of $("#invitation-account-form").querySelectorAll("input, button")) control.disabled = loading;
+  $("#invitation-account-hint").textContent = accepted
+    ? "This invitation was already accepted. Sign in with an account that has membership to open the Room."
+    : "The invitation offers Room membership; your separately provisioned account key identifies the account that would accept it.";
+  $("#invitation-account-form button").textContent = accepted ? "Sign in to open room" : "Sign in to review acceptance";
+  $("#invitation-account-warning").hidden = !state;
   const action = $("#invitation-accept");
   action.hidden = !(authenticated && (pending || accepted) && !switchingAccount);
   action.disabled = loading;
   action.textContent = accepted ? "Open room" : phase === "unknown" ? "Check acceptance again" : "Accept and open room";
-  $("#invitation-dismiss").disabled = phase === "accepting" || phase === "opening";
+  $("#invitation-dismiss").disabled = invitationIsCommitting();
 }
 function closeInvitation({ returnFocus = true } = {}) {
-  if (["accepting", "opening"].includes(invitation.phase)) return;
+  if (invitationIsCommitting()) return;
+  if (invitation.phase === "unknown" && !window.confirm("Acceptance may already have completed. Closing clears this tab’s retry information. To check later, reopen the original invitation link and sign in with the same account. Close anyway?")) {
+    $("#invitation-accept").focus({ preventScroll: false });
+    return;
+  }
   const opener = invitation.opener;
   invitation.version += 1;
   const selection = invitation.openerSelection;
@@ -269,6 +292,7 @@ function closeInvitation({ returnFocus = true } = {}) {
   setInvitationFeedback("");
   $("#invitation-account-form").reset();
   if ($("#invitation-dialog").open) $("#invitation-dialog").close();
+  $("#connection-status").setAttribute("aria-live", "polite");
   if (returnFocus) queueMicrotask(() => {
     const usable = node => node?.isConnected && !node.disabled && !node.hidden && node.getClientRects().length > 0;
     const fallback = state ? $("#message-input") : $("#access-key");
@@ -281,6 +305,12 @@ function closeInvitation({ returnFocus = true } = {}) {
   });
 }
 async function openInvitation(fragment) {
+  // A newly opened fragment must not replace the owner of an in-flight account change.
+  if (invitationIsCommitting()) return;
+  if (invitation.phase === "unknown" && $("#invitation-dialog").open) {
+    setInvitationFeedback("Check the current acceptance result or close it explicitly before reviewing another invitation.", true);
+    return;
+  }
   invitation.version += 1;
   const version = invitation.version;
   const active = document.activeElement === document.body ? null : document.activeElement;
@@ -307,6 +337,7 @@ async function openInvitation(fragment) {
   });
   setInvitationFeedback(fragment.valid ? "Checking the invitation without joining the Room…" : "This invitation link is unavailable.", !fragment.valid);
   renderInvitation();
+  $("#connection-status").setAttribute("aria-live", "off");
   if (!$("#invitation-dialog").open) $("#invitation-dialog").showModal();
   queueMicrotask(() => $("#invitation-title").focus({ preventScroll: true }));
   if (!fragment.valid) return;
@@ -356,7 +387,9 @@ async function openAcceptedRoom(roomId, message, { acceptanceConfirmed = true } 
   invitation.phase = "opening";
   invitation.secret = null;
   renderInvitation();
+  setInvitationFeedback("");
   $("#invitation-dialog").close();
+  $("#connection-status").setAttribute("aria-live", "polite");
   $("#invitation-account-form").reset();
   accessEndContext = acceptanceConfirmed ? "accepted-room-switch" : "invited-room-switch";
   client.endAccess();
@@ -372,8 +405,9 @@ async function openAcceptedRoom(roomId, message, { acceptanceConfirmed = true } 
     Object.assign(invitation, { phase: "terminal", preview: null, redemptionId: null, opener: null, openerSelection: null, sourceRoomSession: null, sourceAccountSession: null });
     setFormStatus($("#auth-error"), acceptanceConfirmed
       ? "Your membership was accepted, but the conversation could not be loaded. Refresh or sign in with the same account; do not accept the invitation again."
-      : "This account could not open the invited Room. Sign in with the account that accepted the invitation.", true);
-    setConnectionStatus(acceptanceConfirmed ? "Membership accepted · conversation not loaded" : "Invited Room not opened");
+      : [401, 403].includes(error.status) ? "This account could not open the invited Room. Sign in with the account that accepted the invitation."
+        : "This invitation was already accepted, but the Room could not be loaded. Refresh to try again; no new acceptance is needed.", true);
+    setConnectionStatus(acceptanceConfirmed ? "Membership accepted · conversation not loaded" : "Invitation already accepted · Room not loaded");
     $("#auth-panel").hidden = false;
     queueMicrotask(() => $("#access-key").focus({ preventScroll: true }));
   }
@@ -611,9 +645,7 @@ function revealLocationHash() {
   }
 }
 function readyForDecision(i) {
-  const verificationSatisfied = !i.independentVerificationRequired
-    || (i.verification?.result === "pass" && i.verification.independenceConfirmed === true);
-  return i.ownerDecisionRequired && !i.decision && i.state === S.COMPLETED && verificationSatisfied;
+  return i.ownerDecisionRequired && !i.decision && i.state === S.COMPLETED && verificationSatisfied(i);
 }
 function hasReportedProducer(i) { return i.receipt?.producerAttribution === "reported" && i.receipt.producerId != null; }
 function hasIndependentProducer(i) { return hasReportedProducer(i) && i.receipt.producerId !== i.verifierMemberId; }
@@ -662,11 +694,14 @@ function receiptCard(i) {
   return `<div class="receipt"><p class="receipt-label">REPORTED COMPLETION · NOT AUTOMATIC VERIFICATION</p><dl class="receipt-attribution"><div><dt>Completion reporter</dt><dd>${esc(reporter)}</dd></div><div><dt>Producer</dt><dd>${esc(producer)}</dd></div></dl><p>${esc(receipt.summary)}</p><a href="${safeUrl(receipt.evidenceUrl)}" target="_blank" rel="noreferrer" data-focus-key="work-evidence:${esc(i.id)}">Open submitted evidence ↗</a><code>${esc(receipt.evidenceVersion)}</code><p>${esc(receipt.nextAction)}</p>${verification}</div>`;
 }
 function workCard(i) {
+  const next = nextWorkStep(i);
+  const nextActor = next.memberId ? `${memberLabel(next.memberId)} — ` : "";
+  const nextLine = `<p class="work-next-step" data-next-step="${esc(next.action)}"><strong>Next:</strong> ${esc(nextActor + next.label)}</p>`;
   const source = i.sourceMessageId ? `<a class="source-link" href="${esc(recordHref("message", i.sourceMessageId))}" data-open-message="${esc(i.sourceMessageId)}" data-focus-key="work-source:${esc(i.id)}">From this conversation</a>` : "";
   const blocker = i.blocker ? `<div class="blocker"><strong>Blocked</strong><p>${esc(i.blocker.reason)}</p><p>${esc(i.blocker.nextAction)}</p></div>` : "";
   const decision = i.decision ? `<div class="decision"><strong>${esc(humanize(i.decision.decision))}</strong><p>${esc(i.decision.reason)}</p></div>` : "";
   const claim = i.claim ? `<details class="claim"><summary data-focus-key="work-claim:${esc(i.id)}">Recorded scope · ${esc(claimStateLabel(i))}</summary><p>${esc(i.claim.repository)}:${esc(i.claim.ref)}</p><p>${esc(i.claim.paths.join(", "))}</p><p>Expires ${esc(i.claim.expiresAt)}. This service does not execute external actions.</p></details>` : "";
-  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${i.state}">${esc(i.state)}</span><span class="mode">${esc(i.mode)} · revision ${i.revision}</span></div><h3>${esc(i.title)}</h3>${source}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div><div><dt>Verifier</dt><dd>${esc(memberLabel(i.verifierMemberId))}</dd></div></dl>${receiptCard(i)}${blocker}${decision}${claim}<div class="work-actions">${actions(i)}</div></article>`;
+  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${i.state}">${esc(i.state)}</span><span class="mode">${esc(i.mode)} · revision ${i.revision}</span></div><h3>${esc(i.title)}</h3>${source}<p class="definition">${esc(i.definitionOfDone)}</p>${nextLine}<dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div><div><dt>Verifier</dt><dd>${esc(memberLabel(i.verifierMemberId))}</dd></div></dl>${receiptCard(i)}${blocker}${decision}${claim}<div class="work-actions">${actions(i)}</div></article>`;
 }
 // Quiet Focus A4: a failed send reports beside the composer that holds the draft,
 // not only in the page-level status area; the Send button is the retry and the
@@ -719,16 +754,32 @@ async function submit(form, fn, { failureHint } = {}) {
   }
 }
 $("#invitation-dismiss").addEventListener("click", () => closeInvitation());
+$("#invitation-dialog").addEventListener("keydown", e => {
+  if (e.key !== "Tab") return;
+  const controls = [...e.currentTarget.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex='-1'])")]
+    .filter(element => element.getClientRects().length > 0);
+  const first = controls[0], last = controls.at(-1), active = document.activeElement;
+  if (!first || !controls.includes(active) || (e.shiftKey ? active === first : active === last)) {
+    e.preventDefault();
+    (e.shiftKey ? last : first)?.focus();
+    if (!first) $("#invitation-title").focus();
+  }
+});
 $("#invitation-dialog").addEventListener("cancel", e => {
   e.preventDefault();
-  if (!["accepting", "opening"].includes(invitation.phase)) closeInvitation();
+  closeInvitation();
 });
 $("#invitation-account-form").addEventListener("submit", async e => {
   e.preventDefault();
-  if (!invitation.secret || !invitation.preview || ["authenticating", "accepting", "opening"].includes(invitation.phase)) return;
+  if (!invitation.secret || !invitation.preview || invitationIsCommitting() || invitation.phase === "terminal") return;
   const version = invitation.version, secret = invitation.secret;
   const accessKey = $("#invitation-account-key").value.trim();
   const roomBefore = state && session ? session : null;
+  if (roomBefore) {
+    saveComposer();
+    if ((drafts.hasText() || !$("#new-work-form").hidden || $("#action-dialog").open)
+      && !window.confirm("Signing in with a different account clears this Room’s unsent drafts and forms before acceptance. Continue with this account key?")) return;
+  }
   if (roomBefore) { saveComposer(); client.disconnect(); }
   invitation.phase = "authenticating";
   setInvitationFeedback("Confirming the account. This does not accept the invitation…");
@@ -773,7 +824,7 @@ $("#invitation-account-form").addEventListener("submit", async e => {
 $("#invitation-accept").addEventListener("click", async () => {
   const preview = invitation.preview;
   const accountSession = accountClient.session;
-  if (!invitation.secret || !preview || !accountSession?.authenticated || !accountSession.account || ["accepting", "opening"].includes(invitation.phase)) return;
+  if (!invitation.secret || !preview || !accountSession?.authenticated || !accountSession.account || invitationIsCommitting() || invitation.phase === "terminal") return;
   const version = invitation.version, secret = invitation.secret;
   if (preview.status === "accepted") {
     invitation.phase = "opening";
@@ -881,7 +932,7 @@ $("#auth-form").addEventListener("submit", async e => {
   if (state) revealLocationHash();
 });
 $("#signout-button").addEventListener("click", async () => {
-  if (busy || signoutLoading || !state || !session || ["accepting", "opening"].includes(invitation.phase)) return;
+  if (busy || signoutLoading || !state || !session || invitationIsCommitting()) return;
   saveComposer();
   if (drafts.hasText() || !$("#new-work-form").hidden || $("#action-dialog").open) {
     if (!window.confirm("Sign out and clear unsent drafts on this device?")) return;
@@ -1194,7 +1245,7 @@ $("#action-form").addEventListener("submit", e => {
 window.addEventListener("beforeunload", e => {
   if (state) saveComposer();
   if ((state && (drafts.hasText() || !$("#new-work-form").hidden || $("#action-dialog").open))
-    || ["accepting", "unknown"].includes(invitation.phase)) { e.preventDefault(); e.returnValue = ""; }
+    || invitationIsCommitting() || invitation.phase === "unknown") { e.preventDefault(); e.returnValue = ""; }
 });
 window.addEventListener("pagehide", () => client.endAccess());
 window.addEventListener("pageshow", e => {
@@ -1384,9 +1435,26 @@ $("#rb-ack-button").addEventListener("click", async () => {
     }
   }
 });
+shareLinksUI = installShareLinks({ client, accountClient, getState: () => state, getSession: () => session,
+  async openRoom(roomId, roomMode, joinedSession) {
+    if (state && session?.roomId === roomId && session.member.id === joinedSession?.member?.id
+      && session.account?.id === joinedSession.account?.id && session.sessionBinding === joinedSession.sessionBinding) {
+      await client.refresh();
+      if (!state || !session) throw new Error("Room access changed. Reopen the invitation.");
+      return;
+    }
+    accessEndContext = "accepted-room-switch";
+    client.endAccess();
+    history.replaceState(history.state, "", roomMode ? location.pathname : `${location.pathname}?room=${encodeURIComponent(roomId)}`);
+    configureAuthPanel(roomMode ? null : roomId);
+    const restored = await client.restore(roomMode ? null : roomId);
+    if (!restored) throw new Error("Browser identity changed. Reopen the invitation.");
+  }
+});
 configureAuthPanel();
 if (initialInvitationFragment) openInvitation(initialInvitationFragment);
 (async () => {
+  if (initialJoinFragment) { await shareLinksUI.open(initialJoinFragment); return; }
   const requestedRoom = selectedRoomFromLocation();
   if (requestedRoom) {
     const account = await ensureAccountSession();
