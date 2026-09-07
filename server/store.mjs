@@ -6,6 +6,7 @@ import {
   MEMBERSHIP_AUTHORITY_POLICY_VERSION, validId
 } from "../src/events.js";
 import { buildReturnBrief, resolveHistoryWindow, RETURN_BRIEF_DEFAULT_LIMIT } from "./return-brief.mjs";
+import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal } from "./invitation-journal.mjs";
 
 export class ServiceError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -156,15 +157,23 @@ export function validateCommand(command) {
 }
 
 export class RoomStore {
-  constructor(filename, { now = () => Date.now() } = {}) {
+  constructor(filename, { now = () => Date.now(), readOnly = false } = {}) {
     this.now = now;
-    this.db = new DatabaseSync(filename);
+    this.db = new DatabaseSync(filename, { readOnly });
     const version = this.db.prepare("PRAGMA user_version").get().user_version;
-    const supported = new Set([0, 1, 2, 3, 4]);
+    const supported = new Set([0, 1, 2, 3, 4, 5]);
     const hasSchema = version === 0 && Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' LIMIT 1").get());
     if (!supported.has(version) || hasSchema) {
       this.db.close();
-      throw new Error(version > 4 ? "Database schema is newer than this service" : "Database schema version is unsupported");
+      throw new Error(version > 5 ? "Database schema is newer than this service" : "Database schema version is unsupported");
+    }
+    if (readOnly) {
+      try {
+        if (version !== 5) throw new Error("Read-only invitation audit requires schema v5; migrate a backed-up database through the service first");
+        this.db.exec("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=3000;");
+        this.verifyInvitationAudit();
+        return;
+      } catch (error) { this.db.close(); throw error; }
     }
     this.db.exec("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=3000;");
     if (version === 0) this.db.exec(`BEGIN IMMEDIATE;
@@ -184,6 +193,10 @@ export class RoomStore {
     this.repairProjectionProvenance({ upgradeV1: version === 1 });
     if (version === 1 || version === 2) this.migrateIdentityV3(version);
     if (version === 1 || version === 2 || version === 3) this.migrateInvitationsV4();
+    try {
+      if (version < 5) this.migrateInvitationJournalV5();
+      this.verifyInvitationAudit();
+    } catch (error) { this.db.close(); throw error; }
   }
 
   // v2 had only Room-local member identities. Give each historical human membership its
@@ -227,6 +240,80 @@ export class RoomStore {
       this.db.exec(invitationSchema);
       this.db.exec("PRAGMA user_version=4");
     });
+  }
+  migrateInvitationJournalV5() {
+    this.transaction(() => {
+      this.db.exec(invitationJournalSchema);
+      for (const record of this.db.prepare("SELECT * FROM membership_invitations ORDER BY id").all()) {
+        this.appendInvitationJournal(record, "legacy-v4-baseline");
+        this.verifyInvitationRecord(record.id);
+      }
+      this.db.exec("PRAGMA user_version=5");
+    });
+  }
+  appendInvitationJournal(record, kind) {
+    const rows = this.db.prepare("SELECT * FROM membership_invitation_journal WHERE invitation_id=? ORDER BY sequence").all(record.id);
+    const audits = this.db.prepare("SELECT * FROM membership_invitation_events WHERE invitation_id=? ORDER BY sequence").all(record.id);
+    const entry = invitationJournalEntry(record, audits, kind, this.now(), rows.at(-1));
+    try { replayInvitationJournal([...rows, entry]); }
+    catch { fail(503, "invitation_integrity_error", "Invitation record requires operator reconciliation"); }
+    this.db.prepare("INSERT INTO membership_invitation_journal(invitation_id,sequence,body,checksum) VALUES(?,?,?,?)")
+      .run(entry.invitation_id, entry.sequence, entry.body, entry.checksum);
+  }
+  verifyInvitationRecord(invitationId) {
+    try {
+      const stored = this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(invitationId);
+      const journal = this.db.prepare("SELECT * FROM membership_invitation_journal WHERE invitation_id=? ORDER BY sequence").all(invitationId);
+      const replayed = replayInvitationJournal(journal);
+      const audits = this.db.prepare("SELECT * FROM membership_invitation_events WHERE invitation_id=? ORDER BY sequence").all(invitationId);
+      if (canonicalInvitationData(stored) !== canonicalInvitationData(replayed.record)
+        || canonicalInvitationData(audits) !== canonicalInvitationData(replayed.audits)) throw new Error("Projection differs from journal");
+      if (stored.status === "accepted") {
+        const linked = this.db.prepare("SELECT body,room_id FROM events WHERE id=?").get(stored.joined_event_id);
+        const joined = linked && JSON.parse(linked.body);
+        const binding = this.db.prepare("SELECT account_id,origin FROM member_accounts WHERE room_id=? AND member_id=?").get(stored.room_id, stored.intended_member_id);
+        const member = this.room(stored.room_id).state.members[stored.intended_member_id];
+        const expectedOrigin = { kind: "invitation", invitationId: stored.id, invitedByMemberId: stored.issuer_member_id };
+        if (!joined || linked.room_id !== stored.room_id || joined.roomId !== stored.room_id
+          || joined.id !== stored.joined_event_id || joined.type !== T.MEMBER_JOINED_VIA_INVITATION || joined.actorId !== stored.intended_member_id
+          || joined.at !== new Date(stored.accepted_at).toISOString()
+          || canonicalInvitationData(joined.data) !== canonicalInvitationData({
+            memberId: stored.intended_member_id, displayName: stored.intended_display_name, role: stored.intended_role,
+            permissions: JSON.parse(stored.intended_permissions_json), invitedByMemberId: stored.issuer_member_id,
+            invitationId: stored.id, rolePolicyVersion: stored.role_policy_version, authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION
+          }) || binding?.account_id !== stored.intended_account_id || binding.origin !== `invitation:${stored.id}`
+          || member?.id !== stored.intended_member_id || member.kind !== "human"
+          || canonicalInvitationData(member.membershipOrigin) !== canonicalInvitationData(expectedOrigin)) throw new Error("Membership evidence differs from journal");
+      }
+      return replayed;
+    } catch { fail(503, "invitation_integrity_error", "Invitation record requires operator reconciliation"); }
+  }
+  verifyInvitationAudit() {
+    return this.readTransaction(() => {
+      const records = this.db.prepare("SELECT id FROM membership_invitations ORDER BY id").all();
+      if (this.db.prepare("SELECT 1 FROM membership_invitation_journal j LEFT JOIN membership_invitations i ON i.id=j.invitation_id WHERE i.id IS NULL LIMIT 1").get()) {
+        fail(503, "invitation_integrity_error", "Invitation record requires operator reconciliation");
+      }
+      const result = { consistent: true, invitations: records.length, legacyBaselines: 0, journalEntries: 0 };
+      for (const { id } of records) {
+        const verified = this.verifyInvitationRecord(id);
+        result.legacyBaselines += Number(verified.legacyBaseline);
+        result.journalEntries += verified.journalSequence;
+      }
+      return result;
+    });
+  }
+  verifyInvitedMembership(roomId, member) {
+    const accepted = this.db.prepare("SELECT id FROM membership_invitations WHERE room_id=? AND intended_member_id=? AND status='accepted'").get(roomId, member.id);
+    const binding = this.db.prepare("SELECT origin FROM member_accounts WHERE room_id=? AND member_id=?").get(roomId, member.id);
+    const fromBinding = binding?.origin?.startsWith("invitation:") ? binding.origin.slice("invitation:".length) : null;
+    const fromProjection = member.membershipOrigin?.kind === "invitation" ? member.membershipOrigin.invitationId : null;
+    const invitationId = accepted?.id ?? fromBinding ?? fromProjection;
+    if (!invitationId) return;
+    const verified = this.verifyInvitationRecord(invitationId);
+    if (verified.record.status !== "accepted" || verified.record.room_id !== roomId || verified.record.intended_member_id !== member.id) {
+      fail(503, "invitation_integrity_error", "Invitation record requires operator reconciliation");
+    }
   }
   // Deterministic upgrade repair: persisted projections are not replayed on startup. Recover
   // proposers and authenticated completion reporters from their own authoritative envelopes,
@@ -537,6 +624,7 @@ export class RoomStore {
     if (!binding) fail(403, "access_denied", "This account has no membership in that Room");
     const member = this.room(roomId).state.members[binding.member_id];
     if (!member || member.kind !== "human" || member.active === false) fail(403, "access_denied", "Active human Room membership required");
+    this.verifyInvitedMembership(roomId, member);
     return { ...auth, member, roomId };
   }
   ensureHumanAccountBinding(roomId, memberId, requestedAccountId = null, origin = "local-provisioning") {
@@ -587,6 +675,7 @@ export class RoomStore {
       const prior = this.db.prepare("SELECT * FROM membership_invitations WHERE room_id=? AND issuer_account_id=? AND issue_request_id=?")
         .get(roomId, issuer.account.id, requestId);
       if (prior) {
+        this.verifyInvitationRecord(prior.id);
         if (prior.issue_fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Invitation request ID already used for different scope");
         return { invitation: invitationView(prior, this.now(), { includeScope: true }), duplicate: true };
       }
@@ -620,6 +709,7 @@ export class RoomStore {
         invitation_id,sequence,type,actor_account_id,actor_member_id,actor_auth_epoch,actor_session_revision,invitation_revision,at,room_event_id,reason
       ) VALUES(?,1,'issued',?,?,?,?,0,?,NULL,NULL)`).run(invitationId, issuer.account.id, issuer.member.id, issuer.account.authEpoch, issuer.sessionRevision, now);
       const row = this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(invitationId);
+      this.appendInvitationJournal(row, "issued");
       return { invitation: invitationView(row, now, { includeScope: true }), duplicate: false };
     });
   }
@@ -628,6 +718,7 @@ export class RoomStore {
     return this.readTransaction(() => {
       const row = this.db.prepare("SELECT i.*,r.projection FROM membership_invitations i JOIN rooms r ON r.id=i.room_id WHERE i.token_hash=?").get(hash(token));
       if (!row) fail(404, "invitation_unavailable", "Invitation is unavailable");
+      this.verifyInvitationRecord(row.id);
       const room = JSON.parse(row.projection);
       let status = invitationStatus(row, this.now());
       if (status === "pending") {
@@ -660,6 +751,7 @@ export class RoomStore {
       if (!row) fail(404, "invitation_not_found", "Invitation not found");
       const actor = this.authenticateAccountSession(accountSessionToken, row.room_id, expectedSessionBinding);
       if (!actor.member.permissions.includes("manage_members")) fail(403, "access_denied", "Current membership administration grant required");
+      this.verifyInvitationRecord(row.id);
       if (row.revision !== expectedRevision) fail(409, "stale_invitation_revision", "Invitation changed; refresh before revoking it");
       if (row.status !== "pending") fail(409, "invitation_not_pending", "Only a pending invitation can be revoked");
       const revision = row.revision + 1, now = this.now();
@@ -669,7 +761,9 @@ export class RoomStore {
       this.db.prepare(`INSERT INTO membership_invitation_events(
         invitation_id,sequence,type,actor_account_id,actor_member_id,actor_auth_epoch,actor_session_revision,invitation_revision,at,room_event_id,reason
       ) VALUES(?,2,'revoked',?,?,?,?,?,?,NULL,?)`).run(invitationId, actor.account.id, actor.member.id, actor.account.authEpoch, actor.sessionRevision, revision, now, reason.trim());
-      return { invitation: invitationView(this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(invitationId), now, { includeScope: true }), duplicate: false };
+      const revoked = this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(invitationId);
+      this.appendInvitationJournal(revoked, "revoked");
+      return { invitation: invitationView(revoked, now, { includeScope: true }), duplicate: false };
     });
   }
   acceptInvitation(accountSessionToken, token, { redemptionId, expectedRevision, expectedSessionBinding } = {}) {
@@ -682,6 +776,7 @@ export class RoomStore {
       const row = this.db.prepare("SELECT * FROM membership_invitations WHERE token_hash=?").get(hash(token));
       if (!row) fail(404, "invitation_unavailable", "Invitation is unavailable");
       if (row.intended_account_id !== accountSession.account.id) fail(403, "invitation_account_mismatch", "Invitation belongs to a different account");
+      this.verifyInvitationRecord(row.id);
       if (row.status === "accepted") {
         if (row.redemption_id !== redemptionId) fail(409, "invitation_already_used", "Invitation was already accepted by this account through another request");
         const auth = this.authenticateAccountSession(accountSessionToken, row.room_id, expectedSessionBinding);
@@ -747,6 +842,7 @@ export class RoomStore {
       this.db.prepare(`INSERT INTO membership_invitation_events(
         invitation_id,sequence,type,actor_account_id,actor_member_id,actor_auth_epoch,actor_session_revision,invitation_revision,at,room_event_id,reason
       ) VALUES(?,2,'accepted',?,?,?,?,1,?,?,NULL)`).run(row.id, accountSession.account.id, row.intended_member_id, accountSession.account.authEpoch, accountSession.sessionRevision, now, incoming.id);
+      this.appendInvitationJournal(this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(row.id), "accepted");
       const authorized = this.authenticateAccountSession(accountSessionToken, row.room_id, expectedSessionBinding);
       return {
         invitation: invitationView(this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(row.id), now, { includeScope: true }),
@@ -812,6 +908,7 @@ export class RoomStore {
     const members = this.room(row.room_id).state.members;
     const member = Object.hasOwn(members, row.member_id) && members[row.member_id];
     if (!member || member.active === false) fail(403, "access_denied", "Room membership is inactive");
+    this.verifyInvitedMembership(row.room_id, member);
     let account = null;
     if (member.kind === "human") {
       const invalidAccount = !row.account_id || row.account_id !== row.bound_account_id || row.account_active !== 1

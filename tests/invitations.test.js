@@ -430,11 +430,11 @@ test("v3 to v4 is additive and a failed migration leaves the v3 database untouch
     accounts: store.db.prepare("SELECT * FROM accounts ORDER BY id").all().map(row => ({ ...row })),
     bindings: store.db.prepare("SELECT * FROM member_accounts ORDER BY room_id,member_id").all().map(row => ({ ...row }))
   };
-  store.db.exec("DROP TABLE membership_invitation_events; DROP TABLE membership_invitations; DROP TABLE account_session_slots; DROP TABLE account_credentials; PRAGMA user_version=3");
+  store.db.exec("DROP TABLE membership_invitation_journal; DROP TABLE membership_invitation_events; DROP TABLE membership_invitations; DROP TABLE account_session_slots; DROP TABLE account_credentials; PRAGMA user_version=3");
   store.close();
 
   store = new RoomStore(filename);
-  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 4);
+  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 5);
   assert.deepEqual({
     rooms: store.db.prepare("SELECT * FROM rooms ORDER BY id").all().map(row => ({ ...row })),
     events: store.db.prepare("SELECT * FROM events ORDER BY room_id,sequence").all().map(row => ({ ...row })),
@@ -447,7 +447,7 @@ test("v3 to v4 is additive and a failed migration leaves the v3 database untouch
   const broken = join(directory, "broken.sqlite");
   store = new RoomStore(broken);
   store.initialize(initialRoom("broken", "owner"));
-  store.db.exec("DROP TABLE membership_invitation_events; DROP TABLE membership_invitations; DROP TABLE account_session_slots; DROP TABLE account_credentials; PRAGMA user_version=3");
+  store.db.exec("DROP TABLE membership_invitation_journal; DROP TABLE membership_invitation_events; DROP TABLE membership_invitations; DROP TABLE account_session_slots; DROP TABLE account_credentials; PRAGMA user_version=3");
   store.close();
   const raw = new DatabaseSync(broken);
   raw.exec("CREATE TABLE membership_invitations(dummy TEXT)");

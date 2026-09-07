@@ -63,6 +63,12 @@ The v3-to-v4 schema step is additive and transactional: failure leaves a v3 inpu
 
 The schema-v4 local checkpoint now passes 118 core checks and 24 Chromium scenarios. See [INVITATION-CHECKPOINT.md](INVITATION-CHECKPOINT.md) for commands, visual inspection, fixes, and the still-pending independent final review. The full Project Room goal remains active.
 
+### Current schema-v5 extension: private invitation audit and recovery
+
+The next local change adds a private replayable journal for the complete invitation lifecycle. Its initial record stores the offer; later records preserve immutable scope and append the terminal outcome. Pure replay is compared with relational invitation/audit state, the joined Room event, and immutable account/member provenance. The service checks consistency on startup, invitation operations, and invited-member authentication. An operator audit command opens an existing v5 database read-only and emits only counts and baseline coverage.
+
+Existing v4 data migrates transactionally to an explicit `legacy-v4-baseline`; migration does not invent earlier independent evidence. New target-account scope remains private rather than being added to the shared Room conversation. The journal supports consistency and reconstruction within the trusted database, not cryptographic attestation of a database administrator or external independent review. See [INVITATION-AUDIT.md](INVITATION-AUDIT.md) for acceptance criteria, verification, and remaining gates. The historical v4 checkpoint above keeps its original scope and results.
+
 ### Slice 10: authoritative single-room service
 
 Implement now:
