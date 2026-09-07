@@ -1,20 +1,39 @@
-# Project Room
+# Project Room — unified local candidate
 
-A shared project workspace where people and agents discuss work, hand off tasks, and return to results with evidence and a clear next action.
+A shared workspace where people and agents can talk, turn a conversation into bounded work, review exact results, and return with a clear next action.
 
-This repository contains a local, single-node pilot: conversation, bounded work, exact-revision evidence, separate review and human decisions, plus guest invitation links. Automated demonstrations use explicitly synthetic participants and artifacts—not live AI or a real GitHub review.
+**Use this checkout for the combined local candidate.** Its source is the preserved local milestone plus published PR #20, reconciled and tested together. Other workspace copies remain untouched historical inputs, not parallel places to continue implementation.
 
-Start with [the verified local milestone and acceptance audit](./docs/FINAL-LOCAL-ACCEPTANCE-2026-09-07.md), [guest links](./docs/SHAREABLE-GUEST-LINKS.md), and [the structured agent client](./docs/AGENT-CLIENT.md). The service requires Node 24.19 or newer. The bounded synthetic local handoff is verified with 163 automated tests and documented browser checks; live runtimes, independent review and production readiness remain separate open gates.
+Start with [the unification ledger](docs/UNIFICATION-2026-09-07.md): exact inputs, changes included, checks, rollback, and unavailable pieces. The earlier [local acceptance report](docs/FINAL-LOCAL-ACCEPTANCE-2026-09-07.md) is historical baseline evidence, not proof for every later build.
 
-| Document | Purpose |
-| --- | --- |
-| [SPEC-v0](./docs/SPEC-v0.md) | Scope, one object model, membership, permissions, and acceptance criteria |
-| [First workflow](./docs/FIRST-WORKFLOW.md) | The first screen and a complete demonstration |
-| [Events and fixtures](./docs/EVENT-FIXTURES.md) | State changes, versioned checks, decisions, and recovery examples |
-| [Research](./docs/RESEARCH.md) | Sources, design inferences, and unverified comparison questions |
+## What is combined
 
-The [coordination thread](https://github.com/Uuriko/dasha-desk/pull/167) records the discussion. A source-linked revision of these documents is the reviewable contract; a claim that a draft exists on another machine is not a handoff.
+- Canonical accounts, invitations and anyone-with-link conversation-only guests.
+- Human conversation, threads, reactions, search and source-linked work.
+- One work-status model shared by the UI, catch-up view and structured agent API.
+- Exact-version verification/approval and reopened-work history.
+- Resumable catch-up and truthful saved-but-not-refreshed feedback.
+- Optional tab draft recovery tied to account, authorization epoch, room, member and browser-session binding. Off by default; never sends automatically.
+- One combined core/API and browser verification entrypoint.
 
-## Status
+## Run locally
 
-John explicitly authorized local implementation through the active September 6–7 milestone goal, superseding the earlier spec-only checkpoint. Merge / close / deploy / publish remain unapproved. Preserve other agents' unfinished work and coordinate edits through the shared board and bus.
+Requires Node 24.19+.
+
+```sh
+npm ci
+npm run check
+npx playwright install chromium
+npm run test:browser
+node scripts/acceptance-fixture.mjs --port 52331
+```
+
+The fixture command creates a fresh temporary database; do not run it on an occupied port. It prints a private local credential-file path, not keys. Use the existing preserved preview when available; see the unification ledger. Tests use their own temporary rooms.
+
+For an ordinary provisioned pilot, follow [SERVICE.md](docs/SERVICE.md). Agent users start with [AGENT-CLIENT.md](docs/AGENT-CLIENT.md); people joining start with [SHAREABLE-GUEST-LINKS.md](docs/SHAREABLE-GUEST-LINKS.md).
+
+## Still separate
+
+Instinct's complete newer identity/service chain is not available as a downloadable revision. Its readable lifecycle findings are accounted for in the ledger, not treated as a wholesale integration. Grok's independently executed conformance/runtime result is not available. The older experimental gateway and separate PR #9 harness are retained source references, not silently activated.
+
+No deployment, real agent runtime, MCP host conformance, independent implementation review or production-readiness claim follows from the synthetic local checks.

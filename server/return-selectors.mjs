@@ -1,8 +1,6 @@
 import { WORK_STATES } from "../src/events.js";
-import { verificationSatisfied, nextWorkStep } from "../src/workflow.js";
-// needsAttention / workInvolvingMe originated in the reviewed r3 selector slice and now
-// include the frozen provenance and explicit-rework refinements. The error class stays local
-// so the wired package does not depend on the unwired return-cursor contract module.
+import { terminalWork, nextWorkStep } from "../src/workflow.js";
+// One shared current-state derivation for the browser, return brief and agent client.
 
 export class CursorError extends Error {
   constructor(code, message) {
@@ -39,15 +37,6 @@ const REQUEST_ROLES = ["accountableMemberId", "verifierMemberId", "humanDecision
 // verification requirement is satisfied (PASS) or absent. Terminal work stays
 // discoverable under the fixed-horizon "What changed" view and in record history -
 // it never masquerades as open work here.
-function involvementTerminal(item) {
-  if (item.state === WORK_STATES.SUPERSEDED || item.supersededBy) return true;
-  // An approval is terminal only while its exact completion remains completed. The
-  // explicit rework path retires that decision to history, and BLOCKED / ACCEPTED /
-  // WORKING remain visible until a replacement result completes the gates again.
-  if (item.ownerDecisionRequired) return item.state === WORK_STATES.COMPLETED && verificationSatisfied(item) && item.decision?.decision === "approved";
-  return item.state === WORK_STATES.COMPLETED && verificationSatisfied(item);
-}
-
 export function workInvolvingMe({ workItems, memberId }) {
   if (!workItems || typeof workItems !== "object" || Array.isArray(workItems)) throw new CursorError("cursor.work_items_required", "workInvolvingMe requires the current work-item projection map");
   if (!memberId) throw new CursorError("cursor.member_required", "workInvolvingMe requires a memberId");
@@ -55,7 +44,7 @@ export function workInvolvingMe({ workItems, memberId }) {
   for (const item of Object.values(workItems)) {
     if (!item || typeof item !== "object") continue;
     const roles = REQUEST_ROLES.filter(field => item[field] === memberId);
-    if (roles.length === 0 || involvementTerminal(item)) continue;
+    if (roles.length === 0 || terminalWork(item)) continue;
     out.push(Object.freeze({ workItemId: item.id, action: item.title ?? null, roles: Object.freeze(roles), state: item.state }));
   }
   return Object.freeze(out);

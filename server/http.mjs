@@ -9,7 +9,7 @@ const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 const bindingPattern = /^[a-f0-9]{64}$/;
 const assets = new Map([
   ["/", ["index.html", "text/html"]], ["/index.html", ["index.html", "text/html"]],
-  ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
+  ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js", "return-brief.js", "work-status.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
   ["/src/styles.css", ["src/styles.css", "text/css"]]
 ]);
 const reject = (status, code, message) => { throw new ServiceError(status, code, message); };

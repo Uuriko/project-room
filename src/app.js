@@ -1,7 +1,8 @@
 import { EVENT_TYPES as T, WORK_STATES as S } from "./events.js";
 import { AccountClient, RoomClient, draftCommand } from "./client.js";
-import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts } from "./conversation.js";
-import { nextWorkStep, verificationSatisfied } from "./workflow.js";
+import { ReturnBrief } from "./return-brief.js";
+import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope } from "./conversation.js";
+import { nextWorkStep, workStatus } from "./workflow.js";
 import { consumeJoinFragment, installShareLinks } from "./share-links.js";
 
 const $ = selector => document.querySelector(selector);
@@ -27,8 +28,6 @@ let workDraftId = null, replyToId = null, busy = false;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
 const viewPositions = new Map(), pendingReactions = new Map(), locallyOwnedMessageIds = new Set();
 let newVisibleMessages = 0;
-let returnBrief = null; // last fetched brief; history items accumulate across pages of one frozen horizon
-let returnBriefRequestId = 0, returnBriefLoading = false, cursorOperationId = 0, cursorLoading = false;
 let signoutOperationId = 0, signoutLoading = false;
 let refreshOperationId = 0, submitOperationId = 0;
 let submitControls = null, noticeTimer = null, noticeVersion = 0, workFormOpener = null;
@@ -51,6 +50,10 @@ document.addEventListener("pointerdown", event => {
 document.addEventListener("keydown", event => {
   if (event.key === "Tab" && event.target === $("#message-input")) lastComposerSelection = null;
 });
+let recovery;
+let leavingPage = false;
+try { recovery = new DraftRecovery(window.sessionStorage); } catch { recovery = new DraftRecovery(null); }
+const draftScope = draftRecoveryScope;
 const client = new RoomClient({
   accountClient,
   onSnapshot(snapshot, identity) {
@@ -68,7 +71,19 @@ const client = new RoomClient({
     $("#cursor-label").textContent = `Your caught-up marker: ${snapshot.cursor} · room event ${snapshot.sequence}`;
     render();
     shareLinksUI?.sync();
-    if (firstSnapshot) loadReturnBrief().catch(handleFailureNotice);
+    if (firstSnapshot) {
+      const saved = recovery.read(draftScope(identity), state);
+      if (saved) {
+        drafts = saved.drafts; currentThreadId = saved.threadId;
+        const draft = drafts.get(currentThreadId);
+        $("#message-input").value = draft.body; $("#message-to-select").value = draft.toMemberId;
+        replyToId = draft.replyToId; pendingMessage = draft.pending;
+        $("#remember-drafts").checked = true;
+        updateReply(); renderMessages();
+        $("#draft-recovery-status").textContent = "Recovered drafts for this room. Review before sending.";
+      }
+    }
+    if (!briefView.owns(briefView.chain)) loadReturnBrief();
     if (firstSnapshot) revealLocationHash();
   },
   onStatus(text) { setConnectionStatus(text); },
@@ -76,14 +91,15 @@ const client = new RoomClient({
     const endedContext = accessEndContext;
     accessEndContext = null;
     const pendingSignout = signoutLoading;
+    if (!leavingPage) recovery.clear();
     releaseSubmission(submitControls);
     submitOperationId += 1; busy = false;
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null;
     shareLinksUI?.resetManagement();
     workDraftId = null; replyToId = null;
     currentThreadId = null; conversation = null; drafts = new ConversationDrafts();
-    viewPositions.clear(); pendingReactions.clear(); locallyOwnedMessageIds.clear(); newVisibleMessages = 0; returnBrief = null; returnBriefRequestId += 1; returnBriefLoading = false;
-    cursorOperationId += 1; cursorLoading = false; $("#caught-up-button").disabled = false;
+    renderComposerError();
+    viewPositions.clear(); pendingReactions.clear(); locallyOwnedMessageIds.clear(); newVisibleMessages = 0; briefView.reset();
     if (!pendingSignout) signoutOperationId += 1;
     refreshOperationId += 1;
     $("#signout-button").disabled = pendingSignout;
@@ -105,7 +121,7 @@ const client = new RoomClient({
     for (const id of ["rb-attention-list", "rb-involving-list", "rb-history-list"]) delete $(`#${id}`)._content;
     $("#rb-current-boundary").textContent = ""; $("#rb-history-boundary").textContent = "";
     $("#rb-ack-button").textContent = "Mark caught up"; $("#return-brief-panel").open = false;
-    updateReturnBriefControls();
+    renderReturnBrief();
     const openingAcceptedRoom = endedContext === "accepted-room-switch";
     const openingInvitedRoom = endedContext === "invited-room-switch";
     const switchedAccount = endedContext === "account-switch";
@@ -120,6 +136,15 @@ const client = new RoomClient({
     if (!pendingSignout) queueMicrotask(() => {
       if (!$("#invitation-dialog").open) $("#access-key").focus({ preventScroll: true });
     });
+  }
+});
+const briefView = new ReturnBrief(client, {
+  onChange: renderReturnBrief,
+  // A recoverable catch-up error belongs to its own status region. It does not
+  // establish that the room's separate live connection has disconnected.
+  onError: error => { if ([401, 403].includes(error.status)) client.handleFailure(error); },
+  onReconciliationFailure: () => {
+    if (state) notice("Your caught-up position was saved, but the latest room view could not be refreshed. Refresh before relying on this brief.", true);
   }
 });
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
@@ -468,6 +493,13 @@ function render() {
   renderMessages();
   renderSearch();
   $("#work-list").innerHTML = items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(workCard).join("") || '<p class="empty-note">Nothing assigned. A room is useful before it has a task.</p>';
+  for (const item of items) {
+    const card = workRecord(item.id), status = workStatus(item);
+    card.querySelector(".state").textContent = status.label;
+    const updated = document.createElement("p"); updated.className = "form-hint";
+    updated.textContent = `Last recorded update: ${new Date(item.updatedAt).toLocaleString()}. Live execution is not measured.`;
+    card.querySelector(".work-facts").after(updated);
+  }
   restoreDisclosures($("#presence-list"), presenceSnap);
   restoreDisclosures($("#work-list"), workSnap);
   $("#event-count").textContent = `${client.sequence}`;
@@ -566,6 +598,12 @@ function renderSearch() {
 }
 function saveComposer() {
   drafts.save(currentThreadId, { body: $("#message-input").value, toMemberId: $("#message-to-select").value, replyToId, pending: pendingMessage });
+  persistDrafts();
+}
+function persistDrafts() {
+  if (!session || !$("#remember-drafts").checked) return;
+  const saved = recovery.write(draftScope(session), drafts, currentThreadId);
+  $("#draft-recovery-status").textContent = saved ? "Draft recovery enabled in this tab for 12 hours. Sign-out clears it." : "Draft recovery unavailable. Keep this page open to retain unsent text.";
 }
 function switchThread(threadId, focusComposer = false) {
   if (!state || busy || (threadId && !conversation.threads.has(threadId))) return;
@@ -644,9 +682,7 @@ function revealLocationHash() {
     break;
   }
 }
-function readyForDecision(i) {
-  return i.ownerDecisionRequired && !i.decision && i.state === S.COMPLETED && verificationSatisfied(i);
-}
+function readyForDecision(i) { return nextWorkStep(i).action === "decide"; }
 function hasReportedProducer(i) { return i.receipt?.producerAttribution === "reported" && i.receipt.producerId != null; }
 function hasIndependentProducer(i) { return hasReportedProducer(i) && i.receipt.producerId !== i.verifierMemberId; }
 function activeClaim(i) { return i.claim?.status === "active" && Date.parse(i.claim.expiresAt) > Date.now(); }
@@ -731,14 +767,17 @@ async function submit(form, fn, { failureHint } = {}) {
   } : null;
   busy = true; const controls = [...form.querySelectorAll("button, input, select, textarea")];
   const disabled = controls.map(e => e.disabled);
+  const generation = client.generation;
   const ticket = submitControls = { form, controls, disabled, focus, selection };
+  const current = () => operationId === submitOperationId
+    && (form.id === "auth-form" || generation === client.generation);
   form.setAttribute("aria-busy", "true"); controls.forEach(e => e.disabled = true);
   const local = form.querySelector(".form-status");
   if (form.id === "message-form") setComposerError("");
   else if (local) setFormStatus(local, "");
-  try { await fn(); }
+  try { await fn(current); }
   catch (error) {
-    if (operationId !== submitOperationId) return;
+    if (!current()) return;
     const text = `${error.message}. ${failureHint ?? (state ? "Your entries were kept; try again." : "Sign in again.")}`;
     // One live-announcement owner per send result: when the form has its own status region
     // it owns the announcement (the visible composer error); the page-level region stays
@@ -918,7 +957,7 @@ $("#auth-form").addEventListener("submit", async e => {
   e.preventDefault(); setFormStatus($("#auth-error"), "");
   const accessKey = $("#access-key").value.trim();
   const requestedRoom = selectedRoomFromLocation();
-  await submit(e.currentTarget, async () => {
+  await submit(e.currentTarget, async current => {
     let identity;
     if (requestedRoom) {
       await ensureAccountSession();
@@ -926,7 +965,7 @@ $("#auth-form").addEventListener("submit", async e => {
       if (!account) return;
       identity = await client.restore(requestedRoom);
     } else identity = await client.login(accessKey);
-    if (!identity || !state || session?.member.id !== identity.member.id || session?.roomId !== identity.roomId) return;
+    if (!current() || !identity || !state || session?.member.id !== identity.member.id || session?.roomId !== identity.roomId) return;
     $("#access-key").value = ""; $("#message-input").focus(); notice("Signed in. Welcome to your room.");
   }, { failureHint: requestedRoom ? "Check the account key and Room membership, then try again." : "Check the access key and try again." });
   if (state) revealLocationHash();
@@ -992,37 +1031,7 @@ $("#refresh-button").addEventListener("click", async () => {
     handleFailureNotice(error);
   }
 });
-$("#caught-up-button").addEventListener("click", async () => {
-  if (cursorLoading || !state || !session) return;
-  const operationId = ++cursorOperationId;
-  const briefOperationId = ++returnBriefRequestId;
-  const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
-  const isCurrentOperation = () => operationId === cursorOperationId && briefOperationId === returnBriefRequestId
-    && sameSession(generation, roomId, memberId);
-  let committed = false;
-  cursorLoading = true; returnBriefLoading = true; $("#caught-up-button").disabled = true; updateReturnBriefControls();
-  try {
-    await client.caughtUp();
-    committed = true;
-    if (!isCurrentOperation()) return;
-    await client.refresh();
-    if (!isCurrentOperation()) return;
-    await loadReturnBrief(null, briefOperationId);
-    if (!isCurrentOperation()) return;
-    notice("Your caught-up position saved. No peer read or processing claim was created.");
-  } catch (error) {
-    if (!isCurrentOperation()) return;
-    if (committed) handleCaughtUpReconciliationFailure(error);
-    else handleFailureNotice(error);
-  } finally {
-    if (operationId === cursorOperationId) {
-      cursorLoading = false; $("#caught-up-button").disabled = false; updateReturnBriefControls();
-    }
-    if (briefOperationId === returnBriefRequestId) {
-      returnBriefLoading = false; updateReturnBriefControls();
-    }
-  }
-});
+$("#caught-up-button").addEventListener("click", () => briefView.acknowledge(client.sequence));
 $("#message-form").addEventListener("submit", e => {
   e.preventDefault(); if (!state) return;
   const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId };
@@ -1036,11 +1045,12 @@ $("#message-form").addEventListener("submit", e => {
   submit(e.currentTarget, async () => {
     // Ownership must outlive pendingMessage: the command can commit while its immediate
     // snapshot fails, then first appear on a later refresh after the draft was cleared.
-    locallyOwnedMessageIds.add(data.messageId);
+    locallyOwnedMessageIds.add(data.messageId || pendingMessage.command.id);
     const receipt = await client.send(pendingMessage.command);
     if (generation !== client.generation || !state) return;
     drafts.clear(threadId);
     $("#message-input").value = ""; pendingMessage = null; clearReply();
+    persistDrafts();
     notice(`Message saved${threadId ? " in this thread" : " to the room"}.`);
   }, { failureHint: "Draft kept; press Send to retry." });
 });
@@ -1062,6 +1072,10 @@ function updateReply() {
 function clearReply() { replyToId = currentThreadId; updateReply(); }
 $("#cancel-reply").addEventListener("click", () => { clearReply(); $("#message-input").focus({ preventScroll: true }); });
 $("#thread-back").addEventListener("click", () => switchThread(null));
+ $("#remember-drafts").addEventListener("change", () => {
+  if ($("#remember-drafts").checked) saveComposer();
+  else { recovery.clear(); $("#draft-recovery-status").textContent = "Draft recovery off. Drafts stay only while this page is open."; }
+});
 function rememberComposerSelection({ clearCollapsed = false } = {}) {
   const input = $("#message-input");
   if (input.selectionStart !== input.selectionEnd) {
@@ -1163,9 +1177,9 @@ $("#new-work-form").addEventListener("submit", e => {
   const data = { workItemId: workDraftId, title: $("#work-title-input").value.trim(), definitionOfDone: $("#work-done-input").value.trim(), accountableMemberId: $("#assignee-select").value, verifierMemberId: $("#verifier-select").value, independentVerificationRequired: true, ownerDecisionRequired: true, humanDecisionMakerId: state.room.ownerId, mode: $("#work-mode-select").value, sourceMessageId: $("#source-message-id").value || null };
   pendingWork = draftCommand(pendingWork, T.WORK_PROPOSED, data);
   const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
-  submit(e.currentTarget, async () => {
+  submit(e.currentTarget, async current => {
     await client.send(pendingWork.command);
-    if (!sameSession(generation, roomId, memberId)) return;
+    if (!current() || !sameSession(generation, roomId, memberId)) return;
     closeWorkForm(); notice("Work proposed. The accountable member must accept it; no external action was authorized.");
   }, { failureHint: "Your work proposal was kept; try again." });
 });
@@ -1236,9 +1250,9 @@ $("#action-form").addEventListener("submit", e => {
   if (entry.action === "claim") data.paths = fields.paths.split("\n").map(p => p.trim()).filter(Boolean);
   if (["verify", "decide"].includes(entry.action)) Object.assign(data, entry.receipt);
   entry.retry = draftCommand(entry.retry, entry.type, data);
-  submit(e.currentTarget, async () => {
+  submit(e.currentTarget, async current => {
     await client.send(entry.retry.command);
-    if (!sameSession(generation, roomId, memberId)) return;
+    if (!current() || !sameSession(generation, roomId, memberId)) return;
     closeActionDialog({ returnFocus: false }); notice("Record saved. External execution and independent verification are separate facts."); setTimeout(() => revealWork(entry.workId), 0);
   }, { failureHint: "Your entries were kept; try again." });
 });
@@ -1247,7 +1261,12 @@ window.addEventListener("beforeunload", e => {
   if ((state && (drafts.hasText() || !$("#new-work-form").hidden || $("#action-dialog").open))
     || invitationIsCommitting() || invitation.phase === "unknown") { e.preventDefault(); e.returnValue = ""; }
 });
-window.addEventListener("pagehide", () => client.endAccess());
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden" && state) saveComposer(); });
+window.addEventListener("pagehide", () => {
+  if (state) saveComposer();
+  leavingPage = true;
+  try { client.endAccess(); } finally { leavingPage = false; }
+});
 window.addEventListener("pageshow", e => {
   if (!e.persisted) return;
   const roomId = selectedRoomFromLocation();
@@ -1256,68 +1275,7 @@ window.addEventListener("pageshow", e => {
 // Return brief (disposition 5557850637): compact expandable rail entry. Fetch on return and
 // on open; history stays fixed through the frozen horizon H, the action sections are live
 // through N, and only the explicit button acknowledges - exactly H, never the latest event.
-function updateReturnBriefControls() {
-  const history = returnBrief?.history;
-  $("#return-brief-panel").setAttribute("aria-busy", returnBriefLoading ? "true" : "false");
-  $("#rb-more-button").hidden = !history?.hasMore;
-  $("#rb-more-button").disabled = cursorLoading || returnBriefLoading || !history?.hasMore;
-  $("#rb-ack-button").disabled = cursorLoading || returnBriefLoading || !history || history.evaluatedThrough === history.cursor;
-}
-function invalidateReturnBrief() {
-  returnBrief = null;
-  for (const id of ["rb-attention-list", "rb-involving-list", "rb-history-list"]) {
-    $(`#${id}`).replaceChildren();
-    delete $(`#${id}`)._content;
-  }
-  $("#rb-current-boundary").textContent = "";
-  $("#rb-history-boundary").textContent = "· refresh required";
-  $("#rb-more-button").hidden = true;
-  $("#rb-ack-button").textContent = "Refresh brief before acknowledging";
-  updateReturnBriefControls();
-}
-function handleCaughtUpReconciliationFailure(error) {
-  // The POST is durable even if a later read fails. Never invite a retry against the
-  // stale horizon or describe the committed write as failed.
-  invalidateReturnBrief();
-  client.handleFailure(error);
-  if (state) notice("Your caught-up position was saved, but the latest room view could not be refreshed. Refresh before relying on this brief.", true);
-}
-async function loadReturnBrief(continuation = null, operationId = null) {
-  if (!state || !session) return;
-  const requestId = operationId ?? ++returnBriefRequestId;
-  if (requestId !== returnBriefRequestId) return;
-  const pagingButtonFocused = Boolean(continuation) && document.activeElement === $("#rb-more-button");
-  const firstNewHistoryIndex = returnBrief?.history.items.length ?? 0;
-  const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
-  const isCurrentRequest = () => requestId === returnBriefRequestId && generation === client.generation
-    && state && session?.roomId === roomId && session?.member.id === memberId;
-  returnBriefLoading = true;
-  updateReturnBriefControls();
-  try {
-    const brief = await client.returnBrief(continuation ? { horizon: continuation.horizon, after: continuation.after, cursor: continuation.cursor } : {});
-    if (!isCurrentRequest()) return;
-    if (continuation && returnBrief && returnBrief.history.evaluatedThrough === brief.history.evaluatedThrough) {
-      returnBrief.history.items = returnBrief.history.items.concat(brief.history.items);
-      returnBrief.history.hasMore = brief.history.hasMore;
-      returnBrief.history.continuation = brief.history.continuation;
-      returnBrief.current = brief.current; // the action sections are live on every fetch
-    } else returnBrief = brief;
-    renderReturnBrief();
-    if (pagingButtonFocused && !returnBrief.history.hasMore) {
-      const newRow = $("#rb-history-list").querySelectorAll("[data-brief-key]")[firstNewHistoryIndex];
-      focusRecord(newRow || $("#rb-ack-button"));
-    }
-    return true;
-  } catch (error) {
-    if (!isCurrentRequest()) return;
-    throw error;
-  } finally {
-    if (requestId === returnBriefRequestId) {
-      returnBriefLoading = false;
-      updateReturnBriefControls();
-    }
-  }
-}
+function loadReturnBrief() { return briefView.refresh(); }
 const roleLabel = role => ({ accountableMemberId: "accountable", verifierMemberId: "verifier", humanDecisionMakerId: "decision maker" }[role] ?? humanize(role));
 function briefEventTarget(event) {
   if (event.type === T.MESSAGE_POSTED) return { kind: "message", id: event.data.messageId || event.id };
@@ -1369,7 +1327,20 @@ function renderBriefList(selector, html) {
   }
 }
 function renderReturnBrief() {
-  if (!returnBrief || !state) return;
+  const returnBrief = briefView.owns(briefView.chain) ? briefView.brief : null;
+  $("#rb-status").textContent = state ? briefView.message : "";
+  $("#rb-refresh-button").disabled = !state || briefView.busy;
+  $("#caught-up-button").disabled = !state || briefView.busy;
+  $("#return-brief-panel").setAttribute("aria-busy", briefView.busy ? "true" : "false");
+  $("#rb-more-button").disabled = briefView.busy;
+  $("#rb-ack-button").disabled = true;
+  $("#rb-more-button").hidden = true;
+  if (!returnBrief || !state) {
+    for (const id of ["rb-current-boundary", "rb-history-boundary", "rb-attention-list", "rb-involving-list", "rb-history-list"]) $(`#${id}`).replaceChildren();
+    for (const id of ["rb-attention-list", "rb-involving-list", "rb-history-list"]) delete $(`#${id}`)._content;
+    $("#rb-ack-button").textContent = briefView.reconciliationRequired ? "Refresh brief before acknowledging" : "Mark caught up";
+    return;
+  }
   const { history, current } = returnBrief;
   $("#rb-current-boundary").textContent = `as of event ${current.evaluatedThrough}`;
   $("#rb-history-boundary").textContent = history.evaluatedThrough === history.cursor
@@ -1385,56 +1356,22 @@ function renderReturnBrief() {
     || '<li class="rb-empty">Nothing new since your marker.</li>');
   $("#rb-more-button").hidden = !history.hasMore;
   $("#rb-ack-button").textContent = history.evaluatedThrough === history.cursor ? "Already caught up" : `Mark caught up through event ${history.evaluatedThrough}`;
-  updateReturnBriefControls();
+  $("#rb-ack-button").disabled = briefView.busy || history.evaluatedThrough === history.cursor;
 }
 $("#return-brief-panel").addEventListener("toggle", e => {
-  if (e.currentTarget.open && state && !cursorLoading && !returnBriefLoading) loadReturnBrief().catch(handleFailureNotice); // reopening starts a fresh horizon
+  if (e.currentTarget.open && state) loadReturnBrief(); // reopening replaces the pagination chain
 });
+$("#rb-refresh-button").addEventListener("click", loadReturnBrief);
 $("#rb-more-button").addEventListener("click", async () => {
-  try { if (!cursorLoading && !returnBriefLoading && returnBrief?.history.continuation) await loadReturnBrief(returnBrief.history.continuation); }
-  catch (error) {
-    if (error.code === "cursor_changed") { // another tab moved the marker: restart on a fresh horizon
-      try { if (await loadReturnBrief()) notice("Your marker moved elsewhere; the brief restarted on a fresh horizon."); } catch (retry) { handleFailureNotice(retry); }
-    } else handleFailureNotice(error);
+  const chain = briefView.chain, firstNewHistoryIndex = briefView.brief?.history.items.length ?? 0;
+  const pagingButtonFocused = document.activeElement === $("#rb-more-button");
+  await briefView.more();
+  if (pagingButtonFocused && briefView.owns(chain) && briefView.brief && !briefView.brief.history.hasMore
+      && (document.activeElement === document.body || document.activeElement === $("#rb-more-button"))) {
+    focusRecord($("#rb-history-list").querySelectorAll("[data-brief-key]")[firstNewHistoryIndex] || $("#rb-ack-button"));
   }
 });
-$("#rb-ack-button").addEventListener("click", async () => {
-  if (cursorLoading || returnBriefLoading || !returnBrief || !state || !session) return;
-  const operationId = ++returnBriefRequestId;
-  const cursorId = ++cursorOperationId;
-  const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
-  const evaluatedThrough = returnBrief.history.evaluatedThrough;
-  const isCurrentOperation = () => operationId === returnBriefRequestId && cursorId === cursorOperationId
-    && sameSession(generation, roomId, memberId);
-  let committed = false;
-  cursorLoading = true; returnBriefLoading = true; $("#caught-up-button").disabled = true;
-  updateReturnBriefControls();
-  try {
-    await client.caughtUp(evaluatedThrough); // acknowledges exactly H; H+1 stays new
-    committed = true;
-    if (!isCurrentOperation()) return;
-    await client.refresh();
-    if (!isCurrentOperation()) return;
-    await loadReturnBrief(null, operationId);
-    if (!isCurrentOperation()) return;
-    notice("Your caught-up position saved. No peer read or processing claim was created.");
-  } catch (error) {
-    // A response from an ended account cannot announce into, refresh, or revoke the
-    // next account's UI. The old request still settles server-side for its own member.
-    if (!isCurrentOperation()) return;
-    if (committed) handleCaughtUpReconciliationFailure(error);
-    else handleFailureNotice(error);
-  } finally {
-    if (cursorId === cursorOperationId) {
-      cursorLoading = false; $("#caught-up-button").disabled = false;
-      updateReturnBriefControls();
-    }
-    if (operationId === returnBriefRequestId) {
-      returnBriefLoading = false;
-      updateReturnBriefControls();
-    }
-  }
-});
+$("#rb-ack-button").addEventListener("click", () => briefView.acknowledge());
 shareLinksUI = installShareLinks({ client, accountClient, getState: () => state, getSession: () => session,
   async openRoom(roomId, roomMode, joinedSession) {
     if (state && session?.roomId === roomId && session.member.id === joinedSession?.member?.id
@@ -1471,6 +1408,7 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
   await client.restore();
 })().catch(error => {
   const signedOut = [401, 403].includes(error.status);
+  if (signedOut) recovery.clear();
   const requestedRoom = selectedRoomFromLocation();
   setFormStatus($("#auth-error"), signedOut
     ? requestedRoom ? `This account cannot open #${requestedRoom}. Use an account with active membership there.` : "Use a provisioned human room key to enter. No demo identity is selected for you."

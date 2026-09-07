@@ -65,11 +65,20 @@ async function login(page, origin, accessKey, expectedIdentity) {
 
 async function openReadyBrief(page) {
   const panel = page.locator("#return-brief-panel");
-  if (!await panel.evaluate(element => element.open)) await panel.locator(":scope > summary").click();
-  await page.waitForFunction(() => {
+  const ready = () => page.waitForFunction(() => {
     const button = document.querySelector("#rb-ack-button");
     return button && !button.disabled && /through event \d+/.test(button.textContent);
   });
+  await ready(); // Let the initial snapshot's brief settle before opening it.
+  if (!await panel.evaluate(element => element.open)) {
+    // Opening schedules another fetch. Do not read the old button while its
+    // asynchronous toggle handler is about to replace the displayed horizon.
+    await Promise.all([
+      page.waitForResponse(response => response.url().endsWith("/return-brief")),
+      panel.locator(":scope > summary").click()
+    ]);
+  }
+  await ready();
 }
 
 test("late caught-up success and access error cannot cross an account switch", { timeout: 90000 }, async t => {

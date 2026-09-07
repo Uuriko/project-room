@@ -102,7 +102,9 @@
                 <button class="button primary" type="submit">Send</button>
               </div>
               <p id="composer-status" class="status form-status" role="status"></p>
-              <p id="draft-hint" class="form-hint">Enter for a new line · Ctrl/⌘ + Enter to send. Each discussion keeps its draft while this page stays open. Reloading, leaving, or signing out clears unsent drafts.</p>
+              <p id="draft-hint" class="form-hint">Enter for a new line · Ctrl/⌘ + Enter to send. Each discussion keeps its own draft.</p>
+              <label class="form-hint draft-recovery-toggle"><input id="remember-drafts" type="checkbox" aria-describedby="draft-recovery-status"> Recover drafts after reloading this tab</label>
+              <p id="draft-recovery-status" class="form-hint" role="status">Off by default. Enable only on a trusted device. Saved drafts expire after 12 hours and clear on sign-out.</p>
               <details class="conversation-boundaries"><summary>Who can see and respond?</summary><p>Messages, threads, and reactions are visible to active room members. Addressing an agent does not trigger it in this pilot. Conversation never grants permission, approves work, or proves someone read a message.</p></details>
             </form>
             <div class="cursor-row"><span id="cursor-label"></span><button id="caught-up-button" class="button ghost" type="button">Mark myself caught up</button></div>
@@ -134,6 +136,7 @@
               <span id="return-brief-heading">Catch up on this room</span>
             </summary>
             <div class="return-brief-body">
+              <p id="rb-status" class="rb-note" role="status" aria-live="polite"></p>
               <section aria-labelledby="rb-current-heading">
                 <h3 id="rb-current-heading">Needs your attention <span id="rb-current-boundary" class="rb-boundary"></span></h3>
                 <ul id="rb-attention-list" class="rb-list"></ul>
@@ -144,6 +147,7 @@
                 <h3 id="rb-history-heading">What changed <span id="rb-history-boundary" class="rb-boundary"></span></h3>
                 <ul id="rb-history-list" class="rb-list rb-history"></ul>
                 <div class="rb-actions">
+                  <button id="rb-refresh-button" class="button secondary" type="button">Refresh catch-up</button>
                   <button id="rb-more-button" class="button secondary" type="button" hidden>Show more changes</button>
                   <button id="rb-ack-button" class="button secondary" type="button">Mark caught up</button>
                 </div>

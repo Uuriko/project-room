@@ -127,7 +127,7 @@ test("background updates preserve open disclosures, focus, draft and recipient",
   await fallbackAccept.click();
   await page.locator("#action-dialog").waitFor({ state: "visible" });
   send(owner, T.WORK_ACCEPTED, { workItemId: "focus-work-fallback", expectedRevision: 0 });
-  await page.waitForFunction(() => document.querySelector('[data-work-record-id="focus-work-fallback"] .state')?.textContent === "accepted");
+  await page.waitForFunction(() => document.querySelector('[data-work-record-id="focus-work-fallback"] .state')?.textContent === "Accepted");
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => document.activeElement?.dataset.workRecordId === "focus-work-fallback");
 
