@@ -58,3 +58,7 @@ The first build must demonstrate the shared screen, a second person joining with
 Evaluate five suitable handoffs for required human relays, repeated actions, and whether each participant can identify the next action. Record fallbacks to existing tools; do not ban those tools to force adoption.
 
 Defer automatic skill generation, automatic benchmarks or model routing, bot marketplaces, chat bridges, calls, and community features. The first implementation needs conversation, work state, evidence, and one useful handoff.
+
+## Adjacent product: Compute bridge (Phase 1+)
+
+Phase 0 is unchanged. Project Room and Dasha Compute stay separate products. A later bridge may let a Work Item POST a job to `compute/api` and record a Receipt Event. See [FOLD-COMPUTE-ROOM](./FOLD-COMPUTE-ROOM.md) and [BRIDGE-COMPUTE](./BRIDGE-COMPUTE.md).

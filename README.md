@@ -6,7 +6,16 @@ A shared workspace where people and agents can talk, turn a conversation into bo
 
 Start with [the unification ledger](docs/UNIFICATION-2026-09-07.md): exact inputs, changes included, checks, rollback, and unavailable pieces. The earlier [local acceptance report](docs/FINAL-LOCAL-ACCEPTANCE-2026-09-07.md) is historical baseline evidence, not proof for every later build.
 
-The current uncommitted [workflow refinement](docs/WORKFLOW-REFINEMENT-2026-09-07.md) adds optional review/decision choices (both on by default), consistent status styling and repeat review, while sharing evidence predicates and removing a second rendering pass. It uses the existing model and preserves external-action permissions.
+| Document | Purpose |
+| --- | --- |
+| [SPEC-v0](./docs/SPEC-v0.md) | Scope, one object model, membership, permissions, and acceptance criteria |
+| [First workflow](./docs/FIRST-WORKFLOW.md) | The first screen and a complete demonstration |
+| [Events and fixtures](./docs/EVENT-FIXTURES.md) | State changes, versioned checks, decisions, and recovery examples |
+| [Research](./docs/RESEARCH.md) | Sources, design inferences, and unverified comparison questions |
+| [Fold: Compute and Room](./docs/FOLD-COMPUTE-ROOM.md) | Engines stay separate; surface may fold lightly |
+| [Bridge: Compute](./docs/BRIDGE-COMPUTE.md) | Phase 1+ Work Item → `compute/api` → Receipt. Not Phase 0. |
+
+The included [workflow refinement](docs/WORKFLOW-REFINEMENT-2026-09-07.md) adds optional review/decision choices (both on by default), consistent status styling and repeat review, while sharing evidence predicates and removing a second rendering pass. It uses the existing model and preserves external-action permissions. That document's uncommitted/outbound-blocked statements describe its historical checkpoint; the source and subsequent coordination are now published in PR #23 and issue #11.
 
 ## What is combined
 
@@ -36,7 +45,7 @@ For an ordinary provisioned pilot, follow [SERVICE.md](docs/SERVICE.md). Agent u
 
 ## Invite-only deployment candidate
 
-See [the deployment runbook](docs/INVITE-ONLY-DEPLOYMENT.md) for the explicit production configuration, same-host HTTPS proxy, persistent database, verified backups, service definitions and hosted acceptance checklist. No live deployment has occurred. Hosting/domain/budget and a real-host acceptance run remain outstanding. Guests still have an eight-hour browser identity; returning provisioned members use their own valid key with operator-assisted recovery.
+See [the deployment runbook](docs/INVITE-ONLY-DEPLOYMENT.md) for the explicit production configuration, same-host HTTPS proxy, persistent database, verified backups, service definitions and hosted acceptance checklist. No live deployment has occurred. John selected an unlisted trydemigod.com page; backend placement, path routing and a real-host acceptance run remain outstanding. Guests still have an eight-hour browser identity; returning provisioned members use their own valid key with operator-assisted recovery.
 
 ## Still separate
 

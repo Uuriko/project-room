@@ -10,6 +10,8 @@ The public shell is a sign-in/invitation entrypoint, not public room membership.
 
 ## Required owner choices
 
+Update: John selected an unlisted page on **trydemigod.com**, with no link in the public navigation. This selects the desired website, not an available Node server or a spending allowance. Its existing deployment owner has been asked for backend/routing details. The current app uses root-relative assets/API and origin-wide cookies; do not mount it below a path by simply rewriting HTML. Resolve prefix routing and same-origin isolation across the existing site, or obtain agreement on an isolated subdomain/backend. No current homepage, navigation or unrelated Worker was changed.
+
 - Hosting account and authorized monthly budget, or an existing compatible server.
 - Domain/hostname and permission to update its DNS.
 - Pilot operator, invited participants, retention/deletion expectations and a secure way to deliver initial member credentials.
