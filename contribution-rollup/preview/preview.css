@@ -1,0 +1,87 @@
+:root {
+  --bg: #10151d;
+  --panel: #151c27;
+  --line: #2a3648;
+  --line-soft: #223044;
+  --text: #e8eef7;
+  --muted: #8b97a8;
+  --blue: #7aa2ff;
+  --amber: #e6b35a;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.45 ui-sans-serif, system-ui, sans-serif;
+}
+.rail {
+  max-width: 28rem;
+  margin: 0 auto;
+  padding: 1.4rem 1rem 3rem;
+}
+.eyebrow {
+  margin: 0;
+  color: var(--blue);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+h1 { margin: 0.35rem 0 0.5rem; font-size: 1.35rem; }
+.lede, .rb-note { color: var(--muted); font-size: 0.82rem; }
+code { font-size: 0.86em; }
+.open-status {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--line);
+  background: #1a2940;
+  font-size: 0.78rem;
+}
+
+.return-brief-panel {
+  margin-top: 0.85rem;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+.return-brief-panel > summary {
+  display: grid;
+  gap: 0.12rem;
+  padding: 0.85rem;
+  cursor: pointer;
+  list-style: none;
+}
+.return-brief-panel > summary::-webkit-details-marker { display: none; }
+.return-brief-panel > summary span:nth-child(2) { font-weight: 650; }
+.rb-line-count { color: var(--muted); font-size: 0.72rem; }
+.return-brief-body {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0 0.85rem 0.85rem;
+  border-top: 1px solid var(--line-soft);
+}
+.return-brief-body h3 {
+  margin: 0.75rem 0 0.35rem;
+  font-size: 0.82rem;
+}
+.rb-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; }
+.rb-event { font-size: 0.78rem; line-height: 1.35; overflow-wrap: anywhere; }
+.rb-event-link, .rb-evidence {
+  color: inherit;
+  text-decoration: none;
+}
+.rb-event-link {
+  display: block;
+  padding: 0.16rem;
+  border-radius: 0.2rem;
+}
+.rb-event-link:hover, .rb-evidence:hover { background: #1a2940; }
+.rb-actor { font-weight: 600; }
+.rb-type, .rb-detail, .rb-empty { color: var(--muted); }
+.rb-evidence { color: var(--blue); }
+.rb-gap .rb-event-link { color: var(--amber); }
+
+@media (max-width: 780px) {
+  .rail { padding-inline: 0.75rem; }
+  .return-brief-panel { border-radius: 14px; }
+}

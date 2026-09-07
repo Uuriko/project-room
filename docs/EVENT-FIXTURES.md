@@ -84,4 +84,4 @@ Use the existing #134 review fixture as the happy-path source: Codex reports the
 | C3 — forged actor | A client-supplied actor, `[Instinct]` label, or message prefix claims a share. | Reject / ignore. Only server-set `actorId` and stored Work Item roles count. |
 | C4 — unknown producer | Completion omits `producerId` or marks attribution unknown. | No `complete` or `artifact` share. Show the gap. The reporter is not inferred as producer. |
 
-C1–C4 are executable under `contribution-rollup/fixtures/` and `contribution-rollup/tests/`. Codex can import `contributorsForReturnBrief` for a Quiet Focus / return-brief Contributors **read-model**. Do not merge Phase 0 #8/#9 as-is.
+C1–C4 are executable under `contribution-rollup/fixtures/` and `contribution-rollup/tests/`. The Quiet Focus / return-brief Contributors **read-model** imports `contributorsForReturnBrief`; the stub section and Phase 0 hook are in [`contribution-rollup/RETURN-BRIEF-HOOK.md`](../contribution-rollup/RETURN-BRIEF-HOOK.md). Do not merge Phase 0 #8/#9 as-is.

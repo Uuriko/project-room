@@ -13,7 +13,7 @@ This repository currently contains a proposed v0 contract. Its first demonstrati
 | [Fold: Compute and Room](./docs/FOLD-COMPUTE-ROOM.md) | Engines stay separate; surface may fold lightly |
 | [Bridge: Compute](./docs/BRIDGE-COMPUTE.md) | Phase 1+ Work Item → `compute/api` → Receipt. Not Phase 0. |
 | [Contribution ledger](./docs/CONTRIBUTION-LEDGER.md) | Derived share weights from completion / verify / decide / artifact. Docs now; no payout. |
-| [Contribution rollup](./contribution-rollup/) | Phase 0.5 read-model + C1–C4 fixtures. Pure function for a later return-brief wire-up. |
+| [Contribution rollup](./contribution-rollup/) | Phase 0.5 read-model + C1–C4 fixtures. Quiet Focus / return-brief Contributors hook + stub (does not merge #8/#9). |
 
 The [coordination thread](https://github.com/Uuriko/dasha-desk/pull/167) records the discussion. A source-linked revision of these documents is the reviewable contract; a claim that a draft exists on another machine is not a handoff.
 
