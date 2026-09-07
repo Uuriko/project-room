@@ -1,8 +1,11 @@
 # Cloudflare staging candidate
 
-Status: **locally verified, not deployed**. The existing Node deployment remains
-the fallback. No production domain, DNS record, Worker, database or paid resource
-was changed. This is the same Room implementation with explicit database, asset,
+Status: **deployed to isolated staging on September 7, 2026** at
+https://project-room-staging.getdasha.workers.dev. Health and readiness pass;
+two real HTTPS browsers completed owner login, invite creation, guest joining,
+mobile Send, desktop Enter and bidirectional live updates. The Node service remains
+the fallback. A new Worker and SQLite Durable Object were created; existing site
+Workers, DNS and routes were not changed. This is the same Room implementation with explicit database, asset,
 and visitor-address adapters, not a second product.
 
 ## Design
@@ -77,39 +80,42 @@ of infrastructure headroom (not a spend target). No provider-enforced $100 cap o
 billing alerts have been configured; do not call that budget a hard billing cap.
 AI execution, bounties and payments are not enabled or included in this approval.
 
-Dashboard login works. Wrangler's initial narrow OAuth login succeeded and its
-credential is encrypted with a key in the Mac keychain. Cloudflare rejected the
-deployment-list request because Worker script permissions were missing. An
-expanded authorization is awaiting explicit user approval: User Read, Background
-Access, Account Read, Workers Write, Workers Scripts Write, Workers Routes Write,
-Zone Read. The app approval check denied clicking Authorize because these rights
-are account-wide, not scoped to this one Worker. **Do not retry or work around
-that denial without the user's explicit approval.** No deployment was attempted.
+John subsequently explicitly approved the account-wide Worker script/route access
+and retrying the declined publishing commands. Expanded OAuth succeeded; its
+credential remains encrypted with a key in the Mac keychain. The candidate was
+pushed to the existing PR #23 branch. The Worker name was confirmed absent before
+creation. Deployment uses only `room.mjs` and ten allowlisted static assets.
 
-Once authorized:
+The owner key was generated once into private ignored `.operator/owner-key.txt`.
+Only its hash and expiry were uploaded. Both one-time bootstrap settings were
+removed after successful owner login and invitation acceptance. Never regenerate
+the key blindly or reset the live room. No existing local database was imported.
 
-1. Verify the connected account and that `project-room-staging` does not already
-   belong to another deployment. Its absence has NOT been confirmed yet.
-2. Re-run checks and exact bundle validation. Stage using only `room.mjs`.
-   The checked-in invalid origin deliberately denies all requests until the
-   real deployment URL is known and configured. No homepage/routes are modified.
-3. Generate the private owner key with `node prepare-owner.mjs`. This has not
-   been run. It writes `.operator/owner-key.txt` and `.operator/bootstrap.json`
-   with exclusive creation and private permissions; neither may enter Git,
-   chat, logs, screenshots, static assets or issue comments.
-4. Configure owner hash/absolute expiry through the provider's secrets interface;
-   never upload the raw owner key. Initialize and verify the owner session, then
-   remove bootstrap configuration once initialization succeeds. Do not blindly
-   regenerate keys or replace live data after an uncertain response.
-5. Re-run hosted invite/message/reconnect checks with disposable identities;
-   verify account isolation, origin and real visitor-IP behavior, and deployment
-   persistence. Exercise provider point-in-time recovery in a separate test
+Hosted browser evidence is in `test-results/hosted-desktop.png` and
+`hosted-mobile.png`, visually inspected. It includes synthetic test messages and
+a test guest in the pilot room. `node hosted-check.mjs` explicitly performs the
+operator acceptance journey; `node hosted-check.mjs --return` checks the privately
+saved guest session after redeployment. Neither runs in ordinary CI; browser
+credentials stay in `.operator/` and TLS verification is enabled.
+The return check passed after bootstrap settings were removed: the same guest
+identity and messages survived redeployment. A signed-out room read returned 401.
+`test-results/hosted-return.png` records the returning guest. This is deployment
+persistence evidence, not a provider restore or disaster-recovery test.
+Current deployed version after bootstrap removal:
+`6575030d-d72f-4e8e-b256-fc18ecc6719b`.
+The runtime source at `7c9292a` passed the existing remote CI workflow; the
+Cloudflare and hosted operator suites were run separately as described above.
+
+Remaining gates:
+
+1. Expand hosted account-isolation, origin and real visitor-IP validation.
+   Exercise provider point-in-time recovery in a separate test
    object and define a tested export/recovery procedure before inviting users.
-6. Coordinate the unlisted trydemigod.com destination with Instinct. A dedicated
+2. Coordinate the unlisted trydemigod.com destination with Instinct. A dedicated
    Room origin avoids sharing auth/storage with marketing-page scripts. The
    current code does not support mounting under `/room` unchanged. No final
    domain/path decision or routing mutation has been made.
-7. Set budget alerts, assess SSE duration against the account's other workloads,
+3. Set budget alerts, assess SSE duration against the account's other workloads,
    document operational ownership and only then promote the tested candidate.
 
 Known pilot limits remain: eight-hour guest sessions without identity recovery,

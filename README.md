@@ -47,16 +47,16 @@ For an ordinary provisioned pilot, follow [SERVICE.md](docs/SERVICE.md). Agent u
 
 The [Cloudflare staging candidate](cloudflare/README.md) reuses the same store,
 HTTP service and UI with explicit Durable Object adapters. Its local storage,
-HTTP and two-browser restart proofs pass. It is not deployed: account-wide
-Worker script/routing authorization requires the owner's explicit approval.
+HTTP and two-browser restart proofs pass. Following explicit owner approval,
+isolated staging is live with hosted owner/invitation/live-message checks passing.
 The prepared Node service remains the fallback.
 
-See [the deployment runbook](docs/INVITE-ONLY-DEPLOYMENT.md) for the explicit production configuration, same-host HTTPS proxy, persistent database, verified backups, service definitions and hosted acceptance checklist. No live deployment has occurred. John selected an unlisted trydemigod.com page; backend placement, path routing and a real-host acceptance run remain outstanding. Guests still have an eight-hour browser identity; returning provisioned members use their own valid key with operator-assisted recovery.
+See [the Node deployment runbook](docs/INVITE-ONLY-DEPLOYMENT.md) for the fallback's production configuration and recovery checks; the Cloudflare handoff above records actual staging evidence and remaining gates. John selected an unlisted trydemigod.com destination; domain integration, provider recovery exercises and budget alerts remain outstanding. Guests still have an eight-hour browser identity; returning provisioned members use their own valid key with operator-assisted recovery.
 
 ## Still separate
 
 Instinct's complete newer identity/service chain is not available as a downloadable revision. Its readable lifecycle findings are accounted for in the ledger, not treated as a wholesale integration. Grok's independently executed conformance/runtime result is not available. The older experimental gateway and separate PR #9 harness are retained source references, not silently activated.
 
-No deployment, real agent runtime, MCP host conformance, independent implementation review or production-readiness claim follows from the synthetic local checks.
+No real agent runtime, MCP host conformance, independent implementation review or production-readiness claim follows from the synthetic local checks. Hosted staging evidence is recorded separately.
 
 Latest local checkpoint: [quiet interface and keyboard sending](docs/QUIET-INTERFACE-2026-09-07.md). Follow-up proposal: [multi-route bounties](docs/BOUNTIES-DESIGN-2026-09-07.md); bounty execution and payments are not implemented.
