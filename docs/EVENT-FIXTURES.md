@@ -70,3 +70,18 @@ The public walkthrough does not supply a fully resolvable deployment receipt or 
 | A future coordinated write claim expires. | Stop authority to continue that write; require a new valid claim for another attempt. Preserve history. This case is outside the first read-only review loop. |
 
 These cases define acceptance behavior. Claiming they pass requires execution evidence from an implementation.
+
+## Contribution Event stubs
+
+Specified scenarios for the [contribution ledger](./CONTRIBUTION-LEDGER.md). They do not change the work-state table or the historical fixtures above. Schema and executable fixtures are Phase 0.5 work; these rows are planning stubs.
+
+Use the existing #134 review fixture as the happy-path source: Codex reports the already-existing result, Instinct verifies that exact revision, Potter holds the owner decision. Ledger rows, when minted, cite those Events and the commit `70053cc6cf9d86f3a43220dcfbb0af05797380c0`. They do not invent a merge, a payout, or a producer when attribution is unknown.
+
+| Stub | Intended record | Required failure if abused |
+| --- | --- | --- |
+| C1 — honest report of existing work | Accountable member reports completion. If producer is known, a later `commit` (or `artifact`) mint may credit that producer. The reporter may receive `coordinate` for the find. Instinct's PASS may later mint `verify`. Potter's decision may later mint `decide`. | Do not mint the reporter as producer when the Artifact marks producer unknown. |
+| C2 — double-mint | Same Member, kind, weight, and `evidence_ref` (or same Event id) arrives twice. | Keep one logical Contribution Event. Conflicting reuse is rejected. Rollup counts the act once. |
+| C3 — reporter ≠ producer | A member records another member's act with evidence that names that other member. | Allowed as a report. Rejected if the reporter mints themselves as `commit` / `artifact` producer against unknown or someone else's attribution. |
+| C4 — superseded | A correction Event replaces a mint (wrong weight, wrong Member, or the Work Item itself is superseded). | Old row stays in history with `superseded_by`. Active share uses only the replacement. Old rows do not move onto a new Work Item without a new Event. |
+
+Instinct owns turning C2–C4 into negative-path harness fixtures. Codex owns showing C1's active weights on Quiet Focus / return brief without merging Phase 0 as-is.

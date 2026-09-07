@@ -8,6 +8,7 @@ These notes separate useful inspiration from claims that still need evidence.
 | [Project Room coordination proposal](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5550169061) | The existing Room / Member / Work Item / Artifact model and source-linked results. |
 | [Scope cuts](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5550808959) | Explicit permissions, ordinary evidence events, selective write claims, and a compact first screen. |
 | [Historical event discussion](https://github.com/Uuriko/dasha-desk/pull/167#issuecomment-5550301667) | Inputs for the already-done-work and competing-executor examples; see the limits in [EVENT-FIXTURES](./EVENT-FIXTURES.md). |
+| [Schroeder group-project credit note](https://x.com/jpschroeder/status/2096703320618361059) | Inspiration only: record who contributed so later credit can follow that record. Ignore any game / store frame. See [CONTRIBUTION-LEDGER](./CONTRIBUTION-LEDGER.md). |
 
 Our design inference is to connect a shared conversation to durable work and evidence while using existing runtimes. A shared session need not mean one endlessly growing prompt or one model provider.
 
