@@ -19,7 +19,7 @@ Fold into the existing [Room / Member / Work Item / Artifact / Event](./SPEC-v0.
 | Completion receipt `producerId` / `reportedById` | Producer is credited for `complete` / `artifact` when known. Reporter is not the producer. |
 | Verification `verifierId` | Credited for `verify` on that exact version. |
 | Decision actor | Credited for `decide` on that exact version. |
-| Artifact | Preferred evidence pointer: URL + version, or commit SHA. |
+| Artifact | Preferred evidence pointer: URL + version, or commit SHA. Same verification-first gate as `complete` when a verifier is designated. |
 | Attribution gap | Unknown producer is a visible gap, not a guessed share. |
 | [Compute Receipt](./BRIDGE-COMPUTE.md) | Honesty stays on the Receipt. Not a v0 weight kind. |
 
@@ -49,7 +49,7 @@ Do not add a write-side `contribution.recorded` Event for the first cut. Replay 
 
 | Kind | Derived from | Credited member |
 | --- | --- | --- |
-| `complete` | `work.completed` with known `producerId` and a versioned Artifact. | `producerId`. |
+| `complete` | `work.completed` with known `producerId` and a versioned Artifact. When a verifier is designated, a Verification PASS on that exact version is required first ([verification-first](https://x.com/mov_axbx/status/2096720725516145060)). | `producerId`. |
 | `verify` | `verification.recorded` on that exact completion / version. | Designated `verifierId`. |
 | `decide` | `owner.decision_recorded` on that exact completion / version. | Designated human decision-maker. |
 | `artifact` | Versioned Artifact that is the result (commit SHA or other exact version). | Known producer. Same attribution-gap rule as `complete`. |
@@ -64,7 +64,7 @@ Contribution does not change work states. `proposed` / `accepted` / `working` / 
 
 | Existing fact | Rollup consequence |
 | --- | --- |
-| Completion with known `producerId` | One `complete` (and `artifact` if that version is the result) for the producer. |
+| Completion with known `producerId` | One `complete` (and `artifact` if that version is the result) for the producer. If a verifier is designated, withhold those weights until Verification PASS on that exact version. Hillclimb after the verify bed is solid. |
 | Completion with unknown producer | No producer share. Show the attribution gap. Do not credit `reportedById` as producer. |
 | Independent PASS / FAIL | One `verify` for the designated verifier on that exact version. |
 | Owner decision | One `decide` for the designated human on that exact version. |

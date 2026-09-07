@@ -108,13 +108,58 @@ test("C3 forged actor: client actor, label, and prefix mint no share", () => {
   const rolled = rollupContributions(c3ForgedActorEvents);
   assert.equal(rolled.active_rows.filter((row) => row.kind === "verify").length, 0);
   assert.equal(rolled.active_rows.filter((row) => row.kind === "decide").length, 0);
-  assert.ok(rolled.active_rows.every((row) => row.member_id === "codex"));
-  assert.deepEqual(
-    rolled.active_rows.map((row) => row.kind).sort(),
-    ["artifact", "complete"]
-  );
   assert.ok(!rolled.active_rows.some((row) => row.member_id === "instinct"));
   assert.ok(!rolled.active_rows.some((row) => row.member_id === "maya"));
+  // Forged PASS is not a designated-verifier PASS, so completion weight stays withheld.
+  assert.equal(rolled.active_rows.filter((row) => row.kind === "complete").length, 0);
+  assert.equal(rolled.active_rows.filter((row) => row.kind === "artifact").length, 0);
+});
+
+test("verification-first: designated verifier must PASS before complete/artifact mint", () => {
+  const withoutPass = c1HappyEvents.filter((event) => event.type !== "verification.recorded");
+  const withheld = rollupContributions(withoutPass);
+  assert.equal(withheld.active_rows.filter((row) => row.kind === "complete").length, 0);
+  assert.equal(withheld.active_rows.filter((row) => row.kind === "artifact").length, 0);
+  assert.equal(withheld.active_rows.filter((row) => row.kind === "decide")[0]?.member_id, "potter");
+
+  const failOnly = [
+    ...withoutPass.filter((event) => event.type !== "owner.decision_recorded"),
+    {
+      id: "evt-work-134-failed",
+      roomId: ROOM_ID,
+      type: "verification.recorded",
+      actorId: "instinct",
+      at: "2026-09-05T09:30:00.000Z",
+      data: {
+        workItemId: WORK_ITEM_ID,
+        result: "fail",
+        completionEventId: "evt-work-134-completed",
+        evidenceVersion: ARTIFACT_SHA,
+        summary: "FAIL on the recorded revision"
+      }
+    }
+  ];
+  const failed = rollupContributions(failOnly);
+  assert.equal(failed.active_rows.filter((row) => row.kind === "verify")[0]?.member_id, "instinct");
+  assert.equal(failed.active_rows.filter((row) => row.kind === "complete").length, 0);
+  assert.equal(failed.active_rows.filter((row) => row.kind === "artifact").length, 0);
+});
+
+test("without a designated verifier, known completion still mints", () => {
+  const events = c1HappyEvents
+    .filter((event) => event.type !== "verification.recorded")
+    .map((event) => {
+      if (event.type !== "work.proposed") return event;
+      const data = { ...event.data };
+      delete data.verifierMemberId;
+      delete data.independentVerificationRequired;
+      return { ...event, data };
+    });
+  const rolled = rollupContributions(events);
+  assert.deepEqual(
+    rolled.active_rows.filter((row) => row.member_id === "codex").map((row) => row.kind).sort(),
+    ["artifact", "complete"]
+  );
 });
 
 test("C4 unknown producer: no complete/artifact share; gap stays visible", () => {
@@ -187,4 +232,5 @@ test("wrong designated verifier or decision-maker earns no share", () => {
   const rolled = rollupContributions(events);
   assert.equal(rolled.active_rows.filter((row) => row.kind === "verify").length, 0);
   assert.equal(rolled.active_rows.filter((row) => row.kind === "decide").length, 0);
+  assert.equal(rolled.active_rows.filter((row) => row.kind === "complete").length, 0);
 });

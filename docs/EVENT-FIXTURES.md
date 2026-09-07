@@ -79,7 +79,7 @@ Use the existing #134 review fixture as the happy-path source: Codex reports the
 
 | Stub | Intended record | Required failure if abused |
 | --- | --- | --- |
-| C1 — derive from completion / verify / decide | Replay `work.completed`, `verification.recorded`, and `owner.decision_recorded`. When `producerId` is known, one `complete` / `artifact` share for that producer; one `verify` for Instinct; one `decide` for Potter after a recorded decision. | Do not credit the reporter as producer. Do not count messages. |
+| C1 — derive from completion / verify / decide | Replay `work.completed`, `verification.recorded`, and `owner.decision_recorded`. When `producerId` is known **and** the designated verifier PASSes that version, one `complete` / `artifact` share for that producer; one `verify` for Instinct; one `decide` for Potter after a recorded decision. | Do not credit the reporter as producer. Do not count messages. Do not mint `complete` / `artifact` before Verification PASS when a verifier is designated. |
 | C2 — double-count | The same completion, verification, or decision (same Event id or same source + payload) is applied twice. | One derived row. Active weight does not increase. |
 | C3 — forged actor | A client-supplied actor, `[Instinct]` label, or message prefix claims a share. | Reject / ignore. Only server-set `actorId` and stored Work Item roles count. |
 | C4 — unknown producer | Completion omits `producerId` or marks attribution unknown. | No `complete` or `artifact` share. Show the gap. The reporter is not inferred as producer. |
