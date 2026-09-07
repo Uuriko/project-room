@@ -1,0 +1,24 @@
+name: contribution-rollup
+
+on:
+  pull_request:
+  push:
+    paths:
+      - "contribution-rollup/**"
+      - ".github/workflows/contribution-rollup.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contribution-rollup
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test

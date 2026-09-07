@@ -1,6 +1,6 @@
 # Contribution ledger
 
-Proposed contract, 2026-09-07. Docs only. This document does not change Phase 0, merge [PR #8](https://github.com/Uuriko/project-room/pull/8) or [PR #9](https://github.com/Uuriko/project-room/pull/9), or add a payout path.
+Proposed contract, 2026-09-07. The Phase 0.5 derived rollup lives in [`contribution-rollup/`](../contribution-rollup/). This document does not change Phase 0, merge [PR #8](https://github.com/Uuriko/project-room/pull/8) or [PR #9](https://github.com/Uuriko/project-room/pull/9), or add a payout path.
 
 A Room already records who proposed work, who produced a result, who verified it, and who decided. The ledger is a **read-model** over those facts so later credit (and, only with an owner go, proceeds) can go to the people and agents who actually contributed.
 
@@ -93,7 +93,7 @@ People should be able to discuss a result without learning ledger terminology. O
 | Phase | Ships | Does not ship |
 | --- | --- | --- |
 | **Docs (now)** | This contract, README pointer, fixture stubs. Coordination on [#11](https://github.com/Uuriko/project-room/issues/11). | Schema writes, UI, payout, Phase 0 merge. |
-| **0.5** | Derived rollup from completion / verify / decide / artifact; negative-path fixtures; Quiet Focus / return-brief Contributors **read-model only**, drafted off the Phase 0 tip. | New scoreboard Event as the store. Auto-payout. Merge of #8/#9 as-is. Identity D235, Arcade, Multichain, Worker. |
+| **0.5** | Derived rollup from completion / verify / decide / artifact; negative-path fixtures; Quiet Focus / return-brief Contributors **read-model only**, drafted off the Phase 0 tip. The isolated module lives in [`contribution-rollup/`](../contribution-rollup/) and does not merge [PR #8](https://github.com/Uuriko/project-room/pull/8) or [PR #9](https://github.com/Uuriko/project-room/pull/9). | New scoreboard Event as the store. Auto-payout. Merge of #8/#9 as-is. Identity D235, Arcade, Multichain, Worker. |
 | **1** | Live derivation in the product (still a projection, not a second ledger). | Wallet, cents, Compute payout, any transfer. |
 | **1b** | Proceeds split using the active rollup. | Nothing until Potter's explicit go. Room still does not collect wallet secrets. Pay stays on its existing door. |
 
@@ -101,7 +101,7 @@ Phase 0 stays the v0 review / Quiet Focus / return-brief slice. Ledger work draf
 
 ## Negative paths (fixture work)
 
-These are specified failures, not passing software tests. Instinct owns fixtures that **derive** the rollup from completion / verify / decide. See the [stub cases](./EVENT-FIXTURES.md#contribution-event-stubs).
+Executable fixtures live in [`contribution-rollup/fixtures/`](../contribution-rollup/fixtures/). They **derive** the rollup from completion / verify / decide. See the [C1–C4 cases](./EVENT-FIXTURES.md#contribution-event-stubs).
 
 | Case | Required result |
 | --- | --- |
@@ -126,5 +126,5 @@ These are specified failures, not passing software tests. Instinct owns fixtures
 
 Design replies and fixtures on [#11](https://github.com/Uuriko/project-room/issues/11). Draft off the Phase 0 tip. Do not merge #8/#9 as-is for this.
 
-- **Instinct** (Phase 0 / harness owner): fixtures that derive the Contributors rollup from completion / verify / decide (and artifact when that is the result), plus negatives for **double-count**, **forged actor**, and **unknown producer**.
-- **Codex**: Quiet Focus / return-brief Contributors **read-model only**. Same source Events. No separate scoreboard UI. Optional `proposedById` on work cards is later, not this slice.
+- **Instinct** (Phase 0 / harness owner): fixtures that derive the Contributors rollup from completion / verify / decide (and artifact when that is the result), plus negatives for **double-count**, **forged actor**, and **unknown producer**. The isolated `contribution-rollup` module is that 0.5 cut.
+- **Codex**: Quiet Focus / return-brief Contributors **read-model only**. Import `contributorsForReturnBrief` from `contribution-rollup`. Same source Events. No separate scoreboard UI. Optional `proposedById` on work cards is later, not this slice. Do not merge #8/#9 to wire it.
