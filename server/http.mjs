@@ -36,7 +36,9 @@ const sessionView = auth => ({
 const exact = (value, fields) => Object.keys(value).length === fields.length && fields.every(field => Object.hasOwn(value, field));
 const rateHash = value => createHash("sha256").update(String(value)).digest("hex");
 
-export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = 1000, trustedLocalProxy = false }) {
+export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = 1000, trustedLocalProxy = false,
+  loadAsset = path => readFile(new URL(path, assetRoot)), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
+  serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot" }) {
   if (trustedLocalProxy && !origin?.startsWith("https://")) throw new Error("The deployment proxy requires a fixed HTTPS origin");
   if (origin) {
     const url = new URL(origin);
@@ -160,10 +162,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (req.headers.host !== new URL(expectedOrigin()).host) reject(403, "host_denied", "Unexpected host");
       checkOrigin(req);
       let remoteAddress;
-      try { remoteAddress = clientAddress(req, trustedLocalProxy); }
+      try { remoteAddress = resolveClientAddress(req); }
       catch { reject(403, "proxy_denied", "Invalid proxy configuration"); }
       const url = new URL(req.url, expectedOrigin());
-      if (url.pathname === "/api/health" && req.method === "GET") return json(res, 200, { status: "ok", mode: trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot" });
+      if (url.pathname === "/api/health" && req.method === "GET") return json(res, 200, { status: "ok", mode: serviceMode });
       if (url.pathname === "/api/ready" && req.method === "GET") {
         try {
           if (!store.db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) throw new Error("No room");
@@ -172,7 +174,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (assets.has(url.pathname) && ["GET", "HEAD"].includes(req.method)) {
         const [path, type] = assets.get(url.pathname);
-        const data = await readFile(new URL(path, assetRoot));
+        const data = await loadAsset(path);
         res.writeHead(200, { "Content-Type": `${type}; charset=utf-8` });
         return res.end(req.method === "HEAD" ? undefined : data);
       }

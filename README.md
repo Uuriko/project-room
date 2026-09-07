@@ -45,6 +45,12 @@ For an ordinary provisioned pilot, follow [SERVICE.md](docs/SERVICE.md). Agent u
 
 ## Invite-only deployment candidate
 
+The [Cloudflare staging candidate](cloudflare/README.md) reuses the same store,
+HTTP service and UI with explicit Durable Object adapters. Its local storage,
+HTTP and two-browser restart proofs pass. It is not deployed: account-wide
+Worker script/routing authorization requires the owner's explicit approval.
+The prepared Node service remains the fallback.
+
 See [the deployment runbook](docs/INVITE-ONLY-DEPLOYMENT.md) for the explicit production configuration, same-host HTTPS proxy, persistent database, verified backups, service definitions and hosted acceptance checklist. No live deployment has occurred. John selected an unlisted trydemigod.com page; backend placement, path routing and a real-host acceptance run remain outstanding. Guests still have an eight-hour browser identity; returning provisioned members use their own valid key with operator-assisted recovery.
 
 ## Still separate

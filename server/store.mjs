@@ -125,6 +125,24 @@ const invitationSchema = `
   CREATE TRIGGER IF NOT EXISTS membership_invitation_events_append_only_delete BEFORE DELETE ON membership_invitation_events BEGIN SELECT RAISE(ABORT,'invitation audit is append-only'); END;
 `;
 const compact = state => ({ ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} });
+// Platform differences stay at the database boundary; identity, invitation and
+// command rules below are shared by every runtime. The default remains Node.
+const nodeStorage = {
+  version: db => db.prepare("PRAGMA user_version").get().user_version,
+  setVersion: (db, version) => db.exec(`PRAGMA user_version=${version}`),
+  hasSchema: db => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' LIMIT 1").get()),
+  configure(db, readOnly) {
+    db.exec(readOnly ? "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=3000;"
+      : "PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=3000;");
+  },
+  registerWriter, installWriterFence, verifyWriterFence,
+  transaction(db, fn, readOnly) {
+    if (db.isTransaction) return fn();
+    db.exec(readOnly ? "BEGIN" : "BEGIN IMMEDIATE");
+    try { const result = fn(); db.exec("COMMIT"); return result; }
+    catch (error) { db.exec("ROLLBACK"); throw error; }
+  }
+};
 const work = "workItemId expectedRevision";
 const shapes = {
   [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId",
@@ -160,13 +178,14 @@ export function validateCommand(command) {
 }
 
 export class RoomStore {
-  constructor(filename, { now = () => Date.now(), readOnly = false } = {}) {
+  constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage } = {}) {
     this.now = now;
-    this.db = new DatabaseSync(filename, { readOnly });
+    this.db = database ?? new DatabaseSync(filename, { readOnly });
+    this.storagePlatform = storagePlatform;
     this.shareLinks = new ShareLinks(this);
-    const version = this.db.prepare("PRAGMA user_version").get().user_version;
+    const version = this.storagePlatform.version(this.db);
     const supported = new Set([0, 1, 2, 3, 4, 5, 6, STORE_SCHEMA_VERSION]);
-    const hasSchema = version === 0 && Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' LIMIT 1").get());
+    const hasSchema = version === 0 && this.storagePlatform.hasSchema(this.db);
     if (!supported.has(version) || hasSchema) {
       this.db.close();
       throw new Error(version > STORE_SCHEMA_VERSION ? "Database schema is newer than this service" : "Database schema version is unsupported");
@@ -174,20 +193,20 @@ export class RoomStore {
     if (readOnly) {
       try {
         if (version !== STORE_SCHEMA_VERSION) throw new Error("Read-only invitation audit requires schema v7; migrate a backed-up database through the service first");
-        this.db.exec("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=3000;");
-        verifyWriterFence(this.db);
+        this.storagePlatform.configure(this.db, true);
+        this.storagePlatform.verifyWriterFence(this.db);
         this.verifyInvitationAudit();
         this.shareLinks.verify();
         return;
       } catch (error) { this.db.close(); throw error; }
     }
-    this.db.exec("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=3000;");
-    registerWriter(this.db);
+    this.storagePlatform.configure(this.db, false);
+    this.storagePlatform.registerWriter(this.db);
     try { this.transaction(() => {
     // Reread under the write lock: another startup may have upgraded while we waited.
-    if (this.db.prepare("PRAGMA user_version").get().user_version !== version) throw new Error("Database changed during startup; retry with the current service");
-    if (version === STORE_SCHEMA_VERSION) verifyWriterFence(this.db);
-    if (version === 0) this.db.exec(`
+    if (this.storagePlatform.version(this.db) !== version) throw new Error("Database changed during startup; retry with the current service");
+    if (version === STORE_SCHEMA_VERSION) this.storagePlatform.verifyWriterFence(this.db);
+    if (version === 0) { this.db.exec(`
       CREATE TABLE rooms (id TEXT PRIMARY KEY, sequence INTEGER NOT NULL, projection TEXT NOT NULL);
       CREATE TABLE events (room_id TEXT NOT NULL REFERENCES rooms(id), sequence INTEGER NOT NULL, id TEXT NOT NULL UNIQUE, body TEXT NOT NULL, PRIMARY KEY(room_id, sequence));
       CREATE TABLE commands (room_id TEXT NOT NULL REFERENCES rooms(id), actor_id TEXT NOT NULL, id TEXT NOT NULL, fingerprint TEXT NOT NULL, sequence INTEGER NOT NULL, PRIMARY KEY(room_id, actor_id, id), FOREIGN KEY(room_id, sequence) REFERENCES events(room_id, sequence));
@@ -199,14 +218,15 @@ export class RoomStore {
       CREATE INDEX credential_account ON credentials(account_id);
       CREATE TABLE cursors (room_id TEXT NOT NULL REFERENCES rooms(id), member_id TEXT NOT NULL, sequence INTEGER NOT NULL, PRIMARY KEY(room_id, member_id));
       CREATE TABLE projection_checkpoints (room_id TEXT PRIMARY KEY REFERENCES rooms(id), sequence INTEGER NOT NULL, projection TEXT NOT NULL);
-      ${invitationSchema}
-      PRAGMA user_version=4;`);
+      ${invitationSchema}`);
+      this.storagePlatform.setVersion(this.db, 4);
+    }
     this.repairProjectionProvenance({ upgradeV1: version === 1 });
     if (version === 1 || version === 2) this.migrateIdentityV3(version);
     if (version === 1 || version === 2 || version === 3) this.migrateInvitationsV4();
       if (version < 5) this.migrateInvitationJournalV5();
       if (version < 7) this.db.exec(shareLinkSchema);
-      if (version < STORE_SCHEMA_VERSION) installWriterFence(this.db);
+      if (version < STORE_SCHEMA_VERSION) this.storagePlatform.installWriterFence(this.db);
       this.verifyInvitationAudit();
       this.shareLinks.verify();
     }); } catch (error) { this.db.close(); throw error; }
@@ -245,13 +265,13 @@ export class RoomStore {
         account_id=(SELECT account_id FROM member_accounts m WHERE m.room_id=credentials.room_id AND m.member_id=credentials.member_id),
         account_auth_epoch=(SELECT a.auth_epoch FROM member_accounts m JOIN accounts a ON a.id=m.account_id WHERE m.room_id=credentials.room_id AND m.member_id=credentials.member_id)
         WHERE EXISTS (SELECT 1 FROM member_accounts m WHERE m.room_id=credentials.room_id AND m.member_id=credentials.member_id)`);
-      this.db.exec("PRAGMA user_version=3");
+      this.storagePlatform.setVersion(this.db, 3);
     });
   }
   migrateInvitationsV4() {
     this.transaction(() => {
       this.db.exec(invitationSchema);
-      this.db.exec("PRAGMA user_version=4");
+      this.storagePlatform.setVersion(this.db, 4);
     });
   }
   migrateInvitationJournalV5() {
@@ -261,7 +281,7 @@ export class RoomStore {
         this.appendInvitationJournal(record, "legacy-v4-baseline");
         this.verifyInvitationRecord(record.id);
       }
-      this.db.exec("PRAGMA user_version=5");
+      this.storagePlatform.setVersion(this.db, 5);
     });
   }
   appendInvitationJournal(record, kind) {
@@ -446,22 +466,16 @@ export class RoomStore {
       // v2 marks the producer/reporter/verification-independence projection contract.
       // Commit its marker atomically with every v1 projection repair so older binaries
       // either see untouched v1 or reject the fully upgraded database.
-      if (upgradeV1) this.db.exec("PRAGMA user_version=2");
+      if (upgradeV1) this.storagePlatform.setVersion(this.db, 2);
     });
   }
   close() { this.db.close(); }
   transaction(fn) {
     // Nested startup helpers share the outer migration transaction and its rollback.
-    if (this.db.isTransaction) return fn();
-    this.db.exec("BEGIN IMMEDIATE");
-    try { const result = fn(); this.db.exec("COMMIT"); return result; }
-    catch (error) { this.db.exec("ROLLBACK"); throw error; }
+    return this.storagePlatform.transaction(this.db, fn, false);
   }
   readTransaction(fn) {
-    if (this.db.isTransaction) return fn();
-    this.db.exec("BEGIN");
-    try { const result = fn(); this.db.exec("COMMIT"); return result; }
-    catch (error) { this.db.exec("ROLLBACK"); throw error; }
+    return this.storagePlatform.transaction(this.db, fn, true);
   }
   room(roomId) {
     const row = this.db.prepare("SELECT * FROM rooms WHERE id=?").get(roomId);
