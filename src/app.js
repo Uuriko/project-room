@@ -65,7 +65,8 @@ const client = new RoomClient({
     $("#conversation-title").textContent = `# ${roomId}`;
     $("#main").hidden = false; $("#auth-panel").hidden = true; $("#auth-panel").setAttribute("aria-busy", "false");
     $("#signout-button").hidden = false; $("#signout-button").disabled = signoutLoading;
-    $("#identity-label").textContent = `${memberLabel(session.member.id)} · ${session.member.kind}`;
+    $("#identity-label").textContent = displayName(session.member.id);
+    $("#identity-label").title = `${memberLabel(session.member.id)} · ${session.member.kind}`;
     $("#cursor-label").textContent = `Your caught-up marker: ${snapshot.cursor} · room event ${snapshot.sequence}`;
     render();
     shareLinksUI?.sync();
@@ -105,6 +106,7 @@ const client = new RoomClient({
     $("#main").hidden = true; $("#auth-panel").hidden = false; $("#signout-button").hidden = true;
     $("#auth-panel").setAttribute("aria-busy", pendingSignout ? "true" : "false");
     $("#identity-label").textContent = "Not signed in";
+    $("#identity-label").removeAttribute("title");
     for (const id of ["message-list", "work-list", "event-list", "presence-list", "member-stack", "summary-grid", "reply-context", "source-context", "action-context", "action-fields", "cursor-label", "presence-count", "message-count", "event-count", "rb-attention-list", "rb-involving-list", "rb-history-list"]) $(`#${id}`).replaceChildren();
     delete $("#summary-grid")._content;
     for (const id of ["message-to-select", "assignee-select", "verifier-select"]) { $(`#${id}`).replaceChildren(); delete $(`#${id}`).dataset.signature; }
@@ -150,6 +152,15 @@ const briefView = new ReturnBrief(client, {
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 const humanize = value => String(value).replaceAll("_", " ").replaceAll(".", " ");
 const memberLabel = id => id == null ? "Unassigned" : state.members[id] ? `${state.members[id].displayName} (${id})` : `Unknown member (${id})`;
+// Keep ordinary conversation readable; exact IDs remain in details and decision
+// controls. Duplicate names retain the full ID so attribution stays unambiguous.
+const displayName = id => {
+  const member = state.members[id];
+  if (!member) return memberLabel(id);
+  const duplicate = Object.values(state.members).some(other => other.id !== id
+    && other.displayName.trim().toLocaleLowerCase() === member.displayName.trim().toLocaleLowerCase());
+  return duplicate ? memberLabel(id) : member.displayName;
+};
 const name = id => memberLabel(id);
 const can = capability => state?.members[session?.member.id]?.permissions.includes(capability);
 const sameSession = (generation, roomId, memberId) => generation === client.generation && state
@@ -453,7 +464,9 @@ function syncWorkForm() {
   const reviewing = $("#require-verification").checked;
   selectOptions("#assignee-select", active.filter(member => ["accept_work", "complete_work", ...(writing ? ["write_external"] : [])]
     .every(permission => member.permissions.includes(permission))), "Choose accountable member");
-  selectOptions("#verifier-select", active.filter(member => member.permissions.includes("verify") && member.id !== $("#assignee-select").value), "Choose independent verifier");
+  const reviewers = active.filter(member => member.permissions.includes("verify") && member.id !== $("#assignee-select").value);
+  selectOptions("#verifier-select", reviewers, "Choose independent verifier");
+  $("#reviewer-unavailable").hidden = !reviewing || !$("#assignee-select").value || reviewers.length > 0;
   $("#verifier-field").hidden = !reviewing;
   $("#verifier-select").disabled = !reviewing;
   $("#verifier-select").required = reviewing;
@@ -499,7 +512,9 @@ function render() {
   $("#member-stack").innerHTML = active.map(m => `<div class="member-avatar ${m.kind}" title="${esc(memberLabel(m.id))}" aria-hidden="true"><span>${initials(m.displayName)}</span></div>`).join("");
   const presenceSnap = captureDisclosures($("#presence-list")), workSnap = captureDisclosures($("#work-list"));
   $("#presence-list").innerHTML = members.map(m => `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span></div><div><strong>${esc(memberLabel(m.id))}</strong><span>${esc(m.kind)} · ${m.active === false ? "access revoked" : "presence unknown"}</span><details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p></details></div></div>`).join("");
-  $("#new-work-button").disabled = !can("steer"); $("#composer-work-button").disabled = !can("steer");
+  for (const id of ["new-work-button", "composer-work-button"]) {
+    $("#" + id).hidden = !can("steer"); $("#" + id).disabled = !can("steer");
+  }
   const items = Object.values(state.workItems);
   const waiting = items.filter(i => readyForDecision(i) && i.humanDecisionMakerId === session.member.id).length;
   const summaryHtml = `<article class="summary-card"><span>Your decisions</span><strong>${waiting}</strong><p>Completion, verification, and approval stay separate.</p></article><article class="summary-card"><span>Work in this room</span><strong>${items.length}</strong><p>${items.filter(i => i.state === S.BLOCKED).length} blocked. Conversation never creates work automatically.</p></article>`;
@@ -509,7 +524,7 @@ function render() {
   }
   renderMessages();
   renderSearch();
-  $("#work-list").innerHTML = items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(workCard).join("") || '<p class="empty-note">Nothing assigned. A room is useful before it has a task.</p>';
+  $("#work-list").innerHTML = items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(workCard).join("") || `<p class="empty-note">${can("steer") ? "Turn a message into work, or start something new." : "Suggest work in the conversation. The owner can create it."}</p>`;
   restoreDisclosures($("#presence-list"), presenceSnap);
   restoreDisclosures($("#work-list"), workSnap);
   $("#event-count").textContent = `${client.sequence}`;
@@ -564,7 +579,7 @@ function renderMessages() {
     }
     if (list.children[index] !== node) list.insertBefore(node, list.children[index] || null);
   });
-  if (!messages.length) list.innerHTML = '<li class="empty-note">Start with a hello, a thought, or a question. No task required.</li>';
+  if (!messages.length) list.innerHTML = '<li class="empty-note">Say hello. What are we working on?</li>';
   list.dataset.view = view;
   if (!sameView) { list.scrollTop = viewPositions.get(view) ?? list.scrollHeight; newVisibleMessages = 0; }
   else if (nearBottom && !focused) { list.scrollTop = list.scrollHeight; newVisibleMessages = 0; }
@@ -583,7 +598,7 @@ function renderMessages() {
 }
 function messageContent(m) {
   const author = state.members[m.authorId];
-  const authorLabel = memberLabel(m.authorId);
+  const authorLabel = displayName(m.authorId);
   const linked = Object.values(state.workItems).filter(i => i.sourceMessageId === m.id || i.id === m.workItemId);
   const parent = conversation.byId.get(m.replyToId);
   const count = (conversation.threads.get(m.id)?.length || 1) - 1;
@@ -1166,6 +1181,7 @@ function openWork(sourceId = null) {
   $("#work-options").open = false;
   $("#work-dialog").showModal();
   $("#source-message-id").value = sourceId || "";
+  if (sourceId) $("#work-title-input").value = (state.messages.find(m => m.id === sourceId)?.body || "").trim().replace(/\s+/g, " ").slice(0, 100).replace(/[\uD800-\uDBFF]$/, "");
   $("#source-context").textContent = sourceId ? `Source: ${state.messages.find(m => m.id === sourceId)?.body || ""}` : "";
   $("#source-context").hidden = !sourceId; $("#work-title-input").focus();
   syncWorkForm();
@@ -1184,6 +1200,10 @@ function closeWorkForm({ returnFocus = true } = {}) {
 }
 $("#new-work-button").addEventListener("click", () => openWork());
 $("#composer-work-button").addEventListener("click", () => openWork());
+$("#review-settings-button").addEventListener("click", () => {
+  $("#work-options").open = true;
+  $("#require-verification").focus();
+});
 $("#cancel-work-button").addEventListener("click", () => closeWorkForm());
 $("#work-dialog").addEventListener("cancel", event => { event.preventDefault(); if (!busy) closeWorkForm(); });
 $("#new-work-form").addEventListener("change", syncWorkForm);
@@ -1412,6 +1432,7 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
   if (requestedRoom) {
     const account = await ensureAccountSession();
     if (!account?.authenticated) {
+      $("#identity-label").textContent = "Not signed in";
       setFormStatus($("#auth-error"), `Sign in with a canonical account that has membership in #${requestedRoom}.`, true);
       setConnectionStatus("Not connected · account sign-in required");
       $("#auth-panel").hidden = false;
@@ -1427,9 +1448,10 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
   if (signedOut) recovery.clear();
   const requestedRoom = selectedRoomFromLocation();
   setFormStatus($("#auth-error"), signedOut
-    ? requestedRoom ? `This account cannot open #${requestedRoom}. Use an account with active membership there.` : "Use a provisioned human room key to enter. No demo identity is selected for you."
+    ? requestedRoom ? `This account cannot open #${requestedRoom}. Use an account with active membership there.` : ""
     : "Room service unavailable. Check the service and retry; no connection is claimed.", true);
   setConnectionStatus(signedOut ? "Not connected · sign in required" : "Room service unavailable · not connected");
+  $("#identity-label").textContent = signedOut ? "Not signed in" : "Session unavailable";
   $("#auth-panel").hidden = false;
   if (!$("#invitation-dialog").open) queueMicrotask(() => $("#access-key").focus({ preventScroll: true }));
 });

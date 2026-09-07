@@ -783,5 +783,6 @@ test("record identities and fragments remain collision-safe and legacy work link
 
   await page.locator("#signout-button").click();
   await enterRoom(page, duplicateA, "Alex (duplicate-a)");
-  assert.equal(await page.locator("#identity-label").textContent(), "Alex (duplicate-a) · human");
+  assert.equal(await page.locator("#identity-label").textContent(), "Alex (duplicate-a)");
+  assert.equal(await page.locator("#identity-label").getAttribute("title"), "Alex (duplicate-a) · human");
 });

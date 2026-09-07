@@ -145,7 +145,11 @@
               <label>Outcome <input id="work-title-input" maxlength="100" required></label>
               <label>Done when… <textarea id="work-done-input" rows="2" maxlength="300" required></textarea></label>
               <label>Owner <select id="assignee-select" required></select></label>
-              <label id="verifier-field">Reviewer <select id="verifier-select" required></select></label>
+              <label id="verifier-field">Reviewer <select id="verifier-select" required aria-describedby="reviewer-unavailable"></select></label>
+              <div id="reviewer-unavailable" class="reviewer-unavailable" hidden>
+                <p>No independent reviewer is available. Choose someone else to own this work, or turn off review.</p>
+                <button id="review-settings-button" class="button secondary" type="button">Review settings</button>
+              </div>
               <details id="work-options"><summary>Review & permissions <span id="work-options-summary"></span></summary>
               <label>Mode <select id="work-mode-select"><option value="read">Read / think / review</option><option value="write">Authorized external write</option></select></label>
               <fieldset class="work-checks" aria-describedby="work-checks-help">

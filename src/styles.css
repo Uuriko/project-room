@@ -25,8 +25,8 @@ button, select { min-height: 2.6rem; }
 button { cursor: pointer; }
 a { color: var(--blue); }
 
-.skip-link { position: fixed; left: 1rem; top: -4rem; z-index: 100; padding: .75rem 1rem; background: white; color: black; }
-.skip-link:focus { top: 1rem; }
+.skip-link { position: fixed; left: 1rem; top: 1rem; z-index: 100; padding: .75rem 1rem; background: white; color: black; clip-path: inset(50%); }
+.skip-link:focus { clip-path: none; }
 .app-shell { min-height: 100vh; }
 .topbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-height: 4.5rem; padding: .8rem clamp(1rem, 3vw, 2.5rem); border-bottom: 1px solid rgb(255 255 255 / 8%); background: rgb(10 12 16 / 86%); backdrop-filter: blur(18px); }
 .brand { display: flex; align-items: center; gap: .75rem; }
@@ -492,6 +492,8 @@ button:disabled { cursor: wait; opacity: .6; }
 #work-options > summary { cursor: pointer; padding: .65rem 0; min-height: 44px; font-size: .875rem; }
 #work-options-summary { display: block; padding-block: .25rem; font-size: .8rem; color: var(--muted); }
 #work-dialog .form-actions { margin-top: 1.25rem; }
+.reviewer-unavailable { padding: .75rem; border: 1px solid var(--line); border-radius: .6rem; margin-bottom: .75rem; }
+.reviewer-unavailable p { margin: 0 0 .5rem; font-size: .875rem; line-height: 1.5; color: var(--muted); }
 .work-checks { border-radius: .6rem; }
 summary { overflow-wrap: anywhere; }
 @container room-shell (max-width: 65em) {
@@ -500,15 +502,17 @@ summary { overflow-wrap: anywhere; }
   .context-rail .work-list { max-height: none; }
 }
 @container room-shell (max-width: 40em) {
-  .topbar { gap: .5rem; }
-  .topbar-actions { justify-content: start; }
-  #identity-label { flex-basis: 100%; }
+  .topbar { flex-direction: row; align-items: center; gap: .5rem; }
+  .brand div { display: none; }
+  .brand-mark { width: 2rem; }
+  .topbar-actions { justify-content: end; margin-left: auto; }
+  #identity-label { flex-basis: auto; max-width: 8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .room-stage .room-heading { align-items: start; }
   .room-presence-summary { display: none; }
   .composer-toolbar .text-button { margin-left: 0; }
   .composer-row { grid-template-columns: minmax(0, 1fr) 44px; }
   .message { grid-template-columns: 1.75rem minmax(0, 1fr); gap: .5rem; }
   .message-avatar { display: grid; width: 1.75rem; height: 1.75rem; }
-  .message-list { padding-inline: .75rem; }
+  .message-list { padding-inline: .75rem; min-height: 12rem; height: clamp(12rem, 26dvh, 18rem); }
   .work-checks { padding: .5rem; }
 }

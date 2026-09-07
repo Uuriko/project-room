@@ -60,3 +60,8 @@ Instinct's complete newer identity/service chain is not available as a downloada
 No real agent runtime, MCP host conformance, independent implementation review or production-readiness claim follows from the synthetic local checks. Hosted staging evidence is recorded separately.
 
 Latest local checkpoint: [quiet interface and keyboard sending](docs/QUIET-INTERFACE-2026-09-07.md). Follow-up proposal: [multi-route bounties](docs/BOUNTIES-DESIGN-2026-09-07.md); bounty execution and payments are not implemented.
+
+The [first-use testing checkpoint](docs/FIRST-USE-TESTING-2026-09-07.md) improves
+guest conversation, source-linked work creation and mobile layout, with repeatable
+browser checks and a short voluntary human-testing script. No human-study outcome
+is claimed.
