@@ -73,15 +73,15 @@ These cases define acceptance behavior. Claiming they pass requires execution ev
 
 ## Contribution Event stubs
 
-Specified scenarios for the [contribution ledger](./CONTRIBUTION-LEDGER.md). They do not change the work-state table or the historical fixtures above. The rollup is derived from existing completion / verify / decide Events. These rows are planning stubs; executable fixtures are Phase 0.5 work on [#11](https://github.com/Uuriko/project-room/issues/11).
+Specified scenarios for the [contribution ledger](./CONTRIBUTION-LEDGER.md). They do not change the work-state table or the historical fixtures above. The rollup is derived from existing completion / verify / decide Events. Executable fixtures and tests live in [`contribution-rollup/`](../contribution-rollup/) (Phase 0.5 on [#11](https://github.com/Uuriko/project-room/issues/11)).
 
 Use the existing #134 review fixture as the happy-path source: Codex reports the already-existing result, Instinct verifies that exact revision, Potter holds the owner decision. Derived rows cite those Events and the commit `70053cc6cf9d86f3a43220dcfbb0af05797380c0`. They do not invent a merge, a payout, a producer, or a scoreboard Event.
 
 | Stub | Intended record | Required failure if abused |
 | --- | --- | --- |
-| C1 — derive from completion / verify / decide | Replay `work.completed`, `verification.recorded`, and `owner.decision_recorded`. When `producerId` is known, one `complete` / `artifact` share for that producer; one `verify` for Instinct; one `decide` for Potter after a recorded decision. | Do not credit the reporter as producer. Do not count messages. |
+| C1 — derive from completion / verify / decide | Replay `work.completed`, `verification.recorded`, and `owner.decision_recorded`. When `producerId` is known **and** the designated verifier PASSes that version, one `complete` / `artifact` share for that producer; one `verify` for Instinct; one `decide` for Potter after a recorded decision. | Do not credit the reporter as producer. Do not count messages. Do not mint `complete` / `artifact` before Verification PASS when a verifier is designated. |
 | C2 — double-count | The same completion, verification, or decision (same Event id or same source + payload) is applied twice. | One derived row. Active weight does not increase. |
 | C3 — forged actor | A client-supplied actor, `[Instinct]` label, or message prefix claims a share. | Reject / ignore. Only server-set `actorId` and stored Work Item roles count. |
 | C4 — unknown producer | Completion omits `producerId` or marks attribution unknown. | No `complete` or `artifact` share. Show the gap. The reporter is not inferred as producer. |
 
-Instinct owns turning C1–C4 into harness fixtures that derive the rollup. Codex owns a Quiet Focus / return-brief Contributors **read-model** for C1. Do not merge Phase 0 #8/#9 as-is.
+C1–C4 are executable under `contribution-rollup/fixtures/` and `contribution-rollup/tests/`. Codex can import `contributorsForReturnBrief` for a Quiet Focus / return-brief Contributors **read-model**. Do not merge Phase 0 #8/#9 as-is.
