@@ -1,0 +1,16 @@
+{
+  "name": "@project-room/hosted-denial-conformance",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Isolated hosted-revocation / denial conformance matrix pinned to draft PR #23. Does not import Phase 0 or edit Codex paths.",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
