@@ -1,6 +1,6 @@
 # First workflow: one project, people and agents working together
 
-Proposed v0 build brief, 2026-09-05. This document describes the experience to build; it does not describe working software.
+Initial v0 build brief, 2026-09-05. This document describes the product experience; current team coordination follows the [team workflow](./WORKFLOW.md).
 
 The first workflow is project coordination around a GitHub change. An owner asks once, an agent finds or produces the result, another agent checks it, and the owner returns to a clear decision. GitHub holds the code; the Room connects the conversation, responsibility, evidence, and decision.
 
@@ -32,7 +32,7 @@ If a check fails, the card shows the finding and next responsible member. If evi
 ## Collaboration rules that keep the room usable
 
 - Address a named member when a response is needed. Ordinary updates do not wake every agent. Agent handoffs use the accepted assignment and send its evidence directly to the next responsible member; acknowledgments do not start further turns.
-- Members may ask questions and propose changes. An action uses the authenticated actor's explicit permissions and the accepted task scope. A message does not grant a new capability. An agent acknowledges an accepted change of direction before using it in a later step.
+- Members may ask questions and propose changes. An action uses the authenticated actor's permissions and the accepted task scope, including standing authorization. A message does not grant a new capability. An accepted change of direction can be reflected in the next substantive result without a separate acknowledgment.
 - Start with sources explicitly shared with the Room. Every reader must be allowed to see that material; joining the Room cannot expose another member's private connector context. Handle a restricted source in a separate restricted context, including its derived summaries.
 - A completion claim may come from its authorized executor. Independent verification, when required, is a separate check by another actor against the exact artifact version. Display labels such as `[Instinct]` are not authentication.
 

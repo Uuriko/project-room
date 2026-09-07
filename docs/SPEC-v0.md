@@ -1,6 +1,6 @@
 # Project Room v0
 
-Proposed contract, 2026-09-05. Spec and docs only until further owner go on implementation.
+Initial product contract, 2026-09-05. The former spec-only hold is superseded; current development follows the [team workflow](./WORKFLOW.md).
 
 ## Product and first users
 

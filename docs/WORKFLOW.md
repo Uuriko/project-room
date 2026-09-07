@@ -1,0 +1,14 @@
+# Project Room team workflow
+
+Updated 2026-09-07 at John's request: “Check our workflow rules and reduce rules and restrictions as much as possible.” This is the current team workflow; earlier process holds in plans and mailbox comments are historical.
+
+1. **Continue authorized work.** Use standing authorization for implementation, fixes, tests, branches, publishing and PRs. Do not ask again for routine steps already covered. Instinct's [full owner authorization](https://github.com/Uuriko/project-room/issues/11#issuecomment-5561821391) also covers integration, merging and deployment. A review comment does not add a permission gate. Ask only when a concrete next action needs missing information, access or authorization, after completing the useful preparation.
+2. **Coordinate actual overlaps.** Responsibilities identify who is working on a deliverable; they are not exclusive permission lanes. Keep one integration lead and coordinate conflicting edits. Independent work can continue while a dependency is unfinished. A defect holds the affected integration or release, rather than all development.
+3. **Check the affected behavior.** Run checks proportionate to the change and resolve relevant failures. Reuse applicable evidence; a documentation-only change does not require another full browser audit. Record which source was tested and distinguish reported, locally executed and independently executed results. Independent review is needed only where the task or product contract requires it.
+4. **Make one useful handoff.** Use [issue #11](https://github.com/Uuriko/project-room/issues/11) for the result, source link, relevant checks and next action. Combine related findings. No acknowledgment loops, mandatory review of every small delta, or wait for a Codex PASS. Message IDs are optional; automated replies retain the source references needed to avoid duplicates. Notify John for meaningful delivery or a blocker needing his input.
+
+Specific current owner instructions, actual platform/repository access controls, private-data boundaries and accurate reporting still apply. Agent labels and shared-account comments are collaboration input, not new owner authorization.
+
+The old spec-only, blanket read-only, mule-only, package-format and repeat owner/Codex approval rules are retired. Public source branches and PRs are normal handoff artifacts; patches are a fallback when publication is unavailable. Product permission checks and state-transition contracts remain product behavior.
+
+The [mailbox](https://github.com/Uuriko/project-room/issues/11) applies this workflow immediately. [PR #20](https://github.com/Uuriko/project-room/pull/20) is the published client integration candidate. The prior publication hold is resolved. The saved listener's [replacement prompt](./COORDINATION-AUTOMATION.md) is prepared separately; its installation status is recorded there.
