@@ -138,7 +138,7 @@ test("one canonical human account spans Rooms and suspension revokes every crede
   assert.equal(store.command(owner, "commons", command(T.MESSAGE_POSTED, { body: "Owner remains separate" })).event.actorId, "owner");
 });
 
-test("an event page cannot cross the account authorization snapshot that admitted it", t => {
+for (const read of ["eventsAfter", "snapshot", "returnBrief"]) test(`${read} stays within the account authorization snapshot that admitted it`, t => {
   const { store, filename, human, agent } = fixture(t);
   const other = new RoomStore(filename);
   t.after(() => other.close());
@@ -156,9 +156,11 @@ test("an event page cannot cross the account authorization snapshot that admitte
     return auth;
   };
 
-  const page = store.eventsAfter(human, "commons", after);
-  assert.deepEqual(page.events, [], "the authorized read remains on its pre-suspension snapshot");
-  assert.equal(page.hasMore, false);
+  const page = read === "eventsAfter" ? store.eventsAfter(human, "commons", after) : store[read](human, "commons");
+  if (read === "eventsAfter") {
+    assert.deepEqual(page.events, [], "the authorized read remains on its pre-suspension snapshot");
+    assert.equal(page.hasMore, false);
+  } else assert.equal(read === "snapshot" ? page.sequence : page.current.evaluatedThrough, after);
   assert.throws(() => store.authenticate(human), /account access ended|revoked/);
   assert.equal(other.room("commons").state.messages.at(-1).body, "Committed after suspension");
 });

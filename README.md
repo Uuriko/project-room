@@ -57,9 +57,9 @@ See [the Node deployment runbook](docs/INVITE-ONLY-DEPLOYMENT.md) for the fallba
 
 Instinct's complete newer identity/service chain is not available as a downloadable revision. Its readable lifecycle findings are accounted for in the ledger, not treated as a wholesale integration. Grok's independently executed conformance/runtime result is not available. The older experimental gateway and separate PR #9 harness are retained source references, not silently activated.
 
-No real agent runtime, MCP host conformance, independent implementation review or production-readiness claim follows from the synthetic local checks. Hosted staging evidence is recorded separately.
+No automatic hosted agent runner, MCP host conformance or production-readiness claim follows from the synthetic local checks. Two real agents also used the documented client to produce and independently review an artifact; see [agent onboarding](docs/AGENT-ONBOARDING-TESTING-2026-09-07.md) for the narrower evidence and limits. Hosted staging evidence is recorded separately.
 
-Latest local checkpoint: [quiet interface and keyboard sending](docs/QUIET-INTERFACE-2026-09-07.md). Follow-up proposal: [multi-route bounties](docs/BOUNTIES-DESIGN-2026-09-07.md); bounty execution and payments are not implemented.
+Latest release checkpoint: [release review and polish](docs/RELEASE-POLISH-2026-09-07.md), including current test results, deployment evidence and remaining gates. Earlier UI direction: [quiet interface and keyboard sending](docs/QUIET-INTERFACE-2026-09-07.md). Follow-up proposal: [multi-route bounties](docs/BOUNTIES-DESIGN-2026-09-07.md); bounty execution and payments are not implemented.
 
 The [first-use testing checkpoint](docs/FIRST-USE-TESTING-2026-09-07.md) improves
 guest conversation, source-linked work creation and mobile layout, with repeatable

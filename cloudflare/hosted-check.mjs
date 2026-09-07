@@ -3,15 +3,22 @@
 import assert from 'node:assert/strict';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { parseArgs } from 'node:util';
 
 const origin = 'https://project-room-staging.getdasha.workers.dev';
 const privatePath = name => new URL(`./.operator/${name}`, import.meta.url);
 const output = fileURLToPath(new URL('./test-results/', import.meta.url));
-const returning = process.argv.includes('--return');
-const inviting = process.argv.includes('--invite-user');
-const checkingWork = process.argv.includes('--work');
+const { values } = parseArgs({ options: {
+  return: { type: 'boolean' }, 'invite-user': { type: 'boolean' },
+  work: { type: 'boolean' }, help: { type: 'boolean' }
+} });
+if (values.help) {
+  console.log('Hosted check: no flags creates a synthetic guest and messages; --work also creates test work; --return only checks saved guest access; --invite-user creates a private invitation. Never runs in CI.');
+  process.exit(0);
+}
+const returning = values.return, inviting = values['invite-user'], checkingWork = values.work;
 if (returning && (inviting || checkingWork) || inviting && checkingWork) throw new Error('Choose one hosted check mode');
+const { chromium } = await import('playwright');
 await mkdir(output, { recursive: true });
 const browser = await chromium.launch({ headless: true });
 try {
@@ -36,6 +43,12 @@ try {
     await owner.getByRole('button', { name: 'Enter room', exact: true }).click();
     await owner.locator('#main').waitFor({ state: 'visible' });
     await owner.locator('#invite-people-button').click();
+    if (!inviting) {
+      await owner.locator('#share-settings > summary').click();
+      await owner.locator('#share-link-expiry').selectOption('1');
+      await owner.locator('#share-link-limit').fill('1');
+      await owner.locator('#share-settings > summary').click();
+    }
     await owner.locator('#share-link-create').click();
     await owner.locator('#share-link-result').waitFor({ state: 'visible' });
     const invitation = await owner.locator('#share-link-url').inputValue();

@@ -98,8 +98,8 @@ test("invitation UI retries the same uncertain creation and preserves confirmed 
     await node("#share-link-form").handlers.submit({ preventDefault() {} });
     assert.equal(createAttempts, 2);
     assert.deepEqual(requests[1], requests[0], "retry preserves token, request ID, expiry, scope and membership revision");
-    assert.match(node("#share-link-status").textContent, /^Link created\./);
-    assert.match(node("#share-link-status").textContent, /list could not refresh/);
+    assert.equal(node("#share-link-status").textContent, "Link ready.");
+    assert.match(node("#share-management-status").textContent, /reload invitation links/);
     assert.equal(node("#share-link-result").hidden, false);
     assert.equal(node("#share-link-url").value, `http://localhost:52331/#join/${requests[0].linkToken}`);
     assert.equal(node("#share-link-create").disabled, false);

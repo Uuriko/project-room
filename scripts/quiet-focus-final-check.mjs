@@ -36,7 +36,10 @@ test("post-connect loss: Connected first, established stream killed, reconnect b
   const { server, page } = await boot(t, { width: 390, height: 844 });
   const status = page.locator("#connection-status");
   // 1. observe the exact Connected label first
-  await page.waitForFunction(() => document.querySelector("#connection-status").textContent.startsWith("Connected to room service"), null, { timeout: 10000 });
+  await page.waitForFunction(() => document.querySelector("#connection-status").textContent === "Connected", null, { timeout: 10000 });
+  await page.locator("#connection-details > summary").click();
+  assert.match(await page.locator("#connection-explanation").textContent(), /no peer read or processing receipt/);
+  await page.locator("#connection-details > summary").click();
   await page.evaluate(() => {
     window.connectionTransitions = [];
     new MutationObserver(() => window.connectionTransitions.push(document.querySelector("#connection-status").textContent))
@@ -50,6 +53,7 @@ test("post-connect loss: Connected first, established stream killed, reconnect b
   await page.waitForFunction(() => /Reconnecting|interrupted/.test(document.querySelector("#connection-status").textContent), null, { timeout: 15000 });
   const mid = await status.textContent();
   assert.match(mid, /Reconnecting|interrupted/);
+  assert.match(await page.locator("#connection-explanation").textContent(), /displayed history may be stale/);
   // 4. while the reconnect path stays blocked, it must never drift back to Connected
   await page.waitForTimeout(4000);
   const late = await status.textContent();

@@ -31,6 +31,9 @@ and visitor-address adapters, not a second product.
   trusted edge header; they do not prove the live edge path.
 - Asset packaging is an allowlist of the existing HTML, JS and CSS. Databases,
   operator files, tests and source directories are not static assets.
+  Wrangler rebuilds the ten files from the current checkout before both dry-run
+  and deployment. Unknown files/directories or symlinks in the output cause a
+  failure; the packager does not silently upload or delete them.
 - `*.test-fixture.mjs` exposes synthetic setup for local tests ONLY. Never use
   these files, or `compatibility-worker.mjs`, as deployment entrypoints.
 
@@ -50,6 +53,9 @@ The browser proof uses the parent checkout's Playwright installation/browser.
 Wrangler 4.116.0 and Miniflare 4.20260730.0 use the same stable workerd generation.
 Cloudflare dependencies are isolated; the original Node test job does not need
 to install or run them. `--ignore-scripts` avoids dependency lifecycle scripts.
+The CI workflow now has separate contract, browser and Cloudflare jobs. The
+Cloudflare job runs all six local scenarios and the exact deployment dry-run;
+it never gets operator credentials or calls the hosted acceptance script.
 
 Verified locally on September 7, 2026:
 
@@ -101,13 +107,22 @@ The return check passed after bootstrap settings were removed: the same guest
 identity and messages survived redeployment. A signed-out room read returned 401.
 `test-results/hosted-return.png` records the returning guest. This is deployment
 persistence evidence, not a provider restore or disaster-recovery test.
-Current deployed version after the first-use interface update:
+Historical deployed version after the first-use interface update:
 `5b052420-ec55-4fe3-8a35-7f0ac1347bcb` (source `0e20615`).
 Existing guest-session return and the new hosted suggestion-to-work flow passed;
 see [first-use testing](../docs/FIRST-USE-TESTING-2026-09-07.md). The earlier
 bootstrap-removal version was `6575030d-d72f-4e8e-b256-fc18ecc6719b`.
 The runtime source at `7c9292a` passed the existing remote CI workflow; the
 Cloudflare and hosted operator suites were run separately as described above.
+
+For the latest candidate and published version, use
+[release review and polish](../docs/RELEASE-POLISH-2026-09-07.md).
+The explicit hosted acceptance script offers `--help`; unknown or conflicting
+modes stop before credentials/browser access. Synthetic guest checks now create
+a one-hour, one-join invitation. The separate `--invite-user` mode retains its
+deliberate 24-hour, ten-guest defaults; no invitation value belongs in source or
+public evidence. `--work` adds a clearly labeled synthetic work item and starts
+it; it does not claim human review or completion.
 
 Remaining gates:
 

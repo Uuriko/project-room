@@ -598,7 +598,7 @@ export class RoomStore {
       const access = this.authenticateAccountAccessKey(accountAccessKey);
       const revision = expectedRevision + 1;
       this.db.prepare(`UPDATE account_session_slots SET revision=?,account_id=?,account_auth_epoch=?,parent_credential_hash=?,authenticated_until=?
-        WHERE hash=? AND revision=?`).run(revision, access.account.id, access.account.authEpoch, access.credentialHash, Math.min(access.expiresAt, this.now() + 8 * 3600000), slot.credentialHash, expectedRevision);
+        WHERE hash=? AND revision=?`).run(revision, access.account.id, access.account.authEpoch, access.credentialHash, Math.min(slot.expiresAt, access.expiresAt, this.now() + 8 * 3600000), slot.credentialHash, expectedRevision);
       // Switching browser identity and retiring its former Room credential are one
       // commit. A storage failure must not report a rejected login after switching.
       if (revokeRoomToken !== null) {
@@ -938,7 +938,7 @@ export class RoomStore {
   revoke(token) { this.db.prepare("UPDATE credentials SET revoked=1 WHERE hash=?").run(hash(token)); }
   snapshot(token, roomId, expectedSessionBinding = null) {
     // One read transaction keeps sequence, projection, and audit tail at the same commit.
-    return this.transaction(() => {
+    return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const room = this.room(roomId);
       const rows = this.db.prepare("SELECT body FROM events WHERE room_id=? ORDER BY sequence DESC LIMIT 100").all(roomId);
@@ -961,7 +961,7 @@ export class RoomStore {
   // horizon, the cursor, the paged events, and the live projection at the same commit.
   // Fetching never acknowledges - only markCaughtUp does, explicitly.
   returnBrief(token, roomId, { horizon = null, after = null, cursor: frozenCursor = null, limit = RETURN_BRIEF_DEFAULT_LIMIT, expectedSessionBinding = null } = {}) {
-    return this.transaction(() => {
+    return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const room = this.room(roomId);
       const cursor = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;

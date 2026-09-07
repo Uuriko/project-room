@@ -1,6 +1,6 @@
 # Invite-only pilot deployment
 
-Prepared September 7, 2026. This is a deployment candidate, not a live service or an enterprise release. No server, domain, paid plan, identity provider or live runtime has been provisioned by this change.
+Prepared September 7, 2026. **Historical Node fallback runbook**, not the current hosting architecture. The shared application is now live on [isolated Cloudflare staging](../cloudflare/README.md); see [the latest release evidence](RELEASE-POLISH-2026-09-07.md). This document's original local results and unprovisioned-host statements apply to the Node/Caddy fallback checkpoint only. That fallback has not been deployed, and neither implementation is an enterprise-release claim.
 
 ## Small launch scope
 

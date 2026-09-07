@@ -99,6 +99,41 @@ async function switchAccount(page, key) {
   }, key);
 }
 
+test("targeted invitation preview retries its retained secret without accepting or losing the opener", { timeout: 45000 }, async t => {
+  const { browser, store, origin, targetRoomKey, invitationToken, invitationId } = await fixture(t);
+  const page = await browser.newPage({ viewport: { width: 1100, height: 850 }, reducedMotion: "reduce" });
+  page.setDefaultTimeout(10000);
+  await page.goto(origin);
+  await page.locator("#access-key").fill(targetRoomKey);
+  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await page.locator("#main").waitFor({ state: "visible" });
+  await page.locator("#message-input").fill("Preserve this selected draft.");
+  await page.locator("#message-input").evaluate(el => { el.focus(); el.setSelectionRange(0, 8); el.dispatchEvent(new Event("select")); });
+  const before = counts(store, invitationId), secrets = [];
+  await page.route("**/api/invitations/preview", async route => {
+    secrets.push(route.request().postDataJSON().invitationToken);
+    if (secrets.length === 1) await route.abort("failed");
+    else if (secrets.length === 2) await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "temporary", message: "Try later." } }) });
+    else await route.continue();
+  });
+  await page.evaluate(token => { location.hash = "#invite/" + token; }, invitationToken);
+  await page.locator("#invitation-retry").waitFor({ state: "visible" });
+  assert.equal(new URL(page.url()).hash, "");
+  assert.doesNotMatch(await page.locator("#invitation-error").textContent(), /invalid|expired|revoked/);
+  await page.locator("#invitation-retry").click();
+  await page.locator("#invitation-retry").waitFor({ state: "visible" });
+  await page.locator("#invitation-retry").click();
+  await page.locator("#invitation-details").waitFor({ state: "visible" });
+  assert.deepEqual(secrets, [invitationToken, invitationToken, invitationToken]);
+  assert.deepEqual(counts(store, invitationId), before, "preview retries do not accept membership");
+  assert.equal(await page.locator("#invitation-retry").isVisible(), false);
+  await page.waitForFunction(() => document.activeElement.id === "invitation-account-key");
+  await page.locator("#invitation-dismiss").click();
+  await page.waitForFunction(() => document.activeElement.id === "message-input");
+  assert.equal(await page.locator("#message-input").inputValue(), "Preserve this selected draft.");
+  assert.deepEqual(await page.locator("#message-input").evaluate(el => [el.selectionStart, el.selectionEnd]), [0, 8]);
+});
+
 test("invitation preview and acceptance preserve privacy, drafts, authority, and stale-tab ownership", { timeout: 90000 }, async t => {
   const { browser, store, origin, targetRoomKey, targetAccountKey, otherAccountKey, invitationToken, invitationId } = await fixture(t);
   const context = await browser.newContext({ viewport: { width: 1100, height: 850 }, reducedMotion: "reduce" });

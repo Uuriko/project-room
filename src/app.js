@@ -3,9 +3,10 @@ import { AccountClient, RoomClient, draftCommand } from "./client.js";
 import { ReturnBrief } from "./return-brief.js";
 import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter } from "./conversation.js";
 import { nextWorkStep, workStatus, workActions, activeClaim, producerKnown as hasReportedProducer } from "./workflow.js";
-import { consumeJoinFragment, installShareLinks } from "./share-links.js";
+import { consumeJoinFragment, installShareLinks, canRetryInvitation } from "./share-links.js";
 
 const $ = selector => document.querySelector(selector);
+const setText = (selector, text) => { const node = $(selector); if (node.textContent !== text) node.textContent = text; };
 const invitationTokenPattern = /^[A-Za-z0-9_-]{43}$/;
 const roomIdPattern = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 function consumeInvitationFragment() {
@@ -36,7 +37,7 @@ let lastComposerSelection = null;
 let lastInvitationOpener = null;
 const invitation = {
   phase: "idle", version: 0, secret: null, preview: null, redemptionId: null,
-  opener: null, openerSelection: null, sourceRoomSession: null, sourceAccountSession: null
+  opener: null, openerSelection: null
 };
 const invitationIsCommitting = () => ["authenticating", "accepting", "opening"].includes(invitation.phase);
 const accountClient = new AccountClient();
@@ -107,12 +108,13 @@ const client = new RoomClient({
     $("#auth-panel").setAttribute("aria-busy", pendingSignout ? "true" : "false");
     $("#identity-label").textContent = "Not signed in";
     $("#identity-label").removeAttribute("title");
-    for (const id of ["message-list", "work-list", "event-list", "presence-list", "member-stack", "summary-grid", "reply-context", "source-context", "action-context", "action-fields", "cursor-label", "presence-count", "message-count", "event-count", "rb-attention-list", "rb-involving-list", "rb-history-list"]) $(`#${id}`).replaceChildren();
-    delete $("#summary-grid")._content;
+    for (const id of ["message-list", "work-list", "event-list", "presence-list", "member-stack", "summary-grid", "reply-context", "source-context", "action-context", "action-fields", "cursor-label", "presence-count", "message-count", "event-count", "rb-attention-list", "rb-involving-list", "rb-history-list"]) {
+      const node = $(`#${id}`); node.replaceChildren(); delete node._content;
+    }
     for (const id of ["message-to-select", "assignee-select", "verifier-select"]) { $(`#${id}`).replaceChildren(); delete $(`#${id}`).dataset.signature; }
     for (const form of document.querySelectorAll("form")) form.reset();
     $("#work-dialog").close();
-    for (const id of ["people-panel", "composer-options", "work-options", "room-about"]) $(`#${id}`).open = false;
+    for (const id of ["people-panel", "composer-options", "work-options", "room-about", "connection-details"]) $(`#${id}`).open = false;
     for (const control of document.querySelectorAll("#auth-form input, #auth-form button")) control.disabled = pendingSignout;
     setFormStatus($("#new-work-status"), ""); setFormStatus($("#action-error"), ""); setFormStatus($("#composer-status"), "");
     $("#action-dialog").close(); $("#new-work-form").hidden = true; $("#reply-bar").hidden = true;
@@ -166,7 +168,8 @@ const can = capability => state?.members[session?.member.id]?.permissions.includ
 const sameSession = (generation, roomId, memberId) => generation === client.generation && state
   && session?.roomId === roomId && session?.member.id === memberId;
 const initials = text => esc(text.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase());
-const time = value => new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(value));
+const timeFormat = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+const time = value => timeFormat.format(new Date(value));
 function safeUrl(value) { try { const u = new URL(value); return u.protocol === "https:" ? esc(u.href) : "#"; } catch { return "#"; } }
 const recordDomId = (kind, id) => `pr-${kind}-record-${[...String(id)].map(character => character.charCodeAt(0).toString(16).padStart(2, "0")).join("")}`;
 // Keep application-owned fragments outside the valid record-id alphabet. Earlier
@@ -179,7 +182,11 @@ function setConnectionStatus(text) {
     ? "Connection interrupted · reconnecting; displayed history may be stale"
     : text;
   const status = $("#connection-status");
-  if (status.textContent !== normalized) status.textContent = normalized;
+  const connected = normalized === "Connected to room service · no peer read or processing receipt";
+  const visible = connected ? "Connected" : normalized;
+  status.dataset.state = connected ? "connected" : "other";
+  if (status.textContent !== visible) status.textContent = visible;
+  $("#connection-explanation").textContent = normalized;
 }
 function setFormStatus(status, text, error = false) {
   status.textContent = text;
@@ -252,7 +259,7 @@ function setInvitationFeedback(text, error = false) {
     queueMicrotask(() => {
       if (version !== invitation.version || !$("#invitation-dialog").open || $("#invitation-error").textContent !== text) return;
       const usable = element => !element.disabled && element.getClientRects().length > 0;
-      const target = [$("#invitation-account-key"), $("#invitation-accept"), $("#invitation-dismiss")].find(usable) ?? $("#invitation-title");
+      const target = [$("#invitation-account-key"), $("#invitation-accept"), $("#invitation-retry"), $("#invitation-dismiss")].find(usable) ?? $("#invitation-title");
       target.focus({ preventScroll: false });
     });
   }
@@ -277,6 +284,7 @@ function renderInvitation() {
   const switchingAccount = ["wrong-account", "changed-account"].includes(phase);
   const loading = ["previewing", "authenticating", "accepting", "opening"].includes(phase);
   $("#invitation-dialog").setAttribute("aria-busy", loading ? "true" : "false");
+  $("#invitation-retry").hidden = phase !== "preview-failed";
   $("#invitation-details").hidden = !preview;
   if (preview) {
     $("#invitation-room").textContent = preview.roomTitle || preview.roomId;
@@ -300,6 +308,7 @@ function renderInvitation() {
         : preview.status === "revoked" ? "This invitation was revoked. Ask a current Room administrator if you still need access."
           : "The inviter’s authority changed. Ask a current Room administrator for a new invitation.";
   if (phase === "unknown") summary = "Acceptance has not been confirmed. Check the result before leaving this invitation.";
+  if (phase === "preview-failed") summary = "Could not check this invitation.";
   $("#invitation-summary").textContent = summary;
   const mayAuthenticate = Boolean(preview && (pending || accepted));
   $("#invitation-account-form").hidden = !mayAuthenticate || (authenticated && !switchingAccount) || phase === "accepting" || phase === "opening";
@@ -324,7 +333,7 @@ function closeInvitation({ returnFocus = true } = {}) {
   const opener = invitation.opener;
   invitation.version += 1;
   const selection = invitation.openerSelection;
-  Object.assign(invitation, { phase: "idle", secret: null, preview: null, redemptionId: null, opener: null, openerSelection: null, sourceRoomSession: null, sourceAccountSession: null });
+  Object.assign(invitation, { phase: "idle", secret: null, preview: null, redemptionId: null, opener: null, openerSelection: null });
   setInvitationFeedback("");
   $("#invitation-account-form").reset();
   if ($("#invitation-dialog").open) $("#invitation-dialog").close();
@@ -348,7 +357,6 @@ async function openInvitation(fragment) {
     return;
   }
   invitation.version += 1;
-  const version = invitation.version;
   const active = document.activeElement === document.body ? null : document.activeElement;
   const composer = $("#message-input");
   const selectedComposer = state && lastComposerSelection?.value === composer.value ? composer : null;
@@ -367,9 +375,7 @@ async function openInvitation(fragment) {
     preview: null,
     redemptionId: null,
     opener,
-    openerSelection,
-    sourceRoomSession: session,
-    sourceAccountSession: accountClient.session
+    openerSelection
   });
   setInvitationFeedback(fragment.valid ? "Checking the invitation without joining the Room…" : "This invitation link is unavailable.", !fragment.valid);
   renderInvitation();
@@ -377,16 +383,23 @@ async function openInvitation(fragment) {
   if (!$("#invitation-dialog").open) $("#invitation-dialog").showModal();
   queueMicrotask(() => $("#invitation-title").focus({ preventScroll: true }));
   if (!fragment.valid) return;
+  await previewCurrentInvitation();
+}
+async function previewCurrentInvitation() {
+  const { version, secret } = invitation;
+  const retryHadFocus = document.activeElement === $("#invitation-retry");
+  invitation.phase = "previewing";
+  setInvitationFeedback("Checking the invitation…");
+  renderInvitation();
   try {
     const [preview] = await Promise.all([
-      accountClient.previewInvitation(fragment.secret),
+      accountClient.previewInvitation(secret),
       ensureAccountSession().catch(() => null)
     ]);
-    if (!currentInvitation(version, fragment.secret)) return;
+    if (!currentInvitation(version, secret)) return;
     invitation.preview = preview;
-    invitation.phase = preview.status === "pending"
-      ? (accountClient.session?.authenticated ? "ready" : "needs-account")
-      : preview.status === "accepted" ? (accountClient.session?.authenticated ? "ready" : "needs-account") : "terminal";
+    invitation.phase = ["pending", "accepted"].includes(preview.status)
+      ? (accountClient.session?.authenticated ? "ready" : "needs-account") : "terminal";
     setInvitationFeedback(preview.status === "pending"
       ? (accountClient.session?.authenticated ? "Review the exact scope, then accept only if it is right." : "Sign in with the separately provisioned account key to continue.")
       : preview.status === "accepted" ? "This invitation has already been accepted. Sign in with an authorized account to open the Room."
@@ -394,10 +407,16 @@ async function openInvitation(fragment) {
           : preview.status === "revoked" ? "This invitation was revoked. Ask a current Room administrator if you still need access."
             : "The inviter’s authority changed. Ask a current Room administrator for a new invitation.", invitation.phase === "terminal");
     renderInvitation();
+    if (retryHadFocus && [document.body, $("#invitation-retry")].includes(document.activeElement)) {
+      const target = invitation.phase === "needs-account" ? "#invitation-account-key"
+        : invitation.phase === "ready" ? "#invitation-accept" : "#invitation-title";
+      $(target).focus({ preventScroll: true });
+    }
   } catch (error) {
-    if (!currentInvitation(version, fragment.secret)) return;
-    invitation.phase = "terminal";
-    setInvitationFeedback("This invitation is unavailable. It may be invalid, expired, revoked, or no longer authorized.", true);
+    if (!currentInvitation(version, secret)) return;
+    invitation.phase = canRetryInvitation(error) ? "preview-failed" : "terminal";
+    setInvitationFeedback(invitation.phase === "preview-failed" ? "Connection interrupted. Try again."
+      : "This invitation is unavailable. It may be invalid, expired, revoked, or no longer authorized.", true);
     renderInvitation();
   }
 }
@@ -434,11 +453,11 @@ async function openAcceptedRoom(roomId, message, { acceptanceConfirmed = true } 
   try {
     const restored = await client.restore(roomId);
     if (!restored) throw new Error("The browser account changed before the Room could open");
-    Object.assign(invitation, { phase: "idle", preview: null, redemptionId: null, opener: null, openerSelection: null, sourceRoomSession: null, sourceAccountSession: null });
+    Object.assign(invitation, { phase: "idle", preview: null, redemptionId: null, opener: null, openerSelection: null });
     notice(message);
     queueMicrotask(() => $("#conversation-title").focus({ preventScroll: true }));
   } catch (error) {
-    Object.assign(invitation, { phase: "terminal", preview: null, redemptionId: null, opener: null, openerSelection: null, sourceRoomSession: null, sourceAccountSession: null });
+    Object.assign(invitation, { phase: "terminal", preview: null, redemptionId: null, opener: null, openerSelection: null });
     setFormStatus($("#auth-error"), acceptanceConfirmed
       ? "Your membership was accepted, but the conversation could not be loaded. Refresh or sign in with the same account; do not accept the invitation again."
       : [401, 403].includes(error.status) ? "This account could not open the invited Room. Sign in with the account that accepted the invitation."
@@ -503,33 +522,34 @@ function restoreDisclosures(container, snap) {
     : null;
   (exact || fallback)?.focus({ preventScroll: true });
 }
+function renderContent(selector, html) {
+  const container = $(selector);
+  if (container._content === html) return;
+  const saved = captureDisclosures(container);
+  container.innerHTML = html; container._content = html;
+  restoreDisclosures(container, saved);
+}
 function render() {
   conversation = conversationIndex(state.messages);
   const members = Object.values(state.members), active = members.filter(m => m.active !== false);
   selectOptions("#message-to-select", active, "Everyone");
   syncWorkForm();
-  $("#presence-count").textContent = `${active.length} members`;
-  $("#member-stack").innerHTML = active.map(m => `<div class="member-avatar ${m.kind}" title="${esc(memberLabel(m.id))}" aria-hidden="true"><span>${initials(m.displayName)}</span></div>`).join("");
-  const presenceSnap = captureDisclosures($("#presence-list")), workSnap = captureDisclosures($("#work-list"));
-  $("#presence-list").innerHTML = members.map(m => `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span></div><div><strong>${esc(memberLabel(m.id))}</strong><span>${esc(m.kind)} · ${m.active === false ? "access revoked" : "presence unknown"}</span><details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p></details></div></div>`).join("");
+  setText("#presence-count", `${active.length} ${active.length === 1 ? "member" : "members"}`);
+  renderContent("#member-stack", active.slice(0, 4).map(m => `<div class="member-avatar ${m.kind}" title="${esc(memberLabel(m.id))}" aria-hidden="true"><span>${initials(m.displayName)}</span></div>`).join(""));
+  renderContent("#presence-list", members.map(m => `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span></div><div><strong>${esc(memberLabel(m.id))}</strong><span>${esc(m.kind)} · ${m.active === false ? "access revoked" : "presence unknown"}</span><details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p></details></div></div>`).join(""));
   for (const id of ["new-work-button", "composer-work-button"]) {
     $("#" + id).hidden = !can("steer"); $("#" + id).disabled = !can("steer");
   }
   const items = Object.values(state.workItems);
   const waiting = items.filter(i => readyForDecision(i) && i.humanDecisionMakerId === session.member.id).length;
   const summaryHtml = `<article class="summary-card"><span>Your decisions</span><strong>${waiting}</strong><p>Completion, verification, and approval stay separate.</p></article><article class="summary-card"><span>Work in this room</span><strong>${items.length}</strong><p>${items.filter(i => i.state === S.BLOCKED).length} blocked. Conversation never creates work automatically.</p></article>`;
-  if ($("#summary-grid")._content !== summaryHtml) {
-    $("#summary-grid").innerHTML = summaryHtml;
-    $("#summary-grid")._content = summaryHtml;
-  }
+  renderContent("#summary-grid", summaryHtml);
   renderMessages();
   renderSearch();
-  $("#work-list").innerHTML = items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(workCard).join("") || `<p class="empty-note">${can("steer") ? "Turn a message into work, or start something new." : "Suggest work in the conversation. The owner can create it."}</p>`;
-  restoreDisclosures($("#presence-list"), presenceSnap);
-  restoreDisclosures($("#work-list"), workSnap);
+  renderContent("#work-list", items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(workCard).join("") || `<p class="empty-note">${can("steer") ? "Turn a message into work, or start something new." : "Suggest work in the conversation. The owner can create it."}</p>`);
   $("#event-count").textContent = `${client.sequence}`;
   renderReturnBrief();
-  $("#event-list").innerHTML = [...state.eventLog].reverse().map(e => `<li id="${recordDomId("event", e.id)}" tabindex="-1" data-event-record-id="${esc(e.id)}"><span>${esc(humanize(e.type))}</span><strong>${esc(name(e.actorId))}</strong><time datetime="${esc(e.at)}">${esc(time(e.at))}</time><code>${esc(e.id)}</code></li>`).join("");
+  renderContent("#event-list", [...state.eventLog].reverse().map(e => `<li id="${recordDomId("event", e.id)}" tabindex="-1" data-event-record-id="${esc(e.id)}" data-focus-key="event:${esc(e.id)}"><span>${esc(humanize(e.type))}</span><strong>${esc(name(e.actorId))}</strong><time datetime="${esc(e.at)}">${esc(time(e.at))}</time><code>${esc(e.id)}</code></li>`).join(""));
 }
 function renderMessages() {
   const list = $("#message-list"), view = currentThreadId ? `thread:${currentThreadId}` : "room";
@@ -548,13 +568,13 @@ function renderMessages() {
   const pendingOutgoingId = pendingMessage?.command?.data?.messageId || pendingMessage?.command?.id;
   const announceCount = newMessages.filter(message => message.id !== pendingOutgoingId && !locallyOwnedMessageIds.has(message.id)).length;
   newMessages.forEach(message => locallyOwnedMessageIds.delete(message.id));
-  $("#message-count").textContent = `${state.messages.length} messages`;
+  setText("#message-count", `${state.messages.length} ${state.messages.length === 1 ? "message" : "messages"}`);
   $("#thread-bar").hidden = !currentThreadId;
   $("#composer-label").textContent = currentThreadId ? "Reply in this thread" : "Message the room";
   if (currentThreadId) {
     const root = conversation.byId.get(currentThreadId);
     $("#thread-title").textContent = `Thread with ${name(root.authorId)}`;
-    $("#thread-context").textContent = `${messages.length - 1} replies · visible to everyone in this room`;
+    setText("#thread-context", `${messages.length - 1} ${messages.length === 2 ? "reply" : "replies"} · visible to everyone in this room`);
   }
 
   // Retain unchanged message nodes so new arrivals do not discard text selection or focus.
@@ -602,20 +622,23 @@ function messageContent(m) {
   const linked = Object.values(state.workItems).filter(i => i.sourceMessageId === m.id || i.id === m.workItemId);
   const parent = conversation.byId.get(m.replyToId);
   const count = (conversation.threads.get(m.id)?.length || 1) - 1;
+  const reactionSummary = Object.entries(REACTIONS).filter(([key]) => m.reactions?.[key]?.length)
+    .map(([key, symbol]) => `${symbol} ${m.reactions[key].length}`).join(" · ") || "React";
   const reactionButtons = Object.entries(REACTIONS).map(([reaction, symbol]) => {
     const members = m.reactions?.[reaction] || [], selected = members.includes(session.member.id);
     const pending = pendingReactions.get(`${m.id}:${reaction}`);
     const label = `${pending && !pending.busy ? "Retry " : ""}${reaction}`;
     return `<button type="button" class="reaction" aria-pressed="${selected}" aria-label="${esc(label)} reaction, ${members.length}" title="${esc(members.map(name).join(", ") || `React with ${reaction}`)}" data-message-action="react" data-message-id="${esc(m.id)}" data-reaction="${reaction}"${pending?.busy ? " disabled" : ""}><span aria-hidden="true">${symbol}</span><span>${members.length || ""}</span>${pending && !pending.busy ? " Retry" : ""}</button>`;
   }).join("");
-  return `<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong><span>${esc(author.kind)}</span><a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · room-visible</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${esc(parent.body.slice(0,90))}</a>` : ""}</div><p>${esc(m.body)}</p><div class="reactions" aria-label="Reactions to message by ${esc(authorLabel)}">${reactionButtons}</div><div class="message-links">${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>`).join("")}<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>${!currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : ""}${can("steer") ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : ""}</div></div>`;
+  return `<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong><span>${esc(author.kind)}</span><a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · room-visible</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${esc(parent.body.slice(0,90))}</a>` : ""}</div><p>${esc(m.body)}</p><details class="reactions"><summary data-message-action="reaction-menu" data-message-id="${esc(m.id)}" aria-label="Reactions to message by ${esc(authorLabel)}">${esc(reactionSummary)}</summary><div class="reaction-options">${reactionButtons}</div></details><div class="message-links">${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>`).join("")}<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>${!currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : ""}${can("steer") ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : ""}</div></div>`;
 }
 function renderSearch() {
   const query = $("#message-search").value;
+  $("#clear-search").hidden = !query;
   $("#search-results").hidden = !query.trim();
   if (!query.trim()) { $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = ""; return; }
   const result = searchMessages(state, query);
-  $("#search-count").textContent = `${result.total} ${result.total === 1 ? "match" : "matches"}${result.total > result.messages.length ? ` · latest ${result.messages.length} shown` : ""} in this room`;
+  setText("#search-count", `${result.total} ${result.total === 1 ? "match" : "matches"}${result.total > result.messages.length ? ` · latest ${result.messages.length} shown` : ""} in this room`);
   const list = $("#search-list"), focused = list.contains(document.activeElement) ? document.activeElement.dataset.openMessage : null;
   const html = result.messages.map(m => `<li><a href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}"><strong>${esc(name(m.authorId))}</strong><span>${esc(m.body.slice(0, 240))}</span><small>${m.replyToId ? "Open thread at this reply" : "Open in room"}</small></a></li>`).join("") || '<li class="empty-note">No matches. Try a name or another phrase.</li>';
   if (list._content !== html) { list.innerHTML = html; list._content = html; }
@@ -628,7 +651,7 @@ function saveComposer() {
 function persistDrafts() {
   if (!session || !$("#remember-drafts").checked) return;
   const saved = recovery.write(draftScope(session), drafts, currentThreadId);
-  $("#draft-recovery-status").textContent = saved ? "Draft recovery enabled in this tab for 12 hours. Sign-out clears it." : "Draft recovery unavailable. Keep this page open to retain unsent text.";
+  setText("#draft-recovery-status", saved ? "Draft recovery enabled in this tab for 12 hours. Sign-out clears it." : "Draft recovery unavailable. Keep this page open to retain unsent text.");
 }
 function switchThread(threadId, focusComposer = false) {
   if (!state || busy || (threadId && !conversation.threads.has(threadId))) return;
@@ -809,6 +832,7 @@ async function submit(form, fn, { failureHint } = {}) {
   }
 }
 $("#invitation-dismiss").addEventListener("click", () => closeInvitation());
+$("#invitation-retry").addEventListener("click", () => { if (invitation.phase === "preview-failed") previewCurrentInvitation(); });
 $("#invitation-dialog").addEventListener("keydown", e => {
   if (e.key !== "Tab") return;
   const controls = [...e.currentTarget.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex='-1'])")]
@@ -855,7 +879,6 @@ $("#invitation-account-form").addEventListener("submit", async e => {
     $("#invitation-account-key").value = "";
     await moveCurrentRoomToAccount(loggedIn);
     if (!currentInvitation(version, secret)) return;
-    invitation.sourceAccountSession = loggedIn;
     invitation.phase = "ready";
     setInvitationFeedback(invitation.preview.status === "accepted"
       ? "Account confirmed. Open the Room only if this is the membership you expected."
@@ -1062,7 +1085,7 @@ $("#message-form").addEventListener("submit", e => {
     // Ownership must outlive pendingMessage: the command can commit while its immediate
     // snapshot fails, then first appear on a later refresh after the draft was cleared.
     locallyOwnedMessageIds.add(data.messageId || pendingMessage.command.id);
-    const receipt = await client.send(pendingMessage.command);
+    await client.send(pendingMessage.command);
     if (generation !== client.generation || !state) return;
     drafts.clear(threadId);
     $("#message-input").value = ""; pendingMessage = null; clearReply();
@@ -1075,7 +1098,7 @@ $("#message-list").addEventListener("click", e => {
   const id = button.dataset.messageId;
   if (button.dataset.messageAction === "work") openWork(id);
   else if (button.dataset.messageAction === "react") setReaction(id, button.dataset.reaction);
-  else {
+  else if (["reply", "thread"].includes(button.dataset.messageAction)) {
     switchThread(conversation.rootById.get(id), button.dataset.messageAction === "reply");
     if (button.dataset.messageAction === "reply") { replyToId = id; updateReply(); saveComposer(); }
   }
@@ -1408,7 +1431,7 @@ $("#rb-more-button").addEventListener("click", async () => {
   }
 });
 $("#rb-ack-button").addEventListener("click", () => briefView.acknowledge());
-shareLinksUI = installShareLinks({ client, accountClient, getState: () => state, getSession: () => session,
+shareLinksUI = installShareLinks({ client, accountClient, getState: () => state, getSession: () => session, setConnectionStatus,
   async openRoom(roomId, roomMode, joinedSession) {
     if (state && session?.roomId === roomId && session.member.id === joinedSession?.member?.id
       && session.account?.id === joinedSession.account?.id && session.sessionBinding === joinedSession.sessionBinding) {
@@ -1427,7 +1450,13 @@ shareLinksUI = installShareLinks({ client, accountClient, getState: () => state,
 configureAuthPanel();
 if (initialInvitationFragment) openInvitation(initialInvitationFragment);
 (async () => {
-  if (initialJoinFragment) { await shareLinksUI.open(initialJoinFragment); return; }
+  if (initialJoinFragment) {
+    // Invitation preview deliberately does not restore/open a Room session.
+    // Do not leave the initial session/connection progress labels running.
+    $("#identity-label").textContent = "Room not open";
+    setConnectionStatus("Not connected · invitation preview");
+    await shareLinksUI.open(initialJoinFragment); return;
+  }
   const requestedRoom = selectedRoomFromLocation();
   if (requestedRoom) {
     const account = await ensureAccountSession();

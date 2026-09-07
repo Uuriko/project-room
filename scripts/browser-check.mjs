@@ -107,6 +107,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
 
     await page.locator("#thread-back").click();
     const heart = p => p.locator('[data-message-record-id="book-club"] [data-reaction="heart"]');
+    await page.locator('[data-message-record-id="book-club"] .reactions > summary').click();
     await heart(page).click();
     await page.waitForFunction(() => document.querySelector('[data-message-record-id="book-club"] [data-reaction="heart"]').getAttribute("aria-pressed") === "true");
     const selectedBody = await page.locator('[data-message-record-id="book-club"] .message-content p').evaluate(e => {
@@ -114,6 +115,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
       const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
       return selection.toString();
     });
+    await other.locator('[data-message-record-id="book-club"] .reactions > summary').click();
     await heart(other).click();
     await page.waitForFunction(() => document.querySelector('[data-message-record-id="book-club"] [data-reaction="heart"]').getAttribute("aria-label").includes(", 2"));
     assert.equal(await page.evaluate(() => window.getSelection().toString()), selectedBody);

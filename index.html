@@ -25,7 +25,10 @@
         </div>
       </header>
 
-      <p id="connection-status" class="connection-status" role="status" tabindex="-1">Connecting to room service…</p>
+      <div class="connection-bar">
+        <p id="connection-status" class="connection-status" role="status" tabindex="-1">Connecting to room service…</p>
+        <details id="connection-details"><summary aria-label="Connection details">Details</summary><p id="connection-explanation">Connecting to room service…</p></details>
+      </div>
       <section id="auth-panel" class="auth-panel panel" aria-labelledby="auth-title" hidden>
         <h1 id="auth-title">Welcome.</h1>
         <p id="auth-description">Open an invite link, or use your member key.</p>
@@ -60,7 +63,7 @@
             </div>
             <form id="search-form" class="conversation-search" role="search" aria-label="Search this room">
               <label class="sr-only" for="message-search">Search messages</label>
-              <div class="search-row"><input id="message-search" type="search" maxlength="200" placeholder="Search…" autocomplete="off" aria-controls="search-results"><button id="clear-search" class="button ghost" type="button">Clear</button></div>
+              <div class="search-row"><input id="message-search" type="search" maxlength="200" placeholder="Search…" autocomplete="off" aria-controls="search-results"><button id="clear-search" class="button ghost" type="button" hidden>Clear</button></div>
             </form>
             <section id="search-results" class="search-results" aria-label="Conversation search results" hidden>
               <p id="search-count" role="status"></p>
@@ -216,6 +219,7 @@
         <p id="invitation-error" class="invitation-feedback error" role="alert"></p>
         <div class="form-actions invitation-actions">
           <button id="invitation-dismiss" class="button ghost" type="button">Not now</button>
+          <button id="invitation-retry" class="button primary" type="button" hidden>Retry</button>
           <button id="invitation-accept" class="button primary" type="button" hidden>Accept and open room</button>
         </div>
       </div>
@@ -224,28 +228,36 @@
     <script type="module" src="./src/app.js"></script>
     <dialog id="share-link-dialog" aria-labelledby="share-link-title" class="share-dialog">
       <div class="panel-header"><h2 id="share-link-title">Invite people</h2><button id="share-link-close" class="button ghost" type="button" aria-label="Close invitation links">Close</button></div>
-      <p>Anyone with your link can join as a guest, read the room’s history, and talk. They cannot manage people or approve work. Links can be forwarded.</p>
+      <p>Anyone with the link can read this room’s history and chat. Guests can’t manage members or approve work.</p>
       <p id="share-local-note" class="form-hint" hidden>This preview is on this Mac only. These links will not work on someone else’s device until the room is hosted.</p>
       <form id="share-link-form">
+        <details id="share-settings"><summary>Link limits <span id="share-settings-summary">24 hours · 10 guests</span></summary>
         <div class="share-settings"><label>Link expires in<select id="share-link-expiry"><option value="1">1 hour</option><option value="24" selected>24 hours</option><option value="168">7 days</option></select></label>
         <label>Maximum new guests<input id="share-link-limit" type="number" min="1" max="25" value="10" required></label></div>
-        <button id="share-link-create" class="button primary" type="submit">Create invitation link</button>
+        </details>
+        <button id="share-link-create" class="button primary" type="submit">Create link</button>
       </form>
-      <div id="share-link-result" hidden><label for="share-link-url">Ready to share</label><input id="share-link-url" type="text" readonly autocomplete="off" spellcheck="false"><button id="share-link-copy" class="button primary" type="button">Copy link</button><p class="form-hint">Copy it now. For privacy, the room cannot show this secret link again after you close this window.</p></div>
+      <div id="share-link-result" hidden><label for="share-link-url">Ready to share</label><input id="share-link-url" type="text" readonly autocomplete="off" spellcheck="false"><button id="share-link-copy" class="button primary" type="button">Copy link</button><button id="share-link-another" class="button ghost" type="button">New link</button><p class="form-hint">Save this link before closing. It can’t be shown again.</p></div>
       <p id="share-link-status" class="form-status" role="status" aria-live="polite"></p>
-      <h3>Your room’s links</h3><ul id="share-link-list" class="share-link-list"></ul>
+      <details id="share-management"><summary id="share-management-summary">Manage links</summary>
+      <p id="share-management-status" class="form-status" role="status" aria-live="polite"></p>
+      <ul id="share-link-list" class="share-link-list"></ul>
       <p class="form-hint">Cancelling a link stops future joins. People who already joined keep their membership.</p>
+      </details>
     </dialog>
     <dialog id="join-link-dialog" aria-labelledby="join-link-title" class="share-dialog">
       <div class="panel-header"><h2 id="join-link-title">Join this room</h2><button id="join-link-close" class="button ghost" type="button">Close</button></div>
       <p id="join-link-scope">Checking your invitation…</p>
       <form id="join-link-form" hidden>
-        <label for="join-link-name">What should we call you?</label><input id="join-link-name" type="text" autocomplete="nickname" required maxlength="80">
-        <p class="form-hint">Names are self-chosen, not verified. Your messages are visible to the room. New guest access lasts up to 8 hours in this browser; signing out or clearing cookies loses that guest access. An existing signed-in membership will be reused.</p>
-        <p class="form-hint">Joining another room may switch your browser identity and clear unsent drafts. Save anything you want to keep first.</p>
+        <label for="join-link-name">Your name</label><input id="join-link-name" type="text" autocomplete="nickname" required maxlength="80" aria-describedby="join-name-note">
+        <p id="join-name-note" class="form-hint">Names aren’t verified.</p>
+        <p class="form-hint">Guest access lasts up to 8 hours in this browser. Signing out or clearing cookies ends it.</p>
+        <details id="join-access-details"><summary>Guest access</summary><p id="join-link-permissions"></p><p id="join-link-expiry" class="form-hint"></p><p class="form-hint">If you’re already a member, your existing membership is reused.</p></details>
+        <p id="join-switch-warning" class="form-hint" hidden>Joining may switch your browser identity and clear unsent drafts. Save anything you need first.</p>
         <button id="join-link-submit" class="button primary" type="submit">Join room</button>
       </form>
       <p id="join-link-status" class="form-status" role="status" aria-live="polite"></p>
+      <button id="join-link-retry" class="button primary" type="button" hidden>Retry</button>
       <button id="join-link-signout" class="button ghost" type="button" hidden>Sign out of expired guest session</button>
     </dialog>
   </body>

@@ -34,3 +34,32 @@ jobs:
           name: conversation-browser-evidence
           path: test-results/
           if-no-files-found: ignore
+  cloudflare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: pnpm --dir cloudflare install --frozen-lockfile --ignore-scripts
+      - name: Verify the shared Workers runtime and restart journey
+        working-directory: cloudflare
+        env:
+          WRANGLER_SEND_METRICS: "false"
+        run: node --test compatibility.check.mjs store.check.mjs http.check.mjs bootstrap.check.mjs browser.check.mjs
+      - name: Build exact assets and validate the deployment bundle
+        working-directory: cloudflare
+        env:
+          WRANGLER_SEND_METRICS: "false"
+        run: pnpm exec wrangler deploy --dry-run --outdir dist
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cloudflare-browser-evidence
+          path: cloudflare/test-results/
+          if-no-files-found: ignore
