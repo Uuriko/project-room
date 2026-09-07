@@ -63,6 +63,6 @@ Defer automatic skill generation, automatic benchmarks or model routing, bot mar
 
 Phase 0 is unchanged. Project Room and Dasha Compute stay separate products. A later bridge may let a Work Item POST a job to `compute/api` and record a Receipt Event. See [FOLD-COMPUTE-ROOM](./FOLD-COMPUTE-ROOM.md) and [BRIDGE-COMPUTE](./BRIDGE-COMPUTE.md).
 
-## Adjacent contract: Contribution ledger (docs now; schema 0.5+)
+## Adjacent contract: Contribution ledger (docs now; derived rollup 0.5+)
 
-Phase 0 is unchanged. Contribution is an append-only Event on the same Room, not a second product. v0 of the ledger is visible share weights only; no auto-payout. See [CONTRIBUTION-LEDGER](./CONTRIBUTION-LEDGER.md).
+Phase 0 is unchanged. Contribution is a read-model over existing completion, verification, decision, and Artifact facts — not a second product or a disconnected scoreboard. v0 of the ledger is visible share weights only; no auto-payout. Message volume is not value. See [CONTRIBUTION-LEDGER](./CONTRIBUTION-LEDGER.md). Designs and fixtures coordinate on [issue #11](https://github.com/Uuriko/project-room/issues/11).
