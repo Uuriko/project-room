@@ -9,8 +9,8 @@
 //   mid-pagination never leak into an earlier-frozen history.
 // - Fetching NEVER acknowledges. Only the separate explicit cursor action (POST cursor)
 //   acknowledges exactly H; H+1 stays new.
-// - The two action sections are LIVE current projections through N, computed by the r3
-//   selectors (wired unchanged) over the current work-item projection - unresolved work
+// - The two action sections are LIVE current projections through N, computed by the
+//   selectors over the current work-item projection - unresolved work
 //   survives any amount of reading, and terminal work never masquerades as open.
 // - Items are full event envelopes (sequence + event), so every accessible event stays
 //   drillable; the proposer of work.proposed is the envelope actorId.
@@ -52,6 +52,7 @@ export function buildReturnBrief({ sequence, workItems, rows, H, startAfter, C, 
   const last = items.at(-1)?.sequence ?? startAfter;
   const hasMore = last < H;
   return {
+    viewerId: memberId,
     history: {
       cursor: C, // frozen on the first page, reported unchanged on every continuation
       evaluatedThrough: H,

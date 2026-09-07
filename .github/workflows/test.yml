@@ -26,7 +26,7 @@ jobs:
           node-version: 24
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - name: Run conversation, Quiet Focus, and accessibility browser gates
+      - name: Run conversation, composer recovery, Quiet Focus, accessibility, and session browser gates
         run: npm run test:browser
       - uses: actions/upload-artifact@v4
         if: always()

@@ -1,7 +1,7 @@
 import { WORK_STATES } from "../src/events.js";
-// needsAttention / workInvolvingMe originated in the reviewed r3 selector slice and now
-// include the frozen provenance and explicit-rework refinements. The error class stays local
-// so the wired package does not depend on the unwired return-cursor contract module.
+import { terminalWork, verificationSatisfied, matchesReceipt, producerKnown } from "../src/work-status.js";
+// Based on the reviewed B3 selectors, with current-completion checks from
+// issue #11 disposition 5561110872. Historical approvals cannot hide active work.
 
 export class CursorError extends Error {
   constructor(code, message) {
@@ -11,22 +11,6 @@ export class CursorError extends Error {
 }
 
 const REQUEST_ROLES = ["accountableMemberId", "verifierMemberId", "humanDecisionMakerId"];
-
-function producerKnown(item) {
-  return item.receipt?.producerAttribution === "reported" && item.receipt.producerId != null;
-}
-
-function verificationSatisfied(item) {
-  if (!item.independentVerificationRequired) return true;
-  const { receipt, verification } = item;
-  return verification?.result === "pass" &&
-    verification.independenceConfirmed === true &&
-    verification.verifierId === item.verifierMemberId &&
-    verification.completionEventId === receipt?.eventId &&
-    verification.evidenceVersion === receipt?.evidenceVersion &&
-    producerKnown(item) &&
-    receipt.producerId !== verification.verifierId;
-}
 
 // Two independent return facts (matrix refinement 4): unread-since-cursor and
 // unresolved-work-involving-me are SEPARATE derivations. The cursor governs what is
@@ -54,15 +38,6 @@ function verificationSatisfied(item) {
 // verification requirement is satisfied (PASS) or absent. Terminal work stays
 // discoverable under the fixed-horizon "What changed" view and in record history -
 // it never masquerades as open work here.
-function involvementTerminal(item) {
-  if (item.state === WORK_STATES.SUPERSEDED || item.supersededBy) return true;
-  // An approval is terminal only while its exact completion remains completed. The
-  // explicit rework path retires that decision to history, and BLOCKED / ACCEPTED /
-  // WORKING remain visible until a replacement result completes the gates again.
-  if (item.ownerDecisionRequired) return item.state === WORK_STATES.COMPLETED && verificationSatisfied(item) && item.decision?.decision === "approved";
-  return item.state === WORK_STATES.COMPLETED && verificationSatisfied(item);
-}
-
 export function workInvolvingMe({ workItems, memberId }) {
   if (!workItems || typeof workItems !== "object" || Array.isArray(workItems)) throw new CursorError("cursor.work_items_required", "workInvolvingMe requires the current work-item projection map");
   if (!memberId) throw new CursorError("cursor.member_required", "workInvolvingMe requires a memberId");
@@ -70,7 +45,7 @@ export function workInvolvingMe({ workItems, memberId }) {
   for (const item of Object.values(workItems)) {
     if (!item || typeof item !== "object") continue;
     const roles = REQUEST_ROLES.filter(field => item[field] === memberId);
-    if (roles.length === 0 || involvementTerminal(item)) continue;
+    if (roles.length === 0 || terminalWork(item)) continue;
     out.push(Object.freeze({ workItemId: item.id, action: item.title ?? null, roles: Object.freeze(roles), state: item.state }));
   }
   return Object.freeze(out);
@@ -81,8 +56,7 @@ export function needsAttention({ workItems, memberId }) {
   if (!memberId) throw new CursorError("cursor.member_required", "needsAttention requires a memberId");
   const out = [];
   for (const item of Object.values(workItems)) {
-    if (!item || typeof item !== "object" || item.state === WORK_STATES.SUPERSEDED || item.supersededBy) continue;
-    if (item.state === WORK_STATES.COMPLETED && verificationSatisfied(item) && item.decision?.decision === "approved") continue;
+    if (!item || typeof item !== "object" || terminalWork(item)) continue;
     const push = (role, step) => out.push(Object.freeze({ workItemId: item.id, action: item.title ?? null, role, step }));
     if (item.accountableMemberId === memberId) {
       if (item.state === WORK_STATES.PROPOSED) push("accountable", "accept");
@@ -98,7 +72,7 @@ export function needsAttention({ workItems, memberId }) {
       } else if (item.verifierMemberId === memberId && item.independentVerificationRequired && !verified) {
         push("verifier", "verify");
       }
-      if (item.humanDecisionMakerId === memberId && item.ownerDecisionRequired && verified && !item.decision) push("decision_maker", "decide");
+      if (item.humanDecisionMakerId === memberId && item.ownerDecisionRequired && verified && !matchesReceipt(item.decision, item.receipt)) push("decision_maker", "decide");
     }
   }
   return Object.freeze(out);

@@ -286,6 +286,7 @@ function startWork(state, incoming) {
   if (item.mode === "write" && (!item.claim || !claimIsActive(item.claim, incoming.at) || item.claim.holderId !== incoming.actorId)) {
     throw new Error("Contested writes require a current exact-scope claim");
   }
+  if (item.state === WORK_STATES.BLOCKED) archiveDecision(item);
   item.state = WORK_STATES.WORKING;
   item.blocker = null;
   commitMutation(item, incoming);
@@ -307,6 +308,7 @@ function resolveBlocker(state, incoming) {
   if (incoming.actorId !== item.accountableMemberId) throw new Error("Only the accountable member may resolve the blocker");
   requirePermission(state, incoming.actorId, "accept_work");
   requireFields(incoming.data, ["resolution"]);
+  archiveDecision(item);
   item.state = WORK_STATES.ACCEPTED;
   item.blocker = null;
   commitMutation(item, incoming);
@@ -510,6 +512,11 @@ function mutableWorkItem(state, incoming, allowedStates) {
 function commitMutation(item, incoming) {
   item.revision += 1;
   item.updatedAt = incoming.at;
+}
+
+function archiveDecision(item) {
+  if (item.decision) item.decisionHistory.push(item.decision);
+  item.decision = null;
 }
 
 function retireApproval(item, incoming, reason) {
