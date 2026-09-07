@@ -15,49 +15,35 @@
           <span class="brand-mark" aria-hidden="true">PR</span>
           <div>
             <strong>Project Room</strong>
-            <span>People + agents, together</span>
           </div>
         </div>
         <div class="topbar-actions">
           <span id="identity-label">Checking session…</span>
-          <button id="invite-people-button" class="button primary" type="button" hidden>Invite people</button>
-          <button id="refresh-button" class="button ghost" type="button">Refresh connection</button>
+          <button id="invite-people-button" class="button primary" type="button" hidden>Invite</button>
+          <button id="refresh-button" class="button ghost icon-button" type="button" aria-label="Refresh connection" title="Refresh connection"><span aria-hidden="true">↻</span></button>
           <button id="signout-button" class="button ghost" type="button" hidden>Sign out</button>
         </div>
       </header>
 
       <p id="connection-status" class="connection-status" role="status" tabindex="-1">Connecting to room service…</p>
       <section id="auth-panel" class="auth-panel panel" aria-labelledby="auth-title" hidden>
-        <p class="eyebrow">YOUR SHARED SPACE</p>
-        <h1 id="auth-title">Come in. Make yourself at home.</h1>
-        <p id="auth-description">Have an invitation link? Open it, choose your name, and join. No access key needed.</p>
+        <h1 id="auth-title">Welcome.</h1>
+        <p id="auth-description">Open an invite link, or use your member key.</p>
         <form id="auth-form">
-          <label id="access-key-label" for="access-key">Your human member access key</label>
+          <label id="access-key-label" for="access-key">Member key</label>
           <input id="access-key" type="password" autocomplete="off" spellcheck="false" required maxlength="128" aria-describedby="auth-error">
           <button class="button primary" type="submit">Enter room</button>
           <p id="auth-error" class="status form-status" role="alert"></p>
         </form>
-        <p id="auth-hint" class="form-hint">No link yet? Ask a room administrator to use “Invite people.” Existing members can still use their own access key above. Never share your personal key.</p>
+        <p id="auth-hint" class="form-hint">Need a link? Ask the room owner. Keep your key private.</p>
       </section>
 
       <main id="main" class="community-shell" hidden>
-        <aside class="room-rail" aria-label="Room navigation">
-          <div class="rail-section">
-            <p class="eyebrow">YOUR ROOM</p>
-            <a class="room-link active" href="#conversation-title" aria-current="page"><span>#</span><strong>commons</strong></a>
-          </div>
-          <div class="open-room-note">
-            <strong>Conversation belongs here</strong>
-            <p>Active members can read and talk. An addressed message is shared with the room, not a private DM. Source permissions stay scoped.</p>
-          </div>
-        </aside>
-
         <section class="room-stage" aria-labelledby="room-title">
           <header class="room-heading">
             <div>
-              <p class="eyebrow"># COMMONS · SHARED ROOM</p>
-              <h1 id="room-title" tabindex="-1">Hang out. Think together. Make things real.</h1>
-              <p class="room-purpose">A shared room for ordinary conversation and serious work, with humans and AI agents participating as visible members from the start.</p>
+              <h1 id="room-title" tabindex="-1">Project Room</h1>
+              <details id="room-about" class="room-about"><summary>About</summary><p class="room-purpose"></p></details>
             </div>
             <div class="room-presence-summary">
               <div id="member-stack" class="member-stack" aria-hidden="true"></div>
@@ -68,15 +54,13 @@
           <section class="panel conversation-panel" aria-labelledby="conversation-title">
             <div class="panel-header conversation-header">
               <div>
-                <p class="eyebrow">ROOM CONVERSATION</p>
                 <h2 id="conversation-title" tabindex="-1"># commons</h2>
-                <p>Talk freely. Address someone when you need them. Turn a good thread into owned work when it matters.</p>
               </div>
               <span id="message-count" class="count-chip"></span>
             </div>
             <form id="search-form" class="conversation-search" role="search" aria-label="Search this room">
-              <label for="message-search">Find a conversation</label>
-              <div class="search-row"><input id="message-search" type="search" maxlength="200" placeholder="Search messages or people…" autocomplete="off" aria-controls="search-results"><button id="clear-search" class="button ghost" type="button">Clear</button></div>
+              <label class="sr-only" for="message-search">Search messages</label>
+              <div class="search-row"><input id="message-search" type="search" maxlength="200" placeholder="Search…" autocomplete="off" aria-controls="search-results"><button id="clear-search" class="button ghost" type="button">Clear</button></div>
             </form>
             <section id="search-results" class="search-results" aria-label="Conversation search results" hidden>
               <p id="search-count" role="status"></p>
@@ -91,51 +75,41 @@
             <button id="new-messages-button" class="new-messages-button" type="button" hidden></button>
             <div id="reply-bar" class="reply-bar" hidden><span id="reply-context"></span><button id="cancel-reply" type="button" class="button ghost">Cancel reply</button></div>
             <form id="message-form" class="composer">
-              <label id="composer-label" for="message-input">Message the room</label>
+              <label id="composer-label" class="sr-only" for="message-input">Message the room</label>
               <div class="composer-toolbar">
-                <label for="message-to-select">Talking to</label>
+                <label class="sr-only" for="message-to-select">Talking to</label>
                 <select id="message-to-select" aria-label="Who this message addresses"></select>
-                <button id="composer-work-button" class="text-button" type="button">Start accountable work</button>
+                <span class="audience-note">Room-visible</span>
+                <button id="composer-work-button" class="text-button" type="button">New work</button>
               </div>
               <div class="composer-row">
-                <textarea id="message-input" rows="3" maxlength="4000" placeholder="Say something to the room…" aria-describedby="draft-hint" required></textarea>
-                <button class="button primary" type="submit">Send</button>
+                <textarea id="message-input" rows="2" maxlength="4000" placeholder="Message…" aria-describedby="draft-hint" required></textarea>
+                <button class="button primary icon-button" type="submit" aria-label="Send" title="Send"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>
               </div>
               <p id="composer-status" class="status form-status" role="status"></p>
-              <p id="draft-hint" class="form-hint">Enter for a new line · Ctrl/⌘ + Enter to send. Each discussion keeps its own draft.</p>
-              <label class="form-hint draft-recovery-toggle"><input id="remember-drafts" type="checkbox" aria-describedby="draft-recovery-status"> Recover drafts after reloading this tab</label>
-              <p id="draft-recovery-status" class="form-hint" role="status">Off by default. Enable only on a trusted device. Saved drafts expire after 12 hours and clear on sign-out.</p>
-              <details class="conversation-boundaries"><summary>Who can see and respond?</summary><p>Messages, threads, and reactions are visible to active room members. Addressing an agent does not trigger it in this pilot. Conversation never grants permission, approves work, or proves someone read a message.</p></details>
+              <p id="draft-hint" class="form-hint">Enter to send · Shift + Enter for a new line</p>
+              <details id="composer-options" class="conversation-boundaries"><summary>Options</summary>
+                <label class="form-hint draft-recovery-toggle"><input id="remember-drafts" type="checkbox" aria-describedby="draft-recovery-status"> Remember drafts</label>
+                <p id="draft-recovery-status" class="form-hint" role="status">This tab only. Use a trusted device. Clears after 12 hours or sign-out.</p>
+                <p>Everyone in the room can read messages. Addressing an agent does not run it or grant permission.</p>
+              </details>
             </form>
-            <div class="cursor-row"><span id="cursor-label"></span><button id="caught-up-button" class="button ghost" type="button">Mark myself caught up</button></div>
+            <div class="cursor-row"><span id="cursor-label" class="sr-only"></span><button id="caught-up-button" class="text-button" type="button">Mark caught up</button></div>
           </section>
         </section>
 
         <aside class="context-rail">
-          <section class="panel presence-panel" aria-labelledby="presence-title">
-            <div class="panel-header">
-              <div>
-                <p class="eyebrow">ROOM MEMBERSHIP</p>
-                <h2 id="presence-title">People & agents</h2>
-              </div>
-            </div>
+          <details id="people-panel" class="panel presence-panel">
+            <summary id="presence-title">People & agents</summary>
             <div id="presence-list" class="presence-list"></div>
-          </section>
-
-          <section class="return-brief" aria-labelledby="return-title">
-            <div class="section-label">
-              <p class="eyebrow">ROOM PULSE</p>
-              <h2 id="return-title">What’s moving</h2>
-            </div>
-            <div id="summary-grid" class="summary-grid" aria-live="polite" aria-atomic="true"></div>
-          </section>
+          </details>
 
           <details id="return-brief-panel" class="panel return-brief-panel">
             <summary>
-              <span class="eyebrow">RETURN BRIEF</span>
               <span id="return-brief-heading">Catch up on this room</span>
             </summary>
             <div class="return-brief-body">
+              <div id="summary-grid" class="summary-grid" aria-live="polite" aria-atomic="true"></div>
               <p id="rb-status" class="rb-note" role="status" aria-live="polite"></p>
               <section aria-labelledby="rb-current-heading">
                 <h3 id="rb-current-heading">Needs your attention <span id="rb-current-boundary" class="rb-boundary"></span></h3>
@@ -159,34 +133,42 @@
           <section class="panel work-panel" aria-labelledby="work-title">
             <div class="panel-header">
               <div>
-                <p class="eyebrow">WORK IN THIS ROOM</p>
-                <h2 id="work-title" tabindex="-1">Accountable outcomes</h2>
+                <h2 id="work-title" tabindex="-1">Work</h2>
               </div>
               <button id="new-work-button" class="button secondary" type="button">New</button>
             </div>
+            <dialog id="work-dialog" aria-labelledby="new-work-title">
             <form id="new-work-form" class="new-work-form" hidden>
+              <h2 id="new-work-title">New work</h2>
               <input id="source-message-id" type="hidden">
               <div id="source-context" class="source-context" hidden></div>
               <label>Outcome <input id="work-title-input" maxlength="100" required></label>
-              <label>Definition of done <textarea id="work-done-input" rows="2" maxlength="300" required></textarea></label>
-              <div class="form-grid">
-                <label>Accountable <select id="assignee-select" required></select></label>
-                <label>Verifier <select id="verifier-select" required></select></label>
-              </div>
-              <label>Work mode <select id="work-mode-select"><option value="read">Read / think / review</option><option value="write">Authorized external write</option></select></label>
-              <p class="form-hint">Choose different accountable and verifying members. If none are available, an administrator must provision them first. This records work; it does not run it.</p>
+              <label>Done when… <textarea id="work-done-input" rows="2" maxlength="300" required></textarea></label>
+              <label>Owner <select id="assignee-select" required></select></label>
+              <label id="verifier-field">Reviewer <select id="verifier-select" required></select></label>
+              <details id="work-options"><summary>Review & permissions <span id="work-options-summary"></span></summary>
+              <label>Mode <select id="work-mode-select"><option value="read">Read / think / review</option><option value="write">Authorized external write</option></select></label>
+              <fieldset class="work-checks" aria-describedby="work-checks-help">
+                <legend>Required to finish</legend>
+                <label class="check-option"><input id="require-verification" type="checkbox" checked><span>Independent review</span></label>
+                <label class="check-option"><input id="require-decision" type="checkbox" checked><span>Owner approval</span></label>
+                <p id="work-checks-help" class="form-hint">Evidence is always required.</p>
+              </fieldset>
+              </details>
+              <p class="form-hint">Creates a record, not permission to act elsewhere.</p>
               <p id="new-work-status" class="status form-status" role="alert"></p>
               <div class="form-actions">
                 <button id="cancel-work-button" class="button ghost" type="button">Cancel</button>
                 <button class="button primary" type="submit">Create outcome</button>
               </div>
             </form>
+            </dialog>
             <div id="work-list" class="work-list"></div>
           </section>
 
           <details id="record-panel" class="panel record-panel">
             <summary class="panel-header">
-              <span><span class="eyebrow">REPLAYABLE RECORD</span><strong id="record-title">Room history</strong></span>
+              <span><strong id="record-title">History</strong></span>
               <span id="event-count" class="count-chip"></span>
             </summary>
             <ol id="event-list" class="event-list"></ol>

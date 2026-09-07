@@ -1,6 +1,13 @@
 // Conversation structure is derived from immutable reply links, including older logs.
 export const REACTIONS = Object.freeze({ like: "👍", heart: "❤️", celebrate: "🎉", thinking: "🤔" });
 
+// Composition, key repeat, and touch Return must never accidentally submit.
+export function sendsOnEnter(event, touchKeyboard = false) {
+  return event.key === "Enter" && !event.shiftKey && !event.altKey
+    && !event.isComposing && event.keyCode !== 229 && !event.repeat
+    && Boolean(!touchKeyboard || event.ctrlKey || event.metaKey);
+}
+
 export function conversationIndex(messages) {
   const byId = new Map(messages.map(message => [message.id, message]));
   const rootById = new Map(), threads = new Map(), roots = [];

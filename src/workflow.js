@@ -1,17 +1,9 @@
-import { WORK_STATES as S } from "./events.js";
+import { WORK_STATES as S, receiptHasKnownProducer, matchesReceipt, hasConfirmedIndependentPass } from "./events.js";
 
-export const producerKnown = item => item.receipt?.producerAttribution === "reported" && item.receipt.producerId != null;
-export function matchesReceipt(record, receipt) {
-  return Boolean(record && receipt?.eventId && receipt?.evidenceVersion
-    && record.completionEventId === receipt.eventId && record.evidenceVersion === receipt.evidenceVersion);
-}
+export { matchesReceipt };
+export const producerKnown = item => receiptHasKnownProducer(item.receipt);
 export function verificationSatisfied(item) {
-  if (!item.independentVerificationRequired) return true;
-  const { receipt, verification } = item;
-  return verification?.result === "pass" && verification.independenceConfirmed === true
-    && verification.verifierId === item.verifierMemberId
-    && matchesReceipt(verification, receipt)
-    && producerKnown(item) && receipt.producerId !== verification.verifierId;
+  return !item.independentVerificationRequired || hasConfirmedIndependentPass(item);
 }
 
 export function currentApproval(item) {
@@ -59,6 +51,33 @@ export function workStatus(item) {
     resolve_independence: "Reviewer conflict", verify: "Awaiting verification",
     decide: "Awaiting decision", complete: "Completed"
   };
-  return { label: labels[next.action], next: item.state === S.BLOCKED
+  return { label: labels[next.action], tone: next.action === "complete" ? "completed" : next.action === "revise" ? "blocked" : "pending", next: item.state === S.BLOCKED
     ? item.blocker?.nextAction || next.label : next.label, owner: next.memberId };
+}
+
+export const activeClaim = (item, now = Date.now()) => item.claim?.status === "active" && Date.parse(item.claim.expiresAt) > now;
+
+// Presentation choices only. Every submitted action is still validated by the service.
+export function workActions(item, member, now = Date.now()) {
+  if (!member || member.active === false || item.state === S.SUPERSEDED || item.supersededBy) return [];
+  const actions = [], own = item.accountableMemberId === member.id;
+  const can = permission => member.permissions.includes(permission);
+  const claim = activeClaim(item, now) && item.claim.holderId === member.id;
+  const writable = item.mode === "read" || (claim && can("write_external"));
+  if (own && item.state === S.PROPOSED && can("accept_work")) actions.push(["accept", "Accept"]);
+  if (own && [S.ACCEPTED, S.WORKING, S.BLOCKED].includes(item.state) && item.mode === "write" && !activeClaim(item, now) && can("write_external")) actions.push(["claim", "Record write scope"]);
+  if (own && item.state === S.ACCEPTED && can("accept_work") && writable) actions.push(["start", "Start"]);
+  if (own && item.state === S.BLOCKED && can("accept_work")) actions.push(["resolve", "Resolve blocker"]);
+  if (own && [S.ACCEPTED, S.WORKING].includes(item.state)) {
+    if (can("accept_work")) actions.push(["block", "Report blocker"]);
+    if (can("complete_work") && writable) actions.push(["complete", "Post evidence"]);
+  }
+  if (own && item.state === S.COMPLETED && can("accept_work")) actions.push(["block", "Reopen for rework"]);
+  if (item.state === S.COMPLETED && item.receipt && member.id === item.verifierMemberId && can("verify")
+    && (!item.independentVerificationRequired || (!own && (!producerKnown(item) || item.receipt.producerId !== member.id)))) {
+    actions.push(["verify", item.verification ? "Review evidence again"
+      : item.independentVerificationRequired && producerKnown(item) ? "Record independent check" : "Record evidence check"]);
+  }
+  if (nextWorkStep(item).action === "decide" && member.id === item.humanDecisionMakerId && member.kind === "human" && can("decide")) actions.push(["decide", "Record decision"]);
+  return actions;
 }

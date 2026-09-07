@@ -1,0 +1,15 @@
+[Unit]
+Description=Verify a fresh Project Room backup
+
+[Service]
+Type=oneshot
+User=project-room
+Group=project-room
+WorkingDirectory=/opt/project-room/current
+EnvironmentFile=/etc/project-room/pilot.env
+ExecStart=/usr/bin/node /opt/project-room/current/scripts/backup-room.mjs --to /var/lib/project-room/backups
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/project-room

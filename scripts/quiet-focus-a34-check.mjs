@@ -40,6 +40,7 @@ test("A3/A4: keyboard disclosures, narrow composer, composer-local failure + ret
 
   // A3 keyboard: focus a disclosure summary, toggle with Enter; opening must not
   // move focus into the panel; closing must not strand focus.
+  await page.locator("#people-panel > summary").click();
   const summary = page.locator('#presence-list .presence-member[data-disclosure-host="maya"] summary');
   const details = page.locator('#presence-list .presence-member[data-disclosure-host="maya"] details');
   await summary.focus();
@@ -54,9 +55,9 @@ test("A3/A4: keyboard disclosures, narrow composer, composer-local failure + ret
   const input = page.locator("#message-input");
   await input.click();
   await input.pressSequentially("line one");
-  await page.keyboard.press("Enter");
+  await page.keyboard.press("Shift+Enter");
   await input.pressSequentially("line two");
-  assert.equal(await input.inputValue(), "line one\nline two", "Enter stays a newline");
+  assert.equal(await input.inputValue(), "line one\nline two", "Shift+Enter inserts a newline");
   await input.press("Control+Enter");
   await page.getByText("line one", { exact: false }).waitFor();
   assert.equal(await input.inputValue(), "", "Ctrl+Enter sends and clears after ack");
@@ -67,7 +68,7 @@ test("A3/A4: keyboard disclosures, narrow composer, composer-local failure + ret
   await page.locator('#message-form button[type="submit"]').click();
   const composerStatus = page.locator("#composer-status");
   await composerStatus.waitFor({ state: "visible" });
-  assert.match(await composerStatus.textContent(), /Draft kept; press Send to retry\./);
+  assert.match(await composerStatus.textContent(), /Draft kept\. Send again to retry\./);
   assert.equal(await input.inputValue(), "send this through an outage", "draft intact after failure");
   assert.equal(await page.locator('#message-form button[type="submit"]').isEnabled(), true, "Send stays available as the retry");
   await page.screenshot({ path: "test-results/a4-send-failure.png", fullPage: true });

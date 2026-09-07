@@ -41,6 +41,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
       await page.waitForFunction(() => !document.querySelector("#access-key").disabled);
     };
     await login(owner);
+    await page.locator("#composer-options > summary").click();
     await page.locator("#remember-drafts").check();
     const input = page.locator("#message-input"), status = page.locator("#composer-status");
     const waitForFailure = () => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#composer-status").classList.contains("error"));
@@ -99,6 +100,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await page.locator("#thread-back").click();
     assert.equal(await input.inputValue(), "A separate room draft");
     await page.locator('[data-message-record-id="topic"] [data-message-action="thread"]').click();
+    await page.locator("#composer-options > summary").click();
     await page.locator("#remember-drafts").uncheck();
     assert.equal(await page.evaluate(() => sessionStorage.getItem("project-room:drafts:v2")), null);
 
@@ -133,9 +135,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
       assert.equal(await input.inputValue(), "検討中の文章");
     }
     await page.keyboard.press("End");
+    await page.keyboard.press("Shift+Enter");
+    assert.equal(await input.inputValue(), "検討中の文章\n", "Shift+Enter inserts a line");
     await page.keyboard.press("Enter");
-    assert.equal(await input.inputValue(), "検討中の文章\n", "ordinary Enter still inserts a line");
-    await page.keyboard.press("Control+Enter");
     await waitForSaved();
     assert.equal(store.snapshot(owner, "commons").state.messages.filter(m => m.body === "検討中の文章").length, 1);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);

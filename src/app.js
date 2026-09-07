@@ -1,8 +1,8 @@
 import { EVENT_TYPES as T, WORK_STATES as S } from "./events.js";
 import { AccountClient, RoomClient, draftCommand } from "./client.js";
 import { ReturnBrief } from "./return-brief.js";
-import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope } from "./conversation.js";
-import { nextWorkStep, workStatus } from "./workflow.js";
+import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter } from "./conversation.js";
+import { nextWorkStep, workStatus, workActions, activeClaim, producerKnown as hasReportedProducer } from "./workflow.js";
 import { consumeJoinFragment, installShareLinks } from "./share-links.js";
 
 const $ = selector => document.querySelector(selector);
@@ -60,8 +60,6 @@ const client = new RoomClient({
     const firstSnapshot = !state;
     state = snapshot.state; session = identity;
     const roomId = state.room?.id ?? identity.roomId;
-    $(".room-link strong").textContent = roomId;
-    $(".room-heading .eyebrow").textContent = `# ${roomId.toUpperCase()} · SHARED ROOM`;
     $("#room-title").textContent = state.room?.title ?? roomId;
     $(".room-purpose").textContent = state.room?.purpose ?? "";
     $("#conversation-title").textContent = `# ${roomId}`;
@@ -111,6 +109,8 @@ const client = new RoomClient({
     delete $("#summary-grid")._content;
     for (const id of ["message-to-select", "assignee-select", "verifier-select"]) { $(`#${id}`).replaceChildren(); delete $(`#${id}`).dataset.signature; }
     for (const form of document.querySelectorAll("form")) form.reset();
+    $("#work-dialog").close();
+    for (const id of ["people-panel", "composer-options", "work-options", "room-about"]) $(`#${id}`).open = false;
     for (const control of document.querySelectorAll("#auth-form input, #auth-form button")) control.disabled = pendingSignout;
     setFormStatus($("#new-work-status"), ""); setFormStatus($("#action-error"), ""); setFormStatus($("#composer-status"), "");
     $("#action-dialog").close(); $("#new-work-form").hidden = true; $("#reply-bar").hidden = true;
@@ -248,13 +248,13 @@ function setInvitationFeedback(text, error = false) {
 }
 function configureAuthPanel(roomId = selectedRoomFromLocation()) {
   const accountMode = Boolean(roomId);
-  $("#access-key-label").textContent = accountMode ? "Your account access key" : "Your human member access key";
+  $("#access-key-label").textContent = accountMode ? "Account key" : "Member key";
   $("#auth-description").textContent = accountMode
-    ? `Sign in to open #${roomId} with a canonical account that already has membership there.`
-    : "Have an invitation link? Open it, choose your name, and join. No access key needed.";
+    ? `Sign in to #${roomId}. Membership required.`
+    : "Open an invite link, or use your member key.";
   $("#auth-hint").textContent = accountMode
-    ? "An account key proves the account; it does not itself grant Room membership. Never put a key in a URL, chat, logs, or GitHub."
-    : "No link yet? Ask a room administrator to use ‘Invite people.’ Existing members can still use their own access key above. Never share your personal key.";
+    ? "An account key does not grant membership. Keep it private."
+    : "Need a link? Ask the room owner. Keep your key private.";
   $("#auth-form button[type='submit']").textContent = accountMode ? "Open room" : "Enter room";
 }
 function renderInvitation() {
@@ -446,6 +446,24 @@ function selectOptions(selector, members, blank) {
   if (previous) select.value = previous;
   select.dataset.signature = signature;
 }
+function syncWorkForm() {
+  if (!state || busy) return;
+  const active = Object.values(state.members).filter(member => member.active !== false);
+  const writing = $("#work-mode-select").value === "write";
+  const reviewing = $("#require-verification").checked;
+  selectOptions("#assignee-select", active.filter(member => ["accept_work", "complete_work", ...(writing ? ["write_external"] : [])]
+    .every(permission => member.permissions.includes(permission))), "Choose accountable member");
+  selectOptions("#verifier-select", active.filter(member => member.permissions.includes("verify") && member.id !== $("#assignee-select").value), "Choose independent verifier");
+  $("#verifier-field").hidden = !reviewing;
+  $("#verifier-select").disabled = !reviewing;
+  $("#verifier-select").required = reviewing;
+  const checks = [reviewing && "Review", $("#require-decision").checked && "approval"].filter(Boolean);
+  $("#work-options-summary").textContent = `${checks.join(" + ") || "Evidence only"} · ${writing ? "external write" : "read only"}`;
+  for (const id of ["assignee-select", "verifier-select"]) {
+    const select = $(`#${id}`);
+    select.setCustomValidity(!select.disabled && select.selectedOptions[0]?.disabled ? "This member is no longer eligible. Choose another member." : "");
+  }
+}
 // Quiet Focus A1/A2: a background snapshot must not collapse open disclosures or
 // steal focus. Capture keyed disclosure + focus state before replacing list
 // contents, restore it after. Keys are stable per host record, never positional.
@@ -475,10 +493,9 @@ function restoreDisclosures(container, snap) {
 function render() {
   conversation = conversationIndex(state.messages);
   const members = Object.values(state.members), active = members.filter(m => m.active !== false);
-  selectOptions("#message-to-select", active, "Everyone in this room");
-  selectOptions("#assignee-select", active.filter(m => m.permissions.includes("accept_work") && m.permissions.includes("complete_work")), "Choose accountable member");
-  selectOptions("#verifier-select", active.filter(m => m.permissions.includes("verify")), "Choose independent verifier");
-  $("#presence-count").textContent = `${active.length} members · presence not measured`;
+  selectOptions("#message-to-select", active, "Everyone");
+  syncWorkForm();
+  $("#presence-count").textContent = `${active.length} members`;
   $("#member-stack").innerHTML = active.map(m => `<div class="member-avatar ${m.kind}" title="${esc(memberLabel(m.id))}" aria-hidden="true"><span>${initials(m.displayName)}</span></div>`).join("");
   const presenceSnap = captureDisclosures($("#presence-list")), workSnap = captureDisclosures($("#work-list"));
   $("#presence-list").innerHTML = members.map(m => `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span></div><div><strong>${esc(memberLabel(m.id))}</strong><span>${esc(m.kind)} · ${m.active === false ? "access revoked" : "presence unknown"}</span><details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p></details></div></div>`).join("");
@@ -493,13 +510,6 @@ function render() {
   renderMessages();
   renderSearch();
   $("#work-list").innerHTML = items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(workCard).join("") || '<p class="empty-note">Nothing assigned. A room is useful before it has a task.</p>';
-  for (const item of items) {
-    const card = workRecord(item.id), status = workStatus(item);
-    card.querySelector(".state").textContent = status.label;
-    const updated = document.createElement("p"); updated.className = "form-hint";
-    updated.textContent = `Last recorded update: ${new Date(item.updatedAt).toLocaleString()}. Live execution is not measured.`;
-    card.querySelector(".work-facts").after(updated);
-  }
   restoreDisclosures($("#presence-list"), presenceSnap);
   restoreDisclosures($("#work-list"), workSnap);
   $("#event-count").textContent = `${client.sequence}`;
@@ -640,9 +650,15 @@ function workRecord(id) {
   return [...$("#work-list").querySelectorAll("[data-work-record-id]")]
     .find(node => node.dataset.workRecordId === id) || null;
 }
-function revealWork(id) { if (state?.workItems[id] && !busy) focusRecord(workRecord(id)); }
+function revealWork(id) {
+  if (!state?.workItems[id] || busy) return;
+  const card = workRecord(id);
+  if (card) card.querySelector(".work-details").open = true;
+  focusRecord(card);
+}
 function revealMember(id) {
   if (!state?.members[id] || busy) return;
+  $("#people-panel").open = true;
   focusRecord([...$("#presence-list").querySelectorAll("[data-member-record-id]")]
     .find(node => node.dataset.memberRecordId === id));
 }
@@ -683,26 +699,9 @@ function revealLocationHash() {
   }
 }
 function readyForDecision(i) { return nextWorkStep(i).action === "decide"; }
-function hasReportedProducer(i) { return i.receipt?.producerAttribution === "reported" && i.receipt.producerId != null; }
 function hasIndependentProducer(i) { return hasReportedProducer(i) && i.receipt.producerId !== i.verifierMemberId; }
-function activeClaim(i) { return i.claim?.status === "active" && Date.parse(i.claim.expiresAt) > Date.now(); }
 function actions(i) {
-  const a = [], own = i.accountableMemberId === session.member.id;
-  if (own && i.state === S.PROPOSED && can("accept_work")) a.push(["accept", "Accept"]);
-  if (own && [S.ACCEPTED, S.WORKING, S.BLOCKED].includes(i.state) && i.mode === "write" && !activeClaim(i) && can("write_external")) a.push(["claim", "Record write scope"]);
-  if (own && i.state === S.ACCEPTED && can("accept_work") && (i.mode === "read" || (activeClaim(i) && can("write_external")))) a.push(["start", "Start"]);
-  if (own && i.state === S.BLOCKED && can("accept_work")) a.push(["resolve", "Resolve blocker"]);
-  if (own && [S.ACCEPTED, S.WORKING].includes(i.state)) {
-    if (can("accept_work")) a.push(["block", "Report blocker"]);
-    if (can("complete_work") && (i.mode === "read" || (activeClaim(i) && can("write_external")))) a.push(["complete", "Post evidence"]);
-  }
-  if (own && i.state === S.COMPLETED && can("accept_work")) a.push(["block", "Reopen for rework"]);
-  if (i.state === S.COMPLETED && session.member.id === i.verifierMemberId && can("verify") && !i.verification) {
-    if (!i.independentVerificationRequired || !hasReportedProducer(i)) a.push(["verify", "Record evidence check"]);
-    else if (hasIndependentProducer(i)) a.push(["verify", "Record independent check"]);
-  }
-  if (readyForDecision(i) && session.member.id === i.humanDecisionMakerId && can("decide")) a.push(["decide", "Record decision"]);
-  return a.map(([action, label]) => `<button type="button" class="button secondary" data-action="${action}" data-work-id="${esc(i.id)}" data-focus-key="work-action:${esc(i.id)}:${action}"${busy ? " disabled" : ""}>${label}</button>`).join("");
+  return workActions(i, state.members[session.member.id]).map(([action, label]) => `<button type="button" class="button secondary" data-action="${action}" data-work-id="${esc(i.id)}" data-focus-key="work-action:${esc(i.id)}:${action}"${busy ? " disabled" : ""}>${label}</button>`).join("");
 }
 function claimStateLabel(i) {
   if (activeClaim(i)) return "not expired";
@@ -730,14 +729,16 @@ function receiptCard(i) {
   return `<div class="receipt"><p class="receipt-label">REPORTED COMPLETION · NOT AUTOMATIC VERIFICATION</p><dl class="receipt-attribution"><div><dt>Completion reporter</dt><dd>${esc(reporter)}</dd></div><div><dt>Producer</dt><dd>${esc(producer)}</dd></div></dl><p>${esc(receipt.summary)}</p><a href="${safeUrl(receipt.evidenceUrl)}" target="_blank" rel="noreferrer" data-focus-key="work-evidence:${esc(i.id)}">Open submitted evidence ↗</a><code>${esc(receipt.evidenceVersion)}</code><p>${esc(receipt.nextAction)}</p>${verification}</div>`;
 }
 function workCard(i) {
-  const next = nextWorkStep(i);
+  const next = nextWorkStep(i), status = workStatus(i);
   const nextActor = next.memberId ? `${memberLabel(next.memberId)} — ` : "";
-  const nextLine = `<p class="work-next-step" data-next-step="${esc(next.action)}"><strong>Next:</strong> ${esc(nextActor + next.label)}</p>`;
+  const nextLine = `<p class="work-next-step" data-next-step="${esc(next.action)}"><strong>Next:</strong> ${esc(nextActor + status.next)}</p>`;
   const source = i.sourceMessageId ? `<a class="source-link" href="${esc(recordHref("message", i.sourceMessageId))}" data-open-message="${esc(i.sourceMessageId)}" data-focus-key="work-source:${esc(i.id)}">From this conversation</a>` : "";
   const blocker = i.blocker ? `<div class="blocker"><strong>Blocked</strong><p>${esc(i.blocker.reason)}</p><p>${esc(i.blocker.nextAction)}</p></div>` : "";
   const decision = i.decision ? `<div class="decision"><strong>${esc(humanize(i.decision.decision))}</strong><p>${esc(i.decision.reason)}</p></div>` : "";
   const claim = i.claim ? `<details class="claim"><summary data-focus-key="work-claim:${esc(i.id)}">Recorded scope · ${esc(claimStateLabel(i))}</summary><p>${esc(i.claim.repository)}:${esc(i.claim.ref)}</p><p>${esc(i.claim.paths.join(", "))}</p><p>Expires ${esc(i.claim.expiresAt)}. This service does not execute external actions.</p></details>` : "";
-  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${i.state}">${esc(i.state)}</span><span class="mode">${esc(i.mode)} · revision ${i.revision}</span></div><h3>${esc(i.title)}</h3>${source}<p class="definition">${esc(i.definitionOfDone)}</p>${nextLine}<dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div><div><dt>Verifier</dt><dd>${esc(memberLabel(i.verifierMemberId))}</dd></div></dl>${receiptCard(i)}${blocker}${decision}${claim}<div class="work-actions">${actions(i)}</div></article>`;
+  const checks = `<div><dt>Verifier</dt><dd>${i.independentVerificationRequired ? esc(memberLabel(i.verifierMemberId)) : "Not required"}</dd></div><div><dt>Decision</dt><dd>${i.ownerDecisionRequired ? esc(memberLabel(i.humanDecisionMakerId)) : "Not required"}</dd></div>`;
+  const updated = `<p class="form-hint">Last recorded update: ${esc(new Date(i.updatedAt).toLocaleString())}. Live execution is not measured.</p>`;
+  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span></div><h3>${esc(i.title)}</h3>${nextLine}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span>${source}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${receiptCard(i)}${blocker}${decision}${claim}</details><div class="work-actions">${actions(i)}</div></article>`;
 }
 // Quiet Focus A4: a failed send reports beside the composer that holds the draft,
 // not only in the page-level status area; the Send button is the retry and the
@@ -1052,7 +1053,7 @@ $("#message-form").addEventListener("submit", e => {
     $("#message-input").value = ""; pendingMessage = null; clearReply();
     persistDrafts();
     notice(`Message saved${threadId ? " in this thread" : " to the room"}.`);
-  }, { failureHint: "Draft kept; press Send to retry." });
+  }, { failureHint: "Draft kept. Send again to retry." });
 });
 $("#message-list").addEventListener("click", e => {
   const button = e.target.closest("[data-message-id]"); if (!button || !state || busy) return;
@@ -1087,11 +1088,19 @@ document.addEventListener("selectionchange", () => { if (document.activeElement 
 for (const type of ["keyup", "mouseup", "touchend"]) $("#message-input").addEventListener(type, () => rememberComposerSelection({ clearCollapsed: true }));
 $("#message-input").addEventListener("input", () => { lastComposerSelection = null; saveComposer(); });
 $("#message-to-select").addEventListener("change", saveComposer);
+const touchKeyboard = matchMedia("(hover: none) and (pointer: coarse)");
+function syncComposerHint() {
+  $("#draft-hint").textContent = touchKeyboard.matches ? "Return for a new line · ↑ to send" : "Enter to send · Shift + Enter for a new line";
+  $("#message-input").enterKeyHint = touchKeyboard.matches ? "enter" : "send";
+}
+touchKeyboard.addEventListener("change", syncComposerHint);
+syncComposerHint();
 $("#message-input").addEventListener("keydown", e => {
   // Some IME confirmation keys arrive after compositionend; keyCode 229 is the
   // legacy UI Events signal. Neither confirmation nor key repeat sends a message.
-  if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.isComposing && e.keyCode !== 229 && !e.repeat) {
-    e.preventDefault(); $("#message-form").requestSubmit();
+  if (sendsOnEnter(e, touchKeyboard.matches)) {
+    e.preventDefault();
+    if (!busy && $("#message-input").value.trim()) $("#message-form").requestSubmit();
   }
 });
 $("#search-form").addEventListener("submit", e => { e.preventDefault(); if (state) renderSearch(); });
@@ -1154,11 +1163,15 @@ function openWork(sourceId = null) {
   if (!$("#new-work-form").hidden) { $("#work-title-input").focus(); return; }
   workFormOpener = document.activeElement;
   $("#new-work-form").hidden = false; workDraftId = `work-${crypto.randomUUID()}`;
+  $("#work-options").open = false;
+  $("#work-dialog").showModal();
   $("#source-message-id").value = sourceId || "";
   $("#source-context").textContent = sourceId ? `Source: ${state.messages.find(m => m.id === sourceId)?.body || ""}` : "";
   $("#source-context").hidden = !sourceId; $("#work-title-input").focus();
+  syncWorkForm();
 }
 function closeWorkForm({ returnFocus = true } = {}) {
+  $("#work-dialog").close();
   $("#new-work-form").hidden = true; $("#new-work-form").reset();
   setFormStatus($("#new-work-status"), "");
   pendingWork = null; workDraftId = null;
@@ -1172,9 +1185,12 @@ function closeWorkForm({ returnFocus = true } = {}) {
 $("#new-work-button").addEventListener("click", () => openWork());
 $("#composer-work-button").addEventListener("click", () => openWork());
 $("#cancel-work-button").addEventListener("click", () => closeWorkForm());
+$("#work-dialog").addEventListener("cancel", event => { event.preventDefault(); if (!busy) closeWorkForm(); });
+$("#new-work-form").addEventListener("change", syncWorkForm);
 $("#new-work-form").addEventListener("submit", e => {
-  e.preventDefault(); if (!state) return;
-  const data = { workItemId: workDraftId, title: $("#work-title-input").value.trim(), definitionOfDone: $("#work-done-input").value.trim(), accountableMemberId: $("#assignee-select").value, verifierMemberId: $("#verifier-select").value, independentVerificationRequired: true, ownerDecisionRequired: true, humanDecisionMakerId: state.room.ownerId, mode: $("#work-mode-select").value, sourceMessageId: $("#source-message-id").value || null };
+  e.preventDefault(); if (!state || busy) return;
+  const independentVerificationRequired = $("#require-verification").checked, ownerDecisionRequired = $("#require-decision").checked;
+  const data = { workItemId: workDraftId, title: $("#work-title-input").value.trim(), definitionOfDone: $("#work-done-input").value.trim(), accountableMemberId: $("#assignee-select").value, verifierMemberId: independentVerificationRequired ? $("#verifier-select").value : null, independentVerificationRequired, ownerDecisionRequired, humanDecisionMakerId: ownerDecisionRequired ? state.room.ownerId : null, mode: $("#work-mode-select").value, sourceMessageId: $("#source-message-id").value || null };
   pendingWork = draftCommand(pendingWork, T.WORK_PROPOSED, data);
   const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
   submit(e.currentTarget, async current => {

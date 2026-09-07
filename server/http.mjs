@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { ServiceError } from "./store.mjs";
+import { clientAddress } from "./deployment.mjs";
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -35,7 +36,8 @@ const sessionView = auth => ({
 const exact = (value, fields) => Object.keys(value).length === fields.length && fields.every(field => Object.hasOwn(value, field));
 const rateHash = value => createHash("sha256").update(String(value)).digest("hex");
 
-export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = 1000 }) {
+export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = 1000, trustedLocalProxy = false }) {
+  if (trustedLocalProxy && !origin?.startsWith("https://")) throw new Error("The deployment proxy requires a fixed HTTPS origin");
   if (origin) {
     const url = new URL(origin);
     if (url.origin !== origin || !["http:", "https:"].includes(url.protocol)) throw new Error("Origin must be a fixed HTTP(S) origin without a path");
@@ -152,12 +154,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("X-Robots-Tag", "noindex, nofollow");
     res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
     try {
       if (req.headers.host !== new URL(expectedOrigin()).host) reject(403, "host_denied", "Unexpected host");
       checkOrigin(req);
+      let remoteAddress;
+      try { remoteAddress = clientAddress(req, trustedLocalProxy); }
+      catch { reject(403, "proxy_denied", "Invalid proxy configuration"); }
       const url = new URL(req.url, expectedOrigin());
-      if (url.pathname === "/api/health" && req.method === "GET") return json(res, 200, { status: "ok", mode: "single-node-pilot" });
+      if (url.pathname === "/api/health" && req.method === "GET") return json(res, 200, { status: "ok", mode: trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot" });
+      if (url.pathname === "/api/ready" && req.method === "GET") {
+        try {
+          if (!store.db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) throw new Error("No room");
+          return json(res, 200, { status: "ready" });
+        } catch { return json(res, 503, { status: "unavailable" }); }
+      }
       if (assets.has(url.pathname) && ["GET", "HEAD"].includes(req.method)) {
         const [path, type] = assets.get(url.pathname);
         const data = await readFile(new URL(path, assetRoot));
@@ -168,7 +180,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const slotToken = cookie(req, accountCookieName);
         if (req.method === "GET") {
           if (!slotToken) {
-            rate(`account-slot:${req.socket.remoteAddress}`, 20);
+            rate(`account-slot:${remoteAddress}`, 20);
             const created = store.createAccountSessionSlot();
             setCookie(res, accountCookieName, created.token, Math.max(0, Math.floor((created.session.expiresAt - store.now()) / 1000)));
             return json(res, 200, accountView(created.session));
@@ -180,7 +192,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             try { slot = store.accountSessionSlot(slotToken); }
             catch (slotError) {
               if (slotError.status !== 401) throw slotError;
-              rate(`account-slot:${req.socket.remoteAddress}`, 20);
+              rate(`account-slot:${remoteAddress}`, 20);
               const created = store.createAccountSessionSlot();
               setCookie(res, accountCookieName, created.token, Math.max(0, Math.floor((created.session.expiresAt - store.now()) / 1000)));
               slot = created.session;
@@ -195,7 +207,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (req.method === "POST") {
           if (!exact(data, ["accountAccessKey", "expectedSessionRevision"]) || typeof data.accountAccessKey !== "string") reject(422, "invalid_login", "An account key and current session revision are required");
-          rate(`account-login:${req.socket.remoteAddress}:${slot.credentialHash}`, 10);
+          rate(`account-login:${remoteAddress}:${slot.credentialHash}`, 10);
           const oldRoomToken = cookie(req, roomCookieName);
           const loggedIn = store.loginAccountSession(slotToken, data.accountAccessKey, data.expectedSessionRevision, {
             revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null
@@ -210,7 +222,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === "/api/share-links/preview" && req.method === "POST") {
         checkOrigin(req, true);
-        rate(`link-preview:${req.socket.remoteAddress}`, 30);
+        rate(`link-preview:${remoteAddress}`, 30);
         const data = await body(req);
         if (!exact(data, ["linkToken"])) reject(422, "invalid_link", "Invitation link required");
         return json(res, 200, store.shareLinks.preview(data.linkToken));
@@ -222,7 +234,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const binding = accountBinding(req);
         const data = await body(req);
         if (!exact(data, ["linkToken", "displayName", "redemptionId", "expectedSessionRevision"])) reject(422, "invalid_join", "Supply the invitation link and your name");
-        rate(`link-join:${req.socket.remoteAddress}`, 20);
+        rate(`link-join:${remoteAddress}`, 20);
         const oldRoomToken = cookie(req, roomCookieName);
         const result = store.shareLinks.join(token, data.linkToken, { ...data, expectedSessionBinding: binding,
           revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null });
@@ -230,7 +242,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === "/api/invitations/preview" && req.method === "POST") {
         checkOrigin(req, true);
-        rate(`invitation-preview:${req.socket.remoteAddress}`, 30);
+        rate(`invitation-preview:${remoteAddress}`, 30);
         const data = await body(req);
         if (!exact(data, ["invitationToken"]) || typeof data.invitationToken !== "string") reject(422, "invalid_invitation", "Invitation token required");
         return json(res, 200, store.previewInvitation(data.invitationToken));
@@ -248,7 +260,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === "/api/session" && req.method === "POST") {
         checkOrigin(req, true);
-        rate(`login:${req.socket.remoteAddress}`, 10);
+        rate(`login:${remoteAddress}`, 10);
         const data = await body(req);
         if (!exact(data, ["accessKey"]) || typeof data.accessKey !== "string") reject(422, "invalid_login", "An access key is required");
         const { token, session } = store.createSession(data.accessKey);

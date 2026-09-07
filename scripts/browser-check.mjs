@@ -145,6 +145,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const work = Object.values(store.snapshot(owner, "commons").state.workItems);
     assert.equal(work.length, 1); assert.equal(work[0].sourceMessageId, posted[0].id);
     await page.locator("#thread-back").click();
+    await page.locator("#work-list .work-details > summary").click();
     await page.locator('#work-list [data-open-message]').click();
     assert.equal(await page.evaluate(() => document.activeElement.dataset.messageRecordId), posted[0].id);
 

@@ -315,7 +315,7 @@ test("composer failures stay discussion-scoped and keyboard sends preserve user 
   assert.equal(await form.locator('button[type="submit"]').isDisabled(), true);
 
   release.resolve();
-  const expectedError = "Composer temporarily unavailable. Draft kept; press Send to retry.";
+  const expectedError = "Composer temporarily unavailable. Draft kept. Send again to retry.";
   await page.waitForFunction(text => document.querySelector("#composer-status")?.textContent === text, expectedError);
   assert.equal(await form.getAttribute("aria-busy"), null);
   assert.equal(await input.isDisabled(), false);

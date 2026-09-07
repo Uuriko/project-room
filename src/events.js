@@ -474,19 +474,12 @@ function recordVerification(state, incoming) {
     throw new Error("Independent verification requires a different actor");
   }
   requireFields(incoming.data, ["result", "completionEventId", "evidenceVersion", "summary"]);
-  const matchesCurrentReceipt =
-    incoming.data.completionEventId === item.receipt?.eventId &&
-    incoming.data.evidenceVersion === item.receipt?.evidenceVersion;
-  const matchesHistoricalReceipt = item.receiptHistory.some((receipt) =>
-    incoming.data.completionEventId === receipt.eventId &&
-    incoming.data.evidenceVersion === receipt.evidenceVersion
-  );
-  if (!matchesCurrentReceipt && !matchesHistoricalReceipt) {
+  const matchesCurrentReceipt = matchesReceipt(incoming.data, item.receipt);
+  const matchedReceipt = matchesCurrentReceipt ? item.receipt
+    : item.receiptHistory.find(receipt => matchesReceipt(incoming.data, receipt));
+  if (!matchedReceipt) {
     throw new Error("Verification must identify the exact current completion and evidence version");
   }
-  const matchedReceipt = matchesCurrentReceipt
-    ? item.receipt
-    : item.receiptHistory.find((receipt) => incoming.data.completionEventId === receipt.eventId && incoming.data.evidenceVersion === receipt.evidenceVersion);
   const producerKnown = receiptHasKnownProducer(matchedReceipt);
   if (item.independentVerificationRequired && producerKnown && matchedReceipt.producerId === incoming.actorId) {
     throw new Error("Independent verification requires a verifier different from the known producer");
@@ -536,7 +529,7 @@ function recordOwnerDecision(state, incoming) {
   if (!["approved", "changes_requested", "rejected"].includes(incoming.data.decision)) {
     throw new Error("Unsupported owner decision");
   }
-  if (incoming.data.completionEventId !== item.receipt?.eventId || incoming.data.evidenceVersion !== item.receipt?.evidenceVersion) {
+  if (!matchesReceipt(incoming.data, item.receipt)) {
     throw new Error("Decision must identify the exact current completion and evidence version");
   }
   if (incoming.data.decision === "approved" && item.independentVerificationRequired && !hasConfirmedIndependentPass(item)) {
@@ -592,17 +585,21 @@ function claimIsActive(claim, at) {
   return claim.status === "active" && Date.parse(claim.expiresAt) > Date.parse(at);
 }
 
-function receiptHasKnownProducer(receipt) {
+export function receiptHasKnownProducer(receipt) {
   return receipt?.producerAttribution === "reported" && receipt.producerId != null;
 }
 
-function hasConfirmedIndependentPass(item) {
+export function matchesReceipt(record, receipt) {
+  return Boolean(record && receipt?.eventId && receipt?.evidenceVersion
+    && record.completionEventId === receipt.eventId && record.evidenceVersion === receipt.evidenceVersion);
+}
+
+export function hasConfirmedIndependentPass(item) {
   const { receipt, verification } = item;
   return verification?.result === "pass" &&
     verification.independenceConfirmed === true &&
     verification.verifierId === item.verifierMemberId &&
-    verification.completionEventId === receipt?.eventId &&
-    verification.evidenceVersion === receipt?.evidenceVersion &&
+    matchesReceipt(verification, receipt) &&
     receiptHasKnownProducer(receipt) &&
     receipt.producerId !== verification.verifierId;
 }

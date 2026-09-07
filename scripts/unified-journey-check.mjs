@@ -38,6 +38,7 @@ test("unified guest entry, account-bound draft recovery, catch-up and agent hand
   await guest.locator("#join-link-dialog").waitFor({ state: "hidden" });
   await guest.locator("#main").waitFor({ state: "visible" });
   assert.equal(await guest.locator("#new-work-button").isDisabled(), true);
+  await guest.locator("#composer-options > summary").click();
   await guest.locator("#remember-drafts").check();
   await guest.locator("#message-input").fill("My optional recovered guest draft");
   guest.once("dialog", d => d.accept());
