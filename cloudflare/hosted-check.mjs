@@ -25,14 +25,21 @@ try {
   if (returning) {
     const receipt = JSON.parse(await readFile(privatePath('hosted-receipt.json'), 'utf8'));
     const guestContext = await browser.newContext({ storageState: fileURLToPath(privatePath('hosted-guest.json')) });
-    const guest = await guestContext.newPage();
-    guest.setDefaultTimeout(20000);
-    await guest.goto(receipt.returnUrl);
-    await guest.locator('#main').waitFor({ state: 'visible' });
-    await guest.getByText(receipt.reply, { exact: true }).first().waitFor();
-    assert.match(await guest.locator('#identity-label').textContent(), /test guest/i);
+    let guest, identity;
+    // Read-only repeat visits: do not create another guest, message or work item.
+    for (let visit = 0; visit < 6; visit++) {
+      await guest?.close();
+      guest = await guestContext.newPage(); guest.setDefaultTimeout(20000);
+      await guest.goto(receipt.returnUrl);
+      await guest.locator('#main').waitFor({ state: 'visible' });
+      await guest.locator('#connection-status[data-state="connected"]').waitFor({ state: 'visible' });
+      await guest.getByText(receipt.reply, { exact: true }).first().waitFor();
+      const current = await guest.locator('#identity-label').textContent();
+      assert.match(current, /test guest/i);
+      if (visit === 0) identity = current; else assert.equal(current, identity);
+    }
     await guest.screenshot({ path: `${output}/hosted-return.png`, fullPage: true });
-    console.log('PASS: hosted guest session and message survived redeployment.');
+    console.log('PASS: six immediate hosted guest returns retain identity, history and connected live updates. No test records added.');
   } else {
     const ownerContext = await browser.newContext({ viewport: { width: 1360, height: 900 } });
     const guestContext = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });

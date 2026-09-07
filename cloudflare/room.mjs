@@ -1,5 +1,6 @@
 import { httpServerHandler } from 'cloudflare:node';
 import { isIP } from 'node:net';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { DurableDatabase, durableStorage } from './storage.mjs';
@@ -10,11 +11,13 @@ import { bootstrapRoom } from './bootstrap.mjs';
 export class ProjectRoom {
   constructor(ctx, env) {
     this.env = env;
+    this.requestSignals = new AsyncLocalStorage();
     const origin = new URL(env.ROOM_ORIGIN);
     if (origin.protocol !== 'https:' || origin.origin !== env.ROOM_ORIGIN) throw new Error('Exact HTTPS Room origin required');
     this.store = new RoomStore(null, { database: new DurableDatabase(ctx.storage), storagePlatform: durableStorage });
     bootstrapRoom(this.store, env);
     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: 'cloudflare-staging',
+      resolveRequestSignal: () => this.requestSignals.getStore(),
       loadAsset: async path => {
         const response = await env.ASSETS.fetch(new Request(new URL('/' + path, env.ROOM_ORIGIN)));
         if (!response.ok) throw new Error('Room asset unavailable');
@@ -31,7 +34,7 @@ export class ProjectRoom {
     });
     this.handler = httpServerHandler(this.server);
   }
-  fetch(request) { return this.handler.fetch(request); }
+  fetch(request) { return this.requestSignals.run(request.signal, () => this.handler.fetch(request)); }
 }
 
 export default {

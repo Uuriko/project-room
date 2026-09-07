@@ -1,7 +1,11 @@
 # Cloudflare staging candidate
 
 Status: **deployed to isolated staging on September 7, 2026** at
-https://project-room-staging.getdasha.workers.dev. Health and readiness pass;
+[Project Room](https://project-room-staging.getdasha.workers.dev).
+Current app `7084dd4`, Worker `91b0e98f-9967-43ea-b930-d188ed6514f6`;
+[latest release evidence](../docs/RELEASE-POLISH-2026-09-07.md).
+All three CI jobs passed; all ten live assets match the reviewed source.
+Health and readiness pass;
 two real HTTPS browsers completed owner login, invite creation, guest joining,
 mobile Send, desktop Enter and bidirectional live updates. The Node service remains
 the fallback. A new Worker and SQLite Durable Object were created; existing site

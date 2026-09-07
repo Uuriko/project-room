@@ -6,10 +6,90 @@ new service purchase, real Compute call or Dasha source change is included.
 
 ## Release state
 
-Local release gates pass. Source publication and hosted acceptance are the next
-gates; this section will record their exact outcomes, not infer them from local
-tests. Confirmed pre-release live Worker version:
-`5b052420-ec55-4fe3-8a35-7f0ac1347bcb`, serving app source `0e20615`.
+**Published; primary flow verified, repeat-return defect under repair** at
+[Project Room staging](https://project-room-staging.getdasha.workers.dev).
+App source: `7084dd4c6d4eaa379b70debcc2cce05b41e18a3b` on
+[PR #23](https://github.com/Uuriko/project-room/pull/23).
+Worker version: `91b0e98f-9967-43ea-b930-d188ed6514f6`, tag `7084dd4`,
+confirmed serving 100% after deployment at 22:27 UTC.
+[CI run 34166599955](https://github.com/Uuriko/project-room/actions/runs/34166599955)
+passed contract, browser and Cloudflare jobs before deployment.
+
+Command-line push had no available GitHub credential; the connected GitHub API
+published all 36 reviewed files instead. Published tree
+`94daf8c21d0a345111ac4a128941e2be3ae3ad8b` exactly matches the tested local tree.
+Local checkout now tracks that same published commit; its temporary local
+commit remains recoverable from the reflog. No force push or main merge.
+
+The pre-release version `5b052420-ec55-4fe3-8a35-7f0ac1347bcb` (app `0e20615`)
+remains the documented rollback target. Same Durable Object, data, origin and
+bindings; no bootstrap, DNS, marketing site or Dasha deployment was changed.
+
+## Hosted acceptance
+
+An additional post-release repeat-return smoke test exposed a connection
+lifecycle defect not covered by the original gates: the same guest's third
+rapid return eventually received 429 on the event stream, with the UI
+showing reconnecting/stale history despite a permanently closed native stream. A fresh later visit connected. An independent
+local Chromium reproduction retained closed connection slots and denied the
+fourth connection. Data and ordinary reads remained available. Do not treat
+the successful primary journey below as complete reconnect acceptance. The
+follow-up candidate below repairs the lifecycle and client retry; hosted
+verification of that candidate is still pending. No stream-cap removal or data
+reset is involved.
+
+- Existing saved test guest returned successfully both before and after this
+  deployment with the same identity and prior message.
+- All ten live public assets match the released checkout byte-for-byte. Health
+  and readiness return 200; signed-out Room read returns 401. Checked responses
+  retain `X-Robots-Tag: noindex, nofollow`.
+- Fresh HTTPS owner created a one-hour/single-join invitation; a touch-browser
+  guest joined, sent a message and received the desktop owner's Enter-sent
+  reply through live updates. The join fragment was removed.
+- Guest suggestion became source-linked work. The owner explicitly disabled
+  unavailable independent verification while retaining owner decision, accepted
+  and started the work. Guest saw progress but no unauthorized work controls.
+- The new guest returned with identity/message intact afterward. This is
+  browser return and deployment persistence evidence, not a provider restore.
+- Root inspected hosted desktop/mobile screenshots. The journey added one
+  labeled synthetic guest, two synthetic messages and one in-progress test work
+  item. Existing human messages and earlier test records were preserved. The
+  test work remains in progress; no human approval or completion was invented.
+
+Evidence remains in ignored `cloudflare/test-results/hosted-{desktop,mobile,return}.png`
+and `/tmp/room-release-hosted-assets.log`. Private browser state and owner key
+stay in ignored `.operator/`; no credentials or hosted screenshots were pushed.
+
+## Reconnect follow-up candidate
+
+The Node HTTP bridge did not emit `close` or `finish` when a Cloudflare browser
+left. The candidate passes the platform request signal through request-scoped
+AsyncLocalStorage and releases that stream's timer and admission slot explicitly.
+It enables both `enable_request_signal` and `request_signal_passthrough`; the
+three-stream credential and 100-stream global limits remain unchanged. No
+schema, Durable Object identity, bootstrap or authentication policy changes.
+
+Native EventSource retries CONNECTING but not CLOSED after an HTTP refusal.
+The client now replaces only an owned CLOSED stream with one delayed retry,
+exponential base delay of 1–30 seconds plus up to 25% jitter (maximum 37.5s).
+Only an actual open resets backoff or labels the room Connected. Disconnect,
+sign-out, account replacement and manual reconnect cancel or invalidate old
+work. The refresh rejection handler also checks ownership, preventing a late
+old-session failure from clearing a replacement session.
+
+Seven new service/client regressions cover lifecycle, limits, retry/backoff and
+session changes. The real Cloudflare browser test injects one local temporary
+429, observes 429 then 200, makes six immediate guest close/reopen visits without
+fixed sleeps, proves both participants still receive messages, then restarts the
+runtime and verifies return persistence. The explicit hosted `--return` check
+now checks six immediate returns with unchanged identity/history and Connected
+state, adding no guest, message or work records.
+
+Primary references: [Cloudflare request signals](https://developers.cloudflare.com/workers/runtime-apis/request/),
+[compatibility flags](https://developers.cloudflare.com/workers/configuration/compatibility-flags/),
+and [native EventSource behavior](https://html.spec.whatwg.org/multipage/server-sent-events.html#the-eventsource-interface).
+These describe the platform behavior; the actual defect and repair were verified
+with our own browser and service tests, not inferred solely from documentation.
 
 ## Review coverage and decisions
 
@@ -74,7 +154,7 @@ Node 24.19.0; installed Playwright Chromium; Wrangler 4.116.0 and Miniflare
 
 | Gate | Result |
 | --- | --- |
-| Syntax plus core/API | 214 passed, zero failed/skipped |
+| Syntax plus core/API | 221 passed, zero failed/skipped |
 | Full browser entrypoint | 56 passed, zero failed/skipped |
 | Local Cloudflare runtime/restart/browser | 6 passed, zero failed/skipped |
 | Wrangler dry-run | Success; same Worker/object/origin, ten allowlisted assets |
@@ -86,8 +166,9 @@ targeted Retry and desktop/touch rendering polish. The first focused run found
 a reaction-dispatch regression; it was corrected and the whole browser suite
 reran successfully. Failed intermediate runs are not counted as passes.
 
-Local logs: `/tmp/room-release-final-core.log`,
-`/tmp/room-release-final-browser.log`, `/tmp/room-release-final-cloudflare.log`.
+Reconnect follow-up logs: `/tmp/room-hotfix-final-core.log`,
+`/tmp/room-hotfix-final-ui.log`, `/tmp/room-hotfix-final-cloudflare.log`.
+The initial polish passed 214 core/API checks; the reconnect follow-up adds seven.
 The Mac lacks an npm executable on PATH; the exact browser script's arguments
 were run with the available Node binary. CI uses the normal npm entrypoints.
 
@@ -131,6 +212,13 @@ If hosted acceptance fails, stop further publication and use the recorded prior
 Worker version for code rollback after confirming compatibility. Cloudflare
 [rollback](https://developers.cloudflare.com/workers/versions-and-deployments/rollbacks/)
 does not restore Durable Object data. No schema changes are part of this pass.
+
+Grok's [PR #24](https://github.com/Uuriko/project-room/pull/24) supplies a separate
+offline hosted-denial conformance package against the old PR #23 tip. Its
+reported 17 offline passes are not live denial evidence and are not counted in
+this release. It was not merged or run here. Cancelled/expired/cap/removed-member
+negative journeys remain locally tested; expanding those hosted cases requires
+an explicit isolated fixture. Signed-out live denial is verified above.
 
 Remaining pilot gates: a separate provider recovery drill, budget alerts,
 final unlisted trydemigod.com routing/ownership, real-device/human testing and

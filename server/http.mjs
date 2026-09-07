@@ -38,6 +38,7 @@ const rateHash = value => createHash("sha256").update(String(value)).digest("hex
 
 export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = 1000, trustedLocalProxy = false,
   loadAsset = path => readFile(new URL(path, assetRoot)), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
+  resolveRequestSignal = () => null,
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot" }) {
   if (trustedLocalProxy && !origin?.startsWith("https://")) throw new Error("The deployment proxy requires a fixed HTTPS origin");
   if (origin) {
@@ -136,21 +137,29 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     const entry = { credentialHash: auth.credentialHash, sessionBinding: binding, res };
     streams.add(entry);
     let cursor = after;
+    let timer;
+    const signal = resolveRequestSignal(req);
+    const cleanup = () => { clearInterval(timer); streams.delete(entry); signal?.removeEventListener("abort", abort); };
+    const end = data => { cleanup(); if (!res.destroyed && !res.writableEnded) res.end(data); };
+    const abort = () => end();
     const pump = () => {
-      if (res.destroyed || res.writableEnded) return;
+      if (res.destroyed || res.writableEnded) { cleanup(); return; }
       try {
         const batch = store.eventsAfter(token, roomId, cursor, 100, binding);
-        if (!batch.events.length && !res.write(": connected transport only\n\n")) res.end();
+        if (!batch.events.length && !res.write(": connected transport only\n\n")) end();
         for (const item of batch.events) {
-          if (!res.write(`id: ${item.sequence}\nevent: room-event\ndata: ${JSON.stringify(item)}\n\n`)) { res.end(); break; }
+          if (!res.write(`id: ${item.sequence}\nevent: room-event\ndata: ${JSON.stringify(item)}\n\n`)) { end(); break; }
           cursor = item.sequence;
         }
-      } catch { res.end('event: access-ended\ndata: {"message":"Access ended; sign in again"}\n\n'); }
+      } catch { end('event: access-ended\ndata: {"message":"Access ended; sign in again"}\n\n'); }
     };
-    const timer = setInterval(pump, streamInterval);
+    timer = setInterval(pump, streamInterval);
     timer.unref();
-    res.on("close", () => { clearInterval(timer); streams.delete(entry); });
-    pump();
+    res.once("close", cleanup); res.once("finish", cleanup); res.once("error", abort);
+    // Workers' Node bridge does not emit close when a browser leaves. The
+    // request-scoped platform signal releases only this stream and its timer.
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort(); else pump();
   }
   const server = createServer(async (req, res) => {
     res.setHeader("Cache-Control", "no-store");

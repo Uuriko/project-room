@@ -167,6 +167,7 @@ export class RoomClient {
     this.sequence = 0;
     this.generation = 0;
     this.accountOwnership = null;
+    this.streamRetryDelay = 1000;
   }
   setAccountClient(accountClient) {
     if (this.accountClient === accountClient) return this;
@@ -348,31 +349,48 @@ export class RoomClient {
     return brief;
   }
   connect() {
+    clearTimeout(this.streamRetry); this.streamRetry = null;
     this.stream?.close();
     if (!this.events || !this.session) { this.onStatus("Manual refresh available; live updates unavailable"); return; }
     if (this.session.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); return; }
+    const generation = this.generation, session = this.session;
     const stream = new this.events(`${this.path("/stream")}?after=${this.sequence}${this.session.authMode === "account" ? `&auth=account&binding=${encodeURIComponent(this.session.sessionBinding)}` : ""}`);
     this.stream = stream;
+    const ownsStream = () => this.stream === stream && this.generation === generation && this.session === session;
+    const refreshStream = () => this.refresh().catch(error => { if (ownsStream()) this.handleFailure(error); });
     stream.addEventListener("open", () => {
-      if (this.stream !== stream) return;
+      if (!ownsStream()) return;
+      this.streamRetryDelay = 1000;
       this.onStatus("Connected to room service · no peer read or processing receipt");
-      this.refresh().catch(error => this.handleFailure(error));
+      refreshStream();
     });
     stream.addEventListener("room-event", () => {
-      if (this.stream === stream) this.refresh().catch(error => this.handleFailure(error));
+      if (ownsStream()) refreshStream();
     });
-    stream.addEventListener("access-ended", () => { if (this.stream === stream) this.endAccess(); });
+    stream.addEventListener("access-ended", () => { if (ownsStream()) this.endAccess(); });
     stream.addEventListener("error", () => {
-      if (this.stream !== stream) return;
+      if (!ownsStream()) return;
       this.onStatus("Reconnecting · displayed history may be stale");
-      this.refresh().catch(error => this.handleFailure(error));
+      refreshStream();
+      // Native retry handles CONNECTING, but HTTP refusals leave EventSource CLOSED.
+      // Replace only that stream, with backoff and the same session ownership.
+      if (ownsStream() && stream.readyState === 2 && !this.streamRetry) {
+        this.streamRetry = setTimeout(() => {
+          this.streamRetry = null;
+          if (ownsStream()) this.connect();
+        }, this.streamRetryDelay + Math.random() * this.streamRetryDelay / 4);
+        this.streamRetryDelay = Math.min(this.streamRetryDelay * 2, 30000);
+      }
     });
   }
   handleFailure(error) {
     if ([401, 403].includes(error.status) || (this.session?.authMode === "account" && error.code === "session_binding_changed")) this.endAccess();
     else this.onStatus("Connection interrupted · refresh to recover; no peer activity inferred");
   }
-  disconnect() { this.generation++; this.stream?.close(); this.stream = null; }
+  disconnect() {
+    this.generation++; clearTimeout(this.streamRetry); this.streamRetry = null; this.streamRetryDelay = 1000;
+    this.stream?.close(); this.stream = null;
+  }
   endAccess() { this.disconnect(); this.session = null; this.sequence = 0; this.accountOwnership = null; this.onAccessEnded(); }
 }
 

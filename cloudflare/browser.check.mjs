@@ -18,8 +18,9 @@ test('two real browsers use the shared UI on local Workers, including SSE and re
   const bundled = await build({ entryPoints: [fileURLToPath(new URL('./http-worker.test-fixture.mjs', import.meta.url))],
     bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
   const persistence = await mkdtemp(join(tmpdir(), 'project-room-cf-browser-'));
+  const release = JSON.parse(await readFile(new URL('./wrangler.jsonc', import.meta.url), 'utf8'));
   const config = { modules: true, script: bundled.outputFiles[0].text, host: '127.0.0.1', port, https: true,
-    compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'],
+    compatibilityDate: release.compatibility_date, compatibilityFlags: release.compatibility_flags,
     durableObjects: { ROOM: { className: 'HttpTestRoom', useSQLite: true } }, durableObjectsPersist: persistence,
     bindings: { ROOM_ORIGIN: origin }, serviceBindings: { ASSETS: async request => {
       const pathname = new URL(request.url).pathname;
@@ -38,7 +39,7 @@ test('two real browsers use the shared UI on local Workers, including SSE and re
     const bootstrap = await ownerContext.request.get(origin + '/__test-provision');
     assert.equal(bootstrap.status(), 200);
     const { ownerKey } = await bootstrap.json();
-    const owner = await ownerContext.newPage(), guest = await guestContext.newPage();
+    const owner = await ownerContext.newPage(); let guest = await guestContext.newPage();
     for (const page of [owner, guest]) page.setDefaultTimeout(12000);
     await owner.goto(origin);
     await owner.locator('#access-key').fill(ownerKey);
@@ -65,6 +66,31 @@ test('two real browsers use the shared UI on local Workers, including SSE and re
     await owner.screenshot({ path: join(output, 'cloudflare-desktop.png'), fullPage: true });
     await guest.screenshot({ path: join(output, 'cloudflare-mobile.png'), fullPage: true });
     const returnUrl = guest.url(); // Account-mode room selection lives in ?room=.
+    // A real browser close must release this credential's stream slot without
+    // disconnecting the owner. Previously the fourth visit received stream 429.
+    for (let visit = 0; visit < 6; visit++) {
+      await guest.close();
+      guest = await guestContext.newPage(); guest.setDefaultTimeout(12000);
+      const streamStatuses = [];
+      guest.on('response', response => {
+        if (new URL(response.url()).pathname.endsWith('/stream')) streamStatuses.push(response.status());
+      });
+      if (visit === 0) await guest.route('**/stream?*', route => route.fulfill({
+        status: 429, contentType: 'application/json', body: '{"error":{"code":"stream_limit","message":"Try again shortly"}}'
+      }), { times: 1 });
+      await guest.goto(returnUrl);
+      await guest.locator('#connection-status[data-state="connected"]').waitFor({ state: 'visible' }).catch(error => {
+        throw new Error(`Guest return ${visit + 1}: stream statuses ${streamStatuses.join(', ')}`, { cause: error });
+      });
+      if (visit === 0) assert.deepEqual(streamStatuses, [429, 200], 'a closed stream recovers automatically after a temporary refusal');
+      assert.equal(await owner.locator('#connection-status').textContent(), 'Connected');
+    }
+    await owner.locator('#message-input').fill('Still live after six guest returns');
+    await owner.locator('#message-input').press('Enter');
+    await guest.getByText('Still live after six guest returns', { exact: true }).waitFor();
+    await guest.locator('#message-input').fill('The original peer is still listening');
+    await guest.getByRole('button', { name: 'Send', exact: true }).click();
+    await owner.getByText('The original peer is still listening', { exact: true }).waitFor();
     // Close only pages, preserving browser session cookies across a real workerd restart.
     await owner.close(); await guest.close();
     await mf.dispose();
