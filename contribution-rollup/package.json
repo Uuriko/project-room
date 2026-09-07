@@ -6,7 +6,9 @@
   "description": "Phase 0.5 derived contribution read-model. Visible share weights only; no payout.",
   "exports": {
     ".": "./src/index.js",
-    "./fixtures": "./fixtures/index.js"
+    "./fixtures": "./fixtures/index.js",
+    "./return-brief": "./src/return-brief.js",
+    "./contributors-section": "./src/contributors-section.js"
   },
   "scripts": {
     "test": "node --test tests/*.test.js"
