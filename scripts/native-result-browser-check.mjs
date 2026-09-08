@@ -57,7 +57,12 @@ for (const mobile of [false, true]) test(`native result ${mobile ? "mobile" : "d
   await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
   await f.page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
   assert.equal(await f.page.locator("#result-dialog").evaluate(el => el.scrollWidth <= el.clientWidth), true);
+  await f.page.locator("#close-result").focus(); await f.page.keyboard.press("Tab");
+  assert.equal(await f.page.locator("#close-result").evaluate(el => el === document.activeElement), true);
+  f.mutate(T.WORK_BLOCKED, { reason: "Synthetic follow-up", nextAction: "Revisit later" });
+  await f.page.waitForFunction(id => document.querySelector(`[data-work-record-id='${id}']`).textContent.includes("Synthetic follow-up"), f.workItemId);
   await f.page.locator("#close-result").click(); assert.equal(await f.page.locator("#result-body").textContent(), "");
+  assert.equal(await f.page.locator(`[data-read-result='${f.workItemId}']`).evaluate(el => el === document.activeElement), true);
 });
 
 test("native result uncertain save resumes exact text and command", { timeout: 25000 }, async t => {

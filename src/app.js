@@ -873,7 +873,7 @@ async function submit(form, fn, { failureHint } = {}) {
 }
 $("#invitation-dismiss").addEventListener("click", () => closeInvitation());
 $("#invitation-retry").addEventListener("click", () => { if (invitation.phase === "preview-failed") previewCurrentInvitation(); });
-for (const id of ["invitation-dialog", "work-dialog", "action-dialog"]) $(`#${id}`).addEventListener("keydown", e => {
+for (const id of ["invitation-dialog", "work-dialog", "action-dialog", "result-dialog"]) $(`#${id}`).addEventListener("keydown", e => {
   if (e.key !== "Tab") return;
   const controls = [...e.currentTarget.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, a[href], [tabindex]:not([tabindex='-1'])")]
     .filter(element => element.getClientRects().length > 0);
@@ -1349,8 +1349,12 @@ const actionSpecs = {
 };
 let resultView = null;
 function closeResult() {
+  const view = resultView;
   resultView = null; $("#result-dialog").close(); $("#result-title").textContent = "Result";
   $("#result-status").textContent = ""; $("#result-body").textContent = "";
+  if (view && sameSession(view.generation, view.roomId, view.memberId)) {
+    const card = workRecord(view.workItemId); focusRecord(card?.querySelector("[data-read-result]") || card);
+  }
 }
 $("#close-result").addEventListener("click", closeResult);
 $("#result-dialog").addEventListener("cancel", event => { event.preventDefault(); closeResult(); });
@@ -1359,7 +1363,7 @@ $("#work-list").addEventListener("click", e => {
   if (read && state && !busy) {
     const item = state.workItems[read.dataset.readResult], receipt = item?.receipt;
     if (!receipt?.nativeText) return;
-    const view = { generation: client.generation, roomId: session.roomId, memberId: session.member.id }; resultView = view;
+    const view = { generation: client.generation, roomId: session.roomId, memberId: session.member.id, workItemId: item.id }; resultView = view;
     $("#result-title").textContent = item.title; $("#result-status").textContent = "Loading exact text…"; $("#result-body").textContent = "";
     $("#result-dialog").showModal();
     const owns = () => resultView === view && sameSession(view.generation, view.roomId, view.memberId);
