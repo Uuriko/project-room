@@ -20,7 +20,7 @@ function code(kind, name) {
 }
 const prepareCommand = new Function(`${code("code", "prepare")}\nreturn prepareCommand;`)();
 const readAssignment = new (Object.getPrototypeOf(async function () {}).constructor)("client", "workId",
-  `${code("read", "assignment")}\nreturn { orientation, addressedToMe, work, current, source };`);
+  `${code("read", "assignment")}\nreturn { context, work, source };`);
 const version = text => `sha256:${createHash("sha256").update(text).digest("hex")}`;
 
 async function fixture(t) {
@@ -56,7 +56,10 @@ async function fixture(t) {
   const origin = `http://127.0.0.1:${server.address().port}`;
   const client = token => new RoomAgentClient({ origin, roomId: "commons", token });
   const owner = client(ownerToken), worker = client(store.issueAccessKey("commons", "worker")), reviewer = client(store.issueAccessKey("commons", "reviewer"));
-  const current = async actor => (await actor.orient()).work.find(item => item.id === "guide-work");
+  const current = async actor => {
+    const context = await actor.workContext("guide-work");
+    return { ...context.work, next: context.next };
+  };
   const prepared = async (actor, name, fields = {}) => {
     assert.ok(examples.has(name), `No command example ${name}`);
     return prepareCommand(examples.get(name), await current(actor), fields);
@@ -84,7 +87,7 @@ test("guide shapes stay explicit and complete", () => {
     assert.ok(Number.isSafeInteger(example.data.expectedRevision), name);
   }
   assert.match(guide, /Node 24\.19\+/);
-  assert.match(guide, /snapshot\.state\.messages\.find/);
+  assert.match(guide, /client\.workContext\(workId, \{ includeSource: true \}\)/);
   assert.match(guide, /service validates HTTPS URL syntax, not reachability/);
   assert.match(guide, /Do not call `prepareCommand` again/);
   assert.match(guide, /16,384 UTF-8 bytes/);
@@ -93,12 +96,13 @@ test("guide shapes stay explicit and complete", () => {
 test("documented reads and writes: real client/store, synthetic pass leaves human decision pending", async t => {
   const f = await fixture(t);
   const read = await readAssignment(f.worker, "guide-work");
-  assert.equal(read.orientation.member.id, "worker");
-  assert.equal(read.orientation.scope.externalExecution, false);
-  assert.equal(read.work.next.action, "accept");
+  assert.equal(read.context.viewer.id, "worker");
+  assert.equal(read.context.scope.externalExecution, false);
+  assert.equal(read.context.next.action, "accept");
   assert.equal(read.source.id, "guide-source");
   assert.match(read.source.body, /Synthetic task/);
-  assert.equal(read.current.mode, "read");
+  assert.equal(read.work.mode, "read");
+  await assert.rejects(readAssignment(f.reviewer, "guide-work"), /No current handoff/);
 
   const pending = await f.prepared(f.worker, "accept");
   const retained = structuredClone(pending);

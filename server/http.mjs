@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { ServiceError } from "./store.mjs";
 import { clientAddress } from "./deployment.mjs";
+import { validId } from "../src/events.js";
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -14,6 +15,12 @@ const assets = new Map([
   ["/src/styles.css", ["src/styles.css", "text/css"]]
 ]);
 const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
+const pathId = encoded => {
+  let id;
+  try { id = decodeURIComponent(encoded); } catch { reject(404, "not_found", "Not found"); }
+  if (!validId(id)) reject(404, "not_found", "Not found");
+  return id;
+};
 const accountView = auth => ({
   authenticated: Boolean(auth.account),
   account: auth.account ? { id: auth.account.id, revision: auth.account.revision, authEpoch: auth.account.authEpoch } : null,
@@ -297,10 +304,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         reject(405, "method_not_allowed", "Method not allowed");
       }
-      const revokeMatch = /^\/api\/rooms\/([a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127})\/invitations\/([a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127})\/revoke$/.exec(url.pathname);
-      const match = /^\/api\/rooms\/([a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127})(?:\/(commands|events|stream|cursor|return-brief|invitations|share-links|share-links-cancel|reminders))?$/.exec(url.pathname);
+      const revokeMatch = /^\/api\/rooms\/([^/]{1,384})\/invitations\/([^/]{1,384})\/revoke$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|invitations|share-links|share-links-cancel|reminders))?$/.exec(url.pathname);
       if (!match && !revokeMatch) reject(404, "not_found", "Not found");
-      const roomId = (match ?? revokeMatch)[1];
+      const roomId = pathId((match ?? revokeMatch)[1]);
+      const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
       const route = match ? (match[2] ?? "") : "invitation-revoke";
       const selected = roomCredentials(req, url);
       const fence = selected.mode === "account" ? accountBinding(req, route === "stream" ? url : null) : expectedBinding(req);
@@ -311,6 +319,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       rate(`read:${auth.credentialHash}`, 600);
       if (!["GET", "HEAD"].includes(req.method)) { protectWrite(req, auth, selected.bearer); rate(`write:${auth.credentialHash}`, 60); }
       if (!route && req.method === "GET") return json(res, 200, store.snapshot(selected.token, roomId, fence));
+      if (route === "work-context" && req.method === "GET") {
+        const params = url.searchParams;
+        if ([...params.keys()].some(key => !["workItemId", "includeSource", "auth"].includes(key) || params.getAll(key).length !== 1)
+          || (params.has("includeSource") && !["true", "false"].includes(params.get("includeSource")))) {
+          reject(422, "invalid_work_context", "Choose one work ID and an optional source inclusion flag");
+        }
+        return json(res, 200, store.workContext(selected.token, roomId, params.get("workItemId"), {
+          includeSource: params.get("includeSource") === "true", expectedSessionBinding: fence
+        }));
+      }
       if (route === "reminders" && req.method === "GET") return json(res, 200, store.reminders.list(selected.token, roomId, fence));
       if (route === "reminders" && req.method === "POST") {
         const result = store.reminders.mutate(selected.token, roomId, await body(req), fence);
@@ -355,7 +373,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (selected.mode !== "account" || selected.bearer) reject(403, "account_session_required", "Invitation administration requires an account browser session");
         const data = await body(req);
         if (!exact(data, ["expectedRevision", "reason"])) reject(422, "invalid_invitation_change", "Invitation revision and reason required");
-        return json(res, 200, store.revokeInvitation(selected.token, revokeMatch[2], { expectedRevision: data.expectedRevision, reason: data.reason, expectedSessionBinding: auth.sessionBinding, expectedRoomId: roomId }));
+        return json(res, 200, store.revokeInvitation(selected.token, invitationId, { expectedRevision: data.expectedRevision, reason: data.reason, expectedSessionBinding: auth.sessionBinding, expectedRoomId: roomId }));
       }
       reject(405, "method_not_allowed", "Method not allowed");
     } catch (error) {

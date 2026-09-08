@@ -289,11 +289,23 @@ cleanup and clipboard/cancellation recovery. 355 core/API, 76 browser and 7 loca
 Cloudflare checks pass, with eight masked screenshots inspected. Growth remains
 a hypothesis, not a measured lift. No publication or schema change in this slice.
 
-Next: inspect and research agent task-context ergonomics. Reuse existing orient,
-snapshot, brief, write guide and portable packet; identify the smallest missing
-selected-task context/next-action handoff before adding interfaces. Write its
-detailed plan, implement and test with fresh agents while preserving human
-approval and explicit external authority. Then continue reusable outcomes and
-v8-compatible release recovery. Do not restart completed watcher/return/invitation
-work or mistake a milestone for this goal's completion. Keep advanced controls
-contextual and voluntary growth value-bearing.
+The [selected-task context checkpoint](WORK-CONTEXT-CHECKPOINT-2026-09-07.md) now
+provides one authenticated read with current roles, claim, blocker, exact evidence,
+next actor and explicit source inclusion. It reuses existing workflow/authority
+and leaves portable export narrower. The client, CLI and executable write guide
+use it; an older encoded Room-ID round-trip issue is fixed. 361 core/API,
+76 browser and seven local Cloudflare checks pass. Two fresh actual agents
+corrected and independently reviewed a proposed document from selected context,
+with exact artifact evidence, released scope and no manufactured human approval.
+The measured response reduction applies to one fixture, not retention or general
+performance. No schema, dependency, live service or publication change here.
+
+Next: inspect, research and plan a v8-compatible release/fallback/recovery package.
+The accumulating useful local slices need a proven disposable recovery path;
+old v7 code is not a rollback for migrated v8 data. Prepare and test locally without
+provider administration, live migration or deployment. Then investigate one
+reusable-outcome/template loop with exact preview and deliberate inclusion, no
+copied credentials/permissions or automatic public posting. Do not restart
+completed watcher/return/invitation/task-context work or mistake a milestone for
+this goal's completion. Keep advanced controls contextual and voluntary growth
+value-bearing. Continue while meaningful authorized work remains.

@@ -54,7 +54,27 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     const guestHeaders = { Cookie: slotCookie, 'X-CSRF-Token': joined.session.csrf,
       'X-Session-Binding': joined.session.sessionBinding, 'X-Project-Room-Auth': 'account' };
     const command = { id: randomUUID(), type: 'message.posted', data: { body: 'Shared HTTP on Cloudflare' } };
-    await json(await call('/api/rooms/commons/commands', { headers: guestHeaders, data: command }), 201);
+    const posted = await json(await call('/api/rooms/commons/commands', { headers: guestHeaders, data: command }), 201);
+    await json(await call('/api/rooms/commons/commands', { headers: ownerHeaders, data: {
+      id: randomUUID(), type: 'work.proposed', data: { workItemId: 'selected:task', title: 'Selected task', definitionOfDone: 'Inspect the linked request',
+        accountableMemberId: 'owner', sourceMessageId: posted.event.data.messageId ?? posted.event.id, mode: 'read' }
+    } }), 201);
+    const beforeRead = await json(await call('/api/rooms/commons', { headers: guestHeaders }));
+    const contextResponse = await call('/api/rooms/commons/work-context?workItemId=selected%3Atask&includeSource=true', { headers: guestHeaders });
+    assert.equal(contextResponse.headers.get('cache-control'), 'no-store');
+    const context = await json(contextResponse);
+    assert.equal(context.work.id, 'selected:task');
+    assert.equal(context.viewer.id, joined.session.member.id);
+    assert.equal(context.viewerSessionBinding, joined.session.sessionBinding);
+    assert.equal(context.context.source.message.body, command.data.body);
+    assert.equal(context.next.addressedToViewer, false);
+    assert.deepEqual(context.suggestedActions, []);
+    const noSource = await json(await call('/api/rooms/commons/work-context?workItemId=selected%3Atask', { headers: { Authorization: `Bearer ${ownerKey}` } }));
+    assert.equal(noSource.context.source.status, 'not_requested');
+    assert.equal(noSource.context.source.message, null);
+    assert.equal(noSource.next.action, 'accept');
+    assert.equal((await call('/api/rooms/commons/work-context?workItemId=selected%3Atask', { headers: { ...guestHeaders, 'X-Session-Binding': 'f'.repeat(64) } })).status, 409);
+    assert.deepEqual(await json(await call('/api/rooms/commons', { headers: guestHeaders })), beforeRead);
     const denied = await call('/api/rooms/commons/commands', { headers: { ...guestHeaders, 'X-CSRF-Token': '' }, data: { ...command, id: randomUUID() } });
     assert.equal(denied.status, 403);
     assert.equal((await call('/api/rooms/commons')).status, 401);

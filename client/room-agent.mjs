@@ -39,6 +39,25 @@ export class RoomAgentClient {
     return value;
   }
   snapshot({ signal } = {}) { return this.#request("", undefined, signal); }
+  async workContext(workItemId, options = {}) {
+    if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => !["includeSource", "signal"].includes(key))) throw new Error("Use includeSource and signal options only");
+    const { includeSource = false, signal } = options;
+    if (!validId(workItemId) || typeof includeSource !== "boolean") throw new Error("Choose one work ID and a boolean includeSource option");
+    const query = new URLSearchParams({ workItemId });
+    if (includeSource) query.set("includeSource", "true");
+    const result = await this.#request(`/work-context?${query}`, undefined, signal);
+    const source = result?.context?.source;
+    if (result?.contractVersion !== 1 || result.roomId !== this.#roomId || result.work?.id !== workItemId
+      || result.next?.workItemId !== workItemId || result.next?.workRevision !== result.work?.revision
+      || !validId(result.viewer?.id) || result.viewerId !== result.viewer.id || !Number.isSafeInteger(result.evaluatedThrough) || result.evaluatedThrough < 0
+      || !Number.isSafeInteger(result.work.revision) || result.work.revision < 0 || !Number.isFinite(Date.parse(result.evaluatedAt))
+      || (!includeSource && (source?.status !== "not_requested" || source.message !== null))
+      || (includeSource && (!source || (result.work.sourceMessageId ? !["included", "unavailable"].includes(source.status) : source.status !== "not_linked")
+        || (source.status === "included" ? source.message?.id !== result.work.sourceMessageId || typeof source.message?.body !== "string" : source.message !== null)))) {
+      throw new RoomClientError(200, "invalid_response", "Selected work context does not match the request");
+    }
+    return result;
+  }
   // Personal to this credential's member, never included in shared orientation.
   reminders(request) { return this.#request("/reminders", request); }
   // Selected task only; the normal authenticated snapshot never leaves this client.
