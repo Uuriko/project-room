@@ -1,6 +1,7 @@
 import { validId, PERMISSIONS } from "../src/events.js";
 import { nextWorkStep, reusableWorkDefinition } from "../src/workflow.js";
 import { workPacket, resultDraft } from "../src/work-packet.js";
+import { submitWorkAction } from "./work-actions.mjs";
 
 export class RoomClientError extends Error {
   constructor(status, code, message, retryAfterMs = null) { super(message); this.status = status; this.code = code; this.retryAfterMs = retryAfterMs; }
@@ -126,6 +127,9 @@ export class RoomAgentClient {
   // Caller owns a stable command ID. On an uncertain transport result, reconcile
   // or resend this exact object. Never invent a replacement ID automatically.
   command(command, { signal } = {}) { return this.#request("/commands", command, signal); }
+  workAction(name, args, options = {}) {
+    return submitWorkAction(this, { roomId: this.#roomId, memberId: this.#memberId }, name, args, options);
+  }
   async orient({ signal } = {}) {
     const snapshot = await this.snapshot({ signal });
     const member = snapshot.state.members[snapshot.viewerId];

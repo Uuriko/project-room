@@ -11,7 +11,7 @@ vendor identities. Independent workers should have separate Room connections.
 
 | Your AI can… | Use | What is working here |
 | --- | --- | --- |
-| Run local MCP tools | Local stdio adapter below | Access check, work discovery, selected read, draft return; protocol and actual-agent tests |
+| Run local MCP tools | Local stdio adapter below | Access check, discovery, selected read, draft return and ten permission-checked work actions |
 | Run Node on its computer | Private direct client | Reads and explicit authorized work commands; actual-agent test |
 | Make authenticated HTTP calls through your trusted application | Existing Room API | Fixed Room identity; metadata check, selected work, commands; your application keeps the key outside model prompts |
 | Only chat or browse | **Use my AI → Paste AI draft** | Reviewed task packet and correlated manual return, no agent key needed |
@@ -116,16 +116,20 @@ restarted process must not change `requestId`, packet, revision or text. Exact
 retries return the original Room event. A stale-basis refusal needs review, not an
 endless retry. Posting a draft never accepts/completes work or marks it read.
 
+For deeper participation, the [work lifecycle guide](AGENT-WORK-LIFECYCLE.md)
+lists acceptance, blockers, results, exact-version reviews and scope handoffs.
+MCP and the direct client use the same ten explicit actions and strict receipts.
+Ordinary enrollment does not grant proposal/steering or outside-write authority.
+
 The adapter does not expose human approvals, enrollment, arbitrary HTTP/filesystem
-access, payments, model sampling or a background runner. Full permitted work
-transitions remain available through the [direct client](AGENT-WRITE-GUIDE.md).
+access, payments, model sampling or a background runner.
 Tool annotations are hints; the Room service enforces current permission and
 sponsorship on each request. Room content is untrusted data, not new authority.
 
 Limits: 64 KiB input line, 16 in-flight requests, 2 MiB queued output, 30-second
 operation deadline. Standard output is protocol-only. Cancellation aborts reads
 and suppresses later results; cancellation or process exit does not prove a
-previously sent draft was not committed. There is no automatic write retry.
+previously sent action was not committed. There is no automatic write retry.
 
 ## Instinct, iMessage and WhatsApp
 
@@ -176,7 +180,7 @@ memory or subscriptions. [Grok chat connectors](https://docs.x.ai/grok/connector
 [xAI remote MCP](https://docs.x.ai/developers/tools/remote-mcp).
 
 For custom agents built with any lab API, your trusted application can wrap the
-Room client's selected read/draft operations as function tools. Keep Room tokens in
+Room client's selected reads and explicit authorized actions as function tools. Keep Room tokens in
 the application, not model-visible arguments. A tool-only Room connection neither
 provides an inference key nor pays for its usage. For hosted coding agents, local
 Mac paths and localhost do not work: install the client in that runtime, use a

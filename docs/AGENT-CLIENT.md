@@ -49,6 +49,7 @@ the client itself does not retry reads or writes automatically.
 | `changes(after, limit)` | Durable event page, next cursor, and has-more flag. Page limit 1–100. Advance a processing checkpoint only after your application handles the page. |
 | `returnBrief(options)` | Frozen-horizon change history and live work needing attention. Pass the returned continuation tuple unchanged for subsequent pages. Fetching does not mark anything read. |
 | `command(command)` | Explicit write through the existing service command boundary; success includes persisted event/sequence and duplicate status. The client does not grant additional capabilities. |
+| `workAction(name, args, { signal })` | Ten named lifecycle actions shared with MCP, using a pinned `memberId`, strict inputs and exact receipt matching. Returns the original operation receipt, not current ownership. Explicitly read current work afterward. No automatic retry, rebase, claim renewal or permission expansion. [Action guide](AGENT-WORK-LIFECYCLE.md). |
 
 Read shapes: `orient().work` and `snapshot().state.messages` are arrays; `snapshot().state.workItems` and `.members` are ID-keyed objects. Resolve a source with `snapshot.state.messages.find(message => message.id === work.sourceMessageId)`, not object indexing. `next.memberId` identifies the member currently addressed; it is not necessarily the producer or reporter.
 

@@ -4,6 +4,7 @@ import { PassThrough } from "node:stream";
 import { setImmediate as tick } from "node:timers/promises";
 import { serveRoomMcp, MCP_VERSION } from "../client/mcp-stdio.mjs";
 import { RoomClientError } from "../client/room-agent.mjs";
+import { createHash } from "node:crypto";
 
 function harness(t, client = {}, options = {}) {
   const input = new PassThrough(), output = new PassThrough(), replies = [], pending = new Map();
@@ -30,7 +31,7 @@ test("stdio version negotiation, discovery fallback, tools and notification sile
   assert.equal((await h.rpc("tools/list")).error.code, -32000);
   await h.ready();
   const tools = (await h.rpc("tools/list")).result.tools;
-  assert.equal(tools.length, 4); assert.ok(tools.every(tool => tool.inputSchema.additionalProperties === false));
+  assert.equal(tools.length, 14); assert.ok(tools.every(tool => tool.inputSchema.additionalProperties === false));
   assert.equal((await h.rpc("tools/call", { name: "room_check_access", arguments: {} }, "typed-id")).result.structuredContent.status, "credential_accepted");
   const count = h.replies.length; h.send({ method: "unknown-notification" }); await tick(); assert.equal(h.replies.length, count);
   assert.equal((await h.rpc("tools/call", { name: "room_read_work", arguments: { workItemId: "work", token: "not-allowed" } })).error.code, -32602);
@@ -81,4 +82,34 @@ test("oversized input and ambiguous in-flight IDs close the bounded transport", 
   const duplicate = harness(t, { checkConnection: () => new Promise(() => {}) }); await duplicate.ready();
   const message = { id: "same", method: "tools/call", params: { name: "room_check_access" } };
   duplicate.send(message); duplicate.send(message); await duplicate.server.done;
+});
+
+test("schema-valid oversized work input is a local refusal, not an unknown save", async t => {
+  let calls = 0; const h = harness(t, { command: async () => { calls++; } }); await h.ready();
+  const result = (await h.rpc("tools/call", { name: "room_record_completion", arguments: {
+    requestId: "large", workItemId: "work", expectedRevision: 2, summary: "☀".repeat(4096), evidenceUrl: "https://example.invalid/artifact",
+    evidenceVersion: "v1", nextAction: "Review", checksClaimed: Array(20).fill("a".repeat(512))
+  } })).result;
+  assert.equal(calls, 0); assert.equal(result.isError, true);
+  assert.equal(result.structuredContent.code, "work_action_too_large"); assert.equal(result.structuredContent.outcome, "this_attempt_not_sent");
+});
+
+test("cancelled lifecycle output cannot imply rollback; exact retry retains the committed operation", async t => {
+  const args = { requestId: "accept", workItemId: "work", expectedRevision: 0 };
+  let started, release, saved;
+  const entered = new Promise(resolve => { started = resolve; }), delayed = new Promise(resolve => { release = resolve; });
+  const client = { command: async command => {
+    if (saved) return { ...saved, duplicate: true };
+    saved = { sequence: 5, duplicate: false, event: { id: "accepted-event", type: command.type, data: command.data,
+      roomId: "commons", actorId: "agent", at: new Date().toISOString(), causationId: null,
+      idempotencyKey: createHash("sha256").update(`agent:${command.id}`).digest("hex") } };
+    started(); await delayed; return saved;
+  } };
+  const h = harness(t, client); await h.ready(); const count = h.replies.length;
+  h.send({ id: "cancel-work", method: "tools/call", params: { name: "room_accept_work", arguments: args } });
+  await entered; h.send({ method: "notifications/cancelled", params: { requestId: "cancel-work" } }); release(); await tick(); await tick();
+  assert.equal(h.replies.length, count); assert.ok(saved);
+  const next = harness(t, client); await next.ready();
+  const retried = (await next.rpc("tools/call", { name: "room_accept_work", arguments: args })).result.structuredContent;
+  assert.equal(retried.status, "recorded"); assert.equal(retried.duplicate, true); assert.equal(retried.eventId, saved.event.id);
 });

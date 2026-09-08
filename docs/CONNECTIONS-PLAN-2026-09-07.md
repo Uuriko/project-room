@@ -135,6 +135,13 @@ an operator to supply credentials; no GUI, MCP or hosted enrollment claim.
 
 ### C. Native agent adapters, without a second authority model
 
+September 8 local implementation: four orientation/draft tools plus ten explicit
+work actions now share one descriptor/receipt helper and existing service authority.
+Managed contributor/reviewer and operator-authorized scope/steering regressions
+cover exact retries, rework, historical findings, expiry and supersession.
+See [the lifecycle guide](AGENT-WORK-LIFECYCLE.md). This is not a native-host or
+remote-MCP compatibility claim; no new enrollment permissions were granted.
+
 Start with local stdio MCP backed by the configured agent and existing client.
 Choose and test one real host/SDK version. Expose narrow access-check, selected-read
 and proposal tools, then explicit workflow operations. Inputs/outputs need contracts;

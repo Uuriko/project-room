@@ -20,7 +20,7 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   const destination = join(directory, "runtime");
   const receipt = createRuntimePackage({ repository, commit, destination });
   assert.equal(receipt.schemaVersion, 9); assert.deepEqual(publicAssets, assetPaths);
-  assert.equal(receipt.files, 47 + ["server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "src/agent-connections.js", "client/mcp-stdio.mjs", "scripts/agent-mcp.mjs"].filter(path => existsSync(join(destination, path))).length);
+  assert.equal(receipt.files, 47 + ["server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "src/agent-connections.js", "client/mcp-stdio.mjs", "scripts/agent-mcp.mjs", "client/work-actions.mjs"].filter(path => existsSync(join(destination, path))).length);
   assert.equal(existsSync(join(destination, ".git")), false);
   assert.equal(existsSync(join(destination, "node_modules")), false);
   for (const path of ["server.mjs", "src/app.js", "cloudflare/room.mjs"]) {
@@ -32,6 +32,19 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   cpSync(fileURLToPath(new URL("../scripts/runtime-package.mjs", import.meta.url)), verifier);
   const verified = spawnSync(process.execPath, [verifier, "verify", destination, commit], { cwd: directory, env: { PATH: "/unavailable" }, encoding: "utf8" });
   assert.equal(verified.status, 0, verified.stderr); assert.deepEqual(JSON.parse(verified.stdout), receipt);
+  // Cold import from the exact package, with neither checkout dependencies nor a
+  // working PATH. This module is absent from genuine historical packages.
+  if (existsSync(join(destination, "client/work-actions.mjs"))) {
+    const program = `import { roomTools } from ${JSON.stringify(pathToFileURL(join(destination, "client/mcp-stdio.mjs")).href)};
+      import { buildWorkCommand } from ${JSON.stringify(pathToFileURL(join(destination, "client/work-actions.mjs")).href)};
+      import { RoomAgentClient } from ${JSON.stringify(pathToFileURL(join(destination, "client/room-agent.mjs")).href)};
+      console.log(JSON.stringify({ tools: roomTools.length, helper: typeof RoomAgentClient.prototype.workAction,
+        command: buildWorkCommand("room_accept_work", { requestId: "cold-package", workItemId: "work", expectedRevision: 0 }) }));`;
+    const cold = spawnSync(process.execPath, ["--input-type=module", "-e", program], { cwd: directory, env: { PATH: "/unavailable" }, encoding: "utf8" });
+    assert.equal(cold.status, 0, cold.stderr);
+    assert.deepEqual(JSON.parse(cold.stdout), { tools: 14, helper: "function",
+      command: { id: "cold-package", type: "work.accepted", data: { workItemId: "work", expectedRevision: 0 } } });
+  }
   assert.throws(() => verifyRuntimePackage(destination, { expectedCommit: "0".repeat(40) }));
   const { buildAssets } = await import(pathToFileURL(join(destination, "cloudflare/build-assets.mjs")));
   const assets = join(directory, "assets");

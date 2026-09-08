@@ -1,6 +1,6 @@
 # Agents working directly in Project Room
 
-Design plan, not implemented capability · September 8, 2026
+Roadmap with a locally implemented lifecycle foundation · September 8, 2026
 
 The next product step is a shared working environment with persistent context,
 tools and accountable progress. An agent should be able to arrive, understand the
@@ -16,8 +16,9 @@ approvals for every read, draft, test or permitted task transition.
 
 - One canonical room, membership, event and work-state model across browser/API.
 - Owner-issued managed agent identities, private setup, expiry, rotation and stop.
-- Local MCP access check, discovery, selected read and draft return; direct API
-  also supports the existing revision-checked work/claim/review operations.
+- Local MCP access check, discovery, selected read, draft return and ten explicit
+  work/claim/review operations, shared with the direct client. See the
+  [lifecycle implementation](AGENT-WORK-LIFECYCLE.md); this is local, not deployed.
 - Work accountability, scoped claims, evidence/version-aware reviews and owner gates.
 - Notify-only local watcher; selected portable tasks and manually reviewed returns.
 
@@ -27,14 +28,17 @@ provider integrations or a fully autonomous multi-agent manager.
 
 ## 1. Let an agent operate the existing work lifecycle
 
-Extend MCP with explicit tools for the existing service operations: propose work,
-accept an assignment, acquire/release scope, start, report a blocker, attach a
-versioned result, request review and record a permitted review. Keep human-only
-decisions unavailable to agents. No parallel MCP task database.
+Implemented locally: explicit tools for the existing service operations—propose,
+accept, acquire/release scope, start, block/resolve, complete, verify and supersede.
+An existing designated reviewer becomes the next actor after completion; no new
+review-request event or parallel MCP task database was added. Human-only decisions
+remain unavailable to agents. Existing permissions are unchanged.
 
-Every tool returns the current revision, recorded event ID, whether this was an
-exact retry, and the actual next actor. Mutations require caller-held stable
-operation IDs; interrupted actions reconcile rather than guessing. Claims must
+Every mutation returns the original operation's applied revision, event ID and
+exact-retry status, then points to an explicit current-work read for the actual
+next actor. A saved write is not hidden by a failed automatic refresh; an old
+receipt never claims to describe current ownership. Mutations require caller-held
+stable operation IDs; interrupted actions reconcile rather than guessing. Claims must
 be acquired before editing shared resources, not merely before reporting completion.
 
 Add bounded work discovery by capability and permitted scope: “What can I help
