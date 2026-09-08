@@ -1,4 +1,26 @@
-import { WORK_STATES as S, receiptHasKnownProducer, matchesReceipt, hasConfirmedIndependentPass } from "./events.js";
+import { EVENT_TYPES as T, WORK_STATES as S, validId, receiptHasKnownProducer, matchesReceipt, hasConfirmedIndependentPass } from "./events.js";
+
+// Reuse content, never a prior assignment, permission, result or source relationship.
+export function reusableWorkDefinition(work) {
+  if (!work || typeof work !== "object" || Array.isArray(work)) throw new Error("Choose an existing work definition");
+  const definition = {};
+  for (const key of ["title", "definitionOfDone"]) {
+    if (!Object.hasOwn(work, key) || typeof work[key] !== "string" || !work[key].trim() || work[key].length > 4096) throw new Error(`Invalid work ${key}`);
+    definition[key] = work[key];
+  }
+  return definition;
+}
+
+// A parsed 2xx alone is not proof that this exact proposal was recorded.
+export function confirmsWorkProposal(receipt, command, roomId, memberId) {
+  const entry = receipt?.event, data = entry?.data;
+  return Number.isSafeInteger(receipt?.sequence) && receipt.sequence > 0
+    && typeof receipt.duplicate === "boolean" && validId(entry?.id)
+    && entry.type === T.WORK_PROPOSED && command?.type === T.WORK_PROPOSED
+    && entry.roomId === roomId && entry.actorId === memberId
+    && data && Object.keys(data).length === Object.keys(command.data).length
+    && Object.keys(command.data).every(key => Object.hasOwn(data, key) && data[key] === command.data[key]);
+}
 
 export { matchesReceipt };
 export const producerKnown = item => receiptHasKnownProducer(item.receipt);

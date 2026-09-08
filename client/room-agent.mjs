@@ -1,5 +1,5 @@
 import { validId } from "../src/events.js";
-import { nextWorkStep } from "../src/workflow.js";
+import { nextWorkStep, reusableWorkDefinition } from "../src/workflow.js";
 import { workPacket } from "../src/work-packet.js";
 
 export class RoomClientError extends Error {
@@ -39,6 +39,10 @@ export class RoomAgentClient {
     return value;
   }
   snapshot({ signal } = {}) { return this.#request("", undefined, signal); }
+  async workDefinition(workItemId, options = {}) {
+    if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => key !== "signal")) throw new Error("Use the signal option only");
+    return reusableWorkDefinition((await this.workContext(workItemId, { signal: options.signal })).work);
+  }
   async workContext(workItemId, options = {}) {
     if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => !["includeSource", "signal"].includes(key))) throw new Error("Use includeSource and signal options only");
     const { includeSource = false, signal } = options;

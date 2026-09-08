@@ -3,7 +3,7 @@ import { AccountClient, RoomClient, draftCommand } from "./client.js";
 import { ReturnBrief } from "./return-brief.js";
 import { needsAttention, workInvolvingMe } from "./work-selectors.js";
 import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter } from "./conversation.js";
-import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, producerKnown as hasReportedProducer } from "./workflow.js";
+import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, reusableWorkDefinition, confirmsWorkProposal, producerKnown as hasReportedProducer } from "./workflow.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation } from "./share-links.js";
 import { installReminders } from "./reminders.js";
 import { installPortableWork } from "./portable-work.js";
@@ -31,6 +31,7 @@ let portableWorkUI = null;
 let remindersUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
 let workDraftId = null, replyToId = null, busy = false;
+let workFormEpoch = 0, workRetryLocked = false;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
 const viewPositions = new Map(), pendingReactions = new Map(), locallyOwnedMessageIds = new Set();
 let newVisibleMessages = 0;
@@ -108,7 +109,8 @@ const client = new RoomClient({
     shareLinksUI?.resetManagement();
     portableWorkUI?.reset();
     remindersUI?.reset();
-    workDraftId = null; replyToId = null;
+    workDraftId = null; replyToId = null; workFormEpoch++; setWorkRetry(false);
+    $("#work-reuse-hint").hidden = true;
     currentThreadId = null; conversation = null; drafts = new ConversationDrafts();
     renderComposerError();
     viewPositions.clear(); pendingReactions.clear(); locallyOwnedMessageIds.clear(); newVisibleMessages = 0; briefView.reset();
@@ -492,13 +494,18 @@ function selectOptions(selector, members, blank) {
 }
 function syncWorkForm() {
   if (!state || busy) return;
+  setWorkRetry(workRetryLocked);
+  if (workRetryLocked) {
+    if ($("#work-dialog").open && [document.body, $("#new-work-form button[type='submit']")].includes(document.activeElement)) $("#retry-work-button").focus();
+    return;
+  }
   const active = Object.values(state.members).filter(member => member.active !== false);
   const writing = $("#work-mode-select").value === "write";
   const reviewing = $("#require-verification").checked;
   selectOptions("#assignee-select", active.filter(member => ["accept_work", "complete_work", ...(writing ? ["write_external"] : [])]
-    .every(permission => member.permissions.includes(permission))), "Choose accountable member");
+    .every(permission => member.permissions.includes(permission))), "Choose owner");
   const reviewers = active.filter(member => member.permissions.includes("verify") && member.id !== $("#assignee-select").value);
-  selectOptions("#verifier-select", reviewers, "Choose independent verifier");
+  selectOptions("#verifier-select", reviewers, "Choose reviewer");
   $("#reviewer-unavailable").hidden = !reviewing || !$("#assignee-select").value || reviewers.length > 0;
   $("#verifier-field").hidden = !reviewing;
   $("#verifier-select").disabled = !reviewing;
@@ -785,7 +792,8 @@ function workCard(i, now) {
   const claim = i.claim ? `<details class="claim"><summary data-focus-key="work-claim:${esc(i.id)}">Recorded scope · ${esc(claimStateLabel(i, now))}</summary><p>${esc(memberLabel(i.claim.holderId))}</p><p>${esc(i.claim.repository)}:${esc(i.claim.ref)}</p><p>${esc(i.claim.paths.join(", "))}</p><p>Expires ${esc(i.claim.expiresAt)}. External activity is not measured.</p>${actions(i, true, now)}</details>` : "";
   const checks = `<div><dt>Verifier</dt><dd>${i.independentVerificationRequired ? esc(memberLabel(i.verifierMemberId)) : "Not required"}</dd></div><div><dt>Decision</dt><dd>${i.ownerDecisionRequired ? esc(memberLabel(i.humanDecisionMakerId)) : "Not required"}</dd></div>`;
   const updated = `<p class="form-hint">Last recorded update: ${esc(new Date(i.updatedAt).toLocaleString())}. Live execution is not measured.</p>`;
-  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span></div><h3>${esc(i.title)}</h3>${nextLine}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span>${source}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${receiptCard(i)}${blocker}${decision}${claim}<div class="portable-actions">${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-portable-work="${esc(i.id)}" data-portable-mode="result" data-focus-key="work-result:${esc(i.id)}">Add result</button></div></details><div class="work-actions">${actions(i, false, now)}</div></article>`;
+  const reuse = can("steer") ? `<button type="button" class="button ghost" data-reuse-work="${esc(i.id)}" data-focus-key="work-reuse:${esc(i.id)}">Use again</button>` : "";
+  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span></div><h3>${esc(i.title)}</h3>${nextLine}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span>${source}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${receiptCard(i)}${blocker}${decision}${claim}<div class="portable-actions">${reuse}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-portable-work="${esc(i.id)}" data-portable-mode="result" data-focus-key="work-result:${esc(i.id)}">Add result</button></div></details><div class="work-actions">${actions(i, false, now)}</div></article>`;
 }
 // Quiet Focus A4: a failed send reports beside the composer that holds the draft,
 // not only in the page-level status area; the Send button is the retry and the
@@ -842,15 +850,15 @@ async function submit(form, fn, { failureHint } = {}) {
 }
 $("#invitation-dismiss").addEventListener("click", () => closeInvitation());
 $("#invitation-retry").addEventListener("click", () => { if (invitation.phase === "preview-failed") previewCurrentInvitation(); });
-$("#invitation-dialog").addEventListener("keydown", e => {
+for (const id of ["invitation-dialog", "work-dialog"]) $(`#${id}`).addEventListener("keydown", e => {
   if (e.key !== "Tab") return;
-  const controls = [...e.currentTarget.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex='-1'])")]
+  const controls = [...e.currentTarget.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, a[href], [tabindex]:not([tabindex='-1'])")]
     .filter(element => element.getClientRects().length > 0);
   const first = controls[0], last = controls.at(-1), active = document.activeElement;
   if (!first || !controls.includes(active) || (e.shiftKey ? active === first : active === last)) {
     e.preventDefault();
     (e.shiftKey ? last : first)?.focus();
-    if (!first) $("#invitation-title").focus();
+    if (!first) (id === "invitation-dialog" ? $("#invitation-title") : e.currentTarget).focus();
   }
 });
 $("#invitation-dialog").addEventListener("cancel", e => {
@@ -1204,30 +1212,57 @@ async function setReaction(messageId, reaction) {
     if (generation === client.generation && state) { pending.busy = false; notice(`${error.message}. Retry keeps the same reaction choice.`, true); }
   } finally { if (state && generation === client.generation) renderMessages(); }
 }
-function openWork(sourceId = null) {
+function openWork(sourceId = null, reuseId = null) {
   if (!can("steer") || busy) return;
-  if (!$("#new-work-form").hidden) { $("#work-title-input").focus(); return; }
-  workFormOpener = document.activeElement;
+  if (!$("#new-work-form").hidden) { $(workRetryLocked ? "#retry-work-button" : "#work-title-input").focus(); return; }
+  let definition;
+  if (reuseId) {
+    try { definition = reusableWorkDefinition(state.workItems[reuseId]); }
+    catch (error) { notice(error.message, true); return; }
+  }
+  workFormOpener = { node: document.activeElement, key: document.activeElement?.dataset.focusKey };
+  workFormEpoch++; setWorkRetry(false);
+  $("#new-work-form").reset();
   $("#new-work-form").hidden = false; workDraftId = `work-${crypto.randomUUID()}`;
   $("#work-options").open = false;
   $("#work-dialog").showModal();
   $("#source-message-id").value = sourceId || "";
   if (sourceId) $("#work-title-input").value = (state.messages.find(m => m.id === sourceId)?.body || "").trim().replace(/\s+/g, " ").slice(0, 100).replace(/[\uD800-\uDBFF]$/, "");
+  if (definition) {
+    $("#work-title-input").value = definition.title;
+    $("#work-done-input").value = definition.definitionOfDone;
+  }
+  $("#work-reuse-hint").hidden = !definition;
   $("#source-context").textContent = sourceId ? `Source: ${state.messages.find(m => m.id === sourceId)?.body || ""}` : "";
   $("#source-context").hidden = !sourceId; $("#work-title-input").focus();
   syncWorkForm();
 }
 function closeWorkForm({ returnFocus = true } = {}) {
+  const unconfirmed = workRetryLocked;
   $("#work-dialog").close();
   $("#new-work-form").hidden = true; $("#new-work-form").reset();
+  setWorkRetry(false); $("#work-reuse-hint").hidden = true;
   setFormStatus($("#new-work-status"), "");
   pendingWork = null; workDraftId = null;
   const opener = workFormOpener; workFormOpener = null;
+  const epoch = ++workFormEpoch, generation = client.generation, roomId = session?.roomId, memberId = session?.member?.id;
+  const focusAtClose = document.activeElement;
+  if (unconfirmed) notice("Creation may already be saved. Check the work list before creating another.");
   if (returnFocus) setTimeout(() => {
+    if (epoch !== workFormEpoch || !sameSession(generation, roomId, memberId) || !$("#new-work-form").hidden || document.activeElement !== focusAtClose) return;
     const usable = node => node?.isConnected && !node.disabled && !node.hidden && node.getClientRects().length > 0;
-    const target = [opener, $("#new-work-button"), $("#composer-work-button")].find(usable) || $("#work-title");
+    const replacement = opener?.key ? [...document.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === opener.key) : null;
+    const target = [opener?.node, replacement, $("#new-work-button"), $("#composer-work-button")].find(usable) || $("#work-title");
     target.focus({ preventScroll: true });
   }, 0);
+}
+function setWorkRetry(locked) {
+  workRetryLocked = locked;
+  for (const control of document.querySelectorAll("#new-work-form input, #new-work-form textarea, #new-work-form select")) control.disabled = locked;
+  $("#new-work-form button[type='submit']").hidden = locked;
+  $("#retry-work-button").hidden = !locked;
+  $("#work-retry-hint").hidden = !locked;
+  $("#cancel-work-button").textContent = locked ? "Close" : "Cancel";
 }
 $("#new-work-button").addEventListener("click", () => openWork());
 $("#composer-work-button").addEventListener("click", () => openWork());
@@ -1238,18 +1273,38 @@ $("#review-settings-button").addEventListener("click", () => {
 $("#cancel-work-button").addEventListener("click", () => closeWorkForm());
 $("#work-dialog").addEventListener("cancel", event => { event.preventDefault(); if (!busy) closeWorkForm(); });
 $("#new-work-form").addEventListener("change", syncWorkForm);
-$("#new-work-form").addEventListener("submit", e => {
-  e.preventDefault(); if (!state || busy) return;
+$("#new-work-form").addEventListener("submit", e => { e.preventDefault(); sendWorkProposal(); });
+$("#retry-work-button").addEventListener("click", () => { if (workRetryLocked) sendWorkProposal(); });
+$("#work-list").addEventListener("click", e => {
+  const button = e.target.closest("[data-reuse-work]");
+  if (button) openWork(null, button.dataset.reuseWork);
+});
+function sendWorkProposal() {
+  if (!state || busy || !workDraftId) return;
   const independentVerificationRequired = $("#require-verification").checked, ownerDecisionRequired = $("#require-decision").checked;
-  const data = { workItemId: workDraftId, title: $("#work-title-input").value.trim(), definitionOfDone: $("#work-done-input").value.trim(), accountableMemberId: $("#assignee-select").value, verifierMemberId: independentVerificationRequired ? $("#verifier-select").value : null, independentVerificationRequired, ownerDecisionRequired, humanDecisionMakerId: ownerDecisionRequired ? state.room.ownerId : null, mode: $("#work-mode-select").value, sourceMessageId: $("#source-message-id").value || null };
-  pendingWork = draftCommand(pendingWork, T.WORK_PROPOSED, data);
+  const data = { workItemId: workDraftId, title: $("#work-title-input").value, definitionOfDone: $("#work-done-input").value, accountableMemberId: $("#assignee-select").value, verifierMemberId: independentVerificationRequired ? $("#verifier-select").value : null, independentVerificationRequired, ownerDecisionRequired, humanDecisionMakerId: ownerDecisionRequired ? state.room.ownerId : null, mode: $("#work-mode-select").value, sourceMessageId: $("#source-message-id").value || null };
+  if (!workRetryLocked) pendingWork = draftCommand(pendingWork, T.WORK_PROPOSED, data);
+  const entry = pendingWork;
   const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
-  submit(e.currentTarget, async current => {
-    await client.send(pendingWork.command);
-    if (!current() || !sameSession(generation, roomId, memberId)) return;
+  submit($("#new-work-form"), async current => {
+    try {
+      const receipt = await client.send(entry.command);
+      if (!current() || !sameSession(generation, roomId, memberId)) return;
+      if (!confirmsWorkProposal(receipt, entry.command, roomId, memberId)) throw new Error("The creation receipt could not be confirmed");
+    } catch (error) {
+      if (!current() || !sameSession(generation, roomId, memberId)) return;
+      const rejected = error.status >= 400 && error.status < 500 && ["command_rejected", "invalid_command", "invalid_cause", "pilot_limit", "too_large"].includes(error.code);
+      // These refusals occur after exact admitted retries are returned by the ledger.
+      // They resolve an unknown ORIGINAL attempt; auth/pre-ledger errors do not.
+      const originalRejected = ([409, 422].includes(error.status) && error.code === "command_rejected")
+        || (error.status === 422 && error.code === "invalid_cause") || (error.status === 409 && error.code === "pilot_limit");
+      setWorkRetry(workRetryLocked ? !originalRejected : !rejected);
+      throw error;
+    }
+    setWorkRetry(false);
     closeWorkForm(); notice("Work proposed. The accountable member must accept it; no external action was authorized.");
   }, { failureHint: "Your work proposal was kept; try again." });
-});
+}
 const field = (name, label, type = "text") => `<label>${esc(label)}<input name="${name}" type="${type}" required maxlength="2000"></label>`;
 const area = (name, label) => `<label>${esc(label)}<textarea name="${name}" required rows="3" maxlength="4000"></textarea></label>`;
 function producerField() {

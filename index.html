@@ -162,8 +162,9 @@
               <h2 id="new-work-title">New work</h2>
               <input id="source-message-id" type="hidden">
               <div id="source-context" class="source-context" hidden></div>
-              <label>Outcome <input id="work-title-input" maxlength="100" required></label>
-              <label>Done when… <textarea id="work-done-input" rows="2" maxlength="300" required></textarea></label>
+              <p id="work-reuse-hint" class="form-hint" hidden>Only outcome and done criteria copied.</p>
+              <label>Outcome <textarea id="work-title-input" rows="1" maxlength="4096" required></textarea></label>
+              <label>Done when… <textarea id="work-done-input" rows="2" maxlength="4096" required></textarea></label>
               <label>Owner <select id="assignee-select" required></select></label>
               <label id="verifier-field">Reviewer <select id="verifier-select" required aria-describedby="reviewer-unavailable"></select></label>
               <div id="reviewer-unavailable" class="reviewer-unavailable" hidden>
@@ -181,9 +182,11 @@
               </details>
               <p class="form-hint">Creates a record, not permission to act elsewhere.</p>
               <p id="new-work-status" class="status form-status" role="alert"></p>
+              <p id="work-retry-hint" class="form-hint" hidden>Creation is unconfirmed. Retry the original before editing. Closing won't undo it.</p>
               <div class="form-actions">
                 <button id="cancel-work-button" class="button ghost" type="button">Cancel</button>
                 <button class="button primary" type="submit">Create outcome</button>
+                <button id="retry-work-button" class="button primary" type="button" hidden>Retry original</button>
               </div>
             </form>
             </dialog>

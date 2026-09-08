@@ -77,7 +77,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
         assert.equal(await decision.isChecked(), false);
         assert.equal(await page.locator("#verifier-select").isDisabled(), true);
         assert.equal(await page.locator("#work-title-input").inputValue(), title);
-        await form.locator('button[type="submit"]').click();
+        await page.locator("#retry-work-button").click();
         await form.waitFor({ state: "hidden" });
         await page.unroute("**/api/rooms/commons/commands");
         assert.equal(attempts.length, 2);

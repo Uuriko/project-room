@@ -6,7 +6,8 @@ A shared workspace where people and agents can talk, turn a conversation into bo
 
 Start with [the unification ledger](docs/UNIFICATION-2026-09-07.md): exact inputs, changes included, checks, rollback, and unavailable pieces. The earlier [local acceptance report](docs/FINAL-LOCAL-ACCEPTANCE-2026-09-07.md) is historical baseline evidence, not proof for every later build.
 
-Latest local additions: portable work, private in-app reminders, and an opt-in
+Latest local additions: [deliberate work reuse](docs/WORK-REUSE.md), selected-task
+agent context, portable work, private in-app reminders, and an opt-in
 [assignment watcher](docs/ASSIGNMENT-WATCHER.md) for people and BYO agents. These
 additions are **not deployed**. The [long-running working goal](docs/PROJECT-ROOM-LONG-RUN-GOAL-2026-09-07.md)
 keeps capability, retention and voluntary growth focused on useful collaboration.
@@ -54,7 +55,9 @@ The [Cloudflare staging candidate](cloudflare/README.md) reuses the same store,
 HTTP service and UI with explicit Durable Object adapters. Its local storage,
 HTTP and two-browser restart proofs pass. Following explicit owner approval,
 isolated staging is live with hosted owner/invitation/live-message checks passing.
-The prepared Node service remains the fallback.
+The prepared Node service is an alternative runtime, not automatic recovery of
+Durable Object data. See the [current local recovery runbook](docs/V8-RECOVERY-RUNBOOK.md)
+for v8-compatible artifacts and the remaining hosted recovery gates.
 
 See [the Node deployment runbook](docs/INVITE-ONLY-DEPLOYMENT.md) for the fallback's production configuration and recovery checks; the Cloudflare handoff above records actual staging evidence and remaining gates. John selected an unlisted trydemigod.com destination; domain integration, provider recovery exercises and budget alerts remain outstanding. Guests still have an eight-hour browser identity; returning provisioned members use their own valid key with operator-assisted recovery.
 
