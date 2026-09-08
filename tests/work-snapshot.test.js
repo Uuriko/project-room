@@ -114,7 +114,10 @@ test('new discovery client reads exact schema12 fallback without upgrading or mu
   createRuntimePackage({ repository: resolve('.'), commit: '4d22189ccdebc56db23397e6cc75b07eff0e3c2c', destination: root });
   const { RoomStore } = await import(pathToFileURL(join(root, 'server/store.mjs')));
   const { createRoomServer: fallbackServer } = await import(pathToFileURL(join(root, 'server/http.mjs')));
-  const f = createAcceptanceFixture(); f.store.close(); const store = new RoomStore(join(f.directory, 'room.sqlite'));
+  const { auditRecovery } = await import(pathToFileURL(join(root, 'server/recovery.mjs')));
+  const { frozenAcceptanceFixture } = await import('../scripts/frozen-runtime-fixture.mjs');
+  const createOldFixture = await frozenAcceptanceFixture(resolve('.'), root, '4d22189ccdebc56db23397e6cc75b07eff0e3c2c');
+  const f = createOldFixture(); f.store.close(); const store = new RoomStore(join(f.directory, 'room.sqlite'));
   const server = fallbackServer({ store });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));

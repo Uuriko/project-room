@@ -123,19 +123,44 @@ test("withdrawal remains possible at event and projection capacity; reopening do
   // Deliberately synthetic capacity state is not claimed to be a recoverable history.
 });
 
+test("help history crosses checkpoints and rework without resuming old consent", t => {
+  const f = setup(t); f.send();
+  const room = f.store.room("commons");
+  f.store.db.prepare("INSERT INTO projection_checkpoints VALUES(?,?,?)").run("commons", room.sequence, JSON.stringify(room.state));
+  const sendWork = (type, data = {}, actor = "producer") => f.store.command(f.keys[actor], "commons", { id: crypto.randomUUID(), type,
+    data: { workItemId: "test-handoff", expectedRevision: f.store.room("commons").state.workItems["test-handoff"].revision, ...data } });
+  const done = { summary: "Agenda", evidenceUrl: "https://example.test/result", evidenceVersion: "v1", nextAction: "Review", producerId: "producer" };
+  sendWork("work.completed", done); const oldCompletion = f.store.room("commons").state.workItems["test-handoff"].receipt.eventId;
+  sendWork("work.blocked", { reason: "Revise", nextAction: "Discuss" });
+  assert.equal(workHelpContext(f.store.room("commons").state, "test-handoff", "guest", new Date(f.now()).toISOString()).status, "consent_changed");
+  f.send(); sendWork("work.blocker_resolved", { resolution: "Clear plan" });
+  sendWork("work.completed", { ...done, evidenceVersion: "v2" }); sendWork("work.blocked", { reason: "Polish", nextAction: "Ask" }); f.send();
+  sendWork("verification.recorded", { result: "fail", completionEventId: oldCompletion, evidenceVersion: "v1", summary: "Historical finding" }, "reviewer");
+  const before = auditRecovery(f.store);
+  const readOnly = new RoomStore(f.filename, { readOnly: true });
+  try {
+    assert.equal(workHelpContext(readOnly.room("commons").state, "test-handoff", "guest", new Date(f.now()).toISOString()).status, "open");
+    assert.deepEqual(auditRecovery(readOnly), before);
+  } finally { readOnly.close(); }
+});
+
 test("genuine schema12 upgrade preserves old help-like message text and refuses projection collisions atomically", async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-help-migration-")); t.after(() => rmSync(directory, { recursive: true, force: true }));
   const runtime = join(directory, "v12"); createRuntimePackage({ repository, commit: v12HelpBaseline, destination: runtime });
   const createFixture = await frozenRecoveryFixture(repository, runtime, v12HelpBaseline);
   const { initialRoom } = await import(pathToFileURL(join(runtime, "server/bootstrap.mjs")));
   const { event } = await import(pathToFileURL(join(runtime, "src/events.js")));
-  for (const target of ["ordinary", "projection", "checkpoint"]) {
+  for (const target of ["ordinary", "projection", "checkpoint", "reserved-event"]) {
     const f = createFixture(join(directory, target + ".sqlite"));
     try {
       f.store.initialize([...initialRoom("old-text", "text-owner"), event({ type: "message.posted", roomId: "old-text", actorId: "text-owner",
         data: { body: "Help wanted, just ordinary text", helpWanted: "yes" } })]);
       const row = f.store.room("commons");
-      if (target !== "ordinary") {
+      if (target === "reserved-event") {
+        const record = f.store.db.prepare("SELECT sequence,body FROM events WHERE room_id='commons' AND json_extract(body,'$.type')='message.posted' LIMIT 1").get();
+        const e = JSON.parse(record.body); e.type = "work.help_updated";
+        f.store.db.prepare("UPDATE events SET body=? WHERE room_id='commons' AND sequence=?").run(JSON.stringify(e), record.sequence);
+      } else if (target !== "ordinary") {
         const state = row.state;
         const item = Object.values(state.workItems)[0]; assert.ok(item);
         item.helpWanted = null;

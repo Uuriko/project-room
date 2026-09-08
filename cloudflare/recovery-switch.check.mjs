@@ -89,7 +89,6 @@ for (const version of [8, 12]) test(`historical schema${version} packages switch
     const origin = 'https://room.example.test';
     const scripts = new Map();
     for (const [label, pkg] of packages) {
-      const publicAssets = JSON.parse(readFileSync(join(pkg.path, 'runtime-manifest.json'))).publicAssets;
       // Test-only wrapper around each preserved production entrypoint. Synthetic
       // rows seed equivalent data; this is NOT a product storage-conversion API.
       const source = `
@@ -157,6 +156,7 @@ for (const version of [8, 12]) test(`historical schema${version} packages switch
     const start = async (label, paused = false) => {
       if (mf) await mf.dispose();
       const pkg = packages.get(label), config = JSON.parse(readFileSync(join(pkg.path, 'cloudflare/wrangler.jsonc')));
+      const publicAssets = JSON.parse(readFileSync(join(pkg.path, 'runtime-manifest.json'))).publicAssets;
       mf = new Miniflare({ modules: true, script: scripts.get(label), compatibilityDate: config.compatibility_date,
         compatibilityFlags: config.compatibility_flags, durableObjects: { ROOM: { className: 'ProjectRoom', useSQLite: true } },
         durableObjectsPersist: persistence, bindings: { ROOM_ORIGIN: origin, ROOM_MAINTENANCE: paused ? '1' : '0', SEED_ROWS: JSON.stringify(rows), IDENTITY_PROOF: JSON.stringify(proof) },

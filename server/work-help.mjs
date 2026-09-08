@@ -1,4 +1,5 @@
 import { WORK_HELP_UPDATED, helpFromEvent, validateHelp } from "../src/work-help.js";
+import { validId } from "../src/events.js";
 
 const own = (value, key) => value != null && Object.hasOwn(value, key);
 const check = condition => { if (!condition) throw new Error("Help invitation history requires operator reconciliation"); };
@@ -22,6 +23,7 @@ const transitions = { "work.accepted": "accepted", "work.started": "working", "w
 export function auditWorkHelp(state, history, checkpoint = null) {
   const events = history.map(row => ({ sequence: row.sequence, event: typeof row.body === "string" ? JSON.parse(row.body) : row.event }));
   const relevant = new Set(events.filter(row => row.event.type === WORK_HELP_UPDATED).map(row => row.event.data.workItemId));
+  check([...relevant].every(validId));
   if (!relevant.size) {
     check(!Object.keys(helpMap(state)).length);
     if (checkpoint) check(!Object.keys(helpMap(JSON.parse(checkpoint.projection))).length);
@@ -46,12 +48,12 @@ export function auditWorkHelp(state, history, checkpoint = null) {
     const d = e.data;
     if (e.type === "room.created") { check(!projected.room); projected.room = { id: e.roomId, ownerId: d.ownerId }; }
     if (["member.added", "member.joined_via_invitation"].includes(e.type)) {
-      check(!own(projected.members, d.memberId) && Array.isArray(d.permissions));
+      check(validId(d.memberId) && !own(projected.members, d.memberId) && Array.isArray(d.permissions));
       projected.members[d.memberId] = { id: d.memberId, kind: e.type === "member.added" ? d.kind : "human",
         active: true, revision: 0, permissions: d.permissions };
     }
     if (e.type === "member.access_changed") {
-      const person = projected.members[d.memberId];
+      check(validId(d.memberId)); const person = projected.members[d.memberId];
       check(person && typeof d.active === "boolean" && Array.isArray(d.permissions) && d.expectedMemberRevision === person.revision);
       Object.assign(person, { active: d.active, permissions: d.permissions, revision: person.revision + 1 });
     }

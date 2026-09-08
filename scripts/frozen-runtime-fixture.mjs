@@ -7,8 +7,10 @@ export const v9TextBaseline = "06551bb9255aefd92e945df158f4db47066606da";
 export const v10CharterBaseline = "b538ee8792abee6dfefc152fd9c90e73ba4d4bc5";
 export const v11ReplyBaseline = "b49880ae6e5376f03b4ff79f6270b3e6576c55d8";
 export const v12HelpBaseline = "cf377f3ad4aba4dd1a31ccbd7691b3a7393c8f16";
-export async function frozenRecoveryFixture(repository, packagePath, commit = v8ConnectionBaseline) {
-  const source = execFileSync("git", ["show", `${commit}:scripts/recovery-fixture.mjs`], { cwd: repository, encoding: "utf8" })
+async function frozenFixture(repository, packagePath, commit, file, name) {
+  const source = execFileSync("git", ["show", `${commit}:scripts/${file}.mjs`], { cwd: repository, encoding: "utf8" })
     .replace(/from "\.\.\/([^"]+)"/g, (_, path) => `from ${JSON.stringify(pathToFileURL(join(packagePath, path)).href)}`);
-  return (await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"))).createRecoveryFixture;
+  return (await import("data:text/javascript;base64," + Buffer.from(source).toString("base64")))[name];
 }
+export const frozenRecoveryFixture = (repository, packagePath, commit = v8ConnectionBaseline) => frozenFixture(repository, packagePath, commit, "recovery-fixture", "createRecoveryFixture");
+export const frozenAcceptanceFixture = (repository, packagePath, commit = v12HelpBaseline) => frozenFixture(repository, packagePath, commit, "acceptance-fixture", "createAcceptanceFixture");
