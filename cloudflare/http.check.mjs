@@ -114,6 +114,31 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.deepEqual(noSource.collaboration, { version: 1, status: 'accountable', offer: null });
     assert.equal((await call('/api/rooms/commons/work-context?workItemId=selected%3Atask', { headers: { ...guestHeaders, 'X-Session-Binding': 'f'.repeat(64) } })).status, 409);
     assert.deepEqual(await json(await call('/api/rooms/commons', { headers: guestHeaders })), beforeRead);
+    const offerPath = '/api/rooms/commons/work-context?workItemId=selected%3Atask';
+    const offerHeaders = { ...guestHeaders, 'X-Project-Room-Offer-Context': '1' };
+    const emptyOffers = await json(await call(offerPath, { headers: offerHeaders }));
+    assert.equal(emptyOffers.offerContextVersion, 1);
+    assert.deepEqual(emptyOffers.offers.offers, []);
+    assert.equal(emptyOffers.offers.availability.reason, 'invitation_unavailable');
+    assert.equal(Object.hasOwn(context, 'offerContextVersion'), false, 'Existing reads remain unchanged');
+    await json(await call(offerPath, { headers: { ...offerHeaders, 'X-Project-Room-Offer-Context': '2' } }), 422);
+    const workCommand = async (type, data, headers = ownerHeaders) => json(await call('/api/rooms/commons/commands', {
+      headers, data: { id: randomUUID(), type, data: { workItemId: 'selected:task', expectedRevision: 1, ...data } }
+    }), 201);
+    await workCommand('work.accepted', { expectedRevision: 0 });
+    const invitation = await workCommand('work.help_updated', { expectedHelpRevision: 0, status: 'open',
+      scope: 'Suggest a short agenda', expiresAt: new Date(Date.now() + 3600000).toISOString() });
+    await workCommand('work.help_offer_opened', { offerId: 'worker-offer', expectedHelpRevision: 1,
+      helpEventId: invitation.event.id, plan: 'I can suggest two items' }, guestHeaders);
+    const pending = await json(await call(offerPath, { headers: { ...ownerHeaders, 'X-Project-Room-Offer-Context': '1' } }));
+    assert.equal(pending.offers.offers[0].canSelect, true);
+    assert.ok(pending.context.participants.some(p => p.id === joined.session.member.id));
+    await workCommand('work.help_offer_updated', { offerId: 'worker-offer', expectedOfferRevision: 0,
+      expectedHelpRevision: 1, helpEventId: invitation.event.id, status: 'selected', reason: 'Use this plan' });
+    const selectedOffer = await json(await call(offerPath, { headers: offerHeaders }));
+    assert.equal(selectedOffer.offers.offers[0].canRelease, true);
+    assert.equal(selectedOffer.offers.offers[0].externalExecution, false);
+    assert.equal(selectedOffer.viewerSessionBinding, joined.session.sessionBinding);
     const questionCommand = { id: randomUUID(), type: 'message.posted', data: { messageId: 'worker-reply-request', requestKind: 'reply',
       toMemberId: joined.session.member.id, body: 'Which agenda would you choose?' } };
     const asked = await json(await call('/api/rooms/commons/commands', { headers: ownerHeaders, data: questionCommand }), 201);

@@ -1,6 +1,7 @@
 import { nextWorkStep, workActions, workCollaboration } from "../src/workflow.js";
 import { charterContext } from "../src/room-charter.js";
 import { validateHelp, workHelpContext } from "../src/work-help.js";
+import { workOffersContext } from "../src/help-offers.js";
 
 const pick = (value, fields) => value == null ? null
   : Object.fromEntries(fields.split(" ").filter(key => Object.hasOwn(value, key)).map(key => [key, structuredClone(value[key])]));
@@ -19,15 +20,17 @@ export function currentWorkRecord(item) {
 
 // An authenticated selected read, not the deliberately narrower portable export.
 // All input comes from one committed Room projection and one service clock.
-export function selectedWorkContext({ state, workItemId, viewerId, sequence, now, includeSource = false }) {
+export function selectedWorkContext({ state, workItemId, viewerId, sequence, now, includeSource = false, includeOffers = false }) {
   if (!Object.hasOwn(state.workItems, workItemId) || !Object.hasOwn(state.members, viewerId)) throw new RangeError("Choose existing work and membership");
   const item = state.workItems[workItemId], member = state.members[viewerId], work = currentWorkRecord(item);
   const message = includeSource && item.sourceMessageId ? state.messages.find(message => message.id === item.sourceMessageId) : null;
   const source = { status: !includeSource ? "not_requested" : !item.sourceMessageId ? "not_linked" : message ? "included" : "unavailable",
     message: message ? pick(message, "id authorId body createdAt") : null };
   const next = nextWorkStep(item, now);
+  const offers = includeOffers ? workOffersContext(state, workItemId, viewerId, new Date(now).toISOString()) : null;
   const participantIds = new Set([viewerId, item.accountableMemberId, item.verifierMemberId, item.humanDecisionMakerId,
     item.proposedById, item.claim?.holderId, item.receipt?.producerId, item.receipt?.reportedById, message?.authorId, state.room.ownerId].filter(Boolean));
+  for (const entry of offers?.offers ?? []) participantIds.add(entry.offer.offererId);
   const participants = [...participantIds].map(id => state.members[id]
     ? pick(state.members[id], "id displayName kind active revision permissions") : { id, unavailable: true });
   return {
@@ -37,6 +40,7 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
     suggestedActions: workActions(item, member, now).map(([action, label]) => ({ action, label })),
     collaboration: workCollaboration(item, member, participants),
     helpContextVersion: 1, help: workHelpContext(state, workItemId, viewerId, new Date(now).toISOString()),
+    ...(includeOffers ? { offerContextVersion: 1, offers } : {}),
     context: { source, charter: charterContext(state.room), participants, roomOwnerId: state.room.ownerId,
       omitted: ["other_work", "other_messages", "event_history", "prior_receipts_and_checks", "private_reminders", "read_marker"] },
     scope: { membership: "room", selectedWorkOnly: true, externalExecution: false,

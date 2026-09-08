@@ -348,12 +348,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "work-context" && req.method === "GET") {
         const params = url.searchParams;
+        const offerContext = req.headers["x-project-room-offer-context"];
+        if (offerContext !== undefined && offerContext !== "1") reject(422, "invalid_offer_context", "Choose offer context version 1");
         if ([...params.keys()].some(key => !["workItemId", "includeSource", "auth"].includes(key) || params.getAll(key).length !== 1)
           || (params.has("includeSource") && !["true", "false"].includes(params.get("includeSource")))) {
           reject(422, "invalid_work_context", "Choose one work ID and an optional source inclusion flag");
         }
         return json(res, 200, store.workContext(selected.token, roomId, params.get("workItemId"), {
-          includeSource: params.get("includeSource") === "true", expectedSessionBinding: fence
+          includeSource: params.get("includeSource") === "true", includeOffers: offerContext === "1", expectedSessionBinding: fence
         }));
       }
       if (route === "work-result" && req.method === "GET") {

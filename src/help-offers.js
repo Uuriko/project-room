@@ -96,7 +96,10 @@ function current(state, offer, now) {
 function selection(rows, workItemId) { return rows.find(offer => offer.workItemId === workItemId && offer.status === "selected")?.id ?? null; }
 
 export function helpOfferAvailability(state, workItemId, viewerId, now) {
-  const help = workHelpContext(state, workItemId, viewerId, now), rows = records(state);
+  return availability(state, workItemId, viewerId, now, records(state));
+}
+function availability(state, workItemId, viewerId, now, rows) {
+  const help = workHelpContext(state, workItemId, viewerId, now);
   const prior = rows.find(offer => offer.workItemId === workItemId && offer.invitation.eventId === help.eventId && offer.offererId === viewerId);
   const pending = rows.filter(offer => offer.status === "offered" && current(state, offer, now));
   const forWork = pending.filter(offer => offer.workItemId === workItemId).length;
@@ -113,6 +116,9 @@ export function helpOfferAvailability(state, workItemId, viewerId, now) {
 export function helpOfferContext(state, offerId, viewerId, now) {
   check(instant(now)); const rows = records(state), offer = rows.find(row => row.id === offerId);
   check(offer, "Unknown help offer");
+  return offerContext(state, offer, viewerId, now, rows);
+}
+function offerContext(state, offer, viewerId, now, rows) {
   const viewer = participant(state, viewerId), active = viewer?.active === true;
   const accountable = active && viewerId === offer.accountableMemberId;
   const moderator = active && viewerId === state.room.ownerId && viewer.kind === "human";
@@ -127,6 +133,17 @@ export function helpOfferContext(state, offerId, viewerId, now) {
     canWithdraw: offer.status === "offered" && helper,
     canRelease: offer.status === "selected" && (helper || accountable || moderator),
     releaseBoundary: "Releasing records coordination only. It does not confirm that outside work stopped." };
+}
+
+// Opt-in selected-work read. Validate once, then reuse the committed rows for
+// availability and decisions; never export other tasks' contribution plans.
+export function workOffersContext(state, workItemId, viewerId, now) {
+  check(instant(now));
+  const rows = records(state);
+  return { version: 1, retainedOfferCount: rows.length,
+    availability: availability(state, workItemId, viewerId, now, rows),
+    offers: rows.filter(offer => offer.workItemId === workItemId)
+      .map(offer => offerContext(state, offer, viewerId, now, rows)) };
 }
 
 // Pure transition. The service/reducer must own atomicity, actor authentication,

@@ -7,6 +7,7 @@ import { submitWorkAction } from "./work-actions.mjs";
 import { replyRoute, validReplyArguments, validateReplyRead, submitReplyAction } from "./reply-actions.mjs";
 import { charterContext, validateCharterContext, validateCharterRead } from "../src/room-charter.js";
 import { workHelpContext } from "../src/work-help.js";
+import { workOffersContext, MAX_HELP_OFFERS, MAX_PENDING_HELP_OFFERS } from "../src/help-offers.js";
 
 export class RoomClientError extends Error {
   constructor(status, code, message, retryAfterMs = null) { super(message); this.status = status; this.code = code; this.retryAfterMs = retryAfterMs; }
@@ -18,6 +19,38 @@ function checkedCharter(value, horizon) {
     if (!Number.isSafeInteger(horizon) || result.revision > horizon) throw new Error();
     return result;
   } catch { throw new RoomClientError(200, "invalid_response", "Room returned invalid instructions metadata"); }
+}
+
+function checkedOffers(result) {
+  const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
+  const count = value => Number.isSafeInteger(value) && value >= 0;
+  try {
+    const read = result.offers, entries = read?.offers, a = read?.availability;
+    if (result.offerContextVersion !== 1 || !object(read) || read.version !== 1
+      || Object.keys(read).sort().join() !== "availability,offers,retainedOfferCount,version"
+      || !Array.isArray(entries) || entries.length > MAX_HELP_OFFERS
+      || !count(read.retainedOfferCount) || read.retainedOfferCount < entries.length || read.retainedOfferCount > MAX_HELP_OFFERS
+      || !count(a?.pendingForViewer) || a.pendingForViewer > MAX_PENDING_HELP_OFFERS || a.pendingForViewer > read.retainedOfferCount) throw new Error();
+    const members = Object.fromEntries(result.context.participants.filter(p => p.unavailable !== true).map(p => [p.id, p]));
+    const rows = Object.fromEntries(entries.map(entry => {
+      if (!object(entry?.offer) || entry.offer.workItemId !== result.work.id
+        || entry.offer.revision > result.evaluatedThrough || entry.offer.invitation?.revision > result.evaluatedThrough
+        || Date.parse(entry.offer.updatedAt) > Date.parse(result.evaluatedAt)) throw new Error();
+      return [entry.offer.id, entry.offer];
+    }));
+    if (Object.keys(rows).length !== entries.length) throw new Error();
+    const expected = workOffersContext({ room: { id: result.roomId, ownerId: result.context.roomOwnerId }, members,
+      workItems: { [result.work.id]: result.work }, helpOffers: rows }, result.work.id, result.viewer.id, result.evaluatedAt);
+    if (!isDeepStrictEqual(entries, expected.offers) || a.pendingForViewer < expected.availability.pendingForViewer) throw new Error();
+    // These two room-wide counts are service facts, not reconstructed from a
+    // selected-task export. All decisions/identities for this work are checked.
+    const local = expected.availability;
+    const reason = !result.help.canOffer ? "invitation_unavailable" : local.existingOfferId ? "already_offered"
+      : local.selectedOfferId ? "helper_selected" : read.retainedOfferCount >= MAX_HELP_OFFERS ? "history_full"
+        : local.pendingForWork >= MAX_PENDING_HELP_OFFERS ? "work_offer_limit"
+          : a.pendingForViewer >= MAX_PENDING_HELP_OFFERS ? "member_offer_limit" : null;
+    if (!isDeepStrictEqual(a, { ...local, pendingForViewer: a.pendingForViewer, reason, canOffer: reason === null })) throw new Error();
+  } catch { throw new RoomClientError(200, "invalid_response", "Help offers do not match selected work and participants"); }
 }
 
 function checkedWorkSnapshot(value, roomId) {
@@ -93,11 +126,12 @@ export class RoomAgentClient {
     this.#origin = origin; this.#roomId = roomId; this.#token = token; this.#fetch = fetchImpl;
     this.#memberId = memberId;
   }
-  async #fetchPath(path, body, signal, helpContext = false) {
+  async #fetchPath(path, body, signal, helpContext = false, offerContext = false) {
     const response = await this.#fetch(`${this.#origin}${path}`, {
       method: body === undefined ? "GET" : "POST", redirect: "error", credentials: "omit", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
       headers: { Authorization: `Bearer ${this.#token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-        ...(helpContext ? { "X-Project-Room-Help-Context": "1" } : {}) },
+        ...(helpContext ? { "X-Project-Room-Help-Context": "1" } : {}),
+        ...(offerContext ? { "X-Project-Room-Offer-Context": "1" } : {}) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) })
     });
     let value;
@@ -112,11 +146,11 @@ export class RoomAgentClient {
     }
     return value;
   }
-  async #request(suffix = "", body, signal, helpContext = false) {
+  async #request(suffix = "", body, signal, helpContext = false, offerContext = false) {
     // Saved configurations pin an agent. Recheck before each operation; a check
     // is never a cached grant. The service still authorizes the operation itself.
     if (this.#memberId) await this.checkConnection({ signal });
-    const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal, helpContext);
+    const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal, helpContext, offerContext);
     const snapshotRead = suffix === "" || suffix === "?view=work";
     if (this.#memberId && (snapshotRead || suffix === "/charter" || suffix.startsWith("/charter?") || suffix.startsWith("/work-context?") || suffix.startsWith("/work-discussion?") || suffix.startsWith("/work-result?") || suffix.startsWith("/return-brief?") || /^\/reply-(requests|context|history)\?/.test(suffix))) {
       if (value?.roomId !== this.#roomId || value.viewerId !== this.#memberId || value.viewerAccountId !== null
@@ -195,12 +229,16 @@ export class RoomAgentClient {
     return resultDraft((await this.workContext(workItemId, { signal: options.signal })).work);
   }
   async workContext(workItemId, options = {}) {
-    if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => !["includeSource", "signal"].includes(key))) throw new Error("Use includeSource and signal options only");
-    const { includeSource = false, signal } = options;
-    if (!validId(workItemId) || typeof includeSource !== "boolean") throw new Error("Choose one work ID and a boolean includeSource option");
+    if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => !["includeSource", "includeOffers", "signal"].includes(key))) throw new Error("Use includeSource, includeOffers and signal options only");
+    const { includeSource = false, includeOffers = false, signal } = options;
+    if (!validId(workItemId) || typeof includeSource !== "boolean" || typeof includeOffers !== "boolean") throw new Error("Choose one work ID and boolean context options");
     const query = new URLSearchParams({ workItemId });
     if (includeSource) query.set("includeSource", "true");
-    const result = await this.#request(`/work-context?${query}`, undefined, signal);
+    const result = await this.#request(`/work-context?${query}`, undefined, signal, false, includeOffers);
+    if (includeOffers && result?.offerContextVersion === undefined && result?.offers === undefined)
+      throw new RoomClientError(200, "offer_context_unavailable", "This service does not advertise help offer context");
+    if (!includeOffers && (Object.hasOwn(result ?? {}, "offers") || Object.hasOwn(result ?? {}, "offerContextVersion")))
+      throw new RoomClientError(200, "invalid_response", "Unrequested help offer context");
     const source = result?.context?.source;
     if (result?.contractVersion !== 1 || result.roomId !== this.#roomId || result.work?.id !== workItemId
       || result.next?.workItemId !== workItemId || result.next?.workRevision !== result.work?.revision
@@ -217,7 +255,7 @@ export class RoomAgentClient {
         const participants = result.context.participants;
         if (!Object.values(WORK_STATES).includes(result.work.state) || !validId(result.work.accountableMemberId)
           || typeof result.work.independentVerificationRequired !== "boolean" || typeof result.viewer.active !== "boolean"
-          || !Array.isArray(participants) || participants.length > 10
+          || !Array.isArray(participants) || participants.length > (includeOffers ? 100 : 10)
           || participants.some(person => !person || !validId(person.id) || person.unavailable !== true && typeof person.active !== "boolean")
           || new Set(participants.map(person => person.id)).size !== participants.length
           || !isDeepStrictEqual(result.collaboration, workCollaboration(result.work, result.viewer, participants))) throw new Error();
@@ -227,7 +265,7 @@ export class RoomAgentClient {
       try {
         const participants = result.context.participants;
         if (result.helpContextVersion !== 1 || !validId(result.context.roomOwnerId) || !Array.isArray(participants)
-          || participants.length > 10 || new Set(participants.map(person => person?.id)).size !== participants.length) throw new Error();
+          || participants.length > (includeOffers ? 100 : 10) || new Set(participants.map(person => person?.id)).size !== participants.length) throw new Error();
         for (const person of participants) if (person?.unavailable !== true && (!validId(person?.id)
           || !["human", "agent"].includes(person.kind) || typeof person.active !== "boolean"
           || !Number.isSafeInteger(person.revision) || person.revision < 0 || person.revision > result.evaluatedThrough
@@ -240,6 +278,10 @@ export class RoomAgentClient {
           workItems: { [workItemId]: result.work } }, workItemId, result.viewer.id, result.evaluatedAt);
         if (expected.revision > result.evaluatedThrough || !isDeepStrictEqual(result.help, expected)) throw new Error();
       } catch { throw new RoomClientError(200, "invalid_response", "Help invitation context does not match selected work"); }
+    }
+    if (includeOffers) {
+      if (result.helpContextVersion !== 1) throw new RoomClientError(200, "invalid_response", "Offer context requires current invitation context");
+      checkedOffers(result);
     }
     return result;
   }

@@ -75,3 +75,36 @@ Continue with [the write guide](AGENT-WRITE-GUIDE.md) for explicit revision-boun
 commands. Do not reinterpret a reservation as external permission or evidence that
 another worker stopped. Human decisions remain human. No runtime/MCP/hosted agent
 is installed or launched by this feature.
+
+## Optional help-offer context
+
+For a configured direct client:
+
+```js
+const context = await client.workContext(workId, { includeOffers: true });
+const { availability, offers } = context.offers;
+```
+
+This opts into `X-Project-Room-Offer-Context: 1` on the same authenticated GET.
+The response adds `offerContextVersion: 1` and an `offers` envelope containing
+`version`, `availability`, `offers` and `retainedOfferCount`. It includes only
+the selected task's offer records and the participants those records reference.
+Source-message inclusion remains a separate option. Default reads are unchanged.
+
+Offer status and allowed-action hints use the same committed state and clock as
+the task. A selected helper is reserved for coordination, not authorized to run
+tools, spend money or execute the task. Expired invitations or changed membership
+can leave a selection needing review; reading does not release it automatically.
+Invitation eligibility (`help`) is not queue capacity: consult offer
+`availability` before proposing a new offer, and let the command validate again.
+
+Room-wide retained-offer and viewer-pending counts explain capacity without
+returning other tasks' plans. These aggregates are service facts; the client
+cannot independently reconstruct them from a selected-task response. It validates
+their bounds and recomputes selected-task decisions and action hints.
+
+Older services may ignore this header. When explicitly requested context is
+absent, the direct client fails with `offer_context_unavailable`; it does not
+silently fall back to a weaker view or fetch the room. This option is not yet
+exposed by the CLI or MCP tool schema. No new browser offer controls ship in this
+read-contract checkpoint.
