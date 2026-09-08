@@ -199,3 +199,109 @@ the help-wanted vertical slice, reviewing invalidation granularity so harmless
 lease/start updates do not unnecessarily erase useful consent. The state machine,
 migration/fallback qualification and human/agent setup must be verified together;
 this design document is not proof that those future features are implemented.
+
+## Implemented next: dormant shared help contract
+
+The next checkpoint adds `src/work-help.js` and17 focused tests. It is deliberately
+not registered in the event reducer, command router, browser assets or runtime
+package. This is implementation progress toward the help feature, not a usable
+help-wanted release. The exact schema12 service/reducer still reject the future
+event, and the rejected command leaves all audited database tables unchanged.
+
+The shared contract implements:
+
+- One optional `helpWanted` projection on existing work. No default backfill;
+  an absent field is off, whereas a malformed present field is an error, not consent.
+- `work.help_updated` with exact work/help revisions. Open data includes a scope
+  and canonical UTC expiry; withdrawal cannot carry a replacement scope. The scope
+  preserves exact Unicode/whitespace, is capped at600 UTF-16 code units, and expires
+  within seven days. These are initial product bounds, not research-derived limits.
+- Accepted, working or blocked work may invite help. Only its active accountable
+  human/agent with `accept_work` can publish or reaffirm. The active accountable
+  member may still withdraw after losing that permission. The active human Room
+  owner may withdraw someone else's invitation but cannot publish it for them.
+- Independent help revision and original signal ID, latest event/actor/time,
+  exact scope and expiry, work basis, accountable identity/revision and most recent
+  completion event. Updating help does not change task revisions or stale drafts.
+- Read-only contextual status and room-level canPublish/canWithdraw/canOffer flags.
+  A helper must be active, different from the accountable member, and not that
+  work's designated independent reviewer. These flags do not bypass current
+  credential, connection, sponsor, session or external-tool authorization.
+- Withdrawal retains scope, issuing identity and original signal ID for context;
+  it does not delete offers, drafts or work. Expiry uses an explicit evaluation time
+  and does not mutate a room or advance a read marker.
+
+### Invalidation decision, now exercised against the real work reducer
+
+The work definition and accountable identity currently cannot be edited in place;
+changed definitions use replacement work. Therefore a blanket work-revision match
+would incorrectly cancel consent on starts, claim changes and historical checks.
+The contract instead anchors the accountable membership revision and current
+completion event at each explicit opening/reaffirmation:
+
+- Starting, ordinary blocking/resolution, claim release/reacquisition and historical
+  review preserve a still-current invitation. Claims have no direct renewal action;
+  tests use the actual release/reacquire sequence.
+- Completion closes discovery. A subsequent block/reopen retains the completion
+  receipt in the existing reducer, so its different event ID prevents resurrection.
+  Explicit reaffirmation records that new work cycle. Another completion closes it
+  again. A replacement work record never inherits the invitation.
+- Revocation makes the accountable participant unavailable. Restoration does not
+  restore old consent because membership revision advanced. Even a permission-
+  preserving access event requires reaffirmation: a conservative, explicit choice.
+- Expiry is exclusive at the exact boundary. Evaluation before openedAt does not
+  expose future consent; writes earlier than the previous help update are refused.
+  Expiry remains a derived wall-clock status, not a persisted irreversible event;
+  this does not establish a monotonic clock across a host clock correction.
+
+17 focused tests cover these paths, both update/withdraw orderings, late stale
+create/update intent, bounds, invalid records and participant identity binding.
+The full604 core/API/package checks pass. Tests intentionally apply the pure help
+constructor outside the current reducer; they are not end-to-end help writes,
+simultaneous database races, native-agent reasoning or browser acceptance.
+Initial claim-fixture errors (repository/ref fields and unsupported renewal) were
+corrected to exercise existing claim behavior, not by weakening the reducer.
+
+All65 existing runtime files match candidatecf377f3 byte-for-byte. Its19 assets,
+schema12 and fallback4d22189 remain verified and unchanged. No new browser or
+Workers suite was needed for this dormant module;184 browser/14 Workers/two exact
+fallback checks remain evidence from the previous runtime checkpoint, not new runs.
+No UI changed, so no new screenshots were taken. Final core output is retained in
+`../project-room-runtime-packages-20260908/evidence-help-contract/core.log`.
+
+### Next integration sequence: still required before calling this complete
+
+1. Add the semantic event and command shape together with writer13. Preserve all
+   historical Node guards, add schema12 to the accepted migration sources and
+   Durable Object old-guard/permit lists, and verify already-open12 writers cannot
+   mutate13 data. Reject legacy helpWanted projection/checkpoint field collisions
+   rather than reinterpret ignored data. Keep older public-asset manifests exact.
+2. Audit help through all retained history, including help hidden behind a
+   checkpoint. The auditor needs historical work revisions, accountable membership
+   revisions and completion anchors. It must not replay unrelated legacy work
+   under new transition rules. Test both help and supporting-fact corruption,
+   provenance, absence and migration rollback before runtime enablement.
+3. Wire generic authenticated commands and exact receipts. Allow withdrawal at
+   room capacity, retain stable retries, and test two real database connections
+   racing update/withdraw/create. Replayed old receipts must not imply current
+   help is open. Pure-contract stale tests above do not replace these checks.
+4. Add optional selected-context/discovery fields and a thin shared client/MCP
+   path. Include accountable membership revision in the selected facts required
+   to validate supplied guidance. Old services remain unavailable, not implicitly
+   open. Filtering must respect pagination and a single service evaluation time.
+5. Bind the explicit offer path to the exact current help event/revision and enforce
+   limits in the service. Merely posting a reply request does not yet do this.
+   Preserve ordinary conversation without treating it as an invitation-bound offer;
+   no automated assignment, execution, duplicate task or inferred acceptance.
+6. Add contextual human controls with short scope/expiry input and explicit
+   withdrawal. Preserve unknown-save inputs/retries, keyboard/mobile/large-text
+   behavior and other drafts. Test accountable human/agent, helper and reviewer
+   end-to-end, including multiple offers and withdrawal while an offer is in flight.
+7. Produce distinct schema13-compatible candidate/fallback packages, then qualify
+   populated migration, restoration and package switching with current authority.
+   Current schema12 fallback is not a future13 rollback. Re-run core/browser/Workers
+   checks and retain inspected screenshots before calling the whole slice usable.
+
+No deployment, push, provider change, paid model, live migration or existing preview
+restart. This goal remains active/incomplete; a tested dormant contract is not the
+full human/agent help-wanted feature or a deployment-ready schema13 candidate.
