@@ -59,6 +59,13 @@ Native-host acceptance, independent recovery-authority freshness, hosted recover
 publication and real-user retention evidence remain open. Consult the current
 handoff for exact tests and artifact hashes; do not repeat completed foundations.
 
+Help-storage correction: the local service now uses **schema/writer13** for explicit
+help invitations. The [storage checkpoint](HELP-STORAGE-CHECKPOINT-2026-09-08.md)
+implements authenticated writes and history/migration checks; human controls,
+structured agent discovery and invitation-bound offers remain in progress. A
+distinct13-compatible fallback is still required. Historical8/12 recovery tests
+and fallback4d22189 do not qualify a13 release; do not downgrade data.
+
 Preserve the useful foundations: invitations and member/account boundaries;
 conversation and desktop Enter-to-send; work/evidence/review/owner decisions;
 revision-based writes and exact retries; room-local scope claims; catch-up with
