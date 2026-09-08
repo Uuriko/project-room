@@ -51,6 +51,8 @@ Current checkpoint correction: human reply requests and observer v3 request
 attention are now locally implemented and covered by reconnect journeys. The
 retained schema12 candidate now includes [lean work discovery](LEAN-WORK-SNAPSHOT-2026-09-08.md),
 with qualified local fallback `4d22189`; the handoff identifies the latest exact package.
+The [fresh narrow-authority checkpoint](NARROW-AUTHORITY-CHECKPOINT-2026-09-08.md)
+subsequently reduces repeated full-room decoding without caching access decisions.
 Human/agent work search and definition-only reuse compose in the
 [discovery-to-contribution journey](DISCOVERY-CONTRIBUTION-2026-09-08.md).
 Native-host acceptance, independent recovery-authority freshness, hosted recovery,
