@@ -1,6 +1,8 @@
 # Durable current attention: implementation plan
 
-September 8, 2026. Local-only slice of the active broader goal.
+September 8, 2026. Locally implemented and verified; see the
+[checkpoint](CURRENT-ATTENTION-CHECKPOINT-2026-09-08.md). This plan is preserved as
+design context. The broader goal remains active and incomplete; not deployed.
 
 ## Problem and intended value
 

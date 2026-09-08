@@ -35,6 +35,12 @@ is historical, not a release instruction. A distinct, lifecycle-aware v9-compati
 fallback must be qualified on populated migrated data before release. Do not
 downgrade the database or use a v8 writer to bypass this requirement.
 
+Current September 8 qualification: native results and room instructions subsequently
+moved the local Room candidate to schema/writer 11. A v11-compatible fallback and
+hosted recovery/current-authority reconciliation now gate release. Local observer
+v2 is separate and does not change Room schema. Earlier v8/v9/v10 fallback references
+below are historical milestones, not instructions to downgrade current data.
+
 Preserve the useful foundations: invitations and member/account boundaries;
 conversation and desktop Enter-to-send; work/evidence/review/owner decisions;
 revision-based writes and exact retries; room-local scope claims; catch-up with
@@ -402,3 +408,19 @@ host acceptance and a v11-compatible fallback/hosted restore remain release gate
 Do not repeat charter implementation, silently enable execution, or treat a v10
 fallback as compatible with v11 data. Keep tools, budgets and action permissions
 separate from instructions and preserve a quiet, useful free/manual/BYO path.
+
+September 8 current-attention milestone: [durable local pull/ack](CURRENT-ATTENTION-CHECKPOINT-2026-09-08.md)
+is implemented at tested runtime 7ac9edc. CLI and two opt-in MCP tools share the
+existing observer/journal, with current semantic work and instruction notices,
+exact retained IDs, explicit local acknowledgement and current reconciliation.
+Separate private v2 directories preserve the original v1 stdout contract. No Room
+schema, UI or service change; 475 core/API/package, 159 browser and 12 local Workers
+checks pass. An actual agent reconnected after an owner changed the brief,
+discovered it through its own inbox and authored a 32-word/230-byte agenda; another
+independently reviewed it, leaving human approval pending and all read markers 0.
+This is not historical message/request delivery or synchronized seen state. The
+broader goal remains active/incomplete. Next specify targeted-discussion/request
+causes with anchored resume and explicit relevance/clearing, then eligible work;
+reduce avoidable read round trips without dropping identity/history checks. Keep
+native-host acceptance and v11 release recovery as parallel gates. Do not repeat
+the completed current-attention implementation or silently schedule its use.

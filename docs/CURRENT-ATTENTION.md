@@ -87,10 +87,11 @@ archive, message-request inbox, delivery receipt, cross-device seen ledger or
 retention metric. Targeted discussion/history requires a separate contract.
 
 V1 `watch start` still clears pending after stdout writes, not downstream receipt.
-V2 pull requires a separate directory: both formats refuse each other without
+V2 pull requires a separate directory: v1 start and v2 pull refuse each other without
 resetting or reinterpreting pending state. A fresh directory repeats initial
 catch-up, not lossless migration. Genuine old v1 readers refuse v2. Room schema
-remains 11; local observer v2 is independent.
+remains 11; local observer v2 is independent. The new status/stop observer can inspect
+either supported format without migration.
 
 Only one computer/local filesystem is supported. Do not move/copy/restore state
 while a reader or holder uses it. No automatic migration or cross-computer sync.
