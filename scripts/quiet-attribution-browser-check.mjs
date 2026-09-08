@@ -1,0 +1,67 @@
+// Simulated local readers, not human research or identity verification.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { rmSync, mkdirSync } from 'node:fs';
+import { chromium } from 'playwright';
+import { createAcceptanceFixture } from './acceptance-fixture.mjs';
+import { createRoomServer } from '../server/http.mjs';
+
+for (const touch of [false, true]) test(`quiet attribution ${touch ? 'touch' : 'desktop'}: short summaries, exact choices, live duplicate names`, { timeout: 45000 }, async t => {
+  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 50 });
+  let browser;
+  t.after(async () => { await browser?.close(); server.closeStreams(); server.closeAllConnections();
+    if (server.listening) await new Promise(resolve => server.close(resolve));
+    f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const jordan = 'guest-11111111-2222-4333-8444-555555555555', duplicate = 'guest-66666666-7777-4888-8999-000000000000';
+  const send = (actor, type, data) => f.store.command(f.keys[actor], 'commons', { id: crypto.randomUUID(), type, data });
+  send('owner', 'member.added', { memberId: jordan, displayName: 'Jordan', kind: 'human', permissions: ['accept_work'] });
+  f.keys[jordan] = f.store.issueAccessKey('commons', jordan);
+  send(jordan, 'message.posted', { messageId: 'naming-root', body: 'I can help with the handoff.' });
+  send('owner', 'message.posted', { messageId: 'naming-directed', body: 'Please check the handoff.', toMemberId: jordan });
+  send('owner', 'message.posted', { messageId: 'naming-reply', body: 'Thanks for helping.', replyToId: 'naming-root' });
+  send('owner', 'work.proposed', { workItemId: 'naming-work', title: 'Check our handoff', definitionOfDone: 'Check the named participant.',
+    accountableMemberId: jordan, independentVerificationRequired: false, ownerDecisionRequired: false });
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
+  browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({ viewport: touch ? { width: 390, height: 844 } : { width: 1280, height: 900 },
+    isMobile: touch, hasTouch: touch, reducedMotion: 'reduce' }), errors = [];
+  page.on('pageerror', error => errors.push(error.message)); page.setDefaultTimeout(8000);
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await page.locator('#access-key').fill(f.keys.owner); await page.locator('#auth-form button[type=submit]').click();
+  await page.locator('#main').waitFor({ state: 'visible' });
+  const record = id => page.locator(`[data-message-record-id="${id}"]`);
+  const next = page.locator('[data-work-record-id="naming-work"] .work-next-step');
+  const directed = record('naming-directed').locator('.audience-chip');
+  assert.equal(await directed.textContent(), 'To Jordan · room-visible');
+  assert.match(await next.textContent(), /Jordan —/); assert.equal((await next.textContent()).includes(jordan), false);
+  assert.equal(await record('naming-root').locator('.message-meta strong').textContent(), 'Jordan');
+  const option = page.locator(`#message-to-select option[value="${jordan}"]`);
+  assert.match(await option.textContent(), new RegExp(jordan), 'action choices retain full identity');
+  await page.locator('#people-panel > summary').click();
+  assert.match(await page.locator(`[data-member-record-id="${jordan}"] strong`).textContent(), new RegExp(jordan));
+  await page.locator('#people-panel > summary').click();
+  await page.locator('#message-search').fill('I can help');
+  assert.equal(await page.locator('#search-list strong').textContent(), 'Jordan');
+  await page.locator('#message-search').fill('');
+  mkdirSync('test-results', { recursive: true });
+  await page.screenshot({ path: `test-results/quiet-attribution-${touch ? 'touch' : 'desktop'}-unique.png` });
+  const reply = record('naming-root').locator('[data-message-action="reply"]'); await reply.focus();
+  send('owner', 'member.added', { memberId: duplicate, displayName: ' jordan ', kind: 'human', permissions: [] });
+  await page.waitForFunction(id => document.querySelector('[data-message-record-id="naming-directed"] .audience-chip').textContent.includes(id), jordan);
+  assert.equal(await reply.evaluate(node => node === document.activeElement), true, 'background identity change preserves action focus');
+  assert.match(await record('naming-root').locator('.message-meta strong').textContent(), new RegExp(jordan));
+  assert.match(await next.textContent(), new RegExp(jordan));
+  send('owner', 'member.access_changed', { memberId: duplicate, expectedMemberRevision: 0, active: false, permissions: [] });
+  await page.waitForFunction(id => document.querySelector(`[data-member-record-id="${id}"]`).textContent.includes('access revoked'), duplicate);
+  assert.match(await directed.textContent(), new RegExp(jordan), 'inactive names remain relevant to historical attribution');
+  await page.locator('#message-search').fill('I can help');
+  assert.match(await page.locator('#search-list strong').textContent(), new RegExp(jordan));
+  await page.locator('#message-search').fill('');
+  await record('naming-root').locator('[data-message-action="thread"]').click();
+  assert.match(await page.locator('#thread-title').textContent(), new RegExp(jordan));
+  await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+  await page.locator('#thread-title').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `test-results/quiet-attribution-${touch ? 'touch' : 'desktop'}-duplicate-large.png` });
+  assert.deepEqual(errors, []);
+});

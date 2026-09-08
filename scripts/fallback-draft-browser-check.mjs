@@ -10,7 +10,7 @@ import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRuntimePackage, verifyRuntimePackage } from './runtime-package.mjs';
 
 const repository = fileURLToPath(new URL('../', import.meta.url));
-const candidateCommit = '9745978c784b71ac90487d37b4e5d7b26fa45ef4';
+const candidateCommit = process.env.ROOM_DRAFT_CANDIDATE_COMMIT ?? '9745978c784b71ac90487d37b4e5d7b26fa45ef4';
 const fallbackCommit = process.env.ROOM_DRAFT_FALLBACK_COMMIT ?? '4d22189ccdebc56db23397e6cc75b07eff0e3c2c';
 
 for (const touch of [false, true]) test(`packaged browser fallback ${touch ? 'touch' : 'desktop'}: drafts survive and sign-out clears private state`, { timeout: 60000 }, async t => {

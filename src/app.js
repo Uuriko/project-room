@@ -212,7 +212,7 @@ const displayName = id => {
     && other.displayName.trim().toLocaleLowerCase() === member.displayName.trim().toLocaleLowerCase());
   return duplicate ? memberLabel(id) : member.displayName;
 };
-const name = id => memberLabel(id);
+const name = displayName; // Ordinary summaries use the same duplicate-aware attribution as authors.
 const can = capability => state?.members[session?.member.id]?.permissions.includes(capability);
 const sameSession = (generation, roomId, memberId) => generation === client.generation && state
   && session?.roomId === roomId && session?.member.id === memberId;
@@ -604,7 +604,7 @@ function render() {
   renderSearch();
   $("#event-count").textContent = `${client.sequence}`;
   renderReturnBrief();
-  renderContent("#event-list", [...state.eventLog].reverse().map(e => `<li id="${recordDomId("event", e.id)}" tabindex="-1" data-event-record-id="${esc(e.id)}" data-focus-key="event:${esc(e.id)}"><span>${esc(humanize(e.type))}</span><strong>${esc(name(e.actorId))}</strong><time datetime="${esc(e.at)}">${esc(time(e.at))}</time><code>${esc(e.id)}</code></li>`).join(""));
+  renderContent("#event-list", [...state.eventLog].reverse().map(e => `<li id="${recordDomId("event", e.id)}" tabindex="-1" data-event-record-id="${esc(e.id)}" data-focus-key="event:${esc(e.id)}"><span>${esc(humanize(e.type))}</span><strong>${esc(memberLabel(e.actorId))}</strong><time datetime="${esc(e.at)}">${esc(time(e.at))}</time><code>${esc(e.id)}</code></li>`).join(""));
 }
 function renderMessages() {
   const list = $("#message-list"), view = currentThreadId ? `thread:${currentThreadId}` : "room";
@@ -912,7 +912,7 @@ function receiptCard(i) {
 }
 function workCard(i, now) {
   const next = nextWorkStep(i, now), status = workStatus(i, now);
-  const nextActor = next.memberId ? `${memberLabel(next.memberId)} — ` : "";
+  const nextActor = next.memberId ? `${name(next.memberId)} — ` : "";
   const nextLine = `<p class="work-next-step" data-next-step="${esc(next.action)}"><strong>Next:</strong> ${esc(nextActor + status.next)}</p>`;
   const source = i.sourceMessageId ? `<a class="source-link" href="${esc(recordHref("message", i.sourceMessageId))}" data-open-message="${esc(i.sourceMessageId)}" data-focus-key="work-source:${esc(i.id)}">From this conversation</a>` : "";
   const blocker = i.blocker ? `<div class="blocker"><strong>Blocked</strong><p>${esc(i.blocker.reason)}</p><p>${esc(i.blocker.nextAction)}</p></div>` : "";
@@ -1515,7 +1515,7 @@ $("#work-list").addEventListener("click", e => {
       if (!owns() || !value) return;
       if (value.result.receipt?.evidenceVersion !== receipt.evidenceVersion) throw new Error("Pinned version changed");
       $("#result-body").textContent = value.result.text.body;
-      $("#result-status").textContent = `Submitted by ${name(receipt.reportedById)} · exact stored text`;
+      $("#result-status").textContent = `Submitted by ${memberLabel(receipt.reportedById)} · exact stored text`;
     }).catch(() => { if (owns()) $("#result-status").textContent = "Exact text unavailable. Close and try again."; });
     return;
   }
@@ -1576,7 +1576,7 @@ function loadActionText(item, action) {
     entry.text = value.result.text;
     $("#action-text-body").textContent = entry.text.body;
     const proposal = entry.text.proposal;
-    $("#action-text-origin").textContent = `Posted by ${name(entry.text.postedById)}${proposal ? ` · draft based on revision ${proposal.basisRevision} · authorship unverified` : ""}`;
+    $("#action-text-origin").textContent = `Posted by ${memberLabel(entry.text.postedById)}${proposal ? ` · draft based on revision ${proposal.basisRevision} · authorship unverified` : ""}`;
     if (value.current.workRevision !== entry.revision) { entry.needsReview = true; entry.error = "Work changed. Review current work before saving."; }
     syncActionForm();
   }).catch(() => {
