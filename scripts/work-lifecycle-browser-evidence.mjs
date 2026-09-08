@@ -12,7 +12,8 @@ assert.equal(manifest.credentialKind, "operator-provisioned synthetic agents; no
 assert.match(manifest.origin, /^http:\/\/127\.0\.0\.1:\d+$/);
 const owner = JSON.parse(readFileSync(join(dirname(manifestPath), "owner-private.json"), "utf8"));
 assert.equal(owner.origin, manifest.origin);
-const output = resolve(prefix), suffixes = ["desktop-quiet.png", "desktop-evidence.png", "mobile-quiet.png", "mobile-large-text.png", "browser.json"];
+const output = resolve(prefix), suffixes = ["desktop-quiet.png", "desktop-evidence.png", "desktop-review.png",
+  "mobile-quiet.png", "mobile-large-text.png", "mobile-large-text-review.png", "mobile-large-text-decision.png", "browser.json"];
 assert.equal(suffixes.some(suffix => existsSync(output + "-" + suffix)), false, "Never overwrite earlier evidence");
 const browser = await chromium.launch({ headless: true }), captures = [], errors = [], outside = [], writes = [];
 try {
@@ -39,18 +40,32 @@ try {
       await card.locator('[data-next-step="decide"]').waitFor();
       assert.equal(await card.locator(".work-details").evaluate(node => node.open), false);
     }
-    const capture = async name => {
+    const capture = async (name, fullPage = true) => {
       assert.equal(await page.locator("#auth-panel").isVisible(), false);
       await page.waitForFunction(() => !document.querySelector("#status").classList.contains("visible"));
       const dimensions = await page.evaluate(() => ({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth }));
       assert.equal(dimensions.scrollWidth <= dimensions.width, true, "No document overflow");
-      const path = output + "-" + name + ".png"; await page.screenshot({ path, fullPage: true });
+      const path = output + "-" + name + ".png"; await page.screenshot({ path, fullPage });
       captures.push({ path, ...dimensions, workText: await cards.allTextContents() });
     };
     await capture(mobile ? "mobile-quiet" : "desktop-quiet");
     for (const participant of manifest.participants) await page.locator('[data-work-record-id="' + participant.workItemId + '"] .work-details > summary').click();
-    if (mobile) await page.addStyleTag({ content: "html { font-size: 200%; }" });
+    if (mobile) {
+      const size = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
+      await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
+      assert.equal(await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize)), size * 2);
+    }
     await capture(mobile ? "mobile-large-text" : "desktop-evidence");
+    const reviewed = page.locator('[data-work-record-id="work-agent-b"]');
+    await reviewed.getByText("INDEPENDENT PASS", { exact: true }).scrollIntoViewIfNeeded();
+    await capture(mobile ? "mobile-large-text-review" : "desktop-review", false);
+    if (mobile) {
+      const decision = reviewed.getByRole("button", { name: "Record decision", exact: true });
+      await decision.scrollIntoViewIfNeeded();
+      const bounds = await decision.boundingBox();
+      assert.ok(bounds && bounds.y >= 0 && bounds.y + bounds.height <= page.viewportSize().height);
+      await capture("mobile-large-text-decision", false);
+    }
     await context.close();
   }
   assert.deepEqual(errors, []); assert.deepEqual(outside, []); assert.deepEqual(writes, []);

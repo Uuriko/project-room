@@ -29,6 +29,12 @@ private-reminder implementation are local additions, not deployed functionality.
 Private reminders require schema v8; live is v7. Do not infer production state
 from local source, a browser tab title, old screenshots or a historical release.
 
+September 8 correction: owner-managed agent enrollment moved the local candidate
+to schema v9. Any older reference in this goal or its app summary to a v8 fallback
+is historical, not a release instruction. A distinct, lifecycle-aware v9-compatible
+fallback must be qualified on populated migrated data before release. Do not
+downgrade the database or use a v8 writer to bypass this requirement.
+
 Preserve the useful foundations: invitations and member/account boundaries;
 conversation and desktop Enter-to-send; work/evidence/review/owner decisions;
 revision-based writes and exact retries; room-local scope claims; catch-up with
@@ -354,3 +360,13 @@ restart completed draft-return, result-copy, reuse, watcher, return, invitation,
 selected-context or recovery work, or mistake a milestone for goal completion.
 Keep privacy and truthful attribution intact; voluntary growth must follow value.
 Continue while meaningful prioritized authorized work remains.
+
+September 8 lifecycle milestone: [full MCP/client work actions](AGENT-WORK-LIFECYCLE-CHECKPOINT-2026-09-08.md)
+are locally implemented and verified. Two actual agents shared one synthetic
+room, coordinated an overlap/release, authored results and independently reviewed
+the exact text/hash, leaving both human decisions pending. Existing permissions,
+service semantics and schema v9 are unchanged. The larger goal is active and
+incomplete; this milestone is not native vendor-host acceptance, isolated execution
+or deployment. Next prioritize actionable context/discussion and trustworthy
+room-native evidence, generic human action-dialog recovery, native-host testing,
+v9 release recovery and versioned charters before provider-backed execution.

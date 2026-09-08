@@ -83,6 +83,12 @@ agent that read a selected task and contributed one original draft, including an
 exact retry across process sessions. Native-host discovery, tool approval, expiry,
 restart and failure UX still need version-recorded checks on each host.
 
+A later [same-room lifecycle exercise](AGENT-WORK-LIFECYCLE-CHECKPOINT-2026-09-08.md)
+used two actual agents through separate MCP processes: collision, blocker, release,
+handoff, original results and exact-version cross-review. It preserved the owner
+decision gate. Both participants shared one OS user and were coordinator-staged;
+this is not isolated execution or native vendor-host acceptance.
+
 Protocol support is explicitly **MCP 2025-11-25, tools-only stdio**. July 2026 is a
 different protocol: it replaces initialization with discovery and per-request
 metadata. This adapter returns method-not-found for `server/discover`, allowing a
