@@ -27,4 +27,22 @@ test('discovery profiler refuses unbounded or noninteger fixture sizes before se
     { workCount: 1.5, messageCount: 2 }, { workCount: 1, messageCount: 2, samples: 0 }]) {
     await assert.rejects(profileDiscovery(options), /bounded synthetic/);
   }
+  await assert.rejects(profileDiscovery({ workCount: 1, messageCount: 2, managedProducer: 'yes' }), /boolean/);
+});
+
+test('discovery profiling separates managed sponsorship reads and immutable projection input from transfer', async () => {
+  // Observe counts, but do not make redundant parsing a required contract.
+  for (const managedProducer of [false, true]) {
+    const profile = await profileDiscovery({ workCount: 4, messageCount: 4, samples: 2, managedProducer });
+    assert.equal(profile.credentialMode, managedProducer ? 'owner-connected' : 'legacy-key');
+    assert.equal(profile.roomAuditUnchanged, true);
+    for (const metric of Object.values(profile.metrics)) {
+      assert.equal(metric.samples, 2);
+      assert.ok(Number.isSafeInteger(metric.fullRoomReads.min) && metric.fullRoomReads.min >= 0);
+      assert.equal(metric.fullRoomReads.min, metric.fullRoomReads.max);
+      assert.equal(metric.fullRoomReads.min, metric.identityFullRoomReads.min + metric.operationFullRoomReads.min);
+      assert.equal(metric.fullProjectionInputBytes.min, metric.fullRoomReads.min * profile.projectionJsonBytes);
+      assert.equal(metric.fullProjectionInputBytes.min, metric.fullProjectionInputBytes.max);
+    }
+  }
 });

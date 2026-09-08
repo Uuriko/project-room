@@ -3,14 +3,15 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { parseArgs } from "node:util";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
-export function createAcceptanceFixture() {
+export function createAcceptanceFixture({ managedProducer = false } = {}) {
+  if (typeof managedProducer !== "boolean") throw new Error("Choose a boolean managed-producer fixture mode");
   const directory = mkdtempSync(join(tmpdir(), "project-room-acceptance-"));
   let offset = 0;
   const store = new RoomStore(join(directory, "room.sqlite"), { now: () => Date.now() + offset });
@@ -24,6 +25,14 @@ export function createAcceptanceFixture() {
     for (const [memberId, kind, permissions] of [
       ["guest", "human", []], ["producer", "agent", ["accept_work", "complete_work"]], ["reviewer", "agent", ["verify"]]
     ]) {
+      if (managedProducer && memberId === "producer") {
+        const session = store.createSession(keys.owner), token = randomBytes(32).toString("base64url");
+        store.agentConnections.apply(session.token, "commons", { action: "create", requestId: randomUUID(), memberId,
+          displayName: "Test producer", access: "contribute", keyHash: createHash("sha256").update(token).digest("hex"),
+          expiresAt: Date.now() + 3600000, expectedOwnerRevision: 0 }, session.session.sessionBinding);
+        keys.producer = token;
+        continue;
+      }
       send("owner", T.MEMBER_ADDED, { memberId, displayName: `Test ${memberId}`, kind, permissions, ...(kind === "agent" ? { accountableHumanId: "owner" } : {}) });
       keys[memberId] = store.issueAccessKey("commons", memberId);
     }
