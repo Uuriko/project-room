@@ -12,6 +12,123 @@ import { saveAgentConnection } from '../client/agent-connection.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
 import { textVersion } from '../server/text-results.mjs';
 
+for (const touch of [false, true]) test(`simultaneous attention ${touch ? 'touch' : 'desktop'}: stable choices and independent resolution`, { timeout: 60000 }, async t => {
+  const f = createAcceptanceFixture({ managedProducer: true }), handles = [], traffic = [], errors = [];
+  const server = createRoomServer({ store: f.store, streamInterval: 50 });
+  let browser;
+  t.after(async () => {
+    for (const handle of handles) await handle.close();
+    await browser?.close(); server.closeStreams(); server.closeAllConnections();
+    if (server.listening) await new Promise(resolve => server.close(resolve));
+    f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+  });
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const actors = {};
+  for (const memberId of ['producer', 'reviewer']) {
+    const directory = join(f.directory, memberId);
+    saveAgentConnection(directory, { version: 1, origin, roomId: 'commons', memberId, token: f.keys[memberId] });
+    actors[memberId] = await openMcpTestClient(directory); handles.push(actors[memberId]);
+  }
+  const call = async (who, tool, args) => {
+    const response = await actors[who].call(tool, args);
+    assert.equal(response.error, undefined, JSON.stringify(response));
+    assert.equal(response.result.isError, undefined, JSON.stringify(response.result));
+    traffic.push({ who, tool }); return response.result.structuredContent;
+  };
+  const send = (who, type, data) => f.store.command(f.keys[who], 'commons', { id: crypto.randomUUID(), type, data });
+  const state = () => f.store.room('commons').state;
+  const questions = [];
+  for (const [i, body] of ['Which audience is this for?', 'Should we include a budget?', 'What is the delivery date?'].entries()) {
+    questions.push(await call(i === 1 ? 'reviewer' : 'producer', 'room_request_reply', {
+      requestId: `queue-question-${i}`, toMemberId: 'owner', workItemId: 'test-handoff', body }));
+  }
+  browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({ viewport: touch ? { width: 390, height: 844 } : { width: 1280, height: 900 },
+    isMobile: touch, hasTouch: touch, reducedMotion: 'reduce' });
+  page.setDefaultTimeout(8000); page.on('pageerror', error => errors.push(error.message));
+  await page.goto(origin); await page.locator('#access-key').fill(f.keys.owner);
+  await page.locator('#auth-form button[type=submit]').click(); await page.locator('#main').waitFor({ state: 'visible' });
+  await page.locator('#contribution-open').focus();
+  assert.equal(await page.locator('#contribution-open').getAttribute('data-step'), `request:${questions[0].requestMessageId}`);
+  for (let i = 0; i < 6; i++) send('owner', 'work.proposed', { workItemId: `queue-work-${i}`, title: `Check source ${i + 1}`,
+    definitionOfDone: 'Record the checked source.', accountableMemberId: 'owner', independentVerificationRequired: false, ownerDecisionRequired: false });
+  send('owner', 'work.proposed', { workItemId: 'queue-decision', title: 'Choose the release note', definitionOfDone: 'Name the intended audience.',
+    accountableMemberId: 'producer', independentVerificationRequired: false, ownerDecisionRequired: true, humanDecisionMakerId: 'owner', mode: 'read' });
+  await call('producer', 'room_accept_work', { requestId: 'queue-accept', workItemId: 'queue-decision', expectedRevision: 0 });
+  const body = 'This release note is for room owners.';
+  const draft = await call('producer', 'room_post_draft', { requestId: 'queue-draft', workItemId: 'queue-decision', packetId: 'queue-packet', basisRevision: 1, body });
+  await call('producer', 'room_submit_text_result', { requestId: 'queue-result', workItemId: 'queue-decision', expectedRevision: 1,
+    evidenceMessageId: draft.messageId, evidenceMessageEventId: draft.eventId, evidenceVersion: textVersion(body), previousCompletionEventId: null,
+    producerId: 'producer', summary: 'Release note for room owners', nextAction: 'Review the intended audience.' });
+  await page.waitForFunction(() => document.querySelector('#contribution-more').textContent === '9 more');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'contribution-open');
+  assert.equal(await page.locator('#contribution-open').getAttribute('data-step'), `request:${questions[0].requestMessageId}`,
+    'A new higher-priority decision cannot replace the focused request action');
+  const beforeRead = auditRecovery(f.store).dataSha256;
+  await page.locator('#contribution-more').click();
+  await page.waitForFunction(() => !document.querySelector('#rb-ack-button').disabled);
+  assert.equal(await page.locator('#rb-attention-list a').count(), 5);
+  assert.equal(await page.locator('#rb-show-all').textContent(), 'Show all (10)');
+  await page.locator('#rb-show-all').click();
+  assert.equal(await page.locator('#rb-attention-list a').count(), 10);
+  assert.equal(auditRecovery(f.store).dataSha256, beforeRead, 'Opening the whole queue is read-only');
+  mkdirSync('test-results', { recursive: true });
+  const prefix = `test-results/simultaneous-attention-${touch ? 'touch' : 'desktop'}`;
+  await page.locator('#return-brief-panel > summary').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${prefix}-queue.png` });
+  const link = index => page.locator(`#rb-attention-list [data-open-message="${questions[index].requestMessageId}"]`);
+  await link(1).focus();
+  await call('reviewer', 'room_cancel_request', { requestId: 'queue-cancel', requestMessageId: questions[1].requestMessageId,
+    expectedRequestRevision: 0, reason: 'Budget is already specified in the room brief.' });
+  await link(1).waitFor({ state: 'detached' });
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.openMessage), questions[2].requestMessageId,
+    'When a focused request clears, focus moves to its surviving next neighbor rather than restarting the queue');
+  await page.screenshot({ path: `${prefix}-neighbor.png` });
+  await link(2).press('Enter');
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.messageRecordId), questions[2].requestMessageId);
+  await page.locator(`[data-message-id="${questions[2].requestMessageId}"][data-message-action="request-answered"]`).click();
+  await page.waitForFunction(() => !document.querySelector('#message-input').disabled);
+  await page.locator('#message-input').fill('Friday. Keep the audience question open for the project lead.');
+  const arrival = send('owner', 'message.posted', { messageId: 'queue-background', body: 'A source note has been updated.' });
+  await page.waitForFunction(sequence => document.querySelector('#event-count').textContent === String(sequence), arrival.sequence);
+  assert.equal(await page.locator('#message-input').inputValue(), 'Friday. Keep the audience question open for the project lead.');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'message-input', 'Background activity does not steal composer focus');
+  if (touch) await page.locator('#message-form button[type=submit]').click(); else await page.locator('#message-input').press('Enter');
+  await page.locator('#request-mode-bar').waitFor({ state: 'hidden' });
+  if (!touch) assert.equal(await page.evaluate(() => document.activeElement.id), 'message-input', 'Keyboard send preserves composer focus');
+  assert.deepEqual(questions.map(q => state().replyRequests[q.requestMessageId].status), ['open', 'cancelled', 'answered']);
+  assert.equal(state().workItems['queue-decision'].decision, null);
+  for (let i = 0; i < 6; i++) assert.equal(state().workItems[`queue-work-${i}`].state, 'proposed');
+  const beforeAgentRead = auditRecovery(f.store).dataSha256;
+  for (const [i, who] of ['producer', 'reviewer', 'producer'].entries()) {
+    const result = await call(who, 'room_read_request', { requestMessageId: questions[i].requestMessageId });
+    assert.equal(result.request.status, ['open', 'cancelled', 'answered'][i]);
+    if (i === 2) assert.match(result.page.items.at(-1).message.body, /^Friday\./);
+  }
+  assert.equal(auditRecovery(f.store).dataSha256, beforeAgentRead);
+  await page.locator('#return-brief-panel > summary').scrollIntoViewIfNeeded();
+  assert.equal(await page.locator('#rb-attention-list a').count(), 8);
+  await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
+  await link(0).scrollIntoViewIfNeeded();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+  await page.screenshot({ path: `${prefix}-remaining-large.png` });
+  // The remaining request is last in this queue: use the preceding surviving
+  // work, not the first row, when its requester explicitly cancels it too.
+  await link(0).focus();
+  await call('producer', 'room_cancel_request', { requestId: 'queue-cancel-last', requestMessageId: questions[0].requestMessageId,
+    expectedRequestRevision: 0, reason: 'The project lead supplied the audience separately.' });
+  await link(0).waitFor({ state: 'detached' });
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.openWork), 'queue-decision');
+  assert.equal(await page.locator('#rb-attention-list a').count(), 7);
+  const markers = Object.fromEntries(['owner', 'producer', 'reviewer'].map(member => [member,
+    f.store.db.prepare('SELECT sequence FROM cursors WHERE room_id=? AND member_id=?').get('commons', member)?.sequence ?? 0]));
+  assert.deepEqual(markers, { owner: 0, producer: 0, reviewer: 0 }); assert.deepEqual(errors, []);
+  writeFileSync(`${prefix}.json`, JSON.stringify({ simulatedHuman: true, scriptedMcp: true, nativeModels: false,
+    initialNeeds: 10, afterAnswerNeeds: 8, remainingNeeds: 7, requestStates: ['cancelled', 'cancelled', 'answered'], humanApproval: null,
+    readMarkers: markers, traffic, finalAudit: auditRecovery(f.store) }, null, 2));
+});
+
 for (const crowded of [false, true]) for (const touch of [false, true]) test(`${crowded ? 'crowded ' : ''}reconnect collaboration ${touch ? 'touch' : 'desktop'}: clarify, restart, contribute and review`, { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture({ managedProducer: crowded }), handles = new Set(), traffic = [], errors = [];
   let server = createRoomServer({ store: f.store, streamInterval: 50 }), browser;

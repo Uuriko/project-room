@@ -1765,20 +1765,24 @@ function renderBriefList(selector, html) {
   const focusedKey = list.contains(document.activeElement)
     ? document.activeElement.closest("[data-brief-key]")?.dataset.briefKey
     : null;
+  const previousKeys = focusedKey ? [...list.querySelectorAll("[data-brief-key]")].map(node => node.dataset.briefKey) : [];
   const changed = list._content !== html;
   if (changed) {
     list.innerHTML = html;
     list._content = html;
   }
   if (focusedKey && changed) {
-    const exact = [...list.querySelectorAll("[data-brief-key]")]
-      .find(node => node.dataset.briefKey === focusedKey);
-    const first = list.querySelector("[data-brief-key]");
+    const remaining = new Map([...list.querySelectorAll("[data-brief-key]")].map(node => [node.dataset.briefKey, node]));
+    const index = previousKeys.indexOf(focusedKey);
+    // Keep the current item, then its next surviving neighbor, then the previous
+    // one. A resolved request should not restart a long queue at the first row.
+    const destination = [focusedKey, ...previousKeys.slice(index + 1), ...previousKeys.slice(0, index).reverse()]
+      .map(key => remaining.get(key)).find(Boolean) ?? remaining.values().next().value;
     const acknowledgement = $("#rb-ack-button");
     const fallback = !acknowledgement.disabled && !acknowledgement.hidden
       ? acknowledgement
       : $("#return-brief-panel > summary");
-    (exact || first || fallback).focus({ preventScroll: true });
+    (destination || fallback).focus({ preventScroll: true });
   }
 }
 function renderContribution(steps, owned) {
