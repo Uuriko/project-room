@@ -23,6 +23,24 @@ export function confirmsWorkProposal(receipt, command, roomId, memberId) {
 }
 
 export { matchesReceipt };
+
+// A conversational offer on selected work, never open assignment or capability
+// matching. Derive from committed participant/work facts; do not inspect prose.
+export function workCollaboration(item, member, participants) {
+  const accountable = participants.find(person => person.id === item.accountableMemberId);
+  const status = member.active !== true ? "unavailable"
+    : item.state === S.COMPLETED || terminalWork(item) ? "closed"
+    : member.id === item.accountableMemberId ? "accountable"
+    : item.independentVerificationRequired && member.id === item.verifierMemberId ? "independent_reviewer"
+    : accountable?.active !== true ? "unavailable" : "may_offer";
+  return { version: 1, status, offer: status === "may_offer" ? {
+    checkExisting: { tool: "room_list_requests", arguments: { direction: "outgoing", status: "all" } },
+    readDiscussion: { tool: "room_read_work_discussion", arguments: { workItemId: item.id } },
+    request: { tool: "room_request_reply", arguments: { workItemId: item.id, toMemberId: accountable.id }, requiredInput: ["requestId", "body"] },
+    guidance: "Not a help-wanted listing. Follow your operator's instructions; inspect discussion and your previous requests before offering one bounded contribution. An answer does not assign work or grant external permission. Do not repeat declined offers."
+  } : null };
+}
+
 // Work actions can carry arrays. Exact payload and business-operation identity
 // must match before a browser may discard a retained retry or announce success.
 export async function confirmsWorkAction(receipt, command, roomId, memberId) {

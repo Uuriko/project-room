@@ -1,5 +1,6 @@
 import { validId, PERMISSIONS, WORK_STATES } from "../src/events.js";
-import { nextWorkStep, workActions, reusableWorkDefinition } from "../src/workflow.js";
+import { nextWorkStep, workActions, reusableWorkDefinition, workCollaboration } from "../src/workflow.js";
+import { isDeepStrictEqual } from "node:util";
 import { searchWork } from "../src/work-selectors.js";
 import { workPacket, resultDraft, verifyWorkResult } from "../src/work-packet.js";
 import { submitWorkAction } from "./work-actions.mjs";
@@ -203,6 +204,17 @@ export class RoomAgentClient {
       throw new RoomClientError(200, "invalid_response", "Selected work context does not match the request");
     }
     if (result.context.charter !== undefined) result.context.charter = checkedCharter(result.context.charter, result.evaluatedThrough);
+    if (Object.hasOwn(result, "collaboration")) {
+      try {
+        const participants = result.context.participants;
+        if (!Object.values(WORK_STATES).includes(result.work.state) || !validId(result.work.accountableMemberId)
+          || typeof result.work.independentVerificationRequired !== "boolean" || typeof result.viewer.active !== "boolean"
+          || !Array.isArray(participants) || participants.length > 10
+          || participants.some(person => !person || !validId(person.id) || person.unavailable !== true && typeof person.active !== "boolean")
+          || new Set(participants.map(person => person.id)).size !== participants.length
+          || !isDeepStrictEqual(result.collaboration, workCollaboration(result.work, result.viewer, participants))) throw new Error();
+      } catch { throw new RoomClientError(200, "invalid_response", "Collaboration guidance does not match selected work"); }
+    }
     return result;
   }
   async workDiscussion(workItemId, options = {}) {

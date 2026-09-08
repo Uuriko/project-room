@@ -223,7 +223,9 @@ for (const crowded of [false, true]) for (const touch of [false, true]) test(`${
     await page.waitForFunction(sequence => document.querySelector('#event-count').textContent === String(sequence), arrival.sequence);
     assert.equal(await page.evaluate(() => document.activeElement.dataset.messageRecordId), question.requestMessageId);
     assert.ok(Math.abs(await requestRow.evaluate(node => node.getBoundingClientRect().top) - beforeTop) <= 2,
-      'New discussion does not pull the reader away from the older request');
+      `New discussion does not pull the reader away from the older request: ${JSON.stringify(await requestRow.evaluate((node, beforeTop) => ({ beforeTop,
+        afterTop: node.getBoundingClientRect().top, list: document.querySelector('#message-list').getBoundingClientRect().toJSON(), scrollY,
+        listScroll: document.querySelector('#message-list').scrollTop }), beforeTop))}`);
     assert.equal(await page.locator('#new-messages-button').isVisible(), true);
   }
   await page.locator(`[data-message-id="${question.requestMessageId}"][data-message-action="request-answered"]`).click();

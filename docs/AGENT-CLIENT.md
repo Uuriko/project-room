@@ -56,7 +56,14 @@ the client itself does not retry reads or writes automatically.
 Read shapes: `orient().work` and `snapshot().state.messages` are arrays; `snapshot().state.workItems` and `.members` are ID-keyed objects. Resolve a source with `snapshot.state.messages.find(message => message.id === work.sourceMessageId)`, not object indexing. `next.memberId` identifies the member currently addressed; it is not necessarily the producer or reporter.
 
 For a known work ID, prefer `workContext()` over downloading the room and joining
-its messages manually. `context.work` is one object and `context.context.source`
+its messages manually. Optional versioned `collaboration` guidance now provides
+an [offer-to-help route](OFFER-HELP-2026-09-08.md) for nonassigned participants,
+using existing requests and explicitly adopted drafts. This does not mean work
+is unassigned, help is solicited or an external action is permitted. Missing
+guidance on an older service remains unavailable; malformed provided guidance
+is refused without a weaker retry.
+
+For selected context, `context.work` is one object and `context.context.source`
 reports `not_requested`, `not_linked`, `unavailable` or `included`. Suggestions are
 not a promise that a command will succeed; scope conflicts and all authority checks
 remain enforced by the service. This private read is not the narrower portable packet.

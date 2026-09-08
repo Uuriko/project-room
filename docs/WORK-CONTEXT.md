@@ -47,6 +47,12 @@ Contract version 1 includes:
 - `suggestedActions`: the same presentation hints used in the browser, not an
   authorization guarantee. Scope conflicts and every command still pass through
   the existing service validation. No commands are created or submitted by a read.
+- Optional `collaboration`: version-1 guidance for an [offer of bounded help](OFFER-HELP-2026-09-08.md).
+  `may_offer` supplies existing request/discussion tool references and the current
+  accountable recipient. `accountable`, `independent_reviewer`, `closed` and
+  `unavailable` have no offer. It is not capability matching, help-wanted status,
+  assignment or an execution grant. Older services may omit it; clients validate
+  provided guidance against the selected work and participants without another read.
 - `evaluatedThrough` and `evaluatedAt`: one room commit and one server clock.
   Claim expiry can change the next step without a new event. Work revisions, not
   room sequence numbers, bind subsequent writes.

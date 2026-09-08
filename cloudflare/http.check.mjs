@@ -80,6 +80,8 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.equal(context.viewer.id, joined.session.member.id);
     assert.equal(context.viewerSessionBinding, joined.session.sessionBinding);
     assert.equal(context.context.source.message.body, command.data.body);
+    assert.equal(context.collaboration.version, 1); assert.equal(context.collaboration.status, 'may_offer');
+    assert.deepEqual(context.collaboration.offer.request.arguments, { workItemId: 'selected:task', toMemberId: 'owner' });
     const discussionResponse = await call('/api/rooms/commons/work-discussion?workItemId=selected%3Atask&limit=1', { headers: guestHeaders });
     assert.equal(discussionResponse.headers.get('cache-control'), 'no-store');
     const discussion = await json(discussionResponse);
@@ -99,6 +101,7 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.equal(noSource.context.source.status, 'not_requested');
     assert.equal(noSource.context.source.message, null);
     assert.equal(noSource.next.action, 'accept');
+    assert.deepEqual(noSource.collaboration, { version: 1, status: 'accountable', offer: null });
     assert.equal((await call('/api/rooms/commons/work-context?workItemId=selected%3Atask', { headers: { ...guestHeaders, 'X-Session-Binding': 'f'.repeat(64) } })).status, 409);
     assert.deepEqual(await json(await call('/api/rooms/commons', { headers: guestHeaders })), beforeRead);
     const questionCommand = { id: randomUUID(), type: 'message.posted', data: { messageId: 'worker-reply-request', requestKind: 'reply',

@@ -125,5 +125,9 @@ test('new discovery client reads exact schema12 fallback without upgrading or mu
   const result = await client.orient({ query: 'agenda', focus: 'needs_me' });
   assert.equal(result.work[0].id, 'test-handoff'); assert.equal(result.selection.shown, 1);
   assert.equal(responses.length, 2); assert.equal(responses[1].snapshotView, undefined); assert.ok(Array.isArray(responses[1].state.messages));
+  const selected = await client.workContext('test-handoff');
+  assert.equal(selected.collaboration, undefined, 'Actual retained fallback does not advertise new help guidance');
+  assert.equal(selected.work.accountableMemberId, 'producer');
+  assert.equal(responses.length, 4, 'Selected read retains identity preflight without a compatibility retry');
   assert.equal(auditRecovery(store).dataSha256, before);
 });
