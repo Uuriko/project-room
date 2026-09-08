@@ -430,7 +430,7 @@ button:disabled { cursor: wait; opacity: .6; }
 .icon-button { display: inline-grid; place-items: center; min-width: 44px; width: 44px; height: 44px; align-self: end; padding: .5rem; border-radius: 50%; }
 .icon-button svg { pointer-events: none; }
 .community-shell { display: grid; grid-template-columns: minmax(0, 1fr) 23rem; }
-.room-navigation { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: .35rem 1rem; padding: .4rem 1.5rem; border-bottom: 1px solid var(--border); }
+.room-navigation { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: .35rem 1rem; padding: .4rem 1.5rem; border-bottom: 1px solid var(--line); }
 .room-navigation button { min-height: 44px; padding: .35rem .6rem; }
 .room-navigation span { font-size: .85em; }
 .return-help { margin-top: 1rem; font-size: .9rem; }

@@ -11,8 +11,10 @@ until a new deployment receipt is published.
 - #8 is included by ancestry and is now merged.
 - #12, #13, #14 and #20 are included by ancestry; their duplicate PRs are closed.
 - #3–#5 were reconciled through the older integration rather than retained as
-  unchanged ancestor commits. Keep their history as provenance; do not apply them
-  again to main. See UNIFICATION-2026-09-07.md for the detailed reconciliation.
+  unchanged ancestor commits. Their historical PRs are closed as superseded;
+  source branches remain as provenance. The only removed source path from #3/#4
+  is the prototype src/storage.js, replaced by the durable server. No #5 file path
+  is missing. See UNIFICATION-2026-09-07.md for the detailed reconciliation.
 - #9's separate harness, #16–#18 contributions and newer unpublished identity
   work require deliberate adaptation. They are not counted as integrated.
 - #24 is an independent conformance contribution. #25/#26 are optional OpenAI
