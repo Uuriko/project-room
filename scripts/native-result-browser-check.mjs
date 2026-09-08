@@ -98,10 +98,12 @@ test("native draft cannot save stale work; explicit refresh keeps the selected t
 test("native result large text and keyboard remain usable; revocation clears visible text", { timeout: 25000 }, async t => {
   const f = await setup(t, { review: true });
   await f.page.evaluate(() => { document.documentElement.style.fontSize = "200%"; }); await f.open(); await f.textReady();
+  assert.equal(await f.page.locator("#action-text-body").evaluate(el => getComputedStyle(el).fontSize), "32px");
   assert.equal(await f.page.locator("#action-dialog").evaluate(el => el.scrollWidth <= el.clientWidth), true);
   await f.page.locator("#cancel-action").focus(); await f.page.keyboard.press("Escape"); await f.page.locator("#action-dialog").waitFor({ state: "hidden" });
   await f.page.locator(`[data-read-result='${f.workItemId}']`).click();
   await f.page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body); await f.capture("large-text");
+  assert.equal(await f.page.locator("#result-body").evaluate(el => getComputedStyle(el).fontSize), "32px");
   f.send(T.MEMBER_ACCESS_CHANGED, { memberId: "human-checker", expectedMemberRevision: 0, permissions: ["verify"], active: false });
   await f.page.locator("#auth-panel").waitFor({ state: "visible" });
   assert.equal(await f.page.locator("#result-body").textContent(), ""); assert.equal(await f.page.locator("#action-text-body").textContent(), "");

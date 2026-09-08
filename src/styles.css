@@ -247,7 +247,7 @@ body { font-size: 16px; }
 .auth-panel h1 { font-size: clamp(1.7rem, 4vw, 2.5rem); line-height: 1.12; }
 .auth-panel p, dialog p { line-height: 1.6; }
 .auth-panel form, #action-fields, #action-form, #invitation-account-form, .invitation-shell { display: grid; gap: 1rem; }
-#action-text-body, #result-body { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 22rem; overflow: auto; font: inherit; padding: 1rem; border: 1px solid var(--line); border-radius: .65rem; }
+#action-text-body, #result-body { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 22rem; overflow: auto; font: inherit; font-size: 1rem; padding: 1rem; border: 1px solid var(--line); border-radius: .65rem; }
 #action-context { overflow-wrap: anywhere; }
 #action-text, #action-form { min-width: 0; }
 .auth-panel label, dialog label { display: grid; gap: .45rem; }

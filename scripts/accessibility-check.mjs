@@ -102,7 +102,7 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   const producerSelect = page.locator('#action-form select[name="producerId"]');
   assert.equal(await producerSelect.inputValue(), "", "producer is never inferred from the completion reporter");
   assert.deepEqual(await producerSelect.locator("option").allTextContents(), [
-    "Choose producer attribution",
+    "Choose producer",
     "I produced this — Room owner (owner)",
     "Unknown / not reported",
     "Maya (maya) · human"
