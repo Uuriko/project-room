@@ -344,18 +344,18 @@ test("the v1 projection, checkpoint, and version marker roll back together", () 
   } finally { store.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 
-test("fresh databases use schema v10 and every unsupported schema fails closed without mutation", () => {
+test("fresh databases use schema v11 and every unsupported schema fails closed without mutation", () => {
   const directory = mkdtempSync(join(tmpdir(), "project-room-schema-version-"));
   const filename = join(directory, "room.sqlite");
   const store = new RoomStore(filename);
   assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 11);
   assert.ok(store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='projection_checkpoints'").get());
-  store.db.exec("PRAGMA journal_mode=DELETE; PRAGMA user_version=11");
+  store.db.exec("PRAGMA journal_mode=DELETE; PRAGMA user_version=12");
   store.close();
   assert.throws(() => new RoomStore(filename), /schema is newer/);
 
   let raw = new DatabaseSync(filename);
-  assert.equal(raw.prepare("PRAGMA user_version").get().user_version, 11);
+  assert.equal(raw.prepare("PRAGMA user_version").get().user_version, 12);
   assert.equal(raw.prepare("PRAGMA journal_mode").get().journal_mode, "delete", "rejection must not change a future database's storage mode");
   raw.exec("PRAGMA user_version=-1");
   raw.close();
