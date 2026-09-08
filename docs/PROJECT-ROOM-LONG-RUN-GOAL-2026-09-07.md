@@ -66,6 +66,12 @@ structured agent discovery and invitation-bound offers remain in progress. A
 distinct13-compatible fallback is still required. Historical8/12 recovery tests
 and fallback4d22189 do not qualify a13 release; do not downgrade data.
 
+Help discovery is now locally implemented through an opt-in existing work-list
+filter and selected context. See the [discovery checkpoint](HELP-DISCOVERY-CHECKPOINT-2026-09-08.md).
+Explicit response negotiation preserves older client envelopes; actual older13
+services report discovery unavailable. Human controls, invitation-bound offers
+and qualified13 fallback remain next, not completed by these read-only additions.
+
 Preserve the useful foundations: invitations and member/account boundaries;
 conversation and desktop Enter-to-send; work/evidence/review/owner decisions;
 revision-based writes and exact retries; room-local scope claims; catch-up with
