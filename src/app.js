@@ -3,7 +3,7 @@ import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./cli
 import { ReturnBrief } from "./return-brief.js";
 import { needsAttention, workInvolvingMe, contributionSteps } from "./work-selectors.js";
 import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter } from "./conversation.js";
-import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, producerKnown as hasReportedProducer } from "./workflow.js";
+import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer } from "./workflow.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation } from "./share-links.js";
 import { installAgentConnections } from "./agent-connections.js";
 import { installRoomInstructions } from "./room-instructions.js";
@@ -156,8 +156,9 @@ const client = new RoomClient({
     for (const control of document.querySelectorAll("#auth-form input, #auth-form button")) control.disabled = pendingSignout;
     setFormStatus($("#new-work-status"), ""); setFormStatus($("#action-error"), ""); setFormStatus($("#composer-status"), "");
     $("#action-dialog").close(); $("#new-work-form").hidden = true; $("#reply-bar").hidden = true;
-    for (const id of ["review-criteria", "review-summary", "review-next"]) setText(`#${id}`, "");
+    for (const id of ["review-criteria", "review-summary", "review-next", "decision-review-label", "decision-review-by", "decision-review-text", "decision-review-version"]) setText(`#${id}`, "");
     $("#review-brief").hidden = true; $("#review-notes").open = false;
+    $("#decision-review").hidden = true; $("#decision-review").open = false;
     $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = "";
     $("#thread-title").textContent = ""; $("#thread-context").textContent = "";
     $("#thread-bar").hidden = true; $("#search-results").hidden = true; $("#new-messages-button").hidden = true;
@@ -1540,6 +1541,12 @@ function renderActionContext(item, action) {
   setText("#review-summary", $("#review-brief").hidden ? "" : item.receipt?.summary ?? "");
   setText("#review-next", $("#review-brief").hidden ? "" : item.receipt?.nextAction ?? "");
   $("#review-notes").open = false;
+  const review = action === "decide" && matchesReceipt(item.verification, item.receipt) ? item.verification : null;
+  $("#decision-review").hidden = !review; $("#decision-review").open = false;
+  setText("#decision-review-label", review ? `${review.independenceConfirmed ? "Independent check" : "Evidence check"} · ${review.result === "pass" ? "Pass" : "Finding"}` : "");
+  setText("#decision-review-by", review ? memberLabel(review.verifierId) : "");
+  setText("#decision-review-text", review?.summary ?? "");
+  setText("#decision-review-version", review ? `Evidence ${review.evidenceVersion}` : "");
   $("#action-title").textContent = action === "block" && item.state === S.COMPLETED ? "Reopen for rework"
     : action === "verify" && item.independentVerificationRequired && hasIndependentProducer(item) ? "Record an independent check" : actionSpecs[action][1];
   $("#action-context").textContent = `${item.title} · revision ${item.revision}${item.receipt ? item.receipt.nativeText ? " · stored text" : ` · evidence ${item.receipt.evidenceVersion}` : ""}`;

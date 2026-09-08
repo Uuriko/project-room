@@ -268,6 +268,7 @@ body { font-size: 16px; }
 .contribution-actions { display: flex; align-items: center; gap: .75rem; flex-shrink: 0; }
 #review-brief p { white-space: pre-wrap; overflow-wrap: anywhere; }
 #review-brief { padding: .75rem 0; border-bottom: 1px solid var(--line-soft); }
+#review-brief summary { cursor: pointer; min-height: 44px; padding-block: .65rem; }
 @media (max-width: 600px) {
   .contribution-next { align-items: stretch; flex-direction: column; gap: .6rem; }
   .contribution-actions { flex-wrap: wrap; }
