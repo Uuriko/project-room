@@ -55,7 +55,9 @@ const prompt = packetMarkdown(packet);
 
 The read-only command `node scripts/agent-inbox.mjs packet WORK_ID` prints that prompt using the existing environment-based credentials. Printing exports task text to the terminal; do so only where that disclosure is intended. It never prints the credential or runs an AI.
 
-Ask the AI to keep the `ROOM-RETURN` line at the beginning of its answer. Paste the full answer into **Add result** on the same work item, review, and post. Room checks the work revision, not unrelated room activity. A stale answer stays editable and requires an explicit older-proposal choice. The reference is reported correlation, not proof the packet was exported or its producer verified.
+Ask the AI to keep the `ROOM-RETURN` line at the beginning of its answer. Choose **Paste AI draft** on the same work item, review the full answer, then **Post draft**. Room checks the work revision, not unrelated room activity. A definitively rejected stale draft stays editable and requires an explicit older-draft choice. An unconfirmed save stays locked for exact retry, even after rate limiting. The reference is reported correlation, not proof the packet was exported or its producer verified.
+
+After a confirmed save the browser opens that exact message when available; a failed snapshot instead asks for refresh. **View latest draft** links back from the work card without advancing the caught-up marker. Posting is conversation only, not completion, verification or approval. Unsent portable drafts persist only in the current tab’s memory until reload, sign-out or observed access loss. See [the draft-return contract](DRAFT-RETURN.md).
 
 An authorized API client can make the same contribution:
 

@@ -415,6 +415,16 @@ export class RoomClient {
 export { RoomClient as RoomSessionClient };
 
 // Retain the ID for an unchanged retry, never blindly replay a changed revision or payload.
+// Unknown commits stay locked across pre-ledger refusals (including rate/size
+// limits). Only a rejection after exact retry lookup resolves an unknown original.
+export function retryUnconfirmed(error, wasUnconfirmed = false) {
+  const rejected = error.status >= 400 && error.status < 500
+    && ["command_rejected", "invalid_command", "invalid_cause", "pilot_limit", "too_large"].includes(error.code);
+  const originalRejected = ([409, 422].includes(error.status) && error.code === "command_rejected")
+    || (error.status === 422 && error.code === "invalid_cause") || (error.status === 409 && error.code === "pilot_limit");
+  return wasUnconfirmed ? !originalRejected : !rejected;
+}
+
 export function draftCommand(previous, type, data, causationId = null) {
   const contents = JSON.stringify({ type, data, causationId });
   return previous?.contents === contents ? previous : { contents, command: { id: crypto.randomUUID(), type, data, ...(causationId ? { causationId } : {}) } };

@@ -266,7 +266,7 @@ dialog h2 { margin: 0; }
 dialog p { margin: 0; color: var(--muted); }
 .portable-section { display: grid; gap: .8rem; margin-top: 1rem; }
 .portable-section[hidden] { display: none; }
-.portable-section textarea { width: 100%; min-height: 12rem; resize: vertical; font: inherit; line-height: 1.5; }
+.portable-section textarea { width: 100%; min-height: 12rem; resize: vertical; font: inherit; font-size: 1rem; line-height: 1.5; }
 .portable-section label:has(input[type="checkbox"]) { display: flex; align-items: center; gap: .6rem; min-height: 44px; }
 .portable-section input[type="checkbox"] { width: 1.1rem; height: 1.1rem; min-height: 0; margin: 0; padding: 0; flex: none; }
 .portable-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
@@ -274,7 +274,6 @@ dialog p { margin: 0; color: var(--muted); }
 #portable-status { margin-top: .8rem; }
 #result-copy-dialog summary { cursor: pointer; min-height: 44px; padding-block: .65rem; color: var(--muted); font-size: .875rem; }
 #result-copy-dialog .form-hint { overflow-wrap: anywhere; }
-#result-copy-preview { font-size: 1rem; }
 #result-copy-dialog > .panel-header { padding: 0 0 .75rem; align-items: flex-start; gap: .75rem; }
 #reminder-work-title, #reminder-preview, .reminder-list { overflow-wrap: anywhere; }
 #reminder-custom-label[hidden] { display: none; }

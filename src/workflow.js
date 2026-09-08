@@ -23,6 +23,19 @@ export function confirmsWorkProposal(receipt, command, roomId, memberId) {
 }
 
 export { matchesReceipt };
+// The same packet may have several drafts: its stable message ID distinguishes
+// this submission. Current return commands contain only primitive data fields.
+export function confirmsWorkReturn(receipt, command, roomId, memberId) {
+  const entry = receipt?.event, data = entry?.data, expected = command?.data;
+  return Boolean(Number.isSafeInteger(receipt?.sequence) && receipt.sequence > 0
+    && typeof receipt.duplicate === "boolean" && validId(entry?.id)
+    && entry.type === T.MESSAGE_POSTED && command?.type === T.MESSAGE_POSTED
+    && entry.roomId === roomId && entry.actorId === memberId
+    && validId(expected?.messageId) && data && !Array.isArray(data)
+    && Object.keys(data).length === Object.keys(expected).length
+    && Object.keys(expected).every(key => Object.hasOwn(data, key) && data[key] === expected[key]));
+}
+
 export const producerKnown = item => receiptHasKnownProducer(item.receipt);
 export function verificationSatisfied(item) {
   return !item.independentVerificationRequired || hasConfirmedIndependentPass(item);

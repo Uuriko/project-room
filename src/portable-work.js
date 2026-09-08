@@ -1,16 +1,16 @@
 import { workPacket, packetMarkdown, parseWorkReturn, resultDraft, resultDraftText } from "./work-packet.js";
-import { draftCommand } from "./client.js";
+import { draftCommand, retryUnconfirmed } from "./client.js";
 import { EVENT_TYPES as T } from "./events.js";
 import { sendsOnEnter } from "./conversation.js";
-import { workStatus } from "./workflow.js";
+import { workStatus, confirmsWorkReturn } from "./workflow.js";
 
 export function installPortableWork({ client, getState, onSaved }) {
   const $ = id => document.getElementById(id);
   const dialog = $("portable-dialog");
   const drafts = new Map(); // Private memory only; cleared on identity loss.
   let entry = null, version = 0, pending = null, saving = false, copying = false, uncertain = false;
-  const owns = ticket => Boolean(ticket && entry === ticket && ticket.version === version && client.generation === ticket.generation
-    && client.session === ticket.session && client.ownsAccountSession());
+  const owns = ticket => Boolean(ticket && entry === ticket && ticket.version === version && dialog.open && client.generation === ticket.generation
+    && client.session === ticket.session && client.ownsAccountSession() && getState()?.room?.id === ticket.session.roomId);
   const status = text => { $("portable-status").textContent = text; $("portable-status").classList.toggle("visible", Boolean(text)); };
   function clearView() {
     version++; entry = null; pending = null; saving = copying = uncertain = false;
@@ -36,7 +36,7 @@ export function installPortableWork({ client, getState, onSaved }) {
     $("portable-submit").disabled = saving;
     $("portable-result").readOnly = saving || uncertain;
     $("portable-older").disabled = saving || uncertain;
-    $("portable-submit").textContent = uncertain ? "Retry proposal" : "Post proposal";
+    $("portable-submit").textContent = uncertain ? "Retry draft" : "Post draft";
     $("packet-copy").disabled = copying;
     $("portable-source").disabled = copying;
     $("portable-add-result").disabled = copying;
@@ -50,15 +50,15 @@ export function installPortableWork({ client, getState, onSaved }) {
   }
   function mode(result) {
     $("portable-export").hidden = result; $("portable-form").hidden = !result;
-    $("portable-title").textContent = result ? "Add result" : "Use my AI";
-    status(result && uncertain ? "Save not confirmed. Retry the same proposal." : ""); (result ? $("portable-result") : $("packet-copy")).focus();
+    $("portable-title").textContent = result ? "Paste AI draft" : "Use my AI";
+    status(result && uncertain ? "Save not confirmed. Retry the same draft." : ""); (result ? $("portable-result") : $("packet-copy")).focus();
   }
   document.addEventListener("click", event => {
     const button = event.target.closest("[data-portable-work]");
-    if (!button || !client.session || !client.ownsAccountSession() || saving) return;
+    if (!button || dialog.open || !client.session || !client.ownsAccountSession() || saving) return;
     close();
     const state = getState(), workId = button.dataset.portableWork;
-    if (!state || !Object.hasOwn(state.workItems, workId)) return;
+    if (!state || state.room.id !== client.session.roomId || !Object.hasOwn(state.workItems, workId)) return;
     entry = { version, generation: client.generation, session: client.session, state, workId, opener: button, focusKey: button.dataset.focusKey,
       packetOptions: { packetId: crypto.randomUUID(), exportedAt: new Date().toISOString() } };
     const draft = drafts.get(workId);
@@ -92,23 +92,35 @@ export function installPortableWork({ client, getState, onSaved }) {
     event.preventDefault();
     const ticket = entry;
     if (!owns(ticket) || saving) return;
-    let data;
-    try {
-      data = parseWorkReturn($("portable-result").value, { roomId: ticket.session.roomId, workItemId: ticket.workId });
-      if ($("portable-older").checked) data.allowOlderBasis = true;
-    } catch (error) { status(error.message); return; }
-    if (!uncertain) pending = draftCommand(pending, T.MESSAGE_POSTED, data);
+    if (!uncertain) {
+      let data;
+      try {
+        data = parseWorkReturn($("portable-result").value, { roomId: ticket.session.roomId, workItemId: ticket.workId });
+        if ($("portable-older").checked) data.allowOlderBasis = true;
+      } catch (error) { status(error.message); return; }
+      data.messageId = pending?.command.data.messageId ?? crypto.randomUUID();
+      pending = draftCommand(pending, T.MESSAGE_POSTED, data);
+    }
+    const command = pending.command, focus = document.activeElement;
     saving = true; controls(); status("Saving…");
     try {
-      await client.send(pending.command);
+      const receipt = await client.send(command);
       if (!owns(ticket)) return;
-      saving = false; $("portable-result").value = ""; close(); onSaved("Proposal added. Work status is unchanged.");
+      if (!confirmsWorkReturn(receipt, command, ticket.session.roomId, ticket.session.member.id)) throw new Error("Draft receipt could not be confirmed");
+      saving = false; $("portable-result").value = ""; close(); onSaved(command.data.messageId);
     } catch (error) {
       if (!owns(ticket)) return;
-      uncertain = !Number.isSafeInteger(error.status) || error.status >= 500;
-      if (error.status === 409 && error.message.startsWith("Stale handoff:")) $("portable-older-label").hidden = false;
-      status(uncertain ? "Save not confirmed. Retry the same proposal." : error.message);
-    } finally { if (owns(ticket)) { saving = false; controls(); } }
+      uncertain = retryUnconfirmed(error, uncertain);
+      if (!uncertain && error.status === 409 && error.code === "command_rejected" && error.message.startsWith("Stale handoff:")) $("portable-older-label").hidden = false;
+      status(uncertain ? "Save not confirmed. Retry the same draft." : error.message);
+    } finally {
+      if (owns(ticket)) {
+        saving = false; controls();
+        if (document.activeElement === document.body && focus?.isConnected && dialog.contains(focus)) {
+          (uncertain ? $("portable-submit") : focus).focus({ preventScroll: true });
+        }
+      }
+    }
   });
   return { reset, hasDraft };
 }

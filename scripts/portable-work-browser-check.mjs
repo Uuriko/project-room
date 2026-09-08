@@ -38,7 +38,7 @@ for (const mobile of [false, true]) {
     const card = page.locator('[data-work-record-id="test-handoff"]');
     const open = async (result = false) => {
       if (!await card.locator(".work-details").evaluate(node => node.open)) await card.locator(".work-details > summary").click();
-      await card.getByRole("button", { name: result ? "Add result" : "Use my AI", exact: true }).click();
+      await card.getByRole("button", { name: result ? "Paste AI draft" : "Use my AI", exact: true }).click();
       await page.locator("#portable-dialog").waitFor({ state: "visible" });
     };
     const screenshot = async name => {
@@ -92,26 +92,33 @@ for (const mobile of [false, true]) {
     assert.equal(snapshot().state.messages.filter(m => m.proposal).length, 1);
     assert.deepEqual(snapshot().state.workItems, changedWork);
     assert.equal(snapshot().cursor, before.cursor);
-    await page.getByText(/Manual proposal · based on revision 0 · older work/).waitFor();
+    await page.getByText(/Pasted draft · based on revision 0 · older work/).waitFor();
 
     await open();
     const current = await page.locator("#packet-preview").inputValue();
     await page.locator("#portable-add-result").click();
     const inert = reference(current) + '\n\n<img src="https://example.invalid/private" onerror="window.badReturn=true">\nNo checks performed.';
     await page.locator("#portable-result").fill(inert);
-    let drop = true;
+    let attempt = 0;
     await page.route("**/api/rooms/commons/commands", async route => {
-      if (drop) { drop = false; await route.fetch(); await route.abort("failed"); }
+      attempt++;
+      if (attempt === 1) { await route.fetch(); await route.abort("failed"); }
+      else if (attempt === 2) await route.fulfill({ status: 429, json: { error: { code: "rate_limited", message: "Try later" } } });
       else await route.continue();
     });
     await page.locator("#portable-submit").click();
-    await page.getByText("Save not confirmed. Retry the same proposal.", { exact: true }).waitFor();
+    await page.getByText("Save not confirmed. Retry the same draft.", { exact: true }).waitFor();
     assert.equal(snapshot().state.messages.filter(m => m.proposal).length, 2, "server committed the dropped response");
     assert.equal(await page.locator("#portable-result").getAttribute("readonly"), "");
     const firstAttempt = writes.at(-1);
     await page.locator("#portable-close").click(); await open(true);
     assert.equal(await page.locator("#portable-result").inputValue(), inert);
     assert.equal(await page.locator("#portable-result").getAttribute("readonly"), "");
+    await page.locator("#portable-submit").click();
+    await page.getByText("Save not confirmed. Retry the same draft.", { exact: true }).waitFor();
+    assert.equal(await page.locator("#portable-result").getAttribute("readonly"), "", "pre-ledger rate limiting cannot unlock a prior unknown commit");
+    assert.deepEqual(writes.at(-1), firstAttempt);
+    await page.locator("#portable-close").click(); await open(true);
     await page.locator("#portable-submit").click();
     await page.locator("#portable-dialog").waitFor({ state: "hidden" });
     assert.deepEqual(writes.at(-1), firstAttempt, "retry preserves the original command bytes and ID");
@@ -121,7 +128,11 @@ for (const mobile of [false, true]) {
     assert.deepEqual(snapshot().state.workItems, changedWork);
 
     await open(true);
+    const fontBefore = await page.locator("#portable-result").evaluate(node => parseFloat(getComputedStyle(node).fontSize));
     await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
+    for (const selector of ["#portable-result", "#packet-preview"]) {
+      assert.equal(await page.locator(selector).evaluate(node => parseFloat(getComputedStyle(node).fontSize)), fontBefore * 2, "both editors actually enlarge");
+    }
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), true);
     await page.locator("#portable-submit").scrollIntoViewIfNeeded();
     const submitBox = await page.locator("#portable-submit").boundingBox();
