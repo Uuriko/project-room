@@ -127,6 +127,22 @@ Do not include credentials in queries or shell arguments. See the
 
 ### From discovery to contribution
 
+For explicit invitations, use MCP `room_list_work` with
+`{"focus":"help_wanted"}`, or `client.orient({ focus: "help_wanted" })`.
+This optional view uses the service clock, current accountable consent and expiry;
+it excludes the accountable worker and designated independent reviewer. It does
+not assign work or authorize execution. Without a query, all eligible invitations
+in the bounded Room are included; with a query, the existing25-hit limit applies.
+Follow `nextRead` for the exact scope, invitation revision and current work context,
+then read the discussion before coordinating. Invitation-bound offer submission
+and human invitation controls are not implemented yet.
+
+The client requests snapshot metadata with `X-Project-Room-Help-Context: 1`.
+Unrequested work snapshots retain their existing envelope for older clients.
+Older services can ignore the header: the new client reports
+`help_context_unavailable`, never an empty success or implied permission.
+No compatibility retry, automatic offer, notification or dispatch occurs.
+
 1. Search, then follow the chosen result's `nextRead`. Read its current brief too:
    the brief can change without changing the task revision.
 2. For assigned work, use the current next step and your permitted actions. A

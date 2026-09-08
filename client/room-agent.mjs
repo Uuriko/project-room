@@ -6,6 +6,7 @@ import { workPacket, resultDraft, verifyWorkResult } from "../src/work-packet.js
 import { submitWorkAction } from "./work-actions.mjs";
 import { replyRoute, validReplyArguments, validateReplyRead, submitReplyAction } from "./reply-actions.mjs";
 import { charterContext, validateCharterContext, validateCharterRead } from "../src/room-charter.js";
+import { workHelpContext } from "../src/work-help.js";
 
 export class RoomClientError extends Error {
   constructor(status, code, message, retryAfterMs = null) { super(message); this.status = status; this.code = code; this.retryAfterMs = retryAfterMs; }
@@ -30,8 +31,10 @@ function checkedWorkSnapshot(value, roomId) {
       || state.room?.id !== roomId || !validId(value.viewerId) || !object(state.members) || !object(state.workItems)
       || !Object.hasOwn(state.members, value.viewerId) || Object.keys(state.members).length > 100 || Object.keys(state.workItems).length > 500) throw new Error();
     if (projected) {
+      const help = Object.hasOwn(value, "helpContextVersion") || Object.hasOwn(value, "evaluatedAt");
       if (value.snapshotView !== "work" || value.snapshotVersion !== 1
-        || !exact(value, "snapshotView snapshotVersion roomId sequence state charter viewerId viewerAccountId viewerAuthEpoch viewerSessionBinding viewerSessionRevision")
+        || !exact(value, "snapshotView snapshotVersion roomId sequence state charter viewerId viewerAccountId viewerAuthEpoch viewerSessionBinding viewerSessionRevision" + (help ? " helpContextVersion evaluatedAt" : ""))
+        || help && (value.helpContextVersion !== 1 || typeof value.evaluatedAt !== "string" || !Number.isFinite(Date.parse(value.evaluatedAt)) || new Date(value.evaluatedAt).toISOString() !== value.evaluatedAt)
         || !exact(state, "room members workItems")) throw new Error();
     } else if (value.replyRequestContractVersion !== undefined && value.replyRequestContractVersion !== 1
       || !integer(value.cursor) || value.cursor > value.sequence
@@ -63,6 +66,10 @@ function checkedWorkSnapshot(value, roomId) {
       if (item.claim && (!validId(item.claim.holderId) || !Number.isFinite(Date.parse(item.claim.expiresAt))
         || !["active", "released", "superseded"].includes(item.claim.status))) throw new Error();
       if (item.blocker && (!text(item.blocker.reason) || !text(item.blocker.nextAction))) throw new Error();
+      if (value.helpContextVersion === 1) {
+        const help = workHelpContext(state, id, value.viewerId, value.evaluatedAt);
+        if (help.revision > value.sequence) throw new Error();
+      }
     }
     checkedCharter(value.charter, value.sequence);
     return value;
@@ -86,10 +93,11 @@ export class RoomAgentClient {
     this.#origin = origin; this.#roomId = roomId; this.#token = token; this.#fetch = fetchImpl;
     this.#memberId = memberId;
   }
-  async #fetchPath(path, body, signal) {
+  async #fetchPath(path, body, signal, helpContext = false) {
     const response = await this.#fetch(`${this.#origin}${path}`, {
       method: body === undefined ? "GET" : "POST", redirect: "error", credentials: "omit", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
-      headers: { Authorization: `Bearer ${this.#token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+      headers: { Authorization: `Bearer ${this.#token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+        ...(helpContext ? { "X-Project-Room-Help-Context": "1" } : {}) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) })
     });
     let value;
@@ -104,11 +112,11 @@ export class RoomAgentClient {
     }
     return value;
   }
-  async #request(suffix = "", body, signal) {
+  async #request(suffix = "", body, signal, helpContext = false) {
     // Saved configurations pin an agent. Recheck before each operation; a check
     // is never a cached grant. The service still authorizes the operation itself.
     if (this.#memberId) await this.checkConnection({ signal });
-    const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal);
+    const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal, helpContext);
     const snapshotRead = suffix === "" || suffix === "?view=work";
     if (this.#memberId && (snapshotRead || suffix === "/charter" || suffix.startsWith("/charter?") || suffix.startsWith("/work-context?") || suffix.startsWith("/work-discussion?") || suffix.startsWith("/work-result?") || suffix.startsWith("/return-brief?") || /^\/reply-(requests|context|history)\?/.test(suffix))) {
       if (value?.roomId !== this.#roomId || value.viewerId !== this.#memberId || value.viewerAccountId !== null
@@ -215,6 +223,24 @@ export class RoomAgentClient {
           || !isDeepStrictEqual(result.collaboration, workCollaboration(result.work, result.viewer, participants))) throw new Error();
       } catch { throw new RoomClientError(200, "invalid_response", "Collaboration guidance does not match selected work"); }
     }
+    if (Object.hasOwn(result, "help") || Object.hasOwn(result, "helpContextVersion")) {
+      try {
+        const participants = result.context.participants;
+        if (result.helpContextVersion !== 1 || !validId(result.context.roomOwnerId) || !Array.isArray(participants)
+          || participants.length > 10 || new Set(participants.map(person => person?.id)).size !== participants.length) throw new Error();
+        for (const person of participants) if (person?.unavailable !== true && (!validId(person?.id)
+          || !["human", "agent"].includes(person.kind) || typeof person.active !== "boolean"
+          || !Number.isSafeInteger(person.revision) || person.revision < 0 || person.revision > result.evaluatedThrough
+          || !Array.isArray(person.permissions) || new Set(person.permissions).size !== person.permissions.length
+          || person.permissions.some(permission => !PERMISSIONS.includes(permission)))) throw new Error();
+        const members = Object.fromEntries(participants.filter(person => person.unavailable !== true).map(person => [person.id, person]));
+        if (!members[result.work.accountableMemberId] || !members[result.context.roomOwnerId] || !members[result.viewer.id]
+          || ["id", "kind", "active", "revision", "permissions"].some(key => !isDeepStrictEqual(members[result.viewer.id][key], result.viewer[key]))) throw new Error();
+        const expected = workHelpContext({ room: { id: result.roomId, ownerId: result.context.roomOwnerId }, members,
+          workItems: { [workItemId]: result.work } }, workItemId, result.viewer.id, result.evaluatedAt);
+        if (expected.revision > result.evaluatedThrough || !isDeepStrictEqual(result.help, expected)) throw new Error();
+      } catch { throw new RoomClientError(200, "invalid_response", "Help invitation context does not match selected work"); }
+    }
     return result;
   }
   async workDiscussion(workItemId, options = {}) {
@@ -292,19 +318,22 @@ export class RoomAgentClient {
     return submitWorkAction(this, { roomId: this.#roomId, memberId: this.#memberId }, name, args, options);
   }
   async orient({ signal, focus = "all", query } = {}) {
-    if (!["all", "needs_me"].includes(focus)) throw new RoomClientError(0, "invalid_focus", "Choose all work or work needing you");
+    if (!["all", "needs_me", "help_wanted"].includes(focus)) throw new RoomClientError(0, "invalid_focus", "Choose all work, work needing you, or explicit help invitations");
     if (query !== undefined && !validWorkSearchQuery(query)) throw new RoomClientError(0, "invalid_query", "Use a nonblank work query of at most 200 UTF-16 code units");
-    const snapshot = focus === "needs_me" || query !== undefined
-      ? checkedWorkSnapshot(await this.#request("?view=work", undefined, signal), this.#roomId)
+    const snapshot = focus !== "all" || query !== undefined
+      ? checkedWorkSnapshot(await this.#request("?view=work", undefined, signal, focus === "help_wanted"), this.#roomId)
       : await this.snapshot({ signal });
     const member = snapshot.state.members[snapshot.viewerId];
     const charter = snapshot.charter === undefined ? null : checkedCharter(snapshot.charter, snapshot.sequence);
     try {
       if (charter === null ? snapshot.state.room.charter !== undefined : JSON.stringify(charter) !== JSON.stringify(charterContext(snapshot.state.room))) throw new Error();
     } catch { throw new RoomClientError(200, "invalid_response", "Room instructions do not match the snapshot"); }
-    const now = Date.now(), items = Object.values(snapshot.state.workItems);
-    if (focus === "needs_me" || query !== undefined) {
+    if (focus === "help_wanted" && snapshot.helpContextVersion !== 1) throw new RoomClientError(200, "help_context_unavailable", "This service does not advertise explicit help invitations");
+    const now = focus === "help_wanted" ? Date.parse(snapshot.evaluatedAt) : Date.now(), items = Object.values(snapshot.state.workItems);
+    const helpFor = item => workHelpContext(snapshot.state, item.id, member.id, snapshot.evaluatedAt);
+    if (focus !== "all" || query !== undefined) {
       const candidates = focus === "all" ? items : items.filter(item => {
+        if (focus === "help_wanted") return helpFor(item).canOffer;
         const next = nextWorkStep(item, now);
         return member.active && next.memberId === member.id && next.needsAttention;
       });
@@ -313,15 +342,19 @@ export class RoomAgentClient {
       const work = (matches?.work ?? candidates.map(item => ({ item }))).map(({ item, excerpt }) => {
         return { id: item.id, title: item.title, state: item.state, revision: item.revision, mode: item.mode, next: nextWorkStep(item, now),
           ...(excerpt === undefined ? {} : { excerpt }),
+          ...(focus === "help_wanted" ? { help: helpFor(item) } : {}),
           availableRoomActions: workActions(item, member, now).map(([action, label]) => ({ action, label })),
           nextRead: { tool: "room_read_work", arguments: { workItemId: item.id } } };
       });
       return { contractVersion: 1, roomId: snapshot.roomId, evaluatedThrough: snapshot.sequence,
-        evaluatedAt: new Date(now).toISOString(), clockSource: "client", focus, charter, member,
+        evaluatedAt: new Date(now).toISOString(), clockSource: focus === "help_wanted" ? "service" : "client", focus, charter, member,
         scope: { kind: "room", permissions: member.permissions, externalExecution: false },
         selection: matches ? { totalWork: items.length, eligibleWork: candidates.length, query: query.trim(),
           matches: matches.total, shown: work.length, limit: 25, hasMore: matches.total > work.length,
-          guidance: "Current work fields only; no message bodies, evidence files or history. Focus is applied before matching and the 25-hit limit; refine the query if truncated. Compact excerpts omit full task context. Read selected work before acting. A hit is not an assignment, suitability judgment or execution grant; empty does not mean the room is done." }
+          guidance: "Current work fields only; no message bodies, evidence files or history. Focus is applied before matching and the 25-hit limit; refine the query if truncated. Compact excerpts omit full task context. Read selected work before acting. A hit is not an assignment, suitability judgment or execution grant; empty does not mean the room is done."
+            + (focus === "help_wanted" ? " Read the invitation scope and discussion before coordinating; invitation-bound offers are not available yet. No automatic offer or dispatch." : "") }
+          : focus === "help_wanted" ? { totalWork: items.length, helpWanted: work.length,
+          guidance: "Explicit current invitations you may offer to help with, not assignments or permission to execute. All matching work in this bounded Room is included. Read selected scope and discussion, then coordinate before contributing. The invitation-bound offer tool is not available yet; no automatic offer or dispatch." }
           : { totalWork: items.length, needsMe: work.length,
           guidance: "Current next steps addressed to you, including those missing a Room permission. Not all your ongoing work or reply requests. Read selected work before acting; available actions are descriptions, not execution grants. Empty does not mean the room is done." },
         work };

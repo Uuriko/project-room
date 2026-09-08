@@ -107,9 +107,13 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
     data: { workItemId, expectedRevision: basis, expectedHelpRevision: 0, status: 'open',
       scope: 'Suggest one additional guide improvement in this Room.', expiresAt: new Date(Date.now() + 3600000).toISOString() } });
   await page.locator(`[data-event-record-id="${help.event.id}"]`).waitFor({ state: 'attached' });
+  const invitations = await call(helper, 'room_list_work', { focus: 'help_wanted' }, true);
+  assert.equal(invitations.work.find(item => item.id === workItemId)?.help.canOffer, true);
+  assert.equal((await call(helper, 'room_read_work', { workItemId }, true)).help.help.eventId, help.event.id);
   const withdrawn = f.store.command(f.keys.owner, 'commons', { id: 'browser-help-withdraw', type: T.WORK_HELP_UPDATED,
     data: { workItemId, expectedRevision: basis, expectedHelpRevision: 1, status: 'withdrawn' } });
   await page.locator(`[data-event-record-id="${withdrawn.event.id}"]`).waitFor({ state: 'attached' });
+  assert.equal((await call(helper, 'room_list_work', { focus: 'help_wanted' }, true)).work.some(item => item.id === workItemId), false);
   assert.equal(await page.locator('#message-input').inputValue(), unsent);
   assert.equal(await page.evaluate(() => document.activeElement.id), 'message-input');
   assert.equal(state().workItems[workItemId].revision, basis);
@@ -225,7 +229,7 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
   assert.equal(await page.locator('#action-text-body').textContent(), '');
   writeFileSync(`${prefix}.json`, JSON.stringify({ simulatedHuman: true, scriptedMcp: true, nativeModels: false,
     workItemId, oneSharedRecord: true, contributors: multiple ? ['producer', 'alternate'] : ['producer'], selectedEarlierDraft: multiple,
-    returnedFrom: touch ? 'working' : 'accepted', draftShortcut: true, helpEventsApplied: true, helpInvitationUI: false,
+    returnedFrom: touch ? 'working' : 'accepted', draftShortcut: true, helpEventsApplied: true, helpDiscovery: true, helpInvitationUI: false,
     accountable: 'owner', postedBy: 'producer', reportedProducer: 'producer', reportedBy: 'owner',
     request: 'answered', reconnect: true, exactOfferRetry: true, exactDraftRetry: true, review: 'pass', humanApproval: null,
     evidenceVersion: textVersion(body), readMarkers: markers, traffic, finalAudit: auditRecovery(f.store) }, null, 2));

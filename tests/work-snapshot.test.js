@@ -132,5 +132,7 @@ test('new discovery client reads exact schema12 fallback without upgrading or mu
   assert.equal(selected.collaboration, undefined, 'Actual retained fallback does not advertise new help guidance');
   assert.equal(selected.work.accountableMemberId, 'producer');
   assert.equal(responses.length, 4, 'Selected read retains identity preflight without a compatibility retry');
+  await assert.rejects(client.orient({ focus: 'help_wanted' }), { code: 'help_context_unavailable' });
+  assert.equal(responses.length, 6, 'Unsupported discovery does not retry with weaker reads');
   assert.equal(auditRecovery(store).dataSha256, before);
 });

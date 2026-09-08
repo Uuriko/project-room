@@ -1004,13 +1004,15 @@ export class RoomStore {
     });
   }
   revoke(token) { this.db.prepare("UPDATE credentials SET revoked=1 WHERE hash=?").run(hash(token)); }
-  snapshot(token, roomId, expectedSessionBinding = null, view = "full") {
+  snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false) {
     // One read transaction keeps sequence, projection, and audit tail at the same commit.
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (!["full", "work"].includes(view)) fail(422, "invalid_snapshot_view", "Choose a supported snapshot view");
+      if (typeof helpContext !== "boolean" || helpContext && view !== "work") fail(422, "invalid_help_context", "Help discovery requires the current work view");
       const room = this.room(roomId);
       if (view === "work") return { snapshotView: "work", snapshotVersion: 1, roomId, sequence: room.sequence,
+        ...(helpContext ? { helpContextVersion: 1, evaluatedAt: new Date(this.now()).toISOString() } : {}),
         state: { room: room.state.room, members: room.state.members,
           workItems: Object.fromEntries(Object.entries(room.state.workItems).map(([id, item]) => [id, currentWorkRecord(item)])) },
         charter: charterContext(room.state.room), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
