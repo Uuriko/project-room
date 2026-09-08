@@ -11,6 +11,7 @@ import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./inv
 import { STORE_SCHEMA_VERSION, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
 import { ShareLinks, shareLinkSchema } from "./share-links.mjs";
 import { conflictingClaim } from "./claim-scopes.mjs";
+import { Reminders, reminderSchema } from "./reminders.mjs";
 
 export class ServiceError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -184,8 +185,9 @@ export class RoomStore {
     this.db = database ?? new DatabaseSync(filename, { readOnly });
     this.storagePlatform = storagePlatform;
     this.shareLinks = new ShareLinks(this);
+    this.reminders = new Reminders(this);
     const version = this.storagePlatform.version(this.db);
-    const supported = new Set([0, 1, 2, 3, 4, 5, 6, STORE_SCHEMA_VERSION]);
+    const supported = new Set([0, 1, 2, 3, 4, 5, 6, 7, STORE_SCHEMA_VERSION]);
     const hasSchema = version === 0 && this.storagePlatform.hasSchema(this.db);
     if (!supported.has(version) || hasSchema) {
       this.db.close();
@@ -193,11 +195,12 @@ export class RoomStore {
     }
     if (readOnly) {
       try {
-        if (version !== STORE_SCHEMA_VERSION) throw new Error("Read-only invitation audit requires schema v7; migrate a backed-up database through the service first");
+        if (version !== STORE_SCHEMA_VERSION) throw new Error(`Read-only invitation audit requires schema v${STORE_SCHEMA_VERSION}; migrate a backed-up database through the service first`);
         this.storagePlatform.configure(this.db, true);
         this.storagePlatform.verifyWriterFence(this.db);
         this.verifyInvitationAudit();
         this.shareLinks.verify();
+        this.reminders.verifySchema();
         return;
       } catch (error) { this.db.close(); throw error; }
     }
@@ -206,7 +209,7 @@ export class RoomStore {
     try { this.transaction(() => {
     // Reread under the write lock: another startup may have upgraded while we waited.
     if (this.storagePlatform.version(this.db) !== version) throw new Error("Database changed during startup; retry with the current service");
-    if (version === STORE_SCHEMA_VERSION) this.storagePlatform.verifyWriterFence(this.db);
+    if (version >= 6) this.storagePlatform.verifyWriterFence(this.db, version);
     if (version === 0) { this.db.exec(`
       CREATE TABLE rooms (id TEXT PRIMARY KEY, sequence INTEGER NOT NULL, projection TEXT NOT NULL);
       CREATE TABLE events (room_id TEXT NOT NULL REFERENCES rooms(id), sequence INTEGER NOT NULL, id TEXT NOT NULL UNIQUE, body TEXT NOT NULL, PRIMARY KEY(room_id, sequence));
@@ -227,9 +230,12 @@ export class RoomStore {
     if (version === 1 || version === 2 || version === 3) this.migrateInvitationsV4();
       if (version < 5) this.migrateInvitationJournalV5();
       if (version < 7) this.db.exec(shareLinkSchema);
+      if (version < 8) this.db.exec(reminderSchema);
       if (version < STORE_SCHEMA_VERSION) this.storagePlatform.installWriterFence(this.db);
+      this.storagePlatform.verifyWriterFence(this.db);
       this.verifyInvitationAudit();
       this.shareLinks.verify();
+      this.reminders.verifySchema();
     }); } catch (error) { this.db.close(); throw error; }
   }
 
@@ -867,6 +873,7 @@ export class RoomStore {
       this.db.prepare("UPDATE account_credentials SET revoked=1 WHERE account_id=?").run(accountId);
       this.db.prepare("UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?").run(accountId);
       this.db.prepare("INSERT INTO account_access_events(account_id,revision,active,auth_epoch,reason,at) VALUES(?,?,?,?,?,?)").run(accountId, revision, active ? 1 : 0, authEpoch, reason.trim(), at);
+      if (!active) this.reminders.retireAccount(accountId);
       return this.account(accountId);
     });
   }
@@ -1014,7 +1021,11 @@ export class RoomStore {
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("INSERT INTO commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, command.id, fingerprint, sequence);
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
-      if (command.type === T.MEMBER_ACCESS_CHANGED && command.data.active === false) this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, command.data.memberId);
+      if (command.data.workItemId) this.reminders.resolveWork(roomId, state.workItems[command.data.workItemId]);
+      if (command.type === T.MEMBER_ACCESS_CHANGED && command.data.active === false) {
+        this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, command.data.memberId);
+        this.reminders.retireMember(roomId, command.data.memberId);
+      }
       return { sequence, event: incoming, duplicate: false };
     });
   }

@@ -1,5 +1,12 @@
 # Cloudflare staging candidate
 
+**Local candidate update:** private reminders now require schema v8. They and the
+portable-work checkpoint are not published or deployed. See the
+[reminder plan](../docs/PRIVATE-REMINDERS-PLAN-2026-09-07.md). A migrated v8 database
+cannot run the older v7 application. Prepare and verify a v8-compatible fallback
+or roll-forward artifact plus recovery procedure before requesting a hosted
+migration. All rollback versions below refer to the still-live **pre-v8** release.
+
 Status: **deployed to isolated staging on September 7, 2026** at
 [Project Room](https://project-room-staging.getdasha.workers.dev).
 Current accepted app `fb90a70`, Worker `901be347-7a39-4b56-8777-f4052bf81b38`;
@@ -38,7 +45,7 @@ and visitor-address adapters, not a second product.
   trusted edge header; they do not prove the live edge path.
 - Asset packaging is an allowlist of the existing HTML, JS and CSS. Databases,
   operator files, tests and source directories are not static assets.
-  Wrangler rebuilds the ten files from the current checkout before both dry-run
+  Wrangler rebuilds the 14 allowlisted files from the current checkout before both dry-run
   and deployment. Unknown files/directories or symlinks in the output cause a
   failure; the packager does not silently upload or delete them.
 - `*.test-fixture.mjs` exposes synthetic setup for local tests ONLY. Never use

@@ -1,25 +1,31 @@
-import { STORE_SCHEMA_VERSION, WRITER_FUNCTION, writerFenceDefinitions } from '../server/writer-fence.mjs';
+import { STORE_SCHEMA_VERSION, fenceDefinitions } from '../server/writer-fence.mjs';
 
 const marker = 'room_runtime_version';
-const fences = writerFenceDefinitions.map(({ name, sql }) => ({ name,
-  sql: sql.replace(`${WRITER_FUNCTION}()`, `(SELECT version FROM ${marker} WHERE singleton=1)`) }));
+const permit = 'room_writer_permit';
+export const durableFenceDefinitions = version => fenceDefinitions(version).map(({ name, sql }) => ({ name,
+  sql: sql.replace(`project_room_writer_v${version}()`, version < 8 ? `(SELECT version FROM ${marker} WHERE singleton=1)`
+    : `(CASE WHEN (SELECT version FROM ${marker} WHERE singleton=1) IS 8 AND (SELECT version FROM ${permit} WHERE singleton=1) IS 8 THEN 8 ELSE NULL END)`) }));
+const fences = durableFenceDefinitions(STORE_SCHEMA_VERSION);
+const reconciliation = () => { throw new Error('Database writer fence requires operator reconciliation'); };
+const hasPermit = db => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(permit));
+const permitValue = db => hasPermit(db) ? db.prepare(`SELECT version FROM ${permit} WHERE singleton=1`).get()?.version : null;
 
 // A narrow adapter for the methods RoomStore actually uses. No SQL parsing,
 // arbitrary rewrites, filesystem emulation, or pretend user-defined functions.
 export class DurableDatabase {
   constructor(storage) { this.storage = storage; this.isTransaction = false; }
-  exec(sql) { this.storage.sql.exec(sql).toArray(); }
+  exec(sql) { return durableStorage.transaction(this, () => this.storage.sql.exec(sql).toArray()); }
   prepare(sql) {
     const all = (...args) => this.storage.sql.exec(sql, ...args).toArray();
     return {
       all,
       get: (...args) => all(...args)[0],
-      run: (...args) => {
+      run: (...args) => durableStorage.transaction(this, () => {
         all(...args);
         // rowsWritten includes trigger/index work; changes() matches Node's
         // affected-row semantics used by invitation compare-and-swap checks.
         return { changes: this.storage.sql.exec('SELECT changes() AS n').one().n };
-      }
+      })
     };
   }
   close() { /* Durable Object owns the storage lifetime. */ }
@@ -43,9 +49,19 @@ export const durableStorage = {
     if (readOnly) throw new Error('Read-only connection mode is not supported by Durable Objects');
     if (db.prepare('PRAGMA foreign_keys').get().foreign_keys !== 1) throw new Error('Foreign key enforcement required');
   },
-  registerWriter() { /* SQL triggers check the durable version marker instead. */ },
+  registerWriter(db) { db.migrationSource = this.version(db) < STORE_SCHEMA_VERSION ? this.version(db) : null; },
   installWriterFence(db) {
     if (!db.isTransaction) throw new Error('Writer fence installation requires the migration transaction');
+    // Marker-based old guards must be removed before moving the shared marker.
+    // Only exact, previously verified historical definitions may be removed.
+    const known = new Map([6, 7].flatMap(durableFenceDefinitions).map(def => [def.name, def.sql]));
+    for (const row of db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v*'").all()) {
+      if (known.get(row.name) !== row.sql) reconciliation();
+      db.exec(`DROP TRIGGER ${row.name}`);
+    }
+    if (hasPermit(db)) reconciliation();
+    db.exec(`CREATE TABLE ${permit} (singleton INTEGER PRIMARY KEY CHECK(singleton=1), version INTEGER NOT NULL CHECK(version IN (0,8)))`);
+    db.storage.sql.exec(`INSERT INTO ${permit} VALUES(1,8)`);
     for (const { name, sql } of fences) {
       const existing = db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?").get(name);
       if (!existing) db.exec(sql);
@@ -53,22 +69,42 @@ export const durableStorage = {
     }
     this.setVersion(db, STORE_SCHEMA_VERSION);
   },
-  verifyWriterFence(db) {
-    for (const { name, sql } of fences) {
+  verifyWriterFence(db, version = STORE_SCHEMA_VERSION) {
+    const expected = new Map([6, 7, 8].filter(v => version < 8 ? v <= version : v === 8).flatMap(durableFenceDefinitions).map(def => [def.name, def.sql]));
+    for (const row of db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v*'").all()) {
+      if (expected.get(row.name) !== row.sql) reconciliation();
+    }
+    if (version === 8 && permitValue(db) !== (db.isTransaction && !db.readOnlyTransaction ? 8 : 0)) reconciliation();
+    for (const { name, sql } of durableFenceDefinitions(version)) {
       if (db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?").get(name)?.sql !== sql) {
         throw new Error('Database writer fence requires operator reconciliation');
       }
     }
   },
-  transaction(db, fn) {
-    if (db.isTransaction) return fn();
+  transaction(db, fn, readOnly = false) {
+    const run = () => {
+      const result = fn();
+      if (result && typeof result.then === 'function') throw new Error('Room transactions must remain synchronous');
+      return result;
+    };
+    if (db.isTransaction) {
+      if (db.readOnlyTransaction && !readOnly) throw new Error('Cannot write inside a read-only Room transaction');
+      return run();
+    }
     return db.storage.transactionSync(() => {
+      const version = this.version(db);
+      if (version === 8) {
+        if (permitValue(db) !== 0) reconciliation();
+      } else if (version !== db.migrationSource) reconciliation();
       db.isTransaction = true;
+      db.readOnlyTransaction = readOnly;
       try {
-        const result = fn();
-        if (result && typeof result.then === 'function') throw new Error('Room transactions must remain synchronous');
+        if (!readOnly && version === 8) db.storage.sql.exec(`UPDATE ${permit} SET version=8 WHERE singleton=1`);
+        const result = run();
+        if (!readOnly && hasPermit(db)) db.storage.sql.exec(`UPDATE ${permit} SET version=0 WHERE singleton=1`);
+        if (this.version(db) === STORE_SCHEMA_VERSION) db.migrationSource = null;
         return result;
-      } finally { db.isTransaction = false; }
+      } finally { db.isTransaction = false; db.readOnlyTransaction = false; }
     });
   }
 };

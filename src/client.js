@@ -331,6 +331,22 @@ export class RoomClient {
     if (!this.ownsAccountSession()) { this.endAccess(); return null; }
     return result;
   }
+  async reminders(request = null) {
+    if (!this.session) return null;
+    if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+    const generation = this.generation, session = this.session;
+    try {
+      const result = await this.request(this.path("/reminders"), request ? { method: "POST", data: request } : {});
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsResponse(result, session)) { this.endAccess(); return null; }
+      return result;
+    } catch (error) {
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+      if ([401, 403].includes(error.status) || error.code === "session_binding_changed") this.handleFailure(error);
+      throw error;
+    }
+  }
   // Return brief: history fixed through H (frozen on the first page, continuations carry it),
   // current live through N. Fetching never acknowledges; only caughtUp() does, explicitly.
   async returnBrief({ horizon = null, after = null, cursor = null, limit = null } = {}) {

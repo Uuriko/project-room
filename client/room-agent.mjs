@@ -31,6 +31,8 @@ export class RoomAgentClient {
     return value;
   }
   snapshot() { return this.#request(); }
+  // Personal to this credential's member, never included in shared orientation.
+  reminders(request) { return this.#request("/reminders", request); }
   // Selected task only; the normal authenticated snapshot never leaves this client.
   async workPacket(workItemId, options = {}) {
     return workPacket((await this.snapshot()).state, workItemId, options);

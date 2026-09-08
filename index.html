@@ -111,10 +111,20 @@
           <details id="return-brief-panel" class="panel return-brief-panel">
             <summary>
               <span id="return-brief-heading">Catch me up</span>
+              <small id="reminder-count" hidden></small>
             </summary>
             <div class="return-brief-body">
               <p id="summary-grid" class="rb-note"></p>
               <p id="rb-status" class="rb-note" role="status" aria-live="polite"></p>
+              <section id="reminder-panel" aria-label="Your reminders" hidden>
+                <h3 id="reminder-due-heading">Your reminders</h3>
+                <p id="reminder-load-error" class="rb-note" role="status"></p>
+                <button id="reminder-refresh" class="button secondary" type="button" hidden>Retry reminders</button>
+                <ul id="reminder-due" class="rb-list reminder-list"></ul>
+                <h3 id="reminder-pending-heading" hidden>Save needs confirmation</h3>
+                <ul id="reminder-pending" class="rb-list reminder-list"></ul>
+                <details id="reminder-scheduled"><summary id="reminder-scheduled-heading">Scheduled</summary><ul id="reminder-upcoming" class="rb-list reminder-list"></ul></details>
+              </section>
               <section aria-labelledby="rb-current-heading">
                 <h3 id="rb-current-heading">Needs you <span id="rb-current-boundary" class="rb-boundary"></span></h3>
                 <ul id="rb-attention-list" class="rb-list"></ul>
@@ -228,6 +238,20 @@
       </div>
     </dialog>
     <div id="status" class="status" role="status" aria-live="polite"></div>
+    <dialog id="reminder-dialog" aria-labelledby="reminder-title">
+      <div class="panel-header"><h2 id="reminder-title">Remind me</h2><button id="reminder-close" class="button ghost" type="button">Close</button></div>
+      <p id="reminder-work-title"></p>
+      <p id="reminder-current" class="form-hint"></p>
+      <form id="reminder-form" class="portable-section">
+        <label for="reminder-choice">When</label>
+        <select id="reminder-choice"><option value="hour">In an hour</option><option value="tomorrow">Tomorrow at 9 am</option><option value="custom">Choose a time…</option></select>
+        <label id="reminder-custom-label" hidden>Local date & time <input id="reminder-custom" type="datetime-local"></label>
+        <p id="reminder-preview" class="form-hint"></p>
+        <p class="form-hint">Private. In Catch me up only—not email or push.</p>
+        <div class="portable-actions"><button id="reminder-save" class="button primary" type="submit">Save</button><button id="reminder-cancel" class="button ghost" type="button" hidden>Remove reminder</button></div>
+      </form>
+      <p id="reminder-status" class="form-status" role="status" aria-live="polite"></p>
+    </dialog>
     <dialog id="portable-dialog" aria-labelledby="portable-title">
       <div class="panel-header"><h2 id="portable-title">Use my AI</h2><button id="portable-close" class="button ghost" type="button">Close</button></div>
       <p id="portable-work-title"></p>

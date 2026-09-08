@@ -273,7 +273,7 @@ test("v1 upgrades checkpoint a conservative projection and strictly replay the v
     store.db.prepare("UPDATE events SET body=? WHERE id=?").run(JSON.stringify(body), completion.id);
   }
   store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(legacy));
-  store.db.exec("DROP TABLE membership_invitation_journal; DROP TABLE projection_checkpoints; PRAGMA user_version=1");
+  store.db.exec("DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE membership_invitation_journal; DROP TABLE projection_checkpoints; PRAGMA user_version=1");
   const eventBodies = store.db.prepare("SELECT body FROM events WHERE room_id='commons' ORDER BY sequence").all().map(row => row.body);
   const legacyEvents = eventBodies.map(body => JSON.parse(body));
   store.close();
@@ -282,7 +282,7 @@ test("v1 upgrades checkpoint a conservative projection and strictly replay the v
     "strict v2 replay must never silently accept a v1-only approval");
   store = new RoomStore(filename);
   try {
-    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 7);
+    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 8);
     assert.deepEqual(store.db.prepare("SELECT body FROM events WHERE room_id='commons' ORDER BY sequence").all().map(row => row.body), eventBodies,
       "migration leaves the append-only event bodies byte-identical");
     const repaired = store.room("commons");
@@ -328,7 +328,7 @@ test("the v1 projection, checkpoint, and version marker roll back together", () 
     store.initialize(initialRoom());
     const originalProjection = store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection;
     const originalEvents = store.db.prepare("SELECT body FROM events WHERE room_id='commons' ORDER BY sequence").all().map(row => row.body);
-    store.db.exec("DROP TABLE projection_checkpoints; PRAGMA user_version=1");
+    store.db.exec("DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE projection_checkpoints; PRAGMA user_version=1");
     store.db.prepare("INSERT INTO rooms(id,sequence,projection) VALUES('z-malformed',0,'{')").run();
 
     assert.throws(() => store.repairProjectionProvenance({ upgradeV1: true }), SyntaxError);
@@ -344,18 +344,18 @@ test("the v1 projection, checkpoint, and version marker roll back together", () 
   } finally { store.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 
-test("fresh databases use schema v7 and every unsupported schema fails closed without mutation", () => {
+test("fresh databases use schema v8 and every unsupported schema fails closed without mutation", () => {
   const directory = mkdtempSync(join(tmpdir(), "project-room-schema-version-"));
   const filename = join(directory, "room.sqlite");
   const store = new RoomStore(filename);
-  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 7);
+  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 8);
   assert.ok(store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='projection_checkpoints'").get());
-  store.db.exec("PRAGMA journal_mode=DELETE; PRAGMA user_version=8");
+  store.db.exec("PRAGMA journal_mode=DELETE; PRAGMA user_version=9");
   store.close();
   assert.throws(() => new RoomStore(filename), /schema is newer/);
 
   let raw = new DatabaseSync(filename);
-  assert.equal(raw.prepare("PRAGMA user_version").get().user_version, 8);
+  assert.equal(raw.prepare("PRAGMA user_version").get().user_version, 9);
   assert.equal(raw.prepare("PRAGMA journal_mode").get().journal_mode, "delete", "rejection must not change a future database's storage mode");
   raw.exec("PRAGMA user_version=-1");
   raw.close();

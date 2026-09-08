@@ -103,9 +103,9 @@ export class StoreTestRoom {
       return Response.json({ recovered: true, guests: guests.length, sequence });
     }
     if (path === '/newer-version') {
-      store.transaction(() => durableStorage.setVersion(this.db, 8));
+      store.transaction(() => durableStorage.setVersion(this.db, 9));
       assert.throws(() => new RoomStore(null, { database: this.db, storagePlatform: durableStorage }), /newer than this service/);
-      assert.throws(() => this.db.exec("INSERT INTO rooms VALUES('old-writer',0,'{}')"), /unsupported database writer/);
+      assert.throws(() => this.db.exec("INSERT INTO rooms VALUES('old-writer',0,'{}')"), /unsupported database writer|reconciliation/);
       return Response.json({ rejected: true });
     }
     return new Response('Not found', { status: 404 });

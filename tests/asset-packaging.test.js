@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, writeFile, mkdir, symlink, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { assetPaths, buildAssets } from '../cloudflare/build-assets.mjs';
@@ -22,6 +22,15 @@ test('asset build produces and refreshes exactly the allowlisted application fil
   for (const file of assetPaths) assert.deepEqual(await readFile(new URL(file, output)), await readFile(new URL('../' + file, import.meta.url)));
   const config = JSON.parse(await readFile(new URL('../cloudflare/wrangler.jsonc', import.meta.url), 'utf8'));
   assert.equal(config.build.command, 'node build-assets.mjs', 'deploy always builds this exact source');
+});
+test('every local browser import is included in the deployment allowlist', async () => {
+  for (const file of assetPaths.filter(path => path.endsWith('.js'))) {
+    const source = await readFile(new URL('../' + file, import.meta.url), 'utf8');
+    for (const match of source.matchAll(/(?:from\s*|import\s*)["'](\.[^"']+)["']/g)) {
+      const dependency = posix.normalize(posix.join(posix.dirname(file), match[1]));
+      assert.ok(assetPaths.includes(dependency), `${file} imports an unpackaged asset: ${dependency}`);
+    }
+  }
 });
 test('asset build rejects unknown files without uploading or deleting them', async t => {
   const output = await fixture(t);

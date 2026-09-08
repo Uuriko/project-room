@@ -10,7 +10,7 @@ const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 const bindingPattern = /^[a-f0-9]{64}$/;
 const assets = new Map([
   ["/", ["index.html", "text/html"]], ["/index.html", ["index.html", "text/html"]],
-  ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js", "return-brief.js", "work-status.js", "work-packet.js", "portable-work.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
+  ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js", "return-brief.js", "work-status.js", "work-packet.js", "portable-work.js", "reminders.js", "reminder-time.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
   ["/src/styles.css", ["src/styles.css", "text/css"]]
 ]);
 const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -298,7 +298,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         reject(405, "method_not_allowed", "Method not allowed");
       }
       const revokeMatch = /^\/api\/rooms\/([a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127})\/invitations\/([a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127})\/revoke$/.exec(url.pathname);
-      const match = /^\/api\/rooms\/([a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127})(?:\/(commands|events|stream|cursor|return-brief|invitations|share-links|share-links-cancel))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127})(?:\/(commands|events|stream|cursor|return-brief|invitations|share-links|share-links-cancel|reminders))?$/.exec(url.pathname);
       if (!match && !revokeMatch) reject(404, "not_found", "Not found");
       const roomId = (match ?? revokeMatch)[1];
       const route = match ? (match[2] ?? "") : "invitation-revoke";
@@ -311,6 +311,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       rate(`read:${auth.credentialHash}`, 600);
       if (!["GET", "HEAD"].includes(req.method)) { protectWrite(req, auth, selected.bearer); rate(`write:${auth.credentialHash}`, 60); }
       if (!route && req.method === "GET") return json(res, 200, store.snapshot(selected.token, roomId, fence));
+      if (route === "reminders" && req.method === "GET") return json(res, 200, store.reminders.list(selected.token, roomId, fence));
+      if (route === "reminders" && req.method === "POST") {
+        const result = store.reminders.mutate(selected.token, roomId, await body(req), fence);
+        return json(res, result.duplicate ? 200 : 201, result);
+      }
       if (route === "share-links" && req.method === "GET") return json(res, 200, store.shareLinks.list(selected.token, roomId, fence));
       if (route === "share-links" && req.method === "POST") {
         const data = await body(req);

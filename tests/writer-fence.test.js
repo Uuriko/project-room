@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
-import { writerFenceDefinitions, verifyWriterFence } from "../server/writer-fence.mjs";
+import { writerFenceDefinitions, verifyWriterFence, fenceDefinitions } from "../server/writer-fence.mjs";
 
 // Construct a synthetic pre-upgrade database. Never use this fixture on user data.
 function legacyFixture(t) {
@@ -15,7 +15,7 @@ function legacyFixture(t) {
   const fresh = new RoomStore(filename);
   fresh.createAccount("fixture-account");
   for (const { name } of writerFenceDefinitions) fresh.db.exec(`DROP TRIGGER ${name}`);
-  fresh.db.exec("PRAGMA user_version=5");
+  fresh.db.exec("DROP TABLE private_reminder_commands; DROP TABLE private_reminders; PRAGMA user_version=5");
   fresh.close();
   return filename;
 }
@@ -27,11 +27,11 @@ test("schema upgrade preserves existing records and fences a previously opened c
   legacyStatement.run("fixture-account");
   const current = new RoomStore(filename);
   try {
-    assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 7);
+    assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 8);
     assert.deepEqual(current.db.prepare("SELECT * FROM accounts").all(), before);
     assert.doesNotThrow(() => verifyWriterFence(current.db));
-    assert.equal(writerFenceDefinitions.length, 48);
-    assert.throws(() => legacyStatement.run("fixture-account"), /project_room_writer_v7|unsupported database writer/);
+    assert.equal(writerFenceDefinitions.length, 54);
+    assert.throws(() => legacyStatement.run("fixture-account"), /project_room_writer_v8|unsupported database writer/);
     current.createAccount("new-fixture-account");
     assert.equal(current.account("new-fixture-account").active, true);
   } finally { current.close(); earlier.close(); }
@@ -66,7 +66,7 @@ test("failure after fence installation rolls back its schema marker and all trig
   const inspected = new DatabaseSync(filename, { readOnly: true });
   try {
     assert.equal(inspected.prepare("PRAGMA user_version").get().user_version, 5);
-    assert.equal(inspected.prepare("SELECT count(*) n FROM sqlite_master WHERE type='trigger' AND name LIKE 'writer_v7_%'").get().n, 0);
+    assert.equal(inspected.prepare("SELECT count(*) n FROM sqlite_master WHERE type='trigger' AND name LIKE 'writer_v8_%'").get().n, 0);
     assert.equal(inspected.prepare("SELECT count(*) n FROM accounts").get().n, 1);
   } finally { inspected.close(); }
   const retry = new RoomStore(filename);
@@ -75,26 +75,40 @@ test("failure after fence installation rolls back its schema marker and all trig
 
 test("read-only audit does not upgrade a pre-fence database", t => {
   const filename = legacyFixture(t);
-  assert.throws(() => new RoomStore(filename, { readOnly: true }), /requires schema v7/);
+  assert.throws(() => new RoomStore(filename, { readOnly: true }), /requires schema v8/);
   const inspected = new DatabaseSync(filename, { readOnly: true });
   try { assert.equal(inspected.prepare("PRAGMA user_version").get().user_version, 5); }
   finally { inspected.close(); }
 });
 
-test("the v7 link migration preserves v6 guards while retiring pre-open v6 writers", t => {
+test("the v8 migration preserves v6 guards while retiring pre-open v6 writers", t => {
   const filename = legacyFixture(t), earlier = new DatabaseSync(filename);
   earlier.function("project_room_writer_v6", () => 6);
-  for (const definition of writerFenceDefinitions.filter(({ name }) => !name.includes("share_link"))) {
-    earlier.exec(definition.sql.replaceAll("writer_v7", "writer_v6").replace("IS NOT 7", "IS NOT 6"));
-  }
+  for (const definition of fenceDefinitions(6)) earlier.exec(definition.sql);
   earlier.exec("PRAGMA user_version=6");
   const oldWrite = earlier.prepare("UPDATE accounts SET revision=revision WHERE id='fixture-account'");
   oldWrite.run();
   const current = new RoomStore(filename);
   try {
-    assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 7);
-    assert.throws(() => oldWrite.run(), /project_room_writer_v7|unsupported database writer/);
+    assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 8);
+    assert.throws(() => oldWrite.run(), /project_room_writer_v8|unsupported database writer/);
     current.createAccount("current-writer");
     assert.equal(current.account("current-writer").active, true);
   } finally { current.close(); earlier.close(); }
+});
+
+test("v7 to v8 preserves every existing table row and retires a pre-open v7 connection", t => {
+  const filename = legacyFixture(t), old = new DatabaseSync(filename);
+  old.function("project_room_writer_v7", () => 7);
+  for (const { sql } of fenceDefinitions(7)) old.exec(sql);
+  old.exec("PRAGMA user_version=7");
+  const tables = old.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all().map(row => row.name);
+  const before = Object.fromEntries(tables.map(name => [name, old.prepare(`SELECT * FROM ${name}`).all()]));
+  const cached = old.prepare("UPDATE accounts SET revision=revision WHERE id='fixture-account'"); cached.run();
+  const current = new RoomStore(filename);
+  try {
+    assert.deepEqual(Object.fromEntries(tables.map(name => [name, current.db.prepare(`SELECT * FROM ${name}`).all()])), before);
+    assert.throws(() => cached.run(), /project_room_writer_v8|unsupported database writer/);
+    assert.equal(current.db.prepare("SELECT count(*) n FROM private_reminders").get().n, 0);
+  } finally { current.close(); old.close(); }
 });

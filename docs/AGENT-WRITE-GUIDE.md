@@ -240,3 +240,39 @@ node --test tests/agent-write-guide.test.js
 ```
 
 For read pagination, recovery boundaries and current interoperability limits, see [Agent client contract](./AGENT-CLIENT.md).
+# Private reminders (local schema-v8 candidate, not yet deployed)
+
+`client.reminders()` reads only the calling member's personal reminders. This
+does not expose a human's reminders to a separately authenticated agent. These
+preferences never enter shared orientation, packets, events or read markers.
+
+To schedule, supply exactly:
+
+```js
+const request = {
+  requestId: "stable-id-for-this-intent",
+  workItemId: "chosen-work-id",
+  expectedRevision: 0, // No prior row; otherwise use its current reminder revision.
+  action: "schedule",
+  dueAt: Date.now() + 3_600_000
+};
+const result = await client.reminders(request);
+```
+
+Store the request before sending. After an uncertain result, resend that exact
+object; do not recalculate the time or replace its ID. A response contains the
+original `receipt` and a fresh `reminders` view. An old successful schedule receipt
+does not mean the reminder is still active: it may have been cancelled or retired.
+
+To remove an active reminder use `action: "cancel"`, current `expectedRevision`,
+and a new stable `requestId`; omit `dueAt`. Read, review and choose a new action
+after `stale_reminder`; do not automatically overwrite another edit.
+
+One active reminder per work item, at most 100 per member/room. Schedule strictly
+in the future and within 365 days. New schedules stop at 5,000 retained requests;
+cancelling existing active reminders and exact retries remain available. Resolution,
+supersession and access revocation retire reminders without resurrecting them on
+reopen. Logout or key rotation alone does not remove them.
+
+In-app only: there is no background agent runner, webhook, email or push delivery.
+Private reminder times are preferences, not proof that work is being performed.
