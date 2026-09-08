@@ -94,15 +94,26 @@ async function race(t, f, jobs) {
   return Promise.all(finished);
 }
 
-for (const scenario of ["selection", "last-pending-slot"]) test(`independent database connections race ${scenario} inside the transaction`, { timeout: 15000 }, async t => {
+for (const scenario of ["selection", "last-pending-slot", "member-limit-across-work"]) test(`independent database connections race ${scenario} inside the transaction`, { timeout: 15000 }, async t => {
   const f = setup(t); let jobs;
   if (scenario === "selection") {
     f.send("guest", f.open("first")); f.send("owner", f.open("second"));
     jobs = [["producer", f.update("first")], ["producer", f.update("second")]];
-  } else {
+  } else if (scenario === "last-pending-slot") {
     for (let i = 0; i < 6; i++) f.add(`helper-${i}`);
     for (let i = 0; i < 4; i++) f.send(`helper-${i}`, f.open(`offer-${i}`));
     jobs = [["helper-4", f.open("last-a")], ["helper-5", f.open("last-b")]];
+  } else {
+    jobs = [];
+    for (let i = 0; i < 6; i++) {
+      const id = `other-work-${i}`;
+      f.send("owner", f.command("work.proposed", { workItemId: id, title: id, definitionOfDone: "Two ideas", accountableMemberId: "producer" }));
+      f.send("producer", f.command("work.accepted", { workItemId: id, expectedRevision: 0 }));
+      const help = f.send("producer", f.command("work.help_updated", { workItemId: id, expectedRevision: 1, expectedHelpRevision: 0,
+        status: "open", scope: "Two ideas", expiresAt: new Date(f.now + 3600000).toISOString() }));
+      const offer = f.open(`offer-${i}`); Object.assign(offer.data, { workItemId: id, helpEventId: help.event.id });
+      if (i < 4) f.send("guest", offer); else jobs.push(["guest", offer]);
+    }
   }
   const results = await race(t, f, jobs), winner = results.findIndex(r => r.result);
   assert.equal(results.filter(r => r.result).length, 1); assert.equal(results[1 - winner].error.status, 409);
@@ -110,6 +121,16 @@ for (const scenario of ["selection", "last-pending-slot"]) test(`independent dat
   assert.equal(rows.filter(r => r.status === (scenario === "selection" ? "selected" : "offered")).length, scenario === "selection" ? 1 : 5);
   const before = auditRecovery(f.store), [actor, c] = jobs[winner];
   assert.deepEqual(f.send(actor, c).event, results[winner].result.event); assert.deepEqual(auditRecovery(f.store), before);
+});
+
+test("failed offer receipt persistence rolls back the event and projection before retry", t => {
+  const f = setup(t), before = auditRecovery(f.store), command = f.open("rollback-offer");
+  f.store.db.exec("CREATE TRIGGER fail_offer_receipt BEFORE INSERT ON commands BEGIN SELECT RAISE(ABORT,'synthetic receipt failure'); END");
+  try { assert.throws(() => f.send("guest", command), /synthetic receipt failure/); }
+  finally { f.store.db.exec("DROP TRIGGER fail_offer_receipt"); }
+  assert.deepEqual(auditRecovery(f.store), before);
+  assert.equal(f.send("guest", command).duplicate, false);
+  assert.equal(f.send("guest", command).duplicate, true);
 });
 
 for (const corruption of ["scope", "helper", "helper-revision", "offer-revision", "selected-by", "unrecorded-release", "event-actor", "missing-opening", "missing-selection"]) test(`offer history rejects ${corruption} behind a checkpoint`, t => {

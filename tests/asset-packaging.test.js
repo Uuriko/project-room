@@ -6,6 +6,8 @@ import { join, posix } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { assetPaths, buildAssets } from '../cloudflare/build-assets.mjs';
+import { RoomStore } from '../server/store.mjs';
+import { createRoomServer } from '../server/http.mjs';
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'room-assets-'));
@@ -30,6 +32,17 @@ test('every local browser import is included in the deployment allowlist', async
       const dependency = posix.normalize(posix.join(posix.dirname(file), match[1]));
       assert.ok(assetPaths.includes(dependency), `${file} imports an unpackaged asset: ${dependency}`);
     }
+  }
+});
+test('the HTTP allowlist serves every packaged browser asset with exact bytes', async t => {
+  const store = new RoomStore(':memory:'), server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  for (const path of assetPaths) {
+    const response = await fetch(origin + '/' + path);
+    assert.equal(response.status, 200, path);
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), await readFile(new URL('../' + path, import.meta.url)), path);
   }
 });
 test('asset build rejects unknown files without uploading or deleting them', async t => {
