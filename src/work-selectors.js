@@ -10,6 +10,29 @@ export class CursorError extends Error {
 
 const REQUEST_ROLES = ["accountableMemberId", "verifierMemberId", "humanDecisionMakerId"];
 
+// Search only the supplied current Room projection. A hit is not an assignment,
+// verified result or permission to act. No external evidence/history is fetched.
+export function searchWork(state, query, limit = 25) {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 25) throw new RangeError("Work search limit must be 1–25");
+  const term = String(query).trim().slice(0, 200).toLocaleLowerCase();
+  if (!term) return { work: [], total: 0 };
+  const matches = [];
+  for (const item of Object.values(state.workItems)) {
+    const fields = [item.title, item.definitionOfDone, item.receipt?.summary, item.receipt?.nextAction, item.id,
+      ...REQUEST_ROLES.map(role => state.members[item[role]]?.displayName)];
+    const matched = fields.find(text => typeof text === "string" && text.toLocaleLowerCase().includes(term));
+    if (matched === undefined) continue;
+    const text = matched === item.title ? item.receipt?.summary || item.definitionOfDone : matched;
+    let start = Math.max(0, text.toLocaleLowerCase().indexOf(term) - 60);
+    if (start && /[\uDC00-\uDFFF]/.test(text[start])) start--;
+    const excerpt = [...text.slice(start)].slice(0, 240).join("");
+    matches.push({ item, excerpt: `${start ? "…" : ""}${excerpt}${start + excerpt.length < text.length ? "…" : ""}` });
+  }
+  matches.sort((a, b) => Number(terminalWork(a.item)) - Number(terminalWork(b.item))
+    || b.item.updatedAt.localeCompare(a.item.updatedAt) || a.item.id.localeCompare(b.item.id));
+  return { work: matches.slice(0, limit), total: matches.length };
+}
+
 // Two independent return facts (matrix refinement 4): unread-since-cursor and
 // unresolved-work-involving-me are SEPARATE derivations. The cursor governs what is
 // new; it never hides older work that is still open.
