@@ -81,6 +81,16 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.equal(context.viewerSessionBinding, joined.session.sessionBinding);
     assert.equal(context.context.source.message.body, command.data.body);
     assert.equal(context.collaboration.version, 1); assert.equal(context.collaboration.status, 'may_offer');
+    assert.equal(context.helpContextVersion, 1); assert.equal(context.help.status, 'off');
+    assert.equal(Object.hasOwn(workView, 'helpContextVersion'), false, 'Legacy snapshot envelope stays unchanged');
+    const helpView = await json(await call('/api/rooms/commons?view=work', {
+      headers: { ...guestHeaders, 'X-Project-Room-Help-Context': '1' } }));
+    assert.equal(helpView.helpContextVersion, 1);
+    assert.equal(new Date(helpView.evaluatedAt).toISOString(), helpView.evaluatedAt);
+    assert.equal(helpView.sequence, beforeRead.sequence);
+    assert.deepEqual(helpView.state, workView.state);
+    await json(await call('/api/rooms/commons?view=work', {
+      headers: { ...guestHeaders, 'X-Project-Room-Help-Context': '2' } }), 422);
     assert.deepEqual(context.collaboration.offer.request.arguments, { workItemId: 'selected:task', toMemberId: 'owner' });
     const discussionResponse = await call('/api/rooms/commons/work-discussion?workItemId=selected%3Atask&limit=1', { headers: guestHeaders });
     assert.equal(discussionResponse.headers.get('cache-control'), 'no-store');
