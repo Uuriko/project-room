@@ -1,0 +1,64 @@
+# Conversation quality: slice 12a
+
+Project Room is a shared place for ordinary conversation and accountable work. A member can talk, reply, react, and find context without creating a task. This slice extends the provisioned single-node pilot in [SERVICE.md](SERVICE.md); it does not attach a remote AI runtime or launch a public service.
+
+## What members can do
+
+- **Follow a discussion.** Reply opens a thread with its original message and chronological replies. Older nested replies remain linked to their immediate parent and belong to the same root discussion. Back to room returns to the room draft and reading position.
+- **Keep separate thoughts.** The room and each thread have independent text, addressed member, reply target, unchanged-request retry ID, and send error while the page remains open. Enter adds a line; Ctrl/Command + Enter sends. Composition-confirmation and repeated keys do not send. After a network error, retry submits the same command if the draft is unchanged.
+- **React without making work.** Like, heart, celebrate, and thinking are explicit choices by the authenticated member. Each member can remove their own choice. Counts are shared room state; reactions do not grant authority, prove reading, or send notifications to agents.
+- **Find original context.** Search matches literal message text or author name within the authenticated room, including older messages outside the displayed audit tail. Results show the latest 50 matches and the total. A result, reply reference, timestamp link, or work-source link opens the original message.
+- **Turn a useful conversation into work.** Members with steering permission can link an outcome to the exact original message. Accountable member, verifier, evidence, and human decision remain separate. No transcript is copied and no tool is run.
+
+Messages, threads, reactions, and addressed messages are visible to active room members. Addressing a human or agent is not a private message. There is no ambient listener or agent wake-up path in this product slice. Transport status is not participant presence or a read/processing receipt.
+
+## Draft lifetime and reading position
+
+Drafts stay in JavaScript memory by default. Snapshot refreshes, an unchanged failed send, and room/thread navigation retain them while the page stays open. Members can explicitly enable recovery in this tab on a trusted device. This stores up to 50 nonempty room/thread drafts in sessionStorage, scoped to the authenticated room, canonical account, authorization epoch, member and browser-session binding, with a 12-hour expiry renewed when saved. Recovery occurs only after an authenticated snapshot. Missing ownership information, sign-out, confirmed access loss, a different identity, or invalid storage clears the saved record. Turning recovery off clears it immediately. Credentials are never stored with drafts. Browser tab duplication and session restoration follow the browser's own sessionStorage behavior; this is not cross-device recovery. The earlier room/member-only storage format is never restored.
+
+The app requests the browser's native leave-page warning when unsent text or an unfinished work form exists. This is a best-effort prompt; browsers may omit it, especially when a mobile process is stopped. See [MDN's beforeunload limitations](https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event). Opt-in message drafts save as edited and on page hiding. Work forms, reading positions, and send-error text are not restored. Storage failure is visible. An unchanged pending message retains its command ID across reload so retry does not create a second message; recovery never sends automatically.
+
+Incoming updates retain unchanged message nodes and the message body during reaction/reply-count updates. The composer retains focus, selection, text, and recipient. Readers away from the latest message keep their scroll anchor and get a jump-to-latest control. Thread navigation remembers each discussion's scroll position. These guarantees are scoped to conversation controls; the work-card and membership surfaces still need a broader focus-retention review.
+
+While sending, the form exposes its busy state and prevents duplicate submissions. When disabling a control displaced keyboard focus, completion restores that control unless focus has moved elsewhere. An unchanged failed send retains text selection as well as the draft. Returning to a thread restores its own error beside its draft; a different discussion does not inherit it. Access ending discards all saved errors and releases controls without restoring focus from the former session.
+
+The keyboard guard uses `isComposing` and the legacy IME value `keyCode === 229`, described in [UI Events, section 7.3.1](https://www.w3.org/TR/2026/WD-uievents-20260221/). The fallback covers confirmation events that arrive after composition ends. Synthetic keyboard events verify the guard; physical IME and WebKit behavior still require separate evaluation.
+
+## Data contract
+
+Threads are a projection of immutable `replyToId` links, not a new message collection. The existing schema and log can be reopened without rewriting old events. Search uses the current authorized snapshot and does not persist another index. It is suitable for the bounded pilot, not a claim of scalable full-text search.
+
+`message.reaction_set` adds or removes the caller's ID from one allowed reaction on an existing room message. Its data is `{messageId,reaction,active}`; actor identity is derived at the service boundary. Exact command retries return their original receipt, including after a later change, without reapplying old intent. Invalid references, inactive membership, or invalid data leave the projection and history unchanged. Reactions consume the ordinary write budget and event limits.
+
+The client isolates late command and snapshot responses from a later session. Access ending clears thread drafts, search results, private rendered content, and pending reaction requests. It does not claim to remove information someone has already copied outside the application.
+
+## Verification
+
+Use Node 24.19 or newer:
+
+```sh
+npm run check
+npm ci
+npx playwright install --with-deps chromium
+npm run test:browser
+```
+
+The first command checks JavaScript syntax and the domain/service/client tests. Conversation cases cover historical reply chains, restart/replay, source-linked work, independent reactions, exact old retries, invalid room references, search beyond the audit tail, and session-scoped draft identity.
+
+The browser command starts a disposable loopback service with a temporary SQLite database and separately authenticated browser contexts. All accounts, access keys, messages, and agent-attributed events are synthetic fixtures. No external agent is called. At desktop 1440×1000 and narrow 390×844 it exercises:
+
+1. Human sign-in and a second member's live message without losing a draft, recipient, focus, or text selection.
+2. Independent room/thread drafts, nested reply targets, and a committed request whose response is lost and retried once with its original ID.
+3. Two members reacting independently, removing only their own choice, and keeping an existing message control focused during unrelated traffic.
+4. Search into a hidden reply, source-linked work creation, and returning to the original discussion.
+5. Literal text rendering, long-message reflow, leave-page warning, reload draft clearing, and credential revocation clearing private UI state.
+
+The additional composer scenarios at 1440×1000 and 320×780 verify keyboard-only retry after a committed response is lost, preserved selection/recipient/nested reply, per-discussion error recovery, focus retained in search during a delayed send, composition/repeat guards, ordinary Enter, narrow reflow, and draft/error cleanup after access ends. Both scenarios fail at the keyboard focus assertion on the PR #12 base, `c22e8bdd80e89cf421dfd5691bf21acf1f0e2519`, and pass with this correction. These tests deliberately use the page keyboard for retry so automatic locator focus cannot conceal the defect.
+
+GitHub Actions runs both gates and uploads synthetic screenshots as `conversation-browser-evidence`. A configured gate is not a PASS: the PR receipt must link a completed run for the exact head. Local browser download failures must be reported as unexecuted, not replaced by source inspection.
+
+The composer scenarios also cover opt-in recovery of independent drafts and an unchanged lost-response retry across reload, plus clearing storage when recovery is disabled. Unit cases cover expiry, room/member isolation, missing targets, malformed storage, and unavailable storage.
+
+Work cards now describe recorded acceptance, work, blockers, verification, and decision status, with the next responsible member and last recorded update. They do not infer live execution. Completion requires the current receipt's existing verification and decision gates.
+
+Remaining evaluation: physical iOS/Android devices, Firefox/WebKit, assistive technology, 200% enlargement, large-room performance, moderation, quiet notification settings, managed-device draft policy, and independent review of this exact change. Responsive Chromium checks alone do not establish consumer or enterprise readiness.

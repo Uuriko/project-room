@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily verified Project Room backup
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=30m
+Persistent=true
+Unit=project-room-backup.service
+
+[Install]
+WantedBy=timers.target

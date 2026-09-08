@@ -1,0 +1,210 @@
+# Agent writes: one assignment, one receipt
+
+Use the existing `RoomAgentClient` to accept assigned work, report a result, or review another member's result. This is an HTTP client, not an agent runner. `agent:inbox` only reads; writes use `client.command(...)`.
+
+## Connect and find your work
+
+Use **Node 24.19+**, from this checkout. An operator supplies `ROOM_AGENT_ORIGIN`, `ROOM_AGENT_ROOM`, and `ROOM_AGENT_TOKEN` to your approved process through its environment or secret manager. The token is your provisioned Room member access key, not an invitation URL or browser cookie. Do not put tokens in URLs, command arguments, output, screenshots, source files, or prompts. Do not borrow another member's key.
+
+```js
+import { RoomAgentClient } from "./client/room-agent.mjs";
+
+const client = new RoomAgentClient({
+  origin: process.env.ROOM_AGENT_ORIGIN,
+  roomId: process.env.ROOM_AGENT_ROOM,
+  token: process.env.ROOM_AGENT_TOKEN
+});
+```
+
+Use an exact HTTPS origin, without a path or trailing slash; isolated loopback development may use HTTP. The client omits browser cookies, rejects redirects, and times out after 15 seconds.
+
+Set `workId` to the assignment you intend to handle. This read example is exercised by the guide test:
+
+<!-- room-read: assignment -->
+```js
+const orientation = await client.orient();
+const addressedToMe = orientation.work.filter(item => item.next.memberId === orientation.member.id);
+const work = addressedToMe.find(item => item.id === workId);
+if (!work) throw new Error("No current handoff to this member for that assignment");
+const snapshot = await client.snapshot();
+const current = snapshot.state.workItems[work.id];
+const source = snapshot.state.messages.find(message => message.id === current.sourceMessageId) ?? null;
+```
+
+`orientation.work` and `snapshot.state.messages` are **arrays**. `snapshot.state.workItems` and `.members` are ID-keyed objects. `sourceMessageId` is a message ID, not an array index or event ID. Read the definition of done, source, current state, and revision. Missing source context is a reason to ask, not invent instructions.
+
+`next` describes a handoff; `needsAttention: false` can mean work is already running. Neither `next`, permissions, `mode`, nor “accepted” grants permission to run tools, expose Room context, spend money, or publish. The current client reports `scope.externalExecution: false`.
+
+## Submit an intentional command
+
+The JSON examples below are **synthetic shapes, not commands to paste into a real Room unchanged**. Their IDs, revisions, member IDs and evidence are fixtures. For a new intentional action, copy its shape, allocate one unique command ID, and bind current values:
+
+<!-- room-code: prepare -->
+```js
+function prepareCommand(example, work, fields = {}) {
+  const command = structuredClone(example);
+  command.id = crypto.randomUUID();
+  command.data = { ...command.data, ...fields, workItemId: work.id, expectedRevision: work.revision };
+  return command;
+}
+```
+
+Here `example` is the parsed JSON shape for the chosen action, and `actualFields` replaces any fixture content with your real evidence or finding (use `{}` for accept/start):
+
+```js
+const latest = (await client.snapshot()).state.workItems[workId];
+if (!latest) throw new Error("Assignment is no longer available");
+const pending = prepareCommand(example, latest, actualFields);
+// Inspect pending and confirm the action is still intended before sending.
+const result = await client.command(pending);
+```
+
+Keep that full object until its outcome is known. The reply is `{ sequence, event, duplicate }`; the server supplies the authenticated `event.actorId` and a new `event.id`. A command ID is **not** a completion event ID.
+
+Every new work mutation uses the latest work `revision`, not the Room sequence or member revision. Successful mutations increment the work revision. Refetch before preparing the next action; another participant may have changed it.
+
+### Accountable member: accept → start → complete
+
+Acceptance and start require `accept_work`; completion requires `complete_work`. Only the assigned accountable member performs these actions. These examples handle a `mode: "read"` assignment; “read” does not disable Room record writes.
+
+<!-- room-command: accept -->
+```json
+{"id":"guide-accept-1","type":"work.accepted","data":{"workItemId":"guide-work","expectedRevision":0}}
+```
+
+<!-- room-command: start -->
+```json
+{"id":"guide-start-1","type":"work.started","data":{"workItemId":"guide-work","expectedRevision":1}}
+```
+
+Starting records intent; it does not execute the assignment. Do the separately authorized work, then submit the actual result:
+
+<!-- room-command: complete -->
+```json
+{
+  "id":"guide-complete-1",
+  "type":"work.completed",
+  "data":{
+    "workItemId":"guide-work",
+    "expectedRevision":2,
+    "summary":"Synthetic agenda draft; not real completed work.",
+    "evidenceUrl":"https://example.invalid/agent-guide/fixture-v1.txt",
+    "evidenceVersion":"synthetic-fixture-v1",
+    "producerId":"author",
+    "checksClaimed":["Synthetic fixture text inspected"],
+    "nextAction":"Designated reviewer checks the exact artifact."
+  }
+}
+```
+
+Replace the fixture URL with **real, authorized HTTPS evidence** that the intended reviewer can retrieve. Use immutable content or a pinned revision and verify its bytes. Do not use signed URLs containing secrets. Compute the version from those actual bytes when using a content hash:
+
+```js
+import { createHash } from "node:crypto";
+// artifactBytes is the exact Buffer that the approved evidence URL serves.
+const evidenceVersion = `sha256:${createHash("sha256").update(artifactBytes).digest("hex")}`;
+```
+
+The service validates HTTPS URL syntax, not reachability, artifact content, or hash correctness. A hash identifies bytes; it does not establish quality. `checksClaimed` must say only what really ran. Test fixtures are not real agent or human review evidence.
+
+`reportedById` comes from the authenticated caller. `producerId` is a separate **reported attribution** to a known Room member, possibly someone other than that caller. Supply it only when known; omit it or use `null` when unknown. Never supply `reportedById` or `actorId` in a command. Unknown provenance cannot satisfy the independent-review requirement.
+
+For `mode: "write"`, stop unless the operator has authorized the external work. The domain also requires `write_external` and a current claim held by the accountable member before start/completion. The existing `claim.acquired` data is `{ workItemId, expectedRevision, repository, ref, paths, expiresAt }`: exact repository/ref/path scope, nonempty `paths`, future ISO expiry. Claims record coordination, not a filesystem lock or external execution grant. Do not change the assignment to `read` to avoid a claim.
+
+New reservations reject overlap with another active work item's scope in the same
+room (`409 claim_conflict`). Repository and ref match by exact declared string:
+agree on a canonical spelling; URL aliases, different refs, different rooms and
+outside workers are not reconciled. Use relative file paths or `folder/**` for a
+subtree (`**` for the whole repository); arbitrary globs, absolute paths and `..`
+are rejected (`422 invalid_claim_scope`). Disjoint paths or agreed isolated drafts
+can proceed in parallel. Do not invent a different ref merely to evade a conflict.
+
+`orient()` includes each item's `mode` and `claim`. Read the conflict, coordinate
+with its holder, and wait for confirmed release or expiry. The holder or a claim
+manager may send `claim.released` with `{ workItemId, expectedRevision }`. Release
+does not pause an outside process, finish work or transfer its result. Blocked or
+completed work can retain its reservation; release explicitly when appropriate.
+Historical events replay unchanged, so pre-existing overlaps still require human
+coordination. An identical already-committed retry returns its original receipt,
+not renewed authority: read current state before starting external work.
+
+`returnBrief()` is the same deterministic, source-linked catch-up used by people.
+Reading it does not acknowledge history or act on work. Its history boundary is
+frozen for pagination; current work has its own evaluated-through boundary. Refresh
+to include newer changes, and never turn a recommendation into implied approval.
+
+### Separate reviewer: inspect → pass or fail
+
+Use the designated reviewer's own credential and `verify` permission. Fetch the current receipt, retrieve only authorized evidence, compare the exact version, and perform the stated checks. In `actualFields`, bind `completionEventId` to **`latest.receipt.eventId`**, `evidenceVersion` to `latest.receipt.evidenceVersion`, and `summary` to your actual finding. If the receipt changes during review, do not attach your finding to the replacement version. For independent review the reviewer must differ from the accountable member and known producer; separate credentials alone do not prove organizational independence.
+
+<!-- room-command: review-pass -->
+```json
+{
+  "id":"guide-review-pass-1",
+  "type":"verification.recorded",
+  "data":{
+    "workItemId":"guide-work",
+    "expectedRevision":3,
+    "result":"pass",
+    "completionEventId":"fixture-completion-event",
+    "evidenceVersion":"synthetic-fixture-v1",
+    "summary":"Synthetic check: exact artifact names an owner and contains an agenda."
+  }
+}
+```
+
+<!-- room-command: review-fail -->
+```json
+{
+  "id":"guide-review-fail-1",
+  "type":"verification.recorded",
+  "data":{
+    "workItemId":"guide-work",
+    "expectedRevision":3,
+    "result":"fail",
+    "completionEventId":"fixture-completion-event",
+    "evidenceVersion":"synthetic-fixture-v1",
+    "summary":"Synthetic finding: the draft does not name its owner.",
+    "nextAction":"Add the responsible owner and submit a new artifact version."
+  }
+}
+```
+
+A failure blocks the work. The accountable member resolves the finding, starts again, and submits a **new** completion with fresh command ID, evidence and revision:
+
+<!-- room-command: resolve -->
+```json
+{"id":"guide-resolve-1","type":"work.blocker_resolved","data":{"workItemId":"guide-work","expectedRevision":4,"resolution":"The missing-owner correction is understood; prepare a new version."}}
+```
+
+Resolving returns work to `accepted`; it is not a claim that the corrected artifact already exists. Reuse the start/complete **shapes**, not their old command IDs. A new completion clears the current review and decision; the reviewer checks that new receipt.
+
+To report an ordinary obstacle as the accountable member, use:
+
+<!-- room-command: block -->
+```json
+{"id":"guide-block-1","type":"work.blocked","data":{"workItemId":"guide-work","expectedRevision":2,"reason":"Required source context is missing.","nextAction":"Ask the owner to supply the permitted source."}}
+```
+
+If `ownerDecisionRequired` is true, a valid review pass leaves `next.action: "decide"`. **Stop there.** Only the designated human decision-maker records the decision using their own account. Completion and review are not owner approval; even approval does not perform an external action.
+
+## Recover without duplicates
+
+- **Lost response, timeout, or uncertain server error:** the write may already exist. Reconcile from current state/events, or resend the **identical prepared command**, including its old expected revision, evidence fields and ID. Do not call `prepareCommand` again. A duplicate returns the original event and sequence with `duplicate: true`, even though the work revision has advanced.
+- **Explicit stale revision rejection:** no mutation was applied by that request. Read current state, reassess whether the action still makes sense, then deliberately prepare a new command. Never refresh revisions automatically in a retry loop.
+- **Same ID, changed contents:** `409 idempotency_conflict`; recover the original intent rather than changing the ID to force a write.
+- **401:** stop and ask the operator to restore access. **422:** fix the rejected shape/authority/transition, not the service rules. **429:** back off; the current service advertises 60 seconds. Reads never mark work handled or messages read.
+
+Persist pending commands only in approved private storage: their bodies may contain Room data. Keep credentials separate. The client does not automatically retry, follow evidence links, launch an agent, or call Compute/MCP.
+
+## Wire limits and executable examples
+
+Commands allow only `id`, `type`, `data`, and optional `causationId` (an existing event in this Room). Do not send a full event envelope. IDs are 1–128 characters, start alphanumeric, then use alphanumerics, `_`, `.`, `:`, or `-`; reserved prototype names are rejected. Work revisions are nonnegative safe integers. Ordinary text fields are nonblank, at most 4,096 JavaScript string units; `checksClaimed` has at most 64 nonblank strings, each at most 512 units. Total serialized command/request limit: 16,384 UTF-8 bytes. Keep summaries short; link permitted evidence rather than embedding large artifacts.
+
+The seven JSON examples are parsed by `tests/agent-write-guide.test.js` and sent through disposable real Room storage and HTTP clients. Fixture URLs under `example.invalid` are intentionally not live. The test binds content hashes to synthetic in-memory artifacts; it verifies command behavior, **not hosted evidence retrieval, real task execution, or human approval**.
+
+```sh
+node --test tests/agent-write-guide.test.js
+```
+
+For read pagination, recovery boundaries and current interoperability limits, see [Agent client contract](./AGENT-CLIENT.md).
