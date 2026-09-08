@@ -12,8 +12,8 @@ import { saveAgentConnection } from '../client/agent-connection.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
 import { textVersion } from '../server/text-results.mjs';
 
-for (const touch of [false, true]) test(`reconnect collaboration ${touch ? 'touch' : 'desktop'}: clarify, restart, contribute and review`, { timeout: 60000 }, async t => {
-  const f = createAcceptanceFixture(), handles = new Set(), traffic = [], errors = [];
+for (const crowded of [false, true]) for (const touch of [false, true]) test(`${crowded ? 'crowded ' : ''}reconnect collaboration ${touch ? 'touch' : 'desktop'}: clarify, restart, contribute and review`, { timeout: 60000 }, async t => {
+  const f = createAcceptanceFixture({ managedProducer: crowded }), handles = new Set(), traffic = [], errors = [];
   let server = createRoomServer({ store: f.store, streamInterval: 50 }), browser;
   const listen = port => new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   const stopServer = async () => { server.closeStreams(); server.closeAllConnections();
@@ -21,6 +21,14 @@ for (const touch of [false, true]) test(`reconnect collaboration ${touch ? 'touc
   const close = async handle => { handles.delete(handle); await handle.close(); };
   t.after(async () => { for (const handle of handles) await handle.close(); await browser?.close();
     await stopServer(); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const background = (type, data) => f.store.command(f.keys.owner, 'commons', { id: crypto.randomUUID(), type, data });
+  if (crowded) {
+    for (let i = 0; i < 80; i++) background('work.proposed', { workItemId: `background-${i}`, title: `Observation archive ${i}`,
+      definitionOfDone: 'File the synthetic observation note with its reference.', accountableMemberId: 'guest',
+      independentVerificationRequired: false, ownerDecisionRequired: false });
+    for (let i = 0; i < 240; i++) background('message.posted', { messageId: `background-message-${i}`,
+      body: `Synthetic discussion ${i}: the observation archive has a new note. No action is requested here.` });
+  }
   await listen(0); const port = server.address().port, origin = `http://127.0.0.1:${port}`;
   const configs = Object.fromEntries(['producer', 'reviewer'].map(memberId => {
     const directory = join(f.directory, memberId);
@@ -55,6 +63,8 @@ for (const touch of [false, true]) test(`reconnect collaboration ${touch ? 'touc
   const question = await call(producer, 'room_request_reply', ask);
   await read(producer, 'room_read_attention'); // Persist the outgoing observation before disconnect.
   await close(producer);
+  if (crowded) for (let i = 0; i < 30; i++) background('message.posted', { messageId: `later-background-${i}`,
+    body: `Later synthetic discussion ${i}. The archive note is unchanged.` });
 
   browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ viewport: touch ? { width: 390, height: 844 } : { width: 1280, height: 900 },
@@ -66,6 +76,39 @@ for (const touch of [false, true]) test(`reconnect collaboration ${touch ? 'touc
     await page.locator('#main').waitFor({ state: 'visible' }); return page;
   };
   let page = await pageForOwner(true);
+  mkdirSync('test-results', { recursive: true });
+  const prefix = `test-results/${crowded ? 'crowded-' : ''}reconnect-collaboration-${touch ? 'touch' : 'desktop'}`;
+  if (crowded) {
+    const beforeNavigation = auditRecovery(f.store).dataSha256;
+    assert.equal(await page.locator('[data-work-record-id]').count(), 81, 'All work remains reachable');
+    assert.match(await page.locator('#contribution-title').textContent(), /agenda/i);
+    await page.screenshot({ path: `${prefix}-arrival.png` });
+    await page.locator('#return-brief-panel > summary').click();
+    await page.waitForFunction(() => !document.querySelector('#rb-ack-button').disabled);
+    assert.equal(await page.locator('#rb-attention-list a').count(), 1);
+    assert.equal(await page.locator('#rb-attention-list [data-open-message]').getAttribute('data-open-message'), question.requestMessageId);
+    for (const id of ['rb-involving-section', 'rb-history-section']) assert.equal(await page.locator(`#${id}`).evaluate(node => node.open), false);
+    await page.screenshot({ path: `${prefix}-catchup.png` });
+    await page.locator('#return-brief-panel > summary').click();
+    await page.locator('#message-search').fill('prepare an agenda');
+    const hit = page.locator('#search-list [data-open-work="test-handoff"]');
+    await hit.focus(); await hit.press('Enter');
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.workRecordId), workItemId);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+    await page.screenshot({ path: `${prefix}-selected.png` });
+    await page.locator('#clear-search').click();
+    await page.locator('#contribution-open').click();
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.messageRecordId), question.requestMessageId);
+    assert.equal(auditRecovery(f.store).dataSha256, beforeNavigation, 'catch-up, search and navigation do not mark read or mutate Room data');
+    const requestRow = page.locator(`[data-message-record-id="${question.requestMessageId}"]`);
+    const beforeTop = await requestRow.evaluate(node => node.getBoundingClientRect().top);
+    const arrival = background('message.posted', { messageId: 'while-reading-request', body: 'Another synthetic archive update while the owner reads the request.' });
+    await page.waitForFunction(sequence => document.querySelector('#event-count').textContent === String(sequence), arrival.sequence);
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.messageRecordId), question.requestMessageId);
+    assert.ok(Math.abs(await requestRow.evaluate(node => node.getBoundingClientRect().top) - beforeTop) <= 2,
+      'New discussion does not pull the reader away from the older request');
+    assert.equal(await page.locator('#new-messages-button').isVisible(), true);
+  }
   await page.locator(`[data-message-id="${question.requestMessageId}"][data-message-action="request-answered"]`).click();
   await page.waitForFunction(() => !document.querySelector('#message-input').disabled);
   const answer = 'Two bullets. Name Room owner and end with a concrete next step.';
@@ -75,8 +118,6 @@ for (const touch of [false, true]) test(`reconnect collaboration ${touch ? 'touc
   await page.locator('#request-mode-bar').waitFor({ state: 'hidden' });
   assert.equal(state().replyRequests[question.requestMessageId].status, 'answered');
   assert.equal(state().workItems[workItemId].state, 'working', 'a reply does not complete work');
-  mkdirSync('test-results', { recursive: true });
-  const prefix = `test-results/reconnect-collaboration-${touch ? 'touch' : 'desktop'}`;
   await page.screenshot({ path: `${prefix}-answered.png` });
   await page.close();
 
@@ -132,7 +173,11 @@ for (const touch of [false, true]) test(`reconnect collaboration ${touch ? 'touc
   assert.equal(state().workItems[workItemId].decision, null);
 
   page = await pageForOwner(false);
-  await page.locator('[data-work-id="test-handoff"][data-action="decide"]').click();
+  if (crowded) {
+    assert.match(await page.locator('#contribution-title').textContent(), /agenda/i);
+    await page.screenshot({ path: `${prefix}-ready.png` });
+    await page.locator('#contribution-open').click();
+  } else await page.locator('[data-work-id="test-handoff"][data-action="decide"]').click();
   await page.waitForFunction(body => document.querySelector('#action-text-body').textContent === body, body);
   assert.equal(await page.locator('#action-fields [name="decision"]').inputValue(), '');
   assert.equal(await page.locator('#decision-review-label').textContent(), 'Independent check · Pass');
@@ -154,13 +199,29 @@ for (const touch of [false, true]) test(`reconnect collaboration ${touch ? 'touc
   await page.locator('#refresh-action').click();
   await page.waitForFunction(() => document.querySelector('#decision-review-text').textContent.startsWith('Later check:'));
   assert.equal(await page.locator('#action-fields [name="reason"]').inputValue(), 'Keep my decision notes.');
+  assert.equal(await page.locator('#action-error').textContent(), '', 'A successful same-evidence refresh is not presented as an error');
+  assert.equal(await page.locator('#action-error').evaluate(node => node.classList.contains('error')), false);
   assert.equal(await page.locator('#decision-review-text b').count(), 0, 'review text is not interpreted as markup');
   assert.equal(await page.locator('#decision-review').evaluate(node => node.open), false);
   await page.locator('#decision-review > summary').click();
+  const reviewFonts = await page.locator('#review-criteria, #decision-review-text, #decision-review-by, #decision-review-label')
+    .evaluateAll(nodes => nodes.map(node => ({ id: node.id, pixels: parseFloat(getComputedStyle(node).fontSize) })));
   await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
-  assert.equal(await page.locator('#action-dialog').evaluate(node => node.scrollWidth <= node.clientWidth), true);
+  for (const font of reviewFonts) assert.ok(await page.locator(`#${font.id}`).evaluate((node, pixels) =>
+    parseFloat(getComputedStyle(node).fontSize) >= pixels * 1.9, font.pixels), `${font.id} follows the larger text preference`);
+  await page.screenshot({ path: `${prefix}-scaled-layout.png` });
+  assert.equal(await page.locator('#action-dialog').evaluate(node => node.scrollWidth <= node.clientWidth), true,
+    JSON.stringify(await page.locator('#action-dialog').evaluate(dialog => [...dialog.querySelectorAll('*')]
+      .filter(node => node.getBoundingClientRect().right > dialog.getBoundingClientRect().right)
+      .map(node => ({ tag: node.tagName, id: node.id, class: node.className, width: node.getBoundingClientRect().width })))));
   await page.locator('#decision-review').scrollIntoViewIfNeeded();
   await page.screenshot({ path: `${prefix}-review-large.png` });
+  for (const selector of ['#action-fields [name="decision"]', '#action-fields [name="reason"]', '#action-form button[type="submit"]']) {
+    const control = page.locator(selector); await control.scrollIntoViewIfNeeded();
+    const box = await control.boundingBox();
+    assert.ok(box.y >= 0 && box.y + box.height <= page.viewportSize().height, 'Decision controls remain reachable with enlarged text');
+  }
+  await page.screenshot({ path: `${prefix}-controls-large.png` });
   assert.equal(state().workItems[workItemId].decision, null, 'viewing the human decision never approves it');
   for (const member of ['owner', 'producer', 'reviewer']) {
     assert.equal(f.store.db.prepare('SELECT sequence FROM cursors WHERE room_id=? AND member_id=?').get('commons', member)?.sequence ?? 0, 0);
@@ -172,6 +233,7 @@ for (const touch of [false, true]) test(`reconnect collaboration ${touch ? 'touc
     assert.equal(await page.locator(`#${id}`).textContent(), '', 'sign-out clears review context');
   }
   writeFileSync(`${prefix}.json`, JSON.stringify({ simulatedHuman: true, scriptedMcp: true, nativeModels: false,
+    crowded, managedProducer: crowded, unrelatedWork: crowded ? 80 : 0, unrelatedMessages: crowded ? 271 : 0,
     serviceRestarted: true, request: 'answered', exactQuestionRetry: true, exactResultRetry: true,
     resultVersion: textVersion(body), independentReviewRecorded: true, humanApproval: null,
     readMarkers: { owner: 0, producer: 0, reviewer: 0 }, traffic, finalAudit: auditRecovery(f.store) }, null, 2));

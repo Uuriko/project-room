@@ -1640,7 +1640,7 @@ $("#refresh-action").addEventListener("click", () => {
     const receipt = item.receipt ? { completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion } : null;
     const changedResult = JSON.stringify(receipt) !== JSON.stringify(entry.receipt);
     entry.revision = item.revision; entry.receipt = receipt; entry.retry = null; entry.needsReview = false;
-    entry.error = changedResult ? "Result changed. Notes kept; inspect this version and choose again." : "Current work loaded. Review your entries before saving.";
+    entry.error = changedResult ? "Result changed. Notes kept; inspect this version and choose again." : "";
     if (changedResult) for (const field of $("#action-fields").querySelectorAll("select[name='result'],select[name='decision']")) field.value = "";
     renderActionContext(item, entry.action);
   }).then(() => {
