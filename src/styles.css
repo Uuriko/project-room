@@ -398,6 +398,7 @@ button:disabled { cursor: wait; opacity: .6; }
 .share-dialog { width: min(38rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); overflow-y: auto; padding: 1.5rem; border-radius: 1rem; }
 .share-dialog p, .share-dialog label, .share-dialog input, .share-dialog select { font-size: 1rem; line-height: 1.5; }
 .share-dialog label { display: block; margin-block: .75rem .35rem; }
+.share-dialog textarea { font-size: 1rem; overflow-wrap: anywhere; }
 .share-dialog input, .share-dialog select { width: 100%; min-height: 2.75rem; }
 .share-dialog .button { margin-block: .5rem; }
 .share-dialog > .panel-header { padding: 0 0 .75rem; align-items: flex-start; flex-wrap: nowrap; }

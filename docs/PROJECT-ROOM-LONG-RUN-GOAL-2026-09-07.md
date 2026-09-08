@@ -282,9 +282,18 @@ progressive history disclosure, shared time-aware work presentation and one
 frozen-horizon acknowledgement. It adds no hosted notification or analytics channel.
 The return-to-useful-contribution experiment is defined but unmeasured.
 
-Next is the optional previewed invitation note/one small ask, preserving default
-Copy link and avoiding automatic context disclosure or sending. Write its detailed
-state/ownership/recovery contract first, implement and test the complete slice,
-then continue agent ergonomics, reusable outcomes and release recovery. Do not
-restart completed watcher/return work or mistake either milestone for this goal's
-completion. Keep advanced controls contextual and voluntary growth value-bearing.
+The [optional invitation-note checkpoint](INVITATION-NOTE-CHECKPOINT-2026-09-07.md)
+is now built locally: unchanged URL-only Copy link, blank opt-in personal note,
+exact combined preview/copy, no service persistence or sending, current-owner/link
+cleanup and clipboard/cancellation recovery. 355 core/API, 76 browser and 7 local
+Cloudflare checks pass, with eight masked screenshots inspected. Growth remains
+a hypothesis, not a measured lift. No publication or schema change in this slice.
+
+Next: inspect and research agent task-context ergonomics. Reuse existing orient,
+snapshot, brief, write guide and portable packet; identify the smallest missing
+selected-task context/next-action handoff before adding interfaces. Write its
+detailed plan, implement and test with fresh agents while preserving human
+approval and explicit external authority. Then continue reusable outcomes and
+v8-compatible release recovery. Do not restart completed watcher/return/invitation
+work or mistake a milestone for this goal's completion. Keep advanced controls
+contextual and voluntary growth value-bearing.

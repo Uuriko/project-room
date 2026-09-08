@@ -72,9 +72,13 @@ for (const mobile of [false, true]) {
     await page.evaluate(() => scrollTo(0, 0)); await capture("closed");
     assert.equal(await summary.evaluate(node => node.getBoundingClientRect().bottom < innerHeight), true);
 
-    await summary.click(); await ready();
+    // The native details toggle is queued after click. Wait for its new response,
+    // not the previous closed-panel brief that can still look ready momentarily.
+    const openedBrief = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/return-brief'));
+    await summary.click(); await openedBrief; await ready();
     await page.waitForFunction(() => document.querySelector("#return-brief-panel").getAttribute("aria-busy") === "false");
     const horizon = Number(await page.locator("#rb-ack-button").getAttribute("data-horizon"));
+    assert.ok(horizon > 0, 'the opened brief owns a populated history horizon');
     assert.equal(await page.locator("#rb-attention-list a").count(), 5);
     assert.equal(await page.locator("#rb-history-section").evaluate(node => node.open), false);
     assert.equal(await page.locator("#rb-involving-section").evaluate(node => node.open), false);

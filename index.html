@@ -287,7 +287,21 @@
         </details>
         <button id="share-link-create" class="button primary" type="submit">Create link</button>
       </form>
-      <div id="share-link-result" hidden><label for="share-link-url">Ready to share</label><input id="share-link-url" type="text" readonly autocomplete="off" spellcheck="false"><button id="share-link-copy" class="button primary" type="button">Copy link</button><button id="share-link-another" class="button ghost" type="button">New link</button><p class="form-hint">Save this link before closing. It can’t be shown again.</p></div>
+      <div id="share-link-result" hidden>
+        <label for="share-link-url">Ready to share</label><input id="share-link-url" type="text" readonly autocomplete="off" spellcheck="false">
+        <button id="share-link-copy" class="button primary" type="button">Copy link</button><button id="share-link-another" class="button ghost" type="button">New link</button>
+        <p class="form-hint">Save this link before closing. It can’t be shown again.</p>
+        <details id="share-note"><summary>Add a note</summary>
+          <label for="share-note-text">Note · optional</label>
+          <textarea id="share-note-text" rows="3" maxlength="600" autocomplete="off" spellcheck="false" placeholder="What would you like a hand with?" aria-describedby="share-note-hint"></textarea>
+          <p id="share-note-hint" class="form-hint">Not saved in Room. Closing this window clears your draft.</p>
+          <div id="share-note-result" hidden>
+            <label for="share-note-preview">Preview</label>
+            <textarea id="share-note-preview" rows="5" readonly autocomplete="off" spellcheck="false"></textarea>
+            <button id="share-note-copy" class="button primary" type="button" disabled>Copy invitation</button>
+          </div>
+        </details>
+      </div>
       <p id="share-link-status" class="form-status" role="status" aria-live="polite"></p>
       <details id="share-management"><summary id="share-management-summary">Manage links</summary>
       <p id="share-management-status" class="form-status" role="status" aria-live="polite"></p>

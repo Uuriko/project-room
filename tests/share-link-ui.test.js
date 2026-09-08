@@ -1,6 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, reuseVisibleRoom } from "../src/share-links.js";
+import { formatShareInvitation, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, reuseVisibleRoom } from "../src/share-links.js";
+
+test("invitation note formatting is bounded plain text with an exact URL-only fallback", () => {
+  const url = "https://room.example/#join/synthetic";
+  for (const note of ["", "  ", "\n\t"]) assert.equal(formatShareInvitation(note, url), url);
+  assert.equal(formatShareInvitation("  Can you review this?\nNo rush.  ", url), `Can you review this?\nNo rush.\n\n${url}`);
+  assert.equal(formatShareInvitation("<b>Literal text</b> 💡", url), `<b>Literal text</b> 💡\n\n${url}`);
+  assert.equal(formatShareInvitation("💡".repeat(300), url), `${"💡".repeat(300)}\n\n${url}`);
+  for (const note of ["x".repeat(601), "💡".repeat(301), null]) assert.equal(formatShareInvitation(note, url), "");
+  assert.equal(formatShareInvitation("A note", ""), "");
+});
 
 test("invitation status uses the shared form-status visibility contract", () => {
   const classes = new Set();
@@ -62,7 +72,7 @@ test("invitation UI retries the same uncertain creation and preserves confirmed 
       value: "", textContent: "", hidden: false, disabled: false, open: false, dataset: {}, handlers: {},
       classList: { toggle() {} },
       addEventListener(type, handler) { this.handlers[type] = handler; },
-      replaceChildren() {}, showModal() { this.open = true; }, close() { this.open = false; },
+      contains() { return false; }, replaceChildren() {}, showModal() { this.open = true; }, close() { this.open = false; },
       focus() { focused = selector; },
     });
     return nodes.get(selector);
@@ -73,14 +83,15 @@ test("invitation UI retries the same uncertain creation and preserves confirmed 
     location: { hostname: "localhost", origin: "http://localhost:52331" } };
   const previous = new Map(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   const member = { id: "owner", kind: "human", revision: 1, permissions: ["manage_members"] };
+  const session = { member };
   const client = {
-    generation: 0, path: suffix => suffix,
+    session, ownsAccountSession: () => true, generation: 0, path: suffix => suffix,
     async request(path, options) {
       assert.equal(path, "/share-links");
       if (options?.method === "POST") {
         requests.push(structuredClone(options.data));
         if (++createAttempts === 1) throw new TypeError("Failed to fetch");
-        return { link: { id: "created-link", status: "active" } };
+        return { link: { id: "created-link", status: "active", expiresAt: options.data.expiresAt } };
       }
       if (++lists > 1) throw new TypeError("Failed to fetch");
       return { links: [] };
@@ -88,7 +99,7 @@ test("invitation UI retries the same uncertain creation and preserves confirmed 
   };
   try {
     for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
-    installShareLinks({ client, accountClient: {}, getState: () => ({ members: { owner: member } }), getSession: () => ({ member }), openRoom() {} });
+    const ui = installShareLinks({ client, accountClient: {}, getState: () => ({ members: { owner: member } }), getSession: () => session, openRoom() {} });
     node("#share-link-expiry").value = "24";
     node("#share-link-limit").value = "2";
     await node("#invite-people-button").handlers.click();
@@ -104,6 +115,7 @@ test("invitation UI retries the same uncertain creation and preserves confirmed 
     assert.equal(node("#share-link-url").value, `http://localhost:52331/#join/${requests[0].linkToken}`);
     assert.equal(node("#share-link-create").disabled, false);
     assert.equal(focused, "#share-link-copy");
+    ui.resetManagement();
   } finally {
     for (const [key, descriptor] of previous) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
@@ -119,7 +131,7 @@ test("failed guest join retains its request, restores retry focus and keeps pend
     if (!nodes.has(selector)) nodes.set(selector, {
       value: "", textContent: "", hidden: false, disabled: false, open: false, dataset: {}, handlers: {},
       classList: { toggle() {} }, addEventListener(type, handler) { this.handlers[type] = handler; },
-      replaceChildren() {}, reset() {}, showModal() { this.open = true; }, close() { this.open = false; },
+      contains() { return false; }, replaceChildren() {}, reset() {}, showModal() { this.open = true; }, close() { this.open = false; },
       focus() { focused = selector; },
       querySelectorAll() { return [node("#join-link-name"), node("#join-link-submit"), node("#join-link-close")]; },
     });
