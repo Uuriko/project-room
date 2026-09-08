@@ -318,7 +318,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
       rate(`read:${auth.credentialHash}`, 600);
       if (!["GET", "HEAD"].includes(req.method)) { protectWrite(req, auth, selected.bearer); rate(`write:${auth.credentialHash}`, 60); }
-      if (!route && req.method === "GET") return json(res, 200, store.snapshot(selected.token, roomId, fence));
+      if (!route && req.method === "GET") {
+        const params = url.searchParams;
+        if (params.has("view") && (params.getAll("view").length !== 1 || params.get("view") !== "work"
+          || [...params.keys()].some(key => !["view", "auth"].includes(key) || params.getAll(key).length !== 1))) {
+          reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
+        }
+        return json(res, 200, store.snapshot(selected.token, roomId, fence, params.has("view") ? "work" : "full"));
+      }
       if (["reply-requests", "reply-context", "reply-history"].includes(route) && req.method === "GET") {
         const params = url.searchParams, names = route === "reply-requests" ? ["direction", "status"]
           : route === "reply-context" ? ["requestMessageId", "cursor", "limit"] : ["direction", "cursor", "checkpoint", "limit"];

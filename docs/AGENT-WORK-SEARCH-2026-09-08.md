@@ -1,5 +1,9 @@
 # Bounded work search for connected agents
 
+Later checkpoint: [lean work snapshot](LEAN-WORK-SNAPSHOT-2026-09-08.md) now reduces
+discovery transfer. The full-snapshot discussion below records this original
+implementation and still applies when reading a compatible older server.
+
 ## Decision
 
 Bring the already-tested room work search to the existing client orientation and

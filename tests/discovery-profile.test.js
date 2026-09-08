@@ -17,6 +17,9 @@ test('discovery transfer measurement counts identity reads and separates result 
   assert.ok(chat.metrics.full.decodedBodyBytes.min > small.metrics.full.decodedBodyBytes.max + 10000);
   assert.ok(Math.abs(chat.metrics.selected.decodedBodyBytes.max - small.metrics.selected.decodedBodyBytes.max) < 100);
   assert.ok(Math.abs(chat.metrics.search.resultJsonBytes.max - small.metrics.search.resultJsonBytes.max) < 100);
+  assert.ok(Math.abs(chat.metrics.search.decodedBodyBytes.max - small.metrics.search.decodedBodyBytes.max) < 100,
+    'unrelated messages do not grow current work-only discovery transfer');
+  assert.ok(chat.metrics.search.decodedBodyBytes.max < chat.metrics.full.decodedBodyBytes.min);
 });
 
 test('discovery profiler refuses unbounded or noninteger fixture sizes before setup', async () => {

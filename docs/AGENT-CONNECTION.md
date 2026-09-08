@@ -117,8 +117,11 @@ is literal and case-insensitive over current work titles, IDs, criteria, reporte
 summaries/next steps and role names—not messages or linked files. Up to25 compact
 hits include counts, excerpts and selected-work read pointers. Refine a truncated
 query. Focus filters before the limit, and does not assign work or acknowledge it.
-Omitting query preserves the existing full/focused list. This still reads the Room
-snapshot internally; smaller output does not reduce network scope or authority.
+Omitting query preserves the existing full/focused list. Current focused/search
+reads request a [work-only snapshot](LEAN-WORK-SNAPSHOT-2026-09-08.md), omitting chat,
+event history and prior work receipts. Compatible older servers return the full
+snapshot instead. Neither view reduces the credential's authority; all current
+work still transfers, and search phrases stay local.
 Do not include credentials in queries or shell arguments. See the
 [search contract and evidence](AGENT-WORK-SEARCH-2026-09-08.md).
 

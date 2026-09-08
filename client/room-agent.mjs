@@ -1,4 +1,4 @@
-import { validId, PERMISSIONS } from "../src/events.js";
+import { validId, PERMISSIONS, WORK_STATES } from "../src/events.js";
 import { nextWorkStep, workActions, reusableWorkDefinition } from "../src/workflow.js";
 import { searchWork } from "../src/work-selectors.js";
 import { workPacket, resultDraft, verifyWorkResult } from "../src/work-packet.js";
@@ -16,6 +16,56 @@ function checkedCharter(value, horizon) {
     if (!Number.isSafeInteger(horizon) || result.revision > horizon) throw new Error();
     return result;
   } catch { throw new RoomClientError(200, "invalid_response", "Room returned invalid instructions metadata"); }
+}
+
+function checkedWorkSnapshot(value, roomId) {
+  const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
+  const integer = value => Number.isSafeInteger(value) && value >= 0;
+  const text = value => typeof value === "string" && value.trim().length > 0 && value.length <= 4096;
+  const exact = (value, keys) => object(value) && Object.keys(value).sort().join(" ") === keys.split(" ").sort().join(" ");
+  try {
+    const state = value?.state, projected = Object.hasOwn(value, "snapshotView") || Object.hasOwn(value, "snapshotVersion");
+    if (!object(value) || value.roomId !== roomId || !integer(value.sequence) || !object(state)
+      || state.room?.id !== roomId || !validId(value.viewerId) || !object(state.members) || !object(state.workItems)
+      || !Object.hasOwn(state.members, value.viewerId) || Object.keys(state.members).length > 100 || Object.keys(state.workItems).length > 500) throw new Error();
+    if (projected) {
+      if (value.snapshotView !== "work" || value.snapshotVersion !== 1
+        || !exact(value, "snapshotView snapshotVersion roomId sequence state charter viewerId viewerAccountId viewerAuthEpoch viewerSessionBinding viewerSessionRevision")
+        || !exact(state, "room members workItems")) throw new Error();
+    } else if (value.replyRequestContractVersion !== undefined && value.replyRequestContractVersion !== 1
+      || !integer(value.cursor) || value.cursor > value.sequence
+      || !Array.isArray(state.messages) || !Array.isArray(state.eventLog)) throw new Error();
+    // Legacy compatibility validates the consumed envelope/current records, not
+    // unused history integrity. It never issues a second, weaker fallback request.
+    for (const [id, member] of Object.entries(state.members)) {
+      if (!validId(id) || member?.id !== id || !text(member.displayName) || !["agent", "human"].includes(member.kind)
+        || typeof member.active !== "boolean" || !integer(member.revision) || member.revision > value.sequence
+        || !Array.isArray(member.permissions) || member.permissions.some(p => !PERMISSIONS.includes(p))
+        || new Set(member.permissions).size !== member.permissions.length) throw new Error();
+    }
+    for (const [id, item] of Object.entries(state.workItems)) {
+      if (!validId(id) || item?.id !== id || !text(item.title) || !text(item.definitionOfDone)
+        || !Object.values(WORK_STATES).includes(item.state) || !integer(item.revision) || item.revision > value.sequence
+        || !["read", "write"].includes(item.mode) || !Number.isFinite(Date.parse(item.updatedAt))
+        || !validId(item.accountableMemberId) || !Object.hasOwn(state.members, item.accountableMemberId)
+        || ["independentVerificationRequired", "ownerDecisionRequired"].some(key => typeof item[key] !== "boolean")
+        || ["verifierMemberId", "humanDecisionMakerId", "supersededBy"].some(key => item[key] !== null && !validId(item[key]))
+        || ["claim", "receipt", "verification", "decision", "blocker"].some(key => item[key] !== null && !object(item[key]))) throw new Error();
+      if (projected && ["receiptHistory", "verificationHistory", "decisionHistory"].some(key => Object.hasOwn(item, key))) throw new Error();
+      if (item.receipt && (!validId(item.receipt.eventId) || !text(item.receipt.evidenceVersion)
+        || !text(item.receipt.summary) || !text(item.receipt.nextAction)
+        || item.receipt.producerId !== null && !validId(item.receipt.producerId))) throw new Error();
+      if (item.verification && (!validId(item.verification.completionEventId) || !text(item.verification.evidenceVersion)
+        || !["pass", "fail"].includes(item.verification.result) || typeof item.verification.independenceConfirmed !== "boolean")) throw new Error();
+      if (item.decision && (!validId(item.decision.completionEventId) || !text(item.decision.evidenceVersion)
+        || !["approved", "changes_requested", "rejected"].includes(item.decision.decision))) throw new Error();
+      if (item.claim && (!validId(item.claim.holderId) || !Number.isFinite(Date.parse(item.claim.expiresAt))
+        || !["active", "released", "superseded"].includes(item.claim.status))) throw new Error();
+      if (item.blocker && (!text(item.blocker.reason) || !text(item.blocker.nextAction))) throw new Error();
+    }
+    checkedCharter(value.charter, value.sequence);
+    return value;
+  } catch { throw new RoomClientError(200, "invalid_response", "Room returned an invalid work snapshot"); }
 }
 
 // Minimal, explicit client for a single configured service and Room. It neither
@@ -58,13 +108,14 @@ export class RoomAgentClient {
     // is never a cached grant. The service still authorizes the operation itself.
     if (this.#memberId) await this.checkConnection({ signal });
     const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal);
-    if (this.#memberId && (suffix === "" || suffix === "/charter" || suffix.startsWith("/charter?") || suffix.startsWith("/work-context?") || suffix.startsWith("/work-discussion?") || suffix.startsWith("/work-result?") || suffix.startsWith("/return-brief?") || /^\/reply-(requests|context|history)\?/.test(suffix))) {
+    const snapshotRead = suffix === "" || suffix === "?view=work";
+    if (this.#memberId && (snapshotRead || suffix === "/charter" || suffix.startsWith("/charter?") || suffix.startsWith("/work-context?") || suffix.startsWith("/work-discussion?") || suffix.startsWith("/work-result?") || suffix.startsWith("/return-brief?") || /^\/reply-(requests|context|history)\?/.test(suffix))) {
       if (value?.roomId !== this.#roomId || value.viewerId !== this.#memberId || value.viewerAccountId !== null
         || value.viewerAuthEpoch !== null || value.viewerSessionBinding !== null || value.viewerSessionRevision !== null) {
         throw new RoomClientError(200, "identity_mismatch", "Room response does not match the configured agent");
       }
-      const member = suffix === "" ? value.state?.members?.[this.#memberId] : suffix.startsWith("/work-context?") ? value.viewer : null;
-      if ((suffix === "" || suffix.startsWith("/work-context?")) && (member?.id !== this.#memberId || member.kind !== "agent" || member.active !== true)) {
+      const member = snapshotRead ? value.state?.members?.[this.#memberId] : suffix.startsWith("/work-context?") ? value.viewer : null;
+      if ((snapshotRead || suffix.startsWith("/work-context?")) && (member?.id !== this.#memberId || member.kind !== "agent" || member.active !== true)) {
         throw new RoomClientError(200, "identity_mismatch", "Room response does not match the configured agent");
       }
     }
@@ -231,7 +282,9 @@ export class RoomAgentClient {
   async orient({ signal, focus = "all", query } = {}) {
     if (!["all", "needs_me"].includes(focus)) throw new RoomClientError(0, "invalid_focus", "Choose all work or work needing you");
     if (query !== undefined && !validWorkSearchQuery(query)) throw new RoomClientError(0, "invalid_query", "Use a nonblank work query of at most 200 UTF-16 code units");
-    const snapshot = await this.snapshot({ signal });
+    const snapshot = focus === "needs_me" || query !== undefined
+      ? checkedWorkSnapshot(await this.#request("?view=work", undefined, signal), this.#roomId)
+      : await this.snapshot({ signal });
     const member = snapshot.state.members[snapshot.viewerId];
     const charter = snapshot.charter === undefined ? null : checkedCharter(snapshot.charter, snapshot.sequence);
     try {

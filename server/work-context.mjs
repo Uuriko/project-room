@@ -4,17 +4,22 @@ import { charterContext } from "../src/room-charter.js";
 const pick = (value, fields) => value == null ? null
   : Object.fromEntries(fields.split(" ").filter(key => Object.hasOwn(value, key)).map(key => [key, structuredClone(value[key])]));
 
-// An authenticated selected read, not the deliberately narrower portable export.
-// All input comes from one committed Room projection and one service clock.
-export function selectedWorkContext({ state, workItemId, viewerId, sequence, now, includeSource = false }) {
-  if (!Object.hasOwn(state.workItems, workItemId) || !Object.hasOwn(state.members, viewerId)) throw new RangeError("Choose existing work and membership");
-  const item = state.workItems[workItemId], member = state.members[viewerId];
+// Shared current record; no prior receipts/checks, conversation text or event log.
+export function currentWorkRecord(item) {
   const work = pick(item, "id title definitionOfDone revision state mode sourceMessageId proposedById accountableMemberId verifierMemberId humanDecisionMakerId independentVerificationRequired ownerDecisionRequired supersededBy createdAt updatedAt");
   work.claim = pick(item.claim, "holderId repository ref paths acquiredAt expiresAt status releasedAt");
   work.receipt = pick(item.receipt, "reportedById producerId producerAttribution summary evidenceUrl evidenceVersion checksClaimed nextAction eventId nativeText");
   work.verification = pick(item.verification, "verifierId result completionEventId evidenceVersion summary independenceConfirmed eventId");
   work.decision = pick(item.decision, "actorId decision completionEventId evidenceVersion reason eventId");
   work.blocker = pick(item.blocker, "reason nextAction eventId");
+  return work;
+}
+
+// An authenticated selected read, not the deliberately narrower portable export.
+// All input comes from one committed Room projection and one service clock.
+export function selectedWorkContext({ state, workItemId, viewerId, sequence, now, includeSource = false }) {
+  if (!Object.hasOwn(state.workItems, workItemId) || !Object.hasOwn(state.members, viewerId)) throw new RangeError("Choose existing work and membership");
+  const item = state.workItems[workItemId], member = state.members[viewerId], work = currentWorkRecord(item);
   const message = includeSource && item.sourceMessageId ? state.messages.find(message => message.id === item.sourceMessageId) : null;
   const source = { status: !includeSource ? "not_requested" : !item.sourceMessageId ? "not_linked" : message ? "included" : "unavailable",
     message: message ? pick(message, "id authorId body createdAt") : null };

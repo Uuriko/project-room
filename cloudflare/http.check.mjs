@@ -61,6 +61,18 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     } }), 201);
     const beforeRead = await json(await call('/api/rooms/commons', { headers: guestHeaders }));
     assert.equal(beforeRead.replyRequestContractVersion, 1, 'Worker advertises the same request contract as the local service');
+    const workViewResponse = await call('/api/rooms/commons?view=work', { headers: guestHeaders });
+    assert.equal(workViewResponse.headers.get('cache-control'), 'no-store');
+    const workView = await json(workViewResponse);
+    assert.equal(workView.snapshotView, 'work'); assert.equal(workView.snapshotVersion, 1);
+    assert.equal(workView.viewerId, joined.session.member.id);
+    assert.equal(workView.viewerSessionBinding, joined.session.sessionBinding);
+    assert.equal(workView.sequence, beforeRead.sequence);
+    assert.deepEqual(Object.keys(workView.state).sort(), ['members', 'room', 'workItems']);
+    assert.equal(Object.hasOwn(workView, 'cursor'), false);
+    assert.equal(workView.state.workItems['selected:task'].sourceMessageId, posted.event.data.messageId ?? posted.event.id);
+    assert.equal(JSON.stringify(workView).includes(command.data.body), false);
+    await json(await call('/api/rooms/commons?view=work&view=work', { headers: guestHeaders }), 422);
     const contextResponse = await call('/api/rooms/commons/work-context?workItemId=selected%3Atask&includeSource=true', { headers: guestHeaders });
     assert.equal(contextResponse.headers.get('cache-control'), 'no-store');
     const context = await json(contextResponse);
