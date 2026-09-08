@@ -97,7 +97,7 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
     await page.locator('#action-form button[type=submit]').click(); await page.locator('#action-dialog').waitFor({ state: 'hidden' });
     assert.equal(state().workItems[workItemId].state, 'working');
   }
-  // Service-driven events exercise browser replay, not an unbuilt invitation UI.
+  // Service-driven events exercise browser replay, not human invitation controls.
   // This existing conversational offer predates the invitation and is not
   // falsely presented as an invitation-bound offer or automated dispatch.
   const unsent = 'Keep this unsent note while help changes.';
@@ -229,7 +229,7 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
   assert.equal(await page.locator('#action-text-body').textContent(), '');
   writeFileSync(`${prefix}.json`, JSON.stringify({ simulatedHuman: true, scriptedMcp: true, nativeModels: false,
     workItemId, oneSharedRecord: true, contributors: multiple ? ['producer', 'alternate'] : ['producer'], selectedEarlierDraft: multiple,
-    returnedFrom: touch ? 'working' : 'accepted', draftShortcut: true, helpEventsApplied: true, helpDiscovery: true, helpInvitationUI: false,
+    returnedFrom: touch ? 'working' : 'accepted', draftShortcut: true, helpEventsApplied: true, helpDiscovery: true, helpInvitationUITested: false,
     accountable: 'owner', postedBy: 'producer', reportedProducer: 'producer', reportedBy: 'owner',
     request: 'answered', reconnect: true, exactOfferRetry: true, exactDraftRetry: true, review: 'pass', humanApproval: null,
     evidenceVersion: textVersion(body), readMarkers: markers, traffic, finalAudit: auditRecovery(f.store) }, null, 2));

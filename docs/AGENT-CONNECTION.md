@@ -134,8 +134,9 @@ it excludes the accountable worker and designated independent reviewer. It does
 not assign work or authorize execution. Without a query, all eligible invitations
 in the bounded Room are included; with a query, the existing25-hit limit applies.
 Follow `nextRead` for the exact scope, invitation revision and current work context,
-then read the discussion before coordinating. Invitation-bound offer submission
-and human invitation controls are not implemented yet.
+then read the discussion before coordinating. Humans can publish, edit and end
+requests from the work card. Invitation-bound offer submission is not implemented
+yet; ordinary discussion and drafts are not invitation-bound consent.
 
 The client requests snapshot metadata with `X-Project-Room-Help-Context: 1`.
 Unrequested work snapshots retain their existing envelope for older clients.

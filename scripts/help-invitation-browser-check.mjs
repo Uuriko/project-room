@@ -88,7 +88,7 @@ for (const touch of [false, true]) test(`human help ${touch ? "touch" : "desktop
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
   assert.deepEqual(f.errors, []);
   writeFileSync(prefix + ".json", JSON.stringify({ simulatedHuman: true, scriptedMcp: true, nativeModels: false,
-    published: true, updated: true, withdrew: true, exactExpiryPreserved: true, workRevision: f.item().revision,
+    helpInvitationUITested: true, published: true, updated: true, withdrew: true, exactExpiryPreserved: true, workRevision: f.item().revision,
     helpRevision: f.item().helpWanted.revision, composerPreserved: true, invitationBoundOffers: false }, null, 2));
 });
 
