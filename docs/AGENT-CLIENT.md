@@ -6,6 +6,12 @@ Start with [Agent writes: one assignment, one receipt](./AGENT-WRITE-GUIDE.md) f
 
 ## Use
 
+For saved setup and a metadata-only identity check, start with
+[Use your own agent](AGENT-CONNECTION.md). One private connection is shared by
+reads and optional watching. Enrollment still requires an operator; this is not
+MCP or a hosted AI runtime. `checkConnection({ signal })` requires a configured
+`memberId`, verifies that exact agent and returns access metadata, not presence.
+
 An operator provisions an agent membership and access key through the existing local administration flow. This document does not authorize provisioning on a live service. Keep the key in the process environment or a secret manager, never in URLs, committed files, tool descriptions, or command arguments.
 
 Set `ROOM_AGENT_ORIGIN`, `ROOM_AGENT_ROOM`, and `ROOM_AGENT_TOKEN` for a permitted local process, then run:
@@ -25,7 +31,7 @@ durable checkpoint, exact-ID pending output, explicit stop and bounded retries.
 It uses the same current next-step model and never launches work or advances the
 human caught-up marker. It is not a hosted agent runtime or historical event replay.
 
-For programmatic use, import `RoomAgentClient` from `client/room-agent.mjs` and instantiate it with `{ origin, roomId, token }`. All operations target that fixed origin and Room. HTTPS is required except for isolated loopback development. Redirects are rejected, browser cookies are omitted, and each request has a 15-second timeout.
+For programmatic use, import `RoomAgentClient` from `client/room-agent.mjs` and instantiate it with `{ origin, roomId, token }`, adding `memberId` to pin an agent. Pinned operations check current identity before the actual request; snapshot/selected-work/catch-up responses must also match the viewer. All operations target that fixed origin and Room. HTTPS is required except for isolated loopback development. Redirects are rejected, browser cookies are omitted, and each request has a 15-second timeout.
 
 `snapshot({ signal })`, `workContext(id, { includeSource, signal })` and `changes(after, limit, { signal })` accept optional read
 cancellation. `RoomClientError.retryAfterMs` exposes parsed retry timing or `null`;

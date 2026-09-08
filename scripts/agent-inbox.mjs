@@ -1,28 +1,53 @@
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { packetMarkdown } from "../src/work-packet.js";
 import { validId } from "../src/events.js";
+import { agentConnectionFromEnvironment, saveAgentConnection, connectionDiagnostic, ConnectionError } from "../client/agent-connection.mjs";
 
 const [action = "orient", checkpoint, ...extra] = process.argv.slice(2);
 if (action === "watch") {
   const { watchMain } = await import("./agent-watch.mjs");
   await watchMain(process.argv.slice(3));
 } else if (action === "--help") {
-  console.log("Read-only agent client: node scripts/agent-inbox.mjs [orient|brief|changes CHECKPOINT|packet WORK_ID|work WORK_ID [--include-source]]\nAssignment watching: node scripts/agent-inbox.mjs watch --help\nSet ROOM_AGENT_ORIGIN, ROOM_AGENT_ROOM, and ROOM_AGENT_TOKEN in the local process environment. Never put a key in a URL or command argument. Work returns authenticated current task context, not a public export; its linked source is opt-in. Packet is a narrower proposal-only export, without source messages. This client does not start an AI runtime or execute work.");
+  console.log(`Agent connection (Node 24.19+):
+  node scripts/agent-inbox.mjs connect NEW_PRIVATE_DIRECTORY
+  node scripts/agent-inbox.mjs check
+  node scripts/agent-inbox.mjs work WORK_ID [--include-source]
+  node scripts/agent-inbox.mjs [orient|brief|changes CHECKPOINT|packet WORK_ID]
+Assignment watching: node scripts/agent-inbox.mjs watch --help
+
+Connect checks access, then saves a new private connection; never overwrites or
+issues a key. Supply ROOM_AGENT_ORIGIN, ROOM_AGENT_ROOM, ROOM_AGENT_MEMBER and
+ROOM_AGENT_TOKEN through the approved process environment/secret manager first.
+After saving, clear those four variables and set ROOM_AGENT_CONFIG to that directory.
+Check/read/watch reuse the saved connection. Never mix the two sources.
+Legacy reads without a saved connection still accept the original three variables;
+expected agent identity is enforced when ROOM_AGENT_MEMBER is supplied.
+Never put a key in a prompt, URL or command argument. No AI or work is started.
+Check reads identity metadata only; work reads one task with source excluded by
+default. Orient reads broader private room context. A read does not narrow the key's
+permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits.`);
 } else {
   try {
-    if (!["orient", "brief", "changes", "packet", "work"].includes(action)
+    if (!["connect", "check", "orient", "brief", "changes", "packet", "work"].includes(action)
+      || (action === "connect" && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
       || (["packet", "work"].includes(action) && !validId(checkpoint))
       || (action === "work" ? extra.length > 1 || (extra.length === 1 && extra[0] !== "--include-source")
-        : extra.length || (["orient", "brief"].includes(action) && checkpoint !== undefined))) throw new Error("Choose a documented read with exact arguments");
-    const client = new RoomAgentClient({
-      origin: process.env.ROOM_AGENT_ORIGIN, roomId: process.env.ROOM_AGENT_ROOM, token: process.env.ROOM_AGENT_TOKEN
-    });
-    const result = action === "work" ? await client.workContext(checkpoint, { includeSource: extra[0] === "--include-source" })
+        : extra.length || (["check", "orient", "brief"].includes(action) && checkpoint !== undefined))
+      || (action === "changes" && (!/^\d+$/.test(checkpoint ?? "") || !Number.isSafeInteger(Number(checkpoint))))) throw new ConnectionError("usage_error");
+    const config = agentConnectionFromEnvironment(), client = new RoomAgentClient(config);
+    let result;
+    if (["connect", "check"].includes(action)) {
+      result = await client.checkConnection();
+      if (action === "connect") {
+        saveAgentConnection(checkpoint, { version: 1, ...config });
+        result = { ...result, configurationSaved: true };
+      }
+    } else result = action === "work" ? await client.workContext(checkpoint, { includeSource: extra[0] === "--include-source" })
       : action === "packet" ? packetMarkdown(await client.workPacket(checkpoint)) : action === "orient" ? await client.orient() : action === "brief" ? await client.returnBrief() : await client.changes(Number(checkpoint));
     console.log(action === "packet" ? result : JSON.stringify(result, null, 2));
   } catch (error) {
     // Fixed diagnostic text avoids printing transport internals or environment secrets.
-    console.error("Agent read did not complete. Check the configured service, Room, active key, and command. No write was requested.");
+    console.error(JSON.stringify(connectionDiagnostic(error)));
     process.exitCode = 1;
   }
 }

@@ -2,13 +2,16 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { RoomAgentClient, RoomClientError } from "../client/room-agent.mjs";
 import { AssignmentWatcher } from "../client/assignment-watcher.mjs";
 import { WatchJournal, WatchError } from "../client/watch-journal.mjs";
+import { agentConnectionFromEnvironment, ConnectionError } from "../client/agent-connection.mjs";
 
 export const WATCH_HELP = `Read-only assignment watcher (Node 24.19+):
   node scripts/agent-inbox.mjs watch start PRIVATE_DIRECTORY [--once]
   node scripts/agent-inbox.mjs watch status PRIVATE_DIRECTORY
   node scripts/agent-inbox.mjs watch stop PRIVATE_DIRECTORY
 
-Start: ROOM_AGENT_ORIGIN, ROOM_AGENT_ROOM, ROOM_AGENT_TOKEN in the environment.
+Start: ROOM_AGENT_CONFIG for a saved agent connection, OR ROOM_AGENT_ORIGIN,
+ROOM_AGENT_ROOM, ROOM_AGENT_TOKEN (optional ROOM_AGENT_MEMBER) in the environment.
+Never mix saved and environment credentials. A pinned agent is checked first.
 Use a dedicated private local directory (not shared or cloud-synchronised).
 Foreground only. Ctrl-C or stop ends watching; no tasks or messages are started.
 Start prints attention JSONL to stdout; health/errors go to stderr. Status/stop
@@ -72,6 +75,7 @@ export async function watchLoop(watcher, { once = false, intervalMs = 10000, rep
 
 const errorCode = error => {
   if (error instanceof WatchError) return error.code;
+  if (error instanceof ConnectionError) return "invalid_connection";
   if (error instanceof RoomClientError) return [401, 403].includes(error.status) ? "access_ended" : "room_unavailable";
   if (error.code === "ENOENT") return "state_not_found";
   return "watch_failed";
@@ -90,8 +94,9 @@ export async function watchMain(args) {
       await writeJson(process.stdout, action === "status" ? journal.status() : journal.requestStop());
       return;
     }
-    const origin = process.env.ROOM_AGENT_ORIGIN, roomId = process.env.ROOM_AGENT_ROOM;
-    const client = new RoomAgentClient({ origin, roomId, token: process.env.ROOM_AGENT_TOKEN });
+    const config = agentConnectionFromEnvironment(), { origin, roomId } = config;
+    const client = new RoomAgentClient(config);
+    if (config.memberId) await client.checkConnection();
     journal = new WatchJournal(directory);
     controller = new AbortController();
     process.on("SIGINT", stop); process.on("SIGTERM", stop);

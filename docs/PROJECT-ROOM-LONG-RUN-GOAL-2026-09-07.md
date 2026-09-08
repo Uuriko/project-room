@@ -336,7 +336,13 @@ Mobile guest→accountable human discovery is simulated, not a human retention
 study. Browser agent-key rejection remains intact. No event/schema change or
 native evidence adoption, publication or deployment is claimed.
 
-Next: apply the same reliability standard to generic work-action dialogs (Post
+User priority now: [one seamless connection experience](CONNECTIONS-PLAN-2026-09-07.md).
+First verify private reusable setup, exact agent access and selected-task reads;
+then build owner-managed enrollment with versioned key lifecycle/recovery, followed
+by host-tested MCP and deliberately scoped tool adapters. Do not call a saved key
+online or a connected runtime permission to work. Keep manual contribution useful.
+
+After connection onboarding, apply the same reliability standard to generic work-action dialogs (Post
 evidence, review, decision): exact confirmation, preserved unknown retries and
 entered text, owned callbacks/focus, and explicit stale-context recovery. Never
 silently rebase approval onto different evidence. After that evaluate a truthful

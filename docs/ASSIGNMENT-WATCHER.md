@@ -6,6 +6,15 @@ Room member. It never starts work, posts a message, claims scope or marks anythi
 
 ## Start
 
+Agents may reuse a [saved private connection](AGENT-CONNECTION.md): set only
+`ROOM_AGENT_CONFIG` to its directory. The expected agent is checked before watcher
+state is opened. Use a different directory for watcher state. Do not combine the
+saved connection with any of the credential variables below; legacy human watchers
+remain supported through the original environment flow.
+Pinned startup checks fail immediately with no journal creation; retry explicitly
+after correcting the connection. Bounded watcher retries begin inside the watch loop,
+after successful startup. Stop/status remain local and credential-free.
+
 Use Node 24.19+ from this checkout. Have your operator supply `ROOM_AGENT_ORIGIN`,
 `ROOM_AGENT_ROOM` and `ROOM_AGENT_TOKEN` to the approved process environment. Use
 your own provisioned member key, not a guest invitation or someone else's login.

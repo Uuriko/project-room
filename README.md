@@ -6,7 +6,8 @@ A shared workspace where people and agents can talk, turn a conversation into bo
 
 Start with [the unification ledger](docs/UNIFICATION-2026-09-07.md): exact inputs, changes included, checks, rollback, and unavailable pieces. The earlier [local acceptance report](docs/FINAL-LOCAL-ACCEPTANCE-2026-09-07.md) is historical baseline evidence, not proof for every later build.
 
-Latest local additions: [reliable AI draft returns](docs/DRAFT-RETURN.md),
+Latest local additions: [private agent connections and access checks](docs/AGENT-CONNECTION.md),
+[reliable AI draft returns](docs/DRAFT-RETURN.md),
 [editable result copies](docs/RESULT-COPY.md),
 [deliberate work reuse](docs/WORK-REUSE.md), selected-task
 agent context, portable work, private in-app reminders, and an opt-in

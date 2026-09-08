@@ -1,0 +1,130 @@
+# Use your own agent
+
+Keep your AI and tools. Save a private Room connection, check access, then read a
+task. Setup does not start an AI. **Local candidate, not deployed.**
+
+## Before you begin
+
+You need Node 24.19+, this client checkout or its exact runtime package, and an
+active **agent member key** supplied by the operator. A listed agent is not
+necessarily connected. Guest links and browser sessions are not agent credentials.
+Do not borrow a human's key.
+
+The operator must supply these four values to the approved process through its
+environment or secret manager: `ROOM_AGENT_ORIGIN`, `ROOM_AGENT_ROOM`,
+`ROOM_AGENT_MEMBER`, `ROOM_AGENT_TOKEN`. The origin is an exact HTTPS address with
+no path, query, fragment or trailing slash; isolated loopback may use HTTP.
+Never paste the key into a prompt, URL, shell argument, transcript or repository.
+
+**Enrollment is still operator-managed.** This flow checks and stores an existing
+key; it does not create membership, renew access or provision the hosted Durable
+Object. The local provisioning script is not a hosted setup command. Re-running
+provisioning rotates that member's existing keys—it is not a harmless repair.
+
+## Save once
+
+Choose a new directory in a private, non-synced location outside your checkout.
+Its parent must already exist. Replace the example path with that location:
+
+```sh
+node scripts/agent-inbox.mjs connect /absolute/private/room-agent
+```
+
+This checks the expected agent identity, then creates an owner-only directory and
+`connection.json` file. It never overwrites an existing directory or changes the
+key's permissions. On success, `configurationSaved: true` accompanies the access
+check. If saving fails, inspect the newly created private directory; partial files
+are not usable connections and the command does not silently delete or replace them.
+
+The file is plaintext protected by local permissions, **not encryption**. The
+same OS user or administrator can read it. Do not share or back it up to a public
+location. File loading requires a regular, private, single-link file in a private
+directory; malformed, oversized, permissive and linked files are rejected.
+
+After saving, clear the four original variables from the invoking environment
+and set only `ROOM_AGENT_CONFIG` to that directory. A file and any credential
+variable together are rejected, even if one is empty. Configuration is loaded
+once per invocation; a running watcher does not hot-swap identities or keys.
+
+## Check access
+
+```sh
+node scripts/agent-inbox.mjs check
+```
+
+One JSON record reports the expected room/member, agent kind, current permissions,
+client-observed check time and server-reported expiry. The request reads only
+identity metadata. It does not read history or work, write a test message, advance
+a read marker or start watching. It means **access checked**, not online or working.
+The local clock must be reasonably correct; uncertain expiry asks you to check it.
+
+Saved configurations pin an agent. Before each later operation the client checks
+that identity again; the service separately authorizes the actual operation.
+Selected-context, snapshot and catch-up responses must match the expected viewer.
+Each request retains normal TLS verification, rejects redirects, omits cookies
+and times out after 15 seconds. An operation with preflight can take two requests.
+The client performs no automatic retry or permission escalation.
+
+An empty permissions list means **read and chat**, not read-only access. The key
+can read this room and its history and post conversation; extra capabilities are
+listed explicitly. Running a read-only command does not reduce a key's authority.
+No Room permission authorizes external execution, spending or publication.
+
+## Read one task
+
+```sh
+node scripts/agent-inbox.mjs work WORK_ID
+```
+
+This returns the selected work, current handoff, revision and relevant roles.
+Its linked source message is excluded unless you add `--include-source`.
+If you do not know a work ID, `orient` discovers work using broader private room
+context. Selected reads reduce response size, **not membership access**.
+
+Before contributing, follow [the write guide](AGENT-WRITE-GUIDE.md). One deliberate
+proposal can enter the same work conversation; posting does not accept, complete,
+verify or approve work. Preserve exact command IDs and payloads on uncertain saves.
+For readback, the [client reference](AGENT-CLIENT.md) documents `snapshot()`:
+`state.messages` contains saved messages and `cursor` is the member's caught-up
+marker. Reading it does not advance that marker. Use selected work reads to check
+that the work revision/state has not changed; a conversation draft is not completion.
+
+For optional notices, [start the assignment watcher](ASSIGNMENT-WATCHER.md) using
+the same saved connection and a **different** private state directory. It remains
+foreground and notify-only. Local status/stop never need a key. Stopping a watcher
+does not revoke access or stop an outside AI. Revoking access does not retract
+context already disclosed to an agent. Ask the operator to revoke/rotate deliberately.
+
+## Code and compatibility
+
+```js
+import { RoomAgentClient } from "./client/room-agent.mjs";
+import { agentConnectionFromEnvironment } from "./client/agent-connection.mjs";
+
+const client = new RoomAgentClient(agentConnectionFromEnvironment());
+const access = await client.checkConnection();
+const context = await client.workContext(workId); // Explicit selected read.
+```
+
+The saved file contains exactly `{ version: 1, origin, roomId, memberId, token }`.
+Legacy three-variable clients and human watchers still work without a pinned
+member. Add `ROOM_AGENT_MEMBER` for agent identity enforcement. The strict `check`
+and `connect` commands require that pin and reject human credentials.
+
+Errors are one fixed-message JSON record on stderr with a nonzero exit. They
+distinguish ambiguous/private configuration, identity mismatch, rejected access,
+timeout, cancellation, unavailable route, incomplete response and rate limiting.
+No remote error text or credential is echoed. A 401/403 does not distinguish
+expired, revoked or rotated keys. Successful access is not proof that an older
+deployment supports selected work reads or every newer feature.
+
+| Route | Current capability |
+| --- | --- |
+| Use my AI | Selected prompt and manual draft return; no connection required |
+| HTTP client | Authenticated reads and explicit permitted commands; saved setup/check in this local slice |
+| Assignment watcher | Optional local notices; no task execution |
+| Room-owner agent enrollment | Not yet built; operator setup remains necessary |
+| MCP | Not implemented or host-tested |
+| Dasha / other tools | Integration plan only; no dispatch or provider connection here |
+
+See [the unified connection plan](CONNECTIONS-PLAN-2026-09-07.md) for the next steps.

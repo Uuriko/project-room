@@ -208,7 +208,7 @@ test("work CLI prints one selected context and rejects extra arguments without d
   }
   for (const args of [["work"], ["packet"], ["packet", "../other"], ["work", "test-handoff", "--includeSource"], ["work", "test-handoff", "--include-source", "extra"], ["work", "../other"]]) {
     const result = await run(args); assert.equal(result.code, 1); assert.equal(result.stdout, "");
-    assert.match(result.stderr, /No write was requested/); assert.equal(result.stderr.includes(f.keys.producer), false);
+    assert.equal(JSON.parse(result.stderr).code, "usage_error"); assert.equal(result.stderr.includes(f.keys.producer), false);
   }
   const guide = readFileSync(new URL("../docs/WORK-CONTEXT.md", import.meta.url), "utf8");
   const code = guide.match(/<!-- work-context-example -->\n```js\n([\s\S]*?)\n```/)[1];

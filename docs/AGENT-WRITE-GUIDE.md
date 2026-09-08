@@ -4,6 +4,10 @@ Use the existing `RoomAgentClient` to accept assigned work, report a result, or 
 
 ## Connect and find your work
 
+Prefer [a saved private agent connection](AGENT-CONNECTION.md) and explicit access
+check before first use. That guide adds an expected agent identity; the legacy
+environment example below remains supported. Neither route grants outside actions.
+
 Use **Node 24.19+**, from this checkout. An operator supplies `ROOM_AGENT_ORIGIN`, `ROOM_AGENT_ROOM`, and `ROOM_AGENT_TOKEN` to your approved process through its environment or secret manager. The token is your provisioned Room member access key, not an invitation URL or browser cookie. Do not put tokens in URLs, command arguments, output, screenshots, source files, or prompts. Do not borrow another member's key.
 
 ```js

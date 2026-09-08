@@ -14,7 +14,9 @@ const required = [...publicAssets, "server.mjs", "package.json", "package-lock.j
   ...["room-agent", "assignment-watcher", "watch-journal"].map(name => `client/${name}.mjs`),
   ...["backup-room", "provision", "audit-invitations", "agent-inbox", "agent-watch"].map(name => `scripts/${name}.mjs`),
   ...["room.mjs", "storage.mjs", "bootstrap.mjs", "build-assets.mjs", "wrangler.jsonc", "package.json", "pnpm-lock.yaml"].map(name => "cloudflare/" + name)].sort();
-const optional = ["server/maintenance.mjs", "server/recovery.mjs"];
+// Historical v8 packages predate these files. Literal-import closure below makes
+// them mandatory when the selected source imports them, without rewriting history.
+const optional = ["server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs"];
 const allowed = new Set([...required, ...optional]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 const check = condition => { if (!condition) throw new Error("Runtime package does not match its exact allowlisted contract"); };

@@ -1,4 +1,4 @@
-import { validId } from "../src/events.js";
+import { validId, PERMISSIONS } from "../src/events.js";
 import { nextWorkStep, reusableWorkDefinition } from "../src/workflow.js";
 import { workPacket, resultDraft } from "../src/work-packet.js";
 
@@ -13,15 +13,18 @@ export class RoomAgentClient {
   #roomId;
   #token;
   #fetch;
-  constructor({ origin, roomId, token, fetchImpl = globalThis.fetch }) {
+  #memberId;
+  constructor({ origin, roomId, token, memberId, fetchImpl = globalThis.fetch }) {
     const url = new URL(origin);
     const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
     if (url.origin !== origin || url.username || url.password || (url.protocol !== "https:" && !(local && url.protocol === "http:"))) throw new Error("Use a fixed HTTPS origin or an isolated loopback development origin");
     if (!validId(roomId) || typeof token !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(token)) throw new Error("A valid Room and access key are required");
+    if (memberId !== undefined && !validId(memberId)) throw new Error("Choose a valid expected agent member");
     this.#origin = origin; this.#roomId = roomId; this.#token = token; this.#fetch = fetchImpl;
+    this.#memberId = memberId;
   }
-  async #request(suffix = "", body, signal) {
-    const response = await this.#fetch(`${this.#origin}/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, {
+  async #fetchPath(path, body, signal) {
+    const response = await this.#fetch(`${this.#origin}${path}`, {
       method: body === undefined ? "GET" : "POST", redirect: "error", credentials: "omit", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
       headers: { Authorization: `Bearer ${this.#token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) })
@@ -37,6 +40,44 @@ export class RoomAgentClient {
       throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room request failed", Number.isFinite(parsed) ? Math.max(0, parsed) : null);
     }
     return value;
+  }
+  async #request(suffix = "", body, signal) {
+    // Saved configurations pin an agent. Recheck before each operation; a check
+    // is never a cached grant. The service still authorizes the operation itself.
+    if (this.#memberId) await this.checkConnection({ signal });
+    const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal);
+    if (this.#memberId && (suffix === "" || suffix.startsWith("/work-context?") || suffix.startsWith("/return-brief?"))) {
+      if (value?.roomId !== this.#roomId || value.viewerId !== this.#memberId || value.viewerAccountId !== null
+        || value.viewerAuthEpoch !== null || value.viewerSessionBinding !== null || value.viewerSessionRevision !== null) {
+        throw new RoomClientError(200, "identity_mismatch", "Room response does not match the configured agent");
+      }
+      const member = suffix === "" ? value.state?.members?.[this.#memberId] : suffix.startsWith("/work-context?") ? value.viewer : null;
+      if ((suffix === "" || suffix.startsWith("/work-context?")) && (member?.id !== this.#memberId || member.kind !== "agent" || member.active !== true)) {
+        throw new RoomClientError(200, "identity_mismatch", "Room response does not match the configured agent");
+      }
+    }
+    return value;
+  }
+  async checkConnection({ signal } = {}) {
+    if (!this.#memberId) throw new RoomClientError(0, "member_required", "Configure the expected agent member before checking access");
+    const value = await this.#fetchPath("/api/session", undefined, signal), member = value?.member;
+    if (!value || Array.isArray(value) || value.authMode !== "room" || !validId(value.roomId)
+      || !member || !validId(member.id) || !["agent", "human"].includes(member.kind) || typeof member.active !== "boolean"
+      || !Number.isSafeInteger(member.revision) || member.revision < 0 || !Array.isArray(member.permissions)
+      || member.permissions.some(permission => !PERMISSIONS.includes(permission)) || new Set(member.permissions).size !== member.permissions.length
+      || !Number.isSafeInteger(value.expiresAt) || !Number.isFinite(new Date(value.expiresAt).getTime())) {
+      throw new RoomClientError(200, "invalid_response", "Room returned incomplete connection metadata");
+    }
+    if (value.roomId !== this.#roomId || member.id !== this.#memberId || member.kind !== "agent"
+      || member.active !== true || ["account", "csrf", "sessionBinding", "sessionRevision"].some(field => value[field] !== null)
+      || member.permissions.some(permission => ["manage_members", "decide"].includes(permission))) {
+      throw new RoomClientError(200, "identity_mismatch", "Access does not match the configured agent");
+    }
+    const now = Date.now();
+    if (value.expiresAt <= now) throw new RoomClientError(200, "expiry_unconfirmed", "Check the local clock and agent key expiry");
+    return { contractVersion: 1, type: "agent_connection_check", status: "credential_accepted", origin: this.#origin,
+      roomId: this.#roomId, memberId: this.#memberId, kind: "agent", permissions: [...member.permissions],
+      checkedAt: new Date(now).toISOString(), expiresAt: value.expiresAt, scope: "room", externalExecution: false };
   }
   snapshot({ signal } = {}) { return this.#request("", undefined, signal); }
   async workDefinition(workItemId, options = {}) {
