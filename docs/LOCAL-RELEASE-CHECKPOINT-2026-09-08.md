@@ -58,6 +58,11 @@ three saved logs. All user journeys are simulations, not human preference resear
 
 ## Remaining release gates and primary-source check
 
+Browser fallback remains a separate local qualification gap: exercise candidate
+drafts, fallback reload/sign-out, and return to candidate in the same browser.
+Check both ordinary and request drafts, unknown retries, identity changes and
+private-state clearing. Passing a server data audit does not prove this behavior.
+
 Cloudflare distinguishes code/configuration versions from storage state; a Worker
 rollback is not a database restore. This reinforces keeping the two drills separate.
 [Versions and deployments](https://developers.cloudflare.com/workers/versions-and-deployments/).
@@ -81,7 +86,8 @@ do not use its historical schema8 packages for current data.
 
 - **Now:** retain this clean local candidate; preserve preview64985. No push or
   deployment has happened. Native AI usage and hosted recovery need current approval.
-- **Next, authorized local work:** specify and test current-authority reconciliation
+- **Next, authorized local work:** qualify browser draft/privacy behavior across
+  the retained fallback switch; specify and test current-authority reconciliation
   after a historical restore, without exposing a public restore endpoint. Review
   the observed UUID clutter in guest attribution, preserving accessible identity
   details and disambiguation. Explore eligible-work suggestions only as explicit
