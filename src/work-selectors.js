@@ -23,7 +23,18 @@ export function searchWork(state, query, limit = 25) {
     const matched = fields.find(text => typeof text === "string" && text.toLocaleLowerCase().includes(term));
     if (matched === undefined) continue;
     const text = matched === item.title ? item.receipt?.summary || item.definitionOfDone : matched;
-    let start = Math.max(0, text.toLocaleLowerCase().indexOf(term) - 60);
+    const folded = text.toLocaleLowerCase(), offset = Math.max(0, folded.indexOf(term) - 60);
+    let start = offset;
+    // Case folding can expand characters (for example İ); convert the folded
+    // offset back to original text rather than slicing beyond a valid match.
+    if (folded.length !== text.length) {
+      let position = 0; start = 0;
+      for (const character of text) {
+        const width = character.toLocaleLowerCase().length;
+        if (position + width > offset) break;
+        position += width; start += character.length;
+      }
+    }
     if (start && /[\uDC00-\uDFFF]/.test(text[start])) start--;
     const excerpt = [...text.slice(start)].slice(0, 240).join("");
     matches.push({ item, excerpt: `${start ? "…" : ""}${excerpt}${start + excerpt.length < text.length ? "…" : ""}` });

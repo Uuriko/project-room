@@ -40,6 +40,8 @@ test('work search caps results and query while preserving total and useful Unico
   const excerpt = searchWork(long, 'needle').work[0].excerpt;
   assert.ok(excerpt.includes('needle')); assert.ok(excerpt.startsWith('…')); assert.ok(excerpt.endsWith('…'));
   assert.ok([...excerpt].length <= 242); assert.ok(excerpt.isWellFormed());
+  const expanded = room(item('folded', { definitionOfDone: 'İ'.repeat(300) + 'needle' }));
+  assert.ok(searchWork(expanded, 'needle').work[0].excerpt.includes('needle'), 'case-fold expansion does not displace the matching excerpt');
 });
 
 test('work search does not index unrelated history, private data or external evidence fields', () => {
