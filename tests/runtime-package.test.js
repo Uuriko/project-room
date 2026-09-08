@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { createServer, request } from "node:http";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, cpSync, symlinkSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -45,6 +46,32 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
       assert.deepEqual(auditRecovery(restored), before);
       assert.equal(restored.command(f.keys.owner, "commons", f.command).duplicate, true);
     } finally { restored.close(); }
+    const probe = createServer(); await new Promise(resolve => probe.listen(0, "127.0.0.1", resolve));
+    const port = probe.address().port; await new Promise(resolve => probe.close(resolve));
+    const modes = existsSync(join(destination, "server/maintenance.mjs")) ? ["1", "0"] : ["0"];
+    for (const pause of modes) {
+      const child = spawn(process.execPath, [join(destination, "server.mjs")], { cwd: directory,
+        env: { PATH: "/unavailable", NODE_ENV: "production", ROOM_DEPLOYMENT: "invite-only", ROOM_DB: f.filename,
+          ROOM_ORIGIN: "https://room.example.test", ROOM_MAINTENANCE: pause, HOST: "127.0.0.1", PORT: String(port) }, stdio: ["ignore", "pipe", "pipe"] });
+      const stopped = new Promise(resolve => child.once("exit", resolve));
+      try {
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error("Packaged service did not start")), 10000);
+          child.stdout.once("data", () => { clearTimeout(timer); resolve(); });
+          child.once("error", error => { clearTimeout(timer); reject(error); });
+          child.once("exit", () => { clearTimeout(timer); reject(new Error("Packaged service exited before readiness")); });
+        });
+        const response = await new Promise((resolve, reject) => {
+          const req = request({ hostname: "127.0.0.1", port, path: "/api/rooms/commons", headers: { host: "room.example.test",
+            "x-real-ip": "192.0.2.1", authorization: `Bearer ${f.keys.owner}` } }, res => {
+            let body = ""; res.on("data", chunk => { body += chunk; }); res.on("end", () => resolve({ status: res.statusCode, body }));
+          }); req.on("error", reject); req.end();
+        });
+        assert.equal(response.status, pause === "1" ? 503 : 200);
+        if (pause === "0") assert.equal(JSON.parse(response.body).viewerId, "owner");
+        assert.deepEqual(auditRecovery(f.store), before);
+      } finally { child.kill("SIGTERM"); await stopped; }
+    }
   } finally { f.store.close(); }
   assert.deepEqual(verifyRuntimePackage(destination), receipt, "all generated state stays outside the immutable package");
 
