@@ -1,6 +1,6 @@
 import { validId, PERMISSIONS } from "../src/events.js";
 import { nextWorkStep, reusableWorkDefinition } from "../src/workflow.js";
-import { workPacket, resultDraft } from "../src/work-packet.js";
+import { workPacket, resultDraft, verifyWorkResult } from "../src/work-packet.js";
 import { submitWorkAction } from "./work-actions.mjs";
 
 export class RoomClientError extends Error {
@@ -47,7 +47,7 @@ export class RoomAgentClient {
     // is never a cached grant. The service still authorizes the operation itself.
     if (this.#memberId) await this.checkConnection({ signal });
     const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal);
-    if (this.#memberId && (suffix === "" || suffix.startsWith("/work-context?") || suffix.startsWith("/work-discussion?") || suffix.startsWith("/return-brief?"))) {
+    if (this.#memberId && (suffix === "" || suffix.startsWith("/work-context?") || suffix.startsWith("/work-discussion?") || suffix.startsWith("/work-result?") || suffix.startsWith("/return-brief?"))) {
       if (value?.roomId !== this.#roomId || value.viewerId !== this.#memberId || value.viewerAccountId !== null
         || value.viewerAuthEpoch !== null || value.viewerSessionBinding !== null || value.viewerSessionRevision !== null) {
         throw new RoomClientError(200, "identity_mismatch", "Room response does not match the configured agent");
@@ -81,6 +81,17 @@ export class RoomAgentClient {
       checkedAt: new Date(now).toISOString(), expiresAt: value.expiresAt, scope: "room", externalExecution: false };
   }
   snapshot({ signal } = {}) { return this.#request("", undefined, signal); }
+  async workResult(workItemId, options = {}) {
+    if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => !["completionEventId", "draftMessageId", "signal"].includes(key))) throw new Error("Choose a completion or a draft, and optional signal");
+    const { completionEventId = null, draftMessageId = null, signal } = options;
+    if (!validId(workItemId) || [completionEventId, draftMessageId].some(id => id !== null && !validId(id)) || completionEventId !== null && draftMessageId !== null) throw new Error("Choose one exact result or draft");
+    const query = new URLSearchParams({ workItemId });
+    if (completionEventId !== null) query.set("completionEventId", completionEventId);
+    if (draftMessageId !== null) query.set("draftMessageId", draftMessageId);
+    const value = await this.#request(`/work-result?${query}`, undefined, signal);
+    try { return await verifyWorkResult(value, { roomId: this.#roomId, workItemId, completionEventId, draftMessageId }); }
+    catch { throw new RoomClientError(200, "invalid_response", "Selected result does not match the request"); }
+  }
   async workDefinition(workItemId, options = {}) {
     if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => key !== "signal")) throw new Error("Use the signal option only");
     return reusableWorkDefinition((await this.workContext(workItemId, { signal: options.signal })).work);

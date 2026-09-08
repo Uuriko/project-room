@@ -3,6 +3,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { textVersion } from "../server/text-results.mjs";
 
 export function createRecoveryFixture(filename) {
   let store = new RoomStore(filename), now = Date.now();
@@ -67,6 +68,14 @@ export function createRecoveryFixture(filename) {
   send("commons", keys.owner, T.WORK_ACCEPTED, { workItemId: "evidence", expectedRevision: 0 });
   send("commons", keys.owner, T.WORK_COMPLETED, { workItemId: "evidence", expectedRevision: 1, producerId: "owner", summary: "Synthetic exact result",
     evidenceUrl: "https://example.invalid/recovery", evidenceVersion: "fixture-v1", nextAction: "Owner review" });
+  propose("commons", keys.owner, "owner", "native-evidence");
+  send("commons", keys.owner, T.WORK_ACCEPTED, { workItemId: "native-evidence", expectedRevision: 0 });
+  const nativeBody = "Exact native recovery text 🪷\n", nativePost = send("commons", keys.owner, T.MESSAGE_POSTED, {
+    messageId: "recovery-native-text", workItemId: "native-evidence", packetId: "recovery-packet", basisRevision: 1, body: nativeBody });
+  const nativeCommand = { id: "recovery-native-command", type: T.WORK_COMPLETED, data: { workItemId: "native-evidence", expectedRevision: 1,
+    evidenceKind: "room_text", evidenceMessageId: "recovery-native-text", evidenceMessageEventId: nativePost.event.id, evidenceVersion: textVersion(nativeBody),
+    previousCompletionEventId: null, producerId: "owner", summary: "Native recovery result", nextAction: "Review exact text" } };
+  const nativeCompletion = store.command(keys.owner, "commons", nativeCommand);
   const sharedSession = session("recovery-shared");
   store.changeAccountAccess("recovery-shared", { expectedRevision: 0, active: false, reason: "Synthetic suspension before capture" });
   const command = { id: "recovery-command", type: T.MESSAGE_POSTED, data: { body: "Synthetic message before recovery capture" } };
@@ -74,5 +83,5 @@ export function createRecoveryFixture(filename) {
   const cursor = store.room("commons").sequence; store.markCaughtUp(keys.owner, "commons", cursor);
   return { store, filename, keys, owner, target, validSession, revokedSession, loggedOut, sharedSession, pending, invitation,
     shareRequest, link, linkToken, guestSlot, guest, joinRequest, reminders, command, commandResult, cursor,
-    enrollmentToken, enrollmentRequest, enrollment, now: () => now, advance: ms => { now += ms; } };
+    enrollmentToken, enrollmentRequest, enrollment, nativeBody, nativeCommand, nativeCompletion, now: () => now, advance: ms => { now += ms; } };
 }

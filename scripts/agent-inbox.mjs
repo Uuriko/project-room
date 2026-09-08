@@ -13,6 +13,7 @@ if (action === "watch") {
   pbpaste | node scripts/agent-inbox.mjs import NEW_PRIVATE_DIRECTORY
   node scripts/agent-inbox.mjs check
   node scripts/agent-inbox.mjs work WORK_ID [--include-source]
+  node scripts/agent-inbox.mjs result WORK_ID [--completion ID | --draft MESSAGE_ID]
   node scripts/agent-inbox.mjs discussion WORK_ID [--since N | --cursor CURSOR] [--limit N]
   node scripts/agent-inbox.mjs [orient|brief|changes CHECKPOINT|packet WORK_ID]
 Assignment watching: node scripts/agent-inbox.mjs watch --help
@@ -33,7 +34,11 @@ default. Orient reads broader private room context. A read does not narrow the k
 permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits.`);
 } else {
   try {
-    let discussionOptions;
+    let discussionOptions, resultOptions = {};
+    if (action === "result" && extra.length) {
+      if (extra.length !== 2 || !["--completion", "--draft"].includes(extra[0]) || !validId(extra[1])) throw new ConnectionError("usage_error");
+      resultOptions = { [extra[0] === "--completion" ? "completionEventId" : "draftMessageId"]: extra[1] };
+    }
     if (action === "discussion") {
       discussionOptions = {};
       for (let index = 0; index < extra.length; index += 2) {
@@ -47,11 +52,11 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
         || (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > 50))
         || (cursor !== undefined && (since !== undefined || cursor.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(cursor)))) throw new ConnectionError("usage_error");
     }
-    if (!["connect", "import", "check", "orient", "brief", "changes", "packet", "work", "discussion"].includes(action)
+    if (!["connect", "import", "check", "orient", "brief", "changes", "packet", "work", "discussion", "result"].includes(action)
       || (["connect", "import"].includes(action) && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
       || (action === "import" && ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"].some(name => process.env[name] !== undefined))
-      || (["packet", "work", "discussion"].includes(action) && !validId(checkpoint))
-      || (action === "discussion" ? false : action === "work" ? extra.length > 1 || (extra.length === 1 && extra[0] !== "--include-source")
+      || (["packet", "work", "discussion", "result"].includes(action) && !validId(checkpoint))
+      || (["discussion", "result"].includes(action) ? false : action === "work" ? extra.length > 1 || (extra.length === 1 && extra[0] !== "--include-source")
         : extra.length || (["check", "orient", "brief"].includes(action) && checkpoint !== undefined))
       || (action === "changes" && (!/^\d+$/.test(checkpoint ?? "") || !Number.isSafeInteger(Number(checkpoint))))) throw new ConnectionError("usage_error");
     const config = action === "import" ? await readConnectionInput() : agentConnectionFromEnvironment(), client = new RoomAgentClient(config);
@@ -63,6 +68,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
         result = { ...result, configurationSaved: true };
       }
     } else result = action === "discussion" ? await client.workDiscussion(checkpoint, discussionOptions)
+      : action === "result" ? await client.workResult(checkpoint, resultOptions)
       : action === "work" ? await client.workContext(checkpoint, { includeSource: extra[0] === "--include-source" })
       : action === "packet" ? packetMarkdown(await client.workPacket(checkpoint)) : action === "orient" ? await client.orient() : action === "brief" ? await client.returnBrief() : await client.changes(Number(checkpoint));
     console.log(action === "packet" ? result : JSON.stringify(result, null, 2));

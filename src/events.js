@@ -1,5 +1,5 @@
 import { REACTIONS } from "./conversation.js";
-import { proposalContext } from "./work-packet.js";
+import { proposalContext, nativeTextEvidence } from "./work-packet.js";
 
 export const EVENT_TYPES = Object.freeze({
   ROOM_CREATED: "room.created",
@@ -388,11 +388,19 @@ function completeWork(state, incoming) {
     requirePermission(state, incoming.actorId, "write_external");
     if (!item.claim || !claimIsActive(item.claim, incoming.at) || item.claim.holderId !== incoming.actorId) throw new Error("Completion requires a current exact-scope claim");
   }
-  requireFields(incoming.data, ["summary", "evidenceUrl", "evidenceVersion", "nextAction"]);
-  try {
-    const url = new URL(incoming.data.evidenceUrl);
-    if (url.protocol !== "https:" || url.username || url.password) throw new Error();
-  } catch { throw new Error("Evidence must be an HTTPS URL without credentials"); }
+  let nativeText = null;
+  if (incoming.data.evidenceKind === "room_text") {
+    requireFields(incoming.data, ["summary", "evidenceVersion", "nextAction"]);
+    nativeText = nativeTextEvidence(state, item, incoming.data);
+  }
+  else {
+    if (["evidenceKind", "evidenceMessageId", "evidenceMessageEventId", "previousCompletionEventId"].some(key => Object.hasOwn(incoming.data, key))) throw new Error("Choose one evidence format");
+    requireFields(incoming.data, ["summary", "evidenceUrl", "evidenceVersion", "nextAction"]);
+    try {
+      const url = new URL(incoming.data.evidenceUrl);
+      if (url.protocol !== "https:" || url.username || url.password) throw new Error();
+    } catch { throw new Error("Evidence must be an HTTPS URL without credentials"); }
+  }
   const producerId = incoming.data.producerId ?? null;
   if (producerId !== null) knownMember(state, producerId);
   if (item.receipt) item.receiptHistory.push(item.receipt);
@@ -407,7 +415,8 @@ function completeWork(state, incoming) {
     producerId,
     producerAttribution: producerId === null ? "unknown" : "reported",
     summary: incoming.data.summary,
-    evidenceUrl: incoming.data.evidenceUrl,
+    evidenceUrl: nativeText ? null : incoming.data.evidenceUrl,
+    ...(nativeText ? { nativeText } : {}),
     evidenceVersion: incoming.data.evidenceVersion,
     checksClaimed: incoming.data.checksClaimed || [],
     nextAction: incoming.data.nextAction,

@@ -2,9 +2,10 @@
 
 September 8, 2026 · local implementation plan · goal active
 
-Status: the [action recovery prerequisite](ACTION-RECOVERY-CHECKPOINT-2026-09-08.md)
-is implemented and verified locally at runtime `fc69f84`. Native text completion,
-result reads and schema/writer10 below are still planned, not implemented.
+Status: native completion, current/historical/draft reads, human preview/review,
+thin agent tools and schema/writer10 are implemented locally. See
+[the contract](NATIVE-TEXT-RESULTS.md). Final gate evidence is recorded separately
+in the native-result checkpoint; implementation is not publication.
 
 Previous turn made verified progress: focused discussion reads and an actual
 clarification-driven agent contribution. Next remove the need for placeholder
@@ -44,10 +45,15 @@ submit. The work card opens the stored text with a short result label; hashes,
 lineage and origin sit in Details. Reviewer and owner dialogs pin that exact text.
 Keep external-link completion available without fabricating URLs for native text.
 
-Agent: existing post-draft → selected discussion/readback → explicit
+Agent: existing post-draft → selected draft readback → explicit
 `room_submit_text_result` → `room_read_result` for an exact current or historical
 completion → existing verification. Thin shared client/MCP; no automatic acceptance,
 work launch, external tool use, human approval, read acknowledgement or runtime wake.
+
+Implementation adjustment: the same result reader also accepts an exclusive
+`draftMessageId` selector. Browser snapshots only retain the latest100 events, so
+old selected drafts need a direct retained-post lookup to obtain exact identity.
+The post-draft receipt now includes message ID, avoiding an extra discussion read.
 
 Before extending the human form, fix its generic action recovery: immutable unknown
 input, exact receipt matching, retained retry after close/reopen, session ownership

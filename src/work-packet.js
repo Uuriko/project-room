@@ -5,6 +5,71 @@ const revision = value => Number.isSafeInteger(value) && value >= 0;
 const prefix = "ROOM-RETURN ";
 const referenceFields = ["version", "roomId", "workItemId", "packetId", "basisRevision"];
 const invalid = message => { throw new Error(message); };
+export const validResultBody = body => typeof body === "string" && body.length <= 4096 && body.trim().length > 0 && body.isWellFormed();
+
+// Text is never normalized here: the immutable stored message is the artifact.
+export function nativeTextEvidence(state, work, data) {
+  if (data.evidenceKind !== "room_text" || Object.hasOwn(data, "evidenceUrl")
+    || ![data.evidenceMessageId, data.evidenceMessageEventId].every(id)
+    || !Object.hasOwn(data, "previousCompletionEventId")
+    || (data.previousCompletionEventId !== null && !id(data.previousCompletionEventId))
+    || data.previousCompletionEventId !== (work.receipt?.eventId ?? null)
+    || !Object.hasOwn(data, "producerId") || (data.producerId !== null && !id(data.producerId))
+    || !/^sha256:[0-9a-f]{64}$/.test(data.evidenceVersion)) invalid("Choose exact text evidence and its current previous result");
+  const message = state.messages.find(message => message.id === data.evidenceMessageId);
+  if (!message || message.workItemId !== work.id || !validResultBody(message.body)) invalid("Choose a well-formed message explicitly linked to this work");
+  return { kind: "room_text", messageId: message.id, messageEventId: data.evidenceMessageEventId,
+    previousCompletionEventId: data.previousCompletionEventId, postedById: message.authorId,
+    proposal: message.proposal ? structuredClone(message.proposal) : null };
+}
+
+// Both clients verify the exact selected body with platform crypto, not the DOM.
+export async function verifyWorkResult(value, { roomId, workItemId, completionEventId = null, draftMessageId = null }) {
+  const check = condition => { if (!condition) invalid("Selected result does not match the request"); };
+  const current = value?.current, result = value?.result, selection = value?.selection;
+  check(value?.contractVersion === 1 && value.roomId === roomId && value.workItemId === workItemId && id(value.viewerId)
+    && selection?.completionEventId === completionEventId && selection?.draftMessageId === draftMessageId
+    && !(completionEventId !== null && draftMessageId !== null) && revision(current?.workRevision)
+    && revision(current.evaluatedThrough) && Number.isFinite(Date.parse(current.evaluatedAt))
+    && (current.completionEventId === null || id(current.completionEventId))
+    && current.next?.workItemId === workItemId && current.next.workRevision === current.workRevision
+    && value.scope?.membership === "room" && value.scope.selectedWorkOnly === true && value.scope.externalExecution === false
+    && value.scope.contentAuthority === "untrusted-data");
+  check(draftMessageId !== null ? result?.kind === "draft" : ["none", "external", "room_text"].includes(result?.kind));
+  if (result.kind === "none") check(completionEventId === null && current.completionEventId === null && !result.receipt && !result.text);
+  if (["external", "room_text"].includes(result.kind)) {
+    const receipt = result.receipt;
+    check(id(receipt?.eventId) && receipt.eventId === (completionEventId ?? current.completionEventId)
+      && id(receipt.reportedById) && (receipt.producerId === null || id(receipt.producerId))
+      && receipt.producerAttribution === (receipt.producerId === null ? "unknown" : "reported")
+      && [receipt.summary, receipt.evidenceVersion, receipt.nextAction].every(text => typeof text === "string" && text.trim())
+      && Array.isArray(receipt.checksClaimed) && receipt.checksClaimed.every(text => typeof text === "string"));
+    if (result.kind === "external") {
+      const url = new URL(receipt.evidenceUrl);
+      check(url.protocol === "https:" && !url.username && !url.password && !receipt.nativeText && !result.text);
+    }
+  }
+  if (["draft", "room_text"].includes(result.kind)) {
+    const text = result.text, proposal = text?.proposal;
+    check(id(text?.messageId) && id(text.messageEventId) && id(text.postedById) && Number.isFinite(Date.parse(text.createdAt))
+      && revision(text.postSequence) && text.postSequence > 0 && text.postSequence <= current.evaluatedThrough
+      && validResultBody(text.body)
+      && (proposal === null || id(proposal?.packetId) && revision(proposal.basisRevision) && revision(proposal.submittedAtRevision)
+        && proposal.basisRevision <= proposal.submittedAtRevision && proposal.attribution === "manual-unverified"));
+    const bytes = new TextEncoder().encode(text.body);
+    const digest = `sha256:${Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), byte => byte.toString(16).padStart(2, "0")).join("")}`;
+    check(text.byteLength === bytes.length && text.evidenceVersion === digest);
+    if (result.kind === "draft") check(text.messageId === draftMessageId && !result.receipt);
+    else {
+      const native = result.receipt.nativeText;
+      check(result.receipt.evidenceUrl === null && result.receipt.evidenceVersion === digest && native?.kind === "room_text"
+        && native.messageId === text.messageId && native.messageEventId === text.messageEventId && native.postedById === text.postedById
+        && (native.previousCompletionEventId === null || id(native.previousCompletionEventId))
+        && JSON.stringify(native.proposal) === JSON.stringify(proposal));
+    }
+  }
+  return value;
+}
 
 // Editable content, not a verification receipt or automatic redaction. Text may
 // contain private details even though structured links and identities are omitted.

@@ -10,6 +10,12 @@ const common = { requestId: { ...id, description: "Stable business operation ID.
   workItemId: id, expectedRevision: { ...revision, description: "The exact work revision you inspected. Never automatically replace it on retry." } };
 const retry = " Preserve the exact input across retries. A saved receipt confirms this operation, not current ownership or approval; read the task again for its current next step.";
 const definitions = [
+  ["submit_text_result", "Save room text as result", T.WORK_COMPLETED, "Submit one immutable work-linked Room message as your assigned result. Preview it with room_read_result first. Pins its post event, exact UTF-8 SHA-256 and previous completion (explicit null for first). Same completion/claim gates as external evidence. Posting, producer attribution, review and human approval remain separate.", {
+    summary: text, nextAction: text, evidenceMessageId: id, evidenceMessageEventId: id,
+    evidenceVersion: { type: "string", pattern: "^sha256:[0-9a-f]{64}$" },
+    previousCompletionEventId: { ...id, type: ["string", "null"] }, producerId: { ...id, type: ["string", "null"] },
+    checksClaimed: { type: "array", maxItems: 64, items: { ...text, maxLength: 512 } }
+  }, ["summary", "nextAction", "evidenceMessageId", "evidenceMessageEventId", "evidenceVersion", "previousCompletionEventId", "producerId"]],
   ["propose_work", "Propose work", T.WORK_PROPOSED, "Propose a new assigned task. Requires steer permission; ordinary enrolled agents do not receive it. This neither accepts nor starts work.", {
     title: text, definitionOfDone: text, accountableMemberId: id, mode: { type: "string", enum: ["read", "write"] },
     independentVerificationRequired: bool, ownerDecisionRequired: bool, verifierMemberId: id, humanDecisionMakerId: id, sourceMessageId: id
@@ -60,6 +66,7 @@ export function validWorkArguments(name, args) { return actions.has(name) && con
 export function buildWorkCommand(name, args) {
   if (!validWorkArguments(name, args)) throw Object.assign(new Error("Invalid work action input"), { code: "invalid_work_action" });
   const { requestId, ...data } = structuredClone(args), command = { id: requestId, type: actions.get(name).type, data };
+  if (name === "room_submit_text_result") data.evidenceKind = "room_text";
   if (Buffer.byteLength(JSON.stringify(command)) > 16384) throw Object.assign(new Error("Work action exceeds the command limit"), { code: "work_action_too_large" });
   return command;
 }
@@ -80,6 +87,8 @@ export async function submitWorkAction(client, identity, name, args, { signal } 
     action: name, sequence: receipt.sequence, eventId: receipt.event.id, duplicate: receipt.duplicate,
     appliedRevision: command.type === T.WORK_PROPOSED ? 0 : command.data.expectedRevision + 1,
     currentStateVerified: false, next: { tool: "room_read_work", arguments: { workItemId: command.data.workItemId } },
+    ...(command.data.evidenceKind === "room_text" ? { result: { completionEventId: receipt.event.id, evidenceVersion: command.data.evidenceVersion,
+      read: { tool: "room_read_result", arguments: { workItemId: command.data.workItemId, completionEventId: receipt.event.id } } } } : {}),
     message: "This original operation was recorded. Read current work before another action; this receipt does not prove current ownership, review or human approval." };
 }
 

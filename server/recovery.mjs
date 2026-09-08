@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { EVENT_TYPES, validId } from "../src/events.js";
 import { terminalWork } from "../src/workflow.js";
 import { applicationTables, STORE_SCHEMA_VERSION } from "./writer-fence.mjs";
+import { auditTextResults } from "./text-results.mjs";
 
 const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(",")}]`
   : value && typeof value === "object" ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}` : JSON.stringify(value);
@@ -43,6 +44,7 @@ export function auditRecovery(store) {
           && Object.values(EVENT_TYPES).includes(event.type) && typeof event.at === "string" && Number.isFinite(Date.parse(event.at))
           && event.data && typeof event.data === "object" && !Array.isArray(event.data));
       });
+      auditTextResults(store.db, actual.state, history);
       eventCount += history.length;
       rooms.set(row.id, actual.state);
     }

@@ -1,3 +1,5 @@
+import { verifyWorkResult } from "./work-packet.js";
+
 const accountSessionError = message => {
   const error = new Error(message);
   error.status = 401;
@@ -340,6 +342,27 @@ export class RoomClient {
       if (generation !== this.generation || session !== this.session) return null;
       if (!this.ownsResponse(result, session)) { this.endAccess(); return null; }
       return result;
+    } catch (error) {
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+      if ([401, 403].includes(error.status) || error.code === "session_binding_changed") this.handleFailure(error);
+      throw error;
+    }
+  }
+  async workResult(workItemId, { completionEventId = null, draftMessageId = null } = {}) {
+    if (!this.session) return null;
+    if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+    const generation = this.generation, session = this.session, params = new URLSearchParams({ workItemId });
+    if (completionEventId !== null) params.set("completionEventId", completionEventId);
+    if (draftMessageId !== null) params.set("draftMessageId", draftMessageId);
+    try {
+      const value = await this.request(this.path(`/work-result?${params}`));
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsResponse(value, session)) { this.endAccess(); return null; }
+      await verifyWorkResult(value, { roomId: session.roomId, workItemId, completionEventId, draftMessageId });
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+      return value;
     } catch (error) {
       if (generation !== this.generation || session !== this.session) return null;
       if (!this.ownsAccountSession()) { this.endAccess(); return null; }

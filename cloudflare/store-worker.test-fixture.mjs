@@ -7,6 +7,8 @@ import { initialRoom } from '../server/bootstrap.mjs';
 import { EVENT_TYPES as T } from '../src/events.js';
 import { DurableDatabase, durableStorage } from './storage.mjs';
 import { STORE_SCHEMA_VERSION } from '../server/writer-fence.mjs';
+import { textVersion } from '../server/text-results.mjs';
+import { auditRecovery } from '../server/recovery.mjs';
 
 export class StoreTestRoom {
   constructor(ctx) {
@@ -85,19 +87,30 @@ export class StoreTestRoom {
       assert.equal(store.command(owner, 'commons', proposal).duplicate, true);
       assert.deepEqual(store.room('commons').state.workItems, unchangedWork);
       assert.equal(store.room('commons').state.messages.at(-1).proposal.attribution, 'manual-unverified');
-      return Response.json({ guests, sequence: store.room('commons').sequence, eventId: receipt.event.id });
+      send(T.WORK_PROPOSED, { workItemId: 'native-text', title: 'Native text', definitionOfDone: 'Exact stored text', accountableMemberId: 'owner', mode: 'read', independentVerificationRequired: false, ownerDecisionRequired: true, humanDecisionMakerId: 'owner' });
+      send(T.WORK_ACCEPTED, { workItemId: 'native-text', expectedRevision: 0 });
+      const nativeBody = 'Workers native text 🪷\r\n  unchanged  ', nativePost = send(T.MESSAGE_POSTED, { messageId: 'native-message', workItemId: 'native-text', body: nativeBody, packetId: 'native-packet', basisRevision: 1 });
+      const nativeCommand = { id: 'native-completion', type: T.WORK_COMPLETED, data: { workItemId: 'native-text', expectedRevision: 1,
+        evidenceKind: 'room_text', evidenceMessageId: 'native-message', evidenceMessageEventId: nativePost.event.id, evidenceVersion: textVersion(nativeBody),
+        previousCompletionEventId: null, producerId: 'owner', summary: 'Native text', nextAction: 'Review' } };
+      assert.throws(() => store.command(owner, 'commons', { ...nativeCommand, data: { ...nativeCommand.data, evidenceVersion: textVersion('wrong') } }), { code: 'command_rejected' });
+      const nativeSaved = store.command(owner, 'commons', nativeCommand);
+      assert.equal(store.workResult(owner, 'commons', 'native-text').result.text.body, nativeBody); auditRecovery(store);
+      return Response.json({ guests, sequence: store.room('commons').sequence, eventId: receipt.event.id, owner, nativeBody, nativeCommand, nativeSaved });
     }
     if (path === '/resume') {
-      const { guests, sequence, eventId } = await request.json();
+      const { guests, sequence, eventId, owner, nativeBody, nativeCommand, nativeSaved } = await request.json();
       for (const guest of guests) {
         assert.equal(store.authenticateAccountSession(guest.token, 'commons', guest.binding).member.id, guest.member);
         const events = store.eventsAfter(guest.token, 'commons', 0, 100, guest.binding);
         assert.ok(events.events.some(row => row.event?.id === eventId || row.id === eventId));
+        assert.equal(store.workResult(guest.token, 'commons', 'native-text', { completionEventId: nativeSaved.event.id, expectedSessionBinding: guest.binding }).result.text.body, nativeBody);
       }
       assert.equal(store.room('commons').sequence, sequence);
       assert.equal(store.room('commons').state.workItems['scope-first'].claim.status, 'released');
       assert.equal(store.room('commons').state.workItems['scope-second'].claim.status, 'active');
-      assert.equal(store.room('commons').state.messages.at(-1).proposal.packetId, 'test-packet');
+      assert.equal(store.room('commons').state.messages.find(message => message.workItemId === 'scope-first').proposal.packetId, 'test-packet');
+      assert.equal(store.command(owner, 'commons', nativeCommand).event.id, nativeSaved.event.id); auditRecovery(store);
       assert.deepEqual(store.rebuildProjection('commons').state.messages, store.room('commons').state.messages);
       assert.equal(store.verifyInvitationAudit().consistent, true);
       store.shareLinks.verify();

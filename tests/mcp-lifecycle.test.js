@@ -33,6 +33,54 @@ async function recorded(mcp, name, args) {
 }
 const digest = body => "sha256:" + createHash("sha256").update(body).digest("hex");
 
+test("MCP agents submit native text, read exact history, retry after restart and review without owner approval", { timeout: 30000 }, async t => {
+  const f = await fixture(t), writer = await f.enroll("native-writer", "contribute"), reviewer = await f.enroll("native-reviewer", "review"), workItemId = "native-work";
+  f.send(T.WORK_PROPOSED, { workItemId, title: "Native text", definitionOfDone: "A short answer inside Room", accountableMemberId: "native-writer",
+    verifierMemberId: "native-reviewer", mode: "read", independentVerificationRequired: true, ownerDecisionRequired: true, humanDecisionMakerId: "owner" });
+  const action = async (actor, name, data = {}) => recorded(actor.mcp, name, { requestId: randomUUID(), workItemId,
+    expectedRevision: (await read(actor.mcp, workItemId)).work.revision, ...data });
+  const result = async (actor, selection = {}) => {
+    const response = (await actor.mcp.call("room_read_result", { workItemId, ...selection })).result;
+    assert.equal(response.isError, undefined, JSON.stringify(response)); return response.structuredContent;
+  };
+  const draft = async body => {
+    const current = await read(writer.mcp, workItemId);
+    const posted = (await writer.mcp.call("room_post_draft", { requestId: randomUUID(), workItemId, packetId: "native-packet", basisRevision: current.work.revision, body })).result.structuredContent;
+    const discussion = (await writer.mcp.call("room_read_work_discussion", { workItemId })).result.structuredContent;
+    const message = discussion.discussion.items.find(row => row.eventId === posted.eventId);
+    assert.equal(posted.messageId, message.message.id);
+    const preview = await result(writer, { draftMessageId: message.message.id });
+    assert.equal(preview.result.text.body, body); assert.equal(preview.result.text.evidenceVersion, digest(body));
+    assert.equal(preview.result.text.proposal.attribution, "manual-unverified");
+    return { evidenceMessageId: message.message.id, evidenceMessageEventId: posted.eventId, evidenceVersion: digest(body) };
+  };
+  await action(writer, "room_accept_work"); await action(writer, "room_start_work");
+  const a = await draft("  First answer: café 🪷\n"), original = { requestId: "native-first", workItemId, expectedRevision: 2, ...a,
+    previousCompletionEventId: null, producerId: "native-writer", summary: "First version", nextAction: "Review exact text" };
+  for (const key of ["previousCompletionEventId", "producerId"]) {
+    const missing = { ...original }; delete missing[key]; assert.equal((await writer.mcp.call("room_submit_text_result", missing)).error.code, -32602);
+  }
+  assert.equal((await writer.mcp.call("room_read_result", { workItemId, completionEventId: "x", draftMessageId: "y" })).error.code, -32602);
+  const first = await recorded(writer.mcp, "room_submit_text_result", original);
+  assert.equal(first.result.read.arguments.completionEventId, first.eventId); assert.equal(first.currentStateVerified, false);
+  assert.equal((await result(reviewer)).result.receipt.eventId, first.eventId);
+  await action(reviewer, "room_record_verification", { result: "fail", completionEventId: first.eventId, evidenceVersion: a.evidenceVersion, summary: "Add a next step", nextAction: "Revise" });
+  await action(writer, "room_resolve_blocker", { resolution: "Added next step" }); await action(writer, "room_start_work");
+  const b = await draft("Second answer: café 🪷\nNext: review."), second = await action(writer, "room_submit_text_result", { ...b,
+    previousCompletionEventId: first.eventId, producerId: "native-writer", summary: "Second version", nextAction: "Review" });
+  await f.close(writer.mcp); writer.mcp = await f.open(writer.configDirectory);
+  const retry = await recorded(writer.mcp, "room_submit_text_result", original); assert.equal(retry.eventId, first.eventId); assert.equal(retry.duplicate, true);
+  assert.equal((await result(writer)).result.receipt.eventId, second.eventId);
+  assert.equal((await result(reviewer, { completionEventId: first.eventId })).result.text.body, "  First answer: café 🪷\n");
+  await action(reviewer, "room_record_verification", { result: "pass", completionEventId: first.eventId, evidenceVersion: a.evidenceVersion, summary: "Historical check" });
+  assert.equal((await read(reviewer.mcp, workItemId)).work.verification, null);
+  const exact = await result(reviewer);
+  await action(reviewer, "room_record_verification", { result: "pass", completionEventId: exact.result.receipt.eventId, evidenceVersion: digest(exact.result.text.body), summary: "Checked the exact revised text" });
+  const current = await read(writer.mcp, workItemId);
+  assert.equal(current.work.decision, null); assert.equal(current.next.action, "decide"); assert.equal(current.next.memberId, "owner");
+  assert.equal((await writer.client.snapshot()).cursor, 0); assert.equal((await reviewer.client.snapshot()).cursor, 0); assert.doesNotThrow(() => auditRecovery(f.store));
+});
+
 test("managed contributor and reviewer complete rework and exact-version review without inventing human approval", { timeout: 30000 }, async t => {
   const f = await fixture(t), writer = await f.enroll("managed-writer", "contribute"), reviewer = await f.enroll("managed-reviewer", "review");
   const workItemId = "managed-work";

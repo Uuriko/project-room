@@ -113,6 +113,8 @@ const client = new RoomClient({
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; actionEpoch++;
     $("#resume-action").hidden = true; $("#refresh-action").hidden = true;
     $("#action-evidence").hidden = true; $("#action-evidence").removeAttribute("href");
+    $("#action-text").hidden = true; $("#action-text-body").textContent = ""; $("#action-text-origin").textContent = "";
+    closeResult();
     roomCursor = 0; roomGeneration = -1; showAllAttention = false; clearTimeout(returnClock); returnClock = null;
     shareLinksUI?.resetManagement();
     portableWorkUI?.reset();
@@ -665,7 +667,7 @@ function messageContent(m) {
     const label = `${pending && !pending.busy ? "Retry " : ""}${reaction}`;
     return `<button type="button" class="reaction" aria-pressed="${selected}" aria-label="${esc(label)} reaction, ${members.length}" title="${esc(members.map(name).join(", ") || `React with ${reaction}`)}" data-message-action="react" data-message-id="${esc(m.id)}" data-reaction="${reaction}"${pending?.busy ? " disabled" : ""}><span aria-hidden="true">${symbol}</span><span>${members.length || ""}</span>${pending && !pending.busy ? " Retry" : ""}</button>`;
   }).join("");
-  return `<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong><span>${esc(author.kind)}</span><a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · room-visible</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${esc(parent.body.slice(0,90))}</a>` : ""}</div><p>${esc(m.body)}</p>${m.proposal ? `<p class="form-hint">Pasted draft · based on revision ${esc(m.proposal.basisRevision)}${m.proposal.basisRevision < m.proposal.submittedAtRevision ? " · older work" : ""} · authorship unverified</p>` : ""}<details class="reactions"><summary data-message-action="reaction-menu" data-message-id="${esc(m.id)}" aria-label="Reactions to message by ${esc(authorLabel)}">${esc(reactionSummary)}</summary><div class="reaction-options">${reactionButtons}</div></details><div class="message-links">${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>`).join("")}<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>${!currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : ""}${can("steer") && !(m.proposal && m.workItemId) ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : ""}</div></div>`;
+  return `<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong><span>${esc(author.kind)}</span><a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · room-visible</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${esc(parent.body.slice(0,90))}</a>` : ""}</div><p>${esc(m.body)}</p>${m.proposal ? `<p class="form-hint">Pasted draft · based on revision ${esc(m.proposal.basisRevision)}${m.proposal.basisRevision < m.proposal.submittedAtRevision ? " · older work" : ""} · authorship unverified</p>` : ""}<details class="reactions"><summary data-message-action="reaction-menu" data-message-id="${esc(m.id)}" aria-label="Reactions to message by ${esc(authorLabel)}">${esc(reactionSummary)}</summary><div class="reaction-options">${reactionButtons}</div></details><div class="message-links">${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>`).join("")}${m.workItemId && workActions(state.workItems[m.workItemId], state.members[session.member.id]).some(([action]) => action === "complete") ? `<button class="message-to-work" type="button" data-message-action="result" data-message-id="${esc(m.id)}">Save as result</button>` : ""}<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>${!currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : ""}${can("steer") && !(m.proposal && m.workItemId) ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : ""}</div></div>`;
 }
 function renderSearch() {
   const query = $("#message-search").value;
@@ -799,7 +801,7 @@ function receiptCard(i) {
       : "";
     verification = `<p><strong>${esc(resultLabel)}</strong> reported by ${esc(memberLabel(i.verification.verifierId))}${independence}: ${esc(i.verification.summary)}</p>`;
   }
-  return `<div class="receipt"><p class="receipt-label">REPORTED COMPLETION · NOT AUTOMATIC VERIFICATION</p><dl class="receipt-attribution"><div><dt>Completion reporter</dt><dd>${esc(reporter)}</dd></div><div><dt>Producer</dt><dd>${esc(producer)}</dd></div></dl><p>${esc(receipt.summary)}</p><a href="${safeUrl(receipt.evidenceUrl)}" target="_blank" rel="noreferrer" data-focus-key="work-evidence:${esc(i.id)}">Open submitted evidence ↗</a><code>${esc(receipt.evidenceVersion)}</code><p>${esc(receipt.nextAction)}</p>${verification}</div>`;
+  return `<div class="receipt"><p class="receipt-label">REPORTED COMPLETION · NOT AUTOMATIC VERIFICATION</p><dl class="receipt-attribution"><div><dt>Completion reporter</dt><dd>${esc(reporter)}</dd></div><div><dt>Producer</dt><dd>${esc(producer)}</dd></div></dl><p>${esc(receipt.summary)}</p>${receipt.nativeText ? "" : `<a href="${safeUrl(receipt.evidenceUrl)}" target="_blank" rel="noreferrer" data-focus-key="work-evidence:${esc(i.id)}">Open submitted evidence ↗</a>`}<code>${esc(receipt.evidenceVersion)}</code><p>${esc(receipt.nextAction)}</p>${verification}</div>`;
 }
 function workCard(i, now) {
   const next = nextWorkStep(i, now), status = workStatus(i, now);
@@ -813,7 +815,7 @@ function workCard(i, now) {
   const updated = `<p class="form-hint">Last recorded update: ${esc(new Date(i.updatedAt).toLocaleString())}. Live execution is not measured.</p>`;
   const reuse = can("steer") ? `<button type="button" class="button ghost" data-reuse-work="${esc(i.id)}" data-focus-key="work-reuse:${esc(i.id)}">Use again</button>` : "";
   const latestDraft = state.messages.findLast(message => message.workItemId === i.id && message.proposal);
-  const draftLink = latestDraft ? `<a class="source-link" href="${esc(recordHref("message", latestDraft.id))}" data-open-message="${esc(latestDraft.id)}" data-focus-key="work-draft:${esc(i.id)}">View latest draft</a>` : "";
+  const draftLink = i.receipt?.nativeText ? `<button class="source-link" type="button" data-read-result="${esc(i.id)}" data-focus-key="work-native-result:${esc(i.id)}">View result</button>` : latestDraft ? `<a class="source-link" href="${esc(recordHref("message", latestDraft.id))}" data-open-message="${esc(latestDraft.id)}" data-focus-key="work-draft:${esc(i.id)}">View latest draft</a>` : "";
   return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span></div><h3>${esc(i.title)}</h3>${nextLine}${draftLink}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span>${source}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${receiptCard(i)}${blocker}${decision}${claim}<div class="portable-actions">${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}${reuse}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-portable-work="${esc(i.id)}" data-portable-mode="result" data-focus-key="work-result:${esc(i.id)}">Paste AI draft</button></div></details><div class="work-actions">${actions(i, false, now)}</div></article>`;
 }
 // Quiet Focus A4: a failed send reports beside the composer that holds the draft,
@@ -1134,6 +1136,10 @@ $("#message-list").addEventListener("click", e => {
   const button = e.target.closest("[data-message-id]"); if (!button || !state || busy) return;
   const id = button.dataset.messageId;
   if (button.dataset.messageAction === "work") openWork(id);
+  else if (button.dataset.messageAction === "result") {
+    const message = conversation.byId.get(id), item = state.workItems[message?.workItemId];
+    if (item && workActions(item, state.members[session.member.id]).some(([action]) => action === "complete")) openWorkAction(item, "complete", id);
+  }
   else if (button.dataset.messageAction === "react") setReaction(id, button.dataset.reaction);
   else if (["reply", "thread"].includes(button.dataset.messageAction)) {
     switchThread(conversation.rootById.get(id), button.dataset.messageAction === "reply");
@@ -1328,7 +1334,7 @@ function producerField() {
   const self = members.find(member => member.id === session.member.id);
   const selfOption = self ? `<option value="${esc(self.id)}">I produced this — ${esc(memberLabel(self.id))}</option>` : "";
   const otherOptions = members.filter(member => member.id !== session.member.id).map(member => `<option value="${esc(member.id)}">${esc(memberLabel(member.id))} · ${esc(member.kind)}${member.active === false ? " · access revoked" : ""}</option>`).join("");
-  return `<label>Primary producer of this result<select name="producerId" required aria-describedby="producer-attribution-help"><option value="">Choose producer attribution</option>${selfOption}<option value="__unknown__">Unknown / not reported</option>${otherOptions}</select></label><p id="producer-attribution-help" class="form-hint">The signed-in member remains the completion reporter. Choose the member who produced the result, or explicitly record that the producer is unknown.</p>`;
+  return `<label>Produced by<select name="producerId" required aria-describedby="producer-attribution-help"><option value="">Choose producer</option>${selfOption}<option value="__unknown__">Unknown / not reported</option>${otherOptions}</select></label><p id="producer-attribution-help" class="form-hint">You submit this result. Credit its producer, or choose Unknown.</p>`;
 }
 const actionSpecs = {
   accept: [T.WORK_ACCEPTED, "Accept this work?", "<p>Accept responsibility for the stated outcome. This does not run any tools.</p>"],
@@ -1341,24 +1347,49 @@ const actionSpecs = {
   verify: [T.VERIFICATION_RECORDED, "Record an evidence check", '<label>Result<select name="result" required><option value="">Choose after checking</option><option value="pass">Pass</option><option value="fail">Finding / fail</option></select></label>' + area("summary", "What did you check at this exact version?")],
   decide: [T.OWNER_DECISION_RECORDED, "Record your decision", '<label>Decision<select name="decision" required><option value="">Choose</option><option value="approved">Approve</option><option value="changes_requested">Request changes</option><option value="rejected">Reject</option></select></label>' + area("reason", "Reason") + "<p>Approval does not merge, deploy, or spend money.</p>" ]
 };
+let resultView = null;
+function closeResult() {
+  resultView = null; $("#result-dialog").close(); $("#result-title").textContent = "Result";
+  $("#result-status").textContent = ""; $("#result-body").textContent = "";
+}
+$("#close-result").addEventListener("click", closeResult);
+$("#result-dialog").addEventListener("cancel", event => { event.preventDefault(); closeResult(); });
 $("#work-list").addEventListener("click", e => {
+  const read = e.target.closest("[data-read-result]");
+  if (read && state && !busy) {
+    const item = state.workItems[read.dataset.readResult], receipt = item?.receipt;
+    if (!receipt?.nativeText) return;
+    const view = { generation: client.generation, roomId: session.roomId, memberId: session.member.id }; resultView = view;
+    $("#result-title").textContent = item.title; $("#result-status").textContent = "Loading exact text…"; $("#result-body").textContent = "";
+    $("#result-dialog").showModal();
+    const owns = () => resultView === view && sameSession(view.generation, view.roomId, view.memberId);
+    client.workResult(item.id, { completionEventId: receipt.eventId }).then(value => {
+      if (!owns() || !value) return;
+      if (value.result.receipt?.evidenceVersion !== receipt.evidenceVersion) throw new Error("Pinned version changed");
+      $("#result-body").textContent = value.result.text.body;
+      $("#result-status").textContent = `Submitted by ${name(receipt.reportedById)} · exact stored text`;
+    }).catch(() => { if (owns()) $("#result-status").textContent = "Exact text unavailable. Close and try again."; });
+    return;
+  }
   const button = e.target.closest("[data-action]"); if (!button || busy) return;
+  openWorkAction(state.workItems[button.dataset.workId], button.dataset.action);
+});
+function openWorkAction(item, action, draftMessageId = null) {
   if (pendingAction?.uncertain) { resumeAction(); return; }
-  const item = state.workItems[button.dataset.workId], action = button.dataset.action;
   const [type, , fields] = actionSpecs[action];
   actionEpoch++;
-  pendingAction = { type, action, workId: item.id, revision: item.revision, receipt: item.receipt ? { completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion } : null, retry: null, uncertain: false, error: "" };
-  $("#action-fields").innerHTML = action === "complete" ? producerField() + fields : fields;
+  pendingAction = { type, action, workId: item.id, revision: item.revision, draftMessageId, receipt: item.receipt ? { completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion } : null, retry: null, uncertain: false, error: "" };
+  $("#action-fields").innerHTML = action === "complete" ? producerField() + (draftMessageId ? area("summary", "Summary") + area("nextAction", "Next step") : fields) : fields;
   renderActionContext(item, action);
   $("#action-dialog").showModal();
   syncActionForm();
-});
+}
 // Only opening or explicitly reviewing current work changes the pinned context.
 // A background update must never silently retarget a review or approval.
 function renderActionContext(item, action) {
   $("#action-title").textContent = action === "block" && item.state === S.COMPLETED ? "Reopen for rework"
     : action === "verify" && item.independentVerificationRequired && hasIndependentProducer(item) ? "Record an independent check" : actionSpecs[action][1];
-  $("#action-context").textContent = `${item.title} · revision ${item.revision}${item.receipt ? ` · evidence ${item.receipt.evidenceVersion}` : ""}`;
+  $("#action-context").textContent = `${item.title} · revision ${item.revision}${item.receipt ? item.receipt.nativeText ? " · stored text" : ` · evidence ${item.receipt.evidenceVersion}` : ""}`;
   const evidence = $("#action-evidence");
   let evidenceUrl = null;
   try {
@@ -1375,6 +1406,31 @@ function renderActionContext(item, action) {
   const result = $("#action-fields select[name='result']");
   if (unknown) result?.setAttribute("aria-describedby", "verification-boundary");
   else result?.removeAttribute("aria-describedby");
+  loadActionText(item, action);
+}
+function loadActionText(item, action) {
+  const entry = pendingAction, epoch = actionEpoch, generation = client.generation, roomId = session.roomId, memberId = session.member.id;
+  const request = (entry.textRequest ?? 0) + 1; entry.textRequest = request;
+  entry.text = null; entry.textRequired = Boolean(entry.draftMessageId || ["verify", "decide"].includes(action) && item.receipt?.nativeText);
+  $("#action-text").hidden = !entry.textRequired; $("#action-text-body").textContent = ""; $("#action-text-origin").textContent = "";
+  if (!entry.textRequired) return;
+  $("#action-text-origin").textContent = "Loading exact text…";
+  if (entry.draftMessageId) $("#action-title").textContent = "Save as result";
+  const owns = () => pendingAction === entry && actionEpoch === epoch && entry.textRequest === request && sameSession(generation, roomId, memberId);
+  client.workResult(item.id, entry.draftMessageId ? { draftMessageId: entry.draftMessageId } : { completionEventId: entry.receipt.completionEventId }).then(value => {
+    if (!owns() || !value) return;
+    if (!entry.draftMessageId && (value.result.receipt?.eventId !== entry.receipt.completionEventId || value.result.receipt?.evidenceVersion !== entry.receipt.evidenceVersion)) throw new Error("Pinned evidence changed");
+    entry.text = value.result.text;
+    $("#action-text-body").textContent = entry.text.body;
+    const proposal = entry.text.proposal;
+    $("#action-text-origin").textContent = `Posted by ${name(entry.text.postedById)}${proposal ? ` · draft based on revision ${proposal.basisRevision} · authorship unverified` : ""}`;
+    if (value.current.workRevision !== entry.revision) { entry.needsReview = true; entry.error = "Work changed. Review current work before saving."; }
+    syncActionForm();
+  }).catch(() => {
+    if (!owns()) return;
+    entry.needsReview = true; entry.error = "Exact text unavailable. Review current work to try again.";
+    $("#action-text-origin").textContent = "Text unavailable"; syncActionForm();
+  });
 }
 function actionAvailable(entry) {
   const item = state?.workItems[entry.workId];
@@ -1387,7 +1443,7 @@ function syncActionForm() {
   const available = actionAvailable(entry), save = $("#action-form button[type='submit']");
   for (const field of $("#action-fields").querySelectorAll("input,textarea,select")) field.disabled = entry.uncertain;
   save.textContent = entry.uncertain ? "Retry original save" : "Save record";
-  save.disabled = !entry.uncertain && (changed || entry.needsReview || !available);
+  save.disabled = !entry.uncertain && (changed || entry.needsReview || !available || entry.textRequired && !entry.text);
   $("#cancel-action").textContent = entry.uncertain ? "Close" : "Cancel";
   $("#refresh-action").hidden = entry.uncertain || !(changed || entry.needsReview || !available);
   $("#refresh-action").disabled = false;
@@ -1459,10 +1515,12 @@ $("#action-form").addEventListener("submit", e => {
   e.preventDefault(); if (!pendingAction || !state || busy) return;
   const entry = pendingAction, fields = Object.fromEntries(new FormData(e.currentTarget));
   const generation = client.generation, roomId = session.roomId, memberId = session.member.id, epoch = actionEpoch, focus = document.activeElement;
-  if (!entry.uncertain && (entry.needsReview || state.workItems[entry.workId]?.revision !== entry.revision || !actionAvailable(entry))) { syncActionForm(); return; }
+  if (!entry.uncertain && (entry.needsReview || entry.textRequired && !entry.text || state.workItems[entry.workId]?.revision !== entry.revision || !actionAvailable(entry))) { syncActionForm(); return; }
   if (!entry.uncertain) {
     const data = { workItemId: entry.workId, expectedRevision: entry.revision, ...fields };
     if (entry.action === "complete") data.producerId = fields.producerId === "__unknown__" ? null : fields.producerId;
+    if (entry.draftMessageId) Object.assign(data, { evidenceKind: "room_text", evidenceMessageId: entry.text.messageId,
+      evidenceMessageEventId: entry.text.messageEventId, evidenceVersion: entry.text.evidenceVersion, previousCompletionEventId: entry.receipt?.completionEventId ?? null });
     if (entry.action === "claim") data.paths = fields.paths.split("\n").map(p => p.trim()).filter(Boolean);
     if (["verify", "decide"].includes(entry.action)) Object.assign(data, entry.receipt);
     entry.retry = draftCommand(entry.retry, entry.type, data);

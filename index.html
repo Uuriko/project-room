@@ -206,11 +206,13 @@
         </aside>
       </main>
     </div>
+    <dialog id="result-dialog" aria-labelledby="result-title"><h2 id="result-title">Result</h2><p id="result-status" class="form-hint" role="status"></p><pre id="result-body"></pre><button id="close-result" type="button" class="button secondary">Close</button></dialog>
     <dialog id="action-dialog" aria-labelledby="action-title" aria-describedby="action-context">
       <form id="action-form">
         <h2 id="action-title"></h2>
         <p id="action-context"></p>
         <a id="action-evidence" target="_blank" rel="noreferrer" hidden>Open result ↗</a>
+        <section id="action-text" hidden aria-label="Exact room text"><p id="action-text-origin" class="form-hint"></p><pre id="action-text-body"></pre></section>
         <div id="action-fields"></div>
         <p id="action-error" class="status form-status" role="alert"></p>
         <button id="refresh-action" class="button secondary" type="button" hidden>Review current work</button>

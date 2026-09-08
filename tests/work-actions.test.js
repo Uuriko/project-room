@@ -12,6 +12,8 @@ const cases = [
   ["block_work", "work.blocked", { ...base, reason: "Waiting", nextAction: "Release scope" }],
   ["resolve_blocker", "work.blocker_resolved", { ...base, resolution: "Scope released" }],
   ["record_completion", "work.completed", { ...base, ...completion }],
+  ["submit_text_result", "work.completed", { ...base, summary: "Stored text", nextAction: "Review", evidenceMessageId: "message", evidenceMessageEventId: "post",
+    evidenceVersion: "sha256:" + "a".repeat(64), producerId: null, previousCompletionEventId: null }],
   ["record_verification", "verification.recorded", { ...base, result: "pass", completionEventId: "completion", evidenceVersion: "v1", summary: "Checked exact bytes" }],
   ["acquire_claim", "claim.acquired", { ...base, repository: "fictional/repo", ref: "main", paths: ["notes/a", "notes/b"], expiresAt: "2030-01-01T00:00:00.000Z" }],
   ["release_claim", "claim.released", base],
@@ -26,7 +28,7 @@ test("every lifecycle descriptor maps exactly to one existing command without ne
   for (const [action, type, args] of cases) {
     const name = "room_" + action, { requestId, ...data } = args, sent = [];
     const command = buildWorkCommand(name, args);
-    assert.deepEqual(command, { id: requestId, type, data });
+    assert.deepEqual(command, { id: requestId, type, data: action === "submit_text_result" ? { ...data, evidenceKind: "room_text" } : data });
     const response = await submitWorkAction({ command: async value => { sent.push(value); return receipt(value); } }, identity, name, args);
     assert.deepEqual(sent, [command]); assert.equal(response.status, "recorded");
     assert.equal(response.appliedRevision, action === "propose_work" ? 0 : args.expectedRevision + 1);
