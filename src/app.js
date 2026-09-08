@@ -10,6 +10,7 @@ import { installRoomInstructions } from "./room-instructions.js";
 import { installReminders } from "./reminders.js";
 import { installPortableWork, installResultCopy } from "./portable-work.js";
 import { replyDraftKey, replyDraftData, validReplyDraft, confirmsReplyCommand, REPLY_CANCELLED } from "./reply-requests.js";
+import { workHelpContext, validateHelpData } from "./work-help.js";
 
 const $ = selector => document.querySelector(selector);
 $("#skip-link").addEventListener("click", event => {
@@ -900,6 +901,18 @@ function hasIndependentProducer(i) { return hasReportedProducer(i) && i.receipt.
 function actions(i, scopeOnly = false, now = Date.now()) {
   return workActions(i, state.members[session.member.id], now).filter(([action]) => (action === "release") === scopeOnly).map(([action, label]) => `<button type="button" class="button secondary" data-action="${action}" data-work-id="${esc(i.id)}" data-focus-key="work-action:${esc(i.id)}:${action}"${busy ? " disabled" : ""}>${label}</button>`).join("");
 }
+function helpView(item, now = Date.now()) {
+  try { return workHelpContext(state, item.id, session.member.id, new Date(now).toISOString()); }
+  catch { return null; } // Invalid or unavailable context never advertises consent.
+}
+const isHelpAction = action => ["help", "end-help"].includes(action);
+function helpButton(item, action, label) {
+  return `<button type="button" class="button ghost" data-action="${action}" data-work-id="${esc(item.id)}" data-focus-key="work-action:${esc(item.id)}:${action}"${busy ? " disabled" : ""}>${label}</button>`;
+}
+function helpCard(item, help) {
+  if (!help?.help || help.help.status !== "open" || help.status !== "open" && !help.canWithdraw) return "";
+  return `<details class="work-help"><summary data-focus-key="work-help:${esc(item.id)}">${help.status === "open" ? "Help wanted" : "Help ended"}</summary><p class="definition">${esc(help.help.scope)}</p><p class="form-hint">Ends ${esc(new Date(help.help.expiresAt).toLocaleString())}</p><div class="portable-actions">${help.canPublish ? helpButton(item, "help", "Edit") : ""}${help.canWithdraw ? helpButton(item, "end-help", "End request") : ""}</div></details>`;
+}
 function claimStateLabel(i, now = Date.now()) {
   if (activeClaim(i, now)) return "not expired";
   if (i.claim?.status === "superseded") return "superseded";
@@ -926,7 +939,7 @@ function receiptCard(i) {
   return `<div class="receipt"><p class="receipt-label">REPORTED COMPLETION · NOT AUTOMATIC VERIFICATION</p><dl class="receipt-attribution"><div><dt>Completion reporter</dt><dd>${esc(reporter)}</dd></div><div><dt>Producer</dt><dd>${esc(producer)}</dd></div></dl><p>${esc(receipt.summary)}</p>${receipt.nativeText ? "" : `<a href="${safeUrl(receipt.evidenceUrl)}" target="_blank" rel="noreferrer" data-focus-key="work-evidence:${esc(i.id)}">Open submitted evidence ↗</a>`}<code>${esc(receipt.evidenceVersion)}</code><p>${esc(receipt.nextAction)}</p>${verification}</div>`;
 }
 function workCard(i, now, drafts) {
-  const next = nextWorkStep(i, now), status = workStatus(i, now);
+  const next = nextWorkStep(i, now), status = workStatus(i, now), help = helpView(i, now);
   const nextActor = next.memberId ? `${name(next.memberId)} — ` : "";
   const nextLine = `<p class="work-next-step" data-next-step="${esc(next.action)}"><strong>Next:</strong> ${esc(nextActor + status.next)}</p>`;
   const source = i.sourceMessageId ? `<a class="source-link" href="${esc(recordHref("message", i.sourceMessageId))}" data-open-message="${esc(i.sourceMessageId)}" data-focus-key="work-source:${esc(i.id)}">From this conversation</a>` : "";
@@ -940,7 +953,7 @@ function workCard(i, now, drafts) {
   const alternatives = drafts.length > 1 ? `<details class="work-drafts"><summary data-focus-key="work-drafts:${esc(i.id)}">Drafts (${drafts.length})</summary>${drafts.map(draft =>
     `<p><a class="source-link" href="${esc(recordHref("message", draft.id))}" data-open-message="${esc(draft.id)}" data-focus-key="work-draft-message:${esc(draft.id)}">${esc(memberLabel(draft.authorId))} · revision ${esc(draft.proposal.basisRevision)}${draft.proposal.basisRevision < i.revision ? " · older work" : ""}<br><span class="form-hint">${esc([...draft.body].slice(0, 100).join(""))}${[...draft.body].length > 100 ? "…" : ""}</span></a></p>`).join("")}</details>` : "";
   const draftLink = i.receipt?.nativeText ? `<button class="source-link" type="button" data-read-result="${esc(i.id)}" data-focus-key="work-native-result:${esc(i.id)}">View result</button>` : alternatives || (latestDraft ? `<a class="source-link" href="${esc(recordHref("message", latestDraft.id))}" data-open-message="${esc(latestDraft.id)}" data-focus-key="work-draft:${esc(i.id)}">View latest draft</a>` : "");
-  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span></div><h3>${esc(i.title)}</h3>${nextLine}${draftLink}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span>${source}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${receiptCard(i)}${blocker}${decision}${claim}<div class="portable-actions">${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}${reuse}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-portable-work="${esc(i.id)}" data-portable-mode="result" data-focus-key="work-result:${esc(i.id)}">Paste AI draft</button></div></details><div class="work-actions">${actions(i, false, now)}</div></article>`;
+  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span></div><h3>${esc(i.title)}</h3>${nextLine}${draftLink}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span>${source}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${receiptCard(i)}${blocker}${decision}${claim}<div class="portable-actions">${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-portable-work="${esc(i.id)}" data-portable-mode="result" data-focus-key="work-result:${esc(i.id)}">Paste AI draft</button></div></details><div class="work-actions">${actions(i, false, now)}</div></article>`;
 }
 // Quiet Focus A4: a failed send reports beside the composer that holds the draft,
 // not only in the page-level status area; the Send button is the retry and the
@@ -1499,6 +1512,8 @@ function producerField() {
   return `<label>Produced by<select name="producerId" required aria-describedby="producer-attribution-help"><option value="">Choose producer</option>${selfOption}<option value="__unknown__">Unknown / not reported</option>${otherOptions}</select></label><p id="producer-attribution-help" class="form-hint">You submit this result. Credit its producer, or choose Unknown.</p>`;
 }
 const actionSpecs = {
+  help: [T.WORK_HELP_UPDATED, "Ask for help", ""],
+  "end-help": [T.WORK_HELP_UPDATED, "End this help request?", "<p>People and agents will no longer find this request. This does not stop work already underway.</p>"],
   accept: [T.WORK_ACCEPTED, "Accept this work?", "<p>Accept responsibility for the stated outcome. This does not run any tools.</p>"],
   start: [T.WORK_STARTED, "Record work starting", "<p>Record that you are starting this outcome. A record is not proof of external execution.</p>"],
   block: [T.WORK_BLOCKED, "Report a blocker", area("reason", "What is blocked?") + area("nextAction", "What is needed next?")],
@@ -1545,7 +1560,20 @@ function openWorkAction(item, action, draftMessageId = null) {
   const [type, , fields] = actionSpecs[action];
   actionEpoch++;
   pendingAction = { type, action, workId: item.id, revision: item.revision, draftMessageId, receipt: item.receipt ? { completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion } : null, retry: null, uncertain: false, error: "" };
+  if (isHelpAction(action)) {
+    pendingAction.helpRevision = item.helpWanted?.revision ?? 0;
+    pendingAction.accountableRevision = state.members[item.accountableMemberId]?.revision;
+  }
   $("#action-fields").innerHTML = action === "complete" ? producerField() + (draftMessageId ? area("summary", "Summary") + area("nextAction", "Next step") : fields) : fields;
+  if (action === "help") {
+    const keep = item.helpWanted?.status === "open" && Date.parse(item.helpWanted.expiresAt) > Date.now();
+    $("#action-fields").innerHTML = '<label>What would help?<textarea name="scope" required rows="3" maxlength="600"></textarea></label><label>Available for<select name="duration" required>'
+      + (keep ? '<option value="keep">Keep current end time</option>' : "")
+      + '<option value="3600000">1 hour</option><option value="86400000"' + (keep ? "" : " selected") + '>1 day</option><option value="604800000">7 days</option></select></label><p class="form-hint">Visible to this room. You stay accountable; no work starts automatically.</p><p id="help-current" class="form-hint" hidden></p>';
+    $("#action-fields [name=scope]").value = item.helpWanted?.scope ?? "";
+    pendingAction.helpExpiresAt = keep ? item.helpWanted.expiresAt : null;
+  }
+  if (action === "end-help") $("#action-fields").insertAdjacentHTML("afterbegin", '<p id="help-current" class="definition"></p>');
   renderActionContext(item, action);
   $("#action-dialog").showModal();
   syncActionForm();
@@ -1553,6 +1581,7 @@ function openWorkAction(item, action, draftMessageId = null) {
 // Only opening or explicitly reviewing current work changes the pinned context.
 // A background update must never silently retarget a review or approval.
 function renderActionContext(item, action) {
+  if (action === "end-help") $("#help-current").textContent = item.helpWanted?.scope ?? "";
   $("#review-brief").hidden = !["verify", "decide"].includes(action);
   setText("#review-criteria", $("#review-brief").hidden ? "" : item.definitionOfDone);
   setText("#review-summary", $("#review-brief").hidden ? "" : item.receipt?.summary ?? "");
@@ -1611,15 +1640,25 @@ function loadActionText(item, action) {
 }
 function actionAvailable(entry) {
   const item = state?.workItems[entry.workId];
+  if (item && isHelpAction(entry.action)) {
+    const help = helpView(item);
+    return entry.action === "help" ? help?.canPublish === true : help?.canWithdraw === true;
+  }
   return Boolean(item && workActions(item, state.members[session.member.id]).some(([action]) => action === entry.action));
+}
+function actionChanged(entry) {
+  const item = state?.workItems[entry.workId];
+  return item?.revision !== entry.revision || isHelpAction(entry.action) && (
+    (item?.helpWanted?.revision ?? 0) !== entry.helpRevision
+    || state?.members[item?.accountableMemberId]?.revision !== entry.accountableRevision);
 }
 function syncActionForm() {
   $("#resume-action").hidden = !pendingAction?.uncertain;
   if (!pendingAction || !state || busy) return;
-  const entry = pendingAction, item = state.workItems[entry.workId], changed = item?.revision !== entry.revision;
+  const entry = pendingAction, item = state.workItems[entry.workId], changed = actionChanged(entry);
   const available = actionAvailable(entry), save = $("#action-form button[type='submit']");
   for (const field of $("#action-fields").querySelectorAll("input,textarea,select")) field.disabled = entry.uncertain;
-  save.textContent = entry.uncertain ? "Retry original save" : "Save record";
+  save.textContent = entry.uncertain ? "Retry original save" : entry.action === "help" ? "Publish request" : entry.action === "end-help" ? "End request" : "Save record";
   save.disabled = !entry.uncertain && (changed || entry.needsReview || !available || entry.textRequired && !entry.text);
   $("#cancel-action").textContent = entry.uncertain ? "Close" : "Cancel";
   $("#refresh-action").hidden = entry.uncertain || !(changed || entry.needsReview || !available);
@@ -1655,8 +1694,21 @@ $("#refresh-action").addEventListener("click", () => {
     if (!actionAvailable(entry)) return;
     const receipt = item.receipt ? { completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion } : null;
     const changedResult = JSON.stringify(receipt) !== JSON.stringify(entry.receipt);
+    const changedHelp = isHelpAction(entry.action) && actionChanged(entry);
     entry.revision = item.revision; entry.receipt = receipt; entry.retry = null; entry.needsReview = false;
     entry.error = changedResult ? "Result changed. Notes kept; inspect this version and choose again." : "";
+    if (isHelpAction(entry.action)) {
+      entry.helpRevision = item.helpWanted?.revision ?? 0;
+      entry.accountableRevision = state.members[item.accountableMemberId]?.revision;
+      if (changedHelp && entry.action === "help") {
+        entry.error = "Request changed. Your draft is kept; compare it with the latest request.";
+        $("#help-current").hidden = false;
+        $("#help-current").textContent = item.helpWanted ? `Latest: ${item.helpWanted.scope} · ${helpView(item).status} · ends ${new Date(item.helpWanted.expiresAt).toLocaleString()}` : "No current request.";
+        const keep = $("#action-fields option[value=keep]");
+        if (keep) { keep.disabled = true; $("#action-fields [name=duration]").value = ""; }
+        entry.helpExpiresAt = null;
+      }
+    }
     if (changedResult) for (const field of $("#action-fields").querySelectorAll("select[name='result'],select[name='decision']")) field.value = "";
     renderActionContext(item, entry.action);
   }).then(() => {
@@ -1692,9 +1744,21 @@ $("#action-form").addEventListener("submit", e => {
   e.preventDefault(); if (!pendingAction || !state || busy) return;
   const entry = pendingAction, fields = Object.fromEntries(new FormData(e.currentTarget));
   const generation = client.generation, roomId = session.roomId, memberId = session.member.id, epoch = actionEpoch, focus = document.activeElement;
-  if (!entry.uncertain && (entry.needsReview || entry.textRequired && !entry.text || state.workItems[entry.workId]?.revision !== entry.revision || !actionAvailable(entry))) { syncActionForm(); return; }
+  if (!entry.uncertain && (entry.needsReview || entry.textRequired && !entry.text || actionChanged(entry) || !actionAvailable(entry))) { syncActionForm(); return; }
   if (!entry.uncertain) {
     const data = { workItemId: entry.workId, expectedRevision: entry.revision, ...fields };
+    if (isHelpAction(entry.action)) {
+      data.expectedHelpRevision = entry.helpRevision;
+      data.status = entry.action === "help" ? "open" : "withdrawn";
+      if (entry.action === "help") {
+        const duration = Number(fields.duration);
+        if (fields.duration !== "keep" && ![3600000, 86400000, 604800000].includes(duration)) return;
+        data.expiresAt = fields.duration === "keep" ? entry.helpExpiresAt : new Date(Date.now() + duration).toISOString();
+        delete data.duration;
+        if (Date.parse(data.expiresAt) <= Date.now()) { entry.error = "End time passed. Choose a new duration."; syncActionForm(); return; }
+      }
+      try { validateHelpData(data); } catch { entry.error = "Add a short scope and choose an end time."; syncActionForm(); return; }
+    }
     if (entry.action === "complete") data.producerId = fields.producerId === "__unknown__" ? null : fields.producerId;
     if (entry.draftMessageId) Object.assign(data, { evidenceKind: "room_text", evidenceMessageId: entry.text.messageId,
       evidenceMessageEventId: entry.text.messageEventId, evidenceVersion: entry.text.evidenceVersion, previousCompletionEventId: entry.receipt?.completionEventId ?? null });
@@ -1716,7 +1780,7 @@ $("#action-form").addEventListener("submit", e => {
       entry.needsReview = !entry.uncertain && error.code === "command_rejected" && error.status === 409;
       entry.error = error.message; return;
     }
-    closeActionDialog({ returnFocus: false, confirmed: true }); notice("Record saved.");
+    closeActionDialog({ returnFocus: false, confirmed: true }); notice(isHelpAction(entry.action) ? "Help request saved." : "Record saved.");
     const settledEpoch = actionEpoch;
     setTimeout(() => { if (actionEpoch === settledEpoch && sameSession(generation, roomId, memberId)) revealWork(entry.workId); }, 0);
   }, { failureHint: "Your entries were kept; try again." }).then(() => {
@@ -1866,7 +1930,8 @@ function renderReturnBrief() {
       draftsByWork.get(message.workItemId).push(message);
     }
     renderContent("#work-list", items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(i => workCard(i, now, draftsByWork.get(i.id) ?? [])).join("") || `<p class="empty-note">${can("steer") ? "Turn a message into work, or start something new." : "Suggest work in the conversation. The owner can create it."}</p>`);
-    const expiry = items.map(item => item.claim?.status === "active" ? Date.parse(item.claim.expiresAt) : NaN).filter(at => at > now).sort((a, b) => a - b)[0];
+    const expiry = items.flatMap(item => [item.claim?.status === "active" ? Date.parse(item.claim.expiresAt) : NaN,
+      ...(item.helpWanted?.status === "open" ? [Date.parse(item.helpWanted.openedAt), Date.parse(item.helpWanted.expiresAt)] : [])]).filter(at => at > now).sort((a, b) => a - b)[0];
     if (expiry && document.visibilityState !== "hidden") returnClock = setTimeout(renderReturnBrief, Math.max(100, Math.min(60000, expiry - now)));
   }
   const newer = returnBrief && client.sequence > returnBrief.history.evaluatedThrough;

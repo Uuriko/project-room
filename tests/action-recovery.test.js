@@ -6,7 +6,7 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { confirmsWorkAction } from "../src/workflow.js";
 import { retryUnconfirmed } from "../src/client.js";
 
-test("all nine work actions confirm only the exact owned operation, including ordered claim paths", async t => {
+test("work actions and help changes confirm only the exact owned operation, including ordered claim paths", async t => {
   const f = createAcceptanceFixture();
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const item = () => f.store.snapshot(f.keys.owner, "commons").state.workItems.recovery;
@@ -27,7 +27,7 @@ test("all nine work actions confirm only the exact owned operation, including or
     }
     const reordered = Object.fromEntries(Object.entries(receipt.event.data).reverse());
     assert.equal(await match({ ...receipt, event: { ...receipt.event, data: reordered } }), true, "object key order has no meaning");
-    for (const data of [null, [], {}, { ...command.data, extra: true }, { ...command.data, expectedRevision: item().revision }]) {
+    for (const data of [null, [], {}, { ...command.data, extra: true }, { ...command.data, expectedRevision: command.data.expectedRevision + 1 }]) {
       assert.equal(await match({ ...receipt, event: { ...receipt.event, data } }), false);
     }
     assert.equal(await confirmsWorkAction(receipt, { ...command, id: crypto.randomUUID() }, "commons", actor), false, "same payload is not another operation's receipt");
@@ -38,6 +38,9 @@ test("all nine work actions confirm only the exact owned operation, including or
     return receipt;
   };
   await send(T.WORK_ACCEPTED);
+  await send(T.WORK_HELP_UPDATED, { expectedHelpRevision: 0, status: "open", scope: "One bounded contribution", expiresAt: scope.expiresAt });
+  await send(T.WORK_HELP_UPDATED, { expectedHelpRevision: 1, status: "withdrawn" });
+  assert.equal(item().revision, 1, "Help changes confirm independently without advancing work revisions");
   await send(T.CLAIM_ACQUIRED, scope);
   await send(T.WORK_STARTED);
   await send(T.CLAIM_RELEASED);
