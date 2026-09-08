@@ -318,11 +318,21 @@ guards, long-text/mobile reflow and keyboard wrapping are verified.381 core/API,
 is retained. One actual agent made a fresh proposal from a seeded agenda; no human
 study, retention lift or inherited completion is claimed. No deployment/schema change.
 
-Next: research and plan a previewable result-sharing/export flow using existing
-evidence and portable-work contracts, then implement and test the useful complete
-slice. Keep private context excluded by default, sharing deliberate and attribution
-truthful; do not publish automatically. Continue the broader prioritized workstreams
-and now/next/later backlog. Do not restart completed reuse, watcher, return,
-invitation, task-context or recovery work, or mistake a milestone for completion.
-Keep advanced controls contextual and voluntary growth value-bearing. Continue
-while meaningful authorized work remains.
+The [deliberate result-copy checkpoint](RESULT-COPY-CHECKPOINT-2026-09-07.md) now
+provides a selected title/reported-summary preview, editable redaction, explicit
+copy, source-change choices, temporary draft ownership and honest clipboard
+recovery. A read-only agent helper shares its two-field projection.385 core/API,
+100 browser and nine local Workers tests pass at5f62fd6; the49-file package is
+retained. One actual agent redacted a synthetic draft with unchanged full snapshot/
+private reminders, sequence12/read marker0. No automatic redaction, authorship,
+human preference, retention lift, publication or deployment is claimed.
+
+Next: research and review the complete free/BYO-agent first-contribution → evidence/
+review → reuse/copy → return journey for confusing terms, redundant controls and
+missing orientation. Select and implement one evidence-backed simplification or
+missing step; keep advanced controls contextual rather than adding a dashboard.
+Continue the broader prioritized workstreams and now/next/later backlog. Do not
+restart completed result copy, reuse, watcher, return, invitation, selected-context
+or recovery work, or mistake a milestone for goal completion. Keep privacy and
+truthful attribution intact; voluntary growth must follow value. Continue while
+meaningful prioritized authorized work remains.
