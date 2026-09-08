@@ -44,8 +44,9 @@ desktop and touch browser contexts against separate disposable local fixtures:
 This is simulated human use plus actual scripted protocol/process integration,
 not native-model reasoning, independent human research or retention evidence.
 The initial two tests passed before the screenshot-driven UI improvement. The
-updated two tests and 552 core/API/package checks also passed; final full-browser
-and exact-package qualification are recorded below when completed.
+updated two tests and 552 core/API/package checks also passed. Final full-browser
+qualification passes all 172 tests, including both new reconnect journeys and the
+44px touch-target assertion. Exact-package qualification is recorded below.
 
 ## Evidence
 
@@ -57,6 +58,31 @@ Successful runs remove only their own isolated fixture directories.
 
 Existing preview and retained older packages are preserved. No model invocation,
 push, deployment, provider operation or live data change is part of this slice.
+
+## Exact local candidate
+
+Runtime commit: `222d3e46ebb686aaa63c05449da8589e5de9fa76`.
+Retained package: `../project-room-runtime-packages-20260908/candidate-222d3e4`,
+65 runtime files, 19 public assets, schema/writer12. Manifest SHA256:
+`9f0b72692004f2449d7790f50d4217ccd6c7e7478994b531ec77f544c6523a61`.
+Unchanged fallback: `4d22189ccdebc56db23397e6cc75b07eff0e3c2c` in
+`fallback-4d22189`. Older candidates are preserved; fallback135d824 remains
+superseded and unsuitable.
+
+All 14 local Workers checks pass, including browser use and actual retained-pair
+candidate/pause/fallback/return with all 20 application tables. The browser check
+still emits the known local self-signed TLS diagnostics; its assertions pass.
+Two desktop/touch fallback journeys pass using fresh packages from these exact
+commits. Set `ROOM_DRAFT_CANDIDATE_COMMIT` to the full hash above to reproduce;
+otherwise that script intentionally uses its historical default. Workers switching
+used both explicit `ROOM_RECOVERY_*_PACKAGE` paths. Both retained manifests were
+verified again after testing. This is local app switching, not provider PITR or
+proof of current authority following historical restoration.
+
+All six journey screenshots and two synthetic JSON summaries are also retained
+in `../project-room-runtime-packages-20260908/evidence-222d3e4/` so later browser
+runs do not overwrite this checkpoint's evidence. Touch collapsed and desktop
+expanded/large-text screens were inspected after the final touch-target change.
 
 ## Next
 
