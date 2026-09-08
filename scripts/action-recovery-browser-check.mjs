@@ -263,6 +263,7 @@ for (const action of ["verify", "decide"]) {
       assert.equal(await page.locator("#action-title").textContent(), "Record an evidence check");
       assert.match(await page.locator("#verification-boundary").textContent(), /unknown.*cannot satisfy independent verification/);
     }
+    await f.capture(`refreshed-${action}`);
     let command;
     await page.route("**/commands", route => { command = route.request().postDataJSON(); return route.continue(); });
     await f.input(verdict).selectOption(action === "verify" ? "pass" : "approved");
@@ -298,7 +299,11 @@ for (const mobile of [false, true]) {
   test(`pending action ${mobile ? "mobile large text" : "desktop keyboard"} stays operable`, { timeout: 30000 }, async t => {
     const f = await setup(t, { mobile }), { page } = f;
     await f.open(); await f.fill(); await page.route("**/commands", route => route.abort("failed")); await f.save.click(); await f.unknown();
-    if (mobile) await page.evaluate(() => document.documentElement.style.fontSize = "200%");
+    if (mobile) {
+      await f.dialog.evaluate(node => node.scrollTop = 0); await f.capture("mobile-retry");
+      await page.evaluate(() => document.documentElement.style.fontSize = "200%");
+      await f.dialog.evaluate(node => node.scrollTop = 0); await f.capture("mobile-large-start");
+    }
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
     assert.equal(await f.dialog.evaluate(node => node.scrollWidth <= node.clientWidth + 1), true);
     await f.save.focus(); await page.keyboard.press("Tab"); assert.equal(await page.locator("#cancel-action").evaluate(node => document.activeElement === node), true);

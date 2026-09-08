@@ -2,6 +2,10 @@
 
 September 8, 2026 · local implementation plan · goal active
 
+Status: the [action recovery prerequisite](ACTION-RECOVERY-CHECKPOINT-2026-09-08.md)
+is implemented and verified locally at runtime `fc69f84`. Native text completion,
+result reads and schema/writer10 below are still planned, not implemented.
+
 Previous turn made verified progress: focused discussion reads and an actual
 clarification-driven agent contribution. Next remove the need for placeholder
 external evidence URLs when the actual result is already a draft in the room.
@@ -70,6 +74,13 @@ when configured; that is not a universal default. A2A describes
 [client-owned artifact lineage](https://a2a-protocol.org/latest/topics/life-of-a-task/#tracking-artifact-mutation),
 not an implemented lineage store for us. These patterns inform the contract; no
 source code is copied and interoperability is not claimed.
+
+Root rechecked those primary pages after the independent research lane. Paperclip
+also redirects agent edits of a locked document to a derived document, keeping
+the approved snapshot intact. Our first slice deliberately uses explicit new
+completion/parent references, not a silent destination change: agents can keep
+contributing drafts while the prior approved result remains identifiable. Full
+document editing/branching stays outside this first text-result contract.
 
 Tests: exact Unicode/whitespace bytes, empty/oversized/malformed input, wrong work/
 post/digest/parent, parallel stale revision, old exact retry after new versions,
