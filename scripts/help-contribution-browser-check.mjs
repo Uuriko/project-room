@@ -97,6 +97,24 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
     await page.locator('#action-form button[type=submit]').click(); await page.locator('#action-dialog').waitFor({ state: 'hidden' });
     assert.equal(state().workItems[workItemId].state, 'working');
   }
+  // Service-driven events exercise browser replay, not an unbuilt invitation UI.
+  // This existing conversational offer predates the invitation and is not
+  // falsely presented as an invitation-bound offer or automated dispatch.
+  const unsent = 'Keep this unsent note while help changes.';
+  await page.locator('#message-input').fill(unsent); await page.locator('#message-input').focus();
+  const basis = state().workItems[workItemId].revision;
+  const help = f.store.command(f.keys.owner, 'commons', { id: 'browser-help-open', type: T.WORK_HELP_UPDATED,
+    data: { workItemId, expectedRevision: basis, expectedHelpRevision: 0, status: 'open',
+      scope: 'Suggest one additional guide improvement in this Room.', expiresAt: new Date(Date.now() + 3600000).toISOString() } });
+  await page.locator(`[data-event-record-id="${help.event.id}"]`).waitFor({ state: 'attached' });
+  const withdrawn = f.store.command(f.keys.owner, 'commons', { id: 'browser-help-withdraw', type: T.WORK_HELP_UPDATED,
+    data: { workItemId, expectedRevision: basis, expectedHelpRevision: 1, status: 'withdrawn' } });
+  await page.locator(`[data-event-record-id="${withdrawn.event.id}"]`).waitFor({ state: 'attached' });
+  assert.equal(await page.locator('#message-input').inputValue(), unsent);
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'message-input');
+  assert.equal(state().workItems[workItemId].revision, basis);
+  await page.screenshot({ path: `${prefix}-help-storage.png` });
+  await page.locator('#message-input').fill('');
   await close(helper); helper = await open('producer');
   const response = await call(helper, 'room_read_request', { requestMessageId: question.requestMessageId }, true);
   assert.equal(response.request.status, 'answered'); assert.equal(response.page.items.at(-1).message.body, answer);
@@ -207,7 +225,7 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
   assert.equal(await page.locator('#action-text-body').textContent(), '');
   writeFileSync(`${prefix}.json`, JSON.stringify({ simulatedHuman: true, scriptedMcp: true, nativeModels: false,
     workItemId, oneSharedRecord: true, contributors: multiple ? ['producer', 'alternate'] : ['producer'], selectedEarlierDraft: multiple,
-    returnedFrom: touch ? 'working' : 'accepted', draftShortcut: true,
+    returnedFrom: touch ? 'working' : 'accepted', draftShortcut: true, helpEventsApplied: true, helpInvitationUI: false,
     accountable: 'owner', postedBy: 'producer', reportedProducer: 'producer', reportedBy: 'owner',
     request: 'answered', reconnect: true, exactOfferRetry: true, exactDraftRetry: true, review: 'pass', humanApproval: null,
     evidenceVersion: textVersion(body), readMarkers: markers, traffic, finalAudit: auditRecovery(f.store) }, null, 2));

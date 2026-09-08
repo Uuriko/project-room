@@ -53,11 +53,25 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   for (const path of publicAssets) assert.deepEqual(readFileSync(join(assets, path)), readFileSync(join(destination, path)));
   const f = createRecoveryFixture(join(directory, "fixture.sqlite"));
   try {
+    const helpRetries = [];
+    for (const status of ["open", "withdrawn"]) {
+      const workItemId = `packaged-help-${status}`;
+      for (const command of [
+        { id: `${workItemId}-propose`, type: "work.proposed", data: { workItemId, title: "Help with an agenda", definitionOfDone: "Two ideas", accountableMemberId: "owner" } },
+        { id: `${workItemId}-accept`, type: "work.accepted", data: { workItemId, expectedRevision: 0 } },
+        { id: `${workItemId}-open`, type: "work.help_updated", data: { workItemId, expectedRevision: 1, expectedHelpRevision: 0, status: "open",
+          scope: "Suggest two agenda items 🪷", expiresAt: new Date(f.now() + 3600000).toISOString() } },
+        ...(status === "withdrawn" ? [{ id: `${workItemId}-withdraw`, type: "work.help_updated", data: { workItemId, expectedRevision: 1, expectedHelpRevision: 1, status: "withdrawn" } }] : [])
+      ]) helpRetries.push({ command, receipt: f.store.command(f.keys.owner, "commons", command) });
+    }
     const before = auditRecovery(f.store);
     const { RoomStore } = await import(pathToFileURL(join(destination, "server/store.mjs")));
     const restored = new RoomStore(f.filename, { now: f.now });
     try {
       assert.deepEqual(auditRecovery(restored), before);
+      for (const { command, receipt } of helpRetries) assert.equal(restored.command(f.keys.owner, "commons", command).event.id, receipt.event.id);
+      for (const status of ["open", "withdrawn"]) assert.equal(restored.room("commons").state.workItems[`packaged-help-${status}`].helpWanted.status, status);
+      assert.deepEqual(auditRecovery(restored), before, "Cold exact-package help retries preserve every table");
       assert.equal(restored.command(f.keys.owner, "commons", f.command).duplicate, true);
       assert.equal(restored.command(f.keys.owner, "commons", f.nativeCommand).event.id, f.nativeCompletion.event.id);
       assert.equal(restored.workResult(f.keys.owner, "commons", "native-evidence").result.text.body, f.nativeBody);
