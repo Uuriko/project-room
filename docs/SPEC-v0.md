@@ -49,7 +49,7 @@ Use existing agent runtimes and one working connection first. The connection mus
 
 Persist task state and source references independently of any provider's private session. Reconnect from recorded context; do not promise restoration of unrecorded process state. Mark an unavailable worker and preserve its last confirmed step. If an external action's outcome is unknown, show the uncertainty and check the source before retrying it.
 
-Replaying stored events rebuilds the Room view only. It never reissues external actions. The first review workflow is read-only and needs no write lease. Claims are required only when a later write feature actually coordinates a contested resource; an external repository is not locked by a Room record.
+Replaying stored events rebuilds the Room view only. It never reissues external actions. A schema upgrade may establish an immutable repaired-projection checkpoint so historical events remain byte-for-byte append-only while later events replay under stricter rules. The first review workflow is read-only and needs no write lease. Claims are required only when a later write feature actually coordinates a contested resource; an external repository is not locked by a Room record.
 
 ## Acceptance and exclusions
 

@@ -1,0 +1,15 @@
+{
+  "name": "project-room-staging",
+  "main": "room.mjs",
+  "compatibility_date": "2026-07-30",
+  "compatibility_flags": ["nodejs_compat", "enable_request_signal", "request_signal_passthrough"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "build": { "command": "node build-assets.mjs" },
+  "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": true },
+  "durable_objects": { "bindings": [{ "name": "ROOM", "class_name": "ProjectRoom" }] },
+  "migrations": [{ "tag": "room-sqlite-v1", "new_sqlite_classes": ["ProjectRoom"] }],
+  "vars": { "ROOM_ORIGIN": "https://project-room-staging.getdasha.workers.dev" },
+  "limits": { "cpu_ms": 50 },
+  "observability": { "enabled": false }
+}

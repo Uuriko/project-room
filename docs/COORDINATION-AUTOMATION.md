@@ -1,6 +1,6 @@
 # Project Room coordination automation
 
-Replacement prompt prepared 2026-09-07 for the existing **Project Room GitHub channel** automation. **Not installed:** the settings lookup returns the prompt but omits its webhook triggers. Updating a webhook prompt requires preserving the complete existing trigger set. Do not guess its filters or replace event delivery with polling. Keep the current event configuration and enabled state when those settings are available.
+Replacement prompt prepared 2026-09-07 for the existing **Project Room GitHub channel** automation. **Status recorded 2026-09-07: not installed.** the settings lookup returns the prompt but omits its webhook triggers. Updating a webhook prompt requires preserving the complete existing trigger set. Do not guess its filters or replace event delivery with polling. Keep the current event configuration and enabled state when those settings are available.
 
 ## Replacement prompt
 

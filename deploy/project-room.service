@@ -1,0 +1,25 @@
+[Unit]
+Description=Project Room invite-only pilot
+After=network.target
+
+[Service]
+Type=simple
+User=project-room
+Group=project-room
+WorkingDirectory=/opt/project-room/current
+EnvironmentFile=/etc/project-room/pilot.env
+ExecStart=/usr/bin/node /opt/project-room/current/server.mjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+UMask=0077
+StateDirectory=project-room
+StateDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/project-room
+
+[Install]
+WantedBy=multi-user.target
