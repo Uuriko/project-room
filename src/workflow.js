@@ -23,6 +23,25 @@ export function confirmsWorkProposal(receipt, command, roomId, memberId) {
 }
 
 export { matchesReceipt };
+// Work actions can carry arrays. Exact payload and business-operation identity
+// must match before a browser may discard a retained retry or announce success.
+export async function confirmsWorkAction(receipt, command, roomId, memberId) {
+  const entry = receipt?.event;
+  const actions = [T.WORK_ACCEPTED, T.WORK_STARTED, T.WORK_BLOCKED, T.WORK_BLOCKER_RESOLVED,
+    T.WORK_COMPLETED, T.CLAIM_ACQUIRED, T.CLAIM_RELEASED, T.VERIFICATION_RECORDED, T.OWNER_DECISION_RECORDED];
+  const same = (a, b) => a === b || (a && b && typeof a === "object" && typeof b === "object"
+    && Array.isArray(a) === Array.isArray(b) && Object.keys(a).length === Object.keys(b).length
+    && Object.keys(a).every(key => Object.hasOwn(b, key) && same(a[key], b[key])));
+  if (!actions.includes(command?.type) || !validId(command?.id) || !Number.isSafeInteger(receipt?.sequence) || receipt.sequence < 1
+    || typeof receipt.duplicate !== "boolean" || !validId(entry?.id) || entry.type !== command.type
+    || entry.roomId !== roomId || entry.actorId !== memberId || entry.causationId !== (command.causationId ?? null)
+    || typeof entry.at !== "string" || !Number.isFinite(Date.parse(entry.at))
+    || !command.data || typeof command.data !== "object" || Array.isArray(command.data) || !same(entry.data, command.data)) return false;
+  try {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${memberId}:${command.id}`));
+    return entry.idempotencyKey === [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+  } catch { return false; }
+}
 // The same packet may have several drafts: its stable message ID distinguishes
 // this submission. Current return commands contain only primitive data fields.
 export function confirmsWorkReturn(receipt, command, roomId, memberId) {

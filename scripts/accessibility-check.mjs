@@ -163,7 +163,7 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   assert.equal(await page.locator('[data-work-record-id="producer-conflict"] [data-action="verify"]').count(), 0, "verifier-as-producer does not expose a misleading independent-check action");
   await page.locator('[data-work-record-id="producer-unknown-choice"] [data-action="verify"]').click();
   assert.equal(await page.locator("#action-title").textContent(), "Record an evidence check");
-  assert.match(await page.locator("#action-fields").textContent(), /Producer identity is unknown.*cannot satisfy required independent verification or unlock approval/s);
+  assert.match(await page.locator("#action-fields").textContent(), /Producer identity is unknown.*cannot satisfy independent verification or unlock approval/s);
   await page.locator("#cancel-action").click();
   await page.waitForFunction(() => document.querySelector("#rb-attention-list")?.textContent.includes("Maya-only return item"));
   releaseHeld();

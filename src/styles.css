@@ -538,3 +538,4 @@ summary { overflow-wrap: anywhere; }
 /* Private setup stays within narrow mobile dialogs; never show it by default. */
 #agent-connect-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 #agent-connect-dialog textarea { max-width: 100%; overflow-wrap: anywhere; }
+.pending-save { margin: 0 1rem 1rem; max-width: calc(100% - 2rem); }

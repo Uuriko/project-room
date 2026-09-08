@@ -418,11 +418,13 @@ export { RoomClient as RoomSessionClient };
 // Unknown commits stay locked across pre-ledger refusals (including rate/size
 // limits). Only a rejection after exact retry lookup resolves an unknown original.
 export function retryUnconfirmed(error, wasUnconfirmed = false) {
+  const scopeRejected = (error.status === 409 && error.code === "claim_conflict")
+    || (error.status === 422 && error.code === "invalid_claim_scope");
   const rejected = error.status >= 400 && error.status < 500
     && ["command_rejected", "invalid_command", "invalid_cause", "pilot_limit", "too_large"].includes(error.code);
   const originalRejected = ([409, 422].includes(error.status) && error.code === "command_rejected")
     || (error.status === 422 && error.code === "invalid_cause") || (error.status === 409 && error.code === "pilot_limit");
-  return wasUnconfirmed ? !originalRejected : !rejected;
+  return !(scopeRejected || (wasUnconfirmed ? originalRejected : rejected));
 }
 
 export function draftCommand(previous, type, data, causationId = null) {
