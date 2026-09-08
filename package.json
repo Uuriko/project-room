@@ -12,7 +12,9 @@
     "provision": "node scripts/provision.mjs",
     "audit:invitations": "node scripts/audit-invitations.mjs",
     "test:handoff": "node --test tests/agent-handoff.test.js",
-    "agent:inbox": "node scripts/agent-inbox.mjs"
+    "agent:inbox": "node scripts/agent-inbox.mjs",
+    "agent:openai": "node scripts/room-openai-once.mjs",
+    "test:openai": "node --test tests/openai-room.test.js"
   },
   "engines": {
     "node": ">=24.19.0"
