@@ -10,8 +10,9 @@ import { saveAgentConnection } from '../client/agent-connection.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
 import { textVersion } from '../server/text-results.mjs';
+import { EVENT_TYPES as T } from '../src/events.js';
 
-for (const touch of [false, true]) test(`voluntary help ${touch ? 'touch' : 'desktop'}: offer, answer, draft, adopt and independently review`, { timeout: 60000 }, async t => {
+for (const multiple of [false, true]) for (const touch of [false, true]) test(`${multiple ? 'alternative contributions' : 'voluntary help'} ${touch ? 'touch' : 'desktop'}: offer, answer, draft, adopt and independently review`, { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture({ managedProducer: true }), handles = new Set(), traffic = [], errors = [];
   const server = createRoomServer({ store: f.store, streamInterval: 50 }); let browser;
   t.after(async () => {
@@ -21,13 +22,21 @@ for (const touch of [false, true]) test(`voluntary help ${touch ? 'touch' : 'des
     f.store.close(); rmSync(f.directory, { recursive: true, force: true });
   });
   const workItemId = 'shared-guide', title = 'Contributor guide', state = () => f.store.room('commons').state;
+  if (multiple) {
+    f.store.command(f.keys.owner, 'commons', { id: 'add-alternate', type: T.MEMBER_ADDED, data: {
+      memberId: 'alternate', displayName: 'Test alternate', kind: 'agent', accountableHumanId: 'owner', permissions: ['accept_work', 'complete_work'] } });
+    f.keys.alternate = f.store.issueAccessKey('commons', 'alternate');
+  }
   f.store.command(f.keys.owner, 'commons', { id: 'help-work', type: 'work.proposed', data: { workItemId, title,
     definitionOfDone: 'Two steps: offer bounded help, then preserve attribution when adopting the draft.', mode: 'read',
     accountableMemberId: 'owner', verifierMemberId: 'reviewer', independentVerificationRequired: true,
     ownerDecisionRequired: true, humanDecisionMakerId: 'owner' } });
+  if (multiple) f.store.command(f.keys.owner, 'commons', { id: 'ask-alternative', type: T.MESSAGE_POSTED, data: {
+    messageId: 'ask-alternative', workItemId, toMemberId: 'alternate',
+    body: 'Test alternate: contribute a second two-step guide here for comparison. I will inspect both and choose; do not take over the assignment or use external tools.' } });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   const origin = `http://127.0.0.1:${server.address().port}`, dirs = {};
-  for (const memberId of ['producer', 'reviewer']) {
+  for (const memberId of ['producer', 'reviewer', ...(multiple ? ['alternate'] : [])]) {
     dirs[memberId] = join(f.directory, memberId);
     saveAgentConnection(dirs[memberId], { version: 1, origin, roomId: 'commons', memberId, token: f.keys[memberId] });
   }
@@ -65,7 +74,7 @@ for (const touch of [false, true]) test(`voluntary help ${touch ? 'touch' : 'des
   page.setDefaultTimeout(8000); page.on('pageerror', error => errors.push(error.message));
   await page.goto(origin); await page.locator('#access-key').fill(f.keys.owner);
   await page.locator('#auth-form button[type=submit]').click(); await page.locator('#main').waitFor({ state: 'visible' });
-  mkdirSync('test-results', { recursive: true }); const prefix = `test-results/help-contribution-${touch ? 'touch' : 'desktop'}`;
+  mkdirSync('test-results', { recursive: true }); const prefix = `test-results/${multiple ? 'help-alternatives' : 'help-contribution'}-${touch ? 'touch' : 'desktop'}`;
   await page.locator('#contribution-open').click();
   assert.equal(await page.evaluate(() => document.activeElement.dataset.messageRecordId), question.requestMessageId);
   await page.screenshot({ path: `${prefix}-offer.png` });
@@ -104,6 +113,19 @@ for (const touch of [false, true]) test(`voluntary help ${touch ? 'touch' : 'des
   const draft = await call(helper, 'room_post_draft', draftInput);
   const exact = await call(helper, 'room_read_result', { workItemId, draftMessageId: draft.messageId }, true);
   assert.equal(exact.result.text.postedById, 'producer'); assert.equal(exact.result.text.evidenceVersion, textVersion(body));
+  let alternateDraft = null;
+  if (multiple) {
+    const alternate = await open('alternate');
+    const alternateContext = await call(alternate, 'room_read_work', { workItemId }, true);
+    assert.equal(alternateContext.work.revision, current.work.revision);
+    const before = await call(alternate, 'room_read_work_discussion', { workItemId }, true);
+    assert.ok(before.discussion.items.some(row => row.message.id === 'ask-alternative'));
+    alternateDraft = await call(alternate, 'room_post_draft', { requestId: 'alternate-draft', workItemId,
+      packetId: 'alternate-guide', basisRevision: alternateContext.work.revision,
+      body: '1. Agree on a bounded contribution.\n2. Compare drafts and credit the selected contributor.' });
+    const discussion = await call(helper, 'room_read_work_discussion', { workItemId }, true);
+    assert.deepEqual(discussion.discussion.items.filter(row => row.message.proposal).map(row => row.message.id), [draft.messageId, alternateDraft.messageId]);
+  }
   const beforeDraftRetry = auditRecovery(f.store).dataSha256;
   assert.equal((await call(helper, 'room_post_draft', draftInput)).duplicate, true);
   assert.equal(auditRecovery(f.store).dataSha256, beforeDraftRetry);
@@ -115,16 +137,39 @@ for (const touch of [false, true]) test(`voluntary help ${touch ? 'touch' : 'des
   assert.equal(auditRecovery(f.store).dataSha256, beforeDraftRetry, 'A positive reply does not authorize completing another member’s work');
   await page.reload(); await page.locator('#main').waitFor({ state: 'visible' });
   await page.screenshot({ path: `${prefix}-return.png` });
-  await page.waitForFunction(() => document.querySelector('#contribution-label').textContent === 'Draft to inspect');
+  await page.waitForFunction(label => document.querySelector('#contribution-label').textContent === label, multiple ? 'Drafts to inspect' : 'Draft to inspect');
   await page.locator('#return-brief-panel > summary').click();
-  const draftStep = page.locator(`#rb-attention-list [data-open-message="${draft.messageId}"]`);
+  const draftStep = page.locator(multiple ? `#rb-attention-list [data-open-work="${workItemId}"]` : `#rb-attention-list [data-open-message="${draft.messageId}"]`);
   await draftStep.waitFor({ state: 'visible' });
   assert.equal(await page.locator('#rb-attention-list .rb-event').count(), 1, 'One draft replaces the same work start step');
   assert.equal(await page.locator(`#rb-involving-list [data-open-work="${workItemId}"]`).count(), 0, 'The same work is not repeated as other open work');
   await page.screenshot({ path: `${prefix}-return-catchup.png` });
+  if (multiple) {
+    await draftStep.click();
+    const choices = page.locator(`[data-work-record-id="${workItemId}"] .work-drafts`);
+    assert.equal(await choices.evaluate(node => node.open), true, 'Catch-up opens the same choices as the primary shortcut');
+    await choices.locator('summary').click();
+  }
   await page.locator('#return-brief-panel > summary').click();
   await page.locator('#contribution-open').focus();
   await page.locator('#contribution-open').press('Enter');
+  if (multiple) {
+    const choices = page.locator(`[data-work-record-id="${workItemId}"] .work-drafts`);
+    assert.equal(await choices.evaluate(node => node.open), true);
+    assert.equal(await choices.locator('a[data-open-message]').count(), 2);
+    assert.deepEqual(await choices.locator('a[data-open-message]').evaluateAll(nodes => nodes.map(node => node.dataset.openMessage)), [alternateDraft.messageId, draft.messageId]);
+    assert.equal(await page.evaluate(() => document.activeElement.dataset.focusKey), `work-drafts:${workItemId}`);
+    assert.equal(await page.locator(`[data-work-record-id="${workItemId}"] .work-details`).evaluate(node => node.open), false, 'Draft inspection does not expand unrelated settings');
+    await page.screenshot({ path: `${prefix}-choices.png` });
+    await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
+    await choices.locator('summary').focus();
+    await choices.locator('summary').evaluate(node => node.scrollIntoView({ block: 'start', behavior: 'instant' }));
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    assert.equal(await choices.evaluate(node => node.scrollWidth <= node.clientWidth), true);
+    await page.screenshot({ path: `${prefix}-choices-large.png` });
+    await page.evaluate(() => { document.documentElement.style.fontSize = ''; });
+    await choices.locator(`[data-open-message="${draft.messageId}"]`).click();
+  }
   assert.equal(await page.evaluate(() => document.activeElement.dataset.messageRecordId), draft.messageId);
   await page.screenshot({ path: `${prefix}-return-draft.png` });
   assert.equal(auditRecovery(f.store).dataSha256, beforeDraftRetry, 'Returning and opening a draft do not change work or read markers');
@@ -137,6 +182,7 @@ for (const touch of [false, true]) test(`voluntary help ${touch ? 'touch' : 'des
   await page.screenshot({ path: `${prefix}-adopt.png` });
   await page.locator('#action-form button[type=submit]').click(); await page.locator('#action-dialog').waitFor({ state: 'hidden' });
   const receipt = state().workItems[workItemId].receipt;
+  assert.equal(receipt.nativeText.messageId, draft.messageId, 'Adoption preserves the deliberately chosen nonlatest draft');
   assert.equal(receipt.reportedById, 'owner'); assert.equal(receipt.producerId, 'producer'); assert.equal(receipt.nativeText.postedById, 'producer');
   assert.equal(state().workItems[workItemId].accountableMemberId, 'owner'); assert.equal(Object.keys(state().workItems).length, 2);
   const reviewer = await open('reviewer'), review = await call(reviewer, 'room_read_work', { workItemId }, true);
@@ -160,7 +206,8 @@ for (const touch of [false, true]) test(`voluntary help ${touch ? 'touch' : 'des
   await page.locator('#auth-panel').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#action-text-body').textContent(), '');
   writeFileSync(`${prefix}.json`, JSON.stringify({ simulatedHuman: true, scriptedMcp: true, nativeModels: false,
-    workItemId, oneSharedRecord: true, returnedFrom: touch ? 'working' : 'accepted', draftShortcut: true,
+    workItemId, oneSharedRecord: true, contributors: multiple ? ['producer', 'alternate'] : ['producer'], selectedEarlierDraft: multiple,
+    returnedFrom: touch ? 'working' : 'accepted', draftShortcut: true,
     accountable: 'owner', postedBy: 'producer', reportedProducer: 'producer', reportedBy: 'owner',
     request: 'answered', reconnect: true, exactOfferRetry: true, exactDraftRetry: true, review: 'pass', humanApproval: null,
     evidenceVersion: textVersion(body), readMarkers: markers, traffic, finalAudit: auditRecovery(f.store) }, null, 2));

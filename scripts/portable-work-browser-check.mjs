@@ -92,7 +92,7 @@ for (const mobile of [false, true]) {
     assert.equal(snapshot().state.messages.filter(m => m.proposal).length, 1);
     assert.deepEqual(snapshot().state.workItems, changedWork);
     assert.equal(snapshot().cursor, before.cursor);
-    await page.getByText(/Pasted draft · based on revision 0 · older work/).waitFor();
+    await page.getByText(/Draft · based on revision 0 · older work/).waitFor();
 
     await open();
     const current = await page.locator("#packet-preview").inputValue();

@@ -150,11 +150,15 @@ test("posted draft returns to its exact conversation record and work link preser
   assert.equal(await link.isVisible(), true, "draft is reachable with Details closed");
   assert.equal(await link.getAttribute("data-open-message"), command.data.messageId);
   f.send(T.MESSAGE_POSTED, { messageId: "later-work-draft", workItemId: "test-handoff", packetId: "manual-packet", basisRevision: 0, body: "Another contributor’s synthetic draft." }, "guest");
-  await page.waitForFunction(() => document.querySelector('[data-focus-key="work-draft:test-handoff"]')?.dataset.openMessage === "later-work-draft");
-  assert.equal(await f.card.getByRole("link", { name: "View latest draft", exact: true }).count(), 1, "one link, not an accumulating feature list");
+  const choices = f.card.locator('.work-drafts');
+  await choices.locator('summary').waitFor({ state: 'visible' });
+  assert.equal(await f.card.getByRole("link", { name: "View latest draft", exact: true }).count(), 0, "multiple drafts have one opt-in choice disclosure");
+  assert.equal(await choices.evaluate(node => node.open), false);
   await welcome.locator('[data-message-action="thread"]').click();
   assert.equal(await page.locator("#message-input").inputValue(), "Private unrelated thread draft");
-  await link.click(); await page.waitForFunction(() => document.activeElement?.dataset.messageRecordId === "later-work-draft");
+  await choices.locator('summary').click();
+  await choices.locator('[data-open-message="later-work-draft"]').click();
+  await page.waitForFunction(() => document.activeElement?.dataset.messageRecordId === "later-work-draft");
   await f.capture("work-linked-draft");
   assert.equal(f.snapshot().cursor, before.cursor); assert.deepEqual(f.snapshot().state.workItems, before.state.workItems);
 });
@@ -170,7 +174,7 @@ test("mobile guest draft is discoverable by the returning accountable member wit
   assert.equal(await f.card.locator(".work-details").evaluate(node => node.open), false);
   await f.card.getByRole("link", { name: "View latest draft", exact: true }).click();
   await page.waitForFunction(id => document.activeElement?.dataset.messageRecordId === id, posted.id);
-  assert.match(await page.locator(`[data-message-record-id="${posted.id}"]`).textContent(), /Pasted draft.*authorship unverified/);
+  assert.match(await page.locator(`[data-message-record-id="${posted.id}"]`).textContent(), /Draft.*authorship unverified/);
   await f.capture("mobile-accountable-return");
   assert.deepEqual(f.snapshot().state.workItems, before.state.workItems);
   assert.equal(f.store.snapshot(f.keys.owner, "commons").cursor, 0);

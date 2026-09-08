@@ -69,6 +69,10 @@ test('draft suggestions use the latest canonical proposal and never quietly sele
   const state = draftFixture();
   state.messages.push({ ...structuredClone(state.messages.at(-1)), id: 'newer', createdAt: '2026-09-08T11:00:00Z' });
   assert.equal(contributionSteps(state, 'guest').find(step => step.id === 'assigned').draftMessageId, 'newer');
+  const alternatives = contributionSteps(state, 'guest').find(step => step.id === 'assigned');
+  assert.equal(alternatives.draftCount, 2); assert.equal(alternatives.button, 'View drafts');
+  assert.equal(alternatives.label, 'Drafts to inspect');
+  assert.equal(contributionSteps(state, 'guest').filter(step => step.id === 'assigned').length, 1);
   for (const basis of [1, 3, undefined]) {
     state.messages.at(-1).proposal.basisRevision = basis;
     assert.equal(contributionSteps(state, 'guest').find(step => step.id === 'assigned').draftMessageId, undefined);

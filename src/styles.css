@@ -516,6 +516,9 @@ button:disabled { cursor: wait; opacity: .6; }
 .work-card h3 { margin-top: .65rem; }
 .state { border: 0; border-radius: .35rem; text-transform: none; letter-spacing: 0; font-size: .75rem; }
 .work-details { margin-top: .5rem; }
+.work-drafts { overflow-wrap: anywhere; }
+.work-drafts > summary { min-height: 44px; padding: .5rem 0; font-size: .875rem; cursor: pointer; }
+.work-drafts .source-link { display: block; min-height: 44px; padding: .4rem 0; }
 .work-details > summary { padding: .5rem 0; font-size: .875rem; }
 .work-details .mode, .work-details .source-link { display: block; margin: .5rem 0; }
 .work-details .receipt { border-radius: .6rem; }

@@ -117,16 +117,21 @@ export function contributionSteps(state, memberId, now = Date.now()) {
   }
   // Drafts are content to inspect, not lifecycle transitions. Keep one work row,
   // and never skip a newer stale proposal to promote an older draft as current.
-  const latestDrafts = new Map();
+  const latestDrafts = new Map(), draftCounts = new Map();
   const workSteps = new Map(steps.filter(step => step.kind === 'work').map(step => [step.id, step]));
-  for (const message of state.messages) if (message.workItemId && message.proposal) latestDrafts.set(message.workItemId, message);
+  for (const message of state.messages) if (message.workItemId && message.proposal) {
+    latestDrafts.set(message.workItemId, message);
+    draftCounts.set(message.workItemId, (draftCounts.get(message.workItemId) ?? 0) + 1);
+  }
   for (const [workId, draft] of latestDrafts) {
     const item = state.workItems[workId];
     if (!item || draft.proposal.basisRevision !== item.revision
       || !workActions(item, member, now).some(([action]) => action === 'complete')) continue;
     const existing = workSteps.get(workId);
-    const entry = { key: `work:${workId}`, kind: 'work', id: workId, action: null, draftMessageId: draft.id,
-      title: item.title, label: 'Draft to inspect', button: 'View draft', priority: 2, at: item.updatedAt };
+    const draftCount = draftCounts.get(workId);
+    const entry = { key: `work:${workId}`, kind: 'work', id: workId, action: null, draftMessageId: draft.id, draftCount,
+      title: item.title, label: draftCount > 1 ? 'Drafts to inspect' : 'Draft to inspect',
+      button: draftCount > 1 ? 'View drafts' : 'View draft', priority: 2, at: item.updatedAt };
     if (existing) Object.assign(existing, entry); else steps.push(entry);
   }
   return steps.sort((a, b) => a.priority - b.priority || String(a.at ?? "").localeCompare(String(b.at ?? "")) || a.key.localeCompare(b.key));

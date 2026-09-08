@@ -29,7 +29,7 @@ try {
     await page.goto(manifest.origin); await page.locator("#access-key").fill(owner.token);
     await page.getByRole("button", { name: "Enter room", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
-    const draft = page.locator(".message").filter({ hasText: "Pasted draft · based on revision 0" });
+    const draft = page.locator(".message").filter({ hasText: "Draft · based on revision 0" });
     await draft.waitFor(); assert.equal(await draft.count(), 1);
     const body = await draft.locator(".message-content > p").first().textContent();
     assert.ok(body.trim().length); assert.equal(body.trim().split(/\s+/).length <= 30, true);
