@@ -1,4 +1,5 @@
 // Simulated local people. Search must not submit, acknowledge or create work.
+import './discovery-contribution-browser-check.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, rmSync } from 'node:fs';

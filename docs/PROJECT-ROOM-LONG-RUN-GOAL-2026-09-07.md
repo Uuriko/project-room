@@ -42,10 +42,19 @@ v2 is separate and does not change Room schema. Earlier v8/v9/v10 fallback refer
 below are historical milestones, not instructions to downgrade current data.
 
 Reply-request foundation update: local Room schema/writer is now **12**. Canonical
-requests and agent/history interfaces are implemented, but the human flow and
-request attention remain in progress. Full feature acceptance and a qualified
+requests and agent/history interfaces were implemented at that checkpoint, while
+the human flow and request attention were still in progress. Full feature acceptance and a qualified
 v12-compatible fallback/hosted recovery gate release. Do not treat the foundation
 checkpoint as a completed goal or substitute a pre-v12 writer.
+
+Current checkpoint correction: human reply requests and observer v3 request
+attention are now locally implemented and covered by reconnect journeys. The
+retained schema12 candidate is `cefc89b`, with qualified local fallback `4d22189`.
+Human/agent work search and definition-only reuse compose in the
+[discovery-to-contribution journey](DISCOVERY-CONTRIBUTION-2026-09-08.md).
+Native-host acceptance, independent recovery-authority freshness, hosted recovery,
+publication and real-user retention evidence remain open. Consult the current
+handoff for exact tests and artifact hashes; do not repeat completed foundations.
 
 Preserve the useful foundations: invitations and member/account boundaries;
 conversation and desktop Enter-to-send; work/evidence/review/owner decisions;
