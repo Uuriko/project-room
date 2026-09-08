@@ -11,8 +11,9 @@ const v8Assets = ["index.html", ...["app.js", "client.js", "events.js", "convers
 const v9Assets = [...v8Assets, "src/agent-connections.js"];
 const v11Assets = [...v9Assets, "src/room-charter.js", "src/room-instructions.js"];
 const v12Assets = [...v11Assets, "src/reply-requests.js"];
-export const publicAssets = [...v12Assets, "src/work-help.js"];
-const assetsFor = schema => schema === 8 ? v8Assets : schema <= 10 ? v9Assets : schema === 11 ? v11Assets : schema === 12 ? v12Assets : publicAssets;
+const v13Assets = [...v12Assets, "src/work-help.js"];
+export const publicAssets = [...v13Assets, "src/help-offers.js"];
+const assetsFor = schema => schema === 8 ? v8Assets : schema <= 10 ? v9Assets : schema === 11 ? v11Assets : schema === 12 ? v12Assets : schema === 13 ? v13Assets : publicAssets;
 const required = [...v8Assets, "server.mjs", "package.json", "package-lock.json",
   ...["backup", "bootstrap", "claim-scopes", "deployment", "http", "invitation-evidence", "invitation-journal", "reminders",
     "return-brief", "return-selectors", "share-links", "store", "work-context", "writer-fence"].map(name => `server/${name}.mjs`),
@@ -27,6 +28,7 @@ optional.push("src/reply-requests.js", "server/reply-requests.mjs");
 optional.push("client/reply-actions.mjs", "scripts/agent-replies.mjs");
 optional.push("client/request-notices.mjs");
 optional.push("src/work-help.js", "server/work-help.mjs");
+optional.push("src/help-offers.js");
 const allowed = new Set([...required, ...optional]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 const check = condition => { if (!condition) throw new Error("Runtime package does not match its exact allowlisted contract"); };
@@ -38,7 +40,7 @@ function runtimeMetadata(files) {
   const schema = /export const STORE_SCHEMA_VERSION = (\d+);/.exec(files.get("server/writer-fence.mjs").toString());
   const pkg = JSON.parse(files.get("package.json"));
   const config = JSON.parse(files.get("cloudflare/wrangler.jsonc"));
-  check(["8", "9", "10", "11", "12", "13"].includes(schema?.[1]) && typeof pkg.engines?.node === "string");
+  check(["8", "9", "10", "11", "12", "13", "14"].includes(schema?.[1]) && typeof pkg.engines?.node === "string");
   return { schemaVersion: Number(schema[1]), node: pkg.engines.node, cloudflare: { compatibilityDate: config.compatibility_date,
     compatibilityFlags: config.compatibility_flags, durableObjects: config.durable_objects, migrations: config.migrations } };
 }

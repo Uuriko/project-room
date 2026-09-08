@@ -1,5 +1,6 @@
 import { WORK_HELP_UPDATED, helpFromEvent, validateHelp } from "../src/work-help.js";
 import { validId, WORK_REVISION_TYPES } from "../src/events.js";
+import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, helpOfferFromEvent } from "../src/help-offers.js";
 
 const own = (value, key) => value != null && Object.hasOwn(value, key);
 const check = condition => { if (!condition) throw new Error("Help invitation history requires operator reconciliation"); };
@@ -13,6 +14,7 @@ const workFacts = item => ({ ...pick(item, workFields), receipt: item?.receipt ?
 const helpMap = state => Object.fromEntries(Object.entries(state.workItems ?? {}).filter(([, item]) => own(item, "helpWanted"))
   .map(([id, item]) => [id, validateHelp(item.helpWanted)]));
 const mutations = new Set(WORK_REVISION_TYPES);
+const offerTypes = new Set([HELP_OFFER_OPENED, HELP_OFFER_UPDATED]);
 const transitions = { "work.accepted": "accepted", "work.started": "working", "work.blocked": "blocked",
   "work.blocker_resolved": "accepted", "work.completed": "completed", "work.superseded": "superseded" };
 
@@ -21,17 +23,22 @@ const transitions = { "work.accepted": "accepted", "work.started": "working", "w
 // events and their supporting facts, even when hidden by a projection checkpoint.
 export function auditWorkHelp(state, history, checkpoint = null) {
   const events = history.map(row => ({ sequence: row.sequence, event: typeof row.body === "string" ? JSON.parse(row.body) : row.event }));
-  const relevant = new Set(events.filter(row => row.event.type === WORK_HELP_UPDATED).map(row => row.event.data.workItemId));
+  const relevant = new Set(events.filter(row => row.event.type === WORK_HELP_UPDATED || offerTypes.has(row.event.type)).map(row => row.event.data.workItemId));
   check([...relevant].every(validId));
   if (!relevant.size) {
     check(!Object.keys(helpMap(state)).length);
-    if (checkpoint) check(!Object.keys(helpMap(JSON.parse(checkpoint.projection))).length);
+    check(!own(state, "helpOffers"));
+    if (checkpoint) {
+      const saved = JSON.parse(checkpoint.projection);
+      check(!Object.keys(helpMap(saved)).length && !own(saved, "helpOffers"));
+    }
     return;
   }
   const projected = { room: null, members: {}, workItems: {} };
   const compare = actual => {
     const expected = helpMap(projected);
     check(canonical(helpMap(actual)) === canonical(expected));
+    check(canonical(actual.helpOffers) === canonical(projected.helpOffers));
     if (!Object.keys(expected).length) return;
     check(actual.room?.id === projected.room.id && actual.room.ownerId === projected.room.ownerId);
     const participants = new Set([projected.room.ownerId]);
@@ -39,6 +46,7 @@ export function auditWorkHelp(state, history, checkpoint = null) {
       check(canonical(workFacts(actual.workItems?.[id])) === canonical(workFacts(projected.workItems[id])));
       participants.add(projected.workItems[id].accountableMemberId);
     }
+    for (const offer of Object.values(projected.helpOffers ?? {})) participants.add(offer.offererId);
     for (const id of participants) check(canonical(pick(actual.members?.[id], memberFields)) === canonical(pick(projected.members[id], memberFields)));
   };
   let checkpointChecked = !checkpoint;
@@ -78,6 +86,10 @@ export function auditWorkHelp(state, history, checkpoint = null) {
       if (e.type === WORK_HELP_UPDATED) {
         const help = helpFromEvent(projected, e);
         projected.workItems[d.workItemId].helpWanted = help;
+      }
+      if (offerTypes.has(e.type)) {
+        const offer = helpOfferFromEvent(projected, e);
+        (projected.helpOffers ??= {})[offer.id] = offer;
       }
     }
     if (checkpoint && sequence === checkpoint.sequence) { compare(JSON.parse(checkpoint.projection)); checkpointChecked = true; }

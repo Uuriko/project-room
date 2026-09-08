@@ -1,4 +1,4 @@
-// Dormant contract: register only with a matching writer/migration/history audit.
+// Shared by live commands and retained-history auditing under writer14.
 // Selection coordinates a contribution; it is never an execution or payment grant.
 import { validateHelp, workHelpContext } from "./work-help.js";
 

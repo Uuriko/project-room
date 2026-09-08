@@ -8,9 +8,9 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
 import { createRuntimePackage } from '../scripts/runtime-package.mjs';
-import { frozenRecoveryFixture, v8ConnectionBaseline, v9TextBaseline, v10CharterBaseline, v11ReplyBaseline, v12HelpBaseline } from '../scripts/frozen-runtime-fixture.mjs';
+import { frozenRecoveryFixture, v8ConnectionBaseline, v9TextBaseline, v10CharterBaseline, v11ReplyBaseline, v12HelpBaseline, v13OfferBaseline } from '../scripts/frozen-runtime-fixture.mjs';
 
-for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline], [10, v10CharterBaseline], [11, v11ReplyBaseline], [12, v12HelpBaseline]]) test(`real Workers v${sourceVersion}→v13 permit replacement, rollback, old-writer refusal and restart`, { timeout: 60000 }, async () => {
+for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline], [10, v10CharterBaseline], [11, v11ReplyBaseline], [12, v12HelpBaseline], [13, v13OfferBaseline]]) test(`real Workers v${sourceVersion}→v14 permit replacement, rollback, old-writer refusal and restart`, { timeout: 60000 }, async () => {
   const directory = mkdtempSync(join(tmpdir(), 'room-agent-worker-upgrade-')), repository = fileURLToPath(new URL('../', import.meta.url));
   const destination = join(directory, 'old'); let f, mf;
   try {
@@ -47,7 +47,7 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
             let observed;
             AgentConnections.prototype.verifyHistory=()=>{observed={version:version(),permit:permit()};throw new Error('synthetic failure');};
             try{assert.throws(current,{code:'connection_integrity_error'});}finally{AgentConnections.prototype.verifyHistory=verify;}
-            assert.deepEqual(observed,{version:13,permit:13},'fault occurs after installing the new writer');
+            assert.deepEqual(observed,{version:14,permit:14},'fault occurs after installing the new writer');
             assert.equal(version(),${sourceVersion});assert.equal(permit(),0);assert.deepEqual(catalog(),before);assert.deepEqual(data(),records);assert.equal(oldWrite().changes,1);
             return Response.json({rolledBack:true});
           }
@@ -57,7 +57,7 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
             return Response.json({rejected:true});
           }
           if(path==='/upgrade') {
-            const before=data(), store=current(); assert.equal(version(),13);assert.equal(permit(),0);assert.deepEqual(data(),before);
+            const before=data(), store=current(); assert.equal(version(),14);assert.equal(permit(),0);assert.deepEqual(data(),before);
             assert.throws(oldWrite,/reconciliation/); assert.throws(()=>new OldStore(null,{database:new OldDatabase(this.ctx.storage),storagePlatform:oldStorage}),/newer than this service/);
             assert.equal(store.readTransaction(()=>permit()),0);assert.throws(()=>store.readTransaction(()=>store.createAccount('forbidden')),/read-only/);
             assert.equal(store.db.prepare("UPDATE accounts SET revision=revision WHERE id='missing'").run().changes,0);
@@ -84,13 +84,20 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
             ]) store.command(f.token,'commons',command,f.session.sessionBinding);
             const helpCommand={id:'help-open',type:'work.help_updated',data:{workItemId:'help-task',expectedRevision:1,expectedHelpRevision:0,status:'open',scope:'Suggest two items 🪷',expiresAt:new Date(Date.now()+3600000).toISOString()}};
             const helpSaved=store.command(f.token,'commons',helpCommand,f.session.sessionBinding);
+            const offerCommand={id:'offer-open',type:'work.help_offer_opened',data:{workItemId:'help-task',offerId:'worker-offer',expectedRevision:1,expectedHelpRevision:1,helpEventId:helpSaved.event.id,plan:'Suggest two agenda items'}};
+            const offerSaved=store.command(this.env.AGENT,'commons',offerCommand);
+            const selectCommand={id:'offer-select',type:'work.help_offer_updated',data:{workItemId:'help-task',offerId:'worker-offer',expectedRevision:1,expectedOfferRevision:0,status:'selected',reason:'Use these suggestions',expectedHelpRevision:1,helpEventId:helpSaved.event.id}};
+            const selectSaved=store.command(f.token,'commons',selectCommand,f.session.sessionBinding);
             const helpWithdraw={id:'help-withdraw',type:'work.help_updated',data:{workItemId:'help-task',expectedRevision:1,expectedHelpRevision:1,status:'withdrawn'}};
             const helpClosed=store.command(f.token,'commons',helpWithdraw,f.session.sessionBinding);
+            assert.equal(store.room('commons').state.helpOffers['worker-offer'].status,'selected');
+            const releaseCommand={id:'offer-release',type:'work.help_offer_updated',data:{workItemId:'help-task',offerId:'worker-offer',expectedRevision:1,expectedOfferRevision:1,status:'released',reason:'End coordination only',externalActivityUnverified:true}};
+            const releaseSaved=store.command(this.env.AGENT,'commons',releaseCommand);
             assert.equal(store.room('commons').state.workItems['help-task'].revision,1);
-            return Response.json({upgraded:true,details,disconnect,receipt:result.receipt,charterCommand,charterSaved,question,asked,answer,answered,helpCommand,helpSaved,helpWithdraw,helpClosed,cursors,audit:auditRecovery(store)});
+            return Response.json({upgraded:true,details,disconnect,receipt:result.receipt,charterCommand,charterSaved,question,asked,answer,answered,helpCommand,helpSaved,helpWithdraw,helpClosed,offerCommand,offerSaved,selectCommand,selectSaved,releaseCommand,releaseSaved,cursors,audit:auditRecovery(store)});
           }
           if(path==='/restart') {
-            const proof=await request.json(),store=current();assert.equal(version(),13);assert.equal(permit(),0);
+            const proof=await request.json(),store=current();assert.equal(version(),14);assert.equal(permit(),0);
             assert.deepEqual(store.agentConnections.apply(f.token,'commons',proof.details,f.session.sessionBinding).receipt,proof.receipt);
             assert.equal(store.agentConnections.apply(f.token,'commons',proof.disconnect,f.session.sessionBinding).duplicate,true);
             assert.equal(store.agentConnections.list(f.token,'commons',f.session.sessionBinding).connections.find(c=>c.memberId==='worker-agent').status,'disconnected');
@@ -100,6 +107,10 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
             assert.equal(store.command(this.env.AGENT,'commons',proof.answer).event.id,proof.answered.event.id);
             assert.equal(store.command(f.token,'commons',proof.helpCommand,f.session.sessionBinding).event.id,proof.helpSaved.event.id);
             assert.equal(store.command(f.token,'commons',proof.helpWithdraw,f.session.sessionBinding).event.id,proof.helpClosed.event.id);
+            assert.equal(store.command(this.env.AGENT,'commons',proof.offerCommand).event.id,proof.offerSaved.event.id);
+            assert.equal(store.command(f.token,'commons',proof.selectCommand,f.session.sessionBinding).event.id,proof.selectSaved.event.id);
+            assert.equal(store.command(this.env.AGENT,'commons',proof.releaseCommand).event.id,proof.releaseSaved.event.id);
+            assert.equal(store.room('commons').state.helpOffers['worker-offer'].status,'released');
             assert.equal(store.room('commons').state.workItems['help-task'].helpWanted.status,'withdrawn');
             assert.equal(store.room('commons').state.messages.find(m=>m.id===proof.answer.data.messageId).body,proof.answer.data.body);
             assert.deepEqual(store.db.prepare('SELECT * FROM cursors ORDER BY room_id,member_id').all(),proof.cursors);

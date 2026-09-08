@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
-import { applyEvent, emptyRoomState, event, EVENT_TYPES } from "../src/events.js";
+import { applyEvent, emptyRoomState, event, EVENT_TYPES, WORK_REVISION_TYPES } from "../src/events.js";
 import { HELP_OFFER_OPENED as OPEN, HELP_OFFER_UPDATED as UPDATE, MAX_HELP_OFFERS,
   helpOfferFromEvent, helpOfferAvailability, helpOfferContext, validateHelpOffer, validateHelpOfferData } from "../src/help-offers.js";
 
@@ -218,15 +218,20 @@ test("historical capacity refuses new offers while keeping explicit cleanup avai
   assert.equal(helpOfferFromEvent(base, update).status, "withdrawn");
 });
 
-test("offer events remain unregistered until writer and history support are integrated", () => {
+test("registered offer events preserve exact replay and do not advance work revisions", () => {
   const f = fixture(), before = structuredClone(f.state);
-  assert.equal(Object.values(EVENT_TYPES).includes(OPEN), false);
-  assert.equal(Object.values(EVENT_TYPES).includes(UPDATE), false);
-  assert.throws(() => applyEvent(f.state, f.offerEvent()));
+  for (const type of [OPEN, UPDATE]) {
+    assert.equal(Object.values(EVENT_TYPES).includes(type), true);
+    assert.equal(WORK_REVISION_TYPES.includes(type), false);
+  }
+  const incoming = f.offerEvent(), after = applyEvent(f.state, incoming);
+  assert.equal(after.helpOffers.offer.invitation.eventId, before.workItems.job.helpWanted.eventId);
+  assert.deepEqual(after.workItems, before.workItems);
+  assert.deepEqual(applyEvent(after, incoming), after);
   assert.deepEqual(f.state, before);
 });
 
-test("current schema13 service refuses future offer commands without writes", t => {
+test("registered service refuses incomplete offer commands without writes", t => {
   const f = createAcceptanceFixture();
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const before = auditRecovery(f.store).dataSha256;

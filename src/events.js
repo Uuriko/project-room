@@ -3,6 +3,7 @@ import { proposalContext, nativeTextEvidence } from "./work-packet.js";
 import { CHARTER_TYPE, charterFromEvent } from "./room-charter.js";
 import { REPLY_CANCELLED, prepareReplyPost, recordReplyPost, cancelReplyRequest } from "./reply-requests.js";
 import { WORK_HELP_UPDATED, helpFromEvent } from "./work-help.js";
+import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, helpOfferFromEvent } from "./help-offers.js";
 
 export const EVENT_TYPES = Object.freeze({
   ROOM_CREATED: "room.created",
@@ -15,6 +16,8 @@ export const EVENT_TYPES = Object.freeze({
   MESSAGE_REACTION_SET: "message.reaction_set",
   WORK_PROPOSED: "work.proposed",
   WORK_HELP_UPDATED,
+  HELP_OFFER_OPENED,
+  HELP_OFFER_UPDATED,
   WORK_ACCEPTED: "work.accepted",
   WORK_STARTED: "work.started",
   WORK_BLOCKED: "work.blocked",
@@ -130,6 +133,8 @@ export function applyEvent(current, incoming) {
       state.workItems[help.workItemId].helpWanted = help;
     },
     [EVENT_TYPES.WORK_ACCEPTED]: acceptWork,
+    [HELP_OFFER_OPENED]: recordHelpOffer,
+    [HELP_OFFER_UPDATED]: recordHelpOffer,
     [EVENT_TYPES.WORK_STARTED]: startWork,
     [EVENT_TYPES.WORK_BLOCKED]: blockWork,
     [EVENT_TYPES.WORK_BLOCKER_RESOLVED]: resolveBlocker,
@@ -148,6 +153,11 @@ export function applyEvent(current, incoming) {
   state.seenEvents[incoming.id] = fingerprint;
   state.seenIdempotencyKeys[incoming.idempotencyKey] = incoming.id;
   return state;
+}
+
+function recordHelpOffer(state, incoming) {
+  const offer = helpOfferFromEvent(state, incoming);
+  (state.helpOffers ??= {})[offer.id] = offer;
 }
 
 function validateEnvelope(incoming) {
