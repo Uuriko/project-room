@@ -113,6 +113,24 @@ test("final-pass revocation, expiry and wrong-member metadata do not reuse earli
   });
 });
 
+test("cancelled shared-anchor response cannot acknowledge; retry reads fresh anchors", async t => {
+  const f = await fixture(t), first = await f.pull(), before = f.local();
+  const controller = new AbortController(); let tails = 0;
+  const client = f.makeClient(async (url, options) => {
+    const response = await fetch(url, options);
+    if (new URL(url).searchParams.get("after") === String(before.state.sequence - 1) && ++tails === 2) {
+      const value = await response.json();
+      controller.abort();
+      // Simulate a transport returning fulfilled data after cancellation.
+      return Response.json(value);
+    }
+    return response;
+  });
+  await assert.rejects(f.pull({ client, signal: controller.signal, noticeId: first.items[0].id }), { code: "stopped" });
+  assert.equal(tails, 2); assert.deepEqual(f.local(), before);
+  assert.deepEqual((await f.pull()).items, first.items); checkedRequests(f.requests, 12);
+});
+
 test("synthetic v1 single-event observations deduplicate within a pass, never across passes", async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-anchor-one-")), store = new RoomStore(":memory:");
   store.initialize(initialRoom()); const token = store.issueAccessKey("commons", "owner"), calls = [];
