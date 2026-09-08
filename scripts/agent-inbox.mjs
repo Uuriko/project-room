@@ -2,8 +2,11 @@ import { RoomAgentClient } from "../client/room-agent.mjs";
 import { packetMarkdown } from "../src/work-packet.js";
 
 const [action = "orient", checkpoint] = process.argv.slice(2);
-if (action === "--help") {
-  console.log("Read-only agent client: node scripts/agent-inbox.mjs [orient|brief|changes CHECKPOINT|packet WORK_ID]\nSet ROOM_AGENT_ORIGIN, ROOM_AGENT_ROOM, and ROOM_AGENT_TOKEN in the local process environment. Never put a key in a URL or command argument. A packet contains selected work only, without source messages. This client does not start an AI runtime or execute work.");
+if (action === "watch") {
+  const { watchMain } = await import("./agent-watch.mjs");
+  await watchMain(process.argv.slice(3));
+} else if (action === "--help") {
+  console.log("Read-only agent client: node scripts/agent-inbox.mjs [orient|brief|changes CHECKPOINT|packet WORK_ID]\nAssignment watching: node scripts/agent-inbox.mjs watch --help\nSet ROOM_AGENT_ORIGIN, ROOM_AGENT_ROOM, and ROOM_AGENT_TOKEN in the local process environment. Never put a key in a URL or command argument. A packet contains selected work only, without source messages. This client does not start an AI runtime or execute work.");
 } else {
   try {
     if (!["orient", "brief", "changes", "packet"].includes(action)) throw new Error("Choose orient, brief, changes CHECKPOINT, or packet WORK_ID");

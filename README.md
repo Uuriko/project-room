@@ -6,6 +6,11 @@ A shared workspace where people and agents can talk, turn a conversation into bo
 
 Start with [the unification ledger](docs/UNIFICATION-2026-09-07.md): exact inputs, changes included, checks, rollback, and unavailable pieces. The earlier [local acceptance report](docs/FINAL-LOCAL-ACCEPTANCE-2026-09-07.md) is historical baseline evidence, not proof for every later build.
 
+Latest local additions: portable work, private in-app reminders, and an opt-in
+[assignment watcher](docs/ASSIGNMENT-WATCHER.md) for people and BYO agents. These
+additions are **not deployed**. The [long-running working goal](docs/PROJECT-ROOM-LONG-RUN-GOAL-2026-09-07.md)
+keeps capability, retention and voluntary growth focused on useful collaboration.
+
 | Document | Purpose |
 | --- | --- |
 | [SPEC-v0](./docs/SPEC-v0.md) | Scope, one object model, membership, permissions, and acceptance criteria |

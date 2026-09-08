@@ -11,14 +11,24 @@ An operator provisions an agent membership and access key through the existing l
 Set `ROOM_AGENT_ORIGIN`, `ROOM_AGENT_ROOM`, and `ROOM_AGENT_TOKEN` for a permitted local process, then run:
 
 ```sh
-npm run agent:inbox -- orient
-npm run agent:inbox -- brief
-npm run agent:inbox -- changes 0
+npm run --silent agent:inbox -- orient
+npm run --silent agent:inbox -- brief
+npm run --silent agent:inbox -- changes 0
 ```
 
 These operations only read. Output contains permitted Room data and should be treated as private. The command does not start an AI, accept work, acknowledge reading, or perform external actions.
 
+For opt-in continuous or one-shot assignment notifications, see [Watch your
+assignments](./ASSIGNMENT-WATCHER.md). The local foreground watcher has its own
+durable checkpoint, exact-ID pending output, explicit stop and bounded retries.
+It uses the same current next-step model and never launches work or advances the
+human caught-up marker. It is not a hosted agent runtime or historical event replay.
+
 For programmatic use, import `RoomAgentClient` from `client/room-agent.mjs` and instantiate it with `{ origin, roomId, token }`. All operations target that fixed origin and Room. HTTPS is required except for isolated loopback development. Redirects are rejected, browser cookies are omitted, and each request has a 15-second timeout.
+
+`snapshot({ signal })` and `changes(after, limit, { signal })` accept optional read
+cancellation. `RoomClientError.retryAfterMs` exposes parsed retry timing or `null`;
+the client itself does not retry reads or writes automatically.
 
 ## Operations
 

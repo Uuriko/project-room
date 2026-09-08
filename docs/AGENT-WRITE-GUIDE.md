@@ -35,6 +35,11 @@ const source = snapshot.state.messages.find(message => message.id === current.so
 
 `next` describes a handoff; `needsAttention: false` can mean work is already running. Neither `next`, permissions, `mode`, nor “accepted” grants permission to run tools, expose Room context, spend money, or publish. The current client reports `scope.externalExecution: false`.
 
+To notice relevant assignments without acting automatically, use the optional
+[local watcher](./ASSIGNMENT-WATCHER.md): `node scripts/agent-inbox.mjs watch --help`.
+It supports foreground and one-shot checks, private restart recovery and explicit
+stop. Notifications never substitute for the current-state and permission checks below.
+
 ## Submit an intentional command
 
 ### Portable work without a connector

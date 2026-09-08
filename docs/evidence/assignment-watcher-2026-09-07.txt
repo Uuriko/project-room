@@ -1,0 +1,35 @@
+Project Room assignment watcher — synthetic local HTTP/CLI evidence
+Observed 2026-09-08 02:20 UTC (2026-09-07 in America/Los_Angeles).
+Source: ROOM_WATCH_TEST_EVIDENCE=1 node --test tests/watch-http.test.js
+Both tests passed. Disposable loopback server and local private state only.
+No real user feedback, retention lift, autonomous work, or hosted activity implied.
+
+Initial actual stdout notification (synthetic task data; no credentials):
+{"schemaVersion":1,"type":"attention","id":"54cc9526-c5d9-41c4-8f78-e890c6e73eed","reason":"initial","observedAt":"2026-09-08T02:20:05.122Z","evaluatedThrough":5,"roomId":"commons","memberId":"worker","workItemId":"sample","title":"Check the welcome text","next":{"action":"accept","label":"Accept the assignment","memberId":"worker","role":"accountable","needsAttention":true,"workItemId":"sample","workRevision":0,"completionEventId":null,"evidenceVersion":null},"notifyOnly":true,"message":"Needs your attention. Check current scope before acting."}
+
+Unchanged restart stdout: empty.
+Explicit same-member key rotation/restart stdout: empty.
+Wrong-member restart: exit 1, no notification output.
+Revoked-key restart: exit 1, no notification output.
+Observed request methods: GET only.
+Human caught-up cursor: 2, unchanged by watching.
+Full room snapshot before/after first watch: equal (asserted in test).
+
+Final actual local status:
+{"schemaVersion":1,"state":"stopped","health":"not_running","lastCheckedAt":"2026-09-08T02:20:05.427Z","evaluatedThrough":5,"pending":0}
+
+Separate stop journey: a held loopback HTTP read was interrupted by the local
+stop command; requester reported stop_requested, holder then reported stopped,
+no stdout notice appeared, and no checkpoint was invented for the incomplete read.
+
+Broader verification at this checkpoint:
+332 core/API checks passed (254 prior + 78 new watcher/client tests).
+62 browser checks passed on the current checkout.
+7 local Cloudflare checks passed on the current checkout.
+Syntax checks and git diff whitespace checks passed.
+Clean-environment Node v24.19.0 SQLite import/open emitted no stderr warning.
+
+Images inspected after the current browser run (local, ignored test artifacts):
+test-results/first-use-desktop-guest.png
+test-results/reminders-mobile-due.png
+These verify preserved existing human UI, not a new watcher screen.

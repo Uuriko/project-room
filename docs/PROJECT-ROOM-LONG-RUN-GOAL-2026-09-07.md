@@ -273,6 +273,10 @@ of live readiness or demonstrated retention require the corresponding real evide
 If external authority or participation is the only remaining dependency, checkpoint
 the exact state and request it honestly; follow the goal tool's blocking rules.
 
-The immediate next checkpoint after preserving private reminders is the notify-only
-watcher plan and first tested implementation, followed by onboarding/return-flow
-refinement and the highest-confidence invitation/portable-work growth experiment.
+The initial reminder and notify-only watcher checkpoints are now preserved locally.
+See [the watcher checkpoint](ASSIGNMENT-WATCHER-CHECKPOINT-2026-09-07.md): 332 core/API,
+62 browser and 7 local Cloudflare checks passed. This does not complete the goal.
+Next is onboarding/return-flow refinement and the highest-confidence voluntary
+invitation/portable-work growth experiment, with a plan and explicit measurement
+contract before implementation. Keep advanced controls contextual, review repeated
+catch-up controls/technical copy, and preserve identity and acknowledgement semantics.

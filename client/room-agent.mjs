@@ -3,7 +3,7 @@ import { nextWorkStep } from "../src/workflow.js";
 import { workPacket } from "../src/work-packet.js";
 
 export class RoomClientError extends Error {
-  constructor(status, code, message) { super(message); this.status = status; this.code = code; }
+  constructor(status, code, message, retryAfterMs = null) { super(message); this.status = status; this.code = code; this.retryAfterMs = retryAfterMs; }
 }
 
 // Minimal, explicit client for a single configured service and Room. It neither
@@ -20,26 +20,34 @@ export class RoomAgentClient {
     if (!validId(roomId) || typeof token !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(token)) throw new Error("A valid Room and access key are required");
     this.#origin = origin; this.#roomId = roomId; this.#token = token; this.#fetch = fetchImpl;
   }
-  async #request(suffix = "", body) {
+  async #request(suffix = "", body, signal) {
     const response = await this.#fetch(`${this.#origin}/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, {
-      method: body === undefined ? "GET" : "POST", redirect: "error", credentials: "omit", signal: AbortSignal.timeout(15000),
+      method: body === undefined ? "GET" : "POST", redirect: "error", credentials: "omit", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
       headers: { Authorization: `Bearer ${this.#token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) })
     });
-    const value = await response.json();
-    if (!response.ok) throw new RoomClientError(response.status, value.error?.code ?? "request_failed", value.error?.message ?? "Room request failed");
+    let value;
+    try { value = await response.json(); } catch (error) {
+      if (response.ok && (error instanceof TypeError || ["AbortError", "TimeoutError"].includes(error.name))) throw error;
+      if (response.ok) throw new RoomClientError(response.status, "invalid_response", "Invalid Room response");
+    }
+    if (!response.ok) {
+      const retry = response.headers?.get("retry-after");
+      const parsed = retry == null ? NaN : /^\d+$/.test(retry) ? Number(retry) * 1000 : Date.parse(retry) - Date.now();
+      throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room request failed", Number.isFinite(parsed) ? Math.max(0, parsed) : null);
+    }
     return value;
   }
-  snapshot() { return this.#request(); }
+  snapshot({ signal } = {}) { return this.#request("", undefined, signal); }
   // Personal to this credential's member, never included in shared orientation.
   reminders(request) { return this.#request("/reminders", request); }
   // Selected task only; the normal authenticated snapshot never leaves this client.
   async workPacket(workItemId, options = {}) {
     return workPacket((await this.snapshot()).state, workItemId, options);
   }
-  changes(after = 0, limit = 50) {
+  changes(after = 0, limit = 50, { signal } = {}) {
     if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("Use a nonnegative checkpoint and a page size from 1 to 100");
-    return this.#request(`/events?after=${after}&limit=${limit}`);
+    return this.#request(`/events?after=${after}&limit=${limit}`, undefined, signal);
   }
   returnBrief({ limit = 50, horizon, after, cursor } = {}) {
     const query = new URLSearchParams({ limit });
