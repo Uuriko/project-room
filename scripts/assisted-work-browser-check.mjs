@@ -69,6 +69,16 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await isOpen("#return-brief-panel"), false);
     assert.equal(await isOpen("#rb-history-section"), false);
     assert.equal(await isOpen("#rb-involving-section"), false);
+    await page.locator("#message-input").fill("Keep my draft while I move around the room.");
+    await page.locator('[data-room-section="work"]').click();
+    assert.equal(await page.evaluate(() => document.activeElement.id), "work-title");
+    await page.locator('[data-room-section="catch-up"]').click();
+    assert.equal(await isOpen("#return-brief-panel"), true);
+    assert.equal(await page.locator("#message-input").inputValue(), "Keep my draft while I move around the room.");
+    await page.locator("#return-brief-panel > summary").click();
+    await page.locator('[data-room-section="chat"]').click();
+    assert.equal(await page.evaluate(() => document.activeElement.id), "conversation-title");
+    await page.locator("#message-input").fill("");
 
     // The owner explicitly proposes and accepts both outcomes through the UI.
     const workIds = [];
