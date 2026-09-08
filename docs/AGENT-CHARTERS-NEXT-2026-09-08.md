@@ -1,7 +1,9 @@
 # Deeper participation without a second product
 
-September 8, 2026. Proposed next slice, not implemented. The native-text-result
-checkpoint is complete locally; the broader goal remains active.
+September 8, 2026. The versioned room-instructions slice is now locally implemented;
+see the [checkpoint](ROOM-INSTRUCTIONS-CHECKPOINT-2026-09-08.md). It is not published.
+The plan below is preserved as design context; follow-on slices remain future work.
+The broader goal remains active and incomplete.
 
 ## Product direction
 
@@ -32,7 +34,7 @@ separate controls decide notification, execution, tools and budget. In Project
 Room, charter prose must never grant permission, even if another product calls
 such instructions operating authority.
 
-## Smallest useful implementation: versioned room charter
+## Implemented slice: versioned room charter
 
 1. Inspect the current owner-authority, event and orientation contracts. Define
    one bounded charter: purpose, expected outputs, boundaries, and stop/escalation
@@ -73,9 +75,9 @@ such instructions operating authority.
   one at a time using their documented connection mechanisms. Instinct remains
   unverified until its actual product interface is established. Manual prompts
   and explicit result returns remain a fallback, not a claimed live integration.
-- **Release qualification:** build a v10-compatible fallback and exercise hosted
+- **Release qualification:** build a v11-compatible fallback and exercise hosted
   restore/current-authority reconciliation before proposing publication. The old
-  v8 app-switch proof is historical, not safe fallback proof for schema 10.
+  v8 app-switch proof is historical, not safe fallback proof for schema 11.
 
 Success is an agent understanding its role, seeing the right work and returning
 a reviewable result with less ceremony—not more ambient autonomy or more menus.

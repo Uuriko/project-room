@@ -384,3 +384,21 @@ active and incomplete. Next follow the [versioned-charter plan](AGENT-CHARTERS-N
 then pull-first durable attention and eligible-work suggestions, alongside native
 host tests and v10-compatible release recovery. Instructions are not execution
 grants; retain free/manual/BYO participation and a quiet contextual interface.
+
+September 8 room-instructions milestone: the [versioned charter checkpoint](ROOM-INSTRUCTIONS-CHECKPOINT-2026-09-08.md)
+implements an optional owner-managed brief shared by people and agent orientation.
+Purpose, outputs, boundaries and escalation have exact version history, conflict
+choices and recoverable unknown saves. Context never grants permission. Runtime
+bf3ac3a / assertion-corrected candidate ae75d07 advances schema/writer to 11 without
+new tables or additional MCP tools; genuine frozen v8/v9/v10 migration, rollback,
+old-writer refusal and recovery auditing are verified locally. Two actual scoped
+MCP participants authored and independently reviewed a 43-word agenda against
+both the task and charter, leaving human approval pending and read markers 0.
+Screenshots cover desktop, mobile, conflict and actual enlarged text. The linked
+checkpoint records final regression evidence. Local only; broader goal active.
+Next implement pull-first durable attention with explicit causes, versions and
+deduplication, then eligible-work suggestions and opt-in standing roles. Native
+host acceptance and a v11-compatible fallback/hosted restore remain release gates.
+Do not repeat charter implementation, silently enable execution, or treat a v10
+fallback as compatible with v11 data. Keep tools, budgets and action permissions
+separate from instructions and preserve a quiet, useful free/manual/BYO path.
