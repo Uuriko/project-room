@@ -44,3 +44,54 @@ test("same-priority choices remain deterministic, independent of object insertio
   state.workItems = Object.fromEntries(Object.entries(state.workItems).reverse());
   assert.deepEqual(contributionSteps(state, "guest"), before);
 });
+
+function draftFixture() {
+  const state = fixture();
+  state.members.guest.permissions.push('complete_work');
+  Object.assign(state.workItems.assigned, { state: 'accepted', revision: 2 });
+  state.messages.push({ id: 'draft', workItemId: 'assigned', authorId: 'author', body: 'A useful draft',
+    proposal: { basisRevision: 2, submittedAtRevision: 2 }, createdAt: '2026-09-08T12:10:00Z' });
+  return state;
+}
+test('current contributed draft replaces start and creates one working-work return step', () => {
+  const state = draftFixture(), before = structuredClone(state);
+  const draft = contributionSteps(state, 'guest').find(step => step.id === 'assigned');
+  assert.equal(draft.draftMessageId, 'draft'); assert.equal(draft.label, 'Draft to inspect');
+  assert.equal(draft.button, 'View draft'); assert.equal(draft.action, null);
+  assert.deepEqual(contributionSteps(state, 'guest').map(step => step.key), ['work:review', 'request:question', 'work:assigned']);
+  assert.deepEqual(state, before);
+  state.workItems.assigned.state = 'working';
+  assert.deepEqual(contributionSteps(state, 'guest').filter(step => step.id === 'assigned'), [draft]);
+  state.readMarkers = { guest: 999 };
+  assert.equal(contributionSteps(state, 'guest').find(step => step.id === 'assigned').draftMessageId, 'draft');
+});
+test('draft suggestions use the latest canonical proposal and never quietly select an older current draft', () => {
+  const state = draftFixture();
+  state.messages.push({ ...structuredClone(state.messages.at(-1)), id: 'newer', createdAt: '2026-09-08T11:00:00Z' });
+  assert.equal(contributionSteps(state, 'guest').find(step => step.id === 'assigned').draftMessageId, 'newer');
+  for (const basis of [1, 3, undefined]) {
+    state.messages.at(-1).proposal.basisRevision = basis;
+    assert.equal(contributionSteps(state, 'guest').find(step => step.id === 'assigned').draftMessageId, undefined);
+  }
+  state.messages.at(-1).proposal.basisRevision = 2;
+  state.messages.push({ id: 'ordinary', workItemId: 'assigned', body: 'Just a comment' });
+  assert.equal(contributionSteps(state, 'guest').find(step => step.id === 'assigned').draftMessageId, 'newer');
+  state.messages = state.messages.filter(message => !message.proposal);
+  assert.equal(contributionSteps(state, 'guest').find(step => step.id === 'assigned').draftMessageId, undefined);
+});
+test('draft return respects acceptance, current permissions, write scope and retired work', () => {
+  const state = draftFixture(), hasDraft = () => contributionSteps(state, 'guest', 1000).some(step => step.draftMessageId);
+  for (const stateName of ['proposed', 'blocked', 'completed', 'superseded']) {
+    state.workItems.assigned.state = stateName; assert.equal(hasDraft(), false, stateName);
+  }
+  state.workItems.assigned.state = 'accepted'; state.workItems.assigned.supersededBy = 'replacement';
+  assert.equal(hasDraft(), false); delete state.workItems.assigned.supersededBy;
+  state.members.guest.permissions = ['accept_work']; assert.equal(hasDraft(), false);
+  state.members.guest.permissions.push('complete_work'); assert.equal(hasDraft(), true);
+  state.workItems.assigned.mode = 'write'; assert.equal(hasDraft(), false);
+  state.members.guest.permissions.push('write_external');
+  state.workItems.assigned.claim = { holderId: 'guest', status: 'active', expiresAt: new Date(2000).toISOString() };
+  assert.equal(hasDraft(), true);
+  state.workItems.assigned.claim.expiresAt = new Date(1000).toISOString(); assert.equal(hasDraft(), false);
+  state.workItems.assigned.mode = 'read'; state.workItems.assigned.accountableMemberId = 'other'; assert.equal(hasDraft(), false);
+});

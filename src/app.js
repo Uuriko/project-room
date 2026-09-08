@@ -1822,6 +1822,7 @@ $("#contribution-open").addEventListener("click", () => {
   const step = contributionSteps(state, session.member.id).find(candidate => candidate.key === key);
   if (!step) { renderReturnBrief(); return; }
   if (step.kind === "request") { revealMessage(step.id); return; }
+  if (step.draftMessageId) { revealMessage(step.draftMessageId); return; }
   // Only review/decision shortcuts open a form. Starting work still requires
   // inspecting its existing card and explicitly choosing the relevant action.
   if (["verify", "decide"].includes(step.action)) openWorkAction(state.workItems[step.id], step.action);
@@ -1860,17 +1861,24 @@ function renderReturnBrief() {
   const byWork = new Map(contributions.filter(step => step.kind === "work").map(step => [step.id, step]));
   // Preserve the established catch-up order while the single next-step suggestion
   // prioritizes handoffs. Updating work must not move it out of the first page.
-  const attentionSteps = [...attention.map(item => byWork.get(item.workItemId)).filter(Boolean), ...contributions.filter(step => step.kind === "request")];
+  const attentionIds = new Set(attention.map(item => item.workItemId));
+  const attentionSteps = [...attention.map(item => byWork.get(item.workItemId)).filter(Boolean),
+    ...contributions.filter(step => step.kind === "request" || !attentionIds.has(step.id))];
   const allButton = $("#rb-show-all"), allFocused = document.activeElement === allButton;
   if (contributions.length <= 5) showAllAttention = false;
   allButton.hidden = contributions.length <= 5;
   allButton.textContent = showAllAttention ? "Show less" : `Show all (${contributions.length})`;
   allButton.setAttribute("aria-expanded", String(showAllAttention));
   if (allFocused && allButton.hidden) $("#return-brief-panel > summary").focus({ preventScroll: true });
-  renderBriefList("#rb-attention-list", (showAllAttention ? attentionSteps : attentionSteps.slice(0, 5)).map(i =>
-    `<li class="rb-event"><a class="work-link" href="${esc(i.kind === "work" ? workHref(i.id) : recordHref("message", i.id))}" ${i.kind === "work" ? `data-open-work="${esc(i.id)}"` : `data-open-message="${esc(i.id)}"`} data-brief-key="${esc(i.kind === "work" ? `attention:${i.id}` : i.key)}">${esc(i.title)}</a> <span class="rb-detail">${esc(i.kind === "work" ? nextWorkStep(state.workItems[i.id], now).label : i.label)}</span></li>`).join("")
+  renderBriefList("#rb-attention-list", (showAllAttention ? attentionSteps : attentionSteps.slice(0, 5)).map(i => {
+    const messageId = i.draftMessageId ?? (i.kind === "request" ? i.id : null);
+    const href = messageId ? recordHref("message", messageId) : workHref(i.id);
+    const target = messageId ? `data-open-message="${esc(messageId)}"` : `data-open-work="${esc(i.id)}"`;
+    const label = messageId ? i.label : nextWorkStep(state.workItems[i.id], now).label;
+    return `<li class="rb-event"><a class="work-link" href="${esc(href)}" ${target} data-brief-key="${esc(i.kind === "work" ? `attention:${i.id}` : i.key)}">${esc(i.title)}</a> <span class="rb-detail">${esc(label)}</span></li>`;
+  }).join("")
     || (current ? '<li class="rb-empty">Nothing waiting for you.</li>' : ""));
-  const attentionIds = new Set(attention.map(i => i.workItemId));
+  for (const workId of byWork.keys()) attentionIds.add(workId);
   renderBriefList("#rb-involving-list", (current?.workInvolvingMe ?? []).filter(i => !attentionIds.has(i.workItemId)).map(i =>
     `<li class="rb-event"><a class="work-link" href="${esc(workHref(i.workItemId))}" data-open-work="${esc(i.workItemId)}" data-brief-key="involving:${esc(i.workItemId)}">${esc(i.action ?? i.workItemId)}</a> <span class="rb-detail">${esc(i.roles.map(roleLabel).join(", "))} · ${esc(i.state)}</span></li>`).join("")
     || (current ? '<li class="rb-empty">No other open work.</li>' : ""));

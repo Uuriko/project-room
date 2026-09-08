@@ -83,6 +83,11 @@ for (const touch of [false, true]) test(`voluntary help ${touch ? 'touch' : 'des
   await page.locator(`[data-work-id="${workItemId}"][data-action="accept"]`).click();
   await page.locator('#action-form button[type=submit]').click(); await page.locator('#action-dialog').waitFor({ state: 'hidden' });
   assert.equal(state().workItems[workItemId].state, 'accepted');
+  if (touch) {
+    await page.locator(`[data-work-id="${workItemId}"][data-action="start"]`).click();
+    await page.locator('#action-form button[type=submit]').click(); await page.locator('#action-dialog').waitFor({ state: 'hidden' });
+    assert.equal(state().workItems[workItemId].state, 'working');
+  }
   await close(helper); helper = await open('producer');
   const response = await call(helper, 'room_read_request', { requestMessageId: question.requestMessageId }, true);
   assert.equal(response.request.status, 'answered'); assert.equal(response.page.items.at(-1).message.body, answer);
@@ -108,7 +113,21 @@ for (const touch of [false, true]) test(`voluntary help ${touch ? 'touch' : 'des
     evidenceVersion: textVersion(body), previousCompletionEventId: null, producerId: 'producer', summary: 'Contributor guide', nextAction: 'Review' });
   assert.equal(takeover.result.isError, true);
   assert.equal(auditRecovery(f.store).dataSha256, beforeDraftRetry, 'A positive reply does not authorize completing another member’s work');
-  await page.locator(`[data-work-record-id="${workItemId}"] [data-open-message="${draft.messageId}"]`).click();
+  await page.reload(); await page.locator('#main').waitFor({ state: 'visible' });
+  await page.screenshot({ path: `${prefix}-return.png` });
+  await page.waitForFunction(() => document.querySelector('#contribution-label').textContent === 'Draft to inspect');
+  await page.locator('#return-brief-panel > summary').click();
+  const draftStep = page.locator(`#rb-attention-list [data-open-message="${draft.messageId}"]`);
+  await draftStep.waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#rb-attention-list .rb-event').count(), 1, 'One draft replaces the same work start step');
+  assert.equal(await page.locator(`#rb-involving-list [data-open-work="${workItemId}"]`).count(), 0, 'The same work is not repeated as other open work');
+  await page.screenshot({ path: `${prefix}-return-catchup.png` });
+  await page.locator('#return-brief-panel > summary').click();
+  await page.locator('#contribution-open').focus();
+  await page.locator('#contribution-open').press('Enter');
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.messageRecordId), draft.messageId);
+  await page.screenshot({ path: `${prefix}-return-draft.png` });
+  assert.equal(auditRecovery(f.store).dataSha256, beforeDraftRetry, 'Returning and opening a draft do not change work or read markers');
   await page.locator(`[data-message-id="${draft.messageId}"][data-message-action="result"]`).click();
   await page.waitForFunction(body => document.querySelector('#action-text-body').textContent === body, body);
   await page.locator('#action-fields [name=producerId]').selectOption('producer');
@@ -141,7 +160,8 @@ for (const touch of [false, true]) test(`voluntary help ${touch ? 'touch' : 'des
   await page.locator('#auth-panel').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#action-text-body').textContent(), '');
   writeFileSync(`${prefix}.json`, JSON.stringify({ simulatedHuman: true, scriptedMcp: true, nativeModels: false,
-    workItemId, oneSharedRecord: true, accountable: 'owner', postedBy: 'producer', reportedProducer: 'producer', reportedBy: 'owner',
+    workItemId, oneSharedRecord: true, returnedFrom: touch ? 'working' : 'accepted', draftShortcut: true,
+    accountable: 'owner', postedBy: 'producer', reportedProducer: 'producer', reportedBy: 'owner',
     request: 'answered', reconnect: true, exactOfferRetry: true, exactDraftRetry: true, review: 'pass', humanApproval: null,
     evidenceVersion: textVersion(body), readMarkers: markers, traffic, finalAudit: auditRecovery(f.store) }, null, 2));
 });
