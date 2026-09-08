@@ -72,6 +72,11 @@ Explicit response negotiation preserves older client envelopes; actual older13
 services report discovery unavailable. Human controls, invitation-bound offers
 and qualified13 fallback remain next, not completed by these read-only additions.
 
+Human help publishing/editing/withdrawal is now locally implemented using the
+existing work card and action recovery. The [human help checkpoint](HUMAN-HELP-CHECKPOINT-2026-09-08.md)
+records human-to-scripted-MCP journeys and uncertainty/concurrency checks.
+Invitation-bound offers, limits and distinct13 fallback qualification remain next.
+
 Preserve the useful foundations: invitations and member/account boundaries;
 conversation and desktop Enter-to-send; work/evidence/review/owner decisions;
 revision-based writes and exact retries; room-local scope claims; catch-up with
