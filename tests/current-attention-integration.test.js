@@ -20,8 +20,8 @@ async function fixture(t) {
   return { ...f, requests, configDirectory, attentionDirectory,
     charter: purpose => f.store.command(f.keys.owner, "commons", { id: "instructions-" + revision, type: "room.charter_updated",
       data: { expectedRevision: revision++, purpose, outputs: null, boundaries: null, escalation: null } }),
-    async mcp(enabled = true) {
-      const c = await openMcpTestClient(configDirectory, enabled ? { attentionDirectory } : {});
+    async mcp(enabled = true, attentionVersion) {
+      const c = await openMcpTestClient(configDirectory, enabled ? { attentionDirectory, attentionVersion } : {});
       let closed = false; const original = c.close;
       c.close = async () => { if (!closed) { closed = true; return original(); } };
       clients.push(c); return c;
@@ -56,6 +56,40 @@ test("real CLI pull survives restart; explicit ack differs from stdout and rejec
   assert.equal(after.sequence, before.sequence + 1); assert.equal(after.cursor, before.cursor); assert.deepEqual(after.state.workItems, before.state.workItems);
   assert.ok(f.requests.every(r => r.method === "GET"));
   for (const key of Object.values(f.keys)) assert.equal(JSON.stringify([first, current, legacyStart]).includes(key), false);
+});
+
+test("opt-in v3 CLI and MCP share request notices and exact acknowledgement across process restarts", { timeout: 20000 }, async t => {
+  const f = await fixture(t);
+  f.store.command(f.keys.owner, "commons", { id: "request-notice", type: "message.posted",
+    data: { messageId: "question", body: "PRIVATE question only in the scoped read", toMemberId: "producer", requestKind: "reply" } });
+  const before = f.store.snapshot(f.keys.producer, "commons"), run = await f.cli(["pull", f.attentionDirectory, "--requests"]);
+  assert.equal(run.code, 0, run.stderr);
+  const initial = JSON.parse(run.stdout), request = initial.items.find(n => n.subject === "request");
+  assert.equal(initial.schemaVersion, 3); assert.equal(initial.pending, 2); assert.equal(request.condition, "reply_requested");
+  assert.equal(run.stdout.includes("PRIVATE question"), false);
+  const wrongVersion = await f.cli(["pull", f.attentionDirectory]);
+  assert.equal(wrongVersion.code, 1); assert.match(wrongVersion.stderr, /state_schema_mismatch/);
+  const mcp = await f.mcp(true, 3);
+  assert.equal((await mcp.request("tools/list")).result.tools.length, 26);
+  assert.equal((await mcp.call("room_read_attention", { version: 3 })).error.code, -32602, "agent cannot select an operator inbox/version");
+  assert.deepEqual((await mcp.call("room_read_attention")).result.structuredContent.items, initial.items);
+  const context = (await mcp.call(request.nextRead.tool, request.nextRead.arguments)).result.structuredContent;
+  assert.equal(context.request.id, "question"); assert.ok(context.current.answerBasis);
+  assert.equal(context.page.items[0].message.body, "PRIVATE question only in the scoped read");
+  assert.equal((await mcp.call("room_acknowledge_attention", { noticeId: request.id })).result.structuredContent.status, "acknowledged");
+  await mcp.close();
+  const ack = await f.cli(["ack", f.attentionDirectory, request.id, "--requests"]);
+  assert.equal(ack.code, 0, ack.stderr); assert.equal(JSON.parse(ack.stdout).status, "already_acknowledged");
+  const status = await f.cli(["status", f.attentionDirectory]);
+  assert.equal(JSON.parse(status.stdout).schemaVersion, 3); assert.equal(JSON.parse(status.stdout).pending, 1);
+  assert.deepEqual(f.store.snapshot(f.keys.producer, "commons"), before);
+  assert.ok(f.requests.every(r => r.method === "GET"));
+  const replacement = f.store.command(f.keys.owner, "commons", { id: "request-clarification", type: "message.posted",
+    data: { messageId: "clarification", body: "An additional constraint", replyToId: "question" } });
+  const stale = await f.cli(["ack", f.attentionDirectory, request.id, "--requests"]);
+  assert.equal(JSON.parse(stale.stdout).status, "no_longer_current");
+  const reopened = await f.mcp(true, 3), fresh = (await reopened.call("room_read_attention")).result.structuredContent.items.find(n => n.subject === "request");
+  assert.notEqual(fresh.id, request.id); assert.equal(fresh.request.contextEventId, replacement.event.id);
 });
 
 test("optional real MCP pull/read-pointer/ack shares persisted identity with CLI and remains Room read-only", { timeout: 20000 }, async t => {

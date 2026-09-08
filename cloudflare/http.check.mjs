@@ -60,6 +60,7 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
         accountableMemberId: 'owner', sourceMessageId: posted.event.data.messageId ?? posted.event.id, mode: 'read' }
     } }), 201);
     const beforeRead = await json(await call('/api/rooms/commons', { headers: guestHeaders }));
+    assert.equal(beforeRead.replyRequestContractVersion, 1, 'Worker advertises the same request contract as the local service');
     const contextResponse = await call('/api/rooms/commons/work-context?workItemId=selected%3Atask&includeSource=true', { headers: guestHeaders });
     assert.equal(contextResponse.headers.get('cache-control'), 'no-store');
     const context = await json(contextResponse);

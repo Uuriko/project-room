@@ -1,41 +1,89 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
 import { build } from 'esbuild';
 import { Miniflare, Response } from 'miniflare';
 import { createRuntimePackage, verifyRuntimePackage, publicAssets } from '../scripts/runtime-package.mjs';
 import { frozenRecoveryFixture, v8ConnectionBaseline } from '../scripts/frozen-runtime-fixture.mjs';
+import { candidateRuntimeFixture } from '../scripts/candidate-runtime-fixture.mjs';
+import { createRecoveryFixture as currentRecoveryFixture } from '../scripts/recovery-fixture.mjs';
+import { currentAttention } from '../client/attention-inbox.mjs';
 
 const baseline = '7075c1ddfe5ced3ae970f817dbfd0fc3e88a13b6';
 const repository = fileURLToPath(new URL('../', import.meta.url));
+const observerState = directory => {
+  const db = new DatabaseSync(join(directory, 'watch.sqlite'), { readOnly: true });
+  try { return { checkpoint: db.prepare('SELECT * FROM checkpoint').all(),
+    notices: db.prepare('SELECT * FROM attention ORDER BY work_id').all() }; }
+  finally { db.close(); }
+};
 
-test('distinct exact-commit v8 packages switch candidate → pause → baseline → candidate on the same populated Workers object', { timeout: 90000 }, async t => {
-  const candidate = v8ConnectionBaseline; // Historical v8↔v8 proof, NOT a v9 fallback.
-  assert.notEqual(candidate, baseline, 'Commit the distinct candidate before certifying its immutable package');
-  const directory = mkdtempSync(join(tmpdir(), 'room-v8-switch-'));
+for (const version of [8, 12]) test(`schema${version} packages switch candidate → pause → fallback → candidate on the same populated Workers object`, { timeout: 90000 }, async t => {
+  const directory = mkdtempSync(join(tmpdir(), `room-v${version}-switch-`));
   let fixture, mf;
   try {
-    const packages = new Map([['candidate', candidate], ['baseline', baseline]].map(([label, commit]) => {
-      const path = join(directory, label);
-      return [label, { path, receipt: createRuntimePackage({ repository, commit, destination: path }) }];
-    }));
-    assert.notDeepEqual(readFileSync(join(packages.get('candidate').path, 'cloudflare/room.mjs')),
-      readFileSync(join(packages.get('baseline').path, 'cloudflare/room.mjs')), 'The actual application entrypoints must differ');
+    const retained = version === 12 && (process.env.ROOM_RECOVERY_CANDIDATE_PACKAGE !== undefined
+      || process.env.ROOM_RECOVERY_FALLBACK_PACKAGE !== undefined);
+    const fallback = version === 12 ? '135d82489c62071b3f4eb00710ae4d9787374158' : baseline;
+    let packages;
+    if (retained) {
+      // Explicit paired paths opt into actual retained artifacts. Never rewrite,
+      // repair, delete or replace them with a passing synthetic candidate.
+      packages = new Map([['candidate', process.env.ROOM_RECOVERY_CANDIDATE_PACKAGE],
+        ['baseline', process.env.ROOM_RECOVERY_FALLBACK_PACKAGE]].map(([label, path]) => {
+        assert.ok(typeof path === 'string' && isAbsolute(path), 'Both retained package paths must be absolute');
+        const receipt = verifyRuntimePackage(path);
+        assert.equal(receipt.schemaVersion, 12);
+        if (label === 'baseline') assert.equal(receipt.sourceCommit, fallback);
+        return [label, { path, receipt }];
+      }));
+    } else {
+      const candidate = version === 12 ? candidateRuntimeFixture(repository, directory)
+        : { repository, commit: v8ConnectionBaseline };
+      packages = new Map([['candidate', candidate], ['baseline', { repository, commit: fallback }]].map(([label, source]) => {
+        const path = join(directory, label);
+        return [label, { path, receipt: createRuntimePackage({ ...source, destination: path }) }];
+      }));
+    }
+    assert.notEqual(packages.get('candidate').receipt.sourceCommit, packages.get('baseline').receipt.sourceCommit);
+    const differingRuntime = version === 12 ? 'server/store.mjs' : 'cloudflare/room.mjs';
+    assert.notDeepEqual(readFileSync(join(packages.get('candidate').path, differingRuntime)),
+      readFileSync(join(packages.get('baseline').path, differingRuntime)), 'The actual application runtimes must differ');
     const candidatePath = packages.get('candidate').path;
-    const createRecoveryFixture = await frozenRecoveryFixture(repository, candidatePath);
+    const createRecoveryFixture = version === 12 ? currentRecoveryFixture : await frozenRecoveryFixture(repository, candidatePath);
     const { auditRecovery } = await import(pathToFileURL(join(candidatePath, 'server/recovery.mjs')));
     const { applicationTables } = await import(pathToFileURL(join(candidatePath, 'server/writer-fence.mjs')));
     fixture = createRecoveryFixture(join(directory, 'seed.sqlite'));
+    const requestRetries = [];
+    if (version === 12) {
+      for (const status of ['open', 'answered', 'declined', 'cancelled']) {
+        const opening = { id: `open-${status}`, type: 'message.posted', data: { messageId: `request-${status}`,
+          body: `Synthetic ${status} request 🪷`, toMemberId: 'agent', requestKind: 'reply' } };
+        const opened = fixture.store.command(fixture.keys.owner, 'commons', opening);
+        requestRetries.push({ actor: 'owner', command: opening, receipt: opened });
+        if (status === 'open') continue;
+        const actor = status === 'cancelled' ? 'owner' : 'agent';
+        const command = status === 'cancelled'
+          ? { id: 'cancel-request', type: 'reply_request.cancelled', data: { requestMessageId: opening.data.messageId, expectedRequestRevision: 0, reason: 'Synthetic cancellation' } }
+          : { id: `respond-${status}`, type: 'message.posted', data: { messageId: `response-${status}`, body: `Synthetic ${status} response`,
+            replyToId: opening.data.messageId, responseToRequestId: opening.data.messageId, expectedRequestRevision: 0,
+            responseOutcome: status, toMemberId: 'owner', workItemId: null, contextEventId: opened.event.id, contextSequence: opened.sequence } };
+        requestRetries.push({ actor, command, receipt: fixture.store.command(fixture.keys[actor], 'commons', command) });
+      }
+    }
     const expected = auditRecovery(fixture.store);
     const proof = { keys: fixture.keys, owner: fixture.owner, target: fixture.target, validSession: fixture.validSession,
       revokedSession: fixture.revokedSession, loggedOut: fixture.loggedOut, sharedSession: fixture.sharedSession,
       pending: fixture.pending, guestSlot: fixture.guestSlot, guest: fixture.guest, linkToken: fixture.linkToken,
-      joinRequest: fixture.joinRequest, reminders: fixture.reminders, redemptionId: randomUUID() };
+      joinRequest: fixture.joinRequest, reminders: fixture.reminders, redemptionId: randomUUID(), requestRetries,
+      nativeBody: fixture.nativeBody, nativeCommand: fixture.nativeCommand, nativeCompletion: fixture.nativeCompletion,
+      charterCommand: fixture.charterCommand, charterSaved: fixture.charterSaved,
+      requests: version === 12 ? fixture.store.room('commons').state.replyRequests : null };
     const rows = applicationTables.flatMap(table => fixture.store.db.prepare(`SELECT * FROM ${table}`).all()
       .map(row => ({ table, columns: Object.keys(row), values: Object.values(row) })));
     const persistence = join(directory, 'persistence'); mkdirSync(persistence);
@@ -79,6 +127,16 @@ test('distinct exact-commit v8 packages switch candidate → pause → baseline 
                 const retry = store.reminders.mutate(reminder.token, reminder.room, reminder.request);
                 assert.equal(retry.duplicate, true); assert.deepEqual(retry.receipt, reminder.receipt);
               }
+              if (f.requests) {
+                assert.deepEqual(store.room('commons').state.replyRequests, f.requests);
+                for (const retry of f.requestRetries) {
+                  const receipt = store.command(f.keys[retry.actor], 'commons', retry.command);
+                  assert.equal(receipt.duplicate, true); assert.equal(receipt.event.id, retry.receipt.event.id);
+                }
+                assert.equal(store.command(f.keys.owner, 'commons', f.nativeCommand).event.id, f.nativeCompletion.event.id);
+                assert.equal(store.workResult(f.keys.owner, 'commons', 'native-evidence').result.text.body, f.nativeBody);
+                assert.equal(store.command(f.keys.owner, 'commons', f.charterCommand).event.id, f.charterSaved.event.id);
+              }
               return Response.json({ preservedIdentitiesAndRetries: true });
             }
             if (path === '/__recovery-accept') {
@@ -116,7 +174,7 @@ test('distinct exact-commit v8 packages switch candidate → pause → baseline 
     };
     const audit = async () => {
       const result = await json('/__recovery-audit');
-      assert.equal(result.version, 8); assert.equal(result.permit, 0); assert.equal(result.audit.platform, 'durable-object');
+      assert.equal(result.version, version); assert.equal(result.permit, 0); assert.equal(result.audit.platform, 'durable-object');
       return result.audit;
     };
     await start('candidate'); await json('/__recovery-seed');
@@ -126,11 +184,27 @@ test('distinct exact-commit v8 packages switch candidate → pause → baseline 
     assert.equal((await json('/api/rooms/commons/commands', candidateCommand)).duplicate, false);
     assert.equal((await json('/api/rooms/commons/reminders', candidateReminder)).duplicate, false);
     const candidateData = await audit();
+    const attentionConfig = { directory: join(directory, 'observer-v3'), version: 3, origin, roomId: 'commons', client: {
+      snapshot: () => json('/api/rooms/commons', undefined, fixture.keys.agent),
+      changes: (after, limit) => json(`/api/rooms/commons/events?after=${after}&limit=${limit}`, undefined, fixture.keys.agent)
+    } };
+    const notices = version === 12 ? await currentAttention(attentionConfig) : null;
+    if (notices) assert.equal(notices.items.some(n => n.request?.id === 'request-open'), true);
+    const savedObserver = notices ? observerState(attentionConfig.directory) : null;
     await start('candidate', true);
     for (const path of ['/', '/api/rooms/commons', '/__recovery-audit']) {
       const response = await call(path); assert.equal(response.status, 503); assert.equal(response.headers.get('set-cookie'), null);
     }
+    assert.equal((await call('/api/rooms/commons/commands', { ...candidateCommand, id: 'paused-write' })).status, 503);
+    assert.equal((await call('/api/rooms/commons/reminders', { ...candidateReminder, requestId: 'paused-reminder' })).status, 503);
     await start('baseline'); assert.deepEqual(await audit(), candidateData);
+    if (notices) {
+      await assert.rejects(currentAttention(attentionConfig), error => error.code === 'request_context_unavailable');
+      // A new observer run legitimately changes its control run ID, but must
+      // leave the history checkpoint and every notice/acknowledgement untouched.
+      assert.deepEqual(observerState(attentionConfig.directory), savedObserver,
+        'Unsupported fallback cannot modify observer history or notices');
+    }
     assert.deepEqual(await json('/__recovery-identities'), { preservedIdentitiesAndRetries: true });
     assert.deepEqual(await audit(), candidateData, 'Historical retries do not change any captured row');
     assert.equal((await json('/api/rooms/commons/commands', candidateCommand)).duplicate, true);
@@ -143,15 +217,35 @@ test('distinct exact-commit v8 packages switch candidate → pause → baseline 
     const baselineReminder = { requestId: 'baseline-reminder', workItemId: 'baseline-work', expectedRevision: 0, action: 'schedule', dueAt: Date.now() + 3600000 };
     assert.equal((await json('/api/rooms/commons/commands', baselineWork)).duplicate, false);
     assert.equal((await json('/api/rooms/commons/reminders', baselineReminder)).duplicate, false);
+    const fallbackRequests = [];
+    if (version === 12) {
+      const command = { id: 'fallback-question', type: 'message.posted', data: { messageId: 'fallback-question',
+        body: 'Can requests still be answered on fallback?', toMemberId: 'agent', requestKind: 'reply' } };
+      const opened = await json('/api/rooms/commons/commands', command);
+      const answer = { id: 'fallback-answer', type: 'message.posted', data: { messageId: 'fallback-answer', body: 'Yes, synthetic answer.',
+        replyToId: 'fallback-question', responseToRequestId: 'fallback-question', expectedRequestRevision: 0,
+        responseOutcome: 'answered', toMemberId: 'owner', workItemId: null, contextEventId: opened.event.id, contextSequence: opened.sequence } };
+      const answered = await json('/api/rooms/commons/commands', answer, fixture.keys.agent);
+      assert.equal(opened.duplicate, false); assert.equal(answered.duplicate, false);
+      fallbackRequests.push({ command, token: fixture.keys.owner, eventId: opened.event.id },
+        { command: answer, token: fixture.keys.agent, eventId: answered.event.id });
+    }
     assert.deepEqual(await json('/__recovery-accept'), { accepted: true, duplicate: false });
     const baselineData = await audit();
     await start('candidate'); assert.deepEqual(await audit(), baselineData);
+    if (notices) assert.deepEqual((await currentAttention(attentionConfig)).items, notices.items,
+      'Unsupported fallback does not erase retained observer v3 notices');
+    for (const retry of fallbackRequests) {
+      const result = await json('/api/rooms/commons/commands', retry.command, retry.token);
+      assert.equal(result.duplicate, true); assert.equal(result.event.id, retry.eventId);
+    }
     assert.deepEqual(await json('/__recovery-accept'), { accepted: true, duplicate: true });
     assert.equal((await json('/api/rooms/commons/commands', baselineWork)).duplicate, true);
     assert.equal((await json('/api/rooms/commons/reminders', baselineReminder)).duplicate, true);
+    assert.deepEqual(await audit(), baselineData, 'Returning to candidate and retrying does not change any data');
     for (const [label, pkg] of packages) assert.deepEqual(verifyRuntimePackage(pkg.path), pkg.receipt, label);
     t.diagnostic(JSON.stringify({ candidate: packages.get('candidate').receipt, baseline: packages.get('baseline').receipt,
-      schemaVersion: 8, idlePermit: 0, rooms: expected.rooms, tables: expected.tables.length,
+      schemaVersion: version, syntheticCandidate: version === 12 && !retained, retainedPackages: Boolean(retained), idlePermit: 0, rooms: expected.rooms, tables: expected.tables.length,
       seed: expected.dataSha256, afterCandidate: candidateData.dataSha256, afterBaseline: baselineData.dataSha256,
       boundaries: 'Local workerd app-switch only. No provider PITR, live namespace, deployment or current-authority certification.' }));
   } finally {

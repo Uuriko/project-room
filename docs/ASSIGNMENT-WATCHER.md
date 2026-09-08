@@ -5,7 +5,8 @@ The watcher notices assignments and review requests addressed to your authentica
 Room member. It never starts work, posts a message, claims scope or marks anything read.
 
 For intermittent agent use with explicit notice acknowledgement and instruction
-updates, see [Pull attention](CURRENT-ATTENTION.md). It uses a separate v2 directory;
+updates, see [Pull attention](CURRENT-ATTENTION.md). It uses a separate v2 directory
+(or explicitly enabled v3 for reply requests);
 the v1 foreground watcher described here remains unchanged.
 
 ## Start

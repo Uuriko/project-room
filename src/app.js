@@ -1,7 +1,7 @@
 import { EVENT_TYPES as T, WORK_STATES as S } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief } from "./return-brief.js";
-import { needsAttention, workInvolvingMe } from "./work-selectors.js";
+import { needsAttention, workInvolvingMe, contributionSteps } from "./work-selectors.js";
 import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter } from "./conversation.js";
 import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, producerKnown as hasReportedProducer } from "./workflow.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation } from "./share-links.js";
@@ -9,8 +9,13 @@ import { installAgentConnections } from "./agent-connections.js";
 import { installRoomInstructions } from "./room-instructions.js";
 import { installReminders } from "./reminders.js";
 import { installPortableWork, installResultCopy } from "./portable-work.js";
+import { replyDraftKey, replyDraftData, validReplyDraft, confirmsReplyCommand, REPLY_CANCELLED } from "./reply-requests.js";
 
 const $ = selector => document.querySelector(selector);
+$("#skip-link").addEventListener("click", event => {
+  event.preventDefault();
+  $($("#auth-panel").hidden ? "#connection-status" : "#auth-title").focus();
+});
 const setText = (selector, text) => { const node = $(selector); if (node.textContent !== text) node.textContent = text; };
 const invitationTokenPattern = /^[A-Za-z0-9_-]{43}$/;
 const roomIdPattern = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
@@ -39,6 +44,8 @@ let workDraftId = null, replyToId = null, busy = false;
 let workFormEpoch = 0, workRetryLocked = false;
 let actionEpoch = 0;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
+let requestMode = null, requestReading = false, requestEpoch = 0;
+const composerKey = () => replyDraftKey(requestMode, currentThreadId);
 const viewPositions = new Map(), pendingReactions = new Map(), locallyOwnedMessageIds = new Set();
 let newVisibleMessages = 0;
 let roomCursor = 0, roomGeneration = -1, showAllAttention = false, returnClock = null;
@@ -94,11 +101,11 @@ const client = new RoomClient({
       const saved = recovery.read(draftScope(identity), state);
       if (saved) {
         drafts = saved.drafts; currentThreadId = saved.threadId;
-        const draft = drafts.get(currentThreadId);
-        $("#message-input").value = draft.body; $("#message-to-select").value = draft.toMemberId;
-        replyToId = draft.replyToId; pendingMessage = draft.pending;
+        const draft = drafts.get(saved.activeKey);
+        requestMode = draft.mode ?? null;
+        restoreComposer(draft);
         $("#remember-drafts").checked = true;
-        updateReply(); renderMessages();
+        updateReply(); renderMessages(); syncRequestComposer(); renderComposerError();
         $("#draft-recovery-status").textContent = "Recovered drafts for this room. Review before sending.";
       }
     }
@@ -128,6 +135,7 @@ const client = new RoomClient({
     workDraftId = null; replyToId = null; workFormEpoch++; setWorkRetry(false);
     $("#work-reuse-hint").hidden = true;
     currentThreadId = null; conversation = null; drafts = new ConversationDrafts();
+    requestMode = null; requestReading = false; requestEpoch++; syncRequestComposer();
     renderComposerError();
     viewPositions.clear(); pendingReactions.clear(); locallyOwnedMessageIds.clear(); newVisibleMessages = 0; briefView.reset();
     if (!pendingSignout) signoutOperationId += 1;
@@ -148,6 +156,8 @@ const client = new RoomClient({
     for (const control of document.querySelectorAll("#auth-form input, #auth-form button")) control.disabled = pendingSignout;
     setFormStatus($("#new-work-status"), ""); setFormStatus($("#action-error"), ""); setFormStatus($("#composer-status"), "");
     $("#action-dialog").close(); $("#new-work-form").hidden = true; $("#reply-bar").hidden = true;
+    for (const id of ["review-criteria", "review-summary", "review-next"]) setText(`#${id}`, "");
+    $("#review-brief").hidden = true; $("#review-notes").open = false;
     $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = "";
     $("#thread-title").textContent = ""; $("#thread-context").textContent = "";
     $("#thread-bar").hidden = true; $("#search-results").hidden = true; $("#new-messages-button").hidden = true;
@@ -161,7 +171,7 @@ const client = new RoomClient({
     const switchedAccount = endedContext === "account-switch";
     setFormStatus($("#auth-error"), openingAcceptedRoom || openingInvitedRoom || $("#invitation-dialog").open ? ""
       : switchedAccount ? "The browser account changed; private Room state and drafts were cleared."
-        : "Sign in with an active key. Session ended; private drafts were cleared.", true);
+        : "Session ended; private drafts were cleared.", true);
     setConnectionStatus(openingAcceptedRoom || openingInvitedRoom ? "Opening Room…" : "Not connected");
     if ($("#invitation-dialog").open && invitation.preview) {
       if (!accountClient.session?.authenticated && ["ready", "wrong-account", "changed-account"].includes(invitation.phase)) invitation.phase = "needs-account";
@@ -223,7 +233,8 @@ function setConnectionStatus(text) {
   const status = $("#connection-status");
   const connected = normalized === "Connected to room service · no peer read or processing receipt";
   const visible = connected ? "Connected" : normalized;
-  status.dataset.state = connected ? "connected" : "other";
+  status.dataset.state = connected ? "connected"
+    : /^Not connected · (account )?sign.in required$/.test(normalized) ? "signed-out" : "other";
   if (status.textContent !== visible) status.textContent = visible;
   $("#connection-explanation").textContent = normalized;
 }
@@ -235,14 +246,14 @@ function setFormStatus(status, text, error = false) {
   status.classList.toggle("error", Boolean(text) && error);
 }
 function renderComposerError() {
-  const text = drafts.get(currentThreadId).error;
+  const text = drafts.get(composerKey()).error;
   const status = $("#composer-status");
   if (status.textContent !== text) status.textContent = text;
   status.classList.toggle("visible", Boolean(text));
   status.classList.toggle("error", Boolean(text));
 }
 function setComposerError(text) {
-  drafts.save(currentThreadId, { error: text });
+  drafts.save(composerKey(), { error: text });
   renderComposerError();
 }
 function clearNotice() {
@@ -307,13 +318,14 @@ function setInvitationFeedback(text, error = false) {
 }
 function configureAuthPanel(roomId = selectedRoomFromLocation()) {
   const accountMode = Boolean(roomId);
+  $("#auth-title").textContent = accountMode ? `#${roomId}` : "Welcome.";
   $("#access-key-label").textContent = accountMode ? "Account key" : "Member key";
   $("#auth-description").textContent = accountMode
-    ? `Sign in to #${roomId}. Membership required.`
-    : "Open an invite link, or use your member key.";
+    ? "Use an account key with membership in this room."
+    : "Ask the room owner for an invite link or member key.";
   $("#auth-hint").textContent = accountMode
-    ? "An account key does not grant membership. Keep it private."
-    : "Need a link? Ask the room owner. Keep your key private.";
+    ? "Need membership? Ask the room owner. Keep your key private."
+    : "Keep your key private. Lost guest access? Ask for a new invite.";
   $("#auth-form button[type='submit']").textContent = accountMode ? "Open room" : "Enter room";
 }
 function renderInvitation() {
@@ -329,21 +341,21 @@ function renderInvitation() {
   $("#invitation-details").hidden = !preview;
   if (preview) {
     $("#invitation-room").textContent = preview.roomTitle || preview.roomId;
-    $("#invitation-purpose").textContent = preview.roomPurpose || "No Room purpose was provided.";
+    $("#invitation-purpose").textContent = preview.roomPurpose || "Not provided";
     $("#invitation-display-name").textContent = preview.displayName;
     $("#invitation-member-id").textContent = preview.memberId;
     $("#invitation-role").textContent = humanize(preview.role);
     $("#invitation-permissions").textContent = preview.permissions.length
       ? preview.permissions.map(humanize).join(", ")
-      : "Conversation access only; no additional capabilities";
+      : "Conversation only";
     $("#invitation-issuer").textContent = preview.invitedByDisplayName || "Room administrator";
     const expiry = new Date(preview.expiresAt);
     $("#invitation-expires").dateTime = expiry.toISOString();
     $("#invitation-expires").textContent = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(expiry);
   }
-  let summary = phase === "terminal" ? "This invitation is unavailable." : "Loading the invitation’s exact Room and membership scope…";
+  let summary = phase === "terminal" ? "This invitation is unavailable." : "Checking invitation…";
   if (preview && phase !== "terminal") summary = pending
-    ? `${preview.displayName} is invited to join ${preview.roomTitle || preview.roomId} as ${humanize(preview.role)}.`
+    ? ""
     : accepted ? "This invitation has already been accepted. Sign in with an authorized account to open the Room."
       : preview.status === "expired" ? "This invitation has expired. Ask a current Room administrator for a new one."
         : preview.status === "revoked" ? "This invitation was revoked. Ask a current Room administrator if you still need access."
@@ -355,8 +367,8 @@ function renderInvitation() {
   $("#invitation-account-form").hidden = !mayAuthenticate || (authenticated && !switchingAccount) || phase === "accepting" || phase === "opening";
   for (const control of $("#invitation-account-form").querySelectorAll("input, button")) control.disabled = loading;
   $("#invitation-account-hint").textContent = accepted
-    ? "This invitation was already accepted. Sign in with an account that has membership to open the Room."
-    : "The invitation offers Room membership; your separately provisioned account key identifies the account that would accept it.";
+    ? "Use an account key with membership in this room."
+    : "Use your own account key to accept this membership.";
   $("#invitation-account-form button").textContent = accepted ? "Sign in to open room" : "Sign in to review acceptance";
   $("#invitation-account-warning").hidden = !state;
   const action = $("#invitation-accept");
@@ -588,6 +600,7 @@ function render() {
     $("#" + id).hidden = !can("steer"); $("#" + id).disabled = !can("steer");
   }
   renderMessages();
+  syncRequestComposer();
   renderSearch();
   $("#event-count").textContent = `${client.sequence}`;
   renderReturnBrief();
@@ -672,7 +685,7 @@ function messageContent(m) {
     const label = `${pending && !pending.busy ? "Retry " : ""}${reaction}`;
     return `<button type="button" class="reaction" aria-pressed="${selected}" aria-label="${esc(label)} reaction, ${members.length}" title="${esc(members.map(name).join(", ") || `React with ${reaction}`)}" data-message-action="react" data-message-id="${esc(m.id)}" data-reaction="${reaction}"${pending?.busy ? " disabled" : ""}><span aria-hidden="true">${symbol}</span><span>${members.length || ""}</span>${pending && !pending.busy ? " Retry" : ""}</button>`;
   }).join("");
-  return `<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong><span>${esc(author.kind)}</span><a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · room-visible</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${esc(parent.body.slice(0,90))}</a>` : ""}</div><p>${esc(m.body)}</p>${m.proposal ? `<p class="form-hint">Pasted draft · based on revision ${esc(m.proposal.basisRevision)}${m.proposal.basisRevision < m.proposal.submittedAtRevision ? " · older work" : ""} · authorship unverified</p>` : ""}<details class="reactions"><summary data-message-action="reaction-menu" data-message-id="${esc(m.id)}" aria-label="Reactions to message by ${esc(authorLabel)}">${esc(reactionSummary)}</summary><div class="reaction-options">${reactionButtons}</div></details><div class="message-links">${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>`).join("")}${m.workItemId && workActions(state.workItems[m.workItemId], state.members[session.member.id]).some(([action]) => action === "complete") ? `<button class="message-to-work" type="button" data-message-action="result" data-message-id="${esc(m.id)}">Save as result</button>` : ""}<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>${!currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : ""}${can("steer") && !(m.proposal && m.workItemId) ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : ""}</div></div>`;
+  return `<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong><span>${esc(author.kind)}</span><a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · room-visible</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${esc(parent.body.slice(0,90))}</a>` : ""}</div><p>${esc(m.body)}</p>${m.proposal ? `<p class="form-hint">Pasted draft · based on revision ${esc(m.proposal.basisRevision)}${m.proposal.basisRevision < m.proposal.submittedAtRevision ? " · older work" : ""} · authorship unverified</p>` : ""}<details class="reactions"><summary data-message-action="reaction-menu" data-message-id="${esc(m.id)}" aria-label="Reactions to message by ${esc(authorLabel)}">${esc(reactionSummary)}</summary><div class="reaction-options">${reactionButtons}</div></details><div class="message-links">${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>`).join("")}${m.workItemId && workActions(state.workItems[m.workItemId], state.members[session.member.id]).some(([action]) => action === "complete") ? `<button class="message-to-work" type="button" data-message-action="result" data-message-id="${esc(m.id)}">Save as result</button>` : ""}<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>${!currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : ""}${can("steer") && !(m.proposal && m.workItemId) ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : ""}</div></div>`;
 }
 function renderSearch() {
   const query = $("#message-search").value;
@@ -687,19 +700,108 @@ function renderSearch() {
   if (focused) [...list.querySelectorAll("[data-open-message]")].find(e => e.dataset.openMessage === focused)?.focus({ preventScroll: true });
 }
 function saveComposer() {
-  drafts.save(currentThreadId, { body: $("#message-input").value, toMemberId: $("#message-to-select").value, replyToId, pending: pendingMessage });
+  drafts.save(composerKey(), { body: $("#message-input").value, toMemberId: $("#message-to-select").value, replyToId, pending: pendingMessage,
+    ...(requestMode ? { mode: requestMode, threadId: currentThreadId } : {}) });
   persistDrafts();
 }
+function restoreComposer(draft) {
+  $("#message-input").value = draft.body;
+  const select = $("#message-to-select");
+  if (draft.toMemberId && ![...select.options].some(option => option.value === draft.toMemberId)) {
+    select.add(new Option("Previous recipient unavailable", draft.toMemberId));
+    select.options[select.options.length - 1].disabled = true;
+  }
+  select.value = draft.toMemberId; replyToId = draft.replyToId; pendingMessage = draft.pending;
+}
+function requestControls(message) {
+  const request = state.replyRequests?.[message.id];
+  if (!request) return "";
+  const own = session.member.id, open = request.status === "open";
+  const status = open ? state.members[request.recipientId]?.active === false ? "Recipient unavailable" : "Reply requested"
+    : ({ answered: "Answered", declined: "Declined", cancelled: "Cancelled" })[request.status];
+  const actions = [];
+  if (open && own === request.recipientId) actions.push(["answered", "Answer"], ["declined", "Decline"]);
+  if (open && (own === request.requesterId || own === state.room.ownerId && session.member.kind === "human")) actions.push(["cancelled", "Cancel request"]);
+  return `<span class="request-state">${esc(status)}</span>${actions.map(([kind, label]) =>
+    `<button type="button" class="message-to-work" data-message-id="${esc(message.id)}" data-message-action="request-${kind}">${label}</button>`).join("")}`;
+}
+function syncRequestComposer() {
+  const mode = requestMode, active = Boolean(mode) || requestReading;
+  $("#request-mode-bar").hidden = !active;
+  $("#request-reply").hidden = !state || active;
+  const request = mode?.requestMessageId && state?.replyRequests?.[mode.requestMessageId];
+  const changed = request && (request.revision !== mode.expectedRequestRevision || request.contextEventId !== mode.contextEventId);
+  const label = mode ? ({ request: "Request a reply", answered: "Answer", declined: "Decline", cancelled: "Cancel request" })[mode.kind] : "";
+  const subject = request ? conversation?.byId.get(request.id)?.body.slice(0, 80) : "";
+  setText("#request-mode-label", requestReading ? "Reading request…" : [label, subject, pendingMessage ? "Retry original" : changed ? "Context changed" : ""].filter(Boolean).join(" · "));
+  $("#request-refresh").hidden = !request || Boolean(pendingMessage) || requestReading || request.status !== "open";
+  $("#request-exit").disabled = busy;
+  const input = $("#message-input"), select = $("#message-to-select"), send = $("#message-form button[type=submit]");
+  input.readOnly = Boolean(mode && pendingMessage);
+  input.disabled = busy || requestReading;
+  select.disabled = busy || requestReading || Boolean(mode && (mode.kind !== "request" || pendingMessage));
+  select.required = mode?.kind === "request";
+  select.setCustomValidity(mode?.kind === "request" && (!select.value || select.value === session?.member.id) ? "Choose another participant." : "");
+  send.disabled = busy || requestReading || Boolean(request && request.status !== "open" && !pendingMessage);
+  const action = pendingMessage && mode ? "Retry original" : mode ? mode.kind === "request" ? "Send request" : label : "Send";
+  send.setAttribute("aria-label", action); send.title = action;
+  input.placeholder = mode?.kind === "request" ? "What do you need?" : mode?.kind === "cancelled" ? "Reason…" : mode ? "Your reply…" : "Message…";
+  if (active) $("#reply-bar").hidden = true;
+}
+function setRequestMode(mode) {
+  saveComposer(); requestMode = mode;
+  const key = composerKey();
+  if (!drafts.entries.has(key)) drafts.save(key, { body: "", toMemberId: mode.requesterId ?? "", replyToId: mode.requestMessageId ?? currentThreadId, pending: null, mode, threadId: currentThreadId });
+  else drafts.save(key, { mode });
+  restoreComposer(drafts.get(key));
+  syncRequestComposer(); renderComposerError(); persistDrafts();
+  $("#message-input").focus();
+}
+async function openRequestMode(kind, id) {
+  if (!state || busy || requestReading || requestMode?.requestMessageId === id && pendingMessage) return;
+  const generation = client.generation, identity = session, epoch = ++requestEpoch;
+  const current = () => generation === client.generation && session === identity && epoch === requestEpoch && state;
+  requestReading = true; syncRequestComposer();
+  try {
+    const selected = await client.replyContext(id);
+    if (!current()) return;
+    await client.refresh();
+    if (!current()) return;
+    const request = state.replyRequests?.[id], basis = selected.current;
+    if (!request || request.status !== "open" || selected.request.revision !== request.revision
+      || selected.request.contextEventId !== request.contextEventId) throw new Error("Request changed. Open it again");
+    if (kind === "cancelled" ? !basis?.actions?.cancel : !basis?.answerBasis || !basis.actions[kind === "answered" ? "answer" : "decline"])
+      throw new Error("This action is unavailable");
+    if (basis.contextEventId !== request.contextEventId || kind !== "cancelled" &&
+      (basis.answerBasis.expectedRequestRevision !== request.revision || basis.answerBasis.contextEventId !== basis.contextEventId
+        || basis.answerBasis.contextSequence !== basis.contextSequence)) throw new Error("Request context could not be confirmed");
+    const mode = { kind, requestMessageId: id, expectedRequestRevision: request.revision,
+      requesterId: request.requesterId, workItemId: request.workItemId,
+      contextEventId: basis.contextEventId, contextSequence: basis.contextSequence };
+    if (!validReplyDraft(mode, state)) throw new Error("Request context could not be confirmed");
+    requestReading = false;
+    if (currentThreadId !== conversation.rootById.get(id)) switchThread(conversation.rootById.get(id));
+    setRequestMode(mode);
+  } catch (error) {
+    if (current()) { client.handleFailure(error); if (state) setComposerError(`${error.message}. Draft kept.`); }
+  } finally {
+    if (epoch === requestEpoch) { requestReading = false; syncRequestComposer(); }
+  }
+}
+$("#request-reply").addEventListener("click", () => { if (!state || busy || requestReading) return; setRequestMode({ kind: "request" }); });
+$("#request-exit").addEventListener("click", () => switchThread(currentThreadId, true));
+$("#request-refresh").addEventListener("click", () => { if (requestMode?.requestMessageId) openRequestMode(requestMode.kind, requestMode.requestMessageId); });
 function persistDrafts() {
   if (!session || !$("#remember-drafts").checked) return;
-  const saved = recovery.write(draftScope(session), drafts, currentThreadId);
+  const saved = recovery.write(draftScope(session), drafts, currentThreadId, composerKey());
   setText("#draft-recovery-status", saved ? "Draft recovery enabled in this tab for 12 hours. Sign-out clears it." : "Draft recovery unavailable. Keep this page open to retain unsent text.");
 }
 function switchThread(threadId, focusComposer = false) {
   if (!state || busy || (threadId && !conversation.threads.has(threadId))) return;
-  if (threadId !== currentThreadId) {
+  requestEpoch++; requestReading = false;
+  if (threadId !== currentThreadId || requestMode) {
     saveComposer(); viewPositions.set(currentThreadId ? `thread:${currentThreadId}` : "room", $("#message-list").scrollTop);
-    currentThreadId = threadId;
+    currentThreadId = threadId; requestMode = null;
     const draft = drafts.get(threadId);
     $("#message-input").value = draft.body;
     const select = $("#message-to-select");
@@ -709,7 +811,7 @@ function switchThread(threadId, focusComposer = false) {
     }
     select.value = draft.toMemberId; replyToId = draft.replyToId; pendingMessage = draft.pending;
   }
-  updateReply(); renderMessages(); renderComposerError();
+  updateReply(); renderMessages(); renderComposerError(); syncRequestComposer();
   if (focusComposer) $("#message-input").focus();
   else (currentThreadId ? $("#thread-title") : $("#conversation-title")).focus({ preventScroll: true });
 }
@@ -1050,7 +1152,7 @@ $("#auth-form").addEventListener("submit", async e => {
       identity = await client.restore(requestedRoom);
     } else identity = await client.login(accessKey);
     if (!current() || !identity || !state || session?.member.id !== identity.member.id || session?.roomId !== identity.roomId) return;
-    $("#access-key").value = ""; $("#message-input").focus(); notice("Signed in. Welcome to your room.");
+    $("#access-key").value = ""; $("#message-input").focus();
   }, { failureHint: requestedRoom ? "Check the account key and Room membership, then try again." : "Check the access key and try again." });
   if (state) revealLocationHash();
 });
@@ -1077,7 +1179,7 @@ $("#signout-button").addEventListener("click", async () => {
       if (state) $("#signout-button").disabled = false;
       else {
         configureAuthPanel();
-        const ended = "Sign in with an active key. Session ended; private drafts were cleared.";
+        const ended = "Session ended; private drafts were cleared.";
         if ($("#auth-error").textContent !== ended) setFormStatus($("#auth-error"), ended, true);
         if (!$("#invitation-dialog").open) queueMicrotask(() => $("#access-key").focus({ preventScroll: true }));
       }
@@ -1108,7 +1210,7 @@ $("#refresh-button").addEventListener("click", async () => {
     if (!roomId && client.session) return;
     if (!roomId) {
       const signedOut = [401, 403].includes(error.status);
-      setFormStatus($("#auth-error"), signedOut ? "Use a provisioned human room key to enter. No demo identity is selected for you." : "Room service unavailable. Check the service and retry; no connection is claimed.", true);
+      setFormStatus($("#auth-error"), signedOut ? "" : "Can’t reach the room. Try refreshing.", true);
       setConnectionStatus(signedOut ? "Not connected · sign in required" : "Room service unavailable · not connected");
       return;
     }
@@ -1116,7 +1218,8 @@ $("#refresh-button").addEventListener("click", async () => {
   }
 });
 $("#message-form").addEventListener("submit", e => {
-  e.preventDefault(); if (!state) return;
+  e.preventDefault(); if (!state || busy || requestReading) return;
+  if (requestMode) { submitRequest(e.currentTarget); return; }
   const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId };
   if (!content.body) return;
   const previous = pendingMessage?.command?.data;
@@ -1137,10 +1240,46 @@ $("#message-form").addEventListener("submit", e => {
     notice(`Message saved${threadId ? " in this thread" : " to the room"}.`);
   }, { failureHint: "Draft kept. Send again to retry." });
 });
+function submitRequest(form) {
+  if (!state || busy || requestReading) return;
+  const mode = requestMode, key = composerKey(), identity = session, generation = client.generation;
+  if (!$("#message-input").value.trim()) return;
+  const hadPending = Boolean(pendingMessage);
+  try {
+    if (!pendingMessage) {
+      const data = replyDraftData(mode, { body: $("#message-input").value.trim(),
+        toMemberId: $("#message-to-select").value || null, replyToId, messageId: crypto.randomUUID() });
+      pendingMessage = draftCommand(null, mode.kind === "cancelled" ? REPLY_CANCELLED : T.MESSAGE_POSTED, data);
+    }
+  } catch (error) { setComposerError(error.message); return; }
+  saveComposer();
+  const command = pendingMessage.command;
+  submit(form, async () => {
+    try {
+      if (command.data.messageId) locallyOwnedMessageIds.add(command.data.messageId);
+      const receipt = await client.send(command);
+      if (generation !== client.generation || session !== identity || !state) return;
+      if (!await confirmsReplyCommand(receipt, command, identity.roomId, identity.member.id)) throw new Error("Save not confirmed");
+      if (generation !== client.generation || session !== identity || !state) return;
+      drafts.clear(key); requestMode = null; requestEpoch++;
+      restoreComposer(drafts.get(currentThreadId)); updateReply(); persistDrafts();
+      notice(mode.kind === "request" ? "Request saved." : mode.kind === "cancelled" ? "Request cancelled." : "Reply saved.");
+    } catch (error) {
+      if (generation !== client.generation || session !== identity || !state) return;
+      // command_rejected is issued after exact-operation lookup. Transport and
+      // pre-ledger size/rate errors cannot unlock an earlier uncertain operation.
+      if ((!hadPending && [400, 404, 409, 413, 422].includes(error.status))
+        || error.code === "command_rejected" && [409, 422].includes(error.status)) pendingMessage = null;
+      saveComposer();
+      throw error;
+    }
+  }, { failureHint: "Draft kept. Retry the original, or refresh context after a refusal." });
+}
 $("#message-list").addEventListener("click", e => {
   const button = e.target.closest("[data-message-id]"); if (!button || !state || busy) return;
   const id = button.dataset.messageId;
-  if (button.dataset.messageAction === "work") openWork(id);
+  if (button.dataset.messageAction?.startsWith("request-")) openRequestMode(button.dataset.messageAction.slice(8), id);
+  else if (button.dataset.messageAction === "work") openWork(id);
   else if (button.dataset.messageAction === "result") {
     const message = conversation.byId.get(id), item = state.workItems[message?.workItemId];
     if (item && workActions(item, state.members[session.member.id]).some(([action]) => action === "complete")) openWorkAction(item, "complete", id);
@@ -1153,7 +1292,7 @@ $("#message-list").addEventListener("click", e => {
 });
 function updateReply() {
   const target = conversation?.byId.get(replyToId);
-  $("#reply-bar").hidden = !target || replyToId === currentThreadId;
+  $("#reply-bar").hidden = Boolean(requestMode) || !target || replyToId === currentThreadId;
   $("#reply-context").textContent = target ? `Replying to ${name(target.authorId)}: ${target.body.slice(0, 100)}` : "";
 }
 function clearReply() { replyToId = currentThreadId; updateReply(); }
@@ -1173,7 +1312,7 @@ $("#message-input").addEventListener("select", () => rememberComposerSelection()
 document.addEventListener("selectionchange", () => { if (document.activeElement === $("#message-input")) rememberComposerSelection(); });
 for (const type of ["keyup", "mouseup", "touchend"]) $("#message-input").addEventListener(type, () => rememberComposerSelection({ clearCollapsed: true }));
 $("#message-input").addEventListener("input", () => { lastComposerSelection = null; saveComposer(); });
-$("#message-to-select").addEventListener("change", saveComposer);
+$("#message-to-select").addEventListener("change", () => { saveComposer(); syncRequestComposer(); });
 const touchKeyboard = matchMedia("(hover: none) and (pointer: coarse)");
 function syncComposerHint() {
   $("#draft-hint").textContent = touchKeyboard.matches ? "Return for a new line · ↑ to send" : "Enter to send · Shift + Enter for a new line";
@@ -1396,6 +1535,11 @@ function openWorkAction(item, action, draftMessageId = null) {
 // Only opening or explicitly reviewing current work changes the pinned context.
 // A background update must never silently retarget a review or approval.
 function renderActionContext(item, action) {
+  $("#review-brief").hidden = !["verify", "decide"].includes(action);
+  setText("#review-criteria", $("#review-brief").hidden ? "" : item.definitionOfDone);
+  setText("#review-summary", $("#review-brief").hidden ? "" : item.receipt?.summary ?? "");
+  setText("#review-next", $("#review-brief").hidden ? "" : item.receipt?.nextAction ?? "");
+  $("#review-notes").open = false;
   $("#action-title").textContent = action === "block" && item.state === S.COMPLETED ? "Reopen for rework"
     : action === "verify" && item.independentVerificationRequired && hasIndependentProducer(item) ? "Record an independent check" : actionSpecs[action][1];
   $("#action-context").textContent = `${item.title} · revision ${item.revision}${item.receipt ? item.receipt.nativeText ? " · stored text" : ` · evidence ${item.receipt.evidenceVersion}` : ""}`;
@@ -1629,6 +1773,44 @@ function renderBriefList(selector, html) {
     (exact || first || fallback).focus({ preventScroll: true });
   }
 }
+function renderContribution(steps, owned) {
+  const panel = $("#contribution-next"), button = $("#contribution-open"), more = $("#contribution-more");
+  const focused = panel.contains(document.activeElement);
+  const selected = (focused && steps.find(step => step.key === button.dataset.step)) || steps[0];
+  const contributed = owned && (state.messages.some(message => message.authorId === session.member.id)
+    || state.eventLog.some(event => event.actorId === session.member.id && /^(work|verification|owner_decision)\./.test(event.type)));
+  // An empty conversation already points at its composer. Do not push it below
+  // the first mobile viewport with a second introduction prompt.
+  const newcomer = owned && !contributed && state.messages.length > 0;
+  const visible = Boolean(selected || newcomer);
+  const key = selected?.key ?? "hello";
+  if (focused && (!visible || key !== button.dataset.step)) $("#return-brief-panel > summary").focus({ preventScroll: true });
+  panel.hidden = !visible;
+  setText("#contribution-label", selected?.label ?? (newcomer ? "Start here" : ""));
+  setText("#contribution-title", selected?.title ?? (newcomer ? "What would you like to help with?" : ""));
+  setText("#contribution-open", selected?.button ?? (newcomer ? "Say hello" : ""));
+  button.dataset.step = key;
+  button.disabled = !owned || busy || requestReading;
+  more.hidden = steps.length < 2;
+  setText("#contribution-more", steps.length > 1 ? `${steps.length - 1} more` : "");
+}
+$("#contribution-more").addEventListener("click", () => {
+  if (!state) return;
+  $("#return-brief-panel").open = true;
+  $("#return-brief-panel > summary").focus();
+});
+$("#contribution-open").addEventListener("click", () => {
+  if (!state || busy || requestReading || client.session !== session || !client.ownsAccountSession()) return;
+  const key = $("#contribution-open").dataset.step;
+  if (key === "hello") { switchThread(null, true); return; }
+  const step = contributionSteps(state, session.member.id).find(candidate => candidate.key === key);
+  if (!step) { renderReturnBrief(); return; }
+  if (step.kind === "request") { revealMessage(step.id); return; }
+  // Only review/decision shortcuts open a form. Starting work still requires
+  // inspecting its existing card and explicitly choosing the relevant action.
+  if (["verify", "decide"].includes(step.action)) openWorkAction(state.workItems[step.id], step.action);
+  else revealWork(step.id);
+});
 function renderReturnBrief() {
   clearTimeout(returnClock); returnClock = null;
   const now = Date.now();
@@ -1638,7 +1820,9 @@ function renderReturnBrief() {
     needsAttention: needsAttention({ workItems: state.workItems, memberId: session.member.id, now }),
     workInvolvingMe: workInvolvingMe({ workItems: state.workItems, memberId: session.member.id }) } : null;
   const unread = state ? Math.max(0, client.sequence - roomCursor) : 0;
-  setText("#catchup-count", current ? briefView.message === "Updating room…" ? "Updating…" : [current.needsAttention.length ? `${current.needsAttention.length} need${current.needsAttention.length === 1 ? "s" : ""} you` : "",
+  const contributions = owned ? contributionSteps(state, session.member.id, now) : [];
+  renderContribution(contributions, owned);
+  setText("#catchup-count", current ? briefView.message === "Updating room…" ? "Updating…" : [contributions.length ? `${contributions.length} need${contributions.length === 1 ? "s" : ""} you` : "",
     unread ? `${unread} update${unread === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ") || "No new updates" : "");
   if (owned) {
     // Work destinations and catch-up use the same clock, even without new events.
@@ -1656,14 +1840,18 @@ function renderReturnBrief() {
   delete $("#rb-ack-button").dataset.horizon;
   $("#rb-more-button").hidden = true;
   const attention = current?.needsAttention ?? [];
+  const byWork = new Map(contributions.filter(step => step.kind === "work").map(step => [step.id, step]));
+  // Preserve the established catch-up order while the single next-step suggestion
+  // prioritizes handoffs. Updating work must not move it out of the first page.
+  const attentionSteps = [...attention.map(item => byWork.get(item.workItemId)).filter(Boolean), ...contributions.filter(step => step.kind === "request")];
   const allButton = $("#rb-show-all"), allFocused = document.activeElement === allButton;
-  if (attention.length <= 5) showAllAttention = false;
-  allButton.hidden = attention.length <= 5;
-  allButton.textContent = showAllAttention ? "Show less" : `Show all (${attention.length})`;
+  if (contributions.length <= 5) showAllAttention = false;
+  allButton.hidden = contributions.length <= 5;
+  allButton.textContent = showAllAttention ? "Show less" : `Show all (${contributions.length})`;
   allButton.setAttribute("aria-expanded", String(showAllAttention));
   if (allFocused && allButton.hidden) $("#return-brief-panel > summary").focus({ preventScroll: true });
-  renderBriefList("#rb-attention-list", (showAllAttention ? attention : attention.slice(0, 5)).map(i =>
-    `<li class="rb-event"><a class="work-link" href="${esc(workHref(i.workItemId))}" data-open-work="${esc(i.workItemId)}" data-brief-key="attention:${esc(i.workItemId)}">${esc(i.action ?? i.workItemId)}</a> <span class="rb-detail">${esc(nextWorkStep(state.workItems[i.workItemId], now).label)}</span></li>`).join("")
+  renderBriefList("#rb-attention-list", (showAllAttention ? attentionSteps : attentionSteps.slice(0, 5)).map(i =>
+    `<li class="rb-event"><a class="work-link" href="${esc(i.kind === "work" ? workHref(i.id) : recordHref("message", i.id))}" ${i.kind === "work" ? `data-open-work="${esc(i.id)}"` : `data-open-message="${esc(i.id)}"`} data-brief-key="${esc(i.kind === "work" ? `attention:${i.id}` : i.key)}">${esc(i.title)}</a> <span class="rb-detail">${esc(i.kind === "work" ? nextWorkStep(state.workItems[i.id], now).label : i.label)}</span></li>`).join("")
     || (current ? '<li class="rb-empty">Nothing waiting for you.</li>' : ""));
   const attentionIds = new Set(attention.map(i => i.workItemId));
   renderBriefList("#rb-involving-list", (current?.workInvolvingMe ?? []).filter(i => !attentionIds.has(i.workItemId)).map(i =>
@@ -1680,7 +1868,7 @@ function renderReturnBrief() {
   const { history } = returnBrief;
   const changes = history.evaluatedThrough - history.cursor;
   setText("#rb-ack-note", changes ? `Marks all ${changes} update${changes === 1 ? "" : "s"} read. Work stays open.` : "Work stays open.");
-  setText("#summary-grid", `${changes} ${changes === 1 ? "change" : "changes"} since your marker · ${current.needsAttention.length} to act on`);
+  setText("#summary-grid", `${changes} ${changes === 1 ? "change" : "changes"} since your marker · ${contributions.length} to act on`);
   setText("#rb-history-count", changes ? `(${changes})` : "");
   $("#rb-history-boundary").textContent = history.evaluatedThrough === history.cursor
     ? "· nothing new since your marker"
@@ -1740,7 +1928,7 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
     const account = await ensureAccountSession();
     if (!account?.authenticated) {
       $("#identity-label").textContent = "Not signed in";
-      setFormStatus($("#auth-error"), `Sign in with a canonical account that has membership in #${requestedRoom}.`, true);
+      setFormStatus($("#auth-error"), "");
       setConnectionStatus("Not connected · account sign-in required");
       $("#auth-panel").hidden = false;
       if (!$("#invitation-dialog").open) queueMicrotask(() => $("#access-key").focus({ preventScroll: true }));
@@ -1756,7 +1944,7 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
   const requestedRoom = selectedRoomFromLocation();
   setFormStatus($("#auth-error"), signedOut
     ? requestedRoom ? `This account cannot open #${requestedRoom}. Use an account with active membership there.` : ""
-    : "Room service unavailable. Check the service and retry; no connection is claimed.", true);
+    : "Can’t reach the room. Try refreshing.", true);
   setConnectionStatus(signedOut ? "Not connected · sign in required" : "Room service unavailable · not connected");
   $("#identity-label").textContent = signedOut ? "Not signed in" : "Session unavailable";
   $("#auth-panel").hidden = false;

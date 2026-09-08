@@ -30,7 +30,7 @@ export const roomTools = [
   ...replyTools
 ];
 export const attentionTools = [
-  tool("room_read_attention", "Pull up to 20 current work/instruction notices from this operator-configured local inbox. Remains pending until explicitly acknowledged. May coalesce intermediate changes; not an event archive or cross-device inbox. Read nextRead to refresh context. No work, approval or human read marker changes; no model is started. Updates only private local observer state.", schema(), false),
+  tool("room_read_attention", "Pull up to 20 current work/instruction notices from this operator-configured local inbox; request notices require explicit operator v3 opt-in. Remains pending until explicitly acknowledged. May coalesce intermediate changes; not an event archive or cross-device inbox. Read nextRead to refresh context. No work, approval or human read marker changes; no model is started. Updates only private local observer state.", schema(), false),
   tool("room_acknowledge_attention", "Acknowledge one exact local notice ID after recording it. Rechecks access and current conditions first; an obsolete ID cannot dismiss its replacement. Retry the same ID if the outcome is unknown. Not proof of understanding, accepted work, completion, human approval or a human read marker. Updates only private local observer state.", schema({ noticeId: id }, ["noticeId"]), false)
 ];
 function validArguments(tool, args) {
@@ -78,7 +78,8 @@ async function callTool(client, identity, name, args, signal) {
 export function serveRoomMcp({ client, roomId, memberId, input, output, timeoutMs = 30000, attention }) {
   if (!validId(roomId) || !validId(memberId) || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30000) throw new Error("Invalid adapter configuration");
   if (attention !== undefined && (typeof attention?.directory !== "string" || !attention.directory.trim()
-      || typeof attention.origin !== "string" || new URL(attention.origin).origin !== attention.origin)) throw new Error("Invalid attention configuration");
+      || typeof attention.origin !== "string" || new URL(attention.origin).origin !== attention.origin
+      || (attention.version !== undefined && ![2, 3].includes(attention.version)))) throw new Error("Invalid attention configuration");
   const tools = attention ? [...roomTools, ...attentionTools] : roomTools;
   const flights = new Map(), maxLine = 65536, maxOutput = 2 * 1024 * 1024;
   let phase = "new", buffer = Buffer.alloc(0), closed = false;

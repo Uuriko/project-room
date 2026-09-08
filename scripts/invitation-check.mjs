@@ -172,7 +172,7 @@ test("invitation preview and acceptance preserve privacy, drafts, authority, and
   assert.deepEqual(browserLeak, { dom: false, local: false, session: false, resources: false });
   assert.equal(requestEvidence.some(item => item.url.includes(invitationToken) || item.referer.includes(invitationToken)), false);
   assert.equal(requestEvidence.filter(item => item.body.includes(invitationToken)).length, 1, "only the preview POST body carries the invitation secret");
-  assert.match(await page.locator("#invitation-boundary").textContent(), /does not join.*or create a notification or read receipt/i);
+  assert.match(await page.locator("#invitation-boundary").textContent(), /haven’t joined.*no notification or read receipt is sent/i);
   assert.match(await page.locator("#invitation-room").textContent(), /Studio/);
   assert.deepEqual(counts(store, invitationId), beforePreview, "preview creates no event, membership, audit, or status write");
   mkdirSync("test-results", { recursive: true });
@@ -277,7 +277,7 @@ test("account confirmation keeps the modal open and warns before a draft-sensiti
   await page.locator("#message-input").fill("Retain this draft until I choose to switch");
   await page.evaluate(token => { location.hash = `invite/${token}`; }, f.invitationToken);
   await page.locator("#invitation-account-key").waitFor({ state: "visible" });
-  assert.match(await page.locator("#invitation-account-warning").textContent(), /different account clears.*drafts/i);
+  assert.match(await page.locator("#invitation-account-warning").textContent(), /Switching accounts clears.*drafts.*Save a copy first/i);
   for (let index = 0; index < 6; index++) {
     await page.keyboard.press("Tab");
     assert.equal(await page.evaluate(() => document.querySelector("#invitation-dialog").contains(document.activeElement)), true);

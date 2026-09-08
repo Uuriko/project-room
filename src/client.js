@@ -326,6 +326,42 @@ export class RoomClient {
       throw error;
     }
   }
+  async replyContext(requestMessageId) {
+    const session = this.session, generation = this.generation;
+    if (!session || !this.ownsAccountSession()) throw new Error("Sign in again to read this request");
+    const current = () => generation === this.generation && this.session === session && this.ownsAccountSession();
+    let cursor = null, horizon = null, last = 0;
+    const seen = new Set();
+    for (let pageIndex = 0; pageIndex < 200; pageIndex++) {
+      const query = new URLSearchParams({ requestMessageId, limit: "50", ...(cursor ? { cursor } : {}) });
+      const result = await this.request(this.path(`/reply-context?${query}`));
+      if (!current()) throw new Error("Room identity changed");
+      if (!this.ownsResponse(result, session)) { this.endAccess(); throw new Error("Room identity changed"); }
+      const page = result?.page;
+      const anchor = JSON.stringify([page?.horizonSequence, page?.horizonEventId]);
+      if (result.contractVersion !== 1 || result.selection?.requestMessageId !== requestMessageId
+        || result.request?.id !== requestMessageId || !page || !Array.isArray(page.items)
+        || page.items.length > 50 || typeof page.hasMore !== "boolean"
+        || !Number.isSafeInteger(page.horizonSequence) || page.horizonSequence < 1
+        || page.cursor !== cursor || page.afterSequence !== last || horizon !== null && anchor !== horizon
+        || page.items.some(item => item.requestMessageId !== requestMessageId
+          || !Number.isSafeInteger(item.sequence) || item.sequence <= last || item.sequence > page.horizonSequence))
+        throw new Error("Request context could not be confirmed. Refresh context");
+      horizon = anchor;
+      for (const item of page.items) {
+        if (item.sequence <= last) throw new Error("Request context is out of order");
+        last = item.sequence;
+      }
+      if (!page.hasMore) {
+        if (page.nextCursor !== null) throw new Error("Request context is incomplete");
+        return result;
+      }
+      if (!page.items.length || typeof page.nextCursor !== "string" || !page.nextCursor || seen.has(page.nextCursor))
+        throw new Error("Request context did not advance");
+      seen.add(page.nextCursor); cursor = page.nextCursor;
+    }
+    throw new Error("Request context is too large. Open a new request");
+  }
   async caughtUp(sequence = this.sequence) {
     if (this.session?.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); return null; }
     const generation = this.generation, session = this.session;

@@ -10,6 +10,7 @@ import { createRuntimePackage, verifyRuntimePackage, publicAssets } from "../scr
 import { assetPaths } from "../cloudflare/build-assets.mjs";
 import { createRecoveryFixture } from "../scripts/recovery-fixture.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
+import { candidateRuntimeFixture } from "../scripts/candidate-runtime-fixture.mjs";
 
 const repository = fileURLToPath(new URL("../", import.meta.url));
 
@@ -20,7 +21,7 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   const destination = join(directory, "runtime");
   const receipt = createRuntimePackage({ repository, commit, destination });
   assert.equal(receipt.schemaVersion, 12); assert.deepEqual(publicAssets, assetPaths);
-  assert.equal(receipt.files, 47 + ["server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "src/agent-connections.js", "client/mcp-stdio.mjs", "scripts/agent-mcp.mjs", "client/work-actions.mjs", "server/work-discussion.mjs", "server/text-results.mjs", "client/attention-inbox.mjs", "src/room-charter.js", "src/room-instructions.js", "src/reply-requests.js", "server/reply-requests.mjs", "client/reply-actions.mjs", "scripts/agent-replies.mjs"].filter(path => existsSync(join(destination, path))).length);
+  assert.equal(receipt.files, 47 + ["server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "src/agent-connections.js", "client/mcp-stdio.mjs", "scripts/agent-mcp.mjs", "client/work-actions.mjs", "server/work-discussion.mjs", "server/text-results.mjs", "client/attention-inbox.mjs", "src/room-charter.js", "src/room-instructions.js", "src/reply-requests.js", "server/reply-requests.mjs", "client/reply-actions.mjs", "scripts/agent-replies.mjs", "client/request-notices.mjs"].filter(path => existsSync(join(destination, path))).length);
   assert.equal(existsSync(join(destination, ".git")), false);
   assert.equal(existsSync(join(destination, "node_modules")), false);
   for (const path of ["server.mjs", "src/app.js", "cloudflare/room.mjs"]) {
@@ -115,4 +116,26 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
     }
     assert.throws(() => verifyRuntimePackage(damaged), fault);
   }
+});
+
+test("uncommitted candidate packages cold in an isolated synthetic commit, including request observer dependencies", t => {
+  const directory = mkdtempSync(join(tmpdir(), "room-candidate-package-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const candidate = candidateRuntimeFixture(repository, directory), destination = join(directory, "runtime");
+  const receipt = createRuntimePackage({ ...candidate, destination }); assert.equal(receipt.files, 65);
+  const program = `
+    import { RoomStore } from ${JSON.stringify(pathToFileURL(join(destination, "server/store.mjs")).href)};
+    import { initialRoom } from ${JSON.stringify(pathToFileURL(join(destination, "server/bootstrap.mjs")).href)};
+    import { currentAttention } from ${JSON.stringify(pathToFileURL(join(destination, "client/attention-inbox.mjs")).href)};
+    const store = new RoomStore(":memory:"); store.initialize(initialRoom());
+    const key = store.issueAccessKey("commons", "owner"), client = {
+      snapshot: async () => store.snapshot(key, "commons"), changes: async (after, limit) => store.eventsAfter(key, "commons", after, limit)
+    };
+    const config = { client, origin: "http://127.0.0.1:12345", roomId: "commons", directory: ${JSON.stringify(join(directory, "observer"))}, version: 3 };
+    const first = await currentAttention(config), second = await currentAttention(config);
+    console.log(JSON.stringify({ version: second.schemaVersion, pending: second.pending, unchanged: JSON.stringify(first.items) === JSON.stringify(second.items) }));
+    store.close();`;
+  const cold = spawnSync(process.execPath, ["--input-type=module", "-e", program], { cwd: directory, env: { PATH: "/unavailable" }, encoding: "utf8" });
+  assert.equal(cold.status, 0, cold.stderr); assert.deepEqual(JSON.parse(cold.stdout), { version: 3, pending: 0, unchanged: true });
+  assert.deepEqual(verifyRuntimePackage(destination), receipt);
 });

@@ -12,6 +12,8 @@ export const WATCH_HELP = `Read-only assignment watcher (Node 24.19+):
   node scripts/agent-inbox.mjs watch stop PRIVATE_DIRECTORY
   node scripts/agent-inbox.mjs watch pull NEW_PRIVATE_DIRECTORY
   node scripts/agent-inbox.mjs watch ack PRIVATE_DIRECTORY NOTICE_ID
+  node scripts/agent-inbox.mjs watch pull NEW_V3_DIRECTORY --requests
+  node scripts/agent-inbox.mjs watch ack V3_DIRECTORY NOTICE_ID --requests
 
 Start: ROOM_AGENT_CONFIG for a saved agent connection, OR ROOM_AGENT_ORIGIN,
 ROOM_AGENT_ROOM, ROOM_AGENT_TOKEN (optional ROOM_AGENT_MEMBER) in the environment.
@@ -26,6 +28,10 @@ Pull uses a separate v2 directory: current work and instructions stay pending un
 acknowledged by exact ID. Ack refreshes access/current state before dismissing only
 that notice. Neither command runs continuously or changes Room read/work state.
 Do not reuse a v1 start directory for pull. No automatic migration or reset occurs.
+--requests explicitly selects v3 in its own new directory. Adds incoming requests,
+outgoing answers/declines and unavailable recipients. Requires server support;
+unsupported servers preserve pending state. Repeat --requests for every pull/ack.
+This is current attention, not request history. Use room_request_history for history.
 `;
 
 export function writeJson(stream, value, signal, timeoutMs = 5000) {
@@ -94,9 +100,12 @@ export async function watchMain(args) {
   const stop = () => controller?.abort();
   try {
     if (args.length === 1 && args[0] === "--help") { process.stdout.write(WATCH_HELP); return; }
-    const [action, directory, flag] = args;
+    const requests = args.at(-1) === "--requests";
+    const selected = requests ? args.slice(0, -1) : args;
+    const [action, directory, flag] = selected;
     if (!["start", "status", "stop", "pull", "ack"].includes(action) || !directory || directory.startsWith("--")
-        || args.length > 3 || (action === "ack" ? !validId(flag) : flag !== undefined && (action !== "start" || flag !== "--once"))) throw new WatchError("usage_error");
+        || (requests && !["pull", "ack"].includes(action)) || selected.length > 3
+        || (action === "ack" ? !validId(flag) : flag !== undefined && (action !== "start" || flag !== "--once"))) throw new WatchError("usage_error");
     if (["status", "stop"].includes(action)) {
       journal = new WatchJournal(directory, { acquire: false });
       await writeJson(process.stdout, action === "status" ? journal.status() : journal.requestStop());
@@ -109,7 +118,7 @@ export async function watchMain(args) {
     process.on("SIGINT", stop); process.on("SIGTERM", stop);
     if (["pull", "ack"].includes(action)) {
       await writeJson(process.stdout, await currentAttention({ client, origin, roomId, directory,
-        ...(action === "ack" ? { noticeId: flag } : {}), signal: controller.signal }), controller.signal);
+        ...(action === "ack" ? { noticeId: flag } : {}), version: requests ? 3 : 2, signal: controller.signal }), controller.signal);
       return;
     }
     journal = new WatchJournal(directory);

@@ -1,4 +1,4 @@
-import { terminalWork, nextWorkStep } from "./workflow.js";
+import { terminalWork, nextWorkStep, workActions } from "./workflow.js";
 // One shared current-state derivation for the browser, return brief and agent client.
 
 export class CursorError extends Error {
@@ -59,4 +59,27 @@ export function needsAttention({ workItems, memberId, now = Date.now() }) {
     if (next.needsAttention && next.memberId === memberId) out.push(Object.freeze({ workItemId: item.id, action: item.title ?? null, role: next.role, step: next.action }));
   }
   return Object.freeze(out);
+}
+
+// Presentation only: explicit requests and existing handoffs, never inferred
+// assignments or permission grants. Reading/acknowledging updates cannot clear these.
+export function contributionSteps(state, memberId, now = Date.now()) {
+  const member = state?.members?.[memberId];
+  if (!member || member.active === false) return [];
+  const messages = new Map(state.messages.map(message => [message.id, message]));
+  const requests = Object.values(state.replyRequests ?? {}).filter(request =>
+    request.status === "open" && request.recipientId === memberId && messages.has(request.id));
+  const steps = requests.map(request => ({ key: `request:${request.id}`, kind: "request", id: request.id,
+    title: messages.get(request.id).body, label: "Reply requested", button: "Open request", priority: 1, at: request.createdAt }));
+  for (const attention of needsAttention({ workItems: state.workItems, memberId, now })) {
+    const item = state.workItems[attention.workItemId], step = attention.step;
+    const action = step === "revise" ? "resolve" : step;
+    const permitted = workActions(item, member, now).some(([candidate]) => candidate === action);
+    const labels = { verify: "Ready for review", decide: "Ready for your decision", accept: "Invited to contribute", start: "Ready to start", claim: "Scope needed", revise: "Needs a new direction" };
+    steps.push({ key: `work:${item.id}`, kind: "work", id: item.id, action: permitted ? action : null,
+      title: item.title, label: labels[step] ?? nextWorkStep(item, now).label,
+      button: step === "verify" ? "Review result" : step === "decide" ? "Review decision" : "Open work",
+      priority: ["verify", "decide"].includes(step) ? 0 : 2, at: item.updatedAt });
+  }
+  return steps.sort((a, b) => a.priority - b.priority || String(a.at ?? "").localeCompare(String(b.at ?? "")) || a.key.localeCompare(b.key));
 }

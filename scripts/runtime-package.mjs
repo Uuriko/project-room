@@ -24,6 +24,7 @@ const optional = ["server/maintenance.mjs", "server/recovery.mjs", "client/agent
 optional.push("src/room-charter.js", "src/room-instructions.js");
 optional.push("src/reply-requests.js", "server/reply-requests.mjs");
 optional.push("client/reply-actions.mjs", "scripts/agent-replies.mjs");
+optional.push("client/request-notices.mjs");
 const allowed = new Set([...required, ...optional]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 const check = condition => { if (!condition) throw new Error("Runtime package does not match its exact allowlisted contract"); };

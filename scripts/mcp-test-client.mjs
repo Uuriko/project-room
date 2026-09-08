@@ -1,9 +1,10 @@
 // Test harness, not an AI host integration or a production dependency.
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-export async function openMcpTestClient(configDirectory, { attentionDirectory } = {}) {
+export async function openMcpTestClient(configDirectory, { attentionDirectory, attentionVersion } = {}) {
   const child = spawn(process.execPath, [fileURLToPath(new URL("./agent-mcp.mjs", import.meta.url))], {
-    env: { ROOM_AGENT_CONFIG: configDirectory, ...(attentionDirectory === undefined ? {} : { ROOM_AGENT_ATTENTION_DIR: attentionDirectory }) }, stdio: ["pipe", "pipe", "pipe"]
+    env: { ROOM_AGENT_CONFIG: configDirectory, ...(attentionDirectory === undefined ? {} : { ROOM_AGENT_ATTENTION_DIR: attentionDirectory }),
+      ...(attentionVersion === undefined ? {} : { ROOM_AGENT_ATTENTION_VERSION: String(attentionVersion) }) }, stdio: ["pipe", "pipe", "pipe"]
   });
   const pending = new Map(); let buffer = "", sequence = 0, diagnostics = "";
   const stopped = new Promise(resolve => child.once("exit", resolve));

@@ -1,7 +1,8 @@
 import { nextWorkStep } from "../src/workflow.js";
 import { validId, EVENT_TYPES } from "../src/events.js";
-import { WatchError, MAX_ATTENTION } from "./watch-journal.mjs";
+import { WatchError, MAX_ATTENTION, attentionCapacity, attentionFilter } from "./watch-journal.mjs";
 import { charterContext, validateCharterContext } from "../src/room-charter.js";
+import { requestNotices, hasRequestSupport } from "./request-notices.mjs";
 
 export function attentionNotices(snapshot, now = Date.now()) {
   const notices = new Map();
@@ -49,12 +50,21 @@ export function contextNotices(snapshot, now = Date.now()) {
   return notices;
 }
 
+export function requestContextNotices(snapshot, now = Date.now()) {
+  if (!hasRequestSupport(snapshot)) throw new WatchError("request_context_unavailable");
+  const notices = contextNotices(snapshot, now);
+  try { for (const [key, entry] of requestNotices(snapshot)) notices.set(key, entry); }
+  catch { throw new WatchError("invalid_request_context"); }
+  if (notices.size > attentionCapacity(3)) throw new WatchError("attention_capacity");
+  return notices;
+}
+
 // Snapshot observer, not an event replay or a work executor. State is authoritative
 // as of each snapshot; intermediate changes between polls may intentionally be quiet.
 export class AssignmentWatcher {
   #running = null;
-  constructor({ client, journal, origin, roomId, emit, signal, now = Date.now, context = false }) {
-    Object.assign(this, { client, journal, origin, roomId, emit, signal, now, context });
+  constructor({ client, journal, origin, roomId, emit, signal, now = Date.now, context = false, requests = false }) {
+    Object.assign(this, { client, journal, origin, roomId, emit, signal, now, context, requests });
   }
   #active() {
     if (this.signal?.aborted || this.journal.shouldStop()) throw new WatchError("stopped");
@@ -91,7 +101,8 @@ export class AssignmentWatcher {
     if (!validId(lastEvent?.id) || lastEvent.roomId !== this.roomId) throw new WatchError("invalid_snapshot");
     const created = await anchor(1);
     if (created.type !== EVENT_TYPES.ROOM_CREATED) throw new WatchError("history_changed");
-    const binding = { version: this.context ? 2 : 1, filter: this.context ? "own-context-v2" : "own-attention-v1", origin: this.origin, roomId: this.roomId,
+    const version = this.requests ? 3 : this.context ? 2 : 1;
+    const binding = { version, filter: attentionFilter(version), origin: this.origin, roomId: this.roomId,
       memberId: snapshot.viewerId, accountId: snapshot.viewerAccountId ?? null,
       authEpoch: snapshot.viewerAuthEpoch ?? null, createdEventId: created.id };
     const previous = this.journal.state();
@@ -104,7 +115,7 @@ export class AssignmentWatcher {
     this.#active();
     const now = this.now();
     this.journal.reconcile(binding, { sequence: snapshot.sequence, eventId: lastEvent.id },
-      this.context ? contextNotices(snapshot, now) : attentionNotices(snapshot, now), now);
+      this.requests ? requestContextNotices(snapshot, now) : this.context ? contextNotices(snapshot, now) : attentionNotices(snapshot, now), now);
   }
   tick() {
     if (!this.#running) this.#running = this.#tick().finally(() => { this.#running = null; });

@@ -3,11 +3,14 @@ import { mkdirSync, lstatSync, realpathSync, openSync, closeSync } from "node:fs
 import { resolve, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { validId } from "../src/events.js";
+import { validateRequestNotice } from "./request-notices.mjs";
 
 export class WatchError extends Error {
   constructor(code) { super(code); this.code = code; }
 }
 export const MAX_ATTENTION = 1000;
+export const attentionCapacity = version => version === 3 ? 1001 : MAX_ATTENTION;
+export const attentionFilter = version => version === 3 ? "own-context-v3" : version === 2 ? "own-context-v2" : "own-attention-v1";
 const STATE_ID = 0x50525731, OWNER_ID = 0x50524c31;
 const schemas = {
   owner: ["CREATE TABLE ownership (id INTEGER PRIMARY KEY)"],
@@ -43,7 +46,7 @@ function openDatabase(path, kind, create, version = 1) {
     }
     const catalog = db.prepare("SELECT sql FROM sqlite_master WHERE name NOT GLOB 'sqlite_*' ORDER BY name").all().map(row => normalize(row.sql)).sort();
     if (db.prepare("PRAGMA application_id").get().application_id !== id
-        || !(version === null ? [1, 2] : [version]).includes(db.prepare("PRAGMA user_version").get().user_version)
+        || !(version === null ? [1, 2, 3] : [version]).includes(db.prepare("PRAGMA user_version").get().user_version)
         || JSON.stringify(catalog) !== JSON.stringify(schemas[kind].map(normalize).sort())
         || db.prepare("PRAGMA quick_check").get().quick_check !== "ok") throw new WatchError("state_schema_mismatch");
     db.exec("PRAGMA synchronous=FULL;");
@@ -76,11 +79,11 @@ function validateRecords(db, version) {
   db.exec("BEGIN");
   try {
     const row = db.prepare("SELECT body FROM checkpoint WHERE id=1").get();
-    const rows = db.prepare("SELECT * FROM attention LIMIT ?").all(MAX_ATTENTION + 1);
-    if (rows.length > MAX_ATTENTION || (!row && rows.length)) throw new Error();
+    const rows = db.prepare("SELECT * FROM attention LIMIT ?").all(attentionCapacity(version) + 1);
+    if (rows.length > attentionCapacity(version) || (!row && rows.length)) throw new Error();
     if (row) {
       const state = JSON.parse(row.body), b = state?.binding;
-      if (Buffer.byteLength(row.body) > 8192 || !b || b.version !== version || b.filter !== (version === 2 ? "own-context-v2" : "own-attention-v1")
+      if (Buffer.byteLength(row.body) > 8192 || !b || b.version !== version || b.filter !== attentionFilter(version)
           || typeof b.origin !== "string" || new URL(b.origin).origin !== b.origin
           || ![b.roomId, b.memberId, b.createdEventId].every(validId)
           || (b.accountId !== null && !validId(b.accountId))
@@ -98,9 +101,11 @@ function validateRecords(db, version) {
             || typeof notice.title !== "string" || !Number.isSafeInteger(notice.evaluatedThrough)
             || notice.evaluatedThrough < 1 || notice.evaluatedThrough > state.sequence
             || typeof notice.observedAt !== "string" || !Number.isFinite(Date.parse(notice.observedAt))) throw new Error();
-        if (version === 2) {
+        if (version >= 2) {
           if (ids.has(notice.id)) throw new Error();
-          ids.add(notice.id); validateContextNotice(notice, signature, attention.work_id, b);
+          ids.add(notice.id);
+          if (version === 3 && notice.subject === "request") validateRequestNotice(notice, signature, attention.work_id, b);
+          else validateContextNotice(notice, signature, attention.work_id, b);
         }
         else if (signature.length !== 7 || !validId(attention.work_id) || notice.workItemId !== attention.work_id
             || notice.next?.memberId !== b.memberId || notice.next?.needsAttention !== true) throw new Error();
@@ -117,7 +122,7 @@ function validateRecords(db, version) {
 export class WatchJournal {
   #owner; #db; #held = false; #runId; #version;
   constructor(directory, { acquire = true, version = acquire ? 1 : null, create = acquire } = {}) {
-    if ((acquire && ![1, 2].includes(version)) || (!acquire && version !== null && ![1, 2].includes(version))) throw new WatchError("state_schema_mismatch");
+    if ((acquire && ![1, 2, 3].includes(version)) || (!acquire && version !== null && ![1, 2, 3].includes(version))) throw new WatchError("state_schema_mismatch");
     if (typeof directory !== "string" || !directory.trim()) throw new WatchError("private_state_required");
     const path = resolve(directory);
     if (create) {
@@ -149,7 +154,7 @@ export class WatchJournal {
   reconcile(binding, checkpoint, notices, now) {
     this.#requireHolder();
     if (binding.version !== this.#version) throw new WatchError("state_schema_mismatch");
-    if (notices.size > MAX_ATTENTION) throw new WatchError("attention_capacity");
+    if (notices.size > attentionCapacity(this.#version)) throw new WatchError("attention_capacity");
     this.#transaction(() => {
       const previous = this.state();
       if (previous && JSON.stringify(previous.binding) !== JSON.stringify(binding)) throw new WatchError("identity_changed");
@@ -177,7 +182,7 @@ export class WatchJournal {
   }
   acknowledge(id) {
     this.#requireHolder();
-    if (this.#version !== 2 || !validId(id)) throw new WatchError("invalid_notice");
+    if (![2, 3].includes(this.#version) || !validId(id)) throw new WatchError("invalid_notice");
     return this.#transaction(() => {
       const rows = this.#db.prepare("SELECT work_id,pending FROM attention WHERE json_extract(notice,'$.id')=? LIMIT 2").all(id);
       if (rows.length > 1) throw new WatchError("state_schema_mismatch");

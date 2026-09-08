@@ -68,10 +68,18 @@ or secrets. Check for an existing `project-room` entry before installing again.
 
 ### What has—and has not—been verified
 
+September8 update: [native-host request exercise](NATIVE-HOST-REQUEST-CHECKPOINT-2026-09-08.md)
+now confirms a Codex CLI producer's clarification, fresh-process reconnect, original
+result submission and request answer. Claude Code connected and inspected the result,
+but did not record verification because the test omitted a required scoped discussion
+reader. Its corrected rerun awaits model-usage approval. This is partial acceptance,
+not six verified hosts or a fully completed collaboration. Codex shutdown warnings
+also remain documented. The other host routes below remain setup guidance.
+
 | Host | Documented route | Evidence boundary |
 | --- | --- | --- |
-| Codex desktop, CLI and IDE | Shared MCP settings / `config.toml`, stdio | [Official OpenAI setup](https://learn.chatgpt.com/docs/extend/mcp?surface=cli); native host not exercised in this pass |
-| Claude Code | User/local MCP config, stdio | [Official guide](https://code.claude.com/docs/en/mcp); current docs say stdio defaults to legacy initialization unless automatic negotiation is enabled |
+| Codex desktop, CLI and IDE | Shared MCP settings / `config.toml`, stdio | [Official OpenAI setup](https://learn.chatgpt.com/docs/extend/mcp?surface=cli); CLI0.153.4 native producer flow exercised, not desktop/IDE acceptance |
+| Claude Code | User/local MCP config, stdio | [Official guide](https://code.claude.com/docs/en/mcp); CLI2.1.259 connected and read exact evidence; independent review remains incomplete |
 | Claude Desktop | Local server config or desktop extension | [Desktop extensions](https://support.claude.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop), [manual config example](https://code.claude.com/docs/en/mcp#use-claude-code-as-an-mcp-server); no extension package built here |
 | Grok Build | `mcp_servers` config / `grok mcp add` | [Official guide](https://docs.x.ai/build/features/mcp-servers); may import Claude/Cursor settings, so avoid duplicate entries |
 | Cursor IDE | User `mcp.json`, stdio | [Official guide](https://cursor.com/docs/mcp); cloud-agent paths and credentials are separate |
@@ -106,6 +114,9 @@ change the advertised date without implementing and testing the new contract.
 3. If conversation matters, use `room_read_work_discussion` to read the selected
    source, linked drafts and replies. Follow its pages and check for newer context;
    the work revision alone cannot show a new clarification. See [discussion reads](WORK-DISCUSSION.md).
+   An operator's restricted tool list must include this inspection route and any
+   required request reader. Do not grant a review action while accidentally denying
+   the reads needed to substantiate it. Local inbox acknowledgement is not review.
 4. With permission to contribute, call `room_post_draft` using:
 
 ```json

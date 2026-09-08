@@ -243,9 +243,13 @@ body { font-size: 16px; }
 #connection-details { margin-right: clamp(1rem, 3vw, 2.5rem); color: var(--muted); font-size: .875rem; }
 #connection-details > summary { cursor: pointer; min-height: 44px; padding-block: .8rem; }
 #connection-explanation { position: absolute; z-index: 15; top: 100%; right: 1rem; margin: .25rem 0 0; width: min(26rem, calc(100vw - 2rem)); padding: 1rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--panel-raised); box-shadow: var(--shadow); line-height: 1.5; overflow-wrap: anywhere; }
-.auth-panel { max-width: 38rem; margin: clamp(1rem, 6vw, 5rem) auto; padding: clamp(1rem, 4vw, 2.5rem); }
+.auth-panel { max-width: 28rem; margin: clamp(1rem, 8vw, 6rem) auto; padding: clamp(1.25rem, 4vw, 2.5rem); }
+.app-shell:has(#auth-panel:not([hidden])) #identity-label,
+.app-shell:has(#auth-panel:not([hidden])) .connection-bar:has([data-state="signed-out"]) { display: none; }
+.auth-panel h1 { margin-bottom: 1.5rem; overflow-wrap: anywhere; }
 .auth-panel h1 { font-size: clamp(1.7rem, 4vw, 2.5rem); line-height: 1.12; }
 .auth-panel p, dialog p { line-height: 1.6; }
+#invitation-summary:empty { display: none; }
 .auth-panel form, #action-fields, #action-form, #invitation-account-form, .invitation-shell { display: grid; gap: 1rem; }
 #action-text-body, #result-body { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 22rem; overflow: auto; font: inherit; font-size: 1rem; padding: 1rem; border: 1px solid var(--line); border-radius: .65rem; }
 #action-context { overflow-wrap: anywhere; }
@@ -256,6 +260,19 @@ body { font-size: 16px; }
 .topbar-actions { flex-wrap: wrap; }
 .empty-note { padding: 1.25rem; color: var(--muted); font-size: 1rem; line-height: 1.6; }
 .reply-bar, .cursor-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .65rem 1rem; border-top: 1px solid var(--line-soft); font-size: .875rem; color: var(--muted); }
+#request-mode-bar { flex-wrap: wrap; }
+#request-mode-label { flex: 1 1 auto; overflow-wrap: anywhere; }
+.contribution-next { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .25rem 1rem .9rem; }
+.contribution-next > div:first-child { min-width: 0; }
+.contribution-next p { margin: .2rem 0 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.contribution-actions { display: flex; align-items: center; gap: .75rem; flex-shrink: 0; }
+#review-brief p { white-space: pre-wrap; overflow-wrap: anywhere; }
+#review-brief { padding: .75rem 0; border-bottom: 1px solid var(--line-soft); }
+@media (max-width: 600px) {
+  .contribution-next { align-items: stretch; flex-direction: column; gap: .6rem; }
+  .contribution-actions { flex-wrap: wrap; }
+}
+.request-state { display: inline-block; margin-right: .5rem; color: var(--muted); font-size: .875rem; }
 .message-content p { font-size: 1rem; white-space: pre-wrap; overflow-wrap: anywhere; }
 .form-hint, .prototype-note, .source-link, .audience-chip, .message-meta span, .message-meta time, .presence-member span, .work-facts, .definition, .receipt p, .receipt a, .blocker p, .decision p, .source-context { font-size: .875rem; }
 label, input, textarea, select { font-size: 1rem; }
@@ -305,7 +322,7 @@ button, .button, .message-to-work { min-height: 44px; }
 .invitation-feedback:empty { display: none; }
 .invitation-actions { margin-top: .25rem; }
 @media (max-width: 500px) {
-  .auth-panel { margin: 1rem .75rem; }
+  .auth-panel { margin: 1rem .75rem; padding: min(1.25rem, 5vw); }
   .cursor-row, .reply-bar { align-items: stretch; flex-direction: column; }
   .context-rail .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .invitation-details > div { grid-template-columns: 1fr; gap: .2rem; }
