@@ -221,6 +221,8 @@ function setConnectionStatus(text) {
   $("#connection-explanation").textContent = normalized;
 }
 function setFormStatus(status, text, error = false) {
+  if (status.textContent === text && status.classList.contains("visible") === Boolean(text)
+    && status.classList.contains("error") === (Boolean(text) && error)) return;
   status.textContent = text;
   status.classList.toggle("visible", Boolean(text));
   status.classList.toggle("error", Boolean(text) && error);
@@ -1366,7 +1368,7 @@ function renderActionContext(item, action) {
   evidence.hidden = !(["verify", "decide"].includes(action) && evidenceUrl);
   if (evidence.hidden) evidence.removeAttribute("href");
   else evidence.setAttribute("href", evidenceUrl);
-  $("#verification-boundary")?.remove();
+  $("#action-fields").querySelector("#verification-boundary")?.remove();
   const unknown = action === "verify" && item.independentVerificationRequired && !hasReportedProducer(item);
   if (unknown) $("#action-fields").insertAdjacentHTML("afterbegin", '<p id="verification-boundary" class="form-hint"><strong>Producer identity is unknown.</strong> This check cannot satisfy independent verification or unlock approval.</p>');
   $("#action-dialog").setAttribute("aria-describedby", unknown ? "action-context verification-boundary" : "action-context");

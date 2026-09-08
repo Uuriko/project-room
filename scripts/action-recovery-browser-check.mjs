@@ -150,6 +150,23 @@ test("closed unknown save warns on leave and sign-out without deleting a decline
   assert.equal(await page.locator("#main").isVisible(), true); await page.locator("#resume-action").click(); await f.unknown();
 });
 
+test("unchanged pending-save warning stays quiet during unrelated room activity", { timeout: 30000 }, async t => {
+  const f = await setup(t), { page } = f;
+  await f.open(); await f.fill(); await page.route("**/commands", route => route.abort("failed")); await f.save.click(); await f.unknown();
+  await f.save.focus();
+  await page.evaluate(() => {
+    window.actionAlertMutations = 0;
+    new MutationObserver(records => window.actionAlertMutations += records.length).observe(document.querySelector("#action-error"), { childList: true, subtree: true, characterData: true, attributes: true });
+  });
+  f.send(T.MESSAGE_POSTED, { messageId: "unrelated-to-save", body: "Synthetic unrelated discussion update" }, "guest");
+  await page.locator('[data-message-record-id="unrelated-to-save"]').waitFor({ state: "attached" });
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
+  assert.equal(await page.evaluate(() => window.actionAlertMutations), 0);
+  assert.equal(await f.save.evaluate(node => document.activeElement === node), true);
+  await f.save.click(); await f.unknown();
+  assert.ok(await page.evaluate(() => window.actionAlertMutations) > 0, "an explicit new attempt may announce its changed status");
+});
+
 test("a competing reservation resolves an uncommitted retry without overwriting either scope", { timeout: 30000 }, async t => {
   const f = await setup(t, { action: "claim" }), { page } = f, attempts = [];
   await f.open(); await f.fill();
