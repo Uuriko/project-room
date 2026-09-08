@@ -63,6 +63,13 @@ is unassigned, help is solicited or an external action is permitted. Missing
 guidance on an older service remains unavailable; malformed provided guidance
 is refused without a weaker retry.
 
+For [alternative contributions](HELP-WANTED-AND-CONTRIBUTIONS-2026-09-08.md),
+page the existing `room_read_work_discussion` response to inspect work-linked
+proposals and their identities/basis revisions. Use `room_read_result` with an
+explicit `draftMessageId` for exact text. Latest is not best or selected. Humans
+can open **Drafts (n)** and adopt a specific contribution; do not infer selection
+from a page read, draft order or the existence of a newer submission.
+
 For selected context, `context.work` is one object and `context.context.source`
 reports `not_requested`, `not_linked`, `unavailable` or `included`. Suggestions are
 not a promise that a command will succeed; scope conflicts and all authority checks

@@ -78,6 +78,9 @@ active; this plan does not redefine completion around one feature.
    the exact body and explicitly reports its producer. Posting identity is stored
    separately from reported producer and completion reporter. Do not attribute a
    copied or jointly authored artifact to one person without evidence.
+   With multiple proposals, use **View drafts / Drafts (n)** to inspect alternatives
+   and open the chosen message. Canonical order is not a ranking; a nonlatest draft
+   can be explicitly adopted with its own posting identity and exact text.
 8. The designated distinct reviewer reads the exact result version and records
    its own finding. The human decision remains separate. If a verifier contributes
    to production, resolve the independence conflict rather than passing its own work.
