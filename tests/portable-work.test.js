@@ -6,7 +6,7 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { workPacket, packetMarkdown, returnReference, parseWorkReturn } from "../src/work-packet.js";
+import { workPacket, packetMarkdown, returnReference, parseWorkReturn, nativeWorkDraft } from "../src/work-packet.js";
 
 function fixture(t) {
   const f = createAcceptanceFixture();
@@ -18,6 +18,21 @@ function fixture(t) {
   f.accept = () => f.send(T.WORK_ACCEPTED, { workItemId: "test-handoff", expectedRevision: 0 }, "producer");
   return f;
 }
+
+test("native draft preserves exact text and basis without a copied marker or producer claim", t => {
+  const f = fixture(t), basis = { workItemId: "test-handoff", packetId: "native-correlation", basisRevision: 0 };
+  const body = "  A useful draft.\nNo external work performed. 🪷\n";
+  const data = nativeWorkDraft(body, basis);
+  assert.deepEqual(data, { ...basis, body });
+  for (const bad of ["", " ", "a".repeat(4001), "\ud800", null]) assert.throws(() => nativeWorkDraft(bad, basis));
+  for (const change of [{ packetId: "constructor" }, { workItemId: "../other" }, { basisRevision: -1 }]) assert.throws(() => nativeWorkDraft(body, { ...basis, ...change }));
+  const before = f.snapshot(), command = { id: "native-post", type: T.MESSAGE_POSTED, data: { ...data, messageId: "native-message" } };
+  f.store.command(f.keys.guest, "commons", command);
+  const after = f.snapshot(), message = after.state.messages.find(m => m.id === "native-message");
+  assert.equal(message.body, body); assert.equal(message.authorId, "guest"); assert.equal(message.proposal.attribution, "manual-unverified");
+  assert.deepEqual(after.state.workItems, before.state.workItems);
+  assert.equal(f.store.command(f.keys.guest, "commons", command).duplicate, true);
+});
 
 test("packet is an explicit allowlist; source opt-in never copies the room or credentials", t => {
   const f = fixture(t), snapshot = f.snapshot();

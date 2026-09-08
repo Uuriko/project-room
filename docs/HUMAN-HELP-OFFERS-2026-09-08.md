@@ -81,3 +81,7 @@ another competing task or result model.
 
 The running previews and live site were not replaced. No push, deploy, external
 account connection, model call, message relay or payment occurred.
+
+Follow-up: [Native drafts](NATIVE-DRAFTS-2026-09-08.md) adds plain-text contribution
+entry and tests adoption, independent review and human decision without changing
+the offer lifecycle.
