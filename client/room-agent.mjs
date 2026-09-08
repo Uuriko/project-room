@@ -47,7 +47,7 @@ export class RoomAgentClient {
     // is never a cached grant. The service still authorizes the operation itself.
     if (this.#memberId) await this.checkConnection({ signal });
     const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal);
-    if (this.#memberId && (suffix === "" || suffix.startsWith("/work-context?") || suffix.startsWith("/return-brief?"))) {
+    if (this.#memberId && (suffix === "" || suffix.startsWith("/work-context?") || suffix.startsWith("/work-discussion?") || suffix.startsWith("/return-brief?"))) {
       if (value?.roomId !== this.#roomId || value.viewerId !== this.#memberId || value.viewerAccountId !== null
         || value.viewerAuthEpoch !== null || value.viewerSessionBinding !== null || value.viewerSessionRevision !== null) {
         throw new RoomClientError(200, "identity_mismatch", "Room response does not match the configured agent");
@@ -106,6 +106,59 @@ export class RoomAgentClient {
       || (includeSource && (!source || (result.work.sourceMessageId ? !["included", "unavailable"].includes(source.status) : source.status !== "not_linked")
         || (source.status === "included" ? source.message?.id !== result.work.sourceMessageId || typeof source.message?.body !== "string" : source.message !== null)))) {
       throw new RoomClientError(200, "invalid_response", "Selected work context does not match the request");
+    }
+    return result;
+  }
+  async workDiscussion(workItemId, options = {}) {
+    if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => !["since", "cursor", "limit", "signal"].includes(key))) throw new Error("Use discussion checkpoint, cursor, limit and signal only");
+    const { since, cursor = null, limit = 20, signal } = options, integer = n => Number.isSafeInteger(n) && n >= 0;
+    if (!validId(workItemId) || !integer(limit) || limit < 1 || limit > 50 || (since !== undefined && !integer(since))
+      || (cursor !== null && (typeof cursor !== "string" || cursor.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(cursor) || since !== undefined))) throw new Error("Choose one task and either a checkpoint or its continuation");
+    const query = new URLSearchParams({ workItemId, limit });
+    if (cursor !== null) query.set("cursor", cursor);
+    if (since !== undefined) query.set("since", since);
+    const result = await this.#request(`/work-discussion?${query}`, undefined, signal), page = result?.discussion, current = result?.current;
+    const invalid = () => { throw new RoomClientError(200, "invalid_response", "Work discussion does not match the request"); };
+    const continuation = token => {
+      let value;
+      try { value = JSON.parse(Buffer.from(token, "base64url").toString("utf8")); } catch { invalid(); }
+      const keys = ["version", "roomId", "workItemId", "viewerId", "horizon", "anchorId", "since", "after"];
+      if (!value || Array.isArray(value) || Object.keys(value).length !== keys.length || !keys.every(key => Object.hasOwn(value, key))
+        || Buffer.from(JSON.stringify(value)).toString("base64url") !== token || value.version !== 1
+        || value.roomId !== this.#roomId || value.workItemId !== workItemId || value.viewerId !== result.viewerId || !validId(value.anchorId)
+        || !integer(value.horizon) || !integer(value.since) || !integer(value.after) || value.since > value.after || value.after >= value.horizon) invalid();
+      return value;
+    };
+    if (result?.contractVersion !== 1 || result.roomId !== this.#roomId || result.workItemId !== workItemId || !validId(result.viewerId)
+      || result.selection?.rule !== "source-linked-descendants-v1" || result.scope?.membership !== "room" || result.scope.targetedMessages !== "room-visible" || result.scope.externalExecution !== false
+      || !page || !integer(page.horizon) || !integer(page.since) || !integer(page.after) || page.since > page.after || page.after > page.horizon
+      || page.cursor !== cursor || (cursor === null && (page.since !== (since ?? 0) || page.after !== (since ?? 0)))
+      || page.limit !== limit || !Array.isArray(page.items) || page.items.length > limit || typeof page.hasMore !== "boolean"
+      || !integer(current?.evaluatedThrough) || current.evaluatedThrough < page.horizon || !Number.isFinite(Date.parse(current.evaluatedAt))
+      || !integer(current.workRevision) || current.next?.workItemId !== workItemId || current.next.workRevision !== current.workRevision
+      || (page.hasMore ? !page.items.length || page.checkpoint !== null || typeof page.nextCursor !== "string" || page.nextCursor.length > 2048
+        || !/^[A-Za-z0-9_-]+$/.test(page.nextCursor) || page.nextCursor === cursor : page.nextCursor !== null || page.checkpoint !== page.horizon)) invalid();
+    const requested = cursor === null ? null : continuation(cursor);
+    if (requested && ["horizon", "since", "after"].some(key => requested[key] !== page[key])) invalid();
+    let after = page.after, bytes = 0; const ids = new Set(), events = new Set();
+    for (const row of page.items) {
+      if (!row || typeof row !== "object" || Array.isArray(row)) invalid();
+      const message = row.message, proposal = message?.proposal;
+      if (!integer(row.sequence) || row.sequence <= after || row.sequence > page.horizon || !validId(row.eventId) || events.has(row.eventId)
+        || !["source", "linked", "reply"].includes(row.relation) || !validId(message?.id) || ids.has(message.id) || !validId(message.authorId)
+        || typeof message.body !== "string" || !Number.isFinite(Date.parse(message.createdAt))
+        || ["replyToId", "toMemberId", "workItemId"].some(key => message[key] !== null && !validId(message[key]))
+        || (row.relation === "source" && message.id !== result.selection.sourceMessageId)
+        || (row.relation === "linked" && message.workItemId !== workItemId)
+        || (row.relation === "reply" && (!message.replyToId || message.workItemId !== null))
+        || (proposal && (!validId(proposal.packetId) || !integer(proposal.basisRevision) || !integer(proposal.submittedAtRevision)
+          || proposal.basisRevision > proposal.submittedAtRevision || proposal.attribution !== "manual-unverified"))) invalid();
+      after = row.sequence; ids.add(message.id); events.add(row.eventId); bytes += Buffer.byteLength(JSON.stringify(row));
+    }
+    if (bytes > 65536 || page.rowBytes !== bytes || (page.hasMore && after >= page.horizon)) invalid();
+    if (page.hasMore) {
+      const next = continuation(page.nextCursor);
+      if (next.horizon !== page.horizon || next.since !== page.since || next.after !== after || (requested && requested.anchorId !== next.anchorId)) invalid();
     }
     return result;
   }

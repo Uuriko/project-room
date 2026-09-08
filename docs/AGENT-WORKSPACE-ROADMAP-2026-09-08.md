@@ -128,6 +128,38 @@ question—not a stream of tool calls.
 
 ## Build order and release gates
 
+September 8 refinement: finish the [focused discussion reader](WORK-DISCUSSION.md),
+then prioritize the following room-native capabilities. This is a design decision,
+not a claim that these capabilities already exist or work in native vendor hosts.
+
+1. **Durable room results.** Start with a versioned text artifact connected to one
+   work record: exact bytes/hash, producer, predecessor and review target. Surface
+   only Save as result and the preview in the work card. Pasted/manual drafts take
+   the same route without losing unverified provenance. Verify a real agent's
+   revision/review cycle without placeholder evidence URLs; old approval must never
+   transfer to new bytes. A2A describes client-managed artifact lineage; borrow
+   that pattern, not its different terminal-task semantics. [Source](https://a2a-protocol.org/latest/topics/life-of-a-task/)
+2. **Standing permission and eligible work.** An owner sets “What may this agent
+   do?” under its existing connection; the agent can ask “What can I help with?”
+   within those boundaries. Reuse sponsor/permissions and make new policy versions
+   explicit; a task filter is not a privacy boundary. Verify ordinary authorized
+   initiative, wrong-scope refusal and revocation. Linear separates agent delegation
+   from accountable human assignment; adapt that accountability without replacing
+   Room's canonical work model. [Source](https://linear.app/docs/assigning-issues)
+3. **A durable attention inbox.** Extend the notify-only watcher for exact mentions,
+   answered questions, review requests and relevant clarification. Distinguish
+   queued, delivered and handled; coalesce noise and keep the human read marker
+   independent. BYO consumers remain free of hosted inference. Only later add
+   explicitly authorized runtime wake/dispatch, tied to grant and attempt versions.
+   Paperclip distinguishes handoff, interruption and scoped wake; plain name text
+   is not enough to dispatch. Verify restart/dedupe and two-agent resumption without
+   root relaying the answer. [Source](https://docs.paperclip.ing/guides/day-to-day/issues/)
+
+These priorities add depth to existing chat/work/agent controls, not three new
+dashboards. Native-host acceptance and v9 recovery qualification continue alongside
+them. Resource isolation, remote MCP/OAuth, tool-provider adapters and paid execution
+remain separately scoped follow-ons. The detailed dependency sequence remains:
+
 1. Finish native host acceptance checks and MCP lifecycle parity with the current
    service, including genuine separate-agent coordination and strict receipts.
 2. Introduce versioned charters and attempt records with migration/recovery tests.

@@ -19,6 +19,7 @@ Set `ROOM_AGENT_ORIGIN`, `ROOM_AGENT_ROOM`, and `ROOM_AGENT_TOKEN` for a permitt
 ```sh
 npm run --silent agent:inbox -- orient
 npm run --silent agent:inbox -- work WORK_ID --include-source
+npm run --silent agent:inbox -- discussion WORK_ID --limit 20
 npm run --silent agent:inbox -- brief
 npm run --silent agent:inbox -- changes 0
 ```
@@ -43,6 +44,7 @@ the client itself does not retry reads or writes automatically.
 | --- | --- |
 | `orient()` | Contract version, authenticated member, Room scope/permissions, evaluated-through sequence, bounded-pilot work records and their next steps. It is a description, not permission to dispatch. |
 | `snapshot()` | Current authorized Room projection, recent event tail and viewer ownership. Room membership currently grants Room-wide context; this is not task-level privacy. |
+| `workDiscussion(id, { since, cursor, limit, signal })` | One bounded source/linked-draft/reply page, exact attribution, frozen continuation and separate current work. No reactions, unrelated threads or read-marker changes. Use since **or** cursor; no automatic pagination. [Discussion and recovery contract](WORK-DISCUSSION.md). |
 | `workContext(id, options)` | One authenticated task read: current roles, claim, blocker, evidence, next actor and suggested Room actions, with a shared revision/evaluation boundary. Source excluded by default; `{ includeSource: true }` adds only its exact linked message. No fetches or writes. Local candidate, not yet live; see [selected-task contract](./WORK-CONTEXT.md). |
 | `workDefinition(id, { signal })` | Reads selected context once and returns only title/done criteria for deliberate reuse. No source text or write. Choose new people and review flags explicitly; read permission does not grant creation. [Reuse contract](./WORK-REUSE.md). Local candidate, not yet live. |
 | `resultDraft(id, { signal })` | Reads selected context once, returning only title/reported summary for deliberate editing. No source, identities, structured evidence links or authority metadata returned. Not automatic redaction, verified authorship or publication. [Result-copy contract](./RESULT-COPY.md). Local candidate, not yet live. |
@@ -94,8 +96,9 @@ consent to submit against an older revision should add `allowOlderBasis: true`.
 That is changed input, not an exact retry. For strict receipt matching use
 `confirmsWorkReturn(receipt, command, roomId, memberId)` from `src/workflow.js`.
 
-Read back with `snapshot().state.messages` if necessary; use `workContext()` to
-confirm work remains unchanged. Both reads leave the caught-up marker untouched.
+Read back with `workDiscussion()` and explicitly follow any continuation, matching
+the exact receipt event/message ID, author and bytes. Use `workContext()` to confirm
+work remains unchanged. Neither read advances the caught-up marker.
 
 A command has a caller-owned stable `id`, an allowed `type`, and `data`. The service attributes the actor from the credential. Mutations include the expected work revision; review and decisions identify the exact completion event and evidence version. [The write guide](./AGENT-WRITE-GUIDE.md) contains command shapes and recovery rules; its JSON examples run through the real store/client in `tests/agent-write-guide.test.js`. Reading server or test implementation is not required to start.
 

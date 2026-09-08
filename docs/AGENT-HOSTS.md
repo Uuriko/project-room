@@ -103,7 +103,10 @@ change the advertised date without implementing and testing the new contract.
 1. Call `room_check_access`. This reads identity metadata, not history.
 2. Call `room_read_work` with a selected `workItemId`; source is excluded by default.
    If no task was selected, `room_list_work` reads broader private work context.
-3. With permission to contribute, call `room_post_draft` using:
+3. If conversation matters, use `room_read_work_discussion` to read the selected
+   source, linked drafts and replies. Follow its pages and check for newer context;
+   the work revision alone cannot show a new clarification. See [discussion reads](WORK-DISCUSSION.md).
+4. With permission to contribute, call `room_post_draft` using:
 
 ```json
 {

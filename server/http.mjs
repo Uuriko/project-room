@@ -305,7 +305,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         reject(405, "method_not_allowed", "Method not allowed");
       }
       const revokeMatch = /^\/api\/rooms\/([^/]{1,384})\/invitations\/([^/]{1,384})\/revoke$/.exec(url.pathname);
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|invitations|share-links|share-links-cancel|reminders|agent-connections))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|invitations|share-links|share-links-cancel|reminders|agent-connections))?$/.exec(url.pathname);
       if (!match && !revokeMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((match ?? revokeMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
@@ -327,6 +327,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         return json(res, 200, store.workContext(selected.token, roomId, params.get("workItemId"), {
           includeSource: params.get("includeSource") === "true", expectedSessionBinding: fence
+        }));
+      }
+      if (route === "work-discussion" && req.method === "GET") {
+        const params = url.searchParams;
+        if ([...params.keys()].some(key => !["workItemId", "cursor", "since", "limit", "auth"].includes(key) || params.getAll(key).length !== 1)
+          || ["since", "limit"].some(key => params.has(key) && !/^(0|[1-9]\d*)$/.test(params.get(key)))) reject(422, "invalid_discussion", "Invalid discussion selection");
+        return json(res, 200, store.workDiscussion(selected.token, roomId, params.get("workItemId"), {
+          cursor: params.get("cursor"), ...(params.has("since") ? { since: Number(params.get("since")) } : {}),
+          ...(params.has("limit") ? { limit: Number(params.get("limit")) } : {}), expectedSessionBinding: fence
         }));
       }
       if (route === "reminders" && req.method === "GET") return json(res, 200, store.reminders.list(selected.token, roomId, fence));

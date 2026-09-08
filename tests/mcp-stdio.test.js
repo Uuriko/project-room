@@ -31,7 +31,7 @@ test("stdio version negotiation, discovery fallback, tools and notification sile
   assert.equal((await h.rpc("tools/list")).error.code, -32000);
   await h.ready();
   const tools = (await h.rpc("tools/list")).result.tools;
-  assert.equal(tools.length, 14); assert.ok(tools.every(tool => tool.inputSchema.additionalProperties === false));
+  assert.equal(tools.length, 15); assert.ok(tools.every(tool => tool.inputSchema.additionalProperties === false));
   assert.equal((await h.rpc("tools/call", { name: "room_check_access", arguments: {} }, "typed-id")).result.structuredContent.status, "credential_accepted");
   const count = h.replies.length; h.send({ method: "unknown-notification" }); await tick(); assert.equal(h.replies.length, count);
   assert.equal((await h.rpc("tools/call", { name: "room_read_work", arguments: { workItemId: "work", token: "not-allowed" } })).error.code, -32602);
@@ -82,6 +82,16 @@ test("oversized input and ambiguous in-flight IDs close the bounded transport", 
   const duplicate = harness(t, { checkConnection: () => new Promise(() => {}) }); await duplicate.ready();
   const message = { id: "same", method: "tools/call", params: { name: "room_check_access" } };
   duplicate.send(message); duplicate.send(message); await duplicate.server.done;
+});
+
+test("discussion refusals explain safe next steps without echoing service diagnostics", async t => {
+  for (const code of ["invalid_discussion", "discussion_ahead", "discussion_history_changed", "discussion_entry_too_large"]) {
+    const h = harness(t, { workDiscussion: async () => { throw new RoomClientError(409, code, "PRIVATE SECRET"); } }); await h.ready();
+    const result = (await h.rpc("tools/call", { name: "room_read_work_discussion", arguments: { workItemId: "work" } })).result;
+    assert.equal(result.isError, true); assert.equal(result.structuredContent.type, "discussion_refused");
+    assert.equal(result.structuredContent.code, code); assert.equal(JSON.stringify(result).includes("PRIVATE SECRET"), false);
+    assert.ok(result.structuredContent.message.length > 40);
+  }
 });
 
 test("schema-valid oversized work input is a local refusal, not an unknown save", async t => {
