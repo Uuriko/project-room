@@ -46,11 +46,11 @@ export class AgentConnections {
     return auth;
   }
   authority(row) {
-    const room = this.store.room(row.room_id).state;
+    const room = this.store.roomAuthority(row.room_id);
     const sponsor = room.members[row.sponsor_member_id], member = room.members[row.member_id];
     const account = this.db.prepare("SELECT active,auth_epoch FROM accounts WHERE id=?").get(row.sponsor_account_id);
     const binding = this.db.prepare("SELECT account_id FROM member_accounts WHERE room_id=? AND member_id=?").get(row.room_id, row.sponsor_member_id);
-    if (!sponsor || sponsor.kind !== "human" || sponsor.active === false || sponsor.id !== room.room.ownerId
+    if (!sponsor || sponsor.kind !== "human" || sponsor.active === false || sponsor.id !== room.ownerId
       || sponsor.revision !== row.sponsor_member_revision || !sponsor.permissions.includes("manage_members")
       || account?.active !== 1 || account.auth_epoch !== row.sponsor_auth_epoch || binding?.account_id !== row.sponsor_account_id
       || !member || member.kind !== "agent" || member.active === false || member.revision !== row.member_revision) return false;

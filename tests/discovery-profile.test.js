@@ -36,6 +36,12 @@ test('discovery profiling separates managed sponsorship reads and immutable proj
     const profile = await profileDiscovery({ workCount: 4, messageCount: 4, samples: 2, managedProducer });
     assert.equal(profile.credentialMode, managedProducer ? 'owner-connected' : 'legacy-key');
     assert.equal(profile.roomAuditUnchanged, true);
+    assert.equal(profile.authorityComparison.equivalent, true);
+    assert.ok(profile.authorityComparison.narrowJsonBytes > 0);
+    assert.ok(profile.authorityComparison.narrowJsonBytes < profile.projectionJsonBytes);
+    for (const timing of Object.values(profile.authorityComparison.millisecondsPerRead)) {
+      assert.ok(timing.min >= 0 && timing.min <= timing.median && timing.median <= timing.max);
+    }
     for (const metric of Object.values(profile.metrics)) {
       assert.equal(metric.samples, 2);
       assert.ok(Number.isSafeInteger(metric.fullRoomReads.min) && metric.fullRoomReads.min >= 0);
@@ -43,6 +49,10 @@ test('discovery profiling separates managed sponsorship reads and immutable proj
       assert.equal(metric.fullRoomReads.min, metric.identityFullRoomReads.min + metric.operationFullRoomReads.min);
       assert.equal(metric.fullProjectionInputBytes.min, metric.fullRoomReads.min * profile.projectionJsonBytes);
       assert.equal(metric.fullProjectionInputBytes.min, metric.fullProjectionInputBytes.max);
+      assert.equal(metric.authorityReads.min, metric.identityAuthorityReads.min + metric.operationAuthorityReads.min);
+      assert.equal(metric.projectionSelections.min, metric.fullRoomReads.min + metric.authorityReads.min);
+      assert.equal(metric.javascriptProjectionInputBytes.min,
+        metric.fullProjectionInputBytes.min + metric.authorityReads.min * profile.authorityComparison.narrowJsonBytes);
     }
   }
 });

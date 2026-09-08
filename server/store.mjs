@@ -336,7 +336,8 @@ export class RoomStore {
       if (stored.status === "accepted") {
         const linked = this.db.prepare("SELECT id,sequence,body,room_id FROM events WHERE id=?").get(stored.joined_event_id);
         const binding = this.db.prepare("SELECT account_id,origin FROM member_accounts WHERE room_id=? AND member_id=?").get(stored.room_id, stored.intended_member_id);
-        assertInvitationMembershipEvidence(stored, linked, binding, this.room(stored.room_id));
+        const { sequence, members } = this.roomAuthority(stored.room_id);
+        assertInvitationMembershipEvidence(stored, linked, binding, { sequence, state: { members } });
       }
       return replayed;
     } catch { fail(503, "invitation_integrity_error", "Invitation record requires operator reconciliation"); }
@@ -514,6 +515,14 @@ export class RoomStore {
     if (!row) fail(404, "room_not_found", "Room not found");
     return { sequence: row.sequence, state: JSON.parse(row.projection) };
   }
+  roomAuthority(roomId) {
+    // Fresh storage read, not an authorization cache. Keep membership provenance
+    // intact without decoding conversation, work history or the Room brief in JS.
+    const row = this.db.prepare("SELECT sequence,json_extract(projection,'$.room.ownerId','$.members') AS authority FROM rooms WHERE id=?").get(roomId);
+    if (!row) fail(404, "room_not_found", "Room not found");
+    const [ownerId, members] = JSON.parse(row.authority);
+    return { sequence: row.sequence, ownerId, members };
+  }
   rebuildProjection(roomId) {
     const room = this.room(roomId);
     const checkpoint = this.db.prepare("SELECT sequence,projection FROM projection_checkpoints WHERE room_id=?").get(roomId);
@@ -672,7 +681,7 @@ export class RoomStore {
     if (!validId(roomId)) fail(422, "invalid_room", "Invalid Room id");
     const binding = this.db.prepare("SELECT member_id FROM member_accounts WHERE room_id=? AND account_id=?").get(roomId, auth.account.id);
     if (!binding) fail(403, "access_denied", "This account has no membership in that Room");
-    const member = this.room(roomId).state.members[binding.member_id];
+    const member = this.roomAuthority(roomId).members[binding.member_id];
     if (!member || member.kind !== "human" || member.active === false) fail(403, "access_denied", "Active human Room membership required");
     this.verifyInvitedMembership(roomId, member);
     return { ...auth, member, roomId };
@@ -942,7 +951,7 @@ export class RoomStore {
     }
     if (row.revoked || row.expires_at <= this.now() || (row.parent_hash && (row.parent_revoked !== 0 || row.parent_expiry <= this.now()))) fail(401, "unauthenticated", "Session or key expired or revoked");
     if (roomId && row.room_id !== roomId) fail(403, "access_denied", "This credential does not grant access to that room");
-    const members = this.room(row.room_id).state.members;
+    const members = this.roomAuthority(row.room_id).members;
     const member = Object.hasOwn(members, row.member_id) && members[row.member_id];
     if (!member || member.active === false) fail(403, "access_denied", "Room membership is inactive");
     this.verifyInvitedMembership(row.room_id, member);

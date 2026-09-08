@@ -1,7 +1,7 @@
 // Local test fixture only. This exposes synthetic provisioning for tests and
 // MUST NOT be deployed. The eventual public entrypoint must not include it.
 import assert from 'node:assert/strict';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { EVENT_TYPES as T } from '../src/events.js';
@@ -9,6 +9,19 @@ import { DurableDatabase, durableStorage } from './storage.mjs';
 import { STORE_SCHEMA_VERSION } from '../server/writer-fence.mjs';
 import { textVersion } from '../server/text-results.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
+
+function checkNarrowAuthentication(store, credentials) {
+  const { state, sequence } = store.room('commons'), before = auditRecovery(store).dataSha256;
+  assert.deepEqual(store.roomAuthority('commons'), { sequence, ownerId: state.room.ownerId, members: state.members });
+  const room = store.room; store.room = () => assert.fail('Authentication must use the narrow storage read');
+  try {
+    for (const { token, member, binding = null } of credentials) {
+      assert.deepEqual(store.authenticate(token, 'commons', binding).member, state.members[member]);
+      if (binding) assert.throws(() => store.authenticate(token, 'commons', 'wrong'), { code: 'session_binding_changed' });
+    }
+  } finally { store.room = room; }
+  assert.equal(auditRecovery(store).dataSha256, before);
+}
 
 export class StoreTestRoom {
   constructor(ctx) {
@@ -67,6 +80,14 @@ export class StoreTestRoom {
       store.shareLinks.cancel(owner, 'commons', link.id, null);
       assert.throws(() => store.shareLinks.preview(linkToken), { code: 'link_unavailable' });
       const send = (type, data) => store.command(owner, 'commons', { id: randomUUID(), type, data });
+      const session = store.createSession(owner), managedToken = randomBytes(32).toString('base64url');
+      store.agentConnections.apply(session.token, 'commons', { action: 'create', requestId: randomUUID(), memberId: 'managed-reader',
+        displayName: 'Managed reader', access: 'chat', keyHash: createHash('sha256').update(managedToken).digest('hex'),
+        expiresAt: Date.now() + 3600000, expectedOwnerRevision: 0 }, session.session.sessionBinding);
+      send(T.MEMBER_ADDED, { memberId: 'legacy-reader', displayName: 'Legacy reader', kind: 'agent', permissions: [], accountableHumanId: 'owner' });
+      const credentials = [{ token: owner, member: 'owner' }, { token: session.token, member: 'owner', binding: session.session.sessionBinding },
+        { token: managedToken, member: 'managed-reader' }, { token: store.issueAccessKey('commons', 'legacy-reader'), member: 'legacy-reader' }, ...guests];
+      checkNarrowAuthentication(store, credentials);
       const scope = { repository: 'test/repo', ref: 'draft', paths: ['src/**'], expiresAt: new Date(Date.now() + 60000).toISOString() };
       for (const workItemId of ['scope-first', 'scope-second']) {
         send(T.WORK_PROPOSED, { workItemId, title: workItemId, definitionOfDone: 'Synthetic handoff', accountableMemberId: 'owner', mode: 'write', independentVerificationRequired: false, ownerDecisionRequired: false });
@@ -96,10 +117,11 @@ export class StoreTestRoom {
       assert.throws(() => store.command(owner, 'commons', { ...nativeCommand, data: { ...nativeCommand.data, evidenceVersion: textVersion('wrong') } }), { code: 'command_rejected' });
       const nativeSaved = store.command(owner, 'commons', nativeCommand);
       assert.equal(store.workResult(owner, 'commons', 'native-text').result.text.body, nativeBody); auditRecovery(store);
-      return Response.json({ guests, sequence: store.room('commons').sequence, eventId: receipt.event.id, owner, nativeBody, nativeCommand, nativeSaved });
+      return Response.json({ guests, credentials, sequence: store.room('commons').sequence, eventId: receipt.event.id, owner, nativeBody, nativeCommand, nativeSaved });
     }
     if (path === '/resume') {
-      const { guests, sequence, eventId, owner, nativeBody, nativeCommand, nativeSaved } = await request.json();
+      const { guests, credentials, sequence, eventId, owner, nativeBody, nativeCommand, nativeSaved } = await request.json();
+      checkNarrowAuthentication(store, credentials);
       for (const guest of guests) {
         assert.equal(store.authenticateAccountSession(guest.token, 'commons', guest.binding).member.id, guest.member);
         const events = store.eventsAfter(guest.token, 'commons', 0, 100, guest.binding);
