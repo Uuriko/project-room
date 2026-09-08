@@ -69,6 +69,15 @@ export class AssignmentWatcher {
   }
   async reconcile(initialSnapshot) {
     this.#active();
+    // Reuse only validated rows within this observation. Equal prior/current
+    // checkpoints need one anchor read, but both comparisons still apply.
+    // A new reconcile (including the pre-delivery pass) always reads afresh.
+    const anchors = new Map();
+    const anchor = async sequence => {
+      this.#active();
+      if (!anchors.has(sequence)) anchors.set(sequence, await this.#anchor(sequence));
+      return anchors.get(sequence);
+    };
     const snapshot = initialSnapshot ?? await this.client.snapshot({ signal: this.signal });
     this.#active();
     const member = snapshot?.state?.members?.[snapshot.viewerId];
@@ -80,7 +89,7 @@ export class AssignmentWatcher {
         || !snapshot.state.workItems || !Array.isArray(snapshot.state.eventLog)) throw new WatchError("invalid_snapshot");
     const lastEvent = snapshot.state.eventLog.at(-1);
     if (!validId(lastEvent?.id) || lastEvent.roomId !== this.roomId) throw new WatchError("invalid_snapshot");
-    const created = await this.#anchor(1);
+    const created = await anchor(1);
     if (created.type !== EVENT_TYPES.ROOM_CREATED) throw new WatchError("history_changed");
     const binding = { version: this.context ? 2 : 1, filter: this.context ? "own-context-v2" : "own-attention-v1", origin: this.origin, roomId: this.roomId,
       memberId: snapshot.viewerId, accountId: snapshot.viewerAccountId ?? null,
@@ -88,10 +97,10 @@ export class AssignmentWatcher {
     const previous = this.journal.state();
     if (previous) {
       if (JSON.stringify(binding) !== JSON.stringify(previous.binding)) throw new WatchError("identity_changed");
-      if (snapshot.sequence < previous.sequence || (await this.#anchor(previous.sequence)).id !== previous.eventId) throw new WatchError("history_changed");
+      if (snapshot.sequence < previous.sequence || (await anchor(previous.sequence)).id !== previous.eventId) throw new WatchError("history_changed");
     }
     // Tie the snapshot's last event to its claimed sequence, including first use.
-    if ((await this.#anchor(snapshot.sequence)).id !== lastEvent.id) throw new WatchError("history_changed");
+    if ((await anchor(snapshot.sequence)).id !== lastEvent.id) throw new WatchError("history_changed");
     this.#active();
     const now = this.now();
     this.journal.reconcile(binding, { sequence: snapshot.sequence, eventId: lastEvent.id },

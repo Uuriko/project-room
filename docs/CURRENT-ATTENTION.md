@@ -81,6 +81,14 @@ guarantees. The response has the latest evaluated checkpoint; unchanged conditio
 retain the original body/ID. Always refresh through `nextRead` before new work.
 The actual action checks its own current authority.
 
+History rows are reused only when the same sequence is checked twice inside one
+reconciliation. The next reconciliation, pull, acknowledgement or restart reads
+them again. Each actual pinned-client request still checks the session first;
+there is no cached permission, skipped pre-delivery pass or new service endpoint.
+An unchanged pinned pull uses 12 GETs; advancing history can require 14 or 16.
+The CLI adds its separate startup access check. These are request counts, not a
+latency, token-cost or retention guarantee.
+
 Current conditions coalesce. Changes occurring entirely between checks may be
 omitted; obsolete pending conditions are removed/replaced. This is not an event
 archive, message-request inbox, delivery receipt, cross-device seen ledger or
