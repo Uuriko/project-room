@@ -6,6 +6,7 @@ import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, Draft
 import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, producerKnown as hasReportedProducer } from "./workflow.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation } from "./share-links.js";
 import { installAgentConnections } from "./agent-connections.js";
+import { installRoomInstructions } from "./room-instructions.js";
 import { installReminders } from "./reminders.js";
 import { installPortableWork, installResultCopy } from "./portable-work.js";
 
@@ -32,6 +33,7 @@ let portableWorkUI = null;
 let resultCopyUI = null;
 let remindersUI = null;
 let agentConnectionsUI = null;
+let instructionsUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
 let workDraftId = null, replyToId = null, busy = false;
 let workFormEpoch = 0, workRetryLocked = false;
@@ -86,6 +88,7 @@ const client = new RoomClient({
     shareLinksUI?.sync();
     remindersUI?.sync();
     agentConnectionsUI?.sync();
+    instructionsUI?.sync();
     resultCopyUI?.sync();
     if (firstSnapshot) {
       const saved = recovery.read(draftScope(identity), state);
@@ -121,6 +124,7 @@ const client = new RoomClient({
     resultCopyUI?.reset();
     remindersUI?.reset();
     agentConnectionsUI?.reset();
+    instructionsUI?.reset();
     workDraftId = null; replyToId = null; workFormEpoch++; setWorkRetry(false);
     $("#work-reuse-hint").hidden = true;
     currentThreadId = null; conversation = null; drafts = new ConversationDrafts();
@@ -179,6 +183,7 @@ const briefView = new ReturnBrief(client, {
 });
 remindersUI = installReminders({ client, getState: () => state, onSaved: text => notice(text) });
 agentConnectionsUI = installAgentConnections({ client, getState: () => state });
+instructionsUI = installRoomInstructions({ client, getState: () => state, onSaved: text => notice(text) });
 portableWorkUI = installPortableWork({ client, getState: () => state, onSaved: messageId => {
   const visible = conversation?.byId.has(messageId);
   if (visible) revealMessage(messageId);
@@ -896,8 +901,8 @@ $("#invitation-account-form").addEventListener("submit", async e => {
   const roomBefore = state && session ? session : null;
   if (roomBefore) {
     saveComposer();
-    if ((drafts.hasText() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction)
-      && !window.confirm(pendingAction?.uncertain ? "Switch accounts and clear drafts and the pending retry? The action may already be saved." : "Signing in with a different account clears this Room’s unsent drafts, private setup and forms before acceptance. Continue with this account key?")) return;
+    if ((drafts.hasText() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction)
+      && !window.confirm((pendingAction?.uncertain || instructionsUI?.hasUnknown()) ? "Switch accounts and clear drafts and the pending retry? The action may already be saved." : "Signing in with a different account clears this Room’s unsent drafts, private setup and forms before acceptance. Continue with this account key?")) return;
   }
   if (roomBefore) { saveComposer(); client.disconnect(); }
   invitation.phase = "authenticating";
@@ -1052,8 +1057,8 @@ $("#auth-form").addEventListener("submit", async e => {
 $("#signout-button").addEventListener("click", async () => {
   if (busy || signoutLoading || !state || !session || invitationIsCommitting()) return;
   saveComposer();
-  if (drafts.hasText() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction) {
-    if (!window.confirm(pendingAction?.uncertain ? "Sign out and clear drafts and the pending retry? The action may already be saved." : "Sign out and clear unsent drafts and private setup on this device?")) return;
+  if (drafts.hasText() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction) {
+    if (!window.confirm((pendingAction?.uncertain || instructionsUI?.hasUnknown()) ? "Sign out and clear drafts and the pending retry? The action may already be saved." : "Sign out and clear unsent drafts and private setup on this device?")) return;
   }
   const operationId = ++signoutOperationId;
   const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
@@ -1556,7 +1561,7 @@ $("#action-form").addEventListener("submit", e => {
 });
 window.addEventListener("beforeunload", e => {
   if (state) saveComposer();
-  if ((state && (drafts.hasText() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction))
+  if ((state && (drafts.hasText() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction))
     || invitationIsCommitting() || invitation.phase === "unknown") { e.preventDefault(); e.returnValue = ""; }
 });
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden" && state) saveComposer(); });

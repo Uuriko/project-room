@@ -19,8 +19,8 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim();
   const destination = join(directory, "runtime");
   const receipt = createRuntimePackage({ repository, commit, destination });
-  assert.equal(receipt.schemaVersion, 10); assert.deepEqual(publicAssets, assetPaths);
-  assert.equal(receipt.files, 47 + ["server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "src/agent-connections.js", "client/mcp-stdio.mjs", "scripts/agent-mcp.mjs", "client/work-actions.mjs", "server/work-discussion.mjs", "server/text-results.mjs"].filter(path => existsSync(join(destination, path))).length);
+  assert.equal(receipt.schemaVersion, 11); assert.deepEqual(publicAssets, assetPaths);
+  assert.equal(receipt.files, 47 + ["server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "src/agent-connections.js", "client/mcp-stdio.mjs", "scripts/agent-mcp.mjs", "client/work-actions.mjs", "server/work-discussion.mjs", "server/text-results.mjs", "src/room-charter.js", "src/room-instructions.js"].filter(path => existsSync(join(destination, path))).length);
   assert.equal(existsSync(join(destination, ".git")), false);
   assert.equal(existsSync(join(destination, "node_modules")), false);
   for (const path of ["server.mjs", "src/app.js", "cloudflare/room.mjs"]) {
@@ -48,7 +48,7 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   assert.throws(() => verifyRuntimePackage(destination, { expectedCommit: "0".repeat(40) }));
   const { buildAssets } = await import(pathToFileURL(join(destination, "cloudflare/build-assets.mjs")));
   const assets = join(directory, "assets");
-  assert.equal(await buildAssets(pathToFileURL(assets + "/")), 16);
+  assert.equal(await buildAssets(pathToFileURL(assets + "/")), 18);
   for (const path of publicAssets) assert.deepEqual(readFileSync(join(assets, path)), readFileSync(join(destination, path)));
   const f = createRecoveryFixture(join(directory, "fixture.sqlite"));
   try {
@@ -60,6 +60,8 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
       assert.equal(restored.command(f.keys.owner, "commons", f.command).duplicate, true);
       assert.equal(restored.command(f.keys.owner, "commons", f.nativeCommand).event.id, f.nativeCompletion.event.id);
       assert.equal(restored.workResult(f.keys.owner, "commons", "native-evidence").result.text.body, f.nativeBody);
+      assert.equal(restored.command(f.keys.owner, "commons", f.charterCommand).event.id, f.charterSaved.event.id);
+      assert.equal(restored.charter(f.keys.owner, "commons").charter.purpose, f.charterCommand.data.purpose);
       if (existsSync(join(destination, "server/work-discussion.mjs"))) {
         const discussion = restored.workDiscussion(f.keys.owner, "commons", "evidence");
         assert.equal(discussion.workItemId, "evidence");

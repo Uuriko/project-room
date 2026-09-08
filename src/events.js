@@ -1,8 +1,10 @@
 import { REACTIONS } from "./conversation.js";
 import { proposalContext, nativeTextEvidence } from "./work-packet.js";
+import { CHARTER_TYPE, charterFromEvent } from "./room-charter.js";
 
 export const EVENT_TYPES = Object.freeze({
   ROOM_CREATED: "room.created",
+  ROOM_CHARTER_UPDATED: CHARTER_TYPE,
   MEMBER_ADDED: "member.added",
   MEMBER_JOINED_VIA_INVITATION: "member.joined_via_invitation",
   MEMBER_ACCESS_CHANGED: "member.access_changed",
@@ -103,6 +105,7 @@ export function applyEvent(current, incoming) {
 
   const handlers = {
     [EVENT_TYPES.ROOM_CREATED]: createRoom,
+    [EVENT_TYPES.ROOM_CHARTER_UPDATED]: updateCharter,
     [EVENT_TYPES.MEMBER_ADDED]: addMember,
     [EVENT_TYPES.MEMBER_JOINED_VIA_INVITATION]: joinMemberViaInvitation,
     [EVENT_TYPES.MEMBER_ACCESS_CHANGED]: changeMemberAccess,
@@ -156,6 +159,12 @@ function createRoom(state, incoming) {
   if (incoming.roomId !== incoming.data.roomId) throw new Error("Room event id mismatch");
   if (incoming.actorId !== incoming.data.ownerId) throw new Error("Room must be created by its owner");
   state.room = { id: incoming.data.roomId, ...incoming.data, createdAt: incoming.at };
+}
+
+function updateCharter(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.kind !== "human" || actor.id !== state.room.ownerId) throw new Error("Only the Room owner may change room instructions");
+  state.room.charter = charterFromEvent(incoming, state.room.charter ?? null);
 }
 
 function addMember(state, incoming) {

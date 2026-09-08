@@ -2,9 +2,17 @@ import { validId, PERMISSIONS } from "../src/events.js";
 import { nextWorkStep, reusableWorkDefinition } from "../src/workflow.js";
 import { workPacket, resultDraft, verifyWorkResult } from "../src/work-packet.js";
 import { submitWorkAction } from "./work-actions.mjs";
+import { charterContext, validateCharterContext, validateCharterRead } from "../src/room-charter.js";
 
 export class RoomClientError extends Error {
   constructor(status, code, message, retryAfterMs = null) { super(message); this.status = status; this.code = code; this.retryAfterMs = retryAfterMs; }
+}
+function checkedCharter(value, horizon) {
+  try {
+    const result = validateCharterContext(value);
+    if (!Number.isSafeInteger(horizon) || result.revision > horizon) throw new Error();
+    return result;
+  } catch { throw new RoomClientError(200, "invalid_response", "Room returned invalid instructions metadata"); }
 }
 
 // Minimal, explicit client for a single configured service and Room. It neither
@@ -47,7 +55,7 @@ export class RoomAgentClient {
     // is never a cached grant. The service still authorizes the operation itself.
     if (this.#memberId) await this.checkConnection({ signal });
     const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal);
-    if (this.#memberId && (suffix === "" || suffix.startsWith("/work-context?") || suffix.startsWith("/work-discussion?") || suffix.startsWith("/work-result?") || suffix.startsWith("/return-brief?"))) {
+    if (this.#memberId && (suffix === "" || suffix === "/charter" || suffix.startsWith("/charter?") || suffix.startsWith("/work-context?") || suffix.startsWith("/work-discussion?") || suffix.startsWith("/work-result?") || suffix.startsWith("/return-brief?"))) {
       if (value?.roomId !== this.#roomId || value.viewerId !== this.#memberId || value.viewerAccountId !== null
         || value.viewerAuthEpoch !== null || value.viewerSessionBinding !== null || value.viewerSessionRevision !== null) {
         throw new RoomClientError(200, "identity_mismatch", "Room response does not match the configured agent");
@@ -81,6 +89,12 @@ export class RoomAgentClient {
       checkedAt: new Date(now).toISOString(), expiresAt: value.expiresAt, scope: "room", externalExecution: false };
   }
   snapshot({ signal } = {}) { return this.#request("", undefined, signal); }
+  async charter({ revision, signal } = {}) {
+    if (revision !== undefined && (!Number.isSafeInteger(revision) || revision < 0)) throw new Error("Choose an instructions version");
+    const value = await this.#request(`/charter${revision === undefined ? "" : `?revision=${revision}`}`, undefined, signal);
+    try { return validateCharterRead(value, this.#roomId, revision); }
+    catch { throw new RoomClientError(200, "invalid_response", "Room returned invalid instructions metadata"); }
+  }
   async workResult(workItemId, options = {}) {
     if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => !["completionEventId", "draftMessageId", "signal"].includes(key))) throw new Error("Choose a completion or a draft, and optional signal");
     const { completionEventId = null, draftMessageId = null, signal } = options;
@@ -118,6 +132,7 @@ export class RoomAgentClient {
         || (source.status === "included" ? source.message?.id !== result.work.sourceMessageId || typeof source.message?.body !== "string" : source.message !== null)))) {
       throw new RoomClientError(200, "invalid_response", "Selected work context does not match the request");
     }
+    if (result.context.charter !== undefined) result.context.charter = checkedCharter(result.context.charter, result.evaluatedThrough);
     return result;
   }
   async workDiscussion(workItemId, options = {}) {
@@ -197,8 +212,13 @@ export class RoomAgentClient {
   async orient({ signal } = {}) {
     const snapshot = await this.snapshot({ signal });
     const member = snapshot.state.members[snapshot.viewerId];
+    const charter = snapshot.charter === undefined ? null : checkedCharter(snapshot.charter, snapshot.sequence);
+    try {
+      if (charter === null ? snapshot.state.room.charter !== undefined : JSON.stringify(charter) !== JSON.stringify(charterContext(snapshot.state.room))) throw new Error();
+    } catch { throw new RoomClientError(200, "invalid_response", "Room instructions do not match the snapshot"); }
     return {
       contractVersion: 1, roomId: snapshot.roomId, evaluatedThrough: snapshot.sequence,
+      charter,
       member, scope: { kind: "room", permissions: member.permissions, externalExecution: false },
       work: Object.values(snapshot.state.workItems).map(item => ({
         id: item.id, title: item.title, definitionOfDone: item.definitionOfDone, sourceMessageId: item.sourceMessageId,

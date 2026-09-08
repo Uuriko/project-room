@@ -1,4 +1,5 @@
 import { verifyWorkResult } from "./work-packet.js";
+import { validateCharterRead } from "./room-charter.js";
 
 const accountSessionError = message => {
   const error = new Error(message);
@@ -342,6 +343,23 @@ export class RoomClient {
       if (generation !== this.generation || session !== this.session) return null;
       if (!this.ownsResponse(result, session)) { this.endAccess(); return null; }
       return result;
+    } catch (error) {
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+      if ([401, 403].includes(error.status) || error.code === "session_binding_changed") this.handleFailure(error);
+      throw error;
+    }
+  }
+  async charter(revision) {
+    if (!this.session) return null;
+    if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+    const generation = this.generation, session = this.session;
+    try {
+      const value = await this.request(this.path(`/charter${revision === undefined ? "" : `?revision=${revision}`}`));
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsResponse(value, session)) { this.endAccess(); return null; }
+      validateCharterRead(value, session.roomId, revision);
+      return value;
     } catch (error) {
       if (generation !== this.generation || session !== this.session) return null;
       if (!this.ownsAccountSession()) { this.endAccess(); return null; }

@@ -16,6 +16,7 @@ import { selectedWorkContext } from "./work-context.mjs";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
+import { charterContext, charterFromEvent } from "../src/room-charter.js";
 
 export class ServiceError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -151,6 +152,7 @@ const nodeStorage = {
 };
 const work = "workItemId expectedRevision";
 const shapes = {
+  [T.ROOM_CHARTER_UPDATED]: "expectedRevision purpose outputs boundaries escalation",
   [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId",
   [T.MEMBER_ACCESS_CHANGED]: "memberId expectedMemberRevision permissions active",
   [T.MESSAGE_POSTED]: "messageId body workItemId replyToId toMemberId packetId basisRevision allowOlderBasis",
@@ -192,7 +194,7 @@ export class RoomStore {
     this.reminders = new Reminders(this);
     this.agentConnections = new AgentConnections(this);
     const version = this.storagePlatform.version(this.db);
-    const supported = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, STORE_SCHEMA_VERSION]);
+    const supported = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, STORE_SCHEMA_VERSION]);
     const hasSchema = version === 0 && this.storagePlatform.hasSchema(this.db);
     if (!supported.has(version) || hasSchema) {
       this.db.close();
@@ -962,7 +964,29 @@ export class RoomStore {
       const room = this.room(roomId);
       const rows = this.db.prepare("SELECT body FROM events WHERE room_id=? ORDER BY sequence DESC LIMIT 100").all(roomId);
       const cursor = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
-      return { ...room, roomId, state: { ...room.state, eventLog: rows.reverse().map(r => JSON.parse(r.body)) }, cursor, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+      return { ...room, roomId, charter: charterContext(room.state.room), state: { ...room.state, eventLog: rows.reverse().map(r => JSON.parse(r.body)) }, cursor, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+    });
+  }
+  charter(token, roomId, { revision, expectedSessionBinding = null } = {}) {
+    return this.readTransaction(() => {
+      const auth = this.authenticate(token, roomId, expectedSessionBinding), room = this.room(roomId);
+      if (revision !== undefined && (!Number.isSafeInteger(revision) || revision < 0)) fail(422, "invalid_charter_revision", "Choose an instructions version");
+      const current = charterContext(room.state.room);
+      const selected = revision ?? current.revision;
+      if (selected > current.revision) fail(404, "charter_not_found", "That instructions version is unavailable");
+      let charter = selected === current.revision ? current.charter : null;
+      if (selected > 0 && selected !== current.revision) {
+        // Return one bounded event, not all discussion bodies or every version.
+        // Full retained-history/checkpoint validation belongs to the recovery audit.
+        const rows = this.db.prepare("SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.type')=? AND json_extract(body,'$.data.expectedRevision')=? LIMIT 2").all(roomId, T.ROOM_CHARTER_UPDATED, selected - 1);
+        if (rows.length !== 1) fail(404, "charter_not_found", "That instructions version is unavailable");
+        const event = JSON.parse(rows[0].body);
+        if (event.roomId !== roomId || event.actorId !== room.state.room.ownerId) fail(409, "charter_integrity_error", "Instructions history requires reconciliation");
+        charter = charterFromEvent(event, { revision: selected - 1 });
+      }
+      return { contractVersion: 1, roomId, evaluatedThrough: room.sequence, currentRevision: current.revision, currentEventId: current.eventId,
+        ...charterContext({ charter }), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
+        viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
   }
   workContext(token, roomId, workItemId, { includeSource = false, expectedSessionBinding = null } = {}) {

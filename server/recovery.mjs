@@ -4,6 +4,7 @@ import { EVENT_TYPES, validId } from "../src/events.js";
 import { terminalWork } from "../src/workflow.js";
 import { applicationTables, STORE_SCHEMA_VERSION } from "./writer-fence.mjs";
 import { auditTextResults } from "./text-results.mjs";
+import { auditCharters } from "../src/room-charter.js";
 
 const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(",")}]`
   : value && typeof value === "object" ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}` : JSON.stringify(value);
@@ -45,6 +46,7 @@ export function auditRecovery(store) {
           && event.data && typeof event.data === "object" && !Array.isArray(event.data));
       });
       auditTextResults(store.db, actual.state, history);
+      auditCharters(actual.state, history, checkpoint);
       eventCount += history.length;
       rooms.set(row.id, actual.state);
     }

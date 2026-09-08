@@ -7,8 +7,9 @@ import { createRoomServer } from "../server/http.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 
-export async function startNativeResultFixture() {
+export async function startNativeResultFixture({ initialCharter = null } = {}) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store }); let closing;
+  if (initialCharter) f.store.command(f.keys.owner, "commons", { id: "exercise-charter", type: "room.charter_updated", data: { expectedRevision: 0, ...initialCharter } });
   const close = () => closing ??= (async () => {
     try { server.closeStreams(); server.closeAllConnections(); if (server.listening) await new Promise(resolve => server.close(resolve)); }
     finally { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); }
@@ -22,7 +23,7 @@ export async function startNativeResultFixture() {
       return { memberId, configDirectory, workItemId: "test-handoff" };
     });
     return { origin, participants, close, evidence: () => ({ kind: "actual-agent-exercise", scope: "synthetic local room; same OS; not native vendor acceptance or human testing",
-      seedThrough, sequence: f.store.room("commons").sequence, work: f.store.room("commons").state.workItems["test-handoff"],
+      seedThrough, sequence: f.store.room("commons").sequence, charter: f.store.charter(f.keys.owner, "commons"), work: f.store.room("commons").state.workItems["test-handoff"],
       result: f.store.workResult(f.keys.owner, "commons", "test-handoff"),
       events: f.store.eventsAfter(f.keys.owner, "commons", seedThrough, 100).events, audit: auditRecovery(f.store),
       cursors: ["owner", "producer", "reviewer"].map(memberId => ({ memberId, sequence: f.store.db.prepare("SELECT sequence FROM cursors WHERE room_id='commons' AND member_id=?").get(memberId)?.sequence ?? 0 })) }) };

@@ -47,7 +47,7 @@
           <header class="room-heading">
             <div>
               <h1 id="room-title" tabindex="-1">Project Room</h1>
-              <details id="room-about" class="room-about"><summary>About</summary><p class="room-purpose"></p></details>
+              <details id="room-about" class="room-about"><summary>About</summary><p class="room-purpose"></p><button id="room-instructions-open" class="button ghost" type="button" hidden>Room instructions</button></details>
             </div>
             <div class="room-presence-summary">
               <div id="member-stack" class="member-stack" aria-hidden="true"></div>
@@ -206,6 +206,28 @@
         </aside>
       </main>
     </div>
+    <dialog id="room-instructions-dialog" aria-labelledby="room-instructions-title">
+      <h2 id="room-instructions-title">Room instructions</h2>
+      <p id="room-instructions-version" class="form-hint"></p>
+      <p class="form-hint">Shared guidance. Access and approvals stay separate.</p>
+      <div id="room-instructions-view"></div>
+      <section id="room-instructions-latest" hidden><h3>Latest version</h3><div id="room-instructions-comparison"></div><div class="instructions-actions"><button id="instructions-use-latest" type="button" class="button secondary">Use latest</button><button id="instructions-keep-draft" type="button" class="button secondary">Keep my draft</button></div></section>
+      <form id="room-instructions-form" hidden>
+        <label>Purpose<textarea name="purpose" rows="2" maxlength="1000"></textarea></label>
+        <label>Expected output<textarea name="outputs" rows="2" maxlength="1000"></textarea></label>
+        <label>Boundaries<textarea name="boundaries" rows="2" maxlength="1000"></textarea></label>
+        <label>When to ask for help<textarea name="escalation" rows="2" maxlength="1000"></textarea></label>
+        <p class="form-hint">Optional · up to 1,000 characters each. Clear every field to remove.</p>
+      </form>
+      <p id="room-instructions-status" class="form-hint" role="status"></p>
+      <div class="instructions-actions">
+        <button id="room-instructions-save" class="button primary" type="submit" form="room-instructions-form">Save</button>
+        <button id="room-instructions-edit" class="button secondary" type="button">Edit</button>
+        <button id="room-instructions-previous" class="button ghost" type="button">Previous version</button>
+        <button id="room-instructions-refresh" class="button secondary" type="button" hidden>Review latest</button>
+        <button id="room-instructions-close" class="button secondary" type="button">Close</button>
+      </div>
+    </dialog>
     <dialog id="result-dialog" aria-labelledby="result-title"><h2 id="result-title">Result</h2><p id="result-status" class="form-hint" role="status"></p><pre id="result-body"></pre><button id="close-result" type="button" class="button secondary">Close</button></dialog>
     <dialog id="action-dialog" aria-labelledby="action-title" aria-describedby="action-context">
       <form id="action-form">

@@ -543,3 +543,11 @@ summary { overflow-wrap: anywhere; }
 #agent-connect-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 #agent-connect-dialog textarea { max-width: 100%; overflow-wrap: anywhere; }
 .pending-save { margin: 0 1rem 1rem; max-width: calc(100% - 2rem); }
+#room-instructions-dialog { width: min(38rem, calc(100vw - 2rem)); box-sizing: border-box; }
+#room-instructions-dialog p { overflow-wrap: anywhere; }
+#room-instructions-view p, #room-instructions-comparison p { white-space: pre-wrap; font-size: 1rem; line-height: 1.5; }
+#room-instructions-dialog h3 { margin: 1rem 0 .25rem; font-size: 1rem; }
+#room-instructions-dialog label { display: grid; gap: .35rem; margin: .85rem 0; font-size: 1rem; }
+#room-instructions-dialog textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: 1rem; resize: vertical; }
+.instructions-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .75rem; }
+#room-instructions-latest { border-left: 2px solid currentColor; padding-left: .75rem; margin: 1rem 0; }

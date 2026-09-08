@@ -1,4 +1,5 @@
 import { nextWorkStep, workActions } from "../src/workflow.js";
+import { charterContext } from "../src/room-charter.js";
 
 const pick = (value, fields) => value == null ? null
   : Object.fromEntries(fields.split(" ").filter(key => Object.hasOwn(value, key)).map(key => [key, structuredClone(value[key])]));
@@ -25,7 +26,7 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
     viewer: pick(member, "id displayName kind active revision permissions"), work,
     next: { ...next, addressedToViewer: next.memberId === viewerId },
     suggestedActions: workActions(item, member, now).map(([action, label]) => ({ action, label })),
-    context: { source, participants: [...participantIds].map(id => state.members[id]
+    context: { source, charter: charterContext(state.room), participants: [...participantIds].map(id => state.members[id]
       ? pick(state.members[id], "id displayName kind active") : { id, unavailable: true }),
       omitted: ["other_work", "other_messages", "event_history", "prior_receipts_and_checks", "private_reminders", "read_marker"] },
     scope: { membership: "room", selectedWorkOnly: true, externalExecution: false,

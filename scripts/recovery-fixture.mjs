@@ -76,6 +76,8 @@ export function createRecoveryFixture(filename) {
     evidenceKind: "room_text", evidenceMessageId: "recovery-native-text", evidenceMessageEventId: nativePost.event.id, evidenceVersion: textVersion(nativeBody),
     previousCompletionEventId: null, producerId: "owner", summary: "Native recovery result", nextAction: "Review exact text" } };
   const nativeCompletion = store.command(keys.owner, "commons", nativeCommand);
+  const charterCommand = { id: "recovery-charter", type: T.ROOM_CHARTER_UPDATED, data: { expectedRevision: 0, purpose: "Preserve exact room context 🪷\n", outputs: "A reviewed result", boundaries: "Synthetic only", escalation: "Ask the owner" } };
+  const charterSaved = store.command(keys.owner, "commons", charterCommand);
   const sharedSession = session("recovery-shared");
   store.changeAccountAccess("recovery-shared", { expectedRevision: 0, active: false, reason: "Synthetic suspension before capture" });
   const command = { id: "recovery-command", type: T.MESSAGE_POSTED, data: { body: "Synthetic message before recovery capture" } };
@@ -83,5 +85,5 @@ export function createRecoveryFixture(filename) {
   const cursor = store.room("commons").sequence; store.markCaughtUp(keys.owner, "commons", cursor);
   return { store, filename, keys, owner, target, validSession, revokedSession, loggedOut, sharedSession, pending, invitation,
     shareRequest, link, linkToken, guestSlot, guest, joinRequest, reminders, command, commandResult, cursor,
-    enrollmentToken, enrollmentRequest, enrollment, nativeBody, nativeCommand, nativeCompletion, now: () => now, advance: ms => { now += ms; } };
+    enrollmentToken, enrollmentRequest, enrollment, nativeBody, nativeCommand, nativeCompletion, charterCommand, charterSaved, now: () => now, advance: ms => { now += ms; } };
 }

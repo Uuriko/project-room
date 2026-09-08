@@ -27,7 +27,7 @@ test("schema upgrade preserves existing records and fences a previously opened c
   legacyStatement.run("fixture-account");
   const current = new RoomStore(filename);
   try {
-    assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 10);
+    assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 11);
     assert.deepEqual(current.db.prepare("SELECT * FROM accounts").all(), before);
     assert.doesNotThrow(() => verifyWriterFence(current.db));
     assert.equal(writerFenceDefinitions.length, 60);
@@ -90,7 +90,7 @@ test("the v9 migration preserves v6 guards while retiring pre-open v6 writers", 
   oldWrite.run();
   const current = new RoomStore(filename);
   try {
-    assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 10);
+    assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 11);
     assert.throws(() => oldWrite.run(), /project_room_writer_v10|unsupported database writer/);
     current.createAccount("current-writer");
     assert.equal(current.account("current-writer").active, true);
