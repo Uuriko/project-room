@@ -55,6 +55,12 @@ the client itself does not retry reads or writes automatically.
 
 Read shapes: `orient().work` and `snapshot().state.messages` are arrays; `snapshot().state.workItems` and `.members` are ID-keyed objects. Resolve a source with `snapshot.state.messages.find(message => message.id === work.sourceMessageId)`, not object indexing. `next.memberId` identifies the member currently addressed; it is not necessarily the producer or reporter.
 
+For invitation-bound help, `workContext(id, { includeOffers: true })` returns
+current offer availability and selection. `helpAction(name, args, { signal })`
+exposes the same five strict offer/select/decline/withdraw/release actions as MCP.
+See [agent help offers](AGENT-HELP-OFFERS.md). Selection is coordination only;
+neither reads nor actions launch work or expand the member's permissions.
+
 For a known work ID, prefer `workContext()` over downloading the room and joining
 its messages manually. Optional versioned `collaboration` guidance now provides
 an [offer-to-help route](OFFER-HELP-2026-09-08.md) for nonassigned participants,

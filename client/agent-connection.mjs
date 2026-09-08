@@ -102,6 +102,7 @@ const messages = Object.freeze({
   expiry_unconfirmed: "Expiry could not be confirmed. Check the local clock and key expiry.",
   invalid_response: "Room returned an unsupported or incomplete response. No success was confirmed.",
   help_context_unavailable: "This service does not support explicit help discovery yet. Ordinary work reads remain available; missing invitations are not permission to act.",
+  offer_context_unavailable: "This service does not support offer context yet. No fallback read or action was made; missing offers are not an empty queue or permission to act.",
   unavailable_route: "This address or deployment does not support the requested read, or the selected work is unavailable.",
   rate_limited: "Room asked you to wait before retrying.",
   request_timeout: "The request timed out. Check the service and retry.",
@@ -114,7 +115,7 @@ export function connectionDiagnostic(error) {
   else if (error instanceof RoomClientError) {
     code = error.status === 403 && ["host_denied", "origin_denied", "proxy_denied"].includes(error.code) ? "invalid_config"
       : [401, 403].includes(error.status) ? "access_ended" : error.status === 429 ? "rate_limited"
-      : error.status === 404 ? "unavailable_route" : ["member_required", "identity_mismatch", "expiry_unconfirmed", "invalid_response", "help_context_unavailable"].includes(error.code) ? error.code : code;
+      : error.status === 404 ? "unavailable_route" : ["member_required", "identity_mismatch", "expiry_unconfirmed", "invalid_response", "help_context_unavailable", "offer_context_unavailable"].includes(error.code) ? error.code : code;
   } else if (error?.name === "TimeoutError") code = "request_timeout";
   else if (error?.name === "AbortError") code = "cancelled";
   return { type: "agent_connection_error", code, message: messages[code],

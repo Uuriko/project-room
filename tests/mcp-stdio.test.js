@@ -68,12 +68,28 @@ test("stdio version negotiation, discovery fallback, tools and notification sile
   assert.equal((await h.rpc("tools/list")).error.code, -32000);
   await h.ready();
   const tools = (await h.rpc("tools/list")).result.tools;
-  assert.equal(tools.length, 24); assert.ok(tools.every(tool => tool.inputSchema.additionalProperties === false));
+  assert.equal(tools.length, 29); assert.ok(tools.every(tool => tool.inputSchema.additionalProperties === false));
   assert.equal((await h.rpc("tools/call", { name: "room_check_access", arguments: {} }, "typed-id")).result.structuredContent.status, "credential_accepted");
   const count = h.replies.length; h.send({ method: "unknown-notification" }); await tick(); assert.equal(h.replies.length, count);
   assert.equal((await h.rpc("tools/call", { name: "room_read_work", arguments: { workItemId: "work", token: "not-allowed" } })).error.code, -32602);
   h.input.write("not-json\n"); await tick(); assert.equal(h.replies.at(-1).error.code, -32700);
   h.send({ id: null, method: "ping" }); await tick(); assert.equal(h.replies.at(-1).error.code, -32600);
+});
+
+test("MCP offer reads preserve explicit negotiation and reject malformed options before calling the client", async t => {
+  const seen = [], h = harness(t, { workContext: async (id, options) => { seen.push({ id, options }); return { work: { id } }; } }); await h.ready();
+  for (const args of [{ workItemId: "work" }, { workItemId: "work", includeOffers: true }, { workItemId: "work", includeOffers: true, includeSource: true }]) {
+    await h.rpc("tools/call", { name: "room_read_work", arguments: args });
+    assert.equal(seen.at(-1).options.includeOffers, args.includeOffers ?? false);
+    assert.equal(seen.at(-1).options.includeSource, args.includeSource ?? false);
+    assert.ok(seen.at(-1).options.signal instanceof AbortSignal);
+  }
+  assert.equal((await h.rpc("tools/call", { name: "room_read_work", arguments: { workItemId: "work", includeOffers: "yes" } })).error.code, -32602);
+  assert.equal(seen.length, 3);
+  const older = harness(t, { workContext: async () => { throw new RoomClientError(0, "offer_context_unavailable", "PRIVATE SECRET"); } }); await older.ready();
+  const result = (await older.rpc("tools/call", { name: "room_read_work", arguments: { workItemId: "work", includeOffers: true } })).result;
+  assert.equal(result.isError, true); assert.equal(result.structuredContent.code, "offer_context_unavailable");
+  assert.equal(JSON.stringify(result).includes("PRIVATE SECRET"), false);
 });
 
 test("fragmented UTF-8 draft keeps business identity across transport retries and validates exact receipts", async t => {
@@ -141,8 +157,11 @@ test("schema-valid oversized work input is a local refusal, not an unknown save"
   assert.equal(result.structuredContent.code, "work_action_too_large"); assert.equal(result.structuredContent.outcome, "this_attempt_not_sent");
 });
 
-test("cancelled lifecycle output cannot imply rollback; exact retry retains the committed operation", async t => {
-  const args = { requestId: "accept", workItemId: "work", expectedRevision: 0 };
+for (const [tool, args] of [
+  ["room_accept_work", { requestId: "accept", workItemId: "work", expectedRevision: 0 }],
+  ["room_offer_help", { requestId: "offer", workItemId: "work", offerId: "offer-one", expectedRevision: 1,
+    expectedHelpRevision: 1, helpEventId: "help-event", plan: "Two agenda items" }]
+]) test(`cancelled ${tool} output cannot imply rollback; exact retry retains the committed operation`, async t => {
   let started, release, saved;
   const entered = new Promise(resolve => { started = resolve; }), delayed = new Promise(resolve => { release = resolve; });
   const client = { command: async command => {
@@ -153,10 +172,10 @@ test("cancelled lifecycle output cannot imply rollback; exact retry retains the 
     started(); await delayed; return saved;
   } };
   const h = harness(t, client); await h.ready(); const count = h.replies.length;
-  h.send({ id: "cancel-work", method: "tools/call", params: { name: "room_accept_work", arguments: args } });
+  h.send({ id: "cancel-work", method: "tools/call", params: { name: tool, arguments: args } });
   await entered; h.send({ method: "notifications/cancelled", params: { requestId: "cancel-work" } }); release(); await tick(); await tick();
   assert.equal(h.replies.length, count); assert.ok(saved);
   const next = harness(t, client); await next.ready();
-  const retried = (await next.rpc("tools/call", { name: "room_accept_work", arguments: args })).result.structuredContent;
+  const retried = (await next.rpc("tools/call", { name: tool, arguments: args })).result.structuredContent;
   assert.equal(retried.status, "recorded"); assert.equal(retried.duplicate, true); assert.equal(retried.eventId, saved.event.id);
 });

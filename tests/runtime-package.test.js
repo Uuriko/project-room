@@ -21,7 +21,7 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   const destination = join(directory, "runtime");
   const receipt = createRuntimePackage({ repository, commit, destination });
   assert.equal(receipt.schemaVersion, 14); assert.deepEqual(publicAssets, assetPaths);
-  assert.equal(receipt.files, 47 + ["server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "src/agent-connections.js", "client/mcp-stdio.mjs", "scripts/agent-mcp.mjs", "client/work-actions.mjs", "server/work-discussion.mjs", "server/text-results.mjs", "client/attention-inbox.mjs", "src/room-charter.js", "src/room-instructions.js", "src/reply-requests.js", "server/reply-requests.mjs", "client/reply-actions.mjs", "scripts/agent-replies.mjs", "client/request-notices.mjs", "src/work-help.js", "server/work-help.mjs", "src/help-offers.js"].filter(path => existsSync(join(destination, path))).length);
+  assert.equal(receipt.files, 47 + ["server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "src/agent-connections.js", "client/mcp-stdio.mjs", "scripts/agent-mcp.mjs", "client/work-actions.mjs", "server/work-discussion.mjs", "server/text-results.mjs", "client/attention-inbox.mjs", "src/room-charter.js", "src/room-instructions.js", "src/reply-requests.js", "server/reply-requests.mjs", "client/reply-actions.mjs", "scripts/agent-replies.mjs", "client/request-notices.mjs", "src/work-help.js", "server/work-help.mjs", "src/help-offers.js", "client/help-actions.mjs"].filter(path => existsSync(join(destination, path))).length);
   assert.equal(existsSync(join(destination, ".git")), false);
   assert.equal(existsSync(join(destination, "node_modules")), false);
   for (const path of ["server.mjs", "src/app.js", "cloudflare/room.mjs"]) {
@@ -136,11 +136,17 @@ test("uncommitted candidate packages cold in an isolated synthetic commit, inclu
   const directory = mkdtempSync(join(tmpdir(), "room-candidate-package-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const candidate = candidateRuntimeFixture(repository, directory), destination = join(directory, "runtime");
-  const receipt = createRuntimePackage({ ...candidate, destination }); assert.equal(receipt.files, 68);
+  const receipt = createRuntimePackage({ ...candidate, destination }); assert.equal(receipt.files, 69);
   const program = `
     import { RoomStore } from ${JSON.stringify(pathToFileURL(join(destination, "server/store.mjs")).href)};
     import { initialRoom } from ${JSON.stringify(pathToFileURL(join(destination, "server/bootstrap.mjs")).href)};
     import { currentAttention } from ${JSON.stringify(pathToFileURL(join(destination, "client/attention-inbox.mjs")).href)};
+    import { helpTools, buildHelpCommand } from ${JSON.stringify(pathToFileURL(join(destination, "client/help-actions.mjs")).href)};
+    import { RoomAgentClient } from ${JSON.stringify(pathToFileURL(join(destination, "client/room-agent.mjs")).href)};
+    if (helpTools.length !== 5 || typeof RoomAgentClient.prototype.helpAction !== "function") throw new Error("Missing help tools");
+    const offer = buildHelpCommand("room_offer_help", { requestId: "cold-offer", workItemId: "work", offerId: "offer", expectedRevision: 1,
+      expectedHelpRevision: 1, helpEventId: "invitation", plan: "Two agenda items" });
+    if (offer.type !== "work.help_offer_opened") throw new Error("Incorrect offer command");
     const store = new RoomStore(":memory:"); store.initialize(initialRoom());
     const key = store.issueAccessKey("commons", "owner"), client = {
       snapshot: async () => store.snapshot(key, "commons"), changes: async (after, limit) => store.eventsAfter(key, "commons", after, limit)

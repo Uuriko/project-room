@@ -105,6 +105,11 @@ their bounds and recomputes selected-task decisions and action hints.
 
 Older services may ignore this header. When explicitly requested context is
 absent, the direct client fails with `offer_context_unavailable`; it does not
-silently fall back to a weaker view or fetch the room. This option is not yet
-exposed by the CLI or MCP tool schema. No new browser offer controls ship in this
-read-contract checkpoint.
+silently fall back to a weaker view or fetch the room. MCP exposes the same
+`includeOffers` option on `room_read_work`. The CLI accepts
+`work WORK_ID --include-offers`, optionally combined with `--include-source`.
+Help discovery's `nextRead` requests offer context; discovery itself still
+describes invitations, not queue eligibility.
+
+Continue with [agent help offers](AGENT-HELP-OFFERS.md) for explicit actions.
+No new browser offer controls ship in this agent-tool checkpoint.

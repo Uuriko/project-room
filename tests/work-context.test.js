@@ -200,13 +200,16 @@ test("work CLI prints one selected context and rejects extra arguments without d
     let stdout = "", stderr = ""; child.stdout.on("data", chunk => stdout += chunk); child.stderr.on("data", chunk => stderr += chunk);
     child.on("error", reject); child.on("close", code => resolve({ code, stdout, stderr }));
   });
-  for (const args of [["work", "test-handoff"], ["work", "test-handoff", "--include-source"]]) {
+  for (const flags of [[], ["--include-source"], ["--include-offers"], ["--include-source", "--include-offers"], ["--include-offers", "--include-source"]]) {
+    const args = ["work", "test-handoff", ...flags];
     const result = await run(args); assert.equal(result.code, 0, result.stderr);
     const context = JSON.parse(result.stdout); assert.equal(context.work.id, "test-handoff");
-    assert.equal(context.context.source.status, args.length === 3 ? "included" : "not_requested");
+    assert.equal(context.context.source.status, flags.includes("--include-source") ? "included" : "not_requested");
+    assert.equal(context.offerContextVersion, flags.includes("--include-offers") ? 1 : undefined);
     assert.equal(result.stdout.includes(f.keys.producer), false);
   }
-  for (const args of [["work"], ["packet"], ["packet", "../other"], ["work", "test-handoff", "--includeSource"], ["work", "test-handoff", "--include-source", "extra"], ["work", "../other"]]) {
+  for (const args of [["work"], ["packet"], ["packet", "../other"], ["work", "test-handoff", "--includeSource"], ["work", "test-handoff", "--include-source", "extra"], ["work", "../other"],
+    ["work", "test-handoff", "--include-offers", "--include-offers"], ["work", "test-handoff", "--include-source", "--include-source"]]) {
     const result = await run(args); assert.equal(result.code, 1); assert.equal(result.stdout, "");
     assert.equal(JSON.parse(result.stderr).code, "usage_error"); assert.equal(result.stderr.includes(f.keys.producer), false);
   }

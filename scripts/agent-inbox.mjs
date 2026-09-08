@@ -16,7 +16,7 @@ if (action === "reply") {
   pbpaste | node scripts/agent-inbox.mjs import NEW_PRIVATE_DIRECTORY
   node scripts/agent-inbox.mjs check
   node scripts/agent-inbox.mjs search "phrase" [--needs-me]
-  node scripts/agent-inbox.mjs work WORK_ID [--include-source]
+  node scripts/agent-inbox.mjs work WORK_ID [--include-source] [--include-offers]
   node scripts/agent-inbox.mjs result WORK_ID [--completion ID | --draft MESSAGE_ID]
   node scripts/agent-inbox.mjs discussion WORK_ID [--since N | --cursor CURSOR] [--limit N]
   node scripts/agent-inbox.mjs [orient|next|brief|changes CHECKPOINT|packet WORK_ID]
@@ -65,7 +65,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
       || (action === "import" && ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"].some(name => process.env[name] !== undefined))
       || (["packet", "work", "discussion", "result"].includes(action) && !validId(checkpoint))
       || (action === "search" && !validWorkSearchQuery(checkpoint))
-      || (["discussion", "result"].includes(action) ? false : action === "work" ? extra.length > 1 || (extra.length === 1 && extra[0] !== "--include-source")
+      || (["discussion", "result"].includes(action) ? false : action === "work" ? new Set(extra).size !== extra.length || extra.some(flag => !["--include-source", "--include-offers"].includes(flag))
         : action === "search" ? extra.length > 1 || (extra.length === 1 && extra[0] !== "--needs-me")
         : extra.length || (["check", "orient", "next", "brief"].includes(action) && checkpoint !== undefined))
       || (action === "changes" && (!/^\d+$/.test(checkpoint ?? "") || !Number.isSafeInteger(Number(checkpoint))))) throw new ConnectionError("usage_error");
@@ -79,7 +79,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
       }
     } else result = action === "discussion" ? await client.workDiscussion(checkpoint, discussionOptions)
       : action === "result" ? await client.workResult(checkpoint, resultOptions)
-      : action === "work" ? await client.workContext(checkpoint, { includeSource: extra[0] === "--include-source" })
+      : action === "work" ? await client.workContext(checkpoint, { includeSource: extra.includes("--include-source"), includeOffers: extra.includes("--include-offers") })
       : action === "next" ? await client.orient({ focus: "needs_me" })
       : action === "search" ? await client.orient({ query: checkpoint, focus: extra[0] === "--needs-me" ? "needs_me" : "all" })
       : action === "packet" ? packetMarkdown(await client.workPacket(checkpoint)) : action === "orient" ? await client.orient() : action === "brief" ? await client.returnBrief() : await client.changes(Number(checkpoint));

@@ -118,7 +118,7 @@ test('real MCP and command-line next reuse the focused read; malformed selectors
   const mcp = await openMcpTestClient(directory); t.after(() => mcp.close());
   const before = auditRecovery(f.store).dataSha256;
   const list = await mcp.request('tools/list');
-  assert.equal(list.result.tools.length, 24);
+  assert.equal(list.result.tools.length, 29);
   const tool = list.result.tools.find(tool => tool.name === 'room_list_work');
   assert.equal(tool.annotations.readOnlyHint, true);
   const result = await mcp.call('room_list_work', { focus: 'needs_me' });

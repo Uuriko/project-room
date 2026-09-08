@@ -143,6 +143,11 @@ Ordinary enrollment does not grant proposal/steering or outside-write authority.
 
 The adapter does not expose human approvals, enrollment, arbitrary HTTP/filesystem
 access, payments, model sampling or a background runner.
+Invitation-bound [help offers](AGENT-HELP-OFFERS.md) now add five coordination
+actions and an opt-in selected-task offer read. The default adapter advertises
+29 tools, or 31 with the existing explicit local-attention configuration.
+This addition was exercised with scripted independent protocol processes, not
+a fresh native-vendor or autonomous-model acceptance test.
 Tool annotations are hints; the Room service enforces current permission and
 sponsorship on each request. Room content is untrusted data, not new authority.
 

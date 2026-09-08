@@ -4,6 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import { searchWork } from "../src/work-selectors.js";
 import { workPacket, resultDraft, verifyWorkResult } from "../src/work-packet.js";
 import { submitWorkAction } from "./work-actions.mjs";
+import { submitHelpAction } from "./help-actions.mjs";
 import { replyRoute, validReplyArguments, validateReplyRead, submitReplyAction } from "./reply-actions.mjs";
 import { charterContext, validateCharterContext, validateCharterRead } from "../src/room-charter.js";
 import { workHelpContext } from "../src/work-help.js";
@@ -359,6 +360,9 @@ export class RoomAgentClient {
   workAction(name, args, options = {}) {
     return submitWorkAction(this, { roomId: this.#roomId, memberId: this.#memberId }, name, args, options);
   }
+  helpAction(name, args, options = {}) {
+    return submitHelpAction(this, { roomId: this.#roomId, memberId: this.#memberId }, name, args, options);
+  }
   async orient({ signal, focus = "all", query } = {}) {
     if (!["all", "needs_me", "help_wanted"].includes(focus)) throw new RoomClientError(0, "invalid_focus", "Choose all work, work needing you, or explicit help invitations");
     if (query !== undefined && !validWorkSearchQuery(query)) throw new RoomClientError(0, "invalid_query", "Use a nonblank work query of at most 200 UTF-16 code units");
@@ -386,7 +390,7 @@ export class RoomAgentClient {
           ...(excerpt === undefined ? {} : { excerpt }),
           ...(focus === "help_wanted" ? { help: helpFor(item) } : {}),
           availableRoomActions: workActions(item, member, now).map(([action, label]) => ({ action, label })),
-          nextRead: { tool: "room_read_work", arguments: { workItemId: item.id } } };
+          nextRead: { tool: "room_read_work", arguments: { workItemId: item.id, ...(focus === "help_wanted" ? { includeOffers: true } : {}) } } };
       });
       return { contractVersion: 1, roomId: snapshot.roomId, evaluatedThrough: snapshot.sequence,
         evaluatedAt: new Date(now).toISOString(), clockSource: focus === "help_wanted" ? "service" : "client", focus, charter, member,
@@ -394,9 +398,9 @@ export class RoomAgentClient {
         selection: matches ? { totalWork: items.length, eligibleWork: candidates.length, query: query.trim(),
           matches: matches.total, shown: work.length, limit: 25, hasMore: matches.total > work.length,
           guidance: "Current work fields only; no message bodies, evidence files or history. Focus is applied before matching and the 25-hit limit; refine the query if truncated. Compact excerpts omit full task context. Read selected work before acting. A hit is not an assignment, suitability judgment or execution grant; empty does not mean the room is done."
-            + (focus === "help_wanted" ? " Read the invitation scope and discussion before coordinating; invitation-bound offers are not available yet. No automatic offer or dispatch." : "") }
+            + (focus === "help_wanted" ? " Read selected work with includeOffers=true for current queue capacity and selection, then inspect scope and discussion. Invitation discovery alone is not offer eligibility. No automatic offer or dispatch." : "") }
           : focus === "help_wanted" ? { totalWork: items.length, helpWanted: work.length,
-          guidance: "Explicit current invitations you may offer to help with, not assignments or permission to execute. All matching work in this bounded Room is included. Read selected scope and discussion, then coordinate before contributing. The invitation-bound offer tool is not available yet; no automatic offer or dispatch." }
+          guidance: "Explicit current invitations, not assignments, queue eligibility or permission to execute. All matching invitations in this bounded Room are included. Follow nextRead to inspect current offer capacity and selection; review scope and discussion before contributing. Unsupported offer reads fail explicitly. No automatic offer or dispatch." }
           : { totalWork: items.length, needsMe: work.length,
           guidance: "Current next steps addressed to you, including those missing a Room permission. Not all your ongoing work or reply requests. Read selected work before acting; available actions are descriptions, not execution grants. Empty does not mean the room is done." },
         work };
