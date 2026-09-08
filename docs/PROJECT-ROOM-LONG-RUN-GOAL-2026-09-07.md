@@ -16,7 +16,16 @@ goal. Continue with the next highest-value safe task while meaningful work remai
 
 ## Starting point and truthfulness
 
-Latest September8 checkpoint: [invitation-bound offers](BOUND-HELP-OFFERS-2026-09-08.md)
+Latest September8 checkpoint: [offer storage](HELP-OFFER-STORAGE-CHECKPOINT-2026-09-08.md)
+is implemented locally at3984941/schema14. Exact authenticated command receipts,
+retained-history audits, pre14 collision refusal and atomic old-writer fencing are
+tested.663 core,193 browser and16 local Workers checks pass;68-file/21-asset package
+and evidence are retained. Next negotiated offer context and thin agent tools,
+then compact human offer/choose/release controls and full contribution journeys.
+Existing invitation discovery is not yet offer-queue eligibility. Distinct14
+fallback/hosted recovery remain release gates; no downgrade, deploy or model use.
+
+Earlier September8 checkpoint: [invitation-bound offers](BOUND-HELP-OFFERS-2026-09-08.md)
 have a dormant shared contract with17 focused tests and644 full-suite checks.
 The current runtime remains61f1294/schema13; neither new offer event is registered.
 Next implement writer14, pre14 collision refusal, retained-history reconstruction

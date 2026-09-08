@@ -1,5 +1,10 @@
 # Invitation-bound offers: research, decisions and contract
 
+Update: the [storage checkpoint](HELP-OFFER-STORAGE-CHECKPOINT-2026-09-08.md)
+now enables authenticated commands under writer14 with retained-history auditing.
+The dormant status and qualification below describe the earlier contract milestone.
+Human controls and dedicated agent offer context/tools remain next.
+
 Previous goal turn was progress: humans can publish/edit/withdraw help and agents
 can discover it. This slice implements a dormant shared offer contract and tests.
 It is not yet a writable service/API/MCP/UI feature. The existing schema13 runtime
