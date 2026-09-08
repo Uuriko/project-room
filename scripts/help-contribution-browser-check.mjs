@@ -129,6 +129,7 @@ for (const touch of [false, true]) test(`voluntary help ${touch ? 'touch' : 'des
   assert.equal(state().workItems[workItemId].verification.independenceConfirmed, true);
   await page.locator(`[data-work-id="${workItemId}"][data-action="decide"]`).click();
   await page.waitForFunction(() => document.querySelector('#decision-review-label').textContent === 'Independent check · Pass');
+  await page.waitForFunction(body => document.querySelector('#action-text-body').textContent === body, body);
   await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
   assert.equal(await page.locator('#action-dialog').evaluate(node => node.scrollWidth <= node.clientWidth), true);
   await page.screenshot({ path: `${prefix}-review.png` });
