@@ -49,7 +49,8 @@ checkpoint as a completed goal or substitute a pre-v12 writer.
 
 Current checkpoint correction: human reply requests and observer v3 request
 attention are now locally implemented and covered by reconnect journeys. The
-retained schema12 candidate is `cefc89b`, with qualified local fallback `4d22189`.
+retained schema12 candidate now includes [lean work discovery](LEAN-WORK-SNAPSHOT-2026-09-08.md),
+with qualified local fallback `4d22189`; the handoff identifies the latest exact package.
 Human/agent work search and definition-only reuse compose in the
 [discovery-to-contribution journey](DISCOVERY-CONTRIBUTION-2026-09-08.md).
 Native-host acceptance, independent recovery-authority freshness, hosted recovery,

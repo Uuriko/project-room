@@ -61,12 +61,31 @@ The profiler regression verifies unrelated chat no longer grows discovery transf
 
 All19 public assets match retained candidatecefc89b, so no visual redesign or new
 UI screenshot is needed. The broader176 browser checks were not rerun; six key
-discovery/reconnect journeys were. Local Workers and exact-package qualification
-follow. No native model, live data, deployment, push or preview restart.
+discovery/reconnect journeys were. No native model, live data, deployment, push
+or preview restart.
+
+Final frozen runtime `2553d7329100c25591ac63ff410e4d906837fc04` passes569 core,
+six browser journeys,13 local Workers checks (including the new view and account
+session fence) and two exact-commit desktop/touch fallback-recovery journeys.
+Retained `../project-room-runtime-packages-20260908/candidate-2553d73` is65files,
+19assets, schema12, manifest SHA256:
+`a6c48fa38643d787a4757959e40bbd8337af95b58e3ad9b1a96b800d8fccac2d`.
+Fallback4d22189 and all older candidates are preserved. Workers restart evidence
+remains at `/var/folders/h3/r7zqdttd19v3xzb_q69dqkzc0000gn/T/project-room-cf-store-xkQWMz`.
+
+Actual retained client/server package measurements also match the new counts.
+The new client on retained fallback4d22189 returns the same search results using
+52,272 /361,289 /1,333,590 decoded bytes at the three sizes (three identical repeats
+each). Its legacy full response lacks the32-byte reply-contract advertisement;
+do not conflate this with the original cefc89b baseline. All package measurements
+preserve full audits and manifest verification. Optimized profiler output and the
+observed retained-package summary are saved under the sibling package directory's
+`evidence-2553d73/`, separately from the unmodified original baseline.
+These local recovery checks do not certify hosted restore or current authority.
 
 ## Next
 
-Qualify and retain the exact package, then profile remaining full-projection parse
+The exact package is qualified locally. Next profile remaining full-projection parse
 cost before deciding on database projection changes or server-side search. Avoid
 caching authority or putting private queries into URLs. Native-host acceptance and
 independent current-authority/hosted recovery remain separate gates. Goal incomplete.

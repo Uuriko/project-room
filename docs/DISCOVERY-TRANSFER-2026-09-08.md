@@ -1,5 +1,8 @@
 # Agent discovery transfer: evidence and next implementation
 
+Implemented afterward: [lean work snapshot](LEAN-WORK-SNAPSHOT-2026-09-08.md).
+This document preserves the original baseline and implementation reasoning.
+
 ## Question and method
 
 Does bounded agent search save transfer, or only shrink the output? Measure before
