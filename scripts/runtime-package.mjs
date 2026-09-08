@@ -9,8 +9,9 @@ import { pathToFileURL } from "node:url";
 const v8Assets = ["index.html", ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js",
   "return-brief.js", "work-selectors.js", "work-status.js", "work-packet.js", "portable-work.js", "reminders.js", "reminder-time.js", "styles.css"].map(name => "src/" + name)];
 const v9Assets = [...v8Assets, "src/agent-connections.js"];
-export const publicAssets = [...v9Assets, "src/room-charter.js", "src/room-instructions.js"];
-const assetsFor = schema => schema === 8 ? v8Assets : schema <= 10 ? v9Assets : publicAssets;
+const v11Assets = [...v9Assets, "src/room-charter.js", "src/room-instructions.js"];
+export const publicAssets = [...v11Assets, "src/reply-requests.js"];
+const assetsFor = schema => schema === 8 ? v8Assets : schema <= 10 ? v9Assets : schema === 11 ? v11Assets : publicAssets;
 const required = [...v8Assets, "server.mjs", "package.json", "package-lock.json",
   ...["backup", "bootstrap", "claim-scopes", "deployment", "http", "invitation-evidence", "invitation-journal", "reminders",
     "return-brief", "return-selectors", "share-links", "store", "work-context", "writer-fence"].map(name => `server/${name}.mjs`),
@@ -21,6 +22,8 @@ const required = [...v8Assets, "server.mjs", "package.json", "package-lock.json"
 // them mandatory when the selected source imports them, without rewriting history.
 const optional = ["server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "src/agent-connections.js", "client/mcp-stdio.mjs", "scripts/agent-mcp.mjs", "client/work-actions.mjs", "server/work-discussion.mjs", "server/text-results.mjs", "client/attention-inbox.mjs"];
 optional.push("src/room-charter.js", "src/room-instructions.js");
+optional.push("src/reply-requests.js", "server/reply-requests.mjs");
+optional.push("client/reply-actions.mjs", "scripts/agent-replies.mjs");
 const allowed = new Set([...required, ...optional]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 const check = condition => { if (!condition) throw new Error("Runtime package does not match its exact allowlisted contract"); };
@@ -32,7 +35,7 @@ function runtimeMetadata(files) {
   const schema = /export const STORE_SCHEMA_VERSION = (\d+);/.exec(files.get("server/writer-fence.mjs").toString());
   const pkg = JSON.parse(files.get("package.json"));
   const config = JSON.parse(files.get("cloudflare/wrangler.jsonc"));
-  check(["8", "9", "10", "11"].includes(schema?.[1]) && typeof pkg.engines?.node === "string");
+  check(["8", "9", "10", "11", "12"].includes(schema?.[1]) && typeof pkg.engines?.node === "string");
   return { schemaVersion: Number(schema[1]), node: pkg.engines.node, cloudflare: { compatibilityDate: config.compatibility_date,
     compatibilityFlags: config.compatibility_flags, durableObjects: config.durable_objects, migrations: config.migrations } };
 }

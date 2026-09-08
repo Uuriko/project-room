@@ -8,9 +8,9 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
 import { createRuntimePackage } from '../scripts/runtime-package.mjs';
-import { frozenRecoveryFixture, v8ConnectionBaseline, v9TextBaseline, v10CharterBaseline } from '../scripts/frozen-runtime-fixture.mjs';
+import { frozenRecoveryFixture, v8ConnectionBaseline, v9TextBaseline, v10CharterBaseline, v11ReplyBaseline } from '../scripts/frozen-runtime-fixture.mjs';
 
-for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline], [10, v10CharterBaseline]]) test(`real Workers v${sourceVersion}→v11 permit replacement, rollback, old-writer refusal and restart`, { timeout: 60000 }, async () => {
+for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline], [10, v10CharterBaseline], [11, v11ReplyBaseline]]) test(`real Workers v${sourceVersion}→v12 permit replacement, rollback, old-writer refusal and restart`, { timeout: 60000 }, async () => {
   const directory = mkdtempSync(join(tmpdir(), 'room-agent-worker-upgrade-')), repository = fileURLToPath(new URL('../', import.meta.url));
   const destination = join(directory, 'old'); let f, mf;
   try {
@@ -44,8 +44,10 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
           }
           if(path==='/rollback') {
             const before=catalog(), records=data(), verify=AgentConnections.prototype.verifyHistory;
-            AgentConnections.prototype.verifyHistory=()=>{assert.equal(version(),11);assert.equal(permit(),11);throw new Error('synthetic failure');};
+            let observed;
+            AgentConnections.prototype.verifyHistory=()=>{observed={version:version(),permit:permit()};throw new Error('synthetic failure');};
             try{assert.throws(current,{code:'connection_integrity_error'});}finally{AgentConnections.prototype.verifyHistory=verify;}
+            assert.deepEqual(observed,{version:12,permit:12},'fault occurs after installing the new writer');
             assert.equal(version(),${sourceVersion});assert.equal(permit(),0);assert.deepEqual(catalog(),before);assert.deepEqual(data(),records);assert.equal(oldWrite().changes,1);
             return Response.json({rolledBack:true});
           }
@@ -55,7 +57,7 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
             return Response.json({rejected:true});
           }
           if(path==='/upgrade') {
-            const before=data(), store=current(); assert.equal(version(),11);assert.equal(permit(),0);assert.deepEqual(data(),before);
+            const before=data(), store=current(); assert.equal(version(),12);assert.equal(permit(),0);assert.deepEqual(data(),before);
             assert.throws(oldWrite,/reconciliation/); assert.throws(()=>new OldStore(null,{database:new OldDatabase(this.ctx.storage),storagePlatform:oldStorage}),/newer than this service/);
             assert.equal(store.readTransaction(()=>permit()),0);assert.throws(()=>store.readTransaction(()=>store.createAccount('forbidden')),/read-only/);
             assert.equal(store.db.prepare("UPDATE accounts SET revision=revision WHERE id='missing'").run().changes,0);
@@ -64,19 +66,31 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
             assert.equal(store.authenticate(token).member.id,'worker-agent');assert.equal(store.agentConnections.apply(f.token,'commons',details,f.session.sessionBinding).duplicate,true);
             const disconnect={action:'disconnect',requestId:'worker-disconnect',memberId:'worker-agent',expectedOwnerRevision:0,expectedMemberRevision:0,expectedGeneration:1};
             store.agentConnections.apply(f.token,'commons',disconnect,f.session.sessionBinding);assert.throws(()=>store.authenticate(token));
-            const charterCommand={id:'worker-charter',type:'room.charter_updated',data:{expectedRevision:0,purpose:'Exact Workers instructions 🪷',outputs:'A reviewed result',boundaries:'No external actions',escalation:'Ask the owner'}};
+            const charterCommand={id:'worker-charter',type:'room.charter_updated',data:{expectedRevision:store.room('commons').state.room.charter?.revision??0,purpose:'Exact Workers instructions 🪷',outputs:'A reviewed result',boundaries:'No external actions',escalation:'Ask the owner'}};
             const charterSaved=store.command(f.token,'commons',charterCommand,f.session.sessionBinding);
             assert.equal(store.charter(f.token,'commons',{expectedSessionBinding:f.session.sessionBinding}).charter.purpose,charterCommand.data.purpose);
             assert.equal(auditRecovery(store).checks.agentConnections,true);assert.equal(permit(),0);
-            return Response.json({upgraded:true,details,disconnect,receipt:result.receipt,charterCommand,charterSaved,audit:auditRecovery(store)});
+            const cursors=store.db.prepare('SELECT * FROM cursors ORDER BY room_id,member_id').all();
+            const question={id:'worker-question',type:'message.posted',data:{messageId:'worker-question-message',body:'Can you confirm the instructions?',requestKind:'reply',toMemberId:'agent'}};
+            const asked=store.command(f.token,'commons',question,f.session.sessionBinding);
+            const answer={id:'worker-answer',type:'message.posted',data:{messageId:'worker-answer-message',body:'Confirmed — exact answer.',
+              responseToRequestId:question.data.messageId,expectedRequestRevision:0,responseOutcome:'answered',contextEventId:asked.event.id,contextSequence:asked.sequence,
+              replyToId:question.data.messageId,toMemberId:'owner',workItemId:null}};
+            const answered=store.command(this.env.AGENT,'commons',answer);
+            assert.equal(store.room('commons').state.replyRequests[question.data.messageId].terminalActorId,'agent');
+            return Response.json({upgraded:true,details,disconnect,receipt:result.receipt,charterCommand,charterSaved,question,asked,answer,answered,cursors,audit:auditRecovery(store)});
           }
           if(path==='/restart') {
-            const proof=await request.json(),store=current();assert.equal(version(),11);assert.equal(permit(),0);
+            const proof=await request.json(),store=current();assert.equal(version(),12);assert.equal(permit(),0);
             assert.deepEqual(store.agentConnections.apply(f.token,'commons',proof.details,f.session.sessionBinding).receipt,proof.receipt);
             assert.equal(store.agentConnections.apply(f.token,'commons',proof.disconnect,f.session.sessionBinding).duplicate,true);
             assert.equal(store.agentConnections.list(f.token,'commons',f.session.sessionBinding).connections.find(c=>c.memberId==='worker-agent').status,'disconnected');
             assert.equal(store.command(f.token,'commons',proof.charterCommand,f.session.sessionBinding).event.id,proof.charterSaved.event.id);
-            assert.equal(store.charter(f.token,'commons',{revision:1,expectedSessionBinding:f.session.sessionBinding}).charter.purpose,proof.charterCommand.data.purpose);
+            assert.equal(store.charter(f.token,'commons',{revision:proof.charterCommand.data.expectedRevision+1,expectedSessionBinding:f.session.sessionBinding}).charter.purpose,proof.charterCommand.data.purpose);
+            assert.equal(store.command(f.token,'commons',proof.question,f.session.sessionBinding).event.id,proof.asked.event.id);
+            assert.equal(store.command(this.env.AGENT,'commons',proof.answer).event.id,proof.answered.event.id);
+            assert.equal(store.room('commons').state.messages.find(m=>m.id===proof.answer.data.messageId).body,proof.answer.data.body);
+            assert.deepEqual(store.db.prepare('SELECT * FROM cursors ORDER BY room_id,member_id').all(),proof.cursors);
             assert.deepEqual(auditRecovery(store),proof.audit);return Response.json({recovered:true});
           }
           return new Response(null,{status:404});
@@ -87,7 +101,7 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
     const bundled = await build({ stdin: { contents: source, resolveDir: repository }, bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
     const config = { modules: true, script: bundled.outputFiles[0].text, compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'],
       durableObjects: { ROOM: { className: 'UpgradeRoom', useSQLite: true } }, durableObjectsPersist: join(directory, 'persistence'),
-      bindings: { TABLES: JSON.stringify(tables), ROWS: JSON.stringify(rows), OWNER: JSON.stringify(f.owner) } };
+      bindings: { TABLES: JSON.stringify(tables), ROWS: JSON.stringify(rows), OWNER: JSON.stringify(f.owner), AGENT: f.keys.agent } };
     mf = new Miniflare(config);
     const call = async (path, body) => { const response = await mf.dispatchFetch('http://localhost' + path, body ? { method: 'POST', body: JSON.stringify(body) } : {}); assert.equal(response.status,200,await response.clone().text());return response.json(); };
     await call('/seed'); assert.deepEqual(await call('/rollback'), { rolledBack: true }); const upgraded = await call('/upgrade');

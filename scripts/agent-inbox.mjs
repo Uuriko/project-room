@@ -4,7 +4,10 @@ import { validId } from "../src/events.js";
 import { agentConnectionFromEnvironment, readConnectionInput, saveAgentConnection, connectionDiagnostic, ConnectionError } from "../client/agent-connection.mjs";
 
 const [action = "orient", checkpoint, ...extra] = process.argv.slice(2);
-if (action === "watch") {
+if (action === "reply") {
+  const { replyMain } = await import("./agent-replies.mjs");
+  await replyMain(process.argv.slice(3));
+} else if (action === "watch") {
   const { watchMain } = await import("./agent-watch.mjs");
   await watchMain(process.argv.slice(3));
 } else if (action === "--help") {
@@ -17,6 +20,7 @@ if (action === "watch") {
   node scripts/agent-inbox.mjs discussion WORK_ID [--since N | --cursor CURSOR] [--limit N]
   node scripts/agent-inbox.mjs [orient|brief|changes CHECKPOINT|packet WORK_ID]
 Assignment watching: node scripts/agent-inbox.mjs watch --help
+Reply requests: node scripts/agent-inbox.mjs reply --help
 
 Connect checks access, then saves a new private connection; never overwrites or
 issues a key. Supply ROOM_AGENT_ORIGIN, ROOM_AGENT_ROOM, ROOM_AGENT_MEMBER and

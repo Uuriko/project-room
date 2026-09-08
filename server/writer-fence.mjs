@@ -1,8 +1,8 @@
 // Upgrade compatibility fence, not authentication against a database administrator.
 // Older service connections do not register this function, so ordinary writes fail
 // after the schema transaction commits, even if the connection predates migration.
-export const STORE_SCHEMA_VERSION = 11;
-export const WRITER_FUNCTION = "project_room_writer_v11";
+export const STORE_SCHEMA_VERSION = 12;
+export const WRITER_FUNCTION = "project_room_writer_v12";
 const v6Tables = ["rooms", "events", "commands", "accounts", "member_accounts", "account_access_events",
   "credentials", "cursors", "projection_checkpoints", "account_credentials", "account_session_slots",
   "membership_invitations", "membership_invitation_events", "membership_invitation_journal"];
@@ -10,7 +10,7 @@ const v7Tables = [...v6Tables, "share_links", "share_link_joins"];
 const v8Tables = [...v7Tables, "private_reminders", "private_reminder_commands"];
 const tables = [...v8Tables, "agent_connections", "agent_connection_operations"];
 export const applicationTables = Object.freeze(tables);
-export const fenceDefinitions = version => Object.freeze(({ 6: v6Tables, 7: v7Tables, 8: v8Tables, 9: tables, 10: tables, 11: tables })[version].flatMap(table => ["INSERT", "UPDATE", "DELETE"].map(operation => {
+export const fenceDefinitions = version => Object.freeze(({ 6: v6Tables, 7: v7Tables, 8: v8Tables, 9: tables, 10: tables, 11: tables, 12: tables })[version].flatMap(table => ["INSERT", "UPDATE", "DELETE"].map(operation => {
   const name = `writer_v${version}_${table}_${operation.toLowerCase()}`;
   return Object.freeze({ name, sql: `CREATE TRIGGER ${name} BEFORE ${operation} ON ${table} BEGIN SELECT CASE WHEN project_room_writer_v${version}() IS NOT ${version} THEN RAISE(ABORT,'unsupported database writer') END; END` });
 })));
@@ -22,6 +22,7 @@ export function registerWriter(db) {
   db.function("project_room_writer_v8", () => 8);
   db.function("project_room_writer_v9", () => 9);
   db.function("project_room_writer_v10", () => 10);
+  db.function("project_room_writer_v11", () => 11);
   db.function(WRITER_FUNCTION, () => STORE_SCHEMA_VERSION);
 }
 
@@ -36,7 +37,7 @@ export function installWriterFence(db) {
 }
 
 export function verifyWriterFence(db, version = STORE_SCHEMA_VERSION) {
-  const expected = new Map([6, 7, 8, 9, 10, 11].filter(v => v <= version).flatMap(fenceDefinitions).map(def => [def.name, def.sql]));
+  const expected = new Map([6, 7, 8, 9, 10, 11, 12].filter(v => v <= version).flatMap(fenceDefinitions).map(def => [def.name, def.sql]));
   for (const row of db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v*'").all()) {
     if (expected.get(row.name) !== row.sql) throw new Error("Database writer fence requires operator reconciliation");
   }

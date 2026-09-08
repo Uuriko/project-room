@@ -5,6 +5,7 @@ import { connectionDiagnostic } from "./agent-connection.mjs";
 import { workTools, isWorkTool, validWorkArguments, submitWorkAction, workActionRefusal } from "./work-actions.mjs";
 import { currentAttention } from "./attention-inbox.mjs";
 import { WatchError } from "./watch-journal.mjs";
+import { replyTools, isReplyTool, replyRoute, validReplyArguments, submitReplyAction, replyRefusal } from "./reply-actions.mjs";
 
 export const MCP_VERSION = "2025-11-25";
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -25,13 +26,15 @@ export const roomTools = [
     requestId: id, workItemId: id, packetId: { ...id, description: "Your stable correlation ID for this selected-task handoff, e.g. welcome-draft-01. It is not an access key or proof of authority. Keep it unchanged on exact retry." }, basisRevision: { type: "integer", minimum: 0 },
     body: { type: "string", minLength: 1, maxLength: 4096 }, allowOlderBasis: { type: "boolean", default: false }
   }, ["requestId", "workItemId", "packetId", "basisRevision", "body"]), false),
-  ...workTools
+  ...workTools,
+  ...replyTools
 ];
 export const attentionTools = [
   tool("room_read_attention", "Pull up to 20 current work/instruction notices from this operator-configured local inbox. Remains pending until explicitly acknowledged. May coalesce intermediate changes; not an event archive or cross-device inbox. Read nextRead to refresh context. No work, approval or human read marker changes; no model is started. Updates only private local observer state.", schema(), false),
   tool("room_acknowledge_attention", "Acknowledge one exact local notice ID after recording it. Rechecks access and current conditions first; an obsolete ID cannot dismiss its replacement. Retry the same ID if the outcome is unknown. Not proof of understanding, accepted work, completion, human approval or a human read marker. Updates only private local observer state.", schema({ noticeId: id }, ["noticeId"]), false)
 ];
 function validArguments(tool, args) {
+  if (isReplyTool(tool.name)) return validReplyArguments(tool.name, args);
   if (isWorkTool(tool.name)) return validWorkArguments(tool.name, args);
   if (!object(args) || Object.keys(args).some(key => !Object.hasOwn(tool.inputSchema.properties, key))
     || tool.inputSchema.required.some(key => !Object.hasOwn(args, key))) return false;
@@ -45,6 +48,7 @@ function validArguments(tool, args) {
       : key === "basisRevision" ? Number.isSafeInteger(value) && value >= 0 : typeof value === "boolean");
 }
 async function callTool(client, identity, name, args, signal) {
+  if (isReplyTool(name)) return replyRoute(name) ? client.replyRead(name, args, { signal }) : submitReplyAction(client, identity, name, args, { signal });
   if (isWorkTool(name)) return submitWorkAction(client, identity, name, args, { signal });
   if (name === "room_check_access") return client.checkConnection({ signal });
   if (name === "room_list_work") return client.orient({ signal });
@@ -155,6 +159,7 @@ export function serveRoomMcp({ client, roomId, memberId, input, output, timeoutM
           }
           if (isWorkTool(selected.name)) value = workActionRefusal(cause) ?? { ...value, outcome: "not_confirmed",
             retry: "Retain the exact original input. A lost or cancelled response does not prove the operation was not saved." };
+          if (isReplyTool(selected.name)) value = replyRefusal(cause);
           if (selected.name === "room_post_draft") value = { ...value, outcome: "not_confirmed", retry: "Retain the exact original input. Cancellation or a missing response does not prove the draft was not saved." };
           if (selected.name === "room_post_draft" && [409, 422].includes(cause?.status)) value = {
             type: "draft_refused", code: cause.code === "idempotency_conflict" ? "idempotency_conflict" : "review_required", outcome: "this_attempt_refused",

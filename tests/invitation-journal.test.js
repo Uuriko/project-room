@@ -113,7 +113,7 @@ for (const status of ["pending", "accepted", "revoked"]) test(`v4 ${status} migr
   f.store.db.exec("DROP TABLE agent_connection_operations; DROP TABLE agent_connections; DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE membership_invitation_journal; PRAGMA user_version=4");
   f.close();
   const migrated = f.reopen();
-  assert.equal(migrated.db.prepare("PRAGMA user_version").get().user_version, 11);
+  assert.equal(migrated.db.prepare("PRAGMA user_version").get().user_version, 12);
   assert.deepEqual({ ...f.record() }, record);
   assert.deepEqual(migrated.db.prepare("SELECT * FROM membership_invitation_events WHERE invitation_id=? ORDER BY sequence").all(f.id).map(row => ({ ...row })), audits);
   assert.deepEqual(migrated.db.prepare("SELECT * FROM events ORDER BY room_id,sequence").all().map(row => ({ ...row })), events);
@@ -182,7 +182,7 @@ test("read-only audit refuses a v4 input without migrating or creating a journal
   const f = fixture(t);
   f.store.db.exec("DROP TABLE agent_connection_operations; DROP TABLE agent_connections; DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE membership_invitation_journal; PRAGMA user_version=4");
   f.close();
-  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v11/);
+  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v12/);
   const raw = new DatabaseSync(f.filename, { readOnly: true });
   try {
     assert.equal(raw.prepare("PRAGMA user_version").get().user_version, 4);

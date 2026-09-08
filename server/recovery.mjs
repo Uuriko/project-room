@@ -5,6 +5,7 @@ import { terminalWork } from "../src/workflow.js";
 import { applicationTables, STORE_SCHEMA_VERSION } from "./writer-fence.mjs";
 import { auditTextResults } from "./text-results.mjs";
 import { auditCharters } from "../src/room-charter.js";
+import { auditReplyRequests } from "./reply-requests.mjs";
 
 const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(",")}]`
   : value && typeof value === "object" ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}` : JSON.stringify(value);
@@ -47,6 +48,7 @@ export function auditRecovery(store) {
       });
       auditTextResults(store.db, actual.state, history);
       auditCharters(actual.state, history, checkpoint);
+      auditReplyRequests(actual.state, history, checkpoint);
       eventCount += history.length;
       rooms.set(row.id, actual.state);
     }

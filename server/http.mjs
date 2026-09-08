@@ -11,7 +11,7 @@ const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 const bindingPattern = /^[a-f0-9]{64}$/;
 const assets = new Map([
   ["/", ["index.html", "text/html"]], ["/index.html", ["index.html", "text/html"]],
-  ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js", "agent-connections.js", "return-brief.js", "work-selectors.js", "work-status.js", "work-packet.js", "portable-work.js", "reminders.js", "reminder-time.js", "room-charter.js", "room-instructions.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
+  ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js", "agent-connections.js", "return-brief.js", "work-selectors.js", "work-status.js", "work-packet.js", "portable-work.js", "reminders.js", "reminder-time.js", "room-charter.js", "room-instructions.js", "reply-requests.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
   ["/src/styles.css", ["src/styles.css", "text/css"]]
 ]);
 const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -305,7 +305,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         reject(405, "method_not_allowed", "Method not allowed");
       }
       const revokeMatch = /^\/api\/rooms\/([^/]{1,384})\/invitations\/([^/]{1,384})\/revoke$/.exec(url.pathname);
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|charter|invitations|share-links|share-links-cancel|reminders|agent-connections))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections))?$/.exec(url.pathname);
       if (!match && !revokeMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((match ?? revokeMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
@@ -319,6 +319,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       rate(`read:${auth.credentialHash}`, 600);
       if (!["GET", "HEAD"].includes(req.method)) { protectWrite(req, auth, selected.bearer); rate(`write:${auth.credentialHash}`, 60); }
       if (!route && req.method === "GET") return json(res, 200, store.snapshot(selected.token, roomId, fence));
+      if (["reply-requests", "reply-context", "reply-history"].includes(route) && req.method === "GET") {
+        const params = url.searchParams, names = route === "reply-requests" ? ["direction", "status"]
+          : route === "reply-context" ? ["requestMessageId", "cursor", "limit"] : ["direction", "cursor", "checkpoint", "limit"];
+        if ([...params.keys()].some(key => ![...names, "auth"].includes(key) || params.getAll(key).length !== 1)
+          || params.has("limit") && !/^[1-9]\d*$/.test(params.get("limit"))) reject(422, "invalid_reply_selection", "Invalid request selection");
+        const options = Object.fromEntries(names.filter(key => key !== "requestMessageId" && params.has(key)).map(key => [key, key === "limit" ? Number(params.get(key)) : params.get(key)]));
+        options.expectedSessionBinding = fence;
+        const value = route === "reply-requests" ? store.replyRequests.list(selected.token, roomId, options)
+          : route === "reply-context" ? store.replyRequests.selected(selected.token, roomId, params.get("requestMessageId"), options)
+          : store.replyRequests.history(selected.token, roomId, options);
+        return json(res, 200, value);
+      }
       if (route === "charter" && req.method === "GET") {
         const params = url.searchParams;
         if ([...params.keys()].some(key => !["revision", "auth"].includes(key) || params.getAll(key).length !== 1)

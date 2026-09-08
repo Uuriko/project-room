@@ -2,6 +2,7 @@ import { validId, PERMISSIONS } from "../src/events.js";
 import { nextWorkStep, reusableWorkDefinition } from "../src/workflow.js";
 import { workPacket, resultDraft, verifyWorkResult } from "../src/work-packet.js";
 import { submitWorkAction } from "./work-actions.mjs";
+import { replyRoute, validReplyArguments, validateReplyRead, submitReplyAction } from "./reply-actions.mjs";
 import { charterContext, validateCharterContext, validateCharterRead } from "../src/room-charter.js";
 
 export class RoomClientError extends Error {
@@ -55,7 +56,7 @@ export class RoomAgentClient {
     // is never a cached grant. The service still authorizes the operation itself.
     if (this.#memberId) await this.checkConnection({ signal });
     const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal);
-    if (this.#memberId && (suffix === "" || suffix === "/charter" || suffix.startsWith("/charter?") || suffix.startsWith("/work-context?") || suffix.startsWith("/work-discussion?") || suffix.startsWith("/work-result?") || suffix.startsWith("/return-brief?"))) {
+    if (this.#memberId && (suffix === "" || suffix === "/charter" || suffix.startsWith("/charter?") || suffix.startsWith("/work-context?") || suffix.startsWith("/work-discussion?") || suffix.startsWith("/work-result?") || suffix.startsWith("/return-brief?") || /^\/reply-(requests|context|history)\?/.test(suffix))) {
       if (value?.roomId !== this.#roomId || value.viewerId !== this.#memberId || value.viewerAccountId !== null
         || value.viewerAuthEpoch !== null || value.viewerSessionBinding !== null || value.viewerSessionRevision !== null) {
         throw new RoomClientError(200, "identity_mismatch", "Room response does not match the configured agent");
@@ -89,6 +90,22 @@ export class RoomAgentClient {
       checkedAt: new Date(now).toISOString(), expiresAt: value.expiresAt, scope: "room", externalExecution: false };
   }
   snapshot({ signal } = {}) { return this.#request("", undefined, signal); }
+  async replyRead(name, args = {}, { signal } = {}) {
+    const route = replyRoute(name);
+    if (!route || !validReplyArguments(name, args)) throw new Error("Invalid request read selection");
+    const result = await this.#request(route + "?" + new URLSearchParams(args), undefined, signal);
+    return validateReplyRead(result, { name, args, roomId: this.#roomId });
+  }
+  replyRequests(options = {}) { const { signal, ...args } = options; return this.replyRead("room_list_requests", args, { signal }); }
+  replyContext(requestMessageId, options = {}) {
+    const { signal, ...args } = options;
+    if (Object.hasOwn(args, "requestMessageId")) throw new Error("Choose the request once");
+    return this.replyRead("room_read_request", { ...args, requestMessageId }, { signal });
+  }
+  replyHistory(options = {}) { const { signal, ...args } = options; return this.replyRead("room_request_history", args, { signal }); }
+  replyAction(name, args, options = {}) {
+    return submitReplyAction(this, { roomId: this.#roomId, memberId: this.#memberId }, name, args, options);
+  }
   async charter({ revision, signal } = {}) {
     if (revision !== undefined && (!Number.isSafeInteger(revision) || revision < 0)) throw new Error("Choose an instructions version");
     const value = await this.#request(`/charter${revision === undefined ? "" : `?revision=${revision}`}`, undefined, signal);

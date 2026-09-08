@@ -88,6 +88,23 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.equal(noSource.next.action, 'accept');
     assert.equal((await call('/api/rooms/commons/work-context?workItemId=selected%3Atask', { headers: { ...guestHeaders, 'X-Session-Binding': 'f'.repeat(64) } })).status, 409);
     assert.deepEqual(await json(await call('/api/rooms/commons', { headers: guestHeaders })), beforeRead);
+    const questionCommand = { id: randomUUID(), type: 'message.posted', data: { messageId: 'worker-reply-request', requestKind: 'reply',
+      toMemberId: joined.session.member.id, body: 'Which agenda would you choose?' } };
+    const asked = await json(await call('/api/rooms/commons/commands', { headers: ownerHeaders, data: questionCommand }), 201);
+    const selectedReply = await json(await call('/api/rooms/commons/reply-context?requestMessageId=worker-reply-request', { headers: guestHeaders }));
+    assert.equal(selectedReply.current.answerBasis.contextEventId, asked.event.id);
+    assert.equal(selectedReply.viewerSessionBinding, joined.session.sessionBinding);
+    assert.equal((await json(await call('/api/rooms/commons/reply-requests', { headers: guestHeaders }))).requests[0].id, 'worker-reply-request');
+    const answerCommand = { id: randomUUID(), type: 'message.posted', data: { messageId: 'worker-reply-answer', responseToRequestId: 'worker-reply-request',
+      ...selectedReply.current.answerBasis, responseOutcome: 'answered', body: 'The short agenda 🪷', replyToId: 'worker-reply-request', toMemberId: 'owner', workItemId: null } };
+    const answered = await json(await call('/api/rooms/commons/commands', { headers: guestHeaders, data: answerCommand }), 201);
+    assert.equal((await json(await call('/api/rooms/commons/commands', { headers: guestHeaders, data: answerCommand }))).event.id, answered.event.id);
+    const replyHistory = await json(await call('/api/rooms/commons/reply-history', { headers: guestHeaders }));
+    assert.deepEqual(replyHistory.page.items.map(row => row.kind), ['opened', 'answered']);
+    assert.equal(replyHistory.page.items.at(-1).message.body, answerCommand.data.body);
+    assert.equal((await json(await call('/api/rooms/commons', { headers: guestHeaders }))).cursor, beforeRead.cursor);
+    assert.equal((await call('/api/rooms/commons/reply-context?requestMessageId=worker-reply-request', { headers: { ...guestHeaders, 'X-Session-Binding': 'f'.repeat(64) } })).status, 409);
+    assert.equal((await call('/api/rooms/commons/reply-history?status=open', { headers: guestHeaders })).status, 422);
     const denied = await call('/api/rooms/commons/commands', { headers: { ...guestHeaders, 'X-CSRF-Token': '' }, data: { ...command, id: randomUUID() } });
     assert.equal(denied.status, 403);
     assert.equal((await call('/api/rooms/commons')).status, 401);

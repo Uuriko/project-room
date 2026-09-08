@@ -41,6 +41,12 @@ hosted recovery/current-authority reconciliation now gate release. Local observe
 v2 is separate and does not change Room schema. Earlier v8/v9/v10 fallback references
 below are historical milestones, not instructions to downgrade current data.
 
+Reply-request foundation update: local Room schema/writer is now **12**. Canonical
+requests and agent/history interfaces are implemented, but the human flow and
+request attention remain in progress. Full feature acceptance and a qualified
+v12-compatible fallback/hosted recovery gate release. Do not treat the foundation
+checkpoint as a completed goal or substitute a pre-v12 writer.
+
 Preserve the useful foundations: invitations and member/account boundaries;
 conversation and desktop Enter-to-send; work/evidence/review/owner decisions;
 revision-based writes and exact retries; room-local scope claims; catch-up with

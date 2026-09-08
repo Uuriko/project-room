@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { EVENT_TYPES as T, validId } from "../src/events.js";
+import { replyPostMode, REPLY_POLICY_VERSION } from "../src/reply-requests.js";
 
 const id = { type: "string", minLength: 1, maxLength: 128, pattern: "^(?!(?:constructor|prototype|__proto__)$)[A-Za-z0-9][A-Za-z0-9_.:-]*$" };
 const text = { type: "string", minLength: 1, maxLength: 4096, pattern: "\\S" };
@@ -49,7 +50,7 @@ export const workTools = [...actions.values()].map(action => action.tool);
 export const isWorkTool = name => actions.has(name);
 
 // Validator for this finite descriptor vocabulary, not a general JSON Schema engine.
-function conforms(value, shape) {
+export function conforms(value, shape) {
   if (value === null) return Array.isArray(shape.type) && shape.type.includes("null");
   const type = Array.isArray(shape.type) ? shape.type.find(type => type !== "null") : shape.type;
   if (type === "object") return typeof value === "object" && !Array.isArray(value)
@@ -72,11 +73,15 @@ export function buildWorkCommand(name, args) {
 }
 export function confirmsAgentCommand(receipt, command, { roomId, memberId }) {
   const entry = receipt?.event;
+  let data = command.data;
+  try {
+    if (command.type === T.MESSAGE_POSTED && replyPostMode(data)) data = { ...data, requestPolicyVersion: REPLY_POLICY_VERSION };
+  } catch { return false; }
   return Number.isSafeInteger(receipt?.sequence) && receipt.sequence > 0 && typeof receipt.duplicate === "boolean"
     && validId(entry?.id) && entry.type === command.type && entry.roomId === roomId && entry.actorId === memberId
     && entry.idempotencyKey === createHash("sha256").update(`${memberId}:${command.id}`).digest("hex")
     && entry.causationId === (command.causationId ?? null) && typeof entry.at === "string" && Number.isFinite(Date.parse(entry.at))
-    && isDeepStrictEqual(entry.data, command.data);
+    && isDeepStrictEqual(entry.data, data);
 }
 export async function submitWorkAction(client, identity, name, args, { signal } = {}) {
   if (!validId(identity?.roomId) || !validId(identity?.memberId)) throw new Error("Pinned agent identity required");

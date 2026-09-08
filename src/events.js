@@ -1,6 +1,7 @@
 import { REACTIONS } from "./conversation.js";
 import { proposalContext, nativeTextEvidence } from "./work-packet.js";
 import { CHARTER_TYPE, charterFromEvent } from "./room-charter.js";
+import { REPLY_CANCELLED, prepareReplyPost, recordReplyPost, cancelReplyRequest } from "./reply-requests.js";
 
 export const EVENT_TYPES = Object.freeze({
   ROOM_CREATED: "room.created",
@@ -9,6 +10,7 @@ export const EVENT_TYPES = Object.freeze({
   MEMBER_JOINED_VIA_INVITATION: "member.joined_via_invitation",
   MEMBER_ACCESS_CHANGED: "member.access_changed",
   MESSAGE_POSTED: "message.posted",
+  REPLY_REQUEST_CANCELLED: REPLY_CANCELLED,
   MESSAGE_REACTION_SET: "message.reaction_set",
   WORK_PROPOSED: "work.proposed",
   WORK_ACCEPTED: "work.accepted",
@@ -110,6 +112,7 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.MEMBER_JOINED_VIA_INVITATION]: joinMemberViaInvitation,
     [EVENT_TYPES.MEMBER_ACCESS_CHANGED]: changeMemberAccess,
     [EVENT_TYPES.MESSAGE_POSTED]: postMessage,
+    [EVENT_TYPES.REPLY_REQUEST_CANCELLED]: cancelReplyRequest,
     [EVENT_TYPES.MESSAGE_REACTION_SET]: setMessageReaction,
     [EVENT_TYPES.WORK_PROPOSED]: proposeWork,
     [EVENT_TYPES.WORK_ACCEPTED]: acceptWork,
@@ -261,7 +264,8 @@ function requireScopedMemberAdministration(state, actorId, targetId, currentTarg
 function postMessage(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
   requireFields(incoming.data, ["body"]);
-  if (incoming.data.toMemberId) requireMember(state, incoming.data.toMemberId);
+  const requestMode = prepareReplyPost(state, incoming);
+  if (incoming.data.toMemberId) (requestMode === "respond" ? knownMember : requireMember)(state, incoming.data.toMemberId);
   if (typeof incoming.data.body !== "string") throw new Error("Message body must be text");
   if (incoming.data.workItemId) requireWorkItem(state, incoming.data.workItemId);
   const proposal = proposalContext(incoming.data, state.workItems[incoming.data.workItemId]);
@@ -277,6 +281,7 @@ function postMessage(state, incoming) {
     createdAt: incoming.at,
     ...(proposal ? { proposal } : {})
   });
+  recordReplyPost(state, incoming, requestMode);
 }
 
 function setMessageReaction(state, incoming) {

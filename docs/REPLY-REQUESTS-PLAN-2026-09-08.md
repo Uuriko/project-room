@@ -1,9 +1,11 @@
 # Next: deliberate requests for a reply
 
-Design/implementation plan, September 8, 2026. **Not implemented.** The current
-attention and selected discussion features remain current-condition reads, not
-a request history inbox. This is the next collaboration slice, not a new generic
-task system. Root integrates; independent agents review bounded contracts/tests.
+Design/implementation plan, September 8, 2026. **In progress, local only.** The
+canonical request rules, schema/writer 12, recovery audit, current/selected/anchored
+history reads and shared direct/CLI/MCP actions are implemented. Human composer,
+request-specific current attention and complete actual-agent/simulated-human
+acceptance remain required. This foundation checkpoint is not feature completion.
+Root integrates; independent agents review bounded contracts/tests.
 
 ## Job and product boundary
 
@@ -183,11 +185,43 @@ preference, retention or native host acceptance.
 
 ## Now / next / later
 
-- **Now:** finish the measured client-only attention-read optimization and preserve
-  its identity/history/recovery tests. Keep the main interface unchanged.
-- **Next:** this reply-request slice and anchored historical discovery. In parallel,
-  native-host acceptance and qualified v11 fallback/hosted recovery remain gates.
+- **Now:** finish this reply-request slice: compact human composer/actions with
+  owned drafts and exact unknown retries; explicit opt-in request attention; actual
+  agent reconnect/clarification/answer and simulated human screenshot acceptance.
+  The earlier client-only attention-read optimization is complete; preserve it.
+- **Next:** qualify a distinct v12-compatible fallback and hosted recovery before
+  release. Native-host acceptance remains a separate gate; stdio adapter tests are
+  not Claude/ChatGPT/Grok/Instinct installation or provider acceptance.
 - **Later:** eligible-work suggestions and opt-in standing roles; atomic compact
   observations if measured network costs warrant a new protocol; scoped repository/
   Dasha fake-runner attempts. Real providers, payments, execution and publication
   require their own reviewed contracts and explicit authorization.
+
+## Remaining integration decisions settled at the foundation checkpoint
+
+- Keep every human mode in the existing composer; no new main navigation. Treat
+  request A → B within one root thread as a draft ownership change, not a harmless
+  thread switch. Pin subject/revision/context to the draft and unknown command.
+- Extend opt-in draft recovery through a validated new branch. Reconstruct only
+  the exact permitted payload. An inactive requester is allowed only for a genuine
+  response; ordinary targeting stays strict. A terminal current read is not proof
+  that an earlier unknown write failed.
+- Existing private observer v2 is not extensible in place. Add an operator-selected
+  v3 with a **new directory**, explicit binding/filter/schema and no automatic
+  migration, acknowledgement copying or reset. Preserve existing v1 stdout and
+  v2 work/instruction inbox behavior.
+- V3 conditions: open incoming request keyed by subject/revision/context event;
+  outgoing answer/decline keyed by terminal event; outgoing unavailable-recipient
+  condition. Persist metadata/read pointers only. New relevant context replaces
+  the exact pending notice; unrelated work/reactions/names stay quiet.
+- V3 requires a service support indicator: absent request state means either no
+  requests yet or an older service. Never interpret unsupported service as an
+  empty inbox and clear pending notices. Capacity must cover 500 work conditions
+  + 500 request conditions + one instructions notice (1001), without truncation.
+- Selected context emits no reusable checkpoint; `hasMore:false` completes that
+  read. History alone emits a consumable `completedCheckpoint`. Both use bounded
+  pages; history rows carry immutable requester/recipient/work identity so a
+  terminal-only continuation can independently verify its selection.
+- Recovery/migration evidence covers genuine v11 data, not just a rewritten
+  version marker. Reserved historical policy/map collisions, including JSON null
+  and checkpoint-hidden values, refuse before any migration writes.

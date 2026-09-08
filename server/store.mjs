@@ -17,6 +17,8 @@ import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs"
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
 import { charterContext, charterFromEvent } from "../src/room-charter.js";
+import { REPLY_FIELDS, REPLY_POLICY_VERSION, replyPostMode } from "../src/reply-requests.js";
+import { ReplyRequests } from "./reply-requests.mjs";
 
 export class ServiceError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -155,7 +157,8 @@ const shapes = {
   [T.ROOM_CHARTER_UPDATED]: "expectedRevision purpose outputs boundaries escalation",
   [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId",
   [T.MEMBER_ACCESS_CHANGED]: "memberId expectedMemberRevision permissions active",
-  [T.MESSAGE_POSTED]: "messageId body workItemId replyToId toMemberId packetId basisRevision allowOlderBasis",
+  [T.MESSAGE_POSTED]: `messageId body workItemId replyToId toMemberId packetId basisRevision allowOlderBasis ${REPLY_FIELDS.join(" ")}`,
+  [T.REPLY_REQUEST_CANCELLED]: "requestMessageId expectedRequestRevision reason",
   [T.MESSAGE_REACTION_SET]: "messageId reaction active",
   [T.WORK_PROPOSED]: "workItemId title definitionOfDone accountableMemberId verifierMemberId independentVerificationRequired ownerDecisionRequired humanDecisionMakerId mode sourceMessageId",
   [T.WORK_ACCEPTED]: work,
@@ -179,10 +182,13 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "basisRevision"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed"].includes(name) ? "array" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "basisRevision", "expectedRequestRevision", "contextSequence"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed"].includes(name) ? "array" : "string";
     if (type === "array" ? !Array.isArray(value) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (Buffer.byteLength(JSON.stringify(command)) > 16384) fail(413, "too_large", "Command is too large");
+  if (command.type === T.MESSAGE_POSTED) {
+    try { replyPostMode(command.data); } catch (error) { fail(422, "invalid_command", error.message); }
+  }
 }
 
 export class RoomStore {
@@ -193,8 +199,9 @@ export class RoomStore {
     this.shareLinks = new ShareLinks(this);
     this.reminders = new Reminders(this);
     this.agentConnections = new AgentConnections(this);
+    this.replyRequests = new ReplyRequests(this);
     const version = this.storagePlatform.version(this.db);
-    const supported = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, STORE_SCHEMA_VERSION]);
+    const supported = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, STORE_SCHEMA_VERSION]);
     const hasSchema = version === 0 && this.storagePlatform.hasSchema(this.db);
     if (!supported.has(version) || hasSchema) {
       this.db.close();
@@ -218,6 +225,14 @@ export class RoomStore {
     // Reread under the write lock: another startup may have upgraded while we waited.
     if (this.storagePlatform.version(this.db) !== version) throw new Error("Database changed during startup; retry with the current service");
     if (version >= 6) this.storagePlatform.verifyWriterFence(this.db, version);
+    if (version > 0 && version < 12) {
+      // Legacy fixture import allowed ignored scalar fields. Never reinterpret a
+      // previously stored policy marker, even when it is null or behind a checkpoint.
+      const collision = this.db.prepare("SELECT 1 FROM events WHERE json_extract(body,'$.type')='message.posted' AND json_type(body,'$.data.requestPolicyVersion') IS NOT NULL LIMIT 1").get()
+        || this.db.prepare("SELECT 1 FROM rooms WHERE json_type(projection,'$.replyRequests') IS NOT NULL LIMIT 1").get();
+      const checkpointCollision = version >= 2 && this.db.prepare("SELECT 1 FROM projection_checkpoints WHERE json_type(projection,'$.replyRequests') IS NOT NULL LIMIT 1").get();
+      if (collision || checkpointCollision) throw new Error("Legacy reply request marker requires operator reconciliation");
+    }
     if (version === 0) { this.db.exec(`
       CREATE TABLE rooms (id TEXT PRIMARY KEY, sequence INTEGER NOT NULL, projection TEXT NOT NULL);
       CREATE TABLE events (room_id TEXT NOT NULL REFERENCES rooms(id), sequence INTEGER NOT NULL, id TEXT NOT NULL UNIQUE, body TEXT NOT NULL, PRIMARY KEY(room_id, sequence));
@@ -1079,20 +1094,28 @@ export class RoomStore {
       const target = room.state.members[command.data.memberId];
       const endingAccess = command.type === T.MEMBER_ACCESS_CHANGED && target?.active === true && command.data.active === false
         && canonical(target.permissions) === canonical(command.data.permissions);
-      // At capacity, each remaining active membership can still be ended once.
-      if ((room.sequence >= 10000 && !endingAccess) || (command.type === T.MEMBER_ADDED && Object.keys(room.state.members).length >= 100) || (command.type === T.WORK_PROPOSED && Object.keys(room.state.workItems).length >= 500)) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
+      const requestMode = command.type === T.MESSAGE_POSTED && replyPostMode(command.data);
+      const endingRequest = (requestMode === "respond" || command.type === T.REPLY_REQUEST_CANCELLED)
+        && room.state.replyRequests?.[command.data.responseToRequestId ?? command.data.requestMessageId]?.status === "open";
+      // At capacity, each remaining membership/request can still be ended once.
+      if ((room.sequence >= 10000 && !endingAccess && !endingRequest) || (command.type === T.MEMBER_ADDED && Object.keys(room.state.members).length >= 100) || (command.type === T.WORK_PROPOSED && Object.keys(room.state.workItems).length >= 500)) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       const memberAuthorityEvent = [T.MEMBER_ADDED, T.MEMBER_ACCESS_CHANGED].includes(command.type);
       const incoming = event({
         type: command.type, roomId, actorId: auth.member.id, at: new Date(this.now()).toISOString(),
         idempotencyKey: hash(`${auth.member.id}:${command.id}`), causationId: command.causationId,
-        data: memberAuthorityEvent ? { ...command.data, authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION } : command.data
+        data: memberAuthorityEvent ? { ...command.data, authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION }
+          : requestMode ? { ...command.data, requestPolicyVersion: REPLY_POLICY_VERSION } : command.data
       });
       let state;
       try {
+        if (requestMode === "respond") {
+          const basis = this.db.prepare("SELECT id,body FROM events WHERE room_id=? AND sequence=?").get(roomId, command.data.contextSequence);
+          if (basis?.id !== command.data.contextEventId || JSON.parse(basis.body).type !== T.MESSAGE_POSTED) throw new Error("Stale reply request context sequence");
+        }
         state = compact(applyEvent(room.state, incoming));
         if (incoming.type === T.WORK_COMPLETED && incoming.data.evidenceKind === "room_text") verifyTextCompletion(this.db, room.state, room.state.workItems[incoming.data.workItemId], incoming.data);
       }
-      catch (error) { fail(/Stale|already exists|Invalid transition/.test(error.message) ? 409 : 422, "command_rejected", error.message); }
+      catch (error) { fail(/Stale|already exists|Invalid transition|capacity reached/.test(error.message) ? 409 : 422, "command_rejected", error.message); }
       if (incoming.type === T.CLAIM_ACQUIRED) {
         // Same transaction as actor/revision validation and persistence. Keeping
         // this live-only preserves replay of previously accepted reservations.
@@ -1100,7 +1123,7 @@ export class RoomStore {
         if (conflict) fail(409, "claim_conflict", `Scope is reserved by work ${conflict.id}. Coordinate or release that reservation first; no new claim was saved.`);
       }
       const projection = JSON.stringify(state);
-      if (Buffer.byteLength(projection) > 4 * 1024 * 1024 && !endingAccess) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
+      if (Buffer.byteLength(projection) > 4 * 1024 * 1024 && !endingAccess && !endingRequest) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
       const sequence = room.sequence + 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("INSERT INTO commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, command.id, fingerprint, sequence);
