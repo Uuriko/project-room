@@ -11,11 +11,11 @@ import { WatchJournal } from "../client/watch-journal.mjs";
 
 async function fixture(t) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store }), requests = [], clients = [];
+  t.after(async () => { for (const client of clients) await client.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   server.prependListener("request", req => requests.push({ method: req.method, path: req.url }));
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
   const origin = `http://127.0.0.1:${server.address().port}`, configDirectory = join(f.directory, "config"), attentionDirectory = join(f.directory, "attention");
   saveAgentConnection(configDirectory, { version: 1, origin, roomId: "commons", memberId: "producer", token: f.keys.producer });
-  t.after(async () => { for (const client of clients) await client.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   let revision = 0;
   return { ...f, requests, configDirectory, attentionDirectory,
     charter: purpose => f.store.command(f.keys.owner, "commons", { id: "instructions-" + revision, type: "room.charter_updated",

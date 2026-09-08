@@ -424,3 +424,15 @@ causes with anchored resume and explicit relevance/clearing, then eligible work;
 reduce avoidable read round trips without dropping identity/history checks. Keep
 native-host acceptance and v11 release recovery as parallel gates. Do not repeat
 the completed current-attention implementation or silently schedule its use.
+
+September 8 lean-read milestone: [validated anchor reuse](LEAN-ATTENTION-CHECKPOINT-2026-09-08.md)
+reduces an empirically measured steady pinned attention pull from 16 to 12 GETs.
+Both fresh reconciliations and every actual request's identity preflight remain;
+no schema, service, UI or authority change. Full 487 core/API/package, 159 browser
+and 12 local Workers checks pass. Advancing history legitimately requires more
+reads; no latency or retention lift is claimed. The one changed runtime file is
+in the verified 60-file candidate-812b9c9 package. Local only; goal active.
+Next implement the [deliberate reply-request plan](REPLY-REQUESTS-PLAN-2026-09-08.md):
+explicit human/agent answer/decline/cancel, clarification-aware context, anchored
+historical resume and current-condition attention. Keep ordinary messages ordinary,
+answers separate from approval, and native-host/v11 recovery gates explicit.
