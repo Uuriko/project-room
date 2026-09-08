@@ -92,7 +92,8 @@ export function verifyRuntimePackage(directory, { expectedCommit } = {}) {
   // This is not a complete JavaScript dependency parser; cold runtime tests and
   // source review remain required, especially if a computed loader is added.
   for (const [path, bytes] of files) if (/\.m?js$/.test(path)) {
-    for (const match of bytes.toString().matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)["']([^"']+)["']/g)) {
+    // A quoted CLI action such as "import" is not a module declaration.
+    for (const match of bytes.toString().matchAll(/(?<!["'])(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)["']([^"']+)["']/g)) {
       const specifier = match[1];
       if (specifier.startsWith("node:") || specifier.startsWith("cloudflare:")) continue;
       check(specifier.startsWith(".") && files.has(posix.normalize(posix.join(posix.dirname(path), specifier))));
