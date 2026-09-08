@@ -12,7 +12,7 @@ assert.equal(manifest.credentialKind, "synthetic operator-provisioned agent, dra
 assert.match(manifest.origin, /^http:\/\/127\.0\.0\.1:\d+$/);
 const owner = JSON.parse(readFileSync(join(dirname(manifestPath), "owner-private.json"), "utf8"));
 assert.equal(owner.origin, manifest.origin);
-const output = resolve(prefix), suffixes = ["desktop", "mobile", "mobile-large-text"];
+const output = resolve(prefix), suffixes = ["desktop", "mobile", "mobile-large-text", "mobile-large-text-end"];
 assert.equal([...suffixes.map(s => s + ".png"), "browser.json"].some(s => existsSync(output + "-" + s)), false);
 const browser = await chromium.launch({ headless: true }), captures = [], errors = [], outside = [], writes = [];
 try {
@@ -33,8 +33,14 @@ try {
     await draft.waitFor(); assert.equal(await draft.count(), 1);
     const body = await draft.locator(".message-content > p").first().textContent();
     assert.ok(body.trim().length); assert.equal(body.trim().split(/\s+/).length <= 30, true);
-    const capture = async name => {
+    const capture = async (name, align = null) => {
       await draft.scrollIntoViewIfNeeded();
+      if (align) await draft.evaluate((node, end) => {
+        const scroller = node.parentElement;
+        const target = end ? node.querySelector(".message-content > p") : node;
+        const bounds = target.getBoundingClientRect(), container = scroller.getBoundingClientRect();
+        scroller.scrollTop += end ? bounds.bottom - container.bottom : bounds.top - container.top;
+      }, align === "end");
       await page.waitForFunction(() => !document.querySelector("#status").classList.contains("visible"));
       const width = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth }));
       assert.ok(width.document <= width.viewport, "No document overflow");
@@ -46,7 +52,8 @@ try {
       const size = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
       await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
       assert.equal(await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize)), size * 2);
-      await capture("mobile-large-text");
+      await capture("mobile-large-text", "start");
+      await capture("mobile-large-text-end", "end");
     }
     await context.close();
   }

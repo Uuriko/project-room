@@ -58,6 +58,14 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
     try {
       assert.deepEqual(auditRecovery(restored), before);
       assert.equal(restored.command(f.keys.owner, "commons", f.command).duplicate, true);
+      if (existsSync(join(destination, "server/work-discussion.mjs"))) {
+        const discussion = restored.workDiscussion(f.keys.owner, "commons", "evidence");
+        assert.equal(discussion.workItemId, "evidence");
+        assert.equal(discussion.viewerId, "owner");
+        assert.deepEqual(discussion.discussion.items, []);
+        assert.equal(discussion.discussion.checkpoint, restored.room("commons").sequence);
+        assert.deepEqual(auditRecovery(restored), before, "packaged discussion reader is read-only");
+      }
     } finally { restored.close(); }
     const probe = createServer(); await new Promise(resolve => probe.listen(0, "127.0.0.1", resolve));
     const port = probe.address().port; await new Promise(resolve => probe.close(resolve));
