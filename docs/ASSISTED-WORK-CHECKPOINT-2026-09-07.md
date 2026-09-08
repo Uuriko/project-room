@@ -12,16 +12,16 @@ existing room data, credentials, previews and unrelated products.
 1. Complete: refresh release checks and deploy the already published c9b04e8
    reconnect repair to the existing isolated staging Worker. Verify six returns,
    retained displayed guest label/prior reply and exact assets; no schema or object change.
-2. Complete locally: improve existing ownership and handoff behavior with bounded current
+2. Complete and released: improve existing ownership and handoff behavior with bounded current
    resource/revision checks. Keep independent drafts/reviews parallel. Do not
    claim authority can terminate an external worker.
-3. Complete locally: build a quiet, source-linked catch-up foundation using existing room
+3. Complete and released: build a quiet, source-linked catch-up foundation using existing room
    state. Reuse one structured brief for people and external agents. Label it
    honestly; deterministic catch-up is not a hosted AI assistant.
-4. In progress: regression/browser checks and independent agent exercises against a
+4. Complete: regression/browser checks and independent agent exercises against a
    disposable environment. Capture screenshots, record failure/recovery and
    distinguish simulations from independent human usability testing.
-5. Pending: review, publish only verified source to existing PR23/staging, update
+5. Complete: review, publish only verified source to existing PR23/staging, update
    root handoff and shared bus, and release the lane at a tested checkpoint.
 
 ## Boundaries
@@ -86,6 +86,51 @@ rejected draft and confirm no automatic start, completion or acknowledgement.
 The HTTP concurrency test is two scripted clients, separate from actual independent
 agent participation. Tests never run real external work or paid inference.
 
-New source publication, exact-candidate CI and hosted acceptance are the next gate.
+Source publication, exact-candidate CI and hosted acceptance passed below.
 Rollback to c9ad5cfa is data-compatible but removes the new overlap enforcement;
 if rolled back, stop promising that enforcement until restored and retested.
+
+## Independent agent result
+
+Two Codex agents used separate room memberships in a staged, disposable local
+exercise. A authored an original three-rule handoff proposal while holding scope.
+B attempted overlap and received 409 without advancing its revision, event
+sequence or cursor; B wrote an independent critique. A improved the proposal,
+released scope, and left a clearly labeled late suggestion. B verified unchanged
+revision/expiry and retried its exact rejected command (same id and JSON hash),
+then wrote a consolidated proposal and released its scope. No real repository
+was touched. This is independent agent participation, not a human study or proof
+of uncoached onboarding, external isolation, or organizational independence.
+
+Root independently checked snapshot, orientation and catch-up at event 20,
+cursor 0: both work items revision 4, reported working but scopes released,
+no completion receipt, verification or owner decision. Six messages include the
+brief and five original proposal/critique messages. Sanitized evidence is retained
+at `test-results/assisted-agent-evidence.json`. The exact disposable room and both
+private credentials were removed after export; existing previews were untouched.
+
+## Release receipt
+
+- Application commit: `fb90a7083e9f5866c8df242778a6a72f4a58536d`.
+- Exact tested/published tree: `5f821372bbb82d33591221ee82c71bf77430b63f`.
+- Existing draft PR23 only; no main merge. GitHub connector published the tree;
+  local branch fast-forwarded to the identical commit and was clean at deployment.
+- CI run `34174284247`: contract, browser and Cloudflare jobs all successful.
+- Worker version: `901be347-7a39-4b56-8777-f4052bf81b38`, tag `fb90a70`.
+- Same origin, room object, bindings, schema and keys; no DNS or routing mutation.
+- Hosted: all ten public files byte-identical, health/readiness pass, anonymous
+  room access denied, no-index headers present. Saved guest returned six times
+  before creating fresh evidence. One new one-use invitation/test guest, two
+  messages and one labeled work item exercised actual HTTPS joining, mobile Send,
+  desktop Enter, bidirectional delivery, source-linked work, explicit review
+  choice and owner acceptance/start. New guest then returned six times. Return
+  assertions cover displayed label, prior reply and Connected, not historical-ID
+  comparison or delivery of a fresh message after each return. Hosted screenshots
+  were inspected. Scope admission itself was exercised locally and in Cloudflare
+  simulation; deployed server provenance is tied to the exact CI-tested commit.
+
+This final documentation-only receipt does not change deployed application bytes.
+Next bounded work: opt-in deterministic automation and useful BYO-agent workflows,
+with replay protection, explicit limits and the same authority rules. Hosted AI,
+payments/stablecoins, final-domain routing, provider recovery drills, durable
+account recovery and independent human/device trials remain separate gates.

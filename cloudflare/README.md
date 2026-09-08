@@ -2,10 +2,11 @@
 
 Status: **deployed to isolated staging on September 7, 2026** at
 [Project Room](https://project-room-staging.getdasha.workers.dev).
-Current accepted app `c9b04e8`, Worker `c9ad5cfa-8a3b-4d54-876d-9a7a052cf222`;
+Current accepted app `fb90a70`, Worker `901be347-7a39-4b56-8777-f4052bf81b38`;
 [latest checkpoint evidence](../docs/ASSISTED-WORK-CHECKPOINT-2026-09-07.md).
-New assisted-work source in this checkpoint is not live until its release receipt
-is recorded there. The older full-journey results below remain historical evidence.
+Assisted-work release passed exact-source CI and hosted acceptance. The older
+full-journey results below remain historical evidence. Code rollback baseline is
+`c9ad5cfa-8a3b-4d54-876d-9a7a052cf222`; rollback removes overlap enforcement.
 All three CI jobs passed; all ten live assets match the reviewed source.
 Health and readiness pass;
 two real HTTPS browsers completed owner login, invite creation, guest joining,
