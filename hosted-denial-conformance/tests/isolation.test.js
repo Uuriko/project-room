@@ -49,5 +49,5 @@ test("readme names the isolation and no-merge constraints", () => {
   assert.match(readme, /Does not merge/);
   assert.match(readme, /#8/);
   assert.match(readme, /#23/);
-  assert.match(readme, /c9b04e89577a40f17c71564926eed89ad53faa98/);
+  assert.match(readme, /fb90a7083e9f5866c8df242778a6a72f4a58536d/);
 });

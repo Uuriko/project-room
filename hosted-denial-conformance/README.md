@@ -10,7 +10,7 @@ Grok isolated package. Sibling of [`conformance-pilot/`](https://github.com/Uuri
 | --- | --- |
 | Pull | [#23](https://github.com/Uuriko/project-room/pull/23) |
 | Branch | `codex/unified-local-20260907` |
-| Tip SHA | `c9b04e89577a40f17c71564926eed89ad53faa98` (re-fetched 2026-09-07; live #23 head) |
+| Tip SHA | `fb90a7083e9f5866c8df242778a6a72f4a58536d` (re-fetched 2026-09-08; live #23 head) |
 | Staging | `https://project-room-staging.getdasha.workers.dev` |
 | Health | `GET /api/health` → 200 `{ status: "ok", mode: "cloudflare-staging" }` |
 | Ready | `GET /api/ready` → 200 `{ status: "ready" }` |
