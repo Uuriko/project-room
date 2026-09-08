@@ -64,7 +64,28 @@ Tests use scripted participants, not native AI reasoning or human research.
 All19 public assets are byte-identical to retained candidate-b29dcc3. The prior174
 general browser and one Workers browser check are not rerun or claimed as new
 results; no new UI screenshot is needed. Synthetic protocol evidence is captured
-in `test-results/agent-work-search.json`. Exact-package qualification follows.
+in `test-results/agent-work-search.json` and retained in the sibling runtime package
+directory at `evidence-cefc89b/agent-work-search.json`.
+
+Runtime `cefc89bc04a0df049f78ecbae8949e240525068a` is retained in
+`../project-room-runtime-packages-20260908/candidate-cefc89b`:65files,19assets,
+schema12. Manifest SHA256:
+`59c1bf5cfa75636840c2c0c7b8c7b614e5366e9bb0d608b9881b587482874a7f`.
+Fallback remains `4d22189ccdebc56db23397e6cc75b07eff0e3c2c`; older packages are
+preserved. Both packages verify after testing.
+
+Final qualification adds13 passing local Workers runtime checks, including the
+actual retained20-table candidate/fallback switch, and two passing exact-commit
+desktop/touch browser recovery journeys. Two additional smoke checks run the
+retained candidate's actual search CLI against both retained Node servers, each
+with disposable synthetic data and unchanged all-table audits. This does not add
+search to the older fallback CLI; use the new client against the compatible service.
+Workers synthetic restart evidence remains at
+`/var/folders/h3/r7zqdttd19v3xzb_q69dqkzc0000gn/T/project-room-cf-store-0OcXVV`.
+None of these checks certifies provider recovery or current restored authority.
+
+No native model, push, deployment, provider change or existing preview restart.
+The larger goal remains active/incomplete.
 
 Now: preserve and qualify this local checkpoint.
 Next: use the selected-read pointers in a scripted contribution/reuse journey,
