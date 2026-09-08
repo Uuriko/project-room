@@ -300,12 +300,19 @@ with exact artifact evidence, released scope and no manufactured human approval.
 The measured response reduction applies to one fixture, not retention or general
 performance. No schema, dependency, live service or publication change here.
 
-Next: inspect, research and plan a v8-compatible release/fallback/recovery package.
-The accumulating useful local slices need a proven disposable recovery path;
-old v7 code is not a rollback for migrated v8 data. Prepare and test locally without
-provider administration, live migration or deployment. Then investigate one
-reusable-outcome/template loop with exact preview and deliberate inclusion, no
-copied credentials/permissions or automatic public posting. Do not restart
-completed watcher/return/invitation/task-context work or mistake a milestone for
-this goal's completion. Keep advanced controls contextual and voluntary growth
-value-bearing. Continue while meaningful authorized work remains.
+The [v8 recovery checkpoint](V8-RECOVERY-CHECKPOINT-2026-09-07.md) is now preserved
+locally at tested source 65f094e: read-only 18-table backup audit, exact-commit
+packages, pause before storage, cold packaged Node startup, real workerd compatible
+switch and browser resume. 377 core/API, 77 browser and nine local Cloudflare checks
+pass. Frozen7075 and candidate packages are retained outside the checkout. This is
+not provider PITR, live migration or proof of current restored authority. Frozen7075
+predates pause mode; a real fallback needs independent traffic blocking or a
+separately tested pause-capable version. Hosted recovery and approval remain gates.
+
+Next: investigate one reusable-outcome/template loop with exact preview and
+deliberate inclusion, no copied credentials/permissions or automatic public posting.
+Research relevant primary product patterns, plan the smallest complete useful slice
+and test with simulated human journeys and fresh agents when appropriate. Do not
+restart completed watcher/return/invitation/task-context/recovery work or mistake
+a milestone for this goal's completion. Keep advanced controls contextual and
+voluntary growth value-bearing. Continue while meaningful authorized work remains.
