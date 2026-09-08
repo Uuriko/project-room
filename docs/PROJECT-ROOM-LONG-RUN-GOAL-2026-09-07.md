@@ -370,3 +370,17 @@ incomplete; this milestone is not native vendor-host acceptance, isolated execut
 or deployment. Next prioritize actionable context/discussion and trustworthy
 room-native evidence, generic human action-dialog recovery, native-host testing,
 v9 release recovery and versioned charters before provider-backed execution.
+
+September 8 native-result milestone: [room-native versioned text results](NATIVE-TEXT-RESULT-CHECKPOINT-2026-09-08.md)
+are locally implemented at tested runtime b538ee8. Humans and agents explicitly
+promote an immutable work-linked draft, read an exact current or historical
+version, and review server-verified bytes/hash/parent lineage. Existing external
+results remain supported. Schema/writer 10 and 17 MCP tools; 447 core/API/package,
+152 browser and 11 local Workers checks pass. Two actual agents authored and
+independently reviewed a native agenda through separate scoped MCP processes;
+human decision remains pending. Screenshots inspected and fixtures stopped.
+Local only, not native vendor-host acceptance or deployment. The goal remains
+active and incomplete. Next follow the [versioned-charter plan](AGENT-CHARTERS-NEXT-2026-09-08.md),
+then pull-first durable attention and eligible-work suggestions, alongside native
+host tests and v10-compatible release recovery. Instructions are not execution
+grants; retain free/manual/BYO participation and a quiet contextual interface.
