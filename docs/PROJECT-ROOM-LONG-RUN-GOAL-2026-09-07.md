@@ -327,12 +327,24 @@ retained. One actual agent redacted a synthetic draft with unchanged full snapsh
 private reminders, sequence12/read marker0. No automatic redaction, authorship,
 human preference, retention lift, publication or deployment is claimed.
 
-Next: research and review the complete free/BYO-agent first-contribution → evidence/
-review → reuse/copy → return journey for confusing terms, redundant controls and
-missing orientation. Select and implement one evidence-backed simplification or
-missing step; keep advanced controls contextual rather than adding a dashboard.
+The [manual draft-return checkpoint](DRAFT-RETURN-CHECKPOINT-2026-09-07.md) follows
+a whole-journey review: Paste AI draft/Post draft, exact stable-message receipts,
+sticky unknown retry, a quiet work-to-draft link, owned exact-message navigation,
+preserved thread drafts and truly enlarged portable text.387 core/API,112 browser
+and nine local Workers checks pass at73c04e5; its49-file package is retained.
+Mobile guest→accountable human discovery is simulated, not a human retention
+study. Browser agent-key rejection remains intact. No event/schema change or
+native evidence adoption, publication or deployment is claimed.
+
+Next: apply the same reliability standard to generic work-action dialogs (Post
+evidence, review, decision): exact confirmation, preserved unknown retries and
+entered text, owned callbacks/focus, and explicit stale-context recovery. Never
+silently rebase approval onto different evidence. After that evaluate a truthful
+room-native contribution-to-evidence bridge and narrow opt-in agent draft reads,
+with explicit authority/replay/fallback qualification rather than automatic
+promotion. Keep advanced controls contextual, not another dashboard.
 Continue the broader prioritized workstreams and now/next/later backlog. Do not
-restart completed result copy, reuse, watcher, return, invitation, selected-context
-or recovery work, or mistake a milestone for goal completion. Keep privacy and
-truthful attribution intact; voluntary growth must follow value. Continue while
-meaningful prioritized authorized work remains.
+restart completed draft-return, result-copy, reuse, watcher, return, invitation,
+selected-context or recovery work, or mistake a milestone for goal completion.
+Keep privacy and truthful attribution intact; voluntary growth must follow value.
+Continue while meaningful prioritized authorized work remains.
