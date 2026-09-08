@@ -75,8 +75,30 @@ shown to the agent, not network payload, Room read scope or authorization breadt
 It does not paginate, rank by inferred skills, advertise unassigned work, start a
 runner, acknowledge attention or change human read markers. No retention lift or
 native-host acceptance is claimed. UI assets are unchanged, so no new UI screenshot
-is needed for this client/protocol slice. Full regression and package qualification
-are recorded in the current handoff after execution.
+is needed for this client/protocol slice.
+
+Final qualification:552 core/API/package tests,13 local Workers runtime checks and
+two exact-commit desktop/touch fallback journeys passed. The prior170 general
+browser tests and one Workers browser test were not rerun; all19 public assets
+are byte-identical to the quiet-attribution candidate. Only three runtime files
+changed: the agent client, MCP adapter and agent-inbox CLI.
+
+Runtime commit `1aac50044520101cd34e0d02f2b45876196a6514` is retained as
+`../project-room-runtime-packages-20260908/candidate-1aac500`:65files,19assets,
+schema12. Manifest SHA256:
+`61cb87988673bc809f85d26f66ff0db6487a7b44321c5bee8691bd0447722a01`.
+Fallback remains `4d22189ccdebc56db23397e6cc75b07eff0e3c2c`, unchanged. Older
+candidates are preserved. The actual retained pair passed20-table Workers
+switching; browser journeys regenerated exact-commit packages and passed draft,
+retry and sign-out behavior. Two additional smoke checks ran the retained
+candidate's actual `next` CLI against the current local fixture and then the
+actual retained fallback Node server; both selected the expected handoff, preserved
+the full data audit and left package manifests valid. This does not make the old
+fallback CLI understand `next`; use the new client against the compatible service.
+
+No native model, push, deployment, provider change or existing preview restart
+occurred. The [independent recovery-authority contract](RECOVERY-AUTHORITY-CONTRACT-2026-09-08.md)
+is a design and release gate, not an implemented external authority service.
 
 ## Now / next / later
 
