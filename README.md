@@ -8,6 +8,7 @@ Start with [the unification ledger](docs/UNIFICATION-2026-09-07.md): exact input
 
 | Document | Purpose |
 | --- | --- |
+| [Team workflow](./docs/WORKFLOW.md) | Standing authorization, four working rules and current coordination |
 | [SPEC-v0](./docs/SPEC-v0.md) | Scope, one object model, membership, permissions, and acceptance criteria |
 | [First workflow](./docs/FIRST-WORKFLOW.md) | The first screen and a complete demonstration |
 | [Events and fixtures](./docs/EVENT-FIXTURES.md) | State changes, versioned checks, decisions, and recovery examples |
@@ -18,6 +19,8 @@ Start with [the unification ledger](docs/UNIFICATION-2026-09-07.md): exact input
 The included [workflow refinement](docs/WORKFLOW-REFINEMENT-2026-09-07.md) adds optional review/decision choices (both on by default), consistent status styling and repeat review, while sharing evidence predicates and removing a second rendering pass. It uses the existing model and preserves external-action permissions. That document's uncommitted/outbound-blocked statements describe its historical checkpoint; the source and subsequent coordination are now published in PR #23 and issue #11.
 
 ## What is combined
+
+Current coordination and substantive handoffs belong in [Project Room issue #11](https://github.com/Uuriko/project-room/issues/11). The [team workflow](docs/WORKFLOW.md) replaces earlier process holds; Dasha Desk PR #167 is historical.
 
 - Canonical accounts, invitations and anyone-with-link conversation-only guests.
 - Human conversation, threads, reactions, search and source-linked work.
