@@ -10,6 +10,7 @@ import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchem
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
 import { STORE_SCHEMA_VERSION, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
 import { ShareLinks, shareLinkSchema } from "./share-links.mjs";
+import { conflictingClaim } from "./claim-scopes.mjs";
 
 export class ServiceError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -1001,6 +1002,12 @@ export class RoomStore {
       let state;
       try { state = compact(applyEvent(room.state, incoming)); }
       catch (error) { fail(/Stale|already exists|Invalid transition/.test(error.message) ? 409 : 422, "command_rejected", error.message); }
+      if (incoming.type === T.CLAIM_ACQUIRED) {
+        // Same transaction as actor/revision validation and persistence. Keeping
+        // this live-only preserves replay of previously accepted reservations.
+        const conflict = conflictingClaim(room.state.workItems, state.workItems[incoming.data.workItemId], Date.parse(incoming.at));
+        if (conflict) fail(409, "claim_conflict", `Scope is reserved by work ${conflict.id}. Coordinate or release that reservation first; no new claim was saved.`);
+      }
       const projection = JSON.stringify(state);
       if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
       const sequence = room.sequence + 1;

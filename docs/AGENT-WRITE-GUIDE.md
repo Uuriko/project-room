@@ -111,6 +111,28 @@ The service validates HTTPS URL syntax, not reachability, artifact content, or h
 
 For `mode: "write"`, stop unless the operator has authorized the external work. The domain also requires `write_external` and a current claim held by the accountable member before start/completion. The existing `claim.acquired` data is `{ workItemId, expectedRevision, repository, ref, paths, expiresAt }`: exact repository/ref/path scope, nonempty `paths`, future ISO expiry. Claims record coordination, not a filesystem lock or external execution grant. Do not change the assignment to `read` to avoid a claim.
 
+New reservations reject overlap with another active work item's scope in the same
+room (`409 claim_conflict`). Repository and ref match by exact declared string:
+agree on a canonical spelling; URL aliases, different refs, different rooms and
+outside workers are not reconciled. Use relative file paths or `folder/**` for a
+subtree (`**` for the whole repository); arbitrary globs, absolute paths and `..`
+are rejected (`422 invalid_claim_scope`). Disjoint paths or agreed isolated drafts
+can proceed in parallel. Do not invent a different ref merely to evade a conflict.
+
+`orient()` includes each item's `mode` and `claim`. Read the conflict, coordinate
+with its holder, and wait for confirmed release or expiry. The holder or a claim
+manager may send `claim.released` with `{ workItemId, expectedRevision }`. Release
+does not pause an outside process, finish work or transfer its result. Blocked or
+completed work can retain its reservation; release explicitly when appropriate.
+Historical events replay unchanged, so pre-existing overlaps still require human
+coordination. An identical already-committed retry returns its original receipt,
+not renewed authority: read current state before starting external work.
+
+`returnBrief()` is the same deterministic, source-linked catch-up used by people.
+Reading it does not acknowledge history or act on work. Its history boundary is
+frozen for pagination; current work has its own evaluated-through boundary. Refresh
+to include newer changes, and never turn a recommendation into implied approval.
+
 ### Separate reviewer: inspect → pass or fail
 
 Use the designated reviewer's own credential and `verify` permission. Fetch the current receipt, retrieve only authorized evidence, compare the exact version, and perform the stated checks. In `actualFields`, bind `completionEventId` to **`latest.receipt.eventId`**, `evidenceVersion` to `latest.receipt.evidenceVersion`, and `summary` to your actual finding. If the receipt changes during review, do not attach your finding to the replacement version. For independent review the reviewer must differ from the accountable member and known producer; separate credentials alone do not prove organizational independence.

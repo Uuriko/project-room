@@ -109,27 +109,29 @@
 
           <details id="return-brief-panel" class="panel return-brief-panel">
             <summary>
-              <span id="return-brief-heading">Catch up on this room</span>
+              <span id="return-brief-heading">Catch me up</span>
             </summary>
             <div class="return-brief-body">
-              <div id="summary-grid" class="summary-grid" aria-live="polite" aria-atomic="true"></div>
+              <p id="summary-grid" class="rb-note"></p>
               <p id="rb-status" class="rb-note" role="status" aria-live="polite"></p>
               <section aria-labelledby="rb-current-heading">
-                <h3 id="rb-current-heading">Needs your attention <span id="rb-current-boundary" class="rb-boundary"></span></h3>
+                <h3 id="rb-current-heading">Needs you <span id="rb-current-boundary" class="rb-boundary"></span></h3>
                 <ul id="rb-attention-list" class="rb-list"></ul>
-                <h3 id="rb-involving-heading">Work involving you</h3>
+                <details id="rb-involving-section">
+                <summary id="rb-involving-heading">Work involving you</summary>
                 <ul id="rb-involving-list" class="rb-list"></ul>
+                </details>
               </section>
-              <section aria-labelledby="rb-history-heading">
-                <h3 id="rb-history-heading">What changed <span id="rb-history-boundary" class="rb-boundary"></span></h3>
+              <details id="rb-history-section">
+                <summary id="rb-history-heading">Changes <span id="rb-history-boundary" class="rb-boundary"></span></summary>
                 <ul id="rb-history-list" class="rb-list rb-history"></ul>
+                  <button id="rb-more-button" class="button secondary" type="button" hidden>Show more changes</button>
+              </details>
                 <div class="rb-actions">
                   <button id="rb-refresh-button" class="button secondary" type="button">Refresh catch-up</button>
-                  <button id="rb-more-button" class="button secondary" type="button" hidden>Show more changes</button>
                   <button id="rb-ack-button" class="button secondary" type="button">Mark caught up</button>
                 </div>
-                <p class="rb-note">Catching up moves only your own marker. It creates no peer read or processing claim.</p>
-              </section>
+                <p class="rb-note">Marking caught up changes only your position, not work or approvals.</p>
             </div>
           </details>
 

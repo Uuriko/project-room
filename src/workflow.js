@@ -18,7 +18,7 @@ export function terminalWork(item) {
 
 // A shared description for people and clients, never a grant or a dispatch command.
 // In-progress work has an actor but does not create another attention request.
-export function nextWorkStep(item) {
+export function nextWorkStep(item, now = Date.now()) {
   const step = (action, label, memberId = null, role = null, needsAttention = false) => ({
     action, label, memberId, role, needsAttention,
     workItemId: item.id, workRevision: item.revision,
@@ -28,6 +28,10 @@ export function nextWorkStep(item) {
   const accountable = (action, label, attention = true) => step(action, label, item.accountableMemberId, "accountable", attention);
   if (item.state === S.SUPERSEDED || item.supersededBy) return step("superseded", "Continue in the replacement work item");
   if (item.state === S.PROPOSED) return accountable("accept", "Accept the assignment");
+  if ([S.ACCEPTED, S.WORKING].includes(item.state) && item.mode === "write"
+      && (!activeClaim(item, now) || item.claim.holderId !== item.accountableMemberId)) {
+    return accountable("claim", "Confirm permission and reserve write scope");
+  }
   if (item.state === S.ACCEPTED) return accountable("start", "Start the work");
   if (item.state === S.WORKING) return accountable("in_progress", "Work in progress; no new handoff yet", false);
   if (item.state === S.BLOCKED) return accountable("revise", "Resolve the blocker or revise the result");
@@ -45,7 +49,7 @@ export function nextWorkStep(item) {
 export function workStatus(item) {
   const next = nextWorkStep(item);
   const labels = {
-    superseded: "Replaced", accept: "Awaiting acceptance", start: "Accepted",
+    superseded: "Replaced", accept: "Awaiting acceptance", start: "Accepted", claim: "Scope needed",
     in_progress: "Working · reported", revise: "Blocked", unknown: "Needs reconciliation",
     provide_evidence: "Evidence missing", establish_provenance: "Producer unknown",
     resolve_independence: "Reviewer conflict", verify: "Awaiting verification",
@@ -79,5 +83,6 @@ export function workActions(item, member, now = Date.now()) {
       : item.independentVerificationRequired && producerKnown(item) ? "Record independent check" : "Record evidence check"]);
   }
   if (nextWorkStep(item).action === "decide" && member.id === item.humanDecisionMakerId && member.kind === "human" && can("decide")) actions.push(["decide", "Record decision"]);
+  if (activeClaim(item, now) && (claim || can("manage_claims"))) actions.push(["release", "Release scope"]);
   return actions;
 }

@@ -775,6 +775,7 @@ test("record identities and fragments remain collision-safe and legacy work link
   await page.waitForFunction(() => document.activeElement?.dataset.workRecordId === "room-title");
   await page.locator("#return-brief-panel > summary").click();
   const roomLink = page.locator("#rb-history-list [data-open-room]").first();
+  await page.locator("#rb-history-section > summary").click();
   await roomLink.waitFor();
   assert.equal(await roomLink.getAttribute("href"), "#pr-record/room/commons");
   await roomLink.click();

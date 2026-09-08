@@ -114,7 +114,7 @@ const client = new RoomClient({
     for (const id of ["message-to-select", "assignee-select", "verifier-select"]) { $(`#${id}`).replaceChildren(); delete $(`#${id}`).dataset.signature; }
     for (const form of document.querySelectorAll("form")) form.reset();
     $("#work-dialog").close();
-    for (const id of ["people-panel", "composer-options", "work-options", "room-about", "connection-details"]) $(`#${id}`).open = false;
+    for (const id of ["people-panel", "composer-options", "work-options", "room-about", "connection-details", "rb-history-section", "rb-involving-section"]) $(`#${id}`).open = false;
     for (const control of document.querySelectorAll("#auth-form input, #auth-form button")) control.disabled = pendingSignout;
     setFormStatus($("#new-work-status"), ""); setFormStatus($("#action-error"), ""); setFormStatus($("#composer-status"), "");
     $("#action-dialog").close(); $("#new-work-form").hidden = true; $("#reply-bar").hidden = true;
@@ -541,9 +541,6 @@ function render() {
     $("#" + id).hidden = !can("steer"); $("#" + id).disabled = !can("steer");
   }
   const items = Object.values(state.workItems);
-  const waiting = items.filter(i => readyForDecision(i) && i.humanDecisionMakerId === session.member.id).length;
-  const summaryHtml = `<article class="summary-card"><span>Your decisions</span><strong>${waiting}</strong><p>Completion, verification, and approval stay separate.</p></article><article class="summary-card"><span>Work in this room</span><strong>${items.length}</strong><p>${items.filter(i => i.state === S.BLOCKED).length} blocked. Conversation never creates work automatically.</p></article>`;
-  renderContent("#summary-grid", summaryHtml);
   renderMessages();
   renderSearch();
   renderContent("#work-list", items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(workCard).join("") || `<p class="empty-note">${can("steer") ? "Turn a message into work, or start something new." : "Suggest work in the conversation. The owner can create it."}</p>`);
@@ -738,8 +735,8 @@ function revealLocationHash() {
 }
 function readyForDecision(i) { return nextWorkStep(i).action === "decide"; }
 function hasIndependentProducer(i) { return hasReportedProducer(i) && i.receipt.producerId !== i.verifierMemberId; }
-function actions(i) {
-  return workActions(i, state.members[session.member.id]).map(([action, label]) => `<button type="button" class="button secondary" data-action="${action}" data-work-id="${esc(i.id)}" data-focus-key="work-action:${esc(i.id)}:${action}"${busy ? " disabled" : ""}>${label}</button>`).join("");
+function actions(i, scopeOnly = false) {
+  return workActions(i, state.members[session.member.id]).filter(([action]) => (action === "release") === scopeOnly).map(([action, label]) => `<button type="button" class="button secondary" data-action="${action}" data-work-id="${esc(i.id)}" data-focus-key="work-action:${esc(i.id)}:${action}"${busy ? " disabled" : ""}>${label}</button>`).join("");
 }
 function claimStateLabel(i) {
   if (activeClaim(i)) return "not expired";
@@ -773,7 +770,7 @@ function workCard(i) {
   const source = i.sourceMessageId ? `<a class="source-link" href="${esc(recordHref("message", i.sourceMessageId))}" data-open-message="${esc(i.sourceMessageId)}" data-focus-key="work-source:${esc(i.id)}">From this conversation</a>` : "";
   const blocker = i.blocker ? `<div class="blocker"><strong>Blocked</strong><p>${esc(i.blocker.reason)}</p><p>${esc(i.blocker.nextAction)}</p></div>` : "";
   const decision = i.decision ? `<div class="decision"><strong>${esc(humanize(i.decision.decision))}</strong><p>${esc(i.decision.reason)}</p></div>` : "";
-  const claim = i.claim ? `<details class="claim"><summary data-focus-key="work-claim:${esc(i.id)}">Recorded scope · ${esc(claimStateLabel(i))}</summary><p>${esc(i.claim.repository)}:${esc(i.claim.ref)}</p><p>${esc(i.claim.paths.join(", "))}</p><p>Expires ${esc(i.claim.expiresAt)}. This service does not execute external actions.</p></details>` : "";
+  const claim = i.claim ? `<details class="claim"><summary data-focus-key="work-claim:${esc(i.id)}">Recorded scope · ${esc(claimStateLabel(i))}</summary><p>${esc(memberLabel(i.claim.holderId))}</p><p>${esc(i.claim.repository)}:${esc(i.claim.ref)}</p><p>${esc(i.claim.paths.join(", "))}</p><p>Expires ${esc(i.claim.expiresAt)}. External activity is not measured.</p>${actions(i, true)}</details>` : "";
   const checks = `<div><dt>Verifier</dt><dd>${i.independentVerificationRequired ? esc(memberLabel(i.verifierMemberId)) : "Not required"}</dd></div><div><dt>Decision</dt><dd>${i.ownerDecisionRequired ? esc(memberLabel(i.humanDecisionMakerId)) : "Not required"}</dd></div>`;
   const updated = `<p class="form-hint">Last recorded update: ${esc(new Date(i.updatedAt).toLocaleString())}. Live execution is not measured.</p>`;
   return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span></div><h3>${esc(i.title)}</h3>${nextLine}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span>${source}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${receiptCard(i)}${blocker}${decision}${claim}</details><div class="work-actions">${actions(i)}</div></article>`;
@@ -1257,7 +1254,8 @@ const actionSpecs = {
   block: [T.WORK_BLOCKED, "Report a blocker", area("reason", "What is blocked?") + area("nextAction", "What is needed next?")],
   resolve: [T.WORK_BLOCKER_RESOLVED, "Resolve the blocker", area("resolution", "What changed or which direction did you accept?")],
   complete: [T.WORK_COMPLETED, "Post actual evidence", area("summary", "What did you complete?") + field("evidenceUrl", "Evidence URL (HTTPS)", "url") + field("evidenceVersion", "Exact commit or artifact version") + area("nextAction", "Next handoff")],
-  claim: [T.CLAIM_ACQUIRED, "Record authorized write scope", field("repository", "Repository (owner/name)") + field("ref", "Branch or exact revision") + area("paths", "Exact paths, one per line") + field("expiresAt", "Expiry (ISO timestamp, with timezone)") + "<p>This records scope; it does not grant permission or execute tools.</p>"],
+  claim: [T.CLAIM_ACQUIRED, "Record authorized write scope", field("repository", "Repository (owner/name)") + field("ref", "Branch or exact revision") + area("paths", "Paths or folder/**, one per line") + field("expiresAt", "Expiry (ISO timestamp, with timezone)") + "<p>Reserves matching scope in this room. External permission is separate.</p>"],
+  release: [T.CLAIM_RELEASED, "Release this scope?", "<p>Other work can reserve it next. This does not stop an outside agent or change the work's result. Confirm any outside activity separately.</p>"],
   verify: [T.VERIFICATION_RECORDED, "Record an evidence check", '<label>Result<select name="result" required><option value="">Choose after checking</option><option value="pass">Pass</option><option value="fail">Finding / fail</option></select></label>' + area("summary", "What did you check at this exact version?")],
   decide: [T.OWNER_DECISION_RECORDED, "Record your decision", '<label>Decision<select name="decision" required><option value="">Choose</option><option value="approved">Approve</option><option value="changes_requested">Request changes</option><option value="rejected">Reject</option></select></label>' + area("reason", "Reason") + "<p>Approval does not merge, deploy, or spend money.</p>" ]
 };
@@ -1281,8 +1279,9 @@ $("#work-list").addEventListener("click", e => {
 });
 function restoreActionFocus(entry) {
   if (!entry) return;
+  const generation = client.generation, roomId = session?.roomId, memberId = session?.member?.id;
   setTimeout(() => {
-    if (!state) return;
+    if (!state || !sameSession(generation, roomId, memberId)) return;
     const card = workRecord(entry.workId);
     const key = `work-action:${entry.workId}:${entry.action}`;
     const action = card ? [...card.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === key) : null;
@@ -1312,7 +1311,8 @@ $("#action-form").addEventListener("submit", e => {
   submit(e.currentTarget, async current => {
     await client.send(entry.retry.command);
     if (!current() || !sameSession(generation, roomId, memberId)) return;
-    closeActionDialog({ returnFocus: false }); notice("Record saved. External execution and independent verification are separate facts."); setTimeout(() => revealWork(entry.workId), 0);
+    closeActionDialog({ returnFocus: false }); notice("Record saved. External execution and independent verification are separate facts.");
+    setTimeout(() => { if (sameSession(generation, roomId, memberId)) revealWork(entry.workId); }, 0);
   }, { failureHint: "Your entries were kept; try again." });
 });
 window.addEventListener("beforeunload", e => {
@@ -1387,7 +1387,8 @@ function renderBriefList(selector, html) {
 }
 function renderReturnBrief() {
   const returnBrief = briefView.owns(briefView.chain) ? briefView.brief : null;
-  $("#rb-status").textContent = state ? briefView.message : "";
+  const newer = returnBrief && client.sequence > Math.min(returnBrief.current.evaluatedThrough, returnBrief.history.evaluatedThrough);
+  setText("#rb-status", state ? briefView.message || (newer ? "New changes available. Refresh catch-up." : "") : "");
   $("#rb-refresh-button").disabled = !state || briefView.busy;
   $("#caught-up-button").disabled = !state || briefView.busy;
   $("#return-brief-panel").setAttribute("aria-busy", briefView.busy ? "true" : "false");
@@ -1395,19 +1396,21 @@ function renderReturnBrief() {
   $("#rb-ack-button").disabled = true;
   $("#rb-more-button").hidden = true;
   if (!returnBrief || !state) {
-    for (const id of ["rb-current-boundary", "rb-history-boundary", "rb-attention-list", "rb-involving-list", "rb-history-list"]) $(`#${id}`).replaceChildren();
+    for (const id of ["summary-grid", "rb-current-boundary", "rb-history-boundary", "rb-attention-list", "rb-involving-list", "rb-history-list"]) $(`#${id}`).replaceChildren();
     for (const id of ["rb-attention-list", "rb-involving-list", "rb-history-list"]) delete $(`#${id}`)._content;
     $("#rb-ack-button").textContent = briefView.reconciliationRequired ? "Refresh brief before acknowledging" : "Mark caught up";
     return;
   }
   const { history, current } = returnBrief;
+  const changes = history.evaluatedThrough - history.cursor;
+  setText("#summary-grid", `${changes} ${changes === 1 ? "change" : "changes"} since your marker · ${current.needsAttention.length} to act on`);
   $("#rb-current-boundary").textContent = `as of event ${current.evaluatedThrough}`;
   $("#rb-history-boundary").textContent = history.evaluatedThrough === history.cursor
     ? "· nothing new since your marker"
-    : `since marker ${history.cursor} · through event ${history.evaluatedThrough}`;
+    : `${history.items.length} of ${changes} events · through ${history.evaluatedThrough}`;
   renderBriefList("#rb-attention-list", current.needsAttention.map(i =>
     `<li class="rb-event"><a class="work-link" href="${esc(workHref(i.workItemId))}" data-open-work="${esc(i.workItemId)}" data-brief-key="attention:${esc(i.workItemId)}:${esc(i.step)}">${esc(i.action ?? i.workItemId)}</a> <span class="rb-detail">your step: ${esc(humanize(i.step))}</span></li>`).join("")
-    || '<li class="rb-empty">Nothing needs you right now.</li>');
+    || '<li class="rb-empty">Nothing waiting for you.</li>');
   renderBriefList("#rb-involving-list", current.workInvolvingMe.map(i =>
     `<li class="rb-event"><a class="work-link" href="${esc(workHref(i.workItemId))}" data-open-work="${esc(i.workItemId)}" data-brief-key="involving:${esc(i.workItemId)}">${esc(i.action ?? i.workItemId)}</a> <span class="rb-detail">${esc(i.roles.map(roleLabel).join(", "))} · ${esc(i.state)}</span></li>`).join("")
     || '<li class="rb-empty">No open work involves you.</li>');

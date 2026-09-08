@@ -348,6 +348,7 @@ button:disabled { cursor: wait; opacity: .6; }
 .return-brief-panel > summary span:last-child { font-weight: 650; }
 .return-brief-body { display: grid; gap: .9rem; padding: 0 .85rem .85rem; border-top: 1px solid var(--line-soft); }
 .return-brief-body h3 { margin: .75rem 0 .35rem; font-size: .82rem; }
+.return-brief-body details > summary { min-height: 44px; padding: .65rem 0; cursor: pointer; font-size: .82rem; }
 .rb-boundary { display: block; font-size: .68rem; font-weight: 400; color: var(--muted); }
 .rb-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .3rem; }
 .rb-event { font-size: .78rem; line-height: 1.35; overflow-wrap: anywhere; }

@@ -2,8 +2,10 @@
 
 Status: **deployed to isolated staging on September 7, 2026** at
 [Project Room](https://project-room-staging.getdasha.workers.dev).
-Current app `7084dd4`, Worker `91b0e98f-9967-43ea-b930-d188ed6514f6`;
-[latest release evidence](../docs/RELEASE-POLISH-2026-09-07.md).
+Current accepted app `c9b04e8`, Worker `c9ad5cfa-8a3b-4d54-876d-9a7a052cf222`;
+[latest checkpoint evidence](../docs/ASSISTED-WORK-CHECKPOINT-2026-09-07.md).
+New assisted-work source in this checkpoint is not live until its release receipt
+is recorded there. The older full-journey results below remain historical evidence.
 All three CI jobs passed; all ten live assets match the reviewed source.
 Health and readiness pass;
 two real HTTPS browsers completed owner login, invite creation, guest joining,

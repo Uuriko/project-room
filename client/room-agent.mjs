@@ -50,7 +50,7 @@ export class RoomAgentClient {
       member, scope: { kind: "room", permissions: member.permissions, externalExecution: false },
       work: Object.values(snapshot.state.workItems).map(item => ({
         id: item.id, title: item.title, definitionOfDone: item.definitionOfDone, sourceMessageId: item.sourceMessageId,
-        state: item.state, revision: item.revision, next: nextWorkStep(item),
+        state: item.state, revision: item.revision, mode: item.mode, claim: item.claim, next: nextWorkStep(item),
         receipt: item.receipt, verification: item.verification, decision: item.decision, blocker: item.blocker
       }))
     };

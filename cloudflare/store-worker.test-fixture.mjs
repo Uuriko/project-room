@@ -63,6 +63,19 @@ export class StoreTestRoom {
       store.shareLinks.verify();
       store.shareLinks.cancel(owner, 'commons', link.id, null);
       assert.throws(() => store.shareLinks.preview(linkToken), { code: 'link_unavailable' });
+      const send = (type, data) => store.command(owner, 'commons', { id: randomUUID(), type, data });
+      const scope = { repository: 'test/repo', ref: 'draft', paths: ['src/**'], expiresAt: new Date(Date.now() + 60000).toISOString() };
+      for (const workItemId of ['scope-first', 'scope-second']) {
+        send(T.WORK_PROPOSED, { workItemId, title: workItemId, definitionOfDone: 'Synthetic handoff', accountableMemberId: 'owner', mode: 'write', independentVerificationRequired: false, ownerDecisionRequired: false });
+        send(T.WORK_ACCEPTED, { workItemId, expectedRevision: 0 });
+      }
+      send(T.CLAIM_ACQUIRED, { workItemId: 'scope-first', expectedRevision: 1, ...scope });
+      const rejected = { id: randomUUID(), type: T.CLAIM_ACQUIRED, data: { workItemId: 'scope-second', expectedRevision: 1, ...scope } };
+      const scopeBoundary = store.room('commons').sequence;
+      assert.throws(() => store.command(owner, 'commons', rejected), { code: 'claim_conflict', status: 409 });
+      assert.equal(store.room('commons').sequence, scopeBoundary);
+      send(T.CLAIM_RELEASED, { workItemId: 'scope-first', expectedRevision: 2 });
+      assert.equal(store.command(owner, 'commons', rejected).duplicate, false);
       return Response.json({ guests, sequence: store.room('commons').sequence, eventId: receipt.event.id });
     }
     if (path === '/resume') {
@@ -73,6 +86,8 @@ export class StoreTestRoom {
         assert.ok(events.events.some(row => row.event?.id === eventId || row.id === eventId));
       }
       assert.equal(store.room('commons').sequence, sequence);
+      assert.equal(store.room('commons').state.workItems['scope-first'].claim.status, 'released');
+      assert.equal(store.room('commons').state.workItems['scope-second'].claim.status, 'active');
       assert.equal(store.verifyInvitationAudit().consistent, true);
       store.shareLinks.verify();
       return Response.json({ recovered: true, guests: guests.length, sequence });

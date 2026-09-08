@@ -220,12 +220,14 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.waitForFunction(() => document.querySelector("#rb-current-boundary").textContent && !document.querySelector("#rb-refresh-button").disabled);
     await Promise.all([
       page.waitForResponse(response => response.url().endsWith("/return-brief")),
-      panel.locator("summary").click()
+      panel.locator(":scope > summary").click()
     ]);
+    assert.equal(await page.locator("#rb-history-list").isVisible(), false);
+    await page.locator("#rb-history-section > summary").click();
     await page.locator("#rb-history-list .rb-event").first().waitFor();
     await page.locator("#rb-attention-list", { hasText: "Read the briefing" }).waitFor();
     assert.match(await page.locator("#rb-current-boundary").textContent(), /as of event \d+/);
-    assert.match(await page.locator("#rb-history-boundary").textContent(), /since marker 0 · through event \d+/);
+    assert.match(await page.locator("#rb-history-boundary").textContent(), /50 of 59 events · through 59/);
     assert.match(await page.locator("#rb-attention-list").textContent(), /your step: accept/);
     assert.equal(await page.locator("#rb-history-list .rb-event").count(), 50); // bounded first page
     // Rapid clicks admit one continuation; a failed fetch exposes a usable retry.
@@ -238,12 +240,16 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.locator("#rb-more-button").click();
     await page.waitForFunction(() => document.querySelector("#rb-status").textContent.includes("could not load"));
     assert.equal(await page.locator("#rb-history-list .rb-event").count(), 50);
+    send(owner, T.MESSAGE_POSTED, { body: "arrived while reading" });
     await page.locator("#rb-more-button").evaluate(e => { e.click(); e.click(); });
     await page.waitForFunction(() => document.querySelectorAll("#rb-history-list .rb-event").length > 50);
     assert.equal(pageRequests, 2); // One failure, one retry, no duplicate page.
     assert.doesNotMatch(await page.locator("#connection-status").textContent(), /interrupted/);
     await page.unroute("**/return-brief?*");
     assert.equal(await page.locator("#rb-history-list .rb-event").count(), 59); // every event drillable
+    await page.waitForFunction(() => document.querySelector("#rb-status").textContent.includes("New changes available"));
+    assert.match(await page.locator("#rb-current-boundary").textContent(), /as of event 60/);
+    assert.match(await page.locator("#rb-history-boundary").textContent(), /through 59/);
     assert.equal(await page.locator("#rb-more-button").isVisible(), false);
     const historyMessage = page.locator('#rb-history-list [data-open-message="catch-up-55"]');
     assert.equal(await historyMessage.count(), 1, "history exposes the underlying message");
@@ -256,9 +262,10 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.screenshot({ path: `test-results/return-brief-${label}-open.png`, fullPage: true });
 
     // A late event stays out of the frozen history while current stays live on the next fetch.
-    send(owner, T.MESSAGE_POSTED, { body: "arrived while reading" });
-    await panel.evaluate(e => { e.open = false; }); await panel.locator("summary").click(); // reopen: fresh horizon
-    await page.waitForFunction(() => document.querySelector("#rb-history-boundary").textContent.includes("through event 60"));
+    await page.waitForFunction(() => document.querySelector("#rb-status").textContent.includes("New changes available"));
+    assert.match(await page.locator("#rb-history-boundary").textContent(), /through 59/);
+    await panel.evaluate(e => { e.open = false; }); await panel.locator(":scope > summary").click(); // reopen: fresh horizon
+    await page.waitForFunction(() => document.querySelector("#rb-history-boundary").textContent.includes("through 60"));
     assert.equal(await page.locator("#rb-history-list").textContent().then(t => t.includes("arrived while reading")), false); // still paged out
     await page.locator("#rb-more-button").click(); // the continuation keeps the SAME frozen horizon
     await page.waitForFunction(() => document.querySelector("#rb-history-list").textContent.includes("arrived while reading"));
@@ -272,7 +279,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await page.locator("#rb-ack-button").isDisabled(), true);
     // H+1 stays new: one more event after the ack is the only history item.
     send(owner, T.MESSAGE_POSTED, { body: "after the marker" });
-    await panel.evaluate(e => { e.open = false; }); await panel.locator("summary").click();
+    await panel.evaluate(e => { e.open = false; }); await panel.locator(":scope > summary").click();
     await page.waitForFunction(() => document.querySelectorAll("#rb-history-list .rb-event").length === 1);
     assert.match(await page.locator("#rb-history-list").textContent(), /after the marker/);
     assert.deepEqual(errors, []);
@@ -315,7 +322,7 @@ for (const outcome of ["success", "failure"]) {
     await page.goto(origin); await enter();
     await Promise.all([
       page.waitForResponse(response => response.url().endsWith("/return-brief")),
-      page.locator("#return-brief-panel summary").click()
+      page.locator("#return-brief-panel > summary").click()
     ]);
     await page.waitForFunction(() => !document.querySelector("#rb-refresh-button").disabled);
     let release, arrived;

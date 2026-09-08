@@ -73,7 +73,7 @@ test("visible actions respect roles, producer independence, claims and retired w
   const writer = { ...member, permissions: [...member.permissions, "write_external"] };
   assert.deepEqual(actions(item, writer), ["claim", "block"]);
   item.claim = { status: "active", holderId: "producer", expiresAt: new Date(2000).toISOString() };
-  assert.deepEqual(actions(item, writer), ["start", "block", "complete"]);
+  assert.deepEqual(actions(item, writer), ["start", "block", "complete", "release"]);
   item.claim.holderId = "other";
   assert.deepEqual(actions(item, writer), ["block"]);
   item.claim.expiresAt = new Date(1000).toISOString();
@@ -85,6 +85,21 @@ test("visible actions respect roles, producer independence, claims and retired w
   completed.receipt.producerId = null;
   assert.deepEqual(actions(completed, f.member("reviewer")), ["verify"]);
   assert.deepEqual(actions(completed, f.member("owner")), []);
+});
+
+test("write handoffs request scope before start and after release or expiry", () => {
+  const item = { id: "work", state: "accepted", mode: "write", accountableMemberId: "producer", revision: 1, claim: null };
+  assert.equal(nextWorkStep(item, 1000).action, "claim");
+  item.claim = { status: "active", holderId: "producer", expiresAt: new Date(2000).toISOString() };
+  assert.equal(nextWorkStep(item, 1000).action, "start");
+  item.state = "working";
+  assert.equal(nextWorkStep(item, 1000).action, "in_progress");
+  assert.equal(nextWorkStep(item, 2000).action, "claim");
+  item.claim.status = "released";
+  assert.equal(nextWorkStep(item, 1000).action, "claim");
+  assert.equal(nextWorkStep(item, 1000).needsAttention, true);
+  item.mode = "read";
+  assert.equal(nextWorkStep(item, 1000).action, "in_progress");
 });
 
 test("domain and presentation use the same exact-receipt matcher", () => {
