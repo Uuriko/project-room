@@ -309,10 +309,20 @@ not provider PITR, live migration or proof of current restored authority. Frozen
 predates pause mode; a real fallback needs independent traffic blocking or a
 separately tested pause-capable version. Hosted recovery and approval remain gates.
 
-Next: investigate one reusable-outcome/template loop with exact preview and
-deliberate inclusion, no copied credentials/permissions or automatic public posting.
-Research relevant primary product patterns, plan the smallest complete useful slice
-and test with simulated human journeys and fresh agents when appropriate. Do not
-restart completed watcher/return/invitation/task-context/recovery work or mistake
-a milestone for this goal's completion. Keep advanced controls contextual and
-voluntary growth value-bearing. Continue while meaningful authorized work remains.
+The [deliberate work reuse checkpoint](WORK-REUSE-CHECKPOINT-2026-09-07.md) now
+provides Details → Use again → existing editable New work form, with only outcome/
+done criteria copied and fresh people/read/full-review defaults. A shared agent
+definition read, explicit exact-original retry and refusal recovery, session/focus
+guards, long-text/mobile reflow and keyboard wrapping are verified.381 core/API,
+90 browser and nine local Workers tests pass at45d40c7; its exact49-file package
+is retained. One actual agent made a fresh proposal from a seeded agenda; no human
+study, retention lift or inherited completion is claimed. No deployment/schema change.
+
+Next: research and plan a previewable result-sharing/export flow using existing
+evidence and portable-work contracts, then implement and test the useful complete
+slice. Keep private context excluded by default, sharing deliberate and attribution
+truthful; do not publish automatically. Continue the broader prioritized workstreams
+and now/next/later backlog. Do not restart completed reuse, watcher, return,
+invitation, task-context or recovery work, or mistake a milestone for completion.
+Keep advanced controls contextual and voluntary growth value-bearing. Continue
+while meaningful authorized work remains.
