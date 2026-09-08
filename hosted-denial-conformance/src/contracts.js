@@ -1,6 +1,6 @@
 /**
  * Expected status / code / copy contracts observed on PR #23 tip
- * fb90a7083e9f5866c8df242778a6a72f4a58536d.
+ * 2dcf3deeaf3dc2b897eb39617c43c6efb9f11a49.
  *
  * Copied here as fixtures so this package can assert the contract without
  * importing server/, src/, or cloudflare/. Do not treat this as a second

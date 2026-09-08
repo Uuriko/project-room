@@ -2,7 +2,7 @@
  * Live pin for this isolated Grok package.
  *
  * Re-fetched 2026-09-08: draft PR #23 head is
- * fb90a7083e9f5866c8df242778a6a72f4a58536d on codex/unified-local-20260907.
+ * 2dcf3deeaf3dc2b897eb39617c43c6efb9f11a49 on codex/unified-local-20260907.
  * If that tip moves, update PIN.sha to the live #23 head — do not retarget Instinct #8.
  *
  * This package must not import or edit:
@@ -14,10 +14,10 @@ export const PIN = Object.freeze({
   pull: 23,
   title: "Unified invite-only pilot candidate: quiet UI, guest access and deployment preparation",
   branch: "codex/unified-local-20260907",
-  sha: "fb90a7083e9f5866c8df242778a6a72f4a58536d",
+  sha: "2dcf3deeaf3dc2b897eb39617c43c6efb9f11a49",
   url: "https://github.com/Uuriko/project-room/pull/23",
-  sourceUrl: "https://github.com/Uuriko/project-room/tree/fb90a7083e9f5866c8df242778a6a72f4a58536d",
-  fetchedAt: "2026-09-08T00:47:57Z",
+  sourceUrl: "https://github.com/Uuriko/project-room/tree/2dcf3deeaf3dc2b897eb39617c43c6efb9f11a49",
+  fetchedAt: "2026-09-08T01:47:55Z",
   notInstinctPull: 8,
   siblingSkeleton: {
     pull: 22,

@@ -14,7 +14,7 @@ test("pin is draft PR #23 tip, not Instinct #8", () => {
   assert.equal(PIN.pull, 23);
   assert.equal(PIN.notInstinctPull, 8);
   assert.equal(PIN.branch, "codex/unified-local-20260907");
-  assert.equal(PIN.sha, "fb90a7083e9f5866c8df242778a6a72f4a58536d");
+  assert.equal(PIN.sha, "2dcf3deeaf3dc2b897eb39617c43c6efb9f11a49");
   assert.match(PIN.url, /\/pull\/23$/);
   assert.equal(PIN.siblingSkeleton.pull, 22);
 });
@@ -67,7 +67,7 @@ test("hosted-check gap lists join/return coverage and denial holes", () => {
 
 test("matrix report cites the pin SHA and hosted-check gap", () => {
   const report = matrixReport();
-  assert.equal(report.pin, "fb90a7083e9f5866c8df242778a6a72f4a58536d");
+  assert.equal(report.pin, "2dcf3deeaf3dc2b897eb39617c43c6efb9f11a49");
   assert.equal(report.pull, 23);
   assert.equal(report.staging, STAGING.origin);
   assert.equal(report.rows.length, 5);
