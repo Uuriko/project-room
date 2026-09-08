@@ -48,6 +48,12 @@ The read/action guide is [AGENT-HELP-OFFERS.md](AGENT-HELP-OFFERS.md). Default M
 has 29 tools; the existing explicit local-attention option adds two. No new public
 endpoint, schema migration, dependency, provider access or background process.
 
+Post-commit verification at `b3efc2e` found one additional stale historical test
+assertion: the new exact package correctly exposed 29 tools while its cold-import
+test expected 24. The assertion now distinguishes packages with and without the
+help-action module; no runtime behavior changed. Preserve
+`committed-b3efc2e.log` as that failed attempt, not a passing verification.
+
 ## Next: make this equally usable for people
 
 Add one compact contextual offer entry inside the existing help disclosure, not
