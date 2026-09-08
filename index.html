@@ -39,6 +39,7 @@
           <p id="auth-error" class="status form-status" role="alert"></p>
         </form>
         <p id="auth-hint" class="form-hint">Need a link? Ask the room owner. Keep your key private.</p>
+        <details class="access-help"><summary>Need help signing in?</summary><p>A room link alone doesn’t restore access. Use an active key or ask your inviter. Guest access can’t be recovered; rejoin with a valid invite. Your name isn’t proof of identity.</p></details>
       </section>
 
       <main id="main" class="community-shell" hidden>
@@ -227,6 +228,25 @@
       </div>
     </dialog>
     <div id="status" class="status" role="status" aria-live="polite"></div>
+    <dialog id="portable-dialog" aria-labelledby="portable-title">
+      <div class="panel-header"><h2 id="portable-title">Use my AI</h2><button id="portable-close" class="button ghost" type="button">Close</button></div>
+      <p id="portable-work-title"></p>
+      <section id="portable-export" class="portable-section" aria-label="Task prompt">
+        <label id="portable-source-label" class="form-hint"><input id="portable-source" type="checkbox"> Include source message</label>
+        <label for="packet-preview" class="sr-only">Prompt to copy</label>
+        <textarea id="packet-preview" rows="10" readonly spellcheck="false" aria-describedby="portable-sharing"></textarea>
+        <p id="portable-sharing" class="form-hint">Review before sharing with your AI. Copying doesn’t start work.</p>
+        <div class="portable-actions"><button id="packet-copy" class="button primary" type="button">Copy</button><button id="portable-add-result" class="button secondary" type="button">Add result</button></div>
+      </section>
+      <form id="portable-form" class="portable-section" hidden>
+        <label for="portable-result">Your AI’s answer</label>
+        <textarea id="portable-result" rows="10" maxlength="16000" required placeholder="Paste the full answer, including its ROOM-RETURN line…" aria-describedby="portable-return-note"></textarea>
+        <p id="portable-return-note" class="form-hint">Shared as a proposal, not verified work. Unsent answers stay in this tab until reload or sign-out.</p>
+        <label id="portable-older-label" class="form-hint" hidden><input id="portable-older" type="checkbox"> Post as an older proposal</label>
+        <button id="portable-submit" class="button primary" type="submit">Post proposal</button>
+      </form>
+      <p id="portable-status" class="form-status" role="status" aria-live="polite"></p>
+    </dialog>
     <script type="module" src="./src/app.js"></script>
     <dialog id="share-link-dialog" aria-labelledby="share-link-title" class="share-dialog">
       <div class="panel-header"><h2 id="share-link-title">Invite people</h2><button id="share-link-close" class="button ghost" type="button" aria-label="Close invitation links">Close</button></div>

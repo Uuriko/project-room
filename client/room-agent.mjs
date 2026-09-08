@@ -1,5 +1,6 @@
 import { validId } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
+import { workPacket } from "../src/work-packet.js";
 
 export class RoomClientError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -30,6 +31,10 @@ export class RoomAgentClient {
     return value;
   }
   snapshot() { return this.#request(); }
+  // Selected task only; the normal authenticated snapshot never leaves this client.
+  async workPacket(workItemId, options = {}) {
+    return workPacket((await this.snapshot()).state, workItemId, options);
+  }
   changes(after = 0, limit = 50) {
     if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("Use a nonnegative checkpoint and a page size from 1 to 100");
     return this.#request(`/events?after=${after}&limit=${limit}`);

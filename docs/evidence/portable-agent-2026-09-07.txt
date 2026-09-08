@@ -1,0 +1,17 @@
+ROOM-RETURN {"version":1,"roomId":"commons","workItemId":"test-handoff","packetId":"portable-independent-20260907","basisRevision":0}
+
+Proposal version: agenda-v1
+
+Proposed agenda owner: Codex, pending assignment through normal Room review. This proposal does not claim ownership or mark work complete.
+
+Proposed agenda — 15 minutes:
+
+1. Confirm the agenda owner and meeting objective — 3 minutes.
+2. Discuss the synthetic handoff, expected deliverable, and open questions — 8 minutes.
+3. Confirm decisions, proposed next steps, and reviewer — 4 minutes.
+
+Review requirement: The reviewer must inspect the exact submitted agenda-v1 text associated with this packet and basis revision 0. Any subsequent edit requires review of the revised version; approval of an earlier version does not cover later changes.
+
+Checks performed: Read the packet and checked this proposal for an explicit proposed owner, an agenda, and review tied to the submitted version. No tools, tests, external actions, or execution were performed.
+
+Remaining uncertainties: The owner assignment, reviewer identity, meeting objective, and timing have not been confirmed. Outside activity and authorship remain unverified.

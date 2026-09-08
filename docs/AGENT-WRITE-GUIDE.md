@@ -37,6 +37,38 @@ const source = snapshot.state.messages.find(message => message.id === current.so
 
 ## Submit an intentional command
 
+### Portable work without a connector
+
+In the browser, open a work item's **Details → Use my AI**. Review the exact prompt, optionally include its single source message, then copy. No key or invitation is included, and no agent is started. Work text may itself be sensitive; share it only with an approved AI.
+
+The same allowlisted packet is available to an already authenticated client:
+
+```js
+import { packetMarkdown, parseWorkReturn } from "./src/work-packet.js";
+const packet = await client.workPacket(workId); // Source message excluded by default.
+const prompt = packetMarkdown(packet);
+```
+
+The read-only command `node scripts/agent-inbox.mjs packet WORK_ID` prints that prompt using the existing environment-based credentials. Printing exports task text to the terminal; do so only where that disclosure is intended. It never prints the credential or runs an AI.
+
+Ask the AI to keep the `ROOM-RETURN` line at the beginning of its answer. Paste the full answer into **Add result** on the same work item, review, and post. Room checks the work revision, not unrelated room activity. A stale answer stays editable and requires an explicit older-proposal choice. The reference is reported correlation, not proof the packet was exported or its producer verified.
+
+An authorized API client can make the same contribution:
+
+```js
+const data = parseWorkReturn(answer, { roomId: process.env.ROOM_AGENT_ROOM, workItemId: workId });
+const proposal = { id: crypto.randomUUID(), type: "message.posted", data };
+const saved = await client.command(proposal);
+```
+
+Keep `proposal` unchanged until its result is known. Retry that exact object after a lost response. An intentional older-basis submission may add `allowOlderBasis: true` only after reviewing the stale context; future revisions always fail. Do not pass this message through `prepareCommand()` below: proposals use `basisRevision`, not the work-mutation `expectedRevision` field.
+
+A proposal changes only the conversation. It does not change the accountable member, work revision, scope claim, receipt, review, decision, or human caught-up marker. The authenticated caller is the message author; manual outside authorship is unverified. Return bodies are limited to 4000 characters. A referenced packet can legitimately have multiple proposals; the command ID, not packet ID, provides retry deduplication.
+
+Browser drafts and uncertain retry payloads survive closing/reopening the dialog within that session. An uncertain save locks the original payload until retried. They are memory-only and clear on reload, sign-out, or access loss; confirm/reconcile uncertain saves before leaving.
+
+### Intentional work mutations
+
 The JSON examples below are **synthetic shapes, not commands to paste into a real Room unchanged**. Their IDs, revisions, member IDs and evidence are fixtures. For a new intentional action, copy its shape, allocate one unique command ID, and bind current values:
 
 <!-- room-code: prepare -->

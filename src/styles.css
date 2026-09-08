@@ -264,6 +264,17 @@ dialog { width: min(38rem, calc(100vw - 1.5rem)); max-height: calc(100dvh - 2rem
 dialog::backdrop { background: rgb(0 0 0 / 72%); }
 dialog h2 { margin: 0; }
 dialog p { margin: 0; color: var(--muted); }
+.portable-section { display: grid; gap: .8rem; margin-top: 1rem; }
+.portable-section[hidden] { display: none; }
+.portable-section textarea { width: 100%; min-height: 12rem; resize: vertical; font: inherit; line-height: 1.5; }
+.portable-section label:has(input[type="checkbox"]) { display: flex; align-items: center; gap: .6rem; min-height: 44px; }
+.portable-section input[type="checkbox"] { width: 1.1rem; height: 1.1rem; min-height: 0; margin: 0; padding: 0; flex: none; }
+.portable-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+#portable-work-title { overflow-wrap: anywhere; }
+#portable-status { margin-top: .8rem; }
+.access-help { margin-top: 1rem; }
+.access-help summary { cursor: pointer; min-height: 44px; }
+.access-help p { color: var(--muted); }
 button, .button, .message-to-work { min-height: 44px; }
 .status { max-width: min(40rem, calc(100vw - 2rem)); overflow-wrap: anywhere; pointer-events: none; }
 .invitation-dialog { width: min(42rem, calc(100vw - 1.5rem)); }

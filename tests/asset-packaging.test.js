@@ -12,9 +12,9 @@ async function fixture(t) {
   t.after(() => rm(directory, { recursive: true, force: true }));
   return pathToFileURL(directory + '/');
 }
-test('asset build produces and refreshes exactly the current ten application files', async t => {
+test('asset build produces and refreshes exactly the allowlisted application files', async t => {
   const output = await fixture(t);
-  assert.equal(await buildAssets(output), 10);
+  assert.equal(await buildAssets(output), assetPaths.length);
   await writeFile(new URL('src/app.js', output), 'stale generated asset');
   await buildAssets(output);
   assert.deepEqual((await readdir(output)).sort(), ['index.html', 'src']);

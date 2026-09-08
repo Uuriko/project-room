@@ -76,6 +76,14 @@ export class StoreTestRoom {
       assert.equal(store.room('commons').sequence, scopeBoundary);
       send(T.CLAIM_RELEASED, { workItemId: 'scope-first', expectedRevision: 2 });
       assert.equal(store.command(owner, 'commons', rejected).duplicate, false);
+      const proposal = { id: randomUUID(), type: T.MESSAGE_POSTED, data: { workItemId: 'scope-first', body: 'Synthetic portable proposal; no external work performed.', packetId: 'test-packet', basisRevision: 0 } };
+      const unchangedWork = store.room('commons').state.workItems;
+      assert.throws(() => store.command(owner, 'commons', proposal), { status: 409 });
+      proposal.data.allowOlderBasis = true;
+      store.command(owner, 'commons', proposal);
+      assert.equal(store.command(owner, 'commons', proposal).duplicate, true);
+      assert.deepEqual(store.room('commons').state.workItems, unchangedWork);
+      assert.equal(store.room('commons').state.messages.at(-1).proposal.attribution, 'manual-unverified');
       return Response.json({ guests, sequence: store.room('commons').sequence, eventId: receipt.event.id });
     }
     if (path === '/resume') {
@@ -88,6 +96,8 @@ export class StoreTestRoom {
       assert.equal(store.room('commons').sequence, sequence);
       assert.equal(store.room('commons').state.workItems['scope-first'].claim.status, 'released');
       assert.equal(store.room('commons').state.workItems['scope-second'].claim.status, 'active');
+      assert.equal(store.room('commons').state.messages.at(-1).proposal.packetId, 'test-packet');
+      assert.deepEqual(store.rebuildProjection('commons').state.messages, store.room('commons').state.messages);
       assert.equal(store.verifyInvitationAudit().consistent, true);
       store.shareLinks.verify();
       return Response.json({ recovered: true, guests: guests.length, sequence });

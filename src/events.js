@@ -1,4 +1,5 @@
 import { REACTIONS } from "./conversation.js";
+import { proposalContext } from "./work-packet.js";
 
 export const EVENT_TYPES = Object.freeze({
   ROOM_CREATED: "room.created",
@@ -254,6 +255,7 @@ function postMessage(state, incoming) {
   if (incoming.data.toMemberId) requireMember(state, incoming.data.toMemberId);
   if (typeof incoming.data.body !== "string") throw new Error("Message body must be text");
   if (incoming.data.workItemId) requireWorkItem(state, incoming.data.workItemId);
+  const proposal = proposalContext(incoming.data, state.workItems[incoming.data.workItemId]);
   if (incoming.data.replyToId && !state.messages.some(m => m.id === incoming.data.replyToId)) throw new Error("Reply must reference a message in this Room");
   if (state.messages.some(m => m.id === (incoming.data.messageId || incoming.id))) throw new Error("Message already exists");
   state.messages.push({
@@ -263,7 +265,8 @@ function postMessage(state, incoming) {
     workItemId: incoming.data.workItemId || null,
     replyToId: incoming.data.replyToId || null,
     toMemberId: incoming.data.toMemberId || null,
-    createdAt: incoming.at
+    createdAt: incoming.at,
+    ...(proposal ? { proposal } : {})
   });
 }
 
