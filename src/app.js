@@ -1,6 +1,7 @@
 import { EVENT_TYPES as T, WORK_STATES as S } from "./events.js";
 import { AccountClient, RoomClient, draftCommand } from "./client.js";
 import { ReturnBrief } from "./return-brief.js";
+import { needsAttention, workInvolvingMe } from "./work-selectors.js";
 import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter } from "./conversation.js";
 import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, producerKnown as hasReportedProducer } from "./workflow.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation } from "./share-links.js";
@@ -33,6 +34,7 @@ let workDraftId = null, replyToId = null, busy = false;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
 const viewPositions = new Map(), pendingReactions = new Map(), locallyOwnedMessageIds = new Set();
 let newVisibleMessages = 0;
+let roomCursor = 0, roomGeneration = -1, showAllAttention = false, returnClock = null;
 let signoutOperationId = 0, signoutLoading = false;
 let refreshOperationId = 0, submitOperationId = 0;
 let submitControls = null, noticeTimer = null, noticeVersion = 0, workFormOpener = null;
@@ -64,6 +66,8 @@ const client = new RoomClient({
   onSnapshot(snapshot, identity) {
     const firstSnapshot = !state;
     state = snapshot.state; session = identity;
+    roomCursor = snapshot.cursor;
+    roomGeneration = client.generation;
     const roomId = state.room?.id ?? identity.roomId;
     $("#room-title").textContent = state.room?.title ?? roomId;
     $(".room-purpose").textContent = state.room?.purpose ?? "";
@@ -100,6 +104,7 @@ const client = new RoomClient({
     releaseSubmission(submitControls);
     submitOperationId += 1; busy = false;
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null;
+    roomCursor = 0; roomGeneration = -1; showAllAttention = false; clearTimeout(returnClock); returnClock = null;
     shareLinksUI?.resetManagement();
     portableWorkUI?.reset();
     remindersUI?.reset();
@@ -549,10 +554,8 @@ function render() {
   for (const id of ["new-work-button", "composer-work-button"]) {
     $("#" + id).hidden = !can("steer"); $("#" + id).disabled = !can("steer");
   }
-  const items = Object.values(state.workItems);
   renderMessages();
   renderSearch();
-  renderContent("#work-list", items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(workCard).join("") || `<p class="empty-note">${can("steer") ? "Turn a message into work, or start something new." : "Suggest work in the conversation. The owner can create it."}</p>`);
   $("#event-count").textContent = `${client.sequence}`;
   renderReturnBrief();
   renderContent("#event-list", [...state.eventLog].reverse().map(e => `<li id="${recordDomId("event", e.id)}" tabindex="-1" data-event-record-id="${esc(e.id)}" data-focus-key="event:${esc(e.id)}"><span>${esc(humanize(e.type))}</span><strong>${esc(name(e.actorId))}</strong><time datetime="${esc(e.at)}">${esc(time(e.at))}</time><code>${esc(e.id)}</code></li>`).join(""));
@@ -744,11 +747,11 @@ function revealLocationHash() {
 }
 function readyForDecision(i) { return nextWorkStep(i).action === "decide"; }
 function hasIndependentProducer(i) { return hasReportedProducer(i) && i.receipt.producerId !== i.verifierMemberId; }
-function actions(i, scopeOnly = false) {
-  return workActions(i, state.members[session.member.id]).filter(([action]) => (action === "release") === scopeOnly).map(([action, label]) => `<button type="button" class="button secondary" data-action="${action}" data-work-id="${esc(i.id)}" data-focus-key="work-action:${esc(i.id)}:${action}"${busy ? " disabled" : ""}>${label}</button>`).join("");
+function actions(i, scopeOnly = false, now = Date.now()) {
+  return workActions(i, state.members[session.member.id], now).filter(([action]) => (action === "release") === scopeOnly).map(([action, label]) => `<button type="button" class="button secondary" data-action="${action}" data-work-id="${esc(i.id)}" data-focus-key="work-action:${esc(i.id)}:${action}"${busy ? " disabled" : ""}>${label}</button>`).join("");
 }
-function claimStateLabel(i) {
-  if (activeClaim(i)) return "not expired";
+function claimStateLabel(i, now = Date.now()) {
+  if (activeClaim(i, now)) return "not expired";
   if (i.claim?.status === "superseded") return "superseded";
   if (i.claim?.status === "released") return "released";
   return "expired";
@@ -772,17 +775,17 @@ function receiptCard(i) {
   }
   return `<div class="receipt"><p class="receipt-label">REPORTED COMPLETION · NOT AUTOMATIC VERIFICATION</p><dl class="receipt-attribution"><div><dt>Completion reporter</dt><dd>${esc(reporter)}</dd></div><div><dt>Producer</dt><dd>${esc(producer)}</dd></div></dl><p>${esc(receipt.summary)}</p><a href="${safeUrl(receipt.evidenceUrl)}" target="_blank" rel="noreferrer" data-focus-key="work-evidence:${esc(i.id)}">Open submitted evidence ↗</a><code>${esc(receipt.evidenceVersion)}</code><p>${esc(receipt.nextAction)}</p>${verification}</div>`;
 }
-function workCard(i) {
-  const next = nextWorkStep(i), status = workStatus(i);
+function workCard(i, now) {
+  const next = nextWorkStep(i, now), status = workStatus(i, now);
   const nextActor = next.memberId ? `${memberLabel(next.memberId)} — ` : "";
   const nextLine = `<p class="work-next-step" data-next-step="${esc(next.action)}"><strong>Next:</strong> ${esc(nextActor + status.next)}</p>`;
   const source = i.sourceMessageId ? `<a class="source-link" href="${esc(recordHref("message", i.sourceMessageId))}" data-open-message="${esc(i.sourceMessageId)}" data-focus-key="work-source:${esc(i.id)}">From this conversation</a>` : "";
   const blocker = i.blocker ? `<div class="blocker"><strong>Blocked</strong><p>${esc(i.blocker.reason)}</p><p>${esc(i.blocker.nextAction)}</p></div>` : "";
   const decision = i.decision ? `<div class="decision"><strong>${esc(humanize(i.decision.decision))}</strong><p>${esc(i.decision.reason)}</p></div>` : "";
-  const claim = i.claim ? `<details class="claim"><summary data-focus-key="work-claim:${esc(i.id)}">Recorded scope · ${esc(claimStateLabel(i))}</summary><p>${esc(memberLabel(i.claim.holderId))}</p><p>${esc(i.claim.repository)}:${esc(i.claim.ref)}</p><p>${esc(i.claim.paths.join(", "))}</p><p>Expires ${esc(i.claim.expiresAt)}. External activity is not measured.</p>${actions(i, true)}</details>` : "";
+  const claim = i.claim ? `<details class="claim"><summary data-focus-key="work-claim:${esc(i.id)}">Recorded scope · ${esc(claimStateLabel(i, now))}</summary><p>${esc(memberLabel(i.claim.holderId))}</p><p>${esc(i.claim.repository)}:${esc(i.claim.ref)}</p><p>${esc(i.claim.paths.join(", "))}</p><p>Expires ${esc(i.claim.expiresAt)}. External activity is not measured.</p>${actions(i, true, now)}</details>` : "";
   const checks = `<div><dt>Verifier</dt><dd>${i.independentVerificationRequired ? esc(memberLabel(i.verifierMemberId)) : "Not required"}</dd></div><div><dt>Decision</dt><dd>${i.ownerDecisionRequired ? esc(memberLabel(i.humanDecisionMakerId)) : "Not required"}</dd></div>`;
   const updated = `<p class="form-hint">Last recorded update: ${esc(new Date(i.updatedAt).toLocaleString())}. Live execution is not measured.</p>`;
-  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span></div><h3>${esc(i.title)}</h3>${nextLine}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span>${source}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${receiptCard(i)}${blocker}${decision}${claim}<div class="portable-actions">${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-portable-work="${esc(i.id)}" data-portable-mode="result" data-focus-key="work-result:${esc(i.id)}">Add result</button></div></details><div class="work-actions">${actions(i)}</div></article>`;
+  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span></div><h3>${esc(i.title)}</h3>${nextLine}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span>${source}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${receiptCard(i)}${blocker}${decision}${claim}<div class="portable-actions">${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-portable-work="${esc(i.id)}" data-portable-mode="result" data-focus-key="work-result:${esc(i.id)}">Add result</button></div></details><div class="work-actions">${actions(i, false, now)}</div></article>`;
 }
 // Quiet Focus A4: a failed send reports beside the composer that holds the draft,
 // not only in the page-level status area; the Send button is the retry and the
@@ -1076,7 +1079,6 @@ $("#refresh-button").addEventListener("click", async () => {
     handleFailureNotice(error);
   }
 });
-$("#caught-up-button").addEventListener("click", () => briefView.acknowledge(client.sequence));
 $("#message-form").addEventListener("submit", e => {
   e.preventDefault(); if (!state) return;
   const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId };
@@ -1340,7 +1342,7 @@ window.addEventListener("pageshow", e => {
   const roomId = selectedRoomFromLocation();
   (roomId ? ensureAccountSession().then(account => account.authenticated ? client.restore(roomId) : null) : client.restore()).catch(handleFailureNotice);
 });
-// Return brief (disposition 5557850637): compact expandable rail entry. Fetch on return and
+// Return brief: one compact entry before conversation. Fetch on return and
 // on open; history stays fixed through the frozen horizon H, the action sections are live
 // through N, and only the explicit button acknowledges - exactly H, never the latest event.
 function loadReturnBrief() { return briefView.refresh(); }
@@ -1395,38 +1397,67 @@ function renderBriefList(selector, html) {
   }
 }
 function renderReturnBrief() {
+  clearTimeout(returnClock); returnClock = null;
+  const now = Date.now();
+  const owned = state && session && client.session === session && client.generation === roomGeneration && client.ownsAccountSession();
   const returnBrief = briefView.owns(briefView.chain) ? briefView.brief : null;
-  const newer = returnBrief && client.sequence > Math.min(returnBrief.current.evaluatedThrough, returnBrief.history.evaluatedThrough);
-  setText("#rb-status", state ? briefView.message || (newer ? "New changes available. Refresh catch-up." : "") : "");
-  $("#rb-refresh-button").disabled = !state || briefView.busy;
-  $("#caught-up-button").disabled = !state || briefView.busy;
+  const current = owned ? { evaluatedThrough: client.sequence,
+    needsAttention: needsAttention({ workItems: state.workItems, memberId: session.member.id, now }),
+    workInvolvingMe: workInvolvingMe({ workItems: state.workItems, memberId: session.member.id }) } : null;
+  const unread = state ? Math.max(0, client.sequence - roomCursor) : 0;
+  setText("#catchup-count", current ? briefView.message === "Updating room…" ? "Updating…" : [current.needsAttention.length ? `${current.needsAttention.length} need${current.needsAttention.length === 1 ? "s" : ""} you` : "",
+    unread ? `${unread} update${unread === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ") || "No new updates" : "");
+  if (owned) {
+    // Work destinations and catch-up use the same clock, even without new events.
+    const items = Object.values(state.workItems);
+    renderContent("#work-list", items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(i => workCard(i, now)).join("") || `<p class="empty-note">${can("steer") ? "Turn a message into work, or start something new." : "Suggest work in the conversation. The owner can create it."}</p>`);
+    const expiry = items.map(item => item.claim?.status === "active" ? Date.parse(item.claim.expiresAt) : NaN).filter(at => at > now).sort((a, b) => a - b)[0];
+    if (expiry && document.visibilityState !== "hidden") returnClock = setTimeout(renderReturnBrief, Math.max(100, Math.min(60000, expiry - now)));
+  }
+  const newer = returnBrief && client.sequence > returnBrief.history.evaluatedThrough;
+  setText("#rb-status", owned ? briefView.message || (newer ? "New changes available. Refresh catch-up." : "") : "");
+  $("#rb-refresh-button").disabled = !owned || briefView.busy;
   $("#return-brief-panel").setAttribute("aria-busy", briefView.busy ? "true" : "false");
   $("#rb-more-button").disabled = briefView.busy;
   $("#rb-ack-button").disabled = true;
+  delete $("#rb-ack-button").dataset.horizon;
   $("#rb-more-button").hidden = true;
-  if (!returnBrief || !state) {
-    for (const id of ["summary-grid", "rb-current-boundary", "rb-history-boundary", "rb-attention-list", "rb-involving-list", "rb-history-list"]) $(`#${id}`).replaceChildren();
-    for (const id of ["rb-attention-list", "rb-involving-list", "rb-history-list"]) delete $(`#${id}`)._content;
+  const attention = current?.needsAttention ?? [];
+  const allButton = $("#rb-show-all"), allFocused = document.activeElement === allButton;
+  if (attention.length <= 5) showAllAttention = false;
+  allButton.hidden = attention.length <= 5;
+  allButton.textContent = showAllAttention ? "Show less" : `Show all (${attention.length})`;
+  allButton.setAttribute("aria-expanded", String(showAllAttention));
+  if (allFocused && allButton.hidden) $("#return-brief-panel > summary").focus({ preventScroll: true });
+  renderBriefList("#rb-attention-list", (showAllAttention ? attention : attention.slice(0, 5)).map(i =>
+    `<li class="rb-event"><a class="work-link" href="${esc(workHref(i.workItemId))}" data-open-work="${esc(i.workItemId)}" data-brief-key="attention:${esc(i.workItemId)}">${esc(i.action ?? i.workItemId)}</a> <span class="rb-detail">${esc(nextWorkStep(state.workItems[i.workItemId], now).label)}</span></li>`).join("")
+    || (current ? '<li class="rb-empty">Nothing waiting for you.</li>' : ""));
+  const attentionIds = new Set(attention.map(i => i.workItemId));
+  renderBriefList("#rb-involving-list", (current?.workInvolvingMe ?? []).filter(i => !attentionIds.has(i.workItemId)).map(i =>
+    `<li class="rb-event"><a class="work-link" href="${esc(workHref(i.workItemId))}" data-open-work="${esc(i.workItemId)}" data-brief-key="involving:${esc(i.workItemId)}">${esc(i.action ?? i.workItemId)}</a> <span class="rb-detail">${esc(i.roles.map(roleLabel).join(", "))} · ${esc(i.state)}</span></li>`).join("")
+    || (current ? '<li class="rb-empty">No other open work.</li>' : ""));
+  setText("#rb-current-boundary", current ? `Current work as of event ${current.evaluatedThrough}` : "");
+  if (!returnBrief || !owned) {
+    setText("#rb-ack-note", "");
+    for (const id of ["summary-grid", "rb-history-boundary", "rb-history-count", "rb-history-list"]) $(`#${id}`).replaceChildren();
+    delete $("#rb-history-list")._content;
     $("#rb-ack-button").textContent = briefView.reconciliationRequired ? "Refresh brief before acknowledging" : "Mark caught up";
     return;
   }
-  const { history, current } = returnBrief;
+  const { history } = returnBrief;
   const changes = history.evaluatedThrough - history.cursor;
+  setText("#rb-ack-note", changes ? `Marks all ${changes} update${changes === 1 ? "" : "s"} read. Work stays open.` : "Work stays open.");
   setText("#summary-grid", `${changes} ${changes === 1 ? "change" : "changes"} since your marker · ${current.needsAttention.length} to act on`);
-  $("#rb-current-boundary").textContent = `as of event ${current.evaluatedThrough}`;
+  setText("#rb-history-count", changes ? `(${changes})` : "");
   $("#rb-history-boundary").textContent = history.evaluatedThrough === history.cursor
     ? "· nothing new since your marker"
     : `${history.items.length} of ${changes} events · through ${history.evaluatedThrough}`;
-  renderBriefList("#rb-attention-list", current.needsAttention.map(i =>
-    `<li class="rb-event"><a class="work-link" href="${esc(workHref(i.workItemId))}" data-open-work="${esc(i.workItemId)}" data-brief-key="attention:${esc(i.workItemId)}:${esc(i.step)}">${esc(i.action ?? i.workItemId)}</a> <span class="rb-detail">your step: ${esc(humanize(i.step))}</span></li>`).join("")
-    || '<li class="rb-empty">Nothing waiting for you.</li>');
-  renderBriefList("#rb-involving-list", current.workInvolvingMe.map(i =>
-    `<li class="rb-event"><a class="work-link" href="${esc(workHref(i.workItemId))}" data-open-work="${esc(i.workItemId)}" data-brief-key="involving:${esc(i.workItemId)}">${esc(i.action ?? i.workItemId)}</a> <span class="rb-detail">${esc(i.roles.map(roleLabel).join(", "))} · ${esc(i.state)}</span></li>`).join("")
-    || '<li class="rb-empty">No open work involves you.</li>');
   renderBriefList("#rb-history-list", history.items.map(describeBriefEvent).join("")
     || '<li class="rb-empty">Nothing new since your marker.</li>');
   $("#rb-more-button").hidden = !history.hasMore;
-  $("#rb-ack-button").textContent = history.evaluatedThrough === history.cursor ? "Already caught up" : `Mark caught up through event ${history.evaluatedThrough}`;
+  $("#rb-ack-button").textContent = history.evaluatedThrough === history.cursor ? "Already caught up" : "Mark caught up";
+  $("#rb-ack-button").dataset.horizon = String(history.evaluatedThrough);
+  $("#rb-ack-button").setAttribute("aria-describedby", "rb-ack-note rb-history-boundary");
   $("#rb-ack-button").disabled = briefView.busy || history.evaluatedThrough === history.cursor;
 }
 $("#return-brief-panel").addEventListener("toggle", e => {
@@ -1443,6 +1474,8 @@ $("#rb-more-button").addEventListener("click", async () => {
   }
 });
 $("#rb-ack-button").addEventListener("click", () => briefView.acknowledge());
+$("#rb-show-all").addEventListener("click", () => { showAllAttention = !showAllAttention; renderReturnBrief(); });
+document.addEventListener("visibilitychange", renderReturnBrief);
 shareLinksUI = installShareLinks({ client, accountClient, getState: () => state, getSession: () => session, setConnectionStatus,
   async openRoom(roomId, roomMode, joinedSession) {
     if (state && session?.roomId === roomId && session.member.id === joinedSession?.member?.id

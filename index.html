@@ -55,6 +55,47 @@
             </div>
           </header>
 
+          <details id="return-brief-panel" class="panel return-brief-panel">
+            <summary>
+              <span id="return-brief-heading">Catch me up</span>
+              <span class="catchup-signals"><span id="catchup-count"></span><small id="reminder-count" hidden></small></span>
+            </summary>
+            <div class="return-brief-body">
+              <p id="summary-grid" class="sr-only"></p>
+              <p id="rb-status" class="rb-note" role="status" aria-live="polite"></p>
+              <section id="reminder-panel" aria-label="Your reminders" hidden>
+                <h3 id="reminder-due-heading">Your reminders</h3>
+                <p id="reminder-load-error" class="rb-note" role="status"></p>
+                <button id="reminder-refresh" class="button secondary" type="button" hidden>Retry reminders</button>
+                <ul id="reminder-due" class="rb-list reminder-list"></ul>
+                <h3 id="reminder-pending-heading" hidden>Save needs confirmation</h3>
+                <ul id="reminder-pending" class="rb-list reminder-list"></ul>
+                <details id="reminder-scheduled"><summary id="reminder-scheduled-heading">Scheduled</summary><ul id="reminder-upcoming" class="rb-list reminder-list"></ul></details>
+              </section>
+              <section aria-labelledby="rb-current-heading">
+                <h3 id="rb-current-heading">Needs you</h3>
+                <ul id="rb-attention-list" class="rb-list"></ul>
+                <button id="rb-show-all" class="text-button" type="button" aria-expanded="false" aria-controls="rb-attention-list" hidden>Show all</button>
+                <details id="rb-involving-section">
+                <summary id="rb-involving-heading">Ongoing</summary>
+                <ul id="rb-involving-list" class="rb-list"></ul>
+                </details>
+              </section>
+              <details id="rb-history-section">
+                <summary id="rb-history-heading">Updates <span id="rb-history-count"></span></summary>
+                <p id="rb-current-boundary" class="rb-boundary"></p>
+                <p id="rb-history-boundary" class="rb-boundary"></p>
+                <ul id="rb-history-list" class="rb-list rb-history"></ul>
+                  <button id="rb-more-button" class="button secondary" type="button" hidden>Show more changes</button>
+              </details>
+                <div class="rb-actions">
+                  <button id="rb-refresh-button" class="button ghost icon-button" type="button" aria-label="Refresh catch-up" title="Refresh catch-up"><span aria-hidden="true">↻</span></button>
+                  <button id="rb-ack-button" class="button secondary" type="button">Mark caught up</button>
+                </div>
+                <p id="rb-ack-note" class="rb-note"></p>
+            </div>
+          </details>
+
           <section class="panel conversation-panel" aria-labelledby="conversation-title">
             <div class="panel-header conversation-header">
               <div>
@@ -98,7 +139,7 @@
                 <p>Everyone in the room can read messages. Addressing an agent does not run it or grant permission.</p>
               </details>
             </form>
-            <div class="cursor-row"><span id="cursor-label" class="sr-only"></span><button id="caught-up-button" class="text-button" type="button">Mark caught up</button></div>
+            <span id="cursor-label" class="sr-only"></span>
           </section>
         </section>
 
@@ -108,43 +149,6 @@
             <div id="presence-list" class="presence-list"></div>
           </details>
 
-          <details id="return-brief-panel" class="panel return-brief-panel">
-            <summary>
-              <span id="return-brief-heading">Catch me up</span>
-              <small id="reminder-count" hidden></small>
-            </summary>
-            <div class="return-brief-body">
-              <p id="summary-grid" class="rb-note"></p>
-              <p id="rb-status" class="rb-note" role="status" aria-live="polite"></p>
-              <section id="reminder-panel" aria-label="Your reminders" hidden>
-                <h3 id="reminder-due-heading">Your reminders</h3>
-                <p id="reminder-load-error" class="rb-note" role="status"></p>
-                <button id="reminder-refresh" class="button secondary" type="button" hidden>Retry reminders</button>
-                <ul id="reminder-due" class="rb-list reminder-list"></ul>
-                <h3 id="reminder-pending-heading" hidden>Save needs confirmation</h3>
-                <ul id="reminder-pending" class="rb-list reminder-list"></ul>
-                <details id="reminder-scheduled"><summary id="reminder-scheduled-heading">Scheduled</summary><ul id="reminder-upcoming" class="rb-list reminder-list"></ul></details>
-              </section>
-              <section aria-labelledby="rb-current-heading">
-                <h3 id="rb-current-heading">Needs you <span id="rb-current-boundary" class="rb-boundary"></span></h3>
-                <ul id="rb-attention-list" class="rb-list"></ul>
-                <details id="rb-involving-section">
-                <summary id="rb-involving-heading">Work involving you</summary>
-                <ul id="rb-involving-list" class="rb-list"></ul>
-                </details>
-              </section>
-              <details id="rb-history-section">
-                <summary id="rb-history-heading">Changes <span id="rb-history-boundary" class="rb-boundary"></span></summary>
-                <ul id="rb-history-list" class="rb-list rb-history"></ul>
-                  <button id="rb-more-button" class="button secondary" type="button" hidden>Show more changes</button>
-              </details>
-                <div class="rb-actions">
-                  <button id="rb-refresh-button" class="button secondary" type="button">Refresh catch-up</button>
-                  <button id="rb-ack-button" class="button secondary" type="button">Mark caught up</button>
-                </div>
-                <p class="rb-note">Marking caught up changes only your position, not work or approvals.</p>
-            </div>
-          </details>
 
           <section class="panel work-panel" aria-labelledby="work-title">
             <div class="panel-header">

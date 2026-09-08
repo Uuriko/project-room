@@ -99,7 +99,7 @@ test('two real browsers use the shared UI on local Workers, including SSE and re
     returned.setDefaultTimeout(12000);
     await returned.goto(returnUrl);
     await returned.locator('#main').waitFor({ state: 'visible' });
-    await returned.getByText('Hello back — live updates work', { exact: true }).first().waitFor();
+    await returned.locator('#message-list').getByText('Hello back — live updates work', { exact: true }).waitFor();
     assert.match(await returned.locator('#identity-label').textContent(), /Cloudflare guest/);
     await returned.screenshot({ path: join(output, 'cloudflare-return.png'), fullPage: true });
     console.log('Local Workers browser screenshots saved; synthetic persistence:', persistence);

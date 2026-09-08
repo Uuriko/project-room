@@ -276,7 +276,15 @@ the exact state and request it honestly; follow the goal tool's blocking rules.
 The initial reminder and notify-only watcher checkpoints are now preserved locally.
 See [the watcher checkpoint](ASSIGNMENT-WATCHER-CHECKPOINT-2026-09-07.md): 332 core/API,
 62 browser and 7 local Cloudflare checks passed. This does not complete the goal.
-Next is onboarding/return-flow refinement and the highest-confidence voluntary
-invitation/portable-work growth experiment, with a plan and explicit measurement
-contract before implementation. Keep advanced controls contextual, review repeated
-catch-up controls/technical copy, and preserve identity and acknowledgement semantics.
+The [calm return checkpoint](CALM-RETURN-CHECKPOINT-2026-09-07.md) now provides one
+compact entry before conversation, live current needs and private reminders,
+progressive history disclosure, shared time-aware work presentation and one
+frozen-horizon acknowledgement. It adds no hosted notification or analytics channel.
+The return-to-useful-contribution experiment is defined but unmeasured.
+
+Next is the optional previewed invitation note/one small ask, preserving default
+Copy link and avoiding automatic context disclosure or sending. Write its detailed
+state/ownership/recovery contract first, implement and test the complete slice,
+then continue agent ergonomics, reusable outcomes and release recovery. Do not
+restart completed watcher/return work or mistake either milestone for this goal's
+completion. Keep advanced controls contextual and voluntary growth value-bearing.

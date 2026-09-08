@@ -52,6 +52,14 @@ export class ReturnBrief {
           this.reset();
           return;
         }
+        // A brief can beat the live snapshot. Reconcile before exposing links
+        // whose records the room cannot yet open; this never changes frozen H.
+        if (page.current.evaluatedThrough > this.client.sequence) {
+          this.message = "Updating room…"; this.onChange();
+          await this.client.refresh();
+          if (!this.owns(chain)) return;
+          if (page.current.evaluatedThrough > this.client.sequence) throw new Error("Room view is behind. Refresh catch-up to retry.");
+        }
         if (continuation) {
           const history = this.brief.history;
           if (history.continuation !== continuation || page.history.evaluatedThrough !== history.evaluatedThrough || page.history.cursor !== history.cursor) {
@@ -88,9 +96,10 @@ export class ReturnBrief {
     this.message = "Position saved. Refresh to see the latest changes.";
     this.onReconciliationFailure(error);
   }
-  acknowledge(horizon = this.brief?.history.evaluatedThrough) {
+  acknowledge() {
     const chain = this.chain;
     if (!chain || !this.owns(chain) || this.busy || !this.brief) return Promise.resolve();
+    const horizon = this.brief.history.evaluatedThrough;
     if (horizon === this.brief.history.cursor) return Promise.resolve();
     chain.acknowledging = true;
     this.message = "Saving your caught-up position…";

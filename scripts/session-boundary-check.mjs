@@ -67,7 +67,7 @@ async function openReadyBrief(page) {
   const panel = page.locator("#return-brief-panel");
   const ready = () => page.waitForFunction(() => {
     const button = document.querySelector("#rb-ack-button");
-    return button && !button.disabled && /through event \d+/.test(button.textContent);
+    return button && !button.disabled && /^\d+$/.test(button.dataset.horizon);
   });
   await ready(); // Let the initial snapshot's brief settle before opening it.
   if (!await panel.evaluate(element => element.open)) {
@@ -135,7 +135,7 @@ test("late caught-up success and access error cannot cross an account switch", {
     errorDelivered.resolve();
   });
 
-  const ownerHorizon = Number((await page.locator("#rb-ack-button").textContent()).match(/event (\d+)/)?.[1]);
+  const ownerHorizon = Number(await page.locator("#rb-ack-button").getAttribute("data-horizon"));
   assert.ok(Number.isSafeInteger(ownerHorizon));
   await page.locator("#rb-ack-button").click();
   await successCaptured.promise;
@@ -542,7 +542,7 @@ test("a held return-brief acknowledgement survives close and reopen without a co
   await openReadyBrief(page);
   await page.waitForTimeout(100); // allow the toggle-triggered refresh to settle
   const before = briefRequests;
-  const horizon = Number((await page.locator("#rb-ack-button").textContent()).match(/event (\d+)/)?.[1]);
+  const horizon = Number(await page.locator("#rb-ack-button").getAttribute("data-horizon"));
   const captured = deferred(), release = deferred();
   t.after(() => release.resolve());
   await page.route("**/api/rooms/commons/cursor", async route => {
@@ -565,7 +565,7 @@ test("a held return-brief acknowledgement survives close and reopen without a co
   assert.ok(briefRequests > before, "the committed marker is reconciled through one fresh brief");
 });
 
-test("room-level Caught up refreshes an already-open return brief", { timeout: 90000 }, async t => {
+test("the sole caught-up control refreshes an open brief but preserves arrivals beyond its horizon", { timeout: 90000 }, async t => {
   const { browser, origin, owner, send, store } = await startRoom(t);
   const page = await (await browser.newContext({ viewport: { width: 1100, height: 850 }, reducedMotion: "reduce" })).newPage();
   let briefRequests = 0;
@@ -576,15 +576,20 @@ test("room-level Caught up refreshes an already-open return brief", { timeout: 9
   await login(page, origin, owner, "Room owner");
   await openReadyBrief(page);
   const before = briefRequests;
+  const horizon = Number(await page.locator("#rb-ack-button").getAttribute("data-horizon"));
   send(owner, T.MESSAGE_POSTED, { messageId: "late-before-generic-ack", body: "Arrived while the brief stayed open" });
   await page.locator('[data-message-record-id="late-before-generic-ack"]').getByText("Arrived while the brief stayed open", { exact: true }).waitFor();
   const sequence = store.snapshot(owner, "commons").sequence;
 
-  await page.locator("#caught-up-button").click();
-  await page.waitForFunction(() => document.querySelector("#rb-ack-button")?.textContent === "Already caught up");
-  assert.equal(store.snapshot(owner, "commons").cursor, sequence);
-  assert.match(await page.locator("#rb-history-boundary").textContent(), /nothing new since your marker/);
-  assert.ok(briefRequests > before, "the generic control reloads the cached brief after committing");
+  assert.equal(await page.locator("#caught-up-button").count(), 0, "there is no second acknowledgement with different semantics");
+  await page.locator("#rb-ack-button").click();
+  await page.waitForFunction(value => document.querySelector("#rb-ack-button")?.dataset.horizon === String(value)
+    && !document.querySelector("#rb-ack-button").disabled, sequence);
+  assert.equal(store.snapshot(owner, "commons").cursor, horizon);
+  assert.equal(sequence, horizon + 1);
+  assert.match(await page.locator("#rb-history-boundary").textContent(), /1 of 1 events/);
+  assert.match(await page.locator("#rb-history-list").textContent(), /Arrived while the brief stayed open/);
+  assert.ok(briefRequests > before, "the one control reloads the cached brief after committing exactly H");
 });
 
 test("a committed caught-up marker is not reported as failed when reconciliation is unavailable", { timeout: 90000 }, async t => {
@@ -609,7 +614,7 @@ test("a committed caught-up marker is not reported as failed when reconciliation
   });
   const sequence = store.snapshot(owner, "commons").sequence;
 
-  await page.locator("#caught-up-button").click();
+  await page.locator("#rb-ack-button").click();
   await page.waitForFunction(() => document.querySelector("#status")?.textContent.includes("position was saved"));
   assert.equal(store.snapshot(owner, "commons").cursor, sequence);
   assert.equal(await page.locator("#rb-ack-button").isDisabled(), true);
@@ -624,7 +629,7 @@ test("a committed brief acknowledgement invalidates its old horizon when the bri
   const page = await (await browser.newContext({ viewport: { width: 1100, height: 850 }, reducedMotion: "reduce" })).newPage();
   await login(page, origin, owner, "Room owner");
   await openReadyBrief(page);
-  const horizon = Number((await page.locator("#rb-ack-button").textContent()).match(/event (\d+)/)?.[1]);
+  const horizon = Number(await page.locator("#rb-ack-button").getAttribute("data-horizon"));
   let failBrief = false;
   await page.route("**/api/rooms/commons/cursor", async route => {
     const response = await route.fetch();

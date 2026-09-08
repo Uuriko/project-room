@@ -228,7 +228,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.locator("#rb-attention-list", { hasText: "Read the briefing" }).waitFor();
     assert.match(await page.locator("#rb-current-boundary").textContent(), /as of event \d+/);
     assert.match(await page.locator("#rb-history-boundary").textContent(), /50 of 59 events · through 59/);
-    assert.match(await page.locator("#rb-attention-list").textContent(), /your step: accept/);
+    assert.match(await page.locator("#rb-attention-list").textContent(), /Accept the assignment/);
     assert.equal(await page.locator("#rb-history-list .rb-event").count(), 50); // bounded first page
     // Rapid clicks admit one continuation; a failed fetch exposes a usable retry.
     let pageRequests = 0, failPage = true;

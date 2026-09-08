@@ -46,8 +46,8 @@ export function nextWorkStep(item, now = Date.now()) {
 }
 
 // PR20's presentation adapter delegates to the same next-step model as the API.
-export function workStatus(item) {
-  const next = nextWorkStep(item);
+export function workStatus(item, now = Date.now()) {
+  const next = nextWorkStep(item, now);
   const labels = {
     superseded: "Replaced", accept: "Awaiting acceptance", start: "Accepted", claim: "Scope needed",
     in_progress: "Working · reported", revise: "Blocked", unknown: "Needs reconciliation",
@@ -82,7 +82,7 @@ export function workActions(item, member, now = Date.now()) {
     actions.push(["verify", item.verification ? "Review evidence again"
       : item.independentVerificationRequired && producerKnown(item) ? "Record independent check" : "Record evidence check"]);
   }
-  if (nextWorkStep(item).action === "decide" && member.id === item.humanDecisionMakerId && member.kind === "human" && can("decide")) actions.push(["decide", "Record decision"]);
+  if (nextWorkStep(item, now).action === "decide" && member.id === item.humanDecisionMakerId && member.kind === "human" && can("decide")) actions.push(["decide", "Record decision"]);
   if (activeClaim(item, now) && (claim || can("manage_claims"))) actions.push(["release", "Release scope"]);
   return actions;
 }

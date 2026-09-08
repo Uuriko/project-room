@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test",
-    "test:browser": "node --test --test-concurrency=1 scripts/browser-check.mjs scripts/disclosure-check.mjs scripts/quiet-focus-a34-check.mjs scripts/quiet-focus-final-check.mjs scripts/accessibility-check.mjs scripts/session-boundary-check.mjs scripts/invitation-check.mjs scripts/composer-browser-check.mjs scripts/unified-journey-check.mjs scripts/workflow-browser-check.mjs scripts/quiet-design-check.mjs scripts/first-use-check.mjs scripts/quiet-invites-check.mjs scripts/invitation-recovery-check.mjs scripts/release-polish-check.mjs scripts/assisted-work-browser-check.mjs scripts/portable-work-browser-check.mjs scripts/reminders-browser-check.mjs",
+    "test:browser": "node --test --test-concurrency=1 scripts/browser-check.mjs scripts/disclosure-check.mjs scripts/quiet-focus-a34-check.mjs scripts/quiet-focus-final-check.mjs scripts/accessibility-check.mjs scripts/session-boundary-check.mjs scripts/invitation-check.mjs scripts/composer-browser-check.mjs scripts/unified-journey-check.mjs scripts/workflow-browser-check.mjs scripts/quiet-design-check.mjs scripts/first-use-check.mjs scripts/quiet-invites-check.mjs scripts/invitation-recovery-check.mjs scripts/release-polish-check.mjs scripts/assisted-work-browser-check.mjs scripts/portable-work-browser-check.mjs scripts/reminders-browser-check.mjs scripts/calm-return-browser-check.mjs",
     "check": "node scripts/check.mjs",
     "provision": "node scripts/provision.mjs",
     "audit:invitations": "node scripts/audit-invitations.mjs",
