@@ -87,7 +87,9 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   assert.equal(await page.locator('#search-count').textContent(), '27 matches · 25 shown in this room');
   await search.fill('telescope');
   assert.equal(await hits.locator('[data-open-work]').count(), 1);
+  const searchFont = await hits.locator('a').evaluate(node => parseFloat(getComputedStyle(node).fontSize));
   await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
+  assert.ok(await hits.locator('a').evaluate((node, previous) => parseFloat(getComputedStyle(node).fontSize) >= previous * 1.9, searchFont), 'search results really enlarge');
   await search.scrollIntoViewIfNeeded();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
   assert.equal(await hits.evaluate(node => node.scrollWidth <= node.clientWidth + 1), true);

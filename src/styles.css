@@ -340,7 +340,7 @@ button, .button, .message-to-work { min-height: 44px; }
 .search-results p { margin-bottom: .5rem; color: var(--muted); font-size: .875rem; }
 .search-results ol { max-height: 18rem; overflow-y: auto; list-style: none; padding: 0; margin: 0; }
 .search-results li + li { border-top: 1px solid var(--line); }
-.search-results a { display: grid; gap: .4rem; padding: .8rem .5rem; text-decoration: none; overflow-wrap: anywhere; }
+.search-results a { display: grid; gap: .4rem; padding: .8rem .5rem; font-size: 1rem; text-decoration: none; overflow-wrap: anywhere; }
 .search-results a:hover { background: #1a2940; }
 .search-results a span { color: var(--text); white-space: pre-wrap; }
 .search-results a small { color: var(--muted); }
