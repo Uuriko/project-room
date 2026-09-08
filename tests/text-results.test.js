@@ -69,6 +69,22 @@ test("native evidence rejects wrong IDs, work, hash, parent and mixed formats wi
   assert.notEqual(textVersion("é"), textVersion("e\u0301")); assert.doesNotThrow(() => auditRecovery(f.store));
 });
 
+test("help revisions never masquerade as work revisions when reading or adopting a draft", async t => {
+  const f = await setup(t), basisRevision = f.item().revision;
+  f.mutate(T.WORK_HELP_UPDATED, { expectedHelpRevision: 0, status: "open", scope: "Suggest one item", expiresAt: new Date(Date.now() + 3600000).toISOString() });
+  f.mutate(T.WORK_HELP_UPDATED, { expectedHelpRevision: 1, status: "withdrawn" });
+  assert.equal(f.item().revision, basisRevision);
+  const posted = f.post("Exact contribution after help changes", { packetId: "help-draft", basisRevision }, "guest");
+  const result = await f.client.workResult(f.workItemId, { draftMessageId: posted.event.data.messageId });
+  assert.equal(result.result.text.proposal.submittedAtRevision, basisRevision);
+  assert.equal(result.result.text.body, posted.event.data.body);
+  f.mutate(T.WORK_COMPLETED, f.input(posted));
+  assert.equal((await f.client.workResult(f.workItemId)).result.kind, "room_text");
+  const audit = auditRecovery(f.store), reopened = new RoomStore(join(f.directory, "room.sqlite"));
+  try { assert.deepEqual(auditRecovery(reopened), audit); }
+  finally { reopened.close(); }
+});
+
 test("external and native lineage share exact version review; same body does not inherit approval", async t => {
   const f = await setup(t), external = f.mutate(T.WORK_COMPLETED, { summary: "Old external", evidenceUrl: "https://example.invalid", evidenceVersion: "external-v1", producerId: "producer", nextAction: "Check" });
   assert.equal((await f.client.workResult(f.workItemId)).result.kind, "external");

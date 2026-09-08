@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { nativeTextEvidence, validResultBody, proposalContext } from "../src/work-packet.js";
 import { nextWorkStep } from "../src/workflow.js";
+import { WORK_REVISION_TYPES } from "../src/events.js";
 
 const check = condition => { if (!condition) throw new Error("Native result evidence requires reconciliation"); };
 export const textVersion = body => {
@@ -22,7 +23,7 @@ export function storedText(db, state, workItemId, messageId, messageEventId = nu
     && (post.data.replyToId || null) === message.replyToId && (post.data.toMemberId || null) === message.toMemberId);
   let proposal = null;
   if (["packetId", "basisRevision", "allowOlderBasis"].some(key => Object.hasOwn(post.data, key))) {
-    const prior = db.prepare("SELECT body FROM events WHERE room_id=? AND sequence<? AND json_extract(body,'$.data.workItemId')=? AND (json_extract(body,'$.type')='work.proposed' OR json_type(body,'$.data.expectedRevision')='integer') ORDER BY sequence DESC LIMIT 1").get(state.room.id, row.sequence, workItemId);
+    const prior = db.prepare(`SELECT body FROM events WHERE room_id=? AND sequence<? AND json_extract(body,'$.data.workItemId')=? AND (json_extract(body,'$.type')='work.proposed' OR (json_extract(body,'$.type') IN (${WORK_REVISION_TYPES.map(() => "?").join(",")}) AND json_type(body,'$.data.expectedRevision')='integer')) ORDER BY sequence DESC LIMIT 1`).get(state.room.id, row.sequence, workItemId, ...WORK_REVISION_TYPES);
     check(prior);
     const previous = JSON.parse(prior.body);
     proposal = proposalContext(post.data, { revision: previous.type === "work.proposed" ? 0 : previous.data.expectedRevision + 1 });

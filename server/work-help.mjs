@@ -1,5 +1,5 @@
 import { WORK_HELP_UPDATED, helpFromEvent, validateHelp } from "../src/work-help.js";
-import { validId } from "../src/events.js";
+import { validId, WORK_REVISION_TYPES } from "../src/events.js";
 
 const own = (value, key) => value != null && Object.hasOwn(value, key);
 const check = condition => { if (!condition) throw new Error("Help invitation history requires operator reconciliation"); };
@@ -12,8 +12,7 @@ const memberFields = ["id", "kind", "active", "revision", "permissions"];
 const workFacts = item => ({ ...pick(item, workFields), receipt: item?.receipt ? pick(item.receipt, ["eventId", "evidenceVersion"]) : null });
 const helpMap = state => Object.fromEntries(Object.entries(state.workItems ?? {}).filter(([, item]) => own(item, "helpWanted"))
   .map(([id, item]) => [id, validateHelp(item.helpWanted)]));
-const mutations = new Set(["work.accepted", "work.started", "work.blocked", "work.blocker_resolved", "work.completed",
-  "work.superseded", "claim.acquired", "claim.released", "verification.recorded", "owner.decision_recorded"]);
+const mutations = new Set(WORK_REVISION_TYPES);
 const transitions = { "work.accepted": "accepted", "work.started": "working", "work.blocked": "blocked",
   "work.blocker_resolved": "accepted", "work.completed": "completed", "work.superseded": "superseded" };
 

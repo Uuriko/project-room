@@ -29,6 +29,14 @@ export const EVENT_TYPES = Object.freeze({
 
 export const PERMISSIONS = Object.freeze(["steer", "decide", "manage_members", "manage_claims", "accept_work", "complete_work", "verify", "write_external"]);
 
+// A command may check a work revision without advancing it (for example help).
+// Historical evidence readers must not infer a mutation from a field name alone.
+export const WORK_REVISION_TYPES = Object.freeze([
+  EVENT_TYPES.WORK_ACCEPTED, EVENT_TYPES.WORK_STARTED, EVENT_TYPES.WORK_BLOCKED, EVENT_TYPES.WORK_BLOCKER_RESOLVED,
+  EVENT_TYPES.WORK_COMPLETED, EVENT_TYPES.WORK_SUPERSEDED, EVENT_TYPES.CLAIM_ACQUIRED, EVENT_TYPES.CLAIM_RELEASED,
+  EVENT_TYPES.VERIFICATION_RECORDED, EVENT_TYPES.OWNER_DECISION_RECORDED
+]);
+
 // Roles are human-readable presets. The stored permission snapshot remains the
 // authority so a later role-policy change cannot silently widen an invitation.
 export const INVITATION_ROLE_POLICIES = Object.freeze({
