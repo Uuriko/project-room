@@ -13,14 +13,14 @@ import { auditRecovery } from "../server/recovery.mjs";
 
 const repository = fileURLToPath(new URL("../", import.meta.url));
 
-test("exact-commit runtime package verifies cold, excludes private state and preserves populated v8 data", async t => {
+test("exact-commit runtime package verifies cold, excludes private state and preserves populated v9 data", async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-package-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim();
   const destination = join(directory, "runtime");
   const receipt = createRuntimePackage({ repository, commit, destination });
-  assert.equal(receipt.schemaVersion, 8); assert.deepEqual(publicAssets, assetPaths);
-  assert.equal(receipt.files, 47 + ["server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs"].filter(path => existsSync(join(destination, path))).length);
+  assert.equal(receipt.schemaVersion, 9); assert.deepEqual(publicAssets, assetPaths);
+  assert.equal(receipt.files, 47 + ["server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "src/agent-connections.js", "client/mcp-stdio.mjs", "scripts/agent-mcp.mjs"].filter(path => existsSync(join(destination, path))).length);
   assert.equal(existsSync(join(destination, ".git")), false);
   assert.equal(existsSync(join(destination, "node_modules")), false);
   for (const path of ["server.mjs", "src/app.js", "cloudflare/room.mjs"]) {
@@ -35,7 +35,7 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   assert.throws(() => verifyRuntimePackage(destination, { expectedCommit: "0".repeat(40) }));
   const { buildAssets } = await import(pathToFileURL(join(destination, "cloudflare/build-assets.mjs")));
   const assets = join(directory, "assets");
-  assert.equal(await buildAssets(pathToFileURL(assets + "/")), 15);
+  assert.equal(await buildAssets(pathToFileURL(assets + "/")), 16);
   for (const path of publicAssets) assert.deepEqual(readFileSync(join(assets, path)), readFileSync(join(destination, path)));
   const f = createRecoveryFixture(join(directory, "fixture.sqlite"));
   try {

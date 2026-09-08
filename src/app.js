@@ -5,6 +5,7 @@ import { needsAttention, workInvolvingMe } from "./work-selectors.js";
 import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter } from "./conversation.js";
 import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, reusableWorkDefinition, confirmsWorkProposal, producerKnown as hasReportedProducer } from "./workflow.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation } from "./share-links.js";
+import { installAgentConnections } from "./agent-connections.js";
 import { installReminders } from "./reminders.js";
 import { installPortableWork, installResultCopy } from "./portable-work.js";
 
@@ -30,6 +31,7 @@ let shareLinksUI = null;
 let portableWorkUI = null;
 let resultCopyUI = null;
 let remindersUI = null;
+let agentConnectionsUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
 let workDraftId = null, replyToId = null, busy = false;
 let workFormEpoch = 0, workRetryLocked = false;
@@ -82,6 +84,7 @@ const client = new RoomClient({
     render();
     shareLinksUI?.sync();
     remindersUI?.sync();
+    agentConnectionsUI?.sync();
     resultCopyUI?.sync();
     if (firstSnapshot) {
       const saved = recovery.read(draftScope(identity), state);
@@ -112,6 +115,7 @@ const client = new RoomClient({
     portableWorkUI?.reset();
     resultCopyUI?.reset();
     remindersUI?.reset();
+    agentConnectionsUI?.reset();
     workDraftId = null; replyToId = null; workFormEpoch++; setWorkRetry(false);
     $("#work-reuse-hint").hidden = true;
     currentThreadId = null; conversation = null; drafts = new ConversationDrafts();
@@ -169,6 +173,7 @@ const briefView = new ReturnBrief(client, {
   }
 });
 remindersUI = installReminders({ client, getState: () => state, onSaved: text => notice(text) });
+agentConnectionsUI = installAgentConnections({ client, getState: () => state });
 portableWorkUI = installPortableWork({ client, getState: () => state, onSaved: messageId => {
   const visible = conversation?.byId.has(messageId);
   if (visible) revealMessage(messageId);
@@ -883,8 +888,8 @@ $("#invitation-account-form").addEventListener("submit", async e => {
   const roomBefore = state && session ? session : null;
   if (roomBefore) {
     saveComposer();
-    if ((drafts.hasText() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || !$("#new-work-form").hidden || $("#action-dialog").open)
-      && !window.confirm("Signing in with a different account clears this Room’s unsent drafts and forms before acceptance. Continue with this account key?")) return;
+    if ((drafts.hasText() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || !$("#new-work-form").hidden || $("#action-dialog").open)
+      && !window.confirm("Signing in with a different account clears this Room’s unsent drafts, private setup and forms before acceptance. Continue with this account key?")) return;
   }
   if (roomBefore) { saveComposer(); client.disconnect(); }
   invitation.phase = "authenticating";
@@ -1039,8 +1044,8 @@ $("#auth-form").addEventListener("submit", async e => {
 $("#signout-button").addEventListener("click", async () => {
   if (busy || signoutLoading || !state || !session || invitationIsCommitting()) return;
   saveComposer();
-  if (drafts.hasText() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || !$("#new-work-form").hidden || $("#action-dialog").open) {
-    if (!window.confirm("Sign out and clear unsent drafts on this device?")) return;
+  if (drafts.hasText() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || !$("#new-work-form").hidden || $("#action-dialog").open) {
+    if (!window.confirm("Sign out and clear unsent drafts and private setup on this device?")) return;
   }
   const operationId = ++signoutOperationId;
   const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
@@ -1388,7 +1393,7 @@ $("#action-form").addEventListener("submit", e => {
 });
 window.addEventListener("beforeunload", e => {
   if (state) saveComposer();
-  if ((state && (drafts.hasText() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || !$("#new-work-form").hidden || $("#action-dialog").open))
+  if ((state && (drafts.hasText() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || !$("#new-work-form").hidden || $("#action-dialog").open))
     || invitationIsCommitting() || invitation.phase === "unknown") { e.preventDefault(); e.returnValue = ""; }
 });
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden" && state) saveComposer(); });

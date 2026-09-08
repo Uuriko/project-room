@@ -8,14 +8,17 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
+import { createHash, randomBytes } from "node:crypto";
 
 const directory = mkdtempSync(join(tmpdir(), "room-connection-exercise-"));
 const store = new RoomStore(join(directory, "fixture.sqlite"));
 store.initialize(initialRoom());
 const owner = store.issueAccessKey("commons", "owner");
 const send = (type, data) => store.command(owner, "commons", { id: crypto.randomUUID(), type, data });
-send(T.MEMBER_ADDED, { memberId: "connection-writer", displayName: "Connection test agent", kind: "agent", permissions: [], accountableHumanId: "owner" });
-const token = store.issueAccessKey("commons", "connection-writer");
+const ownerSession = store.createSession(owner), token = randomBytes(32).toString("base64url");
+store.agentConnections.apply(ownerSession.token, "commons", { action: "create", requestId: "exercise-enrollment", memberId: "connection-writer",
+  displayName: "Connection test agent", access: "chat", keyHash: createHash("sha256").update(token).digest("hex"),
+  expiresAt: Date.now() + 3600000, expectedOwnerRevision: 0 }, ownerSession.session.sessionBinding);
 send(T.WORK_PROPOSED, { workItemId: "welcome-draft", title: "Write a short welcome", mode: "read", accountableMemberId: "owner",
   definitionOfDone: "Draft one welcoming sentence for a new Project Room member. Invite one small contribution. Do not claim that AI is online, that work has started, or that private content is public. Post a draft for human review, not completed work." });
 const before = store.snapshot(token, "commons");

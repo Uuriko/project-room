@@ -1,5 +1,5 @@
 // Disposable synthetic data only. Never import this from a production entrypoint.
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
@@ -9,7 +9,7 @@ export function createRecoveryFixture(filename) {
   store.initialize(initialRoom());
   // Established v1 fixture route: migrate a pre-invitation/reminder database,
   // retaining its original event envelopes and generating a real checkpoint.
-  store.db.exec("DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE membership_invitation_journal; DROP TABLE projection_checkpoints; PRAGMA user_version=1");
+  store.db.exec("DROP TABLE agent_connection_operations; DROP TABLE agent_connections; DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE membership_invitation_journal; DROP TABLE projection_checkpoints; PRAGMA user_version=1");
   store.close(); store = new RoomStore(filename, { now: () => now });
   store.initialize(initialRoom("second", "second-owner"));
   const keys = { owner: store.issueAccessKey("commons", "owner"), second: store.issueAccessKey("second", "second-owner") };
@@ -19,6 +19,10 @@ export function createRecoveryFixture(filename) {
     return { accessKey, token: slot.token, session: store.loginAccountSession(slot.token, accessKey, 0) };
   };
   const owner = session(store.accountForMember("commons", "owner").id);
+  const enrollmentToken = randomBytes(32).toString("base64url");
+  const enrollmentRequest = { action: "create", requestId: "recovery-enrollment", memberId: "managed-agent", displayName: "Managed recovery agent", access: "chat",
+    keyHash: createHash("sha256").update(enrollmentToken).digest("hex"), expiresAt: now + 3600000, expectedOwnerRevision: 0 };
+  const enrollment = store.agentConnections.apply(owner.token, "commons", enrollmentRequest, owner.session.sessionBinding);
   store.createAccount("recovery-target"); const target = session("recovery-target");
   store.createAccount("recovery-shared");
   for (const [room, key] of [["commons", keys.owner], ["second", keys.second]]) {
@@ -70,5 +74,5 @@ export function createRecoveryFixture(filename) {
   const cursor = store.room("commons").sequence; store.markCaughtUp(keys.owner, "commons", cursor);
   return { store, filename, keys, owner, target, validSession, revokedSession, loggedOut, sharedSession, pending, invitation,
     shareRequest, link, linkToken, guestSlot, guest, joinRequest, reminders, command, commandResult, cursor,
-    now: () => now, advance: ms => { now += ms; } };
+    enrollmentToken, enrollmentRequest, enrollment, now: () => now, advance: ms => { now += ms; } };
 }

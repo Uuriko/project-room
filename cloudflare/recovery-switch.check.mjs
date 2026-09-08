@@ -5,19 +5,17 @@ import { randomUUID } from 'node:crypto';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare, Response } from 'miniflare';
 import { createRuntimePackage, verifyRuntimePackage, publicAssets } from '../scripts/runtime-package.mjs';
-import { createRecoveryFixture } from '../scripts/recovery-fixture.mjs';
-import { applicationTables } from '../server/writer-fence.mjs';
-import { auditRecovery } from '../server/recovery.mjs';
+import { frozenRecoveryFixture, v8ConnectionBaseline } from '../scripts/frozen-runtime-fixture.mjs';
 
 const baseline = '7075c1ddfe5ced3ae970f817dbfd0fc3e88a13b6';
 const repository = fileURLToPath(new URL('../', import.meta.url));
 
 test('distinct exact-commit v8 packages switch candidate → pause → baseline → candidate on the same populated Workers object', { timeout: 90000 }, async t => {
-  const candidate = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8' }).trim();
+  const candidate = v8ConnectionBaseline; // Historical v8↔v8 proof, NOT a v9 fallback.
   assert.notEqual(candidate, baseline, 'Commit the distinct candidate before certifying its immutable package');
   const directory = mkdtempSync(join(tmpdir(), 'room-v8-switch-'));
   let fixture, mf;
@@ -28,6 +26,10 @@ test('distinct exact-commit v8 packages switch candidate → pause → baseline 
     }));
     assert.notDeepEqual(readFileSync(join(packages.get('candidate').path, 'cloudflare/room.mjs')),
       readFileSync(join(packages.get('baseline').path, 'cloudflare/room.mjs')), 'The actual application entrypoints must differ');
+    const candidatePath = packages.get('candidate').path;
+    const createRecoveryFixture = await frozenRecoveryFixture(repository, candidatePath);
+    const { auditRecovery } = await import(pathToFileURL(join(candidatePath, 'server/recovery.mjs')));
+    const { applicationTables } = await import(pathToFileURL(join(candidatePath, 'server/writer-fence.mjs')));
     fixture = createRecoveryFixture(join(directory, 'seed.sqlite'));
     const expected = auditRecovery(fixture.store);
     const proof = { keys: fixture.keys, owner: fixture.owner, target: fixture.target, validSession: fixture.validSession,
@@ -45,7 +47,7 @@ test('distinct exact-commit v8 packages switch candidate → pause → baseline 
       const source = `
         import assert from 'node:assert/strict';
         import entry, { ProjectRoom as RuntimeRoom } from ${JSON.stringify(join(pkg.path, 'cloudflare/room.mjs'))};
-        import { auditRecovery } from ${JSON.stringify(join(repository, 'server/recovery.mjs'))};
+        import { auditRecovery } from ${JSON.stringify(join(candidatePath, 'server/recovery.mjs'))};
         export class ProjectRoom extends RuntimeRoom {
           fetch(request) {
             const path = new URL(request.url).pathname;

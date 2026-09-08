@@ -13,6 +13,7 @@ import { ShareLinks, shareLinkSchema } from "./share-links.mjs";
 import { conflictingClaim } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
 import { selectedWorkContext } from "./work-context.mjs";
+import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 
 export class ServiceError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -187,8 +188,9 @@ export class RoomStore {
     this.storagePlatform = storagePlatform;
     this.shareLinks = new ShareLinks(this);
     this.reminders = new Reminders(this);
+    this.agentConnections = new AgentConnections(this);
     const version = this.storagePlatform.version(this.db);
-    const supported = new Set([0, 1, 2, 3, 4, 5, 6, 7, STORE_SCHEMA_VERSION]);
+    const supported = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, STORE_SCHEMA_VERSION]);
     const hasSchema = version === 0 && this.storagePlatform.hasSchema(this.db);
     if (!supported.has(version) || hasSchema) {
       this.db.close();
@@ -202,6 +204,7 @@ export class RoomStore {
         this.verifyInvitationAudit();
         this.shareLinks.verify();
         this.reminders.verifySchema();
+        this.agentConnections.verify();
         return;
       } catch (error) { this.db.close(); throw error; }
     }
@@ -232,11 +235,13 @@ export class RoomStore {
       if (version < 5) this.migrateInvitationJournalV5();
       if (version < 7) this.db.exec(shareLinkSchema);
       if (version < 8) this.db.exec(reminderSchema);
+      if (version < 9) this.db.exec(agentConnectionSchema);
       if (version < STORE_SCHEMA_VERSION) this.storagePlatform.installWriterFence(this.db);
       this.storagePlatform.verifyWriterFence(this.db);
       this.verifyInvitationAudit();
       this.shareLinks.verify();
       this.reminders.verifySchema();
+      this.agentConnections.verify();
     }); } catch (error) { this.db.close(); throw error; }
   }
 
@@ -871,6 +876,7 @@ export class RoomStore {
       const revision = row.revision + 1, authEpoch = row.auth_epoch + 1, at = this.now();
       this.db.prepare("UPDATE accounts SET active=?,revision=?,auth_epoch=? WHERE id=?").run(active ? 1 : 0, revision, authEpoch, accountId);
       this.db.prepare("UPDATE credentials SET revoked=1 WHERE account_id=?").run(accountId);
+      this.agentConnections.revokeAccount(accountId);
       this.db.prepare("UPDATE account_credentials SET revoked=1 WHERE account_id=?").run(accountId);
       this.db.prepare("UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?").run(accountId);
       this.db.prepare("INSERT INTO account_access_events(account_id,revision,active,auth_epoch,reason,at) VALUES(?,?,?,?,?,?)").run(accountId, revision, active ? 1 : 0, authEpoch, reason.trim(), at);
@@ -893,6 +899,7 @@ export class RoomStore {
     });
   }
   insertCredential(roomId, memberId, kind, parent, expiresAt) {
+    if (this.agentConnections.row(roomId, memberId)) fail(409, "managed_agent", "Replace this agent's key through its room connection");
     const count = this.db.prepare("SELECT count(*) AS n FROM credentials WHERE room_id=?").get(roomId).n;
     if (count >= 5000) fail(409, "pilot_limit", "Credential retention limit reached; administrator maintenance required");
     const member = this.room(roomId).state.members[memberId];
@@ -928,6 +935,7 @@ export class RoomStore {
       if (invalidAccount) fail(401, "unauthenticated", "Session or key expired, revoked, or account access ended");
       account = { id: row.account_id, active: true, revision: row.account_revision, authEpoch: row.current_account_auth_epoch };
     } else if (row.account_id !== null || row.account_auth_epoch !== null) fail(401, "unauthenticated", "Agent credential has an invalid human account binding");
+    if (member.kind === "agent") this.agentConnections.assertCredential(row);
     const auth = {
       account, member, roomId: row.room_id, credentialHash: row.hash, credentialScope: "room", kind: row.kind, expiresAt: row.expires_at,
       csrf: row.kind === "session" ? hash(`csrf:${token}`) : null,
@@ -1011,7 +1019,11 @@ export class RoomStore {
       }
       if (command.causationId && !this.db.prepare("SELECT 1 FROM events WHERE room_id=? AND id=?").get(roomId, command.causationId)) fail(422, "invalid_cause", "Causation event must exist in this room");
       const room = this.room(roomId);
-      if (room.sequence >= 10000 || (command.type === T.MEMBER_ADDED && Object.keys(room.state.members).length >= 100) || (command.type === T.WORK_PROPOSED && Object.keys(room.state.workItems).length >= 500)) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
+      const target = room.state.members[command.data.memberId];
+      const endingAccess = command.type === T.MEMBER_ACCESS_CHANGED && target?.active === true && command.data.active === false
+        && canonical(target.permissions) === canonical(command.data.permissions);
+      // At capacity, each remaining active membership can still be ended once.
+      if ((room.sequence >= 10000 && !endingAccess) || (command.type === T.MEMBER_ADDED && Object.keys(room.state.members).length >= 100) || (command.type === T.WORK_PROPOSED && Object.keys(room.state.workItems).length >= 500)) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       const memberAuthorityEvent = [T.MEMBER_ADDED, T.MEMBER_ACCESS_CHANGED].includes(command.type);
       const incoming = event({
         type: command.type, roomId, actorId: auth.member.id, at: new Date(this.now()).toISOString(),
@@ -1028,12 +1040,13 @@ export class RoomStore {
         if (conflict) fail(409, "claim_conflict", `Scope is reserved by work ${conflict.id}. Coordinate or release that reservation first; no new claim was saved.`);
       }
       const projection = JSON.stringify(state);
-      if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
+      if (Buffer.byteLength(projection) > 4 * 1024 * 1024 && !endingAccess) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
       const sequence = room.sequence + 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("INSERT INTO commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, command.id, fingerprint, sequence);
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
       if (command.data.workItemId) this.reminders.resolveWork(roomId, state.workItems[command.data.workItemId]);
+      if (command.type === T.MEMBER_ACCESS_CHANGED) this.agentConnections.revokeMember(roomId, command.data.memberId);
       if (command.type === T.MEMBER_ACCESS_CHANGED && command.data.active === false) {
         this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, command.data.memberId);
         this.reminders.retireMember(roomId, command.data.memberId);

@@ -19,9 +19,9 @@ function fixture(t) {
   return { ...f, directory };
 }
 
-test("v8 online capture preserves all 18 tables, identity boundaries and exact retries through recovery and restart", async t => {
+test("v9 online capture preserves all 20 tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t), before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 18);
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 20);
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);

@@ -125,9 +125,9 @@ export class RoomAgentClient {
   }
   // Caller owns a stable command ID. On an uncertain transport result, reconcile
   // or resend this exact object. Never invent a replacement ID automatically.
-  command(command) { return this.#request("/commands", command); }
-  async orient() {
-    const snapshot = await this.snapshot();
+  command(command, { signal } = {}) { return this.#request("/commands", command, signal); }
+  async orient({ signal } = {}) {
+    const snapshot = await this.snapshot({ signal });
     const member = snapshot.state.members[snapshot.viewerId];
     return {
       contractVersion: 1, roomId: snapshot.roomId, evaluatedThrough: snapshot.sequence,

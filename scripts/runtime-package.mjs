@@ -6,9 +6,11 @@ import { lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFil
 import { basename, dirname, isAbsolute, join, resolve, posix } from "node:path";
 import { pathToFileURL } from "node:url";
 
-export const publicAssets = ["index.html", ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js",
+const v8Assets = ["index.html", ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js",
   "return-brief.js", "work-selectors.js", "work-status.js", "work-packet.js", "portable-work.js", "reminders.js", "reminder-time.js", "styles.css"].map(name => "src/" + name)];
-const required = [...publicAssets, "server.mjs", "package.json", "package-lock.json",
+export const publicAssets = [...v8Assets, "src/agent-connections.js"];
+const assetsFor = schema => schema === 8 ? v8Assets : publicAssets;
+const required = [...v8Assets, "server.mjs", "package.json", "package-lock.json",
   ...["backup", "bootstrap", "claim-scopes", "deployment", "http", "invitation-evidence", "invitation-journal", "reminders",
     "return-brief", "return-selectors", "share-links", "store", "work-context", "writer-fence"].map(name => `server/${name}.mjs`),
   ...["room-agent", "assignment-watcher", "watch-journal"].map(name => `client/${name}.mjs`),
@@ -16,7 +18,7 @@ const required = [...publicAssets, "server.mjs", "package.json", "package-lock.j
   ...["room.mjs", "storage.mjs", "bootstrap.mjs", "build-assets.mjs", "wrangler.jsonc", "package.json", "pnpm-lock.yaml"].map(name => "cloudflare/" + name)].sort();
 // Historical v8 packages predate these files. Literal-import closure below makes
 // them mandatory when the selected source imports them, without rewriting history.
-const optional = ["server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs"];
+const optional = ["server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "src/agent-connections.js", "client/mcp-stdio.mjs", "scripts/agent-mcp.mjs"];
 const allowed = new Set([...required, ...optional]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 const check = condition => { if (!condition) throw new Error("Runtime package does not match its exact allowlisted contract"); };
@@ -28,8 +30,8 @@ function runtimeMetadata(files) {
   const schema = /export const STORE_SCHEMA_VERSION = (\d+);/.exec(files.get("server/writer-fence.mjs").toString());
   const pkg = JSON.parse(files.get("package.json"));
   const config = JSON.parse(files.get("cloudflare/wrangler.jsonc"));
-  check(schema?.[1] === "8" && typeof pkg.engines?.node === "string");
-  return { schemaVersion: 8, node: pkg.engines.node, cloudflare: { compatibilityDate: config.compatibility_date,
+  check(["8", "9"].includes(schema?.[1]) && typeof pkg.engines?.node === "string");
+  return { schemaVersion: Number(schema[1]), node: pkg.engines.node, cloudflare: { compatibilityDate: config.compatibility_date,
     compatibilityFlags: config.compatibility_flags, durableObjects: config.durable_objects, migrations: config.migrations } };
 }
 
@@ -52,7 +54,7 @@ export function createRuntimePackage({ repository, commit, destination }) {
     mkdirSync(dirname(join(output, path)), { recursive: true, mode: 0o700 });
     writeFileSync(join(output, path), bytes, { mode: 0o600, flag: "wx" });
   }
-  const manifest = { format: 1, sourceCommit: commit, sourceTree: tree, runtime, publicAssets,
+  const manifest = { format: 1, sourceCommit: commit, sourceTree: tree, runtime, publicAssets: assetsFor(runtime.schemaVersion),
     files: [...files].map(([path, bytes]) => ({ path, bytes: bytes.length, sha256: sha256(bytes) })),
     limitation: "Content consistency only; not trusted provenance, recovery freshness, hosted readiness or publication approval." };
   // Last write is the completion marker. A partial directory is not a package.
@@ -76,7 +78,7 @@ export function verifyRuntimePackage(directory, { expectedCommit } = {}) {
   check(actual.includes(manifestName));
   const raw = readFileSync(join(root, manifestName)), manifest = JSON.parse(raw);
   check(manifest.format === 1 && hashPattern.test(manifest.sourceCommit) && hashPattern.test(manifest.sourceTree)
-    && (!expectedCommit || manifest.sourceCommit === expectedCommit) && same(manifest.publicAssets, publicAssets) && Array.isArray(manifest.files));
+    && (!expectedCommit || manifest.sourceCommit === expectedCommit) && same(manifest.publicAssets, assetsFor(manifest.runtime?.schemaVersion)) && Array.isArray(manifest.files));
   const listed = manifest.files.map(entry => entry.path);
   check(new Set(listed).size === listed.length && same([...listed].sort(), listed) && required.every(path => listed.includes(path))
     && same(actual.sort(), [...listed, manifestName].sort()));
@@ -98,7 +100,7 @@ export function verifyRuntimePackage(directory, { expectedCommit } = {}) {
   }
   check(same(manifest.runtime, runtimeMetadata(files)));
   return { verified: true, sourceCommit: manifest.sourceCommit, sourceTree: manifest.sourceTree,
-    schemaVersion: manifest.runtime.schemaVersion, files: listed.length, assets: publicAssets.length, manifestSha256: sha256(raw) };
+    schemaVersion: manifest.runtime.schemaVersion, files: listed.length, assets: manifest.publicAssets.length, manifestSha256: sha256(raw) };
 }
 
 if (process.argv[1] && pathToFileURL(realpathSync(process.argv[1])).href === import.meta.url) {

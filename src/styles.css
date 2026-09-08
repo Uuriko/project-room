@@ -535,3 +535,6 @@ summary { overflow-wrap: anywhere; }
   .message-list { padding-inline: .75rem; min-height: 12rem; height: clamp(12rem, 26dvh, 18rem); }
   .work-checks { padding: .5rem; }
 }
+/* Private setup stays within narrow mobile dialogs; never show it by default. */
+#agent-connect-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+#agent-connect-dialog textarea { max-width: 100%; overflow-wrap: anywhere; }

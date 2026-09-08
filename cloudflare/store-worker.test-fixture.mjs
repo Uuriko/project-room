@@ -6,6 +6,7 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { EVENT_TYPES as T } from '../src/events.js';
 import { DurableDatabase, durableStorage } from './storage.mjs';
+import { STORE_SCHEMA_VERSION } from '../server/writer-fence.mjs';
 
 export class StoreTestRoom {
   constructor(ctx) {
@@ -103,7 +104,7 @@ export class StoreTestRoom {
       return Response.json({ recovered: true, guests: guests.length, sequence });
     }
     if (path === '/newer-version') {
-      store.transaction(() => durableStorage.setVersion(this.db, 9));
+      store.transaction(() => durableStorage.setVersion(this.db, STORE_SCHEMA_VERSION + 1));
       assert.throws(() => new RoomStore(null, { database: this.db, storagePlatform: durableStorage }), /newer than this service/);
       assert.throws(() => this.db.exec("INSERT INTO rooms VALUES('old-writer',0,'{}')"), /unsupported database writer|reconciliation/);
       return Response.json({ rejected: true });

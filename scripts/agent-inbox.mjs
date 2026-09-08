@@ -1,7 +1,7 @@
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { packetMarkdown } from "../src/work-packet.js";
 import { validId } from "../src/events.js";
-import { agentConnectionFromEnvironment, saveAgentConnection, connectionDiagnostic, ConnectionError } from "../client/agent-connection.mjs";
+import { agentConnectionFromEnvironment, readConnectionInput, saveAgentConnection, connectionDiagnostic, ConnectionError } from "../client/agent-connection.mjs";
 
 const [action = "orient", checkpoint, ...extra] = process.argv.slice(2);
 if (action === "watch") {
@@ -10,6 +10,7 @@ if (action === "watch") {
 } else if (action === "--help") {
   console.log(`Agent connection (Node 24.19+):
   node scripts/agent-inbox.mjs connect NEW_PRIVATE_DIRECTORY
+  pbpaste | node scripts/agent-inbox.mjs import NEW_PRIVATE_DIRECTORY
   node scripts/agent-inbox.mjs check
   node scripts/agent-inbox.mjs work WORK_ID [--include-source]
   node scripts/agent-inbox.mjs [orient|brief|changes CHECKPOINT|packet WORK_ID]
@@ -19,6 +20,9 @@ Connect checks access, then saves a new private connection; never overwrites or
 issues a key. Supply ROOM_AGENT_ORIGIN, ROOM_AGENT_ROOM, ROOM_AGENT_MEMBER and
 ROOM_AGENT_TOKEN through the approved process environment/secret manager first.
 After saving, clear those four variables and set ROOM_AGENT_CONFIG to that directory.
+Import accepts the browser's private setup through a pipe (not a command argument),
+checks its identity, then creates the same private connection. Existing credential
+environment variables must be cleared first. Clear your clipboard afterward.
 Check/read/watch reuse the saved connection. Never mix the two sources.
 Legacy reads without a saved connection still accept the original three variables;
 expected agent identity is enforced when ROOM_AGENT_MEMBER is supplied.
@@ -28,17 +32,18 @@ default. Orient reads broader private room context. A read does not narrow the k
 permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits.`);
 } else {
   try {
-    if (!["connect", "check", "orient", "brief", "changes", "packet", "work"].includes(action)
-      || (action === "connect" && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
+    if (!["connect", "import", "check", "orient", "brief", "changes", "packet", "work"].includes(action)
+      || (["connect", "import"].includes(action) && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
+      || (action === "import" && ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"].some(name => process.env[name] !== undefined))
       || (["packet", "work"].includes(action) && !validId(checkpoint))
       || (action === "work" ? extra.length > 1 || (extra.length === 1 && extra[0] !== "--include-source")
         : extra.length || (["check", "orient", "brief"].includes(action) && checkpoint !== undefined))
       || (action === "changes" && (!/^\d+$/.test(checkpoint ?? "") || !Number.isSafeInteger(Number(checkpoint))))) throw new ConnectionError("usage_error");
-    const config = agentConnectionFromEnvironment(), client = new RoomAgentClient(config);
+    const config = action === "import" ? await readConnectionInput() : agentConnectionFromEnvironment(), client = new RoomAgentClient(config);
     let result;
-    if (["connect", "check"].includes(action)) {
+    if (["connect", "import", "check"].includes(action)) {
       result = await client.checkConnection();
-      if (action === "connect") {
+      if (["connect", "import"].includes(action)) {
         saveAgentConnection(checkpoint, { version: 1, ...config });
         result = { ...result, configurationSaved: true };
       }

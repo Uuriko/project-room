@@ -9,10 +9,10 @@ import { Miniflare } from 'miniflare';
 import { createAcceptanceFixture } from '../scripts/acceptance-fixture.mjs';
 import { durableFenceDefinitions } from './storage.mjs';
 
-test('real Workers v7→v8 migration fences a cached legacy adapter, rolls back failures and survives restart', { timeout: 90000 }, async () => {
+test('real Workers v7→v9 migration fences a cached legacy adapter, rolls back failures and survives restart', { timeout: 90000 }, async () => {
   const fixture = createAcceptanceFixture(), db = fixture.store.db;
   const persistence = mkdtempSync(join(tmpdir(), 'room-reminder-upgrade-'));
-  const schema = db.prepare("SELECT name,type,sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT GLOB 'writer_v*' AND name NOT GLOB 'private_reminder*' ORDER BY rowid").all();
+  const schema = db.prepare("SELECT name,type,sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT GLOB 'writer_v*' AND name NOT GLOB 'private_reminder*' AND name NOT GLOB 'agent_connection*' ORDER BY rowid").all();
   const tables = schema.filter(row => row.type === 'table').map(row => row.name);
   const rows = tables.flatMap(table => db.prepare(`SELECT * FROM ${table}`).all().map(row => ({ table, columns: Object.keys(row), values: Object.values(row) })));
   const account = fixture.store.accountForMember('commons', 'owner').id;

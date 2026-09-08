@@ -47,7 +47,7 @@ export function auditRecovery(store) {
       rooms.set(row.id, actual.state);
     }
     const invitations = store.verifyInvitationAudit();
-    store.shareLinks.verify(); store.reminders.verifySchema();
+    store.shareLinks.verify(); store.reminders.verifySchema(); store.agentConnections.verify();
     const reminders = store.db.prepare("SELECT * FROM private_reminders").all();
     const receipts = store.db.prepare("SELECT * FROM private_reminder_commands").all();
     const byWork = new Map();
@@ -96,7 +96,7 @@ export function auditRecovery(store) {
       return { table, rows: rows.length, sha256: digest(rows) };
     });
     return { contractVersion: 1, schemaVersion: STORE_SCHEMA_VERSION, platform,
-      checks: { sqlite: true, foreignKeys: true, writerFence: true, projectionReplay: true, invitationAudit: true, shareLinks: true, reminders: true },
+      checks: { sqlite: true, foreignKeys: true, writerFence: true, projectionReplay: true, invitationAudit: true, shareLinks: true, reminders: true, agentConnections: true },
       rooms: rooms.size, events: eventCount, legacyCheckpoints: checkpointCount,
       replay: { basis: "retained checkpoint plus strict tail, or full history without a checkpoint", checkpointEvents, replayedEvents: eventCount - checkpointEvents },
       invitations: invitations.invitations, reminders: reminders.length, reminderReceipts: receipts.length,

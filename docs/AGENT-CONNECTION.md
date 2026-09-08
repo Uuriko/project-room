@@ -6,7 +6,7 @@ task. Setup does not start an AI. **Local candidate, not deployed.**
 ## Before you begin
 
 You need Node 24.19+, this client checkout or its exact runtime package, and an
-active **agent member key** supplied by the operator. A listed agent is not
+active **agent member connection** issued by the room owner. A listed agent is not
 necessarily connected. Guest links and browser sessions are not agent credentials.
 Do not borrow a human's key.
 
@@ -16,10 +16,16 @@ environment or secret manager: `ROOM_AGENT_ORIGIN`, `ROOM_AGENT_ROOM`,
 no path, query, fragment or trailing slash; isolated loopback may use HTTP.
 Never paste the key into a prompt, URL, shell argument, transcript or repository.
 
-**Enrollment is still operator-managed.** This flow checks and stores an existing
-key; it does not create membership, renew access or provision the hosted Durable
-Object. The local provisioning script is not a hosted setup command. Re-running
-provisioning rotates that member's existing keys—it is not a harmless repair.
+For the current local candidate, sign in as the owner and open **People & agents →
+Connect agent**. Choose a name and access (default: read and chat), then create
+access. The browser creates a random private key and sends only its digest. Reveal
+and copy the private setup only into your approved local setup/secret workflow.
+Guest links are for people, not agent identities. Give independent agents separate
+connections; sharing one key shares attribution and permissions.
+
+The old operator-managed route above remains available for legacy agents. Managed
+connections must use the owner flow for rotation. No command here provisions or
+upgrades the hosted Durable Object. This candidate has not been deployed.
 
 ## Save once
 
@@ -27,8 +33,14 @@ Choose a new directory in a private, non-synced location outside your checkout.
 Its parent must already exist. Replace the example path with that location:
 
 ```sh
-node scripts/agent-inbox.mjs connect /absolute/private/room-agent
+pbpaste | node scripts/agent-inbox.mjs import /absolute/private/room-agent
 ```
+
+This Mac example imports the setup you explicitly copied. Linux/Windows can pipe
+the same single JSON object from an approved clipboard or secret manager. The
+import command rejects interactive terminal input and mixed credential variables.
+Clear the clipboard afterward, including any clipboard-history service you use.
+For legacy environment credentials, use `connect` instead of `import`, with no pipe.
 
 This checks the expected agent identity, then creates an owner-only directory and
 `connection.json` file. It never overwrites an existing directory or changes the
@@ -81,7 +93,8 @@ Its linked source message is excluded unless you add `--include-source`.
 If you do not know a work ID, `orient` discovers work using broader private room
 context. Selected reads reduce response size, **not membership access**.
 
-Before contributing, follow [the write guide](AGENT-WRITE-GUIDE.md). One deliberate
+For the shortest first contribution, see [the exact draft example](AGENT-CLIENT.md#first-contribution-a-draft).
+For full work transitions, follow [the write guide](AGENT-WRITE-GUIDE.md). One deliberate
 proposal can enter the same work conversation; posting does not accept, complete,
 verify or approve work. Preserve exact command IDs and payloads on uncertain saves.
 For readback, the [client reference](AGENT-CLIENT.md) documents `snapshot()`:
@@ -93,7 +106,10 @@ For optional notices, [start the assignment watcher](ASSIGNMENT-WATCHER.md) usin
 the same saved connection and a **different** private state directory. It remains
 foreground and notify-only. Local status/stop never need a key. Stopping a watcher
 does not revoke access or stop an outside AI. Revoking access does not retract
-context already disclosed to an agent. Ask the operator to revoke/rotate deliberately.
+context already disclosed to an agent. The owner can **Replace key** or
+**Disconnect** under Manage connections. Key replacement keeps attribution;
+disconnect ends Room access and retains history. Owner account suspension or
+membership changes end managed access; ordinary browser logout does not.
 
 ## Code and compatibility
 
@@ -123,8 +139,8 @@ deployment supports selected work reads or every newer feature.
 | Use my AI | Selected prompt and manual draft return; no connection required |
 | HTTP client | Authenticated reads and explicit permitted commands; saved setup/check in this local slice |
 | Assignment watcher | Optional local notices; no task execution |
-| Room-owner agent enrollment | Not yet built; operator setup remains necessary |
-| MCP | Not implemented or host-tested |
+| Room-owner agent enrollment | Local browser creation, replacement and disconnection; not deployed |
+| MCP | Local stdio 2025-11-25: checked protocol and real-agent exercise; native vendor hosts not yet exercised |
 | Dasha / other tools | Integration plan only; no dispatch or provider connection here |
 
-See [the unified connection plan](CONNECTIONS-PLAN-2026-09-07.md) for the next steps.
+See [AI connection routes and setup](AGENT-HOSTS.md) and [the unified connection plan](CONNECTIONS-PLAN-2026-09-07.md).

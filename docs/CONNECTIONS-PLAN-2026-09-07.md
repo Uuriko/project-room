@@ -5,6 +5,22 @@ reviews. User priority: connect agents and other useful tools as seamlessly and
 fully as possible. This takes priority over the generic action-dialog polish
 backlog. The product goal remains broader; its scheduler is currently paused.
 
+## September 8 implementation update
+
+The original plan below is retained as design history. A is implemented. B now
+has local owner-browser enrollment, generation-aware replacement/disconnection,
+hash-only credentials, sponsorship checks and schema-9 migration/recovery audits.
+The compact desktop/mobile flow and two independent actual-agent contributions
+have been exercised using disposable rooms. C has a local, tools-only MCP
+2025-11-25 stdio adapter plus a direct client; native vendor-host acceptance is
+still pending. No remote OAuth server or hosted execution was added. See
+[host routes](AGENT-HOSTS.md) for supported contracts and unverified host recipes,
+and [deeper workspace plan](AGENT-WORKSPACE-ROADMAP-2026-09-08.md) for the next scope.
+
+This is local implementation, not a live upgrade or complete onboarding across
+all vendors. A schema-9-compatible release fallback still needs qualification;
+the frozen v8 package remains useful only for pre-upgrade data and historical tests.
+
 ## Decision
 
 Build a single connection lifecycle, with different adapters behind it. Do not

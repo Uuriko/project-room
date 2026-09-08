@@ -16,6 +16,20 @@ function validate(value) {
     return Object.fromEntries(fields.map(field => [field, value[field]]));
   } catch { throw new ConnectionError("invalid_config"); }
 }
+export async function readConnectionInput(input = process.stdin) {
+  // Pipe from a secret manager/clipboard; never echo a key in an interactive terminal.
+  if (input.isTTY) throw new ConnectionError("usage_error");
+  let length = 0;
+  const chunks = [];
+  try {
+    for await (const chunk of input) {
+      const bytes = Buffer.from(chunk); length += bytes.length;
+      if (length > limit) throw new ConnectionError("invalid_config");
+      chunks.push(bytes);
+    }
+    return validate(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+  } catch { throw new ConnectionError("invalid_config"); }
+}
 function privateStat(stat, directory = false) {
   if ((directory ? !stat.isDirectory() : !stat.isFile() || stat.nlink !== 1) || (stat.mode & 0o077)
     || !process.getuid || stat.uid !== process.getuid()) throw new ConnectionError("config_not_private");
