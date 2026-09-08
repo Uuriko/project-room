@@ -10,6 +10,46 @@ const text = value => typeof value === "string" && value.length <= 4096 && value
 const revision = value => Number.isSafeInteger(value) && value >= 0 && value < Number.MAX_SAFE_INTEGER;
 const requireValid = (valid, message) => { if (!valid) throw new Error(message); };
 
+// Browser drafts have a separate identity for each explicit mode, even inside
+// one conversation. Keys cannot collide with a canonical message ID.
+export function replyDraftKey(mode, threadId = null) {
+  return mode ? JSON.stringify(["request", mode.kind, mode.requestMessageId ?? threadId]) : threadId;
+}
+export function validReplyDraft(mode, state) {
+  if (!mode || typeof mode !== "object" || Array.isArray(mode)) return false;
+  if (mode.kind === "request") return Object.keys(mode).length === 1;
+  const request = state.replyRequests?.[mode.requestMessageId];
+  const keys = ["kind", "requestMessageId", "expectedRequestRevision", "requesterId", "workItemId", "contextEventId", "contextSequence"];
+  return ["answered", "declined", "cancelled"].includes(mode.kind) && request
+    && Object.keys(mode).length === keys.length && keys.every(key => own(mode, key))
+    && revision(mode.expectedRequestRevision) && mode.expectedRequestRevision <= request.revision
+    && mode.requesterId === request.requesterId && mode.workItemId === request.workItemId
+    && id(mode.contextEventId) && Number.isSafeInteger(mode.contextSequence) && mode.contextSequence > 0;
+}
+export function replyDraftData(mode, { body, toMemberId, replyToId, messageId }) {
+  if (!mode) return { ...(messageId === undefined ? {} : { messageId }), body, toMemberId, replyToId };
+  if (mode.kind === "cancelled") return { requestMessageId: mode.requestMessageId,
+    expectedRequestRevision: mode.expectedRequestRevision, reason: body };
+  const data = mode.kind === "request" ? { messageId, body, toMemberId, replyToId, requestKind: "reply" }
+    : { messageId, body, toMemberId: mode.requesterId, replyToId: mode.requestMessageId,
+      workItemId: mode.workItemId, responseToRequestId: mode.requestMessageId,
+      expectedRequestRevision: mode.expectedRequestRevision, responseOutcome: mode.kind,
+      contextEventId: mode.contextEventId, contextSequence: mode.contextSequence };
+  replyPostMode(data);
+  return data;
+}
+export async function confirmsReplyCommand(receipt, command, roomId, memberId) {
+  const event = receipt?.event, expected = { ...command.data };
+  if (command.type === "message.posted") expected.requestPolicyVersion = REPLY_POLICY_VERSION;
+  if (!Number.isSafeInteger(receipt?.sequence) || receipt.sequence < 1 || typeof receipt.duplicate !== "boolean"
+    || !id(event?.id) || event.type !== command.type || event.roomId !== roomId || event.actorId !== memberId
+    || event.causationId !== (command.causationId ?? null) || !event.data
+    || Object.keys(event.data).length !== Object.keys(expected).length
+    || !Object.keys(expected).every(key => own(event.data, key) && event.data[key] === expected[key])) return false;
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${memberId}:${command.id}`));
+  return event.idempotencyKey === [...new Uint8Array(hash)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
 // Commands use this strict validator before the service stamps the event. Old
 // unmarked events may contain ignored fields; they must remain ordinary messages.
 export function replyPostMode(data) {

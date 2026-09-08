@@ -1,3 +1,4 @@
+import { replyDraftKey, validReplyDraft, replyDraftData } from "./reply-requests.js";
 // Conversation structure is derived from immutable reply links, including older logs.
 export const REACTIONS = Object.freeze({ like: "👍", heart: "❤️", celebrate: "🎉", thinking: "🤔" });
 
@@ -57,28 +58,52 @@ export function draftRecoveryScope(identity) {
 // Opt-in, tab-scoped recovery. Read only after an authenticated room snapshot.
 // No credentials or server receipts are stored. Browser storage is untrusted.
 export class DraftRecovery {
-  constructor(storage, now = Date.now) { this.storage = storage; this.now = now; this.key = "project-room:drafts:v2"; }
-  clear() { try { this.storage?.removeItem(this.key); this.storage?.removeItem("project-room:drafts:v1"); } catch {} }
-  write(scope, drafts, threadId) {
+  constructor(storage, now = Date.now) { this.storage = storage; this.now = now; this.key = "project-room:drafts:v3"; }
+  clear() { try { for (const v of [1, 2, 3]) this.storage?.removeItem(`project-room:drafts:v${v}`); } catch {} }
+  write(scope, drafts, threadId, activeKey = threadId) {
     try {
       if (typeof scope !== "string" || !scope) { this.clear(); return false; }
       const entries = [...drafts.entries].filter(([, d]) => d.body.trim()).slice(-50).map(([id, d]) =>
         [id, { body: d.body, toMemberId: d.toMemberId, replyToId: d.replyToId,
+          ...(d.mode ? { mode: d.mode, threadId: d.threadId } : {}),
           pending: d.pending ? { id: d.pending.command.id, messageId: d.pending.command.data.messageId, contents: d.pending.contents } : null }]);
-      this.storage.setItem(this.key, JSON.stringify({ scope, expires: this.now() + 12 * 60 * 60 * 1000, threadId, entries }));
+      this.storage.setItem(this.key, JSON.stringify({ scope, expires: this.now() + 12 * 60 * 60 * 1000, threadId, activeKey, entries }));
+      this.storage.removeItem("project-room:drafts:v2");
       return true;
     } catch { this.clear(); return false; }
   }
   read(scope, state) {
     try {
       if (typeof scope !== "string" || !scope) { this.clear(); return null; }
-      const raw = this.storage?.getItem(this.key);
+      const raw = this.storage?.getItem(this.key) ?? this.storage?.getItem("project-room:drafts:v2");
       if (!raw) return null;
       if (raw.length > 500000) throw new Error("size");
       const saved = JSON.parse(raw);
       if (saved.scope !== scope || !Number.isFinite(saved.expires) || saved.expires <= this.now() || saved.expires > this.now() + 12 * 60 * 60 * 1000 || !Array.isArray(saved.entries) || saved.entries.length > 50) throw new Error("scope or expiry");
       const index = conversationIndex(state.messages), drafts = new ConversationDrafts();
       for (const [id, d] of saved.entries) {
+        if (d?.mode) {
+          if (!validReplyDraft(d.mode, state) || replyDraftKey(d.mode, d.threadId) !== id
+            || d.threadId !== null && !index.threads.has(d.threadId)
+            || typeof d.body !== "string" || d.body.length > 4000 || typeof d.toMemberId !== "string"
+            || d.replyToId !== null && (!index.byId.has(d.replyToId) || index.rootById.get(d.replyToId) !== d.threadId)) continue;
+          if (d.mode.kind === "request" && d.toMemberId && !state.members[d.toMemberId]) continue;
+          if (d.mode.kind !== "request" && (d.replyToId !== d.mode.requestMessageId || d.toMemberId !== d.mode.requesterId)) continue;
+          let pending = null;
+          try {
+            const data = replyDraftData(d.mode, { body: d.body.trim(), toMemberId: d.toMemberId || null,
+              replyToId: d.replyToId, messageId: d.pending?.messageId });
+            const type = d.mode.kind === "cancelled" ? "reply_request.cancelled" : "message.posted";
+            const contents = JSON.stringify({ type, data, causationId: null });
+            if (d.pending?.contents === contents && typeof d.pending.id === "string" && /^[a-zA-Z0-9-]{1,100}$/.test(d.pending.id))
+              pending = { contents, command: { id: d.pending.id, type, data } };
+          } catch {}
+          // A malformed retained operation must never become a new automatic send.
+          if (d.pending && !pending) continue;
+          drafts.save(id, { body: d.body, toMemberId: d.toMemberId, replyToId: d.replyToId,
+            mode: d.mode, threadId: d.threadId, pending });
+          continue;
+        }
         if (id !== null && !index.threads.has(id)) continue;
         if (typeof d.body !== "string" || d.body.length > 4000 || typeof d.toMemberId !== "string") continue;
         if (d.toMemberId && (!state.members[d.toMemberId] || state.members[d.toMemberId].active === false)) continue;
@@ -94,7 +119,8 @@ export class DraftRecovery {
           ? { contents, command: { id: d.pending.id, type: "message.posted", data } } : null;
         drafts.save(id, { ...data, body: d.body, toMemberId: d.toMemberId, pending });
       }
-      return { drafts, threadId: drafts.entries.has(saved.threadId) ? saved.threadId : null };
+      const activeKey = drafts.entries.has(saved.activeKey) ? saved.activeKey : drafts.entries.has(saved.threadId) ? saved.threadId : null;
+      return { drafts, activeKey, threadId: drafts.entries.get(activeKey)?.mode ? drafts.entries.get(activeKey).threadId : activeKey };
     } catch { this.clear(); return null; }
   }
 }
