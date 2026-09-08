@@ -51,7 +51,7 @@ jobs:
         working-directory: cloudflare
         env:
           WRANGLER_SEND_METRICS: "false"
-        run: node --test compatibility.check.mjs store.check.mjs http.check.mjs bootstrap.check.mjs reminder-upgrade.check.mjs browser.check.mjs
+        run: node --test compatibility.check.mjs store.check.mjs http.check.mjs bootstrap.check.mjs reminder-upgrade.check.mjs maintenance.check.mjs browser.check.mjs
       - name: Build exact assets and validate the deployment bundle
         working-directory: cloudflare
         env:

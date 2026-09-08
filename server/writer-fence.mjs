@@ -8,6 +8,7 @@ const v6Tables = ["rooms", "events", "commands", "accounts", "member_accounts", 
   "membership_invitations", "membership_invitation_events", "membership_invitation_journal"];
 const v7Tables = [...v6Tables, "share_links", "share_link_joins"];
 const tables = [...v7Tables, "private_reminders", "private_reminder_commands"];
+export const applicationTables = Object.freeze(tables);
 export const fenceDefinitions = version => Object.freeze((version === 6 ? v6Tables : version === 7 ? v7Tables : tables).flatMap(table => ["INSERT", "UPDATE", "DELETE"].map(operation => {
   const name = `writer_v${version}_${table}_${operation.toLowerCase()}`;
   return Object.freeze({ name, sql: `CREATE TRIGGER ${name} BEFORE ${operation} ON ${table} BEGIN SELECT CASE WHEN project_room_writer_v${version}() IS NOT ${version} THEN RAISE(ABORT,'unsupported database writer') END; END` });

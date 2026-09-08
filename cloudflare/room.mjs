@@ -5,6 +5,13 @@ import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { DurableDatabase, durableStorage } from './storage.mjs';
 import { bootstrapRoom } from './bootstrap.mjs';
+import { maintenanceEnabled, maintenanceResponse } from '../server/maintenance.mjs';
+
+function roomOrigin(env) {
+  const origin = new URL(env.ROOM_ORIGIN);
+  if (origin.protocol !== 'https:' || origin.origin !== env.ROOM_ORIGIN) throw new Error('Exact HTTPS Room origin required');
+  return origin;
+}
 
 // One pilot workspace per object, not one object per member. Account/session
 // ownership currently spans rooms, so splitting by room would break that contract.
@@ -12,8 +19,9 @@ export class ProjectRoom {
   constructor(ctx, env) {
     this.env = env;
     this.requestSignals = new AsyncLocalStorage();
-    const origin = new URL(env.ROOM_ORIGIN);
-    if (origin.protocol !== 'https:' || origin.origin !== env.ROOM_ORIGIN) throw new Error('Exact HTTPS Room origin required');
+    const origin = roomOrigin(env);
+    this.paused = maintenanceEnabled(env.ROOM_MAINTENANCE);
+    if (this.paused) return;
     this.store = new RoomStore(null, { database: new DurableDatabase(ctx.storage), storagePlatform: durableStorage });
     bootstrapRoom(this.store, env);
     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: 'cloudflare-staging',
@@ -34,14 +42,15 @@ export class ProjectRoom {
     });
     this.handler = httpServerHandler(this.server);
   }
-  fetch(request) { return this.requestSignals.run(request.signal, () => this.handler.fetch(request)); }
+  fetch(request) { return this.paused ? maintenanceResponse(request) : this.requestSignals.run(request.signal, () => this.handler.fetch(request)); }
 }
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     // Never derive the trusted origin from a caller-controlled Host header.
-    if (url.origin !== env.ROOM_ORIGIN) return new Response('Unexpected host', { status: 403 });
+    if (url.origin !== roomOrigin(env).origin) return new Response('Unexpected host', { status: 403 });
+    if (maintenanceEnabled(env.ROOM_MAINTENANCE)) return maintenanceResponse(request);
     const address = request.headers.get('CF-Connecting-IP');
     if (!address || !isIP(address)) return new Response('Visitor address unavailable', { status: 403 });
     const headers = new Headers(request.headers);

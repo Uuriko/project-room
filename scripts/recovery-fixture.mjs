@@ -1,0 +1,74 @@
+// Disposable synthetic data only. Never import this from a production entrypoint.
+import { randomBytes, randomUUID } from "node:crypto";
+import { RoomStore } from "../server/store.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
+
+export function createRecoveryFixture(filename) {
+  let store = new RoomStore(filename), now = Date.now();
+  store.initialize(initialRoom());
+  // Established v1 fixture route: migrate a pre-invitation/reminder database,
+  // retaining its original event envelopes and generating a real checkpoint.
+  store.db.exec("DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE membership_invitation_journal; DROP TABLE projection_checkpoints; PRAGMA user_version=1");
+  store.close(); store = new RoomStore(filename, { now: () => now });
+  store.initialize(initialRoom("second", "second-owner"));
+  const keys = { owner: store.issueAccessKey("commons", "owner"), second: store.issueAccessKey("second", "second-owner") };
+  const send = (room, token, type, data) => store.command(token, room, { id: randomUUID(), type, data });
+  const session = accountId => {
+    const accessKey = store.issueAccountAccessKey(accountId), slot = store.createAccountSessionSlot();
+    return { accessKey, token: slot.token, session: store.loginAccountSession(slot.token, accessKey, 0) };
+  };
+  const owner = session(store.accountForMember("commons", "owner").id);
+  store.createAccount("recovery-target"); const target = session("recovery-target");
+  store.createAccount("recovery-shared");
+  for (const [room, key] of [["commons", keys.owner], ["second", keys.second]]) {
+    send(room, key, T.MEMBER_ADDED, { memberId: "shared", displayName: "Shared human", kind: "human", permissions: [] });
+    store.bindHumanAccount(room, "shared", "recovery-shared");
+    keys[room + "Shared"] = store.issueAccessKey(room, "shared");
+  }
+  send("commons", keys.owner, T.MEMBER_ADDED, { memberId: "agent", displayName: "Synthetic agent", kind: "agent", permissions: [] });
+  keys.oldAgent = store.issueAccessKey("commons", "agent");
+  keys.agent = store.issueAccessKey("commons", "agent");
+  const validSession = store.createSession(keys.owner), revokedSession = store.createSession(keys.owner);
+  store.revoke(revokedSession.token);
+  const loggedOut = store.createAccountSessionSlot(), loggedIn = store.loginAccountSession(loggedOut.token, owner.accessKey, 0);
+  store.logoutAccountSession(loggedOut.token, loggedIn.sessionRevision);
+  const pending = { requestId: "recovery-pending", token: randomBytes(32).toString("base64url"), intendedAccountId: "recovery-target",
+    intendedMemberId: "pending-human", displayName: "Pending human", role: "member", expiresAt: now + 3600000,
+    expectedIssuerMemberRevision: store.room("commons").state.members.owner.revision, expectedSessionBinding: owner.session.sessionBinding };
+  const invitation = store.issueInvitation(owner.token, "commons", pending);
+  const linkToken = randomBytes(32).toString("base64url"), shareRequest = { requestId: "recovery-share", linkToken, expiresAt: now + 3600000,
+    maxJoins: 2, expectedMemberRevision: store.room("commons").state.members.owner.revision };
+  const link = store.shareLinks.create(keys.owner, "commons", shareRequest, null);
+  const guestSlot = store.createAccountSessionSlot(), joinRequest = { displayName: "Recovery guest", redemptionId: randomUUID(),
+    expectedSessionRevision: 0, expectedSessionBinding: guestSlot.session.sessionBinding };
+  const guest = store.shareLinks.join(guestSlot.token, linkToken, joinRequest);
+  store.shareLinks.cancel(keys.owner, "commons", link.link.id, null);
+  const propose = (room, key, member, id) => send(room, key, T.WORK_PROPOSED, { workItemId: id, title: `Recovery ${id}`,
+    definitionOfDone: "Preserve the exact synthetic result", accountableMemberId: member,
+    independentVerificationRequired: false, ownerDecisionRequired: true, humanDecisionMakerId: member });
+  for (const id of ["active", "cancelled", "resolved", "evidence"]) propose("commons", keys.owner, "owner", id);
+  propose("second", keys.second, "second-owner", "active");
+  const reminders = [];
+  const schedule = (room, token, workItemId, requestId = "same-local-request") => {
+    const request = { requestId, workItemId, expectedRevision: 0, action: "schedule", dueAt: now + 60000 };
+    const result = store.reminders.mutate(token, room, request); reminders.push({ room, token, request, receipt: result.receipt });
+  };
+  schedule("commons", keys.owner, "active"); schedule("commons", guestSlot.token, "active"); schedule("commons", keys.agent, "active");
+  schedule("commons", keys.commonsShared, "active"); schedule("second", keys.secondShared, "active"); schedule("second", keys.second, "active");
+  schedule("commons", keys.owner, "cancelled", "schedule-cancelled");
+  store.reminders.mutate(keys.owner, "commons", { requestId: "cancel-reminder", workItemId: "cancelled", expectedRevision: 1, action: "cancel" });
+  schedule("commons", keys.owner, "resolved", "schedule-resolved");
+  send("commons", keys.owner, T.WORK_SUPERSEDED, { workItemId: "resolved", expectedRevision: 0, supersededByWorkItemId: "active", reason: "Synthetic replacement" });
+  send("commons", keys.owner, T.WORK_ACCEPTED, { workItemId: "evidence", expectedRevision: 0 });
+  send("commons", keys.owner, T.WORK_COMPLETED, { workItemId: "evidence", expectedRevision: 1, producerId: "owner", summary: "Synthetic exact result",
+    evidenceUrl: "https://example.invalid/recovery", evidenceVersion: "fixture-v1", nextAction: "Owner review" });
+  const sharedSession = session("recovery-shared");
+  store.changeAccountAccess("recovery-shared", { expectedRevision: 0, active: false, reason: "Synthetic suspension before capture" });
+  const command = { id: "recovery-command", type: T.MESSAGE_POSTED, data: { body: "Synthetic message before recovery capture" } };
+  const commandResult = store.command(keys.owner, "commons", command);
+  const cursor = store.room("commons").sequence; store.markCaughtUp(keys.owner, "commons", cursor);
+  return { store, filename, keys, owner, target, validSession, revokedSession, loggedOut, sharedSession, pending, invitation,
+    shareRequest, link, linkToken, guestSlot, guest, joinRequest, reminders, command, commandResult, cursor,
+    now: () => now, advance: ms => { now += ms; } };
+}

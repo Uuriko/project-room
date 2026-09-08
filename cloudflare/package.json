@@ -2,6 +2,6 @@
   "name": "project-room-cloudflare-validation",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node --test compatibility.check.mjs store.check.mjs http.check.mjs bootstrap.check.mjs reminder-upgrade.check.mjs", "test:browser": "node --test browser.check.mjs", "build": "node build-assets.mjs" },
+  "scripts": { "test": "node --test compatibility.check.mjs store.check.mjs http.check.mjs bootstrap.check.mjs reminder-upgrade.check.mjs maintenance.check.mjs", "test:browser": "node --test browser.check.mjs", "build": "node build-assets.mjs" },
   "devDependencies": { "miniflare": "4.20260730.0", "esbuild": "0.28.2", "wrangler": "4.116.0" }
 }

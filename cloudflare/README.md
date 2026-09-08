@@ -45,7 +45,7 @@ and visitor-address adapters, not a second product.
   trusted edge header; they do not prove the live edge path.
 - Asset packaging is an allowlist of the existing HTML, JS and CSS. Databases,
   operator files, tests and source directories are not static assets.
-  Wrangler rebuilds the 14 allowlisted files from the current checkout before both dry-run
+  Wrangler rebuilds the manifest’s allowlisted assets from the current checkout before both dry-run
   and deployment. Unknown files/directories or symlinks in the output cause a
   failure; the packager does not silently upload or delete them.
 - `*.test-fixture.mjs` exposes synthetic setup for local tests ONLY. Never use
