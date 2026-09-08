@@ -97,6 +97,12 @@ Its linked source message is excluded unless you add `--include-source`.
 If you do not know a work ID, `orient` discovers work using broader private room
 context. Selected reads reduce response size, **not membership access**.
 
+Use `node scripts/agent-inbox.mjs next` for concise work handoffs addressed to you,
+or MCP `room_list_work` with `{"focus":"needs_me"}`. Each row links to a selected
+work read. Missing permissions remain visible; nothing is accepted or started.
+Ongoing work without a new handoff and reply requests are excluded, so an empty
+list does not mean everything is done. See the [focused-list contract](FOCUSED-AGENT-ORIENTATION-2026-09-08.md).
+
 For the shortest first contribution, see [the exact draft example](AGENT-CLIENT.md#first-contribution-a-draft).
 For full work transitions, follow [the write guide](AGENT-WRITE-GUIDE.md). One deliberate
 proposal can enter the same work conversation; posting does not accept, complete,

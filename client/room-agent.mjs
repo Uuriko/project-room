@@ -1,5 +1,5 @@
 import { validId, PERMISSIONS } from "../src/events.js";
-import { nextWorkStep, reusableWorkDefinition } from "../src/workflow.js";
+import { nextWorkStep, workActions, reusableWorkDefinition } from "../src/workflow.js";
 import { workPacket, resultDraft, verifyWorkResult } from "../src/work-packet.js";
 import { submitWorkAction } from "./work-actions.mjs";
 import { replyRoute, validReplyArguments, validateReplyRead, submitReplyAction } from "./reply-actions.mjs";
@@ -226,20 +226,37 @@ export class RoomAgentClient {
   workAction(name, args, options = {}) {
     return submitWorkAction(this, { roomId: this.#roomId, memberId: this.#memberId }, name, args, options);
   }
-  async orient({ signal } = {}) {
+  async orient({ signal, focus = "all" } = {}) {
+    if (!["all", "needs_me"].includes(focus)) throw new RoomClientError(0, "invalid_focus", "Choose all work or work needing you");
     const snapshot = await this.snapshot({ signal });
     const member = snapshot.state.members[snapshot.viewerId];
     const charter = snapshot.charter === undefined ? null : checkedCharter(snapshot.charter, snapshot.sequence);
     try {
       if (charter === null ? snapshot.state.room.charter !== undefined : JSON.stringify(charter) !== JSON.stringify(charterContext(snapshot.state.room))) throw new Error();
     } catch { throw new RoomClientError(200, "invalid_response", "Room instructions do not match the snapshot"); }
+    const now = Date.now(), items = Object.values(snapshot.state.workItems);
+    if (focus === "needs_me") {
+      const work = items.flatMap(item => {
+        const next = nextWorkStep(item, now);
+        if (!member.active || next.memberId !== member.id || !next.needsAttention) return [];
+        return [{ id: item.id, title: item.title, state: item.state, revision: item.revision, mode: item.mode, next,
+          availableRoomActions: workActions(item, member, now).map(([action, label]) => ({ action, label })),
+          nextRead: { tool: "room_read_work", arguments: { workItemId: item.id } } }];
+      });
+      return { contractVersion: 1, roomId: snapshot.roomId, evaluatedThrough: snapshot.sequence,
+        evaluatedAt: new Date(now).toISOString(), clockSource: "client", focus, charter, member,
+        scope: { kind: "room", permissions: member.permissions, externalExecution: false },
+        selection: { totalWork: items.length, needsMe: work.length,
+          guidance: "Current next steps addressed to you, including those missing a Room permission. Not all your ongoing work or reply requests. Read selected work before acting; available actions are descriptions, not execution grants. Empty does not mean the room is done." },
+        work };
+    }
     return {
       contractVersion: 1, roomId: snapshot.roomId, evaluatedThrough: snapshot.sequence,
       charter,
       member, scope: { kind: "room", permissions: member.permissions, externalExecution: false },
-      work: Object.values(snapshot.state.workItems).map(item => ({
+      work: items.map(item => ({
         id: item.id, title: item.title, definitionOfDone: item.definitionOfDone, sourceMessageId: item.sourceMessageId,
-        state: item.state, revision: item.revision, mode: item.mode, claim: item.claim, next: nextWorkStep(item),
+        state: item.state, revision: item.revision, mode: item.mode, claim: item.claim, next: nextWorkStep(item, now),
         receipt: item.receipt, verification: item.verification, decision: item.decision, blocker: item.blocker
       }))
     };

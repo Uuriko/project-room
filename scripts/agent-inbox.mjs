@@ -18,7 +18,7 @@ if (action === "reply") {
   node scripts/agent-inbox.mjs work WORK_ID [--include-source]
   node scripts/agent-inbox.mjs result WORK_ID [--completion ID | --draft MESSAGE_ID]
   node scripts/agent-inbox.mjs discussion WORK_ID [--since N | --cursor CURSOR] [--limit N]
-  node scripts/agent-inbox.mjs [orient|brief|changes CHECKPOINT|packet WORK_ID]
+  node scripts/agent-inbox.mjs [orient|next|brief|changes CHECKPOINT|packet WORK_ID]
 Assignment watching: node scripts/agent-inbox.mjs watch --help
 Reply requests: node scripts/agent-inbox.mjs reply --help
 
@@ -34,7 +34,8 @@ Legacy reads without a saved connection still accept the original three variable
 expected agent identity is enforced when ROOM_AGENT_MEMBER is supplied.
 Never put a key in a prompt, URL or command argument. No AI or work is started.
 Check reads identity metadata only; work reads one task with source excluded by
-default. Orient reads broader private room context. A read does not narrow the key's
+default. Next shows current work handoffs addressed to you; it does not start work
+or include reply requests. Orient reads broader private room context. A read does not narrow the key's
 permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits.`);
 } else {
   try {
@@ -56,12 +57,12 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
         || (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > 50))
         || (cursor !== undefined && (since !== undefined || cursor.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(cursor)))) throw new ConnectionError("usage_error");
     }
-    if (!["connect", "import", "check", "orient", "brief", "changes", "packet", "work", "discussion", "result"].includes(action)
+    if (!["connect", "import", "check", "orient", "next", "brief", "changes", "packet", "work", "discussion", "result"].includes(action)
       || (["connect", "import"].includes(action) && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
       || (action === "import" && ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"].some(name => process.env[name] !== undefined))
       || (["packet", "work", "discussion", "result"].includes(action) && !validId(checkpoint))
       || (["discussion", "result"].includes(action) ? false : action === "work" ? extra.length > 1 || (extra.length === 1 && extra[0] !== "--include-source")
-        : extra.length || (["check", "orient", "brief"].includes(action) && checkpoint !== undefined))
+        : extra.length || (["check", "orient", "next", "brief"].includes(action) && checkpoint !== undefined))
       || (action === "changes" && (!/^\d+$/.test(checkpoint ?? "") || !Number.isSafeInteger(Number(checkpoint))))) throw new ConnectionError("usage_error");
     const config = action === "import" ? await readConnectionInput() : agentConnectionFromEnvironment(), client = new RoomAgentClient(config);
     let result;
@@ -74,6 +75,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
     } else result = action === "discussion" ? await client.workDiscussion(checkpoint, discussionOptions)
       : action === "result" ? await client.workResult(checkpoint, resultOptions)
       : action === "work" ? await client.workContext(checkpoint, { includeSource: extra[0] === "--include-source" })
+      : action === "next" ? await client.orient({ focus: "needs_me" })
       : action === "packet" ? packetMarkdown(await client.workPacket(checkpoint)) : action === "orient" ? await client.orient() : action === "brief" ? await client.returnBrief() : await client.changes(Number(checkpoint));
     console.log(action === "packet" ? result : JSON.stringify(result, null, 2));
   } catch (error) {
