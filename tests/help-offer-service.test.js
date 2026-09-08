@@ -41,6 +41,8 @@ test("authenticated offers preserve receipts, identity and immutable scope throu
   assert.equal(opened.event.actorId, "guest"); assert.equal(selected.event.actorId, "producer");
   assert.equal(opened.event.at, new Date(f.now).toISOString());
   assert.throws(() => f.send("guest", { ...open, data: { ...open.data, plan: "Other scope" } }), { code: "idempotency_conflict" });
+  const checkpoint = f.store.room("commons");
+  f.store.db.prepare("INSERT INTO projection_checkpoints VALUES(?,?,?)").run("commons", checkpoint.sequence, JSON.stringify(checkpoint.state));
   f.send("producer", f.command("work.help_updated", { workItemId, expectedRevision: 1, expectedHelpRevision: 1, status: "withdrawn" }));
   assert.equal(helpOfferContext(f.store.room("commons").state, "offer", "guest", new Date(f.now).toISOString()).status, "selection_needs_review");
   const release = f.update("offer", "released"), released = f.send("guest", release);

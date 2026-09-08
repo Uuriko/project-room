@@ -8,11 +8,12 @@ import { createRoomServer } from "../server/http.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { createRuntimePackage } from "../scripts/runtime-package.mjs";
+import { frozenAcceptanceFixture } from "../scripts/frozen-runtime-fixture.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { openMcpTestClient } from "../scripts/mcp-test-client.mjs";
 
-async function fixture(t) {
-  const f = createAcceptanceFixture();
+async function fixture(t, createFixture = createAcceptanceFixture, createServer = createRoomServer) {
+  const f = createFixture();
   let now = Date.now();
   f.store.now = () => now;
   const send = (actor, type, data) => f.store.command(f.keys[actor], "commons", { id: crypto.randomUUID(), type, data });
@@ -28,7 +29,7 @@ async function fixture(t) {
     expiresAt: new Date(now + 60000).toISOString() }, workItemId);
   const withdraw = () => work("work.help_updated", { expectedHelpRevision:
     f.store.room("commons").state.workItems["test-handoff"].helpWanted.revision, status: "withdrawn" });
-  const server = createRoomServer({ store: f.store });
+  const server = createServer({ store: f.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
     f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
@@ -202,27 +203,25 @@ test("real older schema13 service preserves data but explicitly lacks help disco
   const f = await fixture(t); f.invite();
   const runtime = join(f.directory, "older-runtime");
   createRuntimePackage({ repository: resolve("."), commit: "87a54234db084eb7a2fe31de092c6301b5158bd2", destination: runtime });
-  const { RoomStore } = await import(pathToFileURL(join(runtime, "server/store.mjs")));
   const { createRoomServer: olderServer } = await import(pathToFileURL(join(runtime, "server/http.mjs")));
+  const { auditRecovery: olderAudit } = await import(pathToFileURL(join(runtime, "server/recovery.mjs")));
   const { RoomAgentClient: OlderClient } = await import(pathToFileURL(join(runtime, "client/room-agent.mjs")));
   const olderClient = new OlderClient(f.config());
   assert.equal((await olderClient.orient({ query: "agenda" })).work.length, 1, "old client still reads the new service");
   assert.equal((await olderClient.orient({ focus: "needs_me" })).work.length, 0);
   assert.equal((await olderClient.workContext("test-handoff")).work.id, "test-handoff");
-  const store = new RoomStore(join(f.directory, "room.sqlite"), { now: f.now }), server = olderServer({ store });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
-  const origin = `http://127.0.0.1:${server.address().port}`, client = new RoomAgentClient({ ...f.config(), origin });
-  const before = auditRecovery(f.store).dataSha256;
+  const createOldFixture = await frozenAcceptanceFixture(resolve("."), runtime, "87a54234db084eb7a2fe31de092c6301b5158bd2");
+  const old = await fixture(t, createOldFixture, olderServer); old.invite();
+  const client = new RoomAgentClient(old.config()), before = olderAudit(old.store).dataSha256;
   assert.equal((await client.workContext("test-handoff")).help, undefined);
   assert.equal((await client.orient({ query: "agenda" })).work.length, 1);
   await assert.rejects(client.orient({ focus: "help_wanted" }), { code: "help_context_unavailable" });
-  const directory = join(f.directory, "old-mcp"); saveAgentConnection(directory, { version: 1, ...f.config(), origin });
+  const directory = join(old.directory, "old-mcp"); saveAgentConnection(directory, { version: 1, ...old.config() });
   const mcp = await openMcpTestClient(directory);
   try {
     const result = (await mcp.call("room_list_work", { focus: "help_wanted" })).result;
     assert.equal(result.isError, true); assert.equal(result.structuredContent.code, "help_context_unavailable");
   } finally { await mcp.close(); }
-  assert.equal(auditRecovery(f.store).dataSha256, before);
-  assert.equal(store.room("commons").state.workItems["test-handoff"].helpWanted.status, "open");
+  assert.equal(olderAudit(old.store).dataSha256, before);
+  assert.equal(old.store.room("commons").state.workItems["test-handoff"].helpWanted.status, "open");
 });
