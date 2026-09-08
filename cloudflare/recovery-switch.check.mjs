@@ -29,7 +29,7 @@ for (const version of [8, 12]) test(`schema${version} packages switch candidate 
   try {
     const retained = version === 12 && (process.env.ROOM_RECOVERY_CANDIDATE_PACKAGE !== undefined
       || process.env.ROOM_RECOVERY_FALLBACK_PACKAGE !== undefined);
-    const fallback = version === 12 ? '135d82489c62071b3f4eb00710ae4d9787374158' : baseline;
+    const fallback = version === 12 ? '4d22189ccdebc56db23397e6cc75b07eff0e3c2c' : baseline;
     let packages;
     if (retained) {
       // Explicit paired paths opt into actual retained artifacts. Never rewrite,

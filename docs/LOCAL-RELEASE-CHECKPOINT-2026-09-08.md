@@ -1,5 +1,10 @@
 # Durable local candidate — September 8, 2026
 
+**Later correction:** fallback135d824 failed browser draft/privacy qualification.
+Use the [draft-compatible fallback4d22189 checkpoint](FALLBACK-DRAFT-CHECKPOINT-2026-09-08.md).
+The original packages/evidence below are retained historical records, not the
+current fallback selection. Candidate9745978 is unchanged.
+
 ## Preserved outcome
 
 Runtime candidate: `9745978c784b71ac90487d37b4e5d7b26fa45ef4` on
