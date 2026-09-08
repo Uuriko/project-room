@@ -259,6 +259,20 @@
       </form>
       <p id="reminder-status" class="form-status" role="status" aria-live="polite"></p>
     </dialog>
+    <dialog id="result-copy-dialog" aria-labelledby="result-copy-title">
+      <div class="panel-header"><h2 id="result-copy-title">Copy summary</h2><button id="result-copy-close" class="button ghost" type="button">Close</button></div>
+      <div class="portable-section">
+        <label for="result-copy-preview">Edit your copy</label>
+        <textarea id="result-copy-preview" rows="9" maxlength="16000" autocomplete="off" spellcheck="false" aria-describedby="result-copy-note"></textarea>
+        <p id="result-copy-note" class="form-hint">Review for private details. Copying does not publish.</p>
+        <details><summary>About this copy</summary><p id="result-copy-source" class="form-hint"></p><p class="form-hint">Only title and summary are added. Names and links in that text remain. This is not proof of approval. Edits stay in this tab until reload or sign-out.</p></details>
+        <p id="result-copy-changed" class="form-hint" role="status" hidden></p>
+        <p id="result-copy-wait" class="form-hint" role="status" hidden>Previous copy still pending.</p>
+        <div class="portable-actions"><button id="result-copy-button" class="button primary" type="button">Copy</button><button id="result-copy-fresh" class="button secondary" type="button" hidden>Start fresh</button></div>
+        <p id="result-copy-status" class="form-status" role="status" aria-live="polite"></p>
+      </div>
+    </dialog>
+
     <dialog id="portable-dialog" aria-labelledby="portable-title">
       <div class="panel-header"><h2 id="portable-title">Use my AI</h2><button id="portable-close" class="button ghost" type="button">Close</button></div>
       <p id="portable-work-title"></p>

@@ -1,6 +1,6 @@
 import { validId } from "../src/events.js";
 import { nextWorkStep, reusableWorkDefinition } from "../src/workflow.js";
-import { workPacket } from "../src/work-packet.js";
+import { workPacket, resultDraft } from "../src/work-packet.js";
 
 export class RoomClientError extends Error {
   constructor(status, code, message, retryAfterMs = null) { super(message); this.status = status; this.code = code; this.retryAfterMs = retryAfterMs; }
@@ -42,6 +42,11 @@ export class RoomAgentClient {
   async workDefinition(workItemId, options = {}) {
     if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => key !== "signal")) throw new Error("Use the signal option only");
     return reusableWorkDefinition((await this.workContext(workItemId, { signal: options.signal })).work);
+  }
+  // The caller reviews/redacts this draft; preparing it neither shares nor certifies it.
+  async resultDraft(workItemId, options = {}) {
+    if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => key !== "signal")) throw new Error("Use the signal option only");
+    return resultDraft((await this.workContext(workItemId, { signal: options.signal })).work);
   }
   async workContext(workItemId, options = {}) {
     if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => !["includeSource", "signal"].includes(key))) throw new Error("Use includeSource and signal options only");

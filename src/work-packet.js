@@ -6,6 +6,25 @@ const prefix = "ROOM-RETURN ";
 const referenceFields = ["version", "roomId", "workItemId", "packetId", "basisRevision"];
 const invalid = message => { throw new Error(message); };
 
+// Editable content, not a verification receipt or automatic redaction. Text may
+// contain private details even though structured links and identities are omitted.
+export function resultDraft(work) {
+  if (!work || typeof work !== "object" || Array.isArray(work) || !Object.hasOwn(work, "receipt")
+    || !work.receipt || typeof work.receipt !== "object" || Array.isArray(work.receipt)) invalid("Choose work with a reported result");
+  const draft = {};
+  for (const [key, source] of [["title", work], ["summary", work.receipt]]) {
+    if (!Object.hasOwn(source, key) || typeof source[key] !== "string" || !source[key].trim() || source[key].length > 4096) invalid(`Invalid result ${key}`);
+    draft[key] = source[key];
+  }
+  return draft;
+}
+
+export function resultDraftText(draft) {
+  if (!draft || typeof draft !== "object" || Array.isArray(draft) || !Object.hasOwn(draft, "title") || !Object.hasOwn(draft, "summary")) invalid("Choose a result draft");
+  const { title, summary } = resultDraft({ title: draft.title, receipt: { summary: draft.summary } });
+  return `${title}\n\nReported result\n${summary}`;
+}
+
 export function proposalContext(data, work) {
   const fields = ["packetId", "basisRevision", "allowOlderBasis"];
   if (!fields.some(field => Object.hasOwn(data, field))) return null;

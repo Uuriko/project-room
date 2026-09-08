@@ -272,6 +272,10 @@ dialog p { margin: 0; color: var(--muted); }
 .portable-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 #portable-work-title { overflow-wrap: anywhere; }
 #portable-status { margin-top: .8rem; }
+#result-copy-dialog summary { cursor: pointer; min-height: 44px; padding-block: .65rem; color: var(--muted); font-size: .875rem; }
+#result-copy-dialog .form-hint { overflow-wrap: anywhere; }
+#result-copy-preview { font-size: 1rem; }
+#result-copy-dialog > .panel-header { padding: 0 0 .75rem; align-items: flex-start; gap: .75rem; }
 #reminder-work-title, #reminder-preview, .reminder-list { overflow-wrap: anywhere; }
 #reminder-custom-label[hidden] { display: none; }
 .reminder-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
