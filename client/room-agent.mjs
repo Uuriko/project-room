@@ -1,5 +1,6 @@
 import { validId, PERMISSIONS } from "../src/events.js";
 import { nextWorkStep, workActions, reusableWorkDefinition } from "../src/workflow.js";
+import { searchWork } from "../src/work-selectors.js";
 import { workPacket, resultDraft, verifyWorkResult } from "../src/work-packet.js";
 import { submitWorkAction } from "./work-actions.mjs";
 import { replyRoute, validReplyArguments, validateReplyRead, submitReplyAction } from "./reply-actions.mjs";
@@ -8,6 +9,7 @@ import { charterContext, validateCharterContext, validateCharterRead } from "../
 export class RoomClientError extends Error {
   constructor(status, code, message, retryAfterMs = null) { super(message); this.status = status; this.code = code; this.retryAfterMs = retryAfterMs; }
 }
+export const validWorkSearchQuery = query => typeof query === "string" && query.length <= 200 && query.trim().length > 0;
 function checkedCharter(value, horizon) {
   try {
     const result = validateCharterContext(value);
@@ -226,8 +228,9 @@ export class RoomAgentClient {
   workAction(name, args, options = {}) {
     return submitWorkAction(this, { roomId: this.#roomId, memberId: this.#memberId }, name, args, options);
   }
-  async orient({ signal, focus = "all" } = {}) {
+  async orient({ signal, focus = "all", query } = {}) {
     if (!["all", "needs_me"].includes(focus)) throw new RoomClientError(0, "invalid_focus", "Choose all work or work needing you");
+    if (query !== undefined && !validWorkSearchQuery(query)) throw new RoomClientError(0, "invalid_query", "Use a nonblank work query of at most 200 UTF-16 code units");
     const snapshot = await this.snapshot({ signal });
     const member = snapshot.state.members[snapshot.viewerId];
     const charter = snapshot.charter === undefined ? null : checkedCharter(snapshot.charter, snapshot.sequence);
@@ -235,18 +238,26 @@ export class RoomAgentClient {
       if (charter === null ? snapshot.state.room.charter !== undefined : JSON.stringify(charter) !== JSON.stringify(charterContext(snapshot.state.room))) throw new Error();
     } catch { throw new RoomClientError(200, "invalid_response", "Room instructions do not match the snapshot"); }
     const now = Date.now(), items = Object.values(snapshot.state.workItems);
-    if (focus === "needs_me") {
-      const work = items.flatMap(item => {
+    if (focus === "needs_me" || query !== undefined) {
+      const candidates = focus === "all" ? items : items.filter(item => {
         const next = nextWorkStep(item, now);
-        if (!member.active || next.memberId !== member.id || !next.needsAttention) return [];
-        return [{ id: item.id, title: item.title, state: item.state, revision: item.revision, mode: item.mode, next,
+        return member.active && next.memberId === member.id && next.needsAttention;
+      });
+      const matches = query === undefined ? null : searchWork({ members: snapshot.state.members,
+        workItems: Object.fromEntries(candidates.map(item => [item.id, item])) }, query);
+      const work = (matches?.work ?? candidates.map(item => ({ item }))).map(({ item, excerpt }) => {
+        return { id: item.id, title: item.title, state: item.state, revision: item.revision, mode: item.mode, next: nextWorkStep(item, now),
+          ...(excerpt === undefined ? {} : { excerpt }),
           availableRoomActions: workActions(item, member, now).map(([action, label]) => ({ action, label })),
-          nextRead: { tool: "room_read_work", arguments: { workItemId: item.id } } }];
+          nextRead: { tool: "room_read_work", arguments: { workItemId: item.id } } };
       });
       return { contractVersion: 1, roomId: snapshot.roomId, evaluatedThrough: snapshot.sequence,
         evaluatedAt: new Date(now).toISOString(), clockSource: "client", focus, charter, member,
         scope: { kind: "room", permissions: member.permissions, externalExecution: false },
-        selection: { totalWork: items.length, needsMe: work.length,
+        selection: matches ? { totalWork: items.length, eligibleWork: candidates.length, query: query.trim(),
+          matches: matches.total, shown: work.length, limit: 25, hasMore: matches.total > work.length,
+          guidance: "Current work fields only; no message bodies, evidence files or history. Focus is applied before matching and the 25-hit limit; refine the query if truncated. Compact excerpts omit full task context. Read selected work before acting. A hit is not an assignment, suitability judgment or execution grant; empty does not mean the room is done." }
+          : { totalWork: items.length, needsMe: work.length,
           guidance: "Current next steps addressed to you, including those missing a Room permission. Not all your ongoing work or reply requests. Read selected work before acting; available actions are descriptions, not execution grants. Empty does not mean the room is done." },
         work };
     }

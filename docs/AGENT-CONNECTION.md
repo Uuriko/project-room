@@ -103,6 +103,25 @@ work read. Missing permissions remain visible; nothing is accepted or started.
 Ongoing work without a new handoff and reply requests are excluded, so an empty
 list does not mean everything is done. See the [focused-list contract](FOCUSED-AGENT-ORIENTATION-2026-09-08.md).
 
+Find a work record or earlier reported outcome without the full list:
+
+```sh
+node scripts/agent-inbox.mjs search "agenda"
+node scripts/agent-inbox.mjs search "agenda" --needs-me
+```
+
+The equivalent client call is `orient({ query: "agenda" })`; MCP uses the existing
+`room_list_work` with `{"query":"agenda"}` and optional `"focus":"needs_me"`.
+Queries must be nonblank and at most200 UTF-16 code units before trimming. Matching
+is literal and case-insensitive over current work titles, IDs, criteria, reported
+summaries/next steps and role names—not messages or linked files. Up to25 compact
+hits include counts, excerpts and selected-work read pointers. Refine a truncated
+query. Focus filters before the limit, and does not assign work or acknowledge it.
+Omitting query preserves the existing full/focused list. This still reads the Room
+snapshot internally; smaller output does not reduce network scope or authority.
+Do not include credentials in queries or shell arguments. See the
+[search contract and evidence](AGENT-WORK-SEARCH-2026-09-08.md).
+
 For the shortest first contribution, see [the exact draft example](AGENT-CLIENT.md#first-contribution-a-draft).
 For full work transitions, follow [the write guide](AGENT-WRITE-GUIDE.md). One deliberate
 proposal can enter the same work conversation; posting does not accept, complete,

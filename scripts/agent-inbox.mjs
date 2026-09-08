@@ -1,4 +1,4 @@
-import { RoomAgentClient } from "../client/room-agent.mjs";
+import { RoomAgentClient, validWorkSearchQuery } from "../client/room-agent.mjs";
 import { packetMarkdown } from "../src/work-packet.js";
 import { validId } from "../src/events.js";
 import { agentConnectionFromEnvironment, readConnectionInput, saveAgentConnection, connectionDiagnostic, ConnectionError } from "../client/agent-connection.mjs";
@@ -15,6 +15,7 @@ if (action === "reply") {
   node scripts/agent-inbox.mjs connect NEW_PRIVATE_DIRECTORY
   pbpaste | node scripts/agent-inbox.mjs import NEW_PRIVATE_DIRECTORY
   node scripts/agent-inbox.mjs check
+  node scripts/agent-inbox.mjs search "phrase" [--needs-me]
   node scripts/agent-inbox.mjs work WORK_ID [--include-source]
   node scripts/agent-inbox.mjs result WORK_ID [--completion ID | --draft MESSAGE_ID]
   node scripts/agent-inbox.mjs discussion WORK_ID [--since N | --cursor CURSOR] [--limit N]
@@ -34,7 +35,9 @@ Legacy reads without a saved connection still accept the original three variable
 expected agent identity is enforced when ROOM_AGENT_MEMBER is supplied.
 Never put a key in a prompt, URL or command argument. No AI or work is started.
 Check reads identity metadata only; work reads one task with source excluded by
-default. Next shows current work handoffs addressed to you; it does not start work
+default. Search returns up to 25 compact current-work matches; --needs-me narrows
+them to handoffs addressed to you. Refine the query if truncated. No messages or
+external evidence files are searched. Next shows current work handoffs addressed to you; it does not start work
 or include reply requests. Orient reads broader private room context. A read does not narrow the key's
 permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits.`);
 } else {
@@ -57,11 +60,13 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
         || (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > 50))
         || (cursor !== undefined && (since !== undefined || cursor.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(cursor)))) throw new ConnectionError("usage_error");
     }
-    if (!["connect", "import", "check", "orient", "next", "brief", "changes", "packet", "work", "discussion", "result"].includes(action)
+    if (!["connect", "import", "check", "orient", "next", "search", "brief", "changes", "packet", "work", "discussion", "result"].includes(action)
       || (["connect", "import"].includes(action) && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
       || (action === "import" && ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"].some(name => process.env[name] !== undefined))
       || (["packet", "work", "discussion", "result"].includes(action) && !validId(checkpoint))
+      || (action === "search" && !validWorkSearchQuery(checkpoint))
       || (["discussion", "result"].includes(action) ? false : action === "work" ? extra.length > 1 || (extra.length === 1 && extra[0] !== "--include-source")
+        : action === "search" ? extra.length > 1 || (extra.length === 1 && extra[0] !== "--needs-me")
         : extra.length || (["check", "orient", "next", "brief"].includes(action) && checkpoint !== undefined))
       || (action === "changes" && (!/^\d+$/.test(checkpoint ?? "") || !Number.isSafeInteger(Number(checkpoint))))) throw new ConnectionError("usage_error");
     const config = action === "import" ? await readConnectionInput() : agentConnectionFromEnvironment(), client = new RoomAgentClient(config);
@@ -76,6 +81,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
       : action === "result" ? await client.workResult(checkpoint, resultOptions)
       : action === "work" ? await client.workContext(checkpoint, { includeSource: extra[0] === "--include-source" })
       : action === "next" ? await client.orient({ focus: "needs_me" })
+      : action === "search" ? await client.orient({ query: checkpoint, focus: extra[0] === "--needs-me" ? "needs_me" : "all" })
       : action === "packet" ? packetMarkdown(await client.workPacket(checkpoint)) : action === "orient" ? await client.orient() : action === "brief" ? await client.returnBrief() : await client.changes(Number(checkpoint));
     console.log(action === "packet" ? result : JSON.stringify(result, null, 2));
   } catch (error) {
