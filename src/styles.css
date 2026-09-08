@@ -517,6 +517,13 @@ button:disabled { cursor: wait; opacity: .6; }
 .state { border: 0; border-radius: .35rem; text-transform: none; letter-spacing: 0; font-size: .75rem; }
 .work-details { margin-top: .5rem; }
 .work-drafts, .work-help { overflow-wrap: anywhere; }
+.help-offers { list-style: none; margin: .5rem 0; padding: 0; }
+.help-offer { padding: .75rem 0; border-top: 1px solid var(--line, #e5e5e5); }
+.help-offer p { margin: .4rem 0; white-space: pre-wrap; }
+.help-offer-heading { display: flex; align-items: baseline; justify-content: space-between; gap: .75rem; }
+.help-offer-heading strong { font-size: .875rem; font-weight: 600; }
+.help-offer-heading .form-hint { flex-shrink: 0; }
+.offer-history > summary { cursor: pointer; padding: .5rem 0; font-size: .8125rem; }
 .work-drafts > summary, .work-help > summary { min-height: 44px; padding: .5rem 0; font-size: .875rem; cursor: pointer; }
 .work-drafts .source-link { display: block; min-height: 44px; padding: .4rem 0; }
 .work-details > summary { padding: .5rem 0; font-size: .875rem; }

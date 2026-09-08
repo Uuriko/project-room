@@ -199,3 +199,24 @@ test("bulk projection validates malformed histories before presenting an empty o
   state.helpOffers = [];
   assert.throws(() => workOffersContext(state, task, "guest", new Date().toISOString()));
 });
+
+test("full-room offer negotiation is explicit, read-only and independent of work discovery", async t => {
+  const f = setup(t), offerId = f.offer(), before = f.store.room("commons");
+  const plain = f.store.snapshot(f.keys.guest, "commons");
+  const opted = f.store.snapshot(f.keys.guest, "commons", null, "full", false, true);
+  assert.equal(plain.offerContextVersion, undefined); assert.equal(opted.offerContextVersion, 1);
+  assert.deepEqual(opted.state, plain.state); assert.equal(opted.state.helpOffers[offerId].status, "offered");
+  assert.deepEqual(f.store.room("commons"), before); assert.equal(opted.cursor, plain.cursor);
+  assert.throws(() => f.store.snapshot(f.keys.guest, "commons", null, "work", true, true), { code: "invalid_offer_context" });
+  assert.throws(() => f.store.snapshot(f.keys.guest, "commons", null, "full", false, "1"), { code: "invalid_offer_context" });
+  const server = createRoomServer({ store: f.store }); await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const url = "http://127.0.0.1:" + server.address().port + "/api/rooms/commons";
+  const session = f.store.createSession(f.keys.owner), headers = { Cookie: "room_session=" + session.token, "X-Project-Room-Offer-Context": "1" };
+  const response = await fetch(url, { headers });
+  assert.equal(response.status, 200); assert.equal((await response.json()).offerContextVersion, 1);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  for (const version of ["0", "2", "1, 1"]) assert.equal((await fetch(url, { headers: { ...headers, "X-Project-Room-Offer-Context": version } })).status, 422);
+  assert.equal((await fetch(url + "?view=work", { headers })).status, 422);
+  assert.equal((await fetch(url, { headers: { ...headers, "X-Session-Binding": "f".repeat(64) } })).status, 409);
+});

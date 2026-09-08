@@ -139,6 +139,12 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.equal(selectedOffer.offers.offers[0].canRelease, true);
     assert.equal(selectedOffer.offers.offers[0].externalExecution, false);
     assert.equal(selectedOffer.viewerSessionBinding, joined.session.sessionBinding);
+    const browserOffers = await json(await call('/api/rooms/commons', { headers: offerHeaders }));
+    assert.equal(browserOffers.offerContextVersion, 1);
+    assert.equal(browserOffers.state.helpOffers['worker-offer'].status, 'selected');
+    assert.equal(browserOffers.viewerSessionBinding, joined.session.sessionBinding);
+    assert.equal((await json(await call('/api/rooms/commons', { headers: guestHeaders }))).offerContextVersion, undefined);
+    await json(await call('/api/rooms/commons?view=work', { headers: offerHeaders }), 422);
     const questionCommand = { id: randomUUID(), type: 'message.posted', data: { messageId: 'worker-reply-request', requestKind: 'reply',
       toMemberId: joined.session.member.id, body: 'Which agenda would you choose?' } };
     const asked = await json(await call('/api/rooms/commons/commands', { headers: ownerHeaders, data: questionCommand }), 201);

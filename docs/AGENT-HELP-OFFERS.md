@@ -83,5 +83,5 @@ separate local MCP subprocesses and credentials for two helpers and an accountab
 agent, including competing selections, reconnect, immutable retry, consent change,
 release, decline and withdrawal. Existing core tests cover concurrent database
 writers separately. These are scripted protocol actors, not independent LLMs or
-native vendor-host acceptance. Human offer controls and new screenshots remain
-the next product slice.
+native vendor-host acceptance. [Human offer controls](HUMAN-HELP-OFFERS-2026-09-08.md)
+now use the same service with desktop/mobile browser checks and screenshots.

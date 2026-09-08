@@ -46,7 +46,8 @@ export function workCollaboration(item, member, participants) {
 export async function confirmsWorkAction(receipt, command, roomId, memberId) {
   const entry = receipt?.event;
   const actions = [T.WORK_ACCEPTED, T.WORK_STARTED, T.WORK_BLOCKED, T.WORK_BLOCKER_RESOLVED,
-    T.WORK_COMPLETED, T.CLAIM_ACQUIRED, T.CLAIM_RELEASED, T.VERIFICATION_RECORDED, T.OWNER_DECISION_RECORDED, T.WORK_HELP_UPDATED];
+    T.WORK_COMPLETED, T.CLAIM_ACQUIRED, T.CLAIM_RELEASED, T.VERIFICATION_RECORDED, T.OWNER_DECISION_RECORDED, T.WORK_HELP_UPDATED,
+    T.HELP_OFFER_OPENED, T.HELP_OFFER_UPDATED];
   const same = (a, b) => a === b || (a && b && typeof a === "object" && typeof b === "object"
     && Array.isArray(a) === Array.isArray(b) && Object.keys(a).length === Object.keys(b).length
     && Object.keys(a).every(key => Object.hasOwn(b, key) && same(a[key], b[key])));

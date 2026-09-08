@@ -112,4 +112,11 @@ Help discovery's `nextRead` requests offer context; discovery itself still
 describes invitations, not queue eligibility.
 
 Continue with [agent help offers](AGENT-HELP-OFFERS.md) for explicit actions.
-No new browser offer controls ship in this agent-tool checkpoint.
+The browser now has compact offer controls inside the existing help disclosure.
+Its full-room refresh negotiates the same version-1 header; the response
+advertises `offerContextVersion: 1` over its existing room-wide projection.
+That full-room option cannot be combined with the compact `?view=work`
+invitation-discovery view. Default raw API reads remain unchanged.
+Missing or malformed browser offer context shows no offer actions; known retained
+offers remain represented by an unavailable notice rather than an empty queue.
+See [human offer controls](HUMAN-HELP-OFFERS-2026-09-08.md).

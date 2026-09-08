@@ -18,6 +18,15 @@ test("unchanged draft retries retain ID and content changes require a new ID", (
   assert.equal(draftCommand(first, "message.posted", { body: "hello" }), first);
   assert.notEqual(draftCommand(first, "message.posted", { body: "changed" }).command.id, first.command.id);
 });
+
+test("browser refresh negotiates offers without claiming support on an older response", async () => {
+  const seen = [], requests = [], client = new RoomClient({ onSnapshot: value => seen.push(value),
+    fetcher: async (url, options) => { requests.push({ url, options }); return response(snapshot(1)); } });
+  client.session = identity();
+  await client.refresh();
+  assert.equal(requests.length, 1); assert.equal(requests[0].options.headers["X-Project-Room-Offer-Context"], "1");
+  assert.equal(seen[0].offerContextVersion, undefined);
+});
 test("failed command leaves retry object unchanged and never reports a receipt", async () => {
   const client = new RoomClient({ fetcher: async () => response({ error: { message: "Stale revision" } }, 409) });
   client.session = identity();

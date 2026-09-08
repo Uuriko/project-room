@@ -11,6 +11,7 @@ import { installReminders } from "./reminders.js";
 import { installPortableWork, installResultCopy } from "./portable-work.js";
 import { replyDraftKey, replyDraftData, validReplyDraft, confirmsReplyCommand, REPLY_CANCELLED } from "./reply-requests.js";
 import { workHelpContext, validateHelpData } from "./work-help.js";
+import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
 
 const $ = selector => document.querySelector(selector);
 $("#skip-link").addEventListener("click", event => {
@@ -44,6 +45,7 @@ let state = null, session = null, pendingMessage = null, pendingWork = null, pen
 let workDraftId = null, replyToId = null, busy = false;
 let workFormEpoch = 0, workRetryLocked = false;
 let actionEpoch = 0;
+let offerContextVersion = null;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
 let requestMode = null, requestReading = false, requestEpoch = 0;
 const composerKey = () => replyDraftKey(requestMode, currentThreadId);
@@ -81,6 +83,7 @@ const client = new RoomClient({
   onSnapshot(snapshot, identity) {
     const firstSnapshot = !state;
     state = snapshot.state; session = identity;
+    offerContextVersion = snapshot.offerContextVersion === 1 ? 1 : null;
     roomCursor = snapshot.cursor;
     roomGeneration = client.generation;
     const roomId = state.room?.id ?? identity.roomId;
@@ -121,7 +124,7 @@ const client = new RoomClient({
     if (!leavingPage) recovery.clear();
     releaseSubmission(submitControls);
     submitOperationId += 1; busy = false;
-    state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; actionEpoch++;
+    state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
     $("#resume-action").hidden = true; $("#refresh-action").hidden = true;
     $("#action-evidence").hidden = true; $("#action-evidence").removeAttribute("href");
     $("#action-text").hidden = true; $("#action-text-body").textContent = ""; $("#action-text-origin").textContent = "";
@@ -906,13 +909,57 @@ function helpView(item, now = Date.now()) {
   catch { return null; } // Invalid or unavailable context never advertises consent.
 }
 const isHelpAction = action => ["help", "end-help"].includes(action);
+const offerStatuses = { "select-offer": "selected", "decline-offer": "declined", "withdraw-offer": "withdrawn", "release-offer": "released" };
+const offerLabels = { "offer-help": "Offer help", "select-offer": "Select helper", "decline-offer": "Decline", "withdraw-offer": "Withdraw", "release-offer": "Release" };
+const isOfferAction = action => Object.hasOwn(offerLabels, action);
+function offersView(item, now = Date.now()) {
+  if (offerContextVersion !== 1) return null;
+  try { return workOffersContext(state, item.id, session.member.id, new Date(now).toISOString()); }
+  catch { return null; }
+}
+function offerChoice(entry) {
+  return offersView(state?.workItems[entry.workId] ?? {})?.offers.find(row => row.offer.id === entry.offerId) ?? null;
+}
+function pinOffer(entry, item, offerId = entry.offerId) {
+  entry.offerId = offerId ?? crypto.randomUUID();
+  entry.helpRevision = item.helpWanted?.revision ?? 0;
+  entry.helpEventId = item.helpWanted?.eventId ?? null;
+  entry.offerRevision = state.helpOffers?.[entry.offerId]?.revision ?? null;
+  entry.viewerRevision = state.members[session.member.id]?.revision;
+  entry.offererRevision = state.members[state.helpOffers?.[entry.offerId]?.offererId]?.revision ?? null;
+}
 const currentHelp = () => $("#action-fields").querySelector("#help-current");
-function helpButton(item, action, label) {
-  return `<button type="button" class="button ghost" data-action="${action}" data-work-id="${esc(item.id)}" data-focus-key="work-action:${esc(item.id)}:${action}"${busy ? " disabled" : ""}>${label}</button>`;
+const offerField = name => $("#action-fields").querySelector('[id="offer-' + name + '"]');
+function helpButton(item, action, label, offerId = null) {
+  return `<button type="button" class="button ghost" data-action="${action}" data-work-id="${esc(item.id)}"${offerId ? ` data-offer-id="${esc(offerId)}"` : ""} data-focus-key="work-action:${esc(item.id)}:${action}${offerId ? ":" + esc(offerId) : ""}"${busy ? " disabled" : ""}>${label}</button>`;
 }
 function helpCard(item, help) {
-  if (!help?.help || help.help.status !== "open" || help.status !== "open" && !help.canWithdraw) return "";
-  return `<details class="work-help"><summary data-focus-key="work-help:${esc(item.id)}">${help.status === "open" ? "Help wanted" : "Help ended"}</summary><p class="definition">${esc(help.help.scope)}</p><p class="form-hint">Ends ${esc(new Date(help.help.expiresAt).toLocaleString())}</p><div class="portable-actions">${help.canPublish ? helpButton(item, "help", "Edit") : ""}${help.canWithdraw ? helpButton(item, "end-help", "End request") : ""}</div></details>`;
+  const context = offersView(item), rows = context?.offers ?? [];
+  const invitation = help?.help?.status === "open" && (help.status === "open" || help.canWithdraw);
+  const retained = state.helpOffers && !Array.isArray(state.helpOffers) && Object.values(state.helpOffers).some(offer => offer?.workItemId === item.id);
+  if (!invitation && !rows.length && !retained) return "";
+  const live = rows.filter(row => ["offered", "selected"].includes(row.offer.status));
+  const past = rows.filter(row => !["offered", "selected"].includes(row.offer.status));
+  const selected = live.find(row => row.offer.status === "selected");
+  const label = selected ? selected.status === "selection_needs_review" ? "Helper · review needed" : "Helper selected"
+    : help?.status === "open" ? "Help wanted" : "Help ended";
+  const rowHTML = row => {
+    const offer = row.offer, label = { offered: "Offered", selected: "Selected", unavailable: "Request changed", selection_needs_review: "Review needed",
+      withdrawn: "Withdrawn", declined: "Declined", released: "Released" }[row.status];
+    const buttons = [["canSelect", "select-offer"], ["canDecline", "decline-offer"], ["canWithdraw", "withdraw-offer"], ["canRelease", "release-offer"]]
+      .filter(([key]) => row[key]).map(([, action]) => helpButton(item, action, offerLabels[action], offer.id)).join("");
+    return `<li class="help-offer" data-offer-record-id="${esc(offer.id)}"><div class="help-offer-heading"><strong>${esc(memberLabel(offer.offererId))}</strong><span class="form-hint">${label}</span></div><p>${esc(offer.plan)}</p>${offer.reason ? `<p class="form-hint">${esc(offer.reason)}</p>` : ""}${buttons ? `<div class="portable-actions">${buttons}</div>` : ""}</li>`;
+  };
+  const capacity = context?.availability.reason;
+  const capacityText = { work_offer_limit: "This request has enough offers for now.", member_offer_limit: "Finish an existing offer before adding another.", history_full: "Offer history is full." }[capacity];
+  return `<details class="work-help"><summary data-focus-key="work-help:${esc(item.id)}">${label}${live.length && !selected ? ` <span class="form-hint">· ${live.length}</span>` : ""}</summary>
+    ${invitation ? `<p class="definition">${esc(help.help.scope)}</p><p class="form-hint">Ends ${esc(new Date(help.help.expiresAt).toLocaleString())}</p>` : ""}
+    ${selected ? '<p class="form-hint">Coordination only. Work and permissions stay unchanged.</p>' : ""}
+    <div class="portable-actions">${context?.availability.canOffer ? helpButton(item, "offer-help", "Offer help") : ""}${help?.canPublish && invitation ? helpButton(item, "help", "Edit") : ""}${help?.canWithdraw ? helpButton(item, "end-help", "End request") : ""}</div>
+    ${capacityText ? `<p class="form-hint">${capacityText}</p>` : ""}
+    ${!context ? '<p class="form-hint">Offers unavailable.</p>' : ""}
+    ${live.length ? `<ul class="help-offers">${[...live].sort((a, b) => Number(b.offer.status === "selected") - Number(a.offer.status === "selected")).map(rowHTML).join("")}</ul>` : ""}
+    ${past.length ? `<details class="offer-history"><summary data-focus-key="offer-history:${esc(item.id)}">Past offers (${past.length})</summary><ul class="help-offers">${past.map(rowHTML).join("")}</ul></details>` : ""}</details>`;
 }
 function claimStateLabel(i, now = Date.now()) {
   if (activeClaim(i, now)) return "not expired";
@@ -1513,6 +1560,8 @@ function producerField() {
   return `<label>Produced by<select name="producerId" required aria-describedby="producer-attribution-help"><option value="">Choose producer</option>${selfOption}<option value="__unknown__">Unknown / not reported</option>${otherOptions}</select></label><p id="producer-attribution-help" class="form-hint">You submit this result. Credit its producer, or choose Unknown.</p>`;
 }
 const actionSpecs = {
+  "offer-help": [T.HELP_OFFER_OPENED, "Offer help", ""],
+  ...Object.fromEntries(Object.keys(offerStatuses).map(action => [action, [T.HELP_OFFER_UPDATED, offerLabels[action], ""]])),
   help: [T.WORK_HELP_UPDATED, "Ask for help", ""],
   "end-help": [T.WORK_HELP_UPDATED, "End this help request?", "<p>People and agents will no longer find this request. This does not stop work already underway.</p>"],
   accept: [T.WORK_ACCEPTED, "Accept this work?", "<p>Accept responsibility for the stated outcome. This does not run any tools.</p>"],
@@ -1554,10 +1603,11 @@ $("#work-list").addEventListener("click", e => {
     return;
   }
   const button = e.target.closest("[data-action]"); if (!button || busy) return;
-  openWorkAction(state.workItems[button.dataset.workId], button.dataset.action);
+  openWorkAction(state.workItems[button.dataset.workId], button.dataset.action, null, button.dataset.offerId);
 });
-function openWorkAction(item, action, draftMessageId = null) {
+function openWorkAction(item, action, draftMessageId = null, offerId = null) {
   if (pendingAction?.uncertain) { resumeAction(); return; }
+  if (!item || !Object.hasOwn(actionSpecs, action)) return;
   const [type, , fields] = actionSpecs[action];
   actionEpoch++;
   pendingAction = { type, action, workId: item.id, revision: item.revision, draftMessageId, receipt: item.receipt ? { completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion } : null, retry: null, uncertain: false, error: "" };
@@ -1565,6 +1615,7 @@ function openWorkAction(item, action, draftMessageId = null) {
     pendingAction.helpRevision = item.helpWanted?.revision ?? 0;
     pendingAction.accountableRevision = state.members[item.accountableMemberId]?.revision;
   }
+  if (isOfferAction(action)) pinOffer(pendingAction, item, offerId);
   $("#action-fields").innerHTML = action === "complete" ? producerField() + (draftMessageId ? area("summary", "Summary") + area("nextAction", "Next step") : fields) : fields;
   if (action === "help") {
     const keep = item.helpWanted?.status === "open" && Date.parse(item.helpWanted.expiresAt) > Date.now();
@@ -1575,6 +1626,13 @@ function openWorkAction(item, action, draftMessageId = null) {
     pendingAction.helpExpiresAt = keep ? item.helpWanted.expiresAt : null;
   }
   if (action === "end-help") $("#action-fields").insertAdjacentHTML("afterbegin", '<p id="help-current" class="definition"></p>');
+  if (isOfferAction(action)) {
+    $("#action-fields").innerHTML = '<p id="offer-current" class="definition"></p>'
+      + (action === "offer-help" ? '<label>How can you help?<textarea name="plan" required rows="3" maxlength="600"></textarea></label>'
+        : '<p id="offer-plan" class="definition"></p><label>Note<textarea name="reason" required rows="2" maxlength="600"></textarea></label>')
+      + (action === "release-offer" ? '<label class="checkbox-label"><input name="externalActivityUnverified" type="checkbox" required> Outside work may still be running.</label>'
+        : '<p class="form-hint">Coordination only. No work starts or permissions change.</p>');
+  }
   renderActionContext(item, action);
   $("#action-dialog").showModal();
   syncActionForm();
@@ -1583,6 +1641,11 @@ function openWorkAction(item, action, draftMessageId = null) {
 // A background update must never silently retarget a review or approval.
 function renderActionContext(item, action) {
   if (action === "end-help") currentHelp().textContent = item.helpWanted?.scope ?? "";
+  if (isOfferAction(action)) {
+    offerField("current").textContent = item.helpWanted?.scope ?? "";
+    const offer = state.helpOffers?.[pendingAction.offerId];
+    if (offerField("plan")) offerField("plan").textContent = offer ? `${memberLabel(offer.offererId)} · ${offer.plan}` : "Offer unavailable";
+  }
   $("#review-brief").hidden = !["verify", "decide"].includes(action);
   setText("#review-criteria", $("#review-brief").hidden ? "" : item.definitionOfDone);
   setText("#review-summary", $("#review-brief").hidden ? "" : item.receipt?.summary ?? "");
@@ -1596,7 +1659,7 @@ function renderActionContext(item, action) {
   setText("#decision-review-version", review ? `Evidence ${review.evidenceVersion}` : "");
   $("#action-title").textContent = action === "block" && item.state === S.COMPLETED ? "Reopen for rework"
     : action === "verify" && item.independentVerificationRequired && hasIndependentProducer(item) ? "Record an independent check" : actionSpecs[action][1];
-  $("#action-context").textContent = `${item.title} · revision ${item.revision}${item.receipt ? item.receipt.nativeText ? " · stored text" : ` · evidence ${item.receipt.evidenceVersion}` : ""}`;
+  $("#action-context").textContent = isOfferAction(action) ? item.title : `${item.title} · revision ${item.revision}${item.receipt ? item.receipt.nativeText ? " · stored text" : ` · evidence ${item.receipt.evidenceVersion}` : ""}`;
   const evidence = $("#action-evidence");
   let evidenceUrl = null;
   try {
@@ -1641,6 +1704,11 @@ function loadActionText(item, action) {
 }
 function actionAvailable(entry) {
   const item = state?.workItems[entry.workId];
+  if (item && isOfferAction(entry.action)) {
+    if (entry.action === "offer-help") return offersView(item)?.availability.canOffer === true;
+    const key = { "select-offer": "canSelect", "decline-offer": "canDecline", "withdraw-offer": "canWithdraw", "release-offer": "canRelease" }[entry.action];
+    return offerChoice(entry)?.[key] === true;
+  }
   if (item && isHelpAction(entry.action)) {
     const help = helpView(item);
     return entry.action === "help" ? help?.canPublish === true : help?.canWithdraw === true;
@@ -1649,6 +1717,11 @@ function actionAvailable(entry) {
 }
 function actionChanged(entry) {
   const item = state?.workItems[entry.workId];
+  if (isOfferAction(entry.action)) return item?.revision !== entry.revision
+    || (item?.helpWanted?.revision ?? 0) !== entry.helpRevision || (item?.helpWanted?.eventId ?? null) !== entry.helpEventId
+    || (state?.helpOffers?.[entry.offerId]?.revision ?? null) !== entry.offerRevision
+    || state?.members[session.member.id]?.revision !== entry.viewerRevision
+    || (state?.members[state?.helpOffers?.[entry.offerId]?.offererId]?.revision ?? null) !== entry.offererRevision;
   return item?.revision !== entry.revision || isHelpAction(entry.action) && (
     (item?.helpWanted?.revision ?? 0) !== entry.helpRevision
     || state?.members[item?.accountableMemberId]?.revision !== entry.accountableRevision);
@@ -1659,7 +1732,7 @@ function syncActionForm() {
   const entry = pendingAction, item = state.workItems[entry.workId], changed = actionChanged(entry);
   const available = actionAvailable(entry), save = $("#action-form button[type='submit']");
   for (const field of $("#action-fields").querySelectorAll("input,textarea,select")) field.disabled = entry.uncertain;
-  save.textContent = entry.uncertain ? "Retry original save" : entry.action === "help" ? "Publish request" : entry.action === "end-help" ? "End request" : "Save record";
+  save.textContent = entry.uncertain ? "Retry original save" : offerLabels[entry.action] ?? (entry.action === "help" ? "Publish request" : entry.action === "end-help" ? "End request" : "Save record");
   save.disabled = !entry.uncertain && (changed || entry.needsReview || !available || entry.textRequired && !entry.text);
   $("#cancel-action").textContent = entry.uncertain ? "Close" : "Cancel";
   $("#refresh-action").hidden = entry.uncertain || !(changed || entry.needsReview || !available);
@@ -1698,6 +1771,12 @@ $("#refresh-action").addEventListener("click", () => {
     const changedHelp = isHelpAction(entry.action) && actionChanged(entry);
     entry.revision = item.revision; entry.receipt = receipt; entry.retry = null; entry.needsReview = false;
     entry.error = changedResult ? "Result changed. Notes kept; inspect this version and choose again." : "";
+    if (isOfferAction(entry.action)) {
+      pinOffer(entry, item);
+      entry.error = "Current request loaded. Review it alongside your note before saving.";
+      const acknowledgement = $("#action-fields [name=externalActivityUnverified]");
+      if (acknowledgement) acknowledgement.checked = false;
+    }
     if (isHelpAction(entry.action)) {
       entry.helpRevision = item.helpWanted?.revision ?? 0;
       entry.accountableRevision = state.members[item.accountableMemberId]?.revision;
@@ -1722,7 +1801,7 @@ function restoreActionFocus(entry) {
   setTimeout(() => {
     if (!state || epoch !== actionEpoch || !sameSession(generation, roomId, memberId)) return;
     const card = workRecord(entry.workId);
-    const key = `work-action:${entry.workId}:${entry.action}`;
+    const key = `work-action:${entry.workId}:${entry.action}${isOfferAction(entry.action) && entry.action !== "offer-help" ? ":" + entry.offerId : ""}`;
     const action = card ? [...card.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === key) : null;
     focusRecord(action || card);
   }, 0);
@@ -1748,6 +1827,13 @@ $("#action-form").addEventListener("submit", e => {
   if (!entry.uncertain && (entry.needsReview || entry.textRequired && !entry.text || actionChanged(entry) || !actionAvailable(entry))) { syncActionForm(); return; }
   if (!entry.uncertain) {
     const data = { workItemId: entry.workId, expectedRevision: entry.revision, ...fields };
+    if (isOfferAction(entry.action)) {
+      data.offerId = entry.offerId;
+      if (entry.action === "offer-help" || entry.action === "select-offer") Object.assign(data, { expectedHelpRevision: entry.helpRevision, helpEventId: entry.helpEventId });
+      if (entry.action !== "offer-help") Object.assign(data, { expectedOfferRevision: entry.offerRevision, status: offerStatuses[entry.action] });
+      if (entry.action === "release-offer") data.externalActivityUnverified = fields.externalActivityUnverified === "on";
+      try { validateHelpOfferData(entry.type, data); } catch { entry.error = "Add a short note and review the required choice."; syncActionForm(); return; }
+    }
     if (isHelpAction(entry.action)) {
       data.expectedHelpRevision = entry.helpRevision;
       data.status = entry.action === "help" ? "open" : "withdrawn";
@@ -1781,7 +1867,7 @@ $("#action-form").addEventListener("submit", e => {
       entry.needsReview = !entry.uncertain && error.code === "command_rejected" && error.status === 409;
       entry.error = error.message; return;
     }
-    closeActionDialog({ returnFocus: false, confirmed: true }); notice(isHelpAction(entry.action) ? "Help request saved." : "Record saved.");
+    closeActionDialog({ returnFocus: false, confirmed: true }); notice(isHelpAction(entry.action) ? "Help request saved." : isOfferAction(entry.action) ? "Offer updated." : "Record saved.");
     const settledEpoch = actionEpoch;
     setTimeout(() => { if (actionEpoch === settledEpoch && sameSession(generation, roomId, memberId)) revealWork(entry.workId); }, 0);
   }, { failureHint: "Your entries were kept; try again." }).then(() => {
@@ -1931,6 +2017,7 @@ function renderReturnBrief() {
       draftsByWork.get(message.workItemId).push(message);
     }
     renderContent("#work-list", items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(i => workCard(i, now, draftsByWork.get(i.id) ?? [])).join("") || `<p class="empty-note">${can("steer") ? "Turn a message into work, or start something new." : "Suggest work in the conversation. The owner can create it."}</p>`);
+    syncActionForm();
     const expiry = items.flatMap(item => [item.claim?.status === "active" ? Date.parse(item.claim.expiresAt) : NaN,
       ...(item.helpWanted?.status === "open" ? [Date.parse(item.helpWanted.openedAt), Date.parse(item.helpWanted.expiresAt)] : [])]).filter(at => at > now).sort((a, b) => a - b)[0];
     if (expiry && document.visibilityState !== "hidden") returnClock = setTimeout(renderReturnBrief, Math.max(100, Math.min(60000, expiry - now)));

@@ -326,7 +326,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         const helpContext = req.headers["x-project-room-help-context"];
         if (helpContext !== undefined && (helpContext !== "1" || !params.has("view"))) reject(422, "invalid_help_context", "Choose version 1 with the current work view");
-        return json(res, 200, store.snapshot(selected.token, roomId, fence, params.has("view") ? "work" : "full", helpContext === "1"));
+        const offerContext = req.headers["x-project-room-offer-context"];
+        if (offerContext !== undefined && (offerContext !== "1" || params.has("view"))) reject(422, "invalid_offer_context", "Choose version 1 with the full room view");
+        return json(res, 200, store.snapshot(selected.token, roomId, fence, params.has("view") ? "work" : "full", helpContext === "1", offerContext === "1"));
       }
       if (["reply-requests", "reply-context", "reply-history"].includes(route) && req.method === "GET") {
         const params = url.searchParams, names = route === "reply-requests" ? ["direction", "status"]
