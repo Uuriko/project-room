@@ -1,10 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
 import { applyEvent, emptyRoomState, event } from "../src/events.js";
 import { HELP_MAX_DURATION_MS, HELP_SCOPE_LIMIT, WORK_HELP_UPDATED, helpFromEvent, validateHelp, validateHelpData, workHelpContext } from "../src/work-help.js";
-import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
-import { auditRecovery } from "../server/recovery.mjs";
 
 const NOW = "2026-09-08T12:00:00.000Z";
 const later = ms => new Date(Date.parse(NOW) + ms).toISOString();
@@ -28,9 +25,8 @@ function fixture({ mode = "read", accountableId = "producer", accepted = true } 
     expectedHelpRevision: state.workItems.job.helpWanted?.revision ?? 0, status: "open", scope, expiresAt: later(3600000), ...changes });
   const withdrawal = () => ({ workItemId: "job", expectedRevision: state.workItems.job.revision,
     expectedHelpRevision: state.workItems.job.helpWanted?.revision ?? 0, status: "withdrawn" });
-  // Deliberately exercise the new pure contract, not a fictional service route.
-  // Current schema12 continues to reject this event; the integration gate below
-  // prevents accidentally enabling it before writer/recovery qualification.
+  // Unit checks exercise pure construction; service/migration tests separately
+  // establish authenticated writes and recovery rather than assuming them here.
   const help = (data = open(), actor = accountableId, at = NOW) => {
     const e = incoming(WORK_HELP_UPDATED, actor, data, at), result = helpFromEvent(state, e);
     state = structuredClone(state); state.workItems.job.helpWanted = result;
@@ -243,13 +239,12 @@ test("strict contract rejects field smuggling, wrong rooms and malformed or cros
   assert.throws(() => validateHelp({ ...valid, createdAt: later(1) }));
 });
 
-test("schema12 reducer and service still refuse help events without writing", t => {
-  const pure = fixture(); assert.throws(() => applyEvent(pure.state, pure.incoming(WORK_HELP_UPDATED, "producer", pure.open())), /Unsupported/);
-  const f = createAcceptanceFixture();
-  t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
-  const before = auditRecovery(f.store).dataSha256;
-  assert.throws(() => f.store.command(f.keys.producer, "commons", { id: "future-help", type: WORK_HELP_UPDATED,
-    data: { ...pure.open(), workItemId: "test-handoff" } }));
-  assert.equal(auditRecovery(f.store).dataSha256, before);
-  assert.equal(f.store.db.prepare("PRAGMA user_version").get().user_version, 12);
+test("registered help event is replayable and exactly idempotent without changing work revision", () => {
+  const f = fixture(), before = structuredClone(f.state), e = f.incoming(WORK_HELP_UPDATED, "producer", f.open());
+  const saved = applyEvent(f.state, e);
+  assert.equal(saved.workItems.job.helpWanted.eventId, e.id);
+  assert.equal(saved.workItems.job.revision, before.workItems.job.revision);
+  assert.equal(saved.eventLog.length, before.eventLog.length + 1);
+  assert.deepEqual(applyEvent(saved, e), saved); assert.deepEqual(f.state, before);
+  assert.throws(() => applyEvent(saved, { ...e, data: { ...e.data, scope: "Different" } }), /Conflicting/);
 });

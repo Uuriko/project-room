@@ -2,6 +2,7 @@ import { REACTIONS } from "./conversation.js";
 import { proposalContext, nativeTextEvidence } from "./work-packet.js";
 import { CHARTER_TYPE, charterFromEvent } from "./room-charter.js";
 import { REPLY_CANCELLED, prepareReplyPost, recordReplyPost, cancelReplyRequest } from "./reply-requests.js";
+import { WORK_HELP_UPDATED, helpFromEvent } from "./work-help.js";
 
 export const EVENT_TYPES = Object.freeze({
   ROOM_CREATED: "room.created",
@@ -13,6 +14,7 @@ export const EVENT_TYPES = Object.freeze({
   REPLY_REQUEST_CANCELLED: REPLY_CANCELLED,
   MESSAGE_REACTION_SET: "message.reaction_set",
   WORK_PROPOSED: "work.proposed",
+  WORK_HELP_UPDATED,
   WORK_ACCEPTED: "work.accepted",
   WORK_STARTED: "work.started",
   WORK_BLOCKED: "work.blocked",
@@ -115,6 +117,10 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.REPLY_REQUEST_CANCELLED]: cancelReplyRequest,
     [EVENT_TYPES.MESSAGE_REACTION_SET]: setMessageReaction,
     [EVENT_TYPES.WORK_PROPOSED]: proposeWork,
+    [EVENT_TYPES.WORK_HELP_UPDATED]: (state, incoming) => {
+      const help = helpFromEvent(state, incoming);
+      state.workItems[help.workItemId].helpWanted = help;
+    },
     [EVENT_TYPES.WORK_ACCEPTED]: acceptWork,
     [EVENT_TYPES.WORK_STARTED]: startWork,
     [EVENT_TYPES.WORK_BLOCKED]: blockWork,

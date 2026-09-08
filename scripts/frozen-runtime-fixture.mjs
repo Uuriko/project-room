@@ -6,6 +6,7 @@ export const v8ConnectionBaseline = "efa918be3478f88ff0120dad8727a9bb366c3d25";
 export const v9TextBaseline = "06551bb9255aefd92e945df158f4db47066606da";
 export const v10CharterBaseline = "b538ee8792abee6dfefc152fd9c90e73ba4d4bc5";
 export const v11ReplyBaseline = "b49880ae6e5376f03b4ff79f6270b3e6576c55d8";
+export const v12HelpBaseline = "cf377f3ad4aba4dd1a31ccbd7691b3a7393c8f16";
 export async function frozenRecoveryFixture(repository, packagePath, commit = v8ConnectionBaseline) {
   const source = execFileSync("git", ["show", `${commit}:scripts/recovery-fixture.mjs`], { cwd: repository, encoding: "utf8" })
     .replace(/from "\.\.\/([^"]+)"/g, (_, path) => `from ${JSON.stringify(pathToFileURL(join(packagePath, path)).href)}`);

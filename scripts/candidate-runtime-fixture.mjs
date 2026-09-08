@@ -10,6 +10,7 @@ export function candidateRuntimeFixture(repository, directory) {
   createRuntimePackage({ repository, commit: head, destination: baseline });
   const paths = new Set(JSON.parse(readFileSync(join(baseline, 'runtime-manifest.json'))).files.map(entry => entry.path));
   paths.add('client/request-notices.mjs');
+  paths.add('src/work-help.js'); paths.add('server/work-help.mjs');
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
   // No private state, credentials, docs or real checkout Git metadata.
   for (const path of paths) {

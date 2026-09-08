@@ -19,6 +19,8 @@ import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
 import { charterContext, charterFromEvent } from "../src/room-charter.js";
 import { REPLY_FIELDS, REPLY_POLICY_VERSION, replyPostMode } from "../src/reply-requests.js";
 import { ReplyRequests } from "./reply-requests.mjs";
+import { validateHelpData } from "../src/work-help.js";
+import { auditWorkHelp } from "./work-help.mjs";
 
 export class ServiceError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -162,6 +164,7 @@ const shapes = {
   [T.MESSAGE_REACTION_SET]: "messageId reaction active",
   [T.WORK_PROPOSED]: "workItemId title definitionOfDone accountableMemberId verifierMemberId independentVerificationRequired ownerDecisionRequired humanDecisionMakerId mode sourceMessageId",
   [T.WORK_ACCEPTED]: work,
+  [T.WORK_HELP_UPDATED]: `${work} expectedHelpRevision status scope expiresAt`,
   [T.WORK_STARTED]: `${work} resolvedBlocker`,
   [T.WORK_BLOCKED]: `${work} reason nextAction`,
   [T.WORK_BLOCKER_RESOLVED]: `${work} resolution`,
@@ -182,12 +185,15 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "basisRevision", "expectedRequestRevision", "contextSequence"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed"].includes(name) ? "array" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed"].includes(name) ? "array" : "string";
     if (type === "array" ? !Array.isArray(value) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (Buffer.byteLength(JSON.stringify(command)) > 16384) fail(413, "too_large", "Command is too large");
   if (command.type === T.MESSAGE_POSTED) {
     try { replyPostMode(command.data); } catch (error) { fail(422, "invalid_command", error.message); }
+  }
+  if (command.type === T.WORK_HELP_UPDATED) {
+    try { validateHelpData(command.data); } catch (error) { fail(422, "invalid_command", error.message); }
   }
 }
 
@@ -201,7 +207,7 @@ export class RoomStore {
     this.agentConnections = new AgentConnections(this);
     this.replyRequests = new ReplyRequests(this);
     const version = this.storagePlatform.version(this.db);
-    const supported = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, STORE_SCHEMA_VERSION]);
+    const supported = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, STORE_SCHEMA_VERSION]);
     const hasSchema = version === 0 && this.storagePlatform.hasSchema(this.db);
     if (!supported.has(version) || hasSchema) {
       this.db.close();
@@ -216,6 +222,7 @@ export class RoomStore {
         this.shareLinks.verify();
         this.reminders.verifySchema();
         this.agentConnections.verify();
+        this.verifyHelpHistory();
         return;
       } catch (error) { this.db.close(); throw error; }
     }
@@ -232,6 +239,11 @@ export class RoomStore {
         || this.db.prepare("SELECT 1 FROM rooms WHERE json_type(projection,'$.replyRequests') IS NOT NULL LIMIT 1").get();
       const checkpointCollision = version >= 2 && this.db.prepare("SELECT 1 FROM projection_checkpoints WHERE json_type(projection,'$.replyRequests') IS NOT NULL LIMIT 1").get();
       if (collision || checkpointCollision) throw new Error("Legacy reply request marker requires operator reconciliation");
+    }
+    if (version > 0 && version < 13) {
+      const collision = table => this.db.prepare(`SELECT 1 FROM ${table}, json_each(projection,'$.workItems') AS item WHERE json_type(item.value,'$.helpWanted') IS NOT NULL LIMIT 1`).get();
+      if (collision("rooms") || version >= 2 && collision("projection_checkpoints")
+        || this.db.prepare("SELECT 1 FROM events WHERE json_extract(body,'$.type')='work.help_updated' LIMIT 1").get()) throw new Error("Legacy help invitation field requires operator reconciliation");
     }
     if (version === 0) { this.db.exec(`
       CREATE TABLE rooms (id TEXT PRIMARY KEY, sequence INTEGER NOT NULL, projection TEXT NOT NULL);
@@ -261,7 +273,18 @@ export class RoomStore {
       this.shareLinks.verify();
       this.reminders.verifySchema();
       this.agentConnections.verify();
+      this.verifyHelpHistory();
     }); } catch (error) { this.db.close(); throw error; }
+  }
+
+  verifyHelpHistory() {
+    return this.readTransaction(() => {
+      for (const row of this.db.prepare("SELECT id,projection FROM rooms ORDER BY id").all()) {
+        const history = this.db.prepare("SELECT sequence,body FROM events WHERE room_id=? ORDER BY sequence").all(row.id);
+        const checkpoint = this.db.prepare("SELECT sequence,projection FROM projection_checkpoints WHERE room_id=?").get(row.id);
+        auditWorkHelp(JSON.parse(row.projection), history, checkpoint);
+      }
+    });
   }
 
   // v2 had only Room-local member identities. Give each historical human membership its
@@ -1112,8 +1135,10 @@ export class RoomStore {
       const requestMode = command.type === T.MESSAGE_POSTED && replyPostMode(command.data);
       const endingRequest = (requestMode === "respond" || command.type === T.REPLY_REQUEST_CANCELLED)
         && room.state.replyRequests?.[command.data.responseToRequestId ?? command.data.requestMessageId]?.status === "open";
-      // At capacity, each remaining membership/request can still be ended once.
-      if ((room.sequence >= 10000 && !endingAccess && !endingRequest) || (command.type === T.MEMBER_ADDED && Object.keys(room.state.members).length >= 100) || (command.type === T.WORK_PROPOSED && Object.keys(room.state.workItems).length >= 500)) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
+      const endingHelp = command.type === T.WORK_HELP_UPDATED && command.data.status === "withdrawn"
+        && room.state.workItems[command.data.workItemId]?.helpWanted?.status === "open";
+      // At capacity, each remaining membership/request/invitation can still be ended once.
+      if ((room.sequence >= 10000 && !endingAccess && !endingRequest && !endingHelp) || (command.type === T.MEMBER_ADDED && Object.keys(room.state.members).length >= 100) || (command.type === T.WORK_PROPOSED && Object.keys(room.state.workItems).length >= 500)) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       const memberAuthorityEvent = [T.MEMBER_ADDED, T.MEMBER_ACCESS_CHANGED].includes(command.type);
       const incoming = event({
         type: command.type, roomId, actorId: auth.member.id, at: new Date(this.now()).toISOString(),
@@ -1138,7 +1163,7 @@ export class RoomStore {
         if (conflict) fail(409, "claim_conflict", `Scope is reserved by work ${conflict.id}. Coordinate or release that reservation first; no new claim was saved.`);
       }
       const projection = JSON.stringify(state);
-      if (Buffer.byteLength(projection) > 4 * 1024 * 1024 && !endingAccess && !endingRequest) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
+      if (Buffer.byteLength(projection) > 4 * 1024 * 1024 && !endingAccess && !endingRequest && !endingHelp) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
       const sequence = room.sequence + 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("INSERT INTO commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, command.id, fingerprint, sequence);

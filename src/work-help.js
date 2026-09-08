@@ -1,5 +1,5 @@
 // Explicit in-room contribution invitations. Not assignment, execution or payment.
-// Unregistered until the writer migration and recovery path support this event.
+// Storage registration requires the matching writer13 migration and recovery audit.
 export const WORK_HELP_UPDATED = "work.help_updated";
 export const HELP_SCOPE_LIMIT = 600;
 export const HELP_MAX_DURATION_MS = 7 * 24 * 60 * 60 * 1000;

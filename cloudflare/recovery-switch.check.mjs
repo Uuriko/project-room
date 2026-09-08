@@ -8,10 +8,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { build } from 'esbuild';
 import { Miniflare, Response } from 'miniflare';
-import { createRuntimePackage, verifyRuntimePackage, publicAssets } from '../scripts/runtime-package.mjs';
-import { frozenRecoveryFixture, v8ConnectionBaseline } from '../scripts/frozen-runtime-fixture.mjs';
-import { candidateRuntimeFixture } from '../scripts/candidate-runtime-fixture.mjs';
-import { createRecoveryFixture as currentRecoveryFixture } from '../scripts/recovery-fixture.mjs';
+import { createRuntimePackage, verifyRuntimePackage } from '../scripts/runtime-package.mjs';
+import { frozenRecoveryFixture, v8ConnectionBaseline, v12HelpBaseline } from '../scripts/frozen-runtime-fixture.mjs';
 import { currentAttention } from '../client/attention-inbox.mjs';
 
 const baseline = '7075c1ddfe5ced3ae970f817dbfd0fc3e88a13b6';
@@ -23,7 +21,8 @@ const observerState = directory => {
   finally { db.close(); }
 };
 
-for (const version of [8, 12]) test(`schema${version} packages switch candidate → pause → fallback → candidate on the same populated Workers object`, { timeout: 90000 }, async t => {
+// Preserve historical switch proofs. Neither schema12 package is a schema13 fallback.
+for (const version of [8, 12]) test(`historical schema${version} packages switch candidate → pause → fallback → candidate on the same populated Workers object`, { timeout: 90000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), `room-v${version}-switch-`));
   let fixture, mf;
   try {
@@ -43,7 +42,7 @@ for (const version of [8, 12]) test(`schema${version} packages switch candidate 
         return [label, { path, receipt }];
       }));
     } else {
-      const candidate = version === 12 ? candidateRuntimeFixture(repository, directory)
+      const candidate = version === 12 ? { repository, commit: v12HelpBaseline }
         : { repository, commit: v8ConnectionBaseline };
       packages = new Map([['candidate', candidate], ['baseline', { repository, commit: fallback }]].map(([label, source]) => {
         const path = join(directory, label);
@@ -55,7 +54,7 @@ for (const version of [8, 12]) test(`schema${version} packages switch candidate 
     assert.notDeepEqual(readFileSync(join(packages.get('candidate').path, differingRuntime)),
       readFileSync(join(packages.get('baseline').path, differingRuntime)), 'The actual application runtimes must differ');
     const candidatePath = packages.get('candidate').path;
-    const createRecoveryFixture = version === 12 ? currentRecoveryFixture : await frozenRecoveryFixture(repository, candidatePath);
+    const createRecoveryFixture = await frozenRecoveryFixture(repository, candidatePath, packages.get('candidate').receipt.sourceCommit);
     const { auditRecovery } = await import(pathToFileURL(join(candidatePath, 'server/recovery.mjs')));
     const { applicationTables } = await import(pathToFileURL(join(candidatePath, 'server/writer-fence.mjs')));
     fixture = createRecoveryFixture(join(directory, 'seed.sqlite'));
@@ -90,6 +89,7 @@ for (const version of [8, 12]) test(`schema${version} packages switch candidate 
     const origin = 'https://room.example.test';
     const scripts = new Map();
     for (const [label, pkg] of packages) {
+      const publicAssets = JSON.parse(readFileSync(join(pkg.path, 'runtime-manifest.json'))).publicAssets;
       // Test-only wrapper around each preserved production entrypoint. Synthetic
       // rows seed equivalent data; this is NOT a product storage-conversion API.
       const source = `
@@ -245,7 +245,7 @@ for (const version of [8, 12]) test(`schema${version} packages switch candidate 
     assert.deepEqual(await audit(), baselineData, 'Returning to candidate and retrying does not change any data');
     for (const [label, pkg] of packages) assert.deepEqual(verifyRuntimePackage(pkg.path), pkg.receipt, label);
     t.diagnostic(JSON.stringify({ candidate: packages.get('candidate').receipt, baseline: packages.get('baseline').receipt,
-      schemaVersion: version, syntheticCandidate: version === 12 && !retained, retainedPackages: Boolean(retained), idlePermit: 0, rooms: expected.rooms, tables: expected.tables.length,
+      schemaVersion: version, syntheticCandidate: false, retainedPackages: Boolean(retained), idlePermit: 0, rooms: expected.rooms, tables: expected.tables.length,
       seed: expected.dataSha256, afterCandidate: candidateData.dataSha256, afterBaseline: baselineData.dataSha256,
       boundaries: 'Local workerd app-switch only. No provider PITR, live namespace, deployment or current-authority certification.' }));
   } finally {

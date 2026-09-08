@@ -8,9 +8,9 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
 import { createRuntimePackage } from '../scripts/runtime-package.mjs';
-import { frozenRecoveryFixture, v8ConnectionBaseline, v9TextBaseline, v10CharterBaseline, v11ReplyBaseline } from '../scripts/frozen-runtime-fixture.mjs';
+import { frozenRecoveryFixture, v8ConnectionBaseline, v9TextBaseline, v10CharterBaseline, v11ReplyBaseline, v12HelpBaseline } from '../scripts/frozen-runtime-fixture.mjs';
 
-for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline], [10, v10CharterBaseline], [11, v11ReplyBaseline]]) test(`real Workers v${sourceVersion}→v12 permit replacement, rollback, old-writer refusal and restart`, { timeout: 60000 }, async () => {
+for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline], [10, v10CharterBaseline], [11, v11ReplyBaseline], [12, v12HelpBaseline]]) test(`real Workers v${sourceVersion}→v13 permit replacement, rollback, old-writer refusal and restart`, { timeout: 60000 }, async () => {
   const directory = mkdtempSync(join(tmpdir(), 'room-agent-worker-upgrade-')), repository = fileURLToPath(new URL('../', import.meta.url));
   const destination = join(directory, 'old'); let f, mf;
   try {
@@ -47,7 +47,7 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
             let observed;
             AgentConnections.prototype.verifyHistory=()=>{observed={version:version(),permit:permit()};throw new Error('synthetic failure');};
             try{assert.throws(current,{code:'connection_integrity_error'});}finally{AgentConnections.prototype.verifyHistory=verify;}
-            assert.deepEqual(observed,{version:12,permit:12},'fault occurs after installing the new writer');
+            assert.deepEqual(observed,{version:13,permit:13},'fault occurs after installing the new writer');
             assert.equal(version(),${sourceVersion});assert.equal(permit(),0);assert.deepEqual(catalog(),before);assert.deepEqual(data(),records);assert.equal(oldWrite().changes,1);
             return Response.json({rolledBack:true});
           }
@@ -57,7 +57,7 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
             return Response.json({rejected:true});
           }
           if(path==='/upgrade') {
-            const before=data(), store=current(); assert.equal(version(),12);assert.equal(permit(),0);assert.deepEqual(data(),before);
+            const before=data(), store=current(); assert.equal(version(),13);assert.equal(permit(),0);assert.deepEqual(data(),before);
             assert.throws(oldWrite,/reconciliation/); assert.throws(()=>new OldStore(null,{database:new OldDatabase(this.ctx.storage),storagePlatform:oldStorage}),/newer than this service/);
             assert.equal(store.readTransaction(()=>permit()),0);assert.throws(()=>store.readTransaction(()=>store.createAccount('forbidden')),/read-only/);
             assert.equal(store.db.prepare("UPDATE accounts SET revision=revision WHERE id='missing'").run().changes,0);
@@ -78,10 +78,19 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
               replyToId:question.data.messageId,toMemberId:'owner',workItemId:null}};
             const answered=store.command(this.env.AGENT,'commons',answer);
             assert.equal(store.room('commons').state.replyRequests[question.data.messageId].terminalActorId,'agent');
-            return Response.json({upgraded:true,details,disconnect,receipt:result.receipt,charterCommand,charterSaved,question,asked,answer,answered,cursors,audit:auditRecovery(store)});
+            for (const command of [
+              {id:'help-work',type:'work.proposed',data:{workItemId:'help-task',title:'Agenda',definitionOfDone:'Two items',accountableMemberId:'owner'}},
+              {id:'help-accept',type:'work.accepted',data:{workItemId:'help-task',expectedRevision:0}}
+            ]) store.command(f.token,'commons',command,f.session.sessionBinding);
+            const helpCommand={id:'help-open',type:'work.help_updated',data:{workItemId:'help-task',expectedRevision:1,expectedHelpRevision:0,status:'open',scope:'Suggest two items 🪷',expiresAt:new Date(Date.now()+3600000).toISOString()}};
+            const helpSaved=store.command(f.token,'commons',helpCommand,f.session.sessionBinding);
+            const helpWithdraw={id:'help-withdraw',type:'work.help_updated',data:{workItemId:'help-task',expectedRevision:1,expectedHelpRevision:1,status:'withdrawn'}};
+            const helpClosed=store.command(f.token,'commons',helpWithdraw,f.session.sessionBinding);
+            assert.equal(store.room('commons').state.workItems['help-task'].revision,1);
+            return Response.json({upgraded:true,details,disconnect,receipt:result.receipt,charterCommand,charterSaved,question,asked,answer,answered,helpCommand,helpSaved,helpWithdraw,helpClosed,cursors,audit:auditRecovery(store)});
           }
           if(path==='/restart') {
-            const proof=await request.json(),store=current();assert.equal(version(),12);assert.equal(permit(),0);
+            const proof=await request.json(),store=current();assert.equal(version(),13);assert.equal(permit(),0);
             assert.deepEqual(store.agentConnections.apply(f.token,'commons',proof.details,f.session.sessionBinding).receipt,proof.receipt);
             assert.equal(store.agentConnections.apply(f.token,'commons',proof.disconnect,f.session.sessionBinding).duplicate,true);
             assert.equal(store.agentConnections.list(f.token,'commons',f.session.sessionBinding).connections.find(c=>c.memberId==='worker-agent').status,'disconnected');
@@ -89,6 +98,9 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
             assert.equal(store.charter(f.token,'commons',{revision:proof.charterCommand.data.expectedRevision+1,expectedSessionBinding:f.session.sessionBinding}).charter.purpose,proof.charterCommand.data.purpose);
             assert.equal(store.command(f.token,'commons',proof.question,f.session.sessionBinding).event.id,proof.asked.event.id);
             assert.equal(store.command(this.env.AGENT,'commons',proof.answer).event.id,proof.answered.event.id);
+            assert.equal(store.command(f.token,'commons',proof.helpCommand,f.session.sessionBinding).event.id,proof.helpSaved.event.id);
+            assert.equal(store.command(f.token,'commons',proof.helpWithdraw,f.session.sessionBinding).event.id,proof.helpClosed.event.id);
+            assert.equal(store.room('commons').state.workItems['help-task'].helpWanted.status,'withdrawn');
             assert.equal(store.room('commons').state.messages.find(m=>m.id===proof.answer.data.messageId).body,proof.answer.data.body);
             assert.deepEqual(store.db.prepare('SELECT * FROM cursors ORDER BY room_id,member_id').all(),proof.cursors);
             assert.deepEqual(auditRecovery(store),proof.audit);return Response.json({recovered:true});

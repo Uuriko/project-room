@@ -20,8 +20,8 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim();
   const destination = join(directory, "runtime");
   const receipt = createRuntimePackage({ repository, commit, destination });
-  assert.equal(receipt.schemaVersion, 12); assert.deepEqual(publicAssets, assetPaths);
-  assert.equal(receipt.files, 47 + ["server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "src/agent-connections.js", "client/mcp-stdio.mjs", "scripts/agent-mcp.mjs", "client/work-actions.mjs", "server/work-discussion.mjs", "server/text-results.mjs", "client/attention-inbox.mjs", "src/room-charter.js", "src/room-instructions.js", "src/reply-requests.js", "server/reply-requests.mjs", "client/reply-actions.mjs", "scripts/agent-replies.mjs", "client/request-notices.mjs"].filter(path => existsSync(join(destination, path))).length);
+  assert.equal(receipt.schemaVersion, 13); assert.deepEqual(publicAssets, assetPaths);
+  assert.equal(receipt.files, 47 + ["server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "src/agent-connections.js", "client/mcp-stdio.mjs", "scripts/agent-mcp.mjs", "client/work-actions.mjs", "server/work-discussion.mjs", "server/text-results.mjs", "client/attention-inbox.mjs", "src/room-charter.js", "src/room-instructions.js", "src/reply-requests.js", "server/reply-requests.mjs", "client/reply-actions.mjs", "scripts/agent-replies.mjs", "client/request-notices.mjs", "src/work-help.js", "server/work-help.mjs"].filter(path => existsSync(join(destination, path))).length);
   assert.equal(existsSync(join(destination, ".git")), false);
   assert.equal(existsSync(join(destination, "node_modules")), false);
   for (const path of ["server.mjs", "src/app.js", "cloudflare/room.mjs"]) {
@@ -49,7 +49,7 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   assert.throws(() => verifyRuntimePackage(destination, { expectedCommit: "0".repeat(40) }));
   const { buildAssets } = await import(pathToFileURL(join(destination, "cloudflare/build-assets.mjs")));
   const assets = join(directory, "assets");
-  assert.equal(await buildAssets(pathToFileURL(assets + "/")), 19);
+  assert.equal(await buildAssets(pathToFileURL(assets + "/")), 20);
   for (const path of publicAssets) assert.deepEqual(readFileSync(join(assets, path)), readFileSync(join(destination, path)));
   const f = createRecoveryFixture(join(directory, "fixture.sqlite"));
   try {
@@ -122,7 +122,7 @@ test("uncommitted candidate packages cold in an isolated synthetic commit, inclu
   const directory = mkdtempSync(join(tmpdir(), "room-candidate-package-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const candidate = candidateRuntimeFixture(repository, directory), destination = join(directory, "runtime");
-  const receipt = createRuntimePackage({ ...candidate, destination }); assert.equal(receipt.files, 65);
+  const receipt = createRuntimePackage({ ...candidate, destination }); assert.equal(receipt.files, 67);
   const program = `
     import { RoomStore } from ${JSON.stringify(pathToFileURL(join(destination, "server/store.mjs")).href)};
     import { initialRoom } from ${JSON.stringify(pathToFileURL(join(destination, "server/bootstrap.mjs")).href)};
