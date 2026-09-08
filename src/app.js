@@ -906,6 +906,7 @@ function helpView(item, now = Date.now()) {
   catch { return null; } // Invalid or unavailable context never advertises consent.
 }
 const isHelpAction = action => ["help", "end-help"].includes(action);
+const currentHelp = () => $("#action-fields").querySelector("#help-current");
 function helpButton(item, action, label) {
   return `<button type="button" class="button ghost" data-action="${action}" data-work-id="${esc(item.id)}" data-focus-key="work-action:${esc(item.id)}:${action}"${busy ? " disabled" : ""}>${label}</button>`;
 }
@@ -1581,7 +1582,7 @@ function openWorkAction(item, action, draftMessageId = null) {
 // Only opening or explicitly reviewing current work changes the pinned context.
 // A background update must never silently retarget a review or approval.
 function renderActionContext(item, action) {
-  if (action === "end-help") $("#help-current").textContent = item.helpWanted?.scope ?? "";
+  if (action === "end-help") currentHelp().textContent = item.helpWanted?.scope ?? "";
   $("#review-brief").hidden = !["verify", "decide"].includes(action);
   setText("#review-criteria", $("#review-brief").hidden ? "" : item.definitionOfDone);
   setText("#review-summary", $("#review-brief").hidden ? "" : item.receipt?.summary ?? "");
@@ -1702,8 +1703,8 @@ $("#refresh-action").addEventListener("click", () => {
       entry.accountableRevision = state.members[item.accountableMemberId]?.revision;
       if (changedHelp && entry.action === "help") {
         entry.error = "Request changed. Your draft is kept; compare it with the latest request.";
-        $("#help-current").hidden = false;
-        $("#help-current").textContent = item.helpWanted ? `Latest: ${item.helpWanted.scope} · ${helpView(item).status} · ends ${new Date(item.helpWanted.expiresAt).toLocaleString()}` : "No current request.";
+        currentHelp().hidden = false;
+        currentHelp().textContent = item.helpWanted ? `Latest: ${item.helpWanted.scope} · ${helpView(item).status} · ends ${new Date(item.helpWanted.expiresAt).toLocaleString()}` : "No current request.";
         const keep = $("#action-fields option[value=keep]");
         if (keep) { keep.disabled = true; $("#action-fields [name=duration]").value = ""; }
         entry.helpExpiresAt = null;
