@@ -16,6 +16,17 @@ goal. Continue with the next highest-value safe task while meaningful work remai
 
 ## Starting point and truthfulness
 
+Latest September8 checkpoint: [invitation-bound offers](BOUND-HELP-OFFERS-2026-09-08.md)
+have a dormant shared contract with17 focused tests and644 full-suite checks.
+The current runtime remains61f1294/schema13; neither new offer event is registered.
+Next implement writer14, pre14 collision refusal, retained-history reconstruction
+and transactional command checks together before exposing offer controls/tools.
+Test actual competing database writes and retry receipts, then compact human and
+scripted-agent journeys. A distinct14 fallback is required for that future release;
+earlier schema requirements below are historical, not downgrade instructions.
+Selection is coordination only and release cannot prove outside work stopped.
+The larger goal remains active and incomplete.
+
 The canonical checkout is `work/project-room-unified-20260907`, branch
 `codex/unified-local-20260907`, inside the current project mirror. Read
 `PROJECT-ROOM-CURRENT.md`, the latest checkpoint, `AGENTS.md`, the coordination bus
