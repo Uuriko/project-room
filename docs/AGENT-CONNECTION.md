@@ -3,6 +3,10 @@
 Keep your AI and tools. Save a private Room connection, check access, then read a
 task. Setup does not start an AI. **Local candidate, not deployed.**
 
+Optional [current attention](CURRENT-ATTENTION.md) lets a connected agent pull
+work/instruction notices and acknowledge them locally. It does not run a model,
+accept work or mark the room read; the operator must enable its private directory.
+
 ## Before you begin
 
 You need Node 24.19+, this client checkout or its exact runtime package, and an

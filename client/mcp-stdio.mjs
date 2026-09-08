@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import { confirmsWorkReturn } from "../src/workflow.js";
 import { connectionDiagnostic } from "./agent-connection.mjs";
 import { workTools, isWorkTool, validWorkArguments, submitWorkAction, workActionRefusal } from "./work-actions.mjs";
+import { currentAttention } from "./attention-inbox.mjs";
+import { WatchError } from "./watch-journal.mjs";
 
 export const MCP_VERSION = "2025-11-25";
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -25,6 +27,10 @@ export const roomTools = [
   }, ["requestId", "workItemId", "packetId", "basisRevision", "body"]), false),
   ...workTools
 ];
+export const attentionTools = [
+  tool("room_read_attention", "Pull up to 20 current work/instruction notices from this operator-configured local inbox. Remains pending until explicitly acknowledged. May coalesce intermediate changes; not an event archive or cross-device inbox. Read nextRead to refresh context. No work, approval or human read marker changes; no model is started. Updates only private local observer state.", schema(), false),
+  tool("room_acknowledge_attention", "Acknowledge one exact local notice ID after recording it. Rechecks access and current conditions first; an obsolete ID cannot dismiss its replacement. Retry the same ID if the outcome is unknown. Not proof of understanding, accepted work, completion, human approval or a human read marker. Updates only private local observer state.", schema({ noticeId: id }, ["noticeId"]), false)
+];
 function validArguments(tool, args) {
   if (isWorkTool(tool.name)) return validWorkArguments(tool.name, args);
   if (!object(args) || Object.keys(args).some(key => !Object.hasOwn(tool.inputSchema.properties, key))
@@ -34,7 +40,7 @@ function validArguments(tool, args) {
     && (args.since === undefined || Number.isSafeInteger(args.since) && args.since >= 0)
     && (args.limit === undefined || Number.isSafeInteger(args.limit) && args.limit >= 1 && args.limit <= 50)
     && (args.cursor === undefined || typeof args.cursor === "string" && args.cursor.length <= 2048 && /^[A-Za-z0-9_-]+$/.test(args.cursor) && args.since === undefined);
-  return Object.entries(args).every(([key, value]) => ["requestId", "workItemId", "packetId"].includes(key) ? validId(value)
+  return Object.entries(args).every(([key, value]) => ["requestId", "workItemId", "packetId", "noticeId"].includes(key) ? validId(value)
     : key === "body" ? typeof value === "string" && value.trim().length > 0 && value.length <= 4096
       : key === "basisRevision" ? Number.isSafeInteger(value) && value >= 0 : typeof value === "boolean");
 }
@@ -65,8 +71,11 @@ async function callTool(client, identity, name, args, signal) {
 
 // Small, deliberately pinned tools-only stdio transport. No listener, sampling,
 // host installation, credential enrollment, background runner or provider calls.
-export function serveRoomMcp({ client, roomId, memberId, input, output, timeoutMs = 30000 }) {
+export function serveRoomMcp({ client, roomId, memberId, input, output, timeoutMs = 30000, attention }) {
   if (!validId(roomId) || !validId(memberId) || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30000) throw new Error("Invalid adapter configuration");
+  if (attention !== undefined && (typeof attention?.directory !== "string" || !attention.directory.trim()
+      || typeof attention.origin !== "string" || new URL(attention.origin).origin !== attention.origin)) throw new Error("Invalid attention configuration");
+  const tools = attention ? [...roomTools, ...attentionTools] : roomTools;
   const flights = new Map(), maxLine = 65536, maxOutput = 2 * 1024 * 1024;
   let phase = "new", buffer = Buffer.alloc(0), closed = false;
   let finish;
@@ -116,18 +125,25 @@ export function serveRoomMcp({ client, roomId, memberId, input, output, timeoutM
       } else if (phase !== "ready") { await error(requestId, -32000, "Initialize first"); return; }
       else if (message.method === "tools/list") {
         if (message.params?.cursor !== undefined) { await error(requestId, -32602, "No pagination cursor is supported"); return; }
-        result = { tools: roomTools };
+        result = { tools };
       } else if (message.method === "tools/call") {
-        const selected = roomTools.find(tool => tool.name === message.params?.name), args = message.params?.arguments ?? {};
+        const selected = tools.find(tool => tool.name === message.params?.name), args = message.params?.arguments ?? {};
         if (!selected || !validArguments(selected, args)) { await error(requestId, -32602, "Unknown tool or invalid arguments"); return; }
         let value, isError = false;
         try {
-          value = await Promise.race([callTool(client, { roomId, memberId }, selected.name, args, controller.signal),
+          const call = selected.name === "room_read_attention" || selected.name === "room_acknowledge_attention"
+            ? currentAttention({ client, roomId, ...attention, noticeId: args.noticeId, signal: controller.signal })
+            : callTool(client, { roomId, memberId }, selected.name, args, controller.signal);
+          value = await Promise.race([call,
             new Promise((_, reject) => controller.signal.addEventListener("abort", () => reject(controller.signal.reason), { once: true }))]);
           isError = value.status === "unconfirmed";
         }
         catch (cause) {
           value = connectionDiagnostic(cause); isError = true;
+          if (selected.name === "room_read_attention" || selected.name === "room_acknowledge_attention") {
+            value = { ...value, type: "attention_refused", ...(cause instanceof WatchError ? { code: cause.code } : {}),
+              message: "Attention was not confirmed. Check access and the dedicated v2 directory; never reset it automatically. Retry a busy read with the same tool and arguments. For an unknown acknowledgement, retain the exact notice ID." };
+          }
           if (selected.name === "room_read_work_discussion") {
             const guidance = {
               invalid_discussion: "Choose one task and either a valid continuation or a nonnegative since filter. Restart the read if its selection changed.",

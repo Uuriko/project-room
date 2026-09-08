@@ -5,6 +5,10 @@ import { setImmediate as tick } from "node:timers/promises";
 import { serveRoomMcp, MCP_VERSION } from "../client/mcp-stdio.mjs";
 import { RoomClientError } from "../client/room-agent.mjs";
 import { createHash } from "node:crypto";
+import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
+import { existsSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { WatchJournal } from "../client/watch-journal.mjs";
 
 function harness(t, client = {}, options = {}) {
   const input = new PassThrough(), output = new PassThrough(), replies = [], pending = new Map();
@@ -24,6 +28,39 @@ function harness(t, client = {}, options = {}) {
 }
 const args = { requestId: "draft-one", workItemId: "work", packetId: "packet", basisRevision: 0, body: "A draft ☀️" };
 const receipt = command => ({ sequence: 4, duplicate: false, event: { id: "event", type: "message.posted", roomId: "commons", actorId: "agent", data: { ...command.data } } });
+
+test("attention deadline before first authentication creates no state or late response", async t => {
+  const f = createAcceptanceFixture(), directory = join(f.directory, "attention");
+  t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const h = harness(t, { snapshot: ({ signal }) => new Promise((resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true })) },
+    { timeoutMs: 20, attention: { directory, origin: "http://127.0.0.1:1234" } });
+  await h.ready();
+  const reply = (await h.rpc("tools/call", { name: "room_read_attention", arguments: {} })).result;
+  assert.equal(reply.isError, true); assert.equal(reply.structuredContent.code, "request_timeout");
+  assert.equal(existsSync(directory), false);
+  const count = h.replies.length; await tick(); assert.equal(h.replies.length, count);
+});
+
+test("lost MCP acknowledgement response retains an exact idempotent local outcome across adapter restart", async t => {
+  const f = createAcceptanceFixture(), directory = join(f.directory, "attention");
+  const client = { snapshot: async () => f.store.snapshot(f.keys.producer, "commons"), changes: async (after, limit) => f.store.eventsAfter(f.keys.producer, "commons", after, limit) };
+  const options = { memberId: "producer", attention: { directory, origin: "http://127.0.0.1:1234" } };
+  t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const h = harness(t, client, options); await h.ready();
+  const notice = (await h.rpc("tools/call", { name: "room_read_attention", arguments: {} })).result.structuredContent.items[0];
+  h.output.pause();
+  h.send({ id: "lost-ack", method: "tools/call", params: { name: "room_acknowledge_attention", arguments: { noticeId: notice.id } } });
+  let pending = 1;
+  for (let i = 0; i < 30 && pending; i++) {
+    await tick(); const observer = new WatchJournal(directory, { acquire: false }); pending = observer.status().pending; observer.close();
+  }
+  assert.equal(pending, 0); assert.ok(!h.replies.some(r => r.id === "lost-ack"));
+  h.server.stop(); h.input.destroy(); h.output.destroy();
+  const resumed = harness(t, client, options); await resumed.ready();
+  const ack = (await resumed.rpc("tools/call", { name: "room_acknowledge_attention", arguments: { noticeId: notice.id } })).result.structuredContent;
+  assert.equal(ack.status, "already_acknowledged");
+  assert.equal((await resumed.rpc("tools/call", { name: "room_read_attention", arguments: {} })).result.structuredContent.pending, 0);
+});
 
 test("stdio version negotiation, discovery fallback, tools and notification silence", async t => {
   const h = harness(t, { checkConnection: async () => ({ status: "credential_accepted" }) });

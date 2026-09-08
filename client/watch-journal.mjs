@@ -24,7 +24,7 @@ function privatePath(path, directory = false) {
   if (stat.isSymbolicLink() || (directory ? !stat.isDirectory() : !stat.isFile() || stat.nlink !== 1)
       || (stat.mode & 0o077) || (process.getuid && stat.uid !== process.getuid())) throw new WatchError("private_state_required");
 }
-function openDatabase(path, kind, create) {
+function openDatabase(path, kind, create, version = 1) {
   let fresh = false;
   if (create) {
     try { closeSync(openSync(path, "wx", 0o600)); fresh = true; }
@@ -39,21 +39,40 @@ function openDatabase(path, kind, create) {
   try {
     const id = kind === "owner" ? OWNER_ID : STATE_ID;
     if (fresh) {
-      db.exec(`BEGIN IMMEDIATE; PRAGMA application_id=${id}; PRAGMA user_version=1; ${schemas[kind].join(";")}; COMMIT;`);
+      db.exec(`BEGIN IMMEDIATE; PRAGMA application_id=${id}; PRAGMA user_version=${version}; ${schemas[kind].join(";")}; COMMIT;`);
     }
     const catalog = db.prepare("SELECT sql FROM sqlite_master WHERE name NOT GLOB 'sqlite_*' ORDER BY name").all().map(row => normalize(row.sql)).sort();
     if (db.prepare("PRAGMA application_id").get().application_id !== id
-        || db.prepare("PRAGMA user_version").get().user_version !== 1
+        || !(version === null ? [1, 2] : [version]).includes(db.prepare("PRAGMA user_version").get().user_version)
         || JSON.stringify(catalog) !== JSON.stringify(schemas[kind].map(normalize).sort())
         || db.prepare("PRAGMA quick_check").get().quick_check !== "ok") throw new WatchError("state_schema_mismatch");
     db.exec("PRAGMA synchronous=FULL;");
     if (db.prepare("PRAGMA max_page_count=4096").get().max_page_count > 4096) throw new WatchError("attention_capacity");
-    if (kind === "state") validateRecords(db);
+    if (kind === "state") validateRecords(db, db.prepare("PRAGMA user_version").get().user_version);
     return db;
   } catch (error) { db.close(); throw error; }
 }
 
-function validateRecords(db) {
+function validateContextNotice(notice, signature, key, binding) {
+  const charter = notice.charter;
+  if (!charter || !Number.isSafeInteger(charter.revision) || charter.revision < 0 || charter.revision > notice.evaluatedThrough
+      || (charter.revision === 0 ? charter.eventId !== null : !validId(charter.eventId))) throw new Error();
+  if (notice.subject === "instructions") {
+    if (key !== JSON.stringify(["instructions"]) || charter.revision === 0
+        || JSON.stringify(signature) !== JSON.stringify(["instructions", charter.revision, charter.eventId])
+        || notice.workItemId !== undefined || notice.next !== undefined
+        || JSON.stringify(notice.nextRead) !== JSON.stringify({ tool: "room_list_work", arguments: {} })) throw new Error();
+  } else if (notice.subject === "work") {
+    if (!validId(notice.workItemId) || key !== JSON.stringify(["work", notice.workItemId])
+        || signature.length !== 8 || signature[0] !== "work" || signature[1] !== notice.next?.action
+        || signature[2] !== binding.memberId || signature[3] !== notice.next?.completionEventId
+        || signature[4] !== notice.next?.evidenceVersion || notice.next?.memberId !== binding.memberId
+        || notice.next?.workItemId !== notice.workItemId || notice.next?.needsAttention !== true
+        || !Number.isSafeInteger(notice.next.workRevision) || notice.next.workRevision < 0
+        || JSON.stringify(notice.nextRead) !== JSON.stringify({ tool: "room_read_work", arguments: { workItemId: notice.workItemId, includeSource: false } })) throw new Error();
+  } else throw new Error();
+}
+function validateRecords(db, version) {
   db.exec("BEGIN");
   try {
     const row = db.prepare("SELECT body FROM checkpoint WHERE id=1").get();
@@ -61,23 +80,29 @@ function validateRecords(db) {
     if (rows.length > MAX_ATTENTION || (!row && rows.length)) throw new Error();
     if (row) {
       const state = JSON.parse(row.body), b = state?.binding;
-      if (Buffer.byteLength(row.body) > 8192 || !b || b.version !== 1 || b.filter !== "own-attention-v1"
+      if (Buffer.byteLength(row.body) > 8192 || !b || b.version !== version || b.filter !== (version === 2 ? "own-context-v2" : "own-attention-v1")
           || typeof b.origin !== "string" || new URL(b.origin).origin !== b.origin
           || ![b.roomId, b.memberId, b.createdEventId].every(validId)
           || (b.accountId !== null && !validId(b.accountId))
           || (b.accountId === null ? b.authEpoch !== null : !Number.isSafeInteger(b.authEpoch) || b.authEpoch < 0)
           || !Number.isSafeInteger(state.sequence) || state.sequence < 1 || !validId(state.eventId)
           || typeof state.lastCheckedAt !== "string" || !Number.isFinite(Date.parse(state.lastCheckedAt))) throw new Error();
+      const ids = new Set();
       for (const attention of rows) {
         const notice = JSON.parse(attention.notice), signature = JSON.parse(attention.signature);
         if (Buffer.byteLength(attention.notice) > 8192 || Buffer.byteLength(attention.signature) > 4096
-            || !Array.isArray(signature) || signature.length !== 7 || !validId(attention.work_id)
-            || notice?.schemaVersion !== 1 || notice.type !== "attention" || !validId(notice.id)
-            || notice.workItemId !== attention.work_id || notice.roomId !== b.roomId || notice.memberId !== b.memberId
+            || !Array.isArray(signature)
+            || notice?.schemaVersion !== version || notice.type !== "attention" || !validId(notice.id)
+            || notice.roomId !== b.roomId || notice.memberId !== b.memberId
             || !["initial", "changed"].includes(notice.reason) || notice.notifyOnly !== true
             || typeof notice.title !== "string" || !Number.isSafeInteger(notice.evaluatedThrough)
             || notice.evaluatedThrough < 1 || notice.evaluatedThrough > state.sequence
-            || typeof notice.observedAt !== "string" || !Number.isFinite(Date.parse(notice.observedAt))
+            || typeof notice.observedAt !== "string" || !Number.isFinite(Date.parse(notice.observedAt))) throw new Error();
+        if (version === 2) {
+          if (ids.has(notice.id)) throw new Error();
+          ids.add(notice.id); validateContextNotice(notice, signature, attention.work_id, b);
+        }
+        else if (signature.length !== 7 || !validId(attention.work_id) || notice.workItemId !== attention.work_id
             || notice.next?.memberId !== b.memberId || notice.next?.needsAttention !== true) throw new Error();
       }
     }
@@ -90,22 +115,24 @@ function validateRecords(db) {
 // Two databases intentionally: lifetime stdout ownership must not block short
 // checkpoint commits or a second process's stop request. Never unlink either file.
 export class WatchJournal {
-  #owner; #db; #held = false; #runId;
-  constructor(directory, { acquire = true } = {}) {
+  #owner; #db; #held = false; #runId; #version;
+  constructor(directory, { acquire = true, version = acquire ? 1 : null, create = acquire } = {}) {
+    if ((acquire && ![1, 2].includes(version)) || (!acquire && version !== null && ![1, 2].includes(version))) throw new WatchError("state_schema_mismatch");
     if (typeof directory !== "string" || !directory.trim()) throw new WatchError("private_state_required");
     const path = resolve(directory);
-    if (acquire) {
+    if (create) {
       try { mkdirSync(path, { mode: 0o700 }); } catch (error) { if (error.code !== "EEXIST") throw error; }
     }
     privatePath(path, true);
     const canonical = realpathSync(path);
     try {
-      this.#owner = openDatabase(join(canonical, "ownership.sqlite"), "owner", acquire);
+      this.#owner = openDatabase(join(canonical, "ownership.sqlite"), "owner", create);
       if (acquire) {
         try { this.#owner.exec("BEGIN IMMEDIATE"); this.#held = true; }
         catch (error) { if (busy(error)) throw new WatchError("already_watching"); throw error; }
       }
-      this.#db = openDatabase(join(canonical, "watch.sqlite"), "state", acquire);
+      this.#db = openDatabase(join(canonical, "watch.sqlite"), "state", create, version);
+      this.#version = this.#db.prepare("PRAGMA user_version").get().user_version;
       if (acquire) {
         this.#runId = randomUUID();
         this.#transaction(() => this.#db.prepare("INSERT INTO control VALUES (1,?,0,'starting') ON CONFLICT(id) DO UPDATE SET run_id=excluded.run_id,stop_requested=0,health='starting'").run(this.#runId));
@@ -121,6 +148,7 @@ export class WatchJournal {
   state() { const row = this.#db.prepare("SELECT body FROM checkpoint WHERE id=1").get(); return row ? JSON.parse(row.body) : null; }
   reconcile(binding, checkpoint, notices, now) {
     this.#requireHolder();
+    if (binding.version !== this.#version) throw new WatchError("state_schema_mismatch");
     if (notices.size > MAX_ATTENTION) throw new WatchError("attention_capacity");
     this.#transaction(() => {
       const previous = this.state();
@@ -130,7 +158,7 @@ export class WatchJournal {
       for (const id of existing.keys()) if (!notices.has(id)) this.#db.prepare("DELETE FROM attention WHERE work_id=?").run(id);
       for (const [id, { signature, payload }] of notices) {
         if (existing.get(id)?.signature === signature) continue;
-        const notice = JSON.stringify({ schemaVersion: 1, type: "attention", id: randomUUID(), reason: previous ? "changed" : "initial", observedAt: new Date(now).toISOString(), evaluatedThrough: checkpoint.sequence, ...payload });
+        const notice = JSON.stringify({ schemaVersion: this.#version, type: "attention", id: randomUUID(), reason: previous ? "changed" : "initial", observedAt: new Date(now).toISOString(), evaluatedThrough: checkpoint.sequence, ...payload });
         if (Buffer.byteLength(notice) > 8192 || Buffer.byteLength(signature) > 4096) throw new WatchError("attention_capacity");
         this.#db.prepare("INSERT INTO attention VALUES (?,?,?,1) ON CONFLICT(work_id) DO UPDATE SET signature=excluded.signature,notice=excluded.notice,pending=1").run(id, signature, notice);
       }
@@ -144,7 +172,20 @@ export class WatchJournal {
   }
   ack(id) {
     this.#requireHolder();
+    if (this.#version !== 1) throw new WatchError("explicit_ack_required");
     this.#transaction(() => this.#db.prepare("UPDATE attention SET pending=0 WHERE pending=1 AND json_extract(notice,'$.id')=?").run(id));
+  }
+  acknowledge(id) {
+    this.#requireHolder();
+    if (this.#version !== 2 || !validId(id)) throw new WatchError("invalid_notice");
+    return this.#transaction(() => {
+      const rows = this.#db.prepare("SELECT work_id,pending FROM attention WHERE json_extract(notice,'$.id')=? LIMIT 2").all(id);
+      if (rows.length > 1) throw new WatchError("state_schema_mismatch");
+      const row = rows[0]; if (!row) return "no_longer_current";
+      if (!row.pending) return "already_acknowledged";
+      this.#db.prepare("UPDATE attention SET pending=0 WHERE work_id=?").run(row.work_id);
+      return "acknowledged";
+    });
   }
   health(value) {
     this.#requireHolder();
@@ -162,7 +203,7 @@ export class WatchJournal {
   }
   status() {
     const held = this.#isHeld(), control = this.#db.prepare("SELECT * FROM control WHERE id=1").get(), state = this.state();
-    return { schemaVersion: 1, state: held ? control?.stop_requested ? "stop_requested" : "held" : "stopped",
+    return { schemaVersion: this.#version, state: held ? control?.stop_requested ? "stop_requested" : "held" : "stopped",
       health: held ? control?.health ?? "unknown" : "not_running", lastCheckedAt: state?.lastCheckedAt ?? null,
       evaluatedThrough: state?.sequence ?? null, pending: this.#db.prepare("SELECT count(*) AS n FROM attention WHERE pending=1").get().n };
   }

@@ -3,11 +3,15 @@ import { RoomAgentClient, RoomClientError } from "../client/room-agent.mjs";
 import { AssignmentWatcher } from "../client/assignment-watcher.mjs";
 import { WatchJournal, WatchError } from "../client/watch-journal.mjs";
 import { agentConnectionFromEnvironment, ConnectionError } from "../client/agent-connection.mjs";
+import { currentAttention } from "../client/attention-inbox.mjs";
+import { validId } from "../src/events.js";
 
 export const WATCH_HELP = `Read-only assignment watcher (Node 24.19+):
   node scripts/agent-inbox.mjs watch start PRIVATE_DIRECTORY [--once]
   node scripts/agent-inbox.mjs watch status PRIVATE_DIRECTORY
   node scripts/agent-inbox.mjs watch stop PRIVATE_DIRECTORY
+  node scripts/agent-inbox.mjs watch pull NEW_PRIVATE_DIRECTORY
+  node scripts/agent-inbox.mjs watch ack PRIVATE_DIRECTORY NOTICE_ID
 
 Start: ROOM_AGENT_CONFIG for a saved agent connection, OR ROOM_AGENT_ORIGIN,
 ROOM_AGENT_ROOM, ROOM_AGENT_TOKEN (optional ROOM_AGENT_MEMBER) in the environment.
@@ -18,6 +22,10 @@ Start prints attention JSONL to stdout; health/errors go to stderr. Status/stop
 print one local JSON result. --once checks once and writes at most 20 notices.
 Restart resumes pending notices; duplicate IDs may replay after a crash.
 Notifications are not permission to act. Fetch current scope before acting.
+Pull uses a separate v2 directory: current work and instructions stay pending until
+acknowledged by exact ID. Ack refreshes access/current state before dismissing only
+that notice. Neither command runs continuously or changes Room read/work state.
+Do not reuse a v1 start directory for pull. No automatic migration or reset occurs.
 `;
 
 export function writeJson(stream, value, signal, timeoutMs = 5000) {
@@ -87,9 +95,9 @@ export async function watchMain(args) {
   try {
     if (args.length === 1 && args[0] === "--help") { process.stdout.write(WATCH_HELP); return; }
     const [action, directory, flag] = args;
-    if (!["start", "status", "stop"].includes(action) || !directory || directory.startsWith("--")
-        || args.length > 3 || (flag !== undefined && (action !== "start" || flag !== "--once"))) throw new WatchError("usage_error");
-    if (action !== "start") {
+    if (!["start", "status", "stop", "pull", "ack"].includes(action) || !directory || directory.startsWith("--")
+        || args.length > 3 || (action === "ack" ? !validId(flag) : flag !== undefined && (action !== "start" || flag !== "--once"))) throw new WatchError("usage_error");
+    if (["status", "stop"].includes(action)) {
       journal = new WatchJournal(directory, { acquire: false });
       await writeJson(process.stdout, action === "status" ? journal.status() : journal.requestStop());
       return;
@@ -97,9 +105,14 @@ export async function watchMain(args) {
     const config = agentConnectionFromEnvironment(), { origin, roomId } = config;
     const client = new RoomAgentClient(config);
     if (config.memberId) await client.checkConnection();
-    journal = new WatchJournal(directory);
     controller = new AbortController();
     process.on("SIGINT", stop); process.on("SIGTERM", stop);
+    if (["pull", "ack"].includes(action)) {
+      await writeJson(process.stdout, await currentAttention({ client, origin, roomId, directory,
+        ...(action === "ack" ? { noticeId: flag } : {}), signal: controller.signal }), controller.signal);
+      return;
+    }
+    journal = new WatchJournal(directory);
     let monitorError;
     monitor = setInterval(() => {
       try { if (journal.shouldStop()) stop(); }

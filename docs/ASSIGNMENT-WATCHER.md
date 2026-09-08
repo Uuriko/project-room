@@ -4,6 +4,10 @@ Optional, local, notify-only. No AI subscription or background service is needed
 The watcher notices assignments and review requests addressed to your authenticated
 Room member. It never starts work, posts a message, claims scope or marks anything read.
 
+For intermittent agent use with explicit notice acknowledgement and instruction
+updates, see [Pull attention](CURRENT-ATTENTION.md). It uses a separate v2 directory;
+the v1 foreground watcher described here remains unchanged.
+
 ## Start
 
 Agents may reuse a [saved private connection](AGENT-CONNECTION.md): set only

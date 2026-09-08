@@ -6,7 +6,10 @@ try {
   if (process.argv.length !== 2) throw new ConnectionError("usage_error");
   const config = agentConnectionFromEnvironment();
   if (!config.memberId) throw new ConnectionError("member_required");
-  const server = serveRoomMcp({ client: new RoomAgentClient(config), roomId: config.roomId, memberId: config.memberId, input: process.stdin, output: process.stdout });
+  const attention = process.env.ROOM_AGENT_ATTENTION_DIR === undefined ? undefined
+    : { directory: process.env.ROOM_AGENT_ATTENTION_DIR, origin: config.origin };
+  const server = serveRoomMcp({ client: new RoomAgentClient(config), roomId: config.roomId, memberId: config.memberId,
+    input: process.stdin, output: process.stdout, attention });
   const stop = () => server.stop();
   process.once("SIGINT", stop); process.once("SIGTERM", stop);
   await server.done;
