@@ -22,6 +22,10 @@ export function emailInput(value) {
 const canonical = value => Array.isArray(value) ? "[" + value.map(canonical).join(",") + "]" : object(value)
   ? "{" + Object.keys(value).sort().map(k => JSON.stringify(k) + ":" + canonical(value[k])).join(",") + "}" : JSON.stringify(value);
 export const emailDigest = value => createHash("sha256").update(canonical(value)).digest("hex");
+export const emailSourceId = (connection, messageId) => {
+  const c = emailConnection(connection);
+  return "email-" + emailDigest([c.accountId, c.provider, c.mailboxId, emailOpaqueId(messageId)]);
+};
 const localId = value => { requireEmail(typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value)); return value; };
 export const emailOpaqueId = value => emailText(value, 2048);
 const count = (value, max) => {
@@ -88,7 +92,7 @@ export function createEmailEnvelope(input) {
   // hasAttachments=false excludes inline attachments in Graph; it is only a hint.
   requireEmail(a.state !== "complete" || attachments.hint === attachments.items.some(item => !item.inline), "email_attachment_observation_conflict");
   const content = { connection, message, body, replyHeaders, attachments };
-  const sourceId = "email-" + emailDigest([connection.accountId, connection.provider, connection.mailboxId, message.id]);
+  const sourceId = emailSourceId(connection, message.id);
   return { contractVersion: 1, channel: "email", sourceId, sourceVersion: emailDigest(content), ...content };
 }
 export function readEmailEnvelope(value) {

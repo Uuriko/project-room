@@ -35,6 +35,7 @@ optional.push("client/help-actions.mjs");
 optional.push("server/inbox.mjs");
 optional.push("server/inbox-outbox.mjs", "server/inbox-transport.mjs");
 optional.push("server/email-envelope.mjs", "server/graph-email.mjs", "server/email-import.mjs");
+optional.push("server/graph-fixture-sync.mjs");
 optional.push("src/inbox-client.js", "src/inbox-ui.js");
 optional.push("src/inbox-send-ui.js");
 const allowed = new Set([...required, ...optional]);

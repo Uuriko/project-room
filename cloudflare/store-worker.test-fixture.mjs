@@ -10,7 +10,7 @@ import { STORE_SCHEMA_VERSION } from '../server/writer-fence.mjs';
 import { textVersion } from '../server/text-results.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
 import { emailContractFixture } from '../scripts/email-contract-fixture.mjs';
-import { normalizeGraphEmail } from '../server/graph-email.mjs';
+import { RecordedGraphMailbox, prepareGraphFixturePage, graphFixtureStart } from '../server/graph-fixture-sync.mjs';
 
 function checkNarrowAuthentication(store, credentials) {
   const { state, sequence } = store.room('commons'), before = auditRecovery(store).dataSha256;
@@ -125,10 +125,13 @@ export class StoreTestRoom {
       const mailToken = mailSlot.token, mailBinding = mailSession.sessionBinding;
       store.email.apply(mailToken, { action: 'connection.configure', requestId: 'mail-connection', connectionId: mail.connection.id,
         expectedRevision: 0, profile: mail.connection }, mailBinding);
-      const envelope = normalizeGraphEmail(mail.connection, mail.message, mail.options);
-      const mailPage = { action: 'page.apply', requestId: 'mail-first-page', connectionId: mail.connection.id, connectionRevision: 1,
-        folderId: mail.message.parentFolderId, expectedRevision: 0, expectedCursor: null, cursor: 'fixture-next-page', complete: false,
-        reset: true, observations: [{ kind: 'message', expectedSourceRevision: 0, envelope }] };
+      const mailPage = await prepareGraphFixturePage({ store, token: mailToken, binding: mailBinding, requestId: 'mail-first-page',
+        connectionId: mail.connection.id, folderId: mail.message.parentFolderId, reader: new RecordedGraphMailbox({
+          connection: mail.connection, pages: [{ cursor: null, response: { status: 200, body: { value: [{ id: mail.message.id }],
+            '@odata.nextLink': graphFixtureStart(mail.connection, mail.message.parentFolderId) + '?$skiptoken=fixture-next' } } }],
+          messages: [{ id: mail.message.id, response: { status: 200, message: mail.message, options: mail.options } }]
+        }) });
+      const envelope = mailPage.observations[0].envelope;
       store.email.apply(mailToken, mailPage, mailBinding);
       store.inbox.apply(mailToken, { action: 'draft.save', requestId: 'mail-private-draft', sourceId: envelope.sourceId,
         expectedRevision: 0, sourceRevision: 1, body: 'Recover this private email draft' }, mailBinding);
@@ -162,9 +165,13 @@ export class StoreTestRoom {
       assert.equal(store.email.apply(email.token, email.page, email.binding).duplicate, true);
       assert.equal(store.inbox.read(email.token, email.sourceId, email.binding).draft.body, 'Recover this private email draft');
       const mailState = store.email.state(email.token, email.page.connectionId, email.page.folderId, email.binding);
-      assert.equal(mailState.folder.complete, false); assert.equal(mailState.expectedCursor, 'fixture-next-page');
-      store.email.apply(email.token, { ...email.page, requestId: 'mail-final-page', expectedRevision: 1, expectedCursor: email.page.cursor,
-        cursor: 'fixture-final', reset: false, complete: true, observations: [] }, email.binding);
+      assert.equal(mailState.folder.complete, false); assert.equal(mailState.expectedCursor, email.page.cursor);
+      const finalPage = await prepareGraphFixturePage({ store, token: email.token, binding: email.binding,
+        connectionId: email.page.connectionId, folderId: email.page.folderId, requestId: 'mail-final-page',
+        reader: new RecordedGraphMailbox({ connection: mailState.connection.profile, messages: [],
+          pages: [{ cursor: email.page.cursor, response: { status: 200, body: { value: [],
+            '@odata.deltaLink': graphFixtureStart(mailState.connection.profile, email.page.folderId) + '?$deltatoken=fixture-final' } } }] }) });
+      store.email.apply(email.token, finalPage, email.binding);
       assert.equal(store.email.verify().sources, 1); auditRecovery(store);
       return Response.json({ recovered: true, guests: guests.length, sequence });
     }
