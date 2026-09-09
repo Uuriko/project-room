@@ -141,3 +141,27 @@ test("account confirmation failure keeps the draft and reports uncertainty witho
   await p.locator("#account-status").waitFor({ state: "hidden" });
   assert.equal(await p.locator("#inbox-draft").inputValue(), "Keep this during a connection issue");
 });
+
+test("invitation account replacement warns about an account-only draft and clears the old private view", { timeout: 25000 }, async t => {
+  const f = await setup(t), p = f.page; await f.login(); await p.locator("#inbox-reader").waitFor();
+  await p.locator("#inbox-draft").fill("Private thought from the original account");
+  f.store.createAccount("invited-account"); const key = f.store.issueAccountAccessKey("invited-account");
+  const owner = f.store.accountForMember("commons", "owner"), slot = f.store.createAccountSessionSlot();
+  const auth = f.store.loginAccountSession(slot.token, f.store.issueAccountAccessKey(owner.id), 0);
+  const token = randomBytes(32).toString("base64url");
+  f.store.issueInvitation(slot.token, "commons", { requestId: "account-switch-invite", token,
+    intendedAccountId: "invited-account", intendedMemberId: "invited-person", displayName: "Invited person", role: "member",
+    expiresAt: Date.now() + 3600000, expectedIssuerMemberRevision: 0, expectedSessionBinding: auth.sessionBinding });
+  await p.evaluate(hash => { location.hash = hash; }, "#invite/" + token);
+  await p.locator("#invitation-accept").click(); await p.locator("#invitation-account-form").waitFor();
+  await p.locator("#invitation-account-key").fill(key);
+  let warnings = 0; p.removeAllListeners("dialog"); p.on("dialog", d => { warnings++; return d.dismiss(); });
+  await p.locator("#invitation-account-form button").click();
+  assert.equal(warnings, 1); assert.equal(await p.locator("#inbox-draft").inputValue(), "Private thought from the original account");
+  p.removeAllListeners("dialog"); p.on("dialog", d => d.accept());
+  await p.locator("#invitation-account-form button").click(); await p.locator("#invitation-accept").waitFor();
+  assert.equal(await p.locator("#inbox-draft").inputValue(), "");
+  assert.equal(await p.locator("#inbox-source-body").textContent(), "");
+  await p.locator("#invitation-dismiss").click(); await p.locator("#inbox-panel").waitFor();
+  await p.getByText("No messages yet.", { exact: true }).waitFor();
+});

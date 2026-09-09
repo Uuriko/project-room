@@ -23,6 +23,8 @@ Ordinary member-key entry and invitation routes are preserved. The root legacy e
 
 New browser coverage includes desktop/mobile accounts with no rooms, direct synthetic sending, room discovery, room-only revocation, account revocation, another-tab replacement with a held response, legacy entry, explicit invitation joining, lost sign-out acknowledgement and temporary account-check failure.
 
+An additional regression reproduces account-only reauthentication inside an invitation: cancelling the warning preserves the original draft; proceeding clears the old private view before the replacement account is exposed. Known rejected sign-ins preserve the old account; uncertain or successful replacements do not retain its private view.
+
 Service/client tests cover membership filtering, bounded pagination, binding requirements, unprivileged credential refusal, account replacement and delayed confirmation. The local Workers HTTP check exercises the same room-list route.
 
 Final committed-suite counts and screenshots belong in the accompanying checkpoint evidence; candidate passes are not deployment evidence.

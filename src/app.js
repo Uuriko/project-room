@@ -147,11 +147,7 @@ const client = new RoomClient({
     remindersUI?.reset();
     agentConnectionsUI?.reset();
     instructionsUI?.reset();
-    if (!keepAccount) {
-      inboxUI?.reset({ preservePending: leavingPage });
-      roomListVersion++; $("#account-rooms-list").replaceChildren(); $("#account-rooms-status").textContent = "";
-      $("#account-status").textContent = ""; $("#account-status").hidden = true;
-    }
+    if (!keepAccount) clearPrivateWorkspace({ preservePending: leavingPage });
     else inboxUI?.detachRoom();
     workDraftId = null; replyToId = null; workFormEpoch++; setWorkRetry(false);
     $("#work-reuse-hint").hidden = true;
@@ -237,11 +233,15 @@ inboxUI = installInbox({ account: accountClient, room: client, getRoom: () => st
   catch { notice("Shared. Refresh the room to view it.", true); }
 } });
 let accountCheckFlight = null, roomListVersion = 0, roomListCursor = null;
+function clearPrivateWorkspace(options) {
+  inboxUI?.reset(options); roomListVersion++;
+  $("#account-rooms-list").replaceChildren(); $("#account-rooms-status").textContent = "";
+  $("#account-status").textContent = ""; $("#account-status").hidden = true;
+}
 function endAccountAccess() {
   const current = accountClient.session;
   if (current) accountClient.invalidate(accountClient.generation, current);
-  roomListVersion++; $("#account-rooms-list").replaceChildren(); $("#account-rooms-panel").hidden = true;
-  $("#account-status").textContent = ""; $("#account-status").hidden = true; $(".connection-bar").hidden = false;
+  $(".connection-bar").hidden = false;
   accessEndContext = "account-switch"; client.endAccess();
   configureAuthPanel();
 }
@@ -1228,11 +1228,13 @@ $("#invitation-account-form").addEventListener("submit", async e => {
   if (!invitation.secret || !invitation.preview || invitationIsCommitting() || invitation.phase === "terminal") return;
   const version = invitation.version, secret = invitation.secret;
   const accessKey = $("#invitation-account-key").value.trim();
-  const roomBefore = state && session ? session : null;
-  if (roomBefore) {
-    saveComposer();
-    if ((drafts.hasText() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction)
-      && !window.confirm((pendingAction?.uncertain || instructionsUI?.hasUnknown()) ? "Switch accounts and clear drafts and the pending retry? The action may already be saved." : "Signing in with a different account clears this Room’s unsent drafts, private setup and forms before acceptance. Continue with this account key?")) return;
+  const roomBefore = state && session ? session : null, accountBefore = accountClient.session;
+  const privateDraft = inboxUI?.hasPending();
+  if (roomBefore || privateDraft) {
+    if (roomBefore) saveComposer();
+    if ((privateDraft || drafts.hasText() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction)
+      && !window.confirm(privateDraft ? "Switching accounts clears unsent private drafts and local retries. Unconfirmed actions may already be saved. Continue?"
+        : (pendingAction?.uncertain || instructionsUI?.hasUnknown()) ? "Switch accounts and clear drafts and the pending retry? The action may already be saved." : "Signing in with a different account clears this Room’s unsent drafts, private setup and forms before acceptance. Continue with this account key?")) return;
   }
   if (roomBefore) { saveComposer(); client.disconnect(); }
   invitation.phase = "authenticating";
@@ -1246,6 +1248,7 @@ $("#invitation-account-form").addEventListener("submit", async e => {
     if (!loggedIn?.authenticated || !loggedIn.account) {
       accessEndContext = "account-switch";
       if (state) client.endAccess();
+      else { clearPrivateWorkspace(); if (accountClient.session?.authenticated) showAccountWorkspace(); }
       invitation.phase = "changed-account";
       setInvitationFeedback("The browser account changed before sign-in could be confirmed. Sign in again to continue safely.", true);
       renderInvitation();
@@ -1253,6 +1256,7 @@ $("#invitation-account-form").addEventListener("submit", async e => {
     }
     $("#invitation-account-key").value = "";
     await moveCurrentRoomToAccount(loggedIn);
+    if (!roomBefore) { clearPrivateWorkspace(); showAccountWorkspace(); }
     if (!currentInvitation(version, secret)) return;
     invitation.phase = "ready";
     setInvitationFeedback(invitation.preview.status === "accepted"
@@ -1262,6 +1266,10 @@ $("#invitation-account-form").addEventListener("submit", async e => {
     $("#invitation-accept").focus({ preventScroll: true });
   } catch (error) {
     if (!currentInvitation(version, secret)) return;
+    if (!roomBefore && accountClient.session !== accountBefore) {
+      clearPrivateWorkspace();
+      if (accountClient.session?.authenticated) showAccountWorkspace();
+    }
     if (Number.isSafeInteger(error.status) && roomBefore && client.session === roomBefore) client.connect();
     else if (roomBefore && state) {
       accessEndContext = "account-switch";
