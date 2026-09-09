@@ -387,7 +387,7 @@ test("unavailable and HTML provider drafts never show an acknowledgment action",
   const f = await reviewFixture(t), p = f.page;
   for (const observation of [null, { body: { format: "html", content: "<img src='https://example.invalid/private'>" } }]) {
     f.recorded.observe(observation); await p.locator("#inbox-reply-open").click();
-    await p.locator("#inbox-reply-dialog-status").filter({ hasText: "Nothing sent" }).waitFor();
+    await p.locator("#inbox-reply-dialog-status").filter({ hasText: observation === null ? "Draft unavailable · not sent" : "Nothing sent" }).waitFor();
     assert.equal(await p.locator("#inbox-reply-confirm").isVisible(), false);
     assert.equal(await p.locator("#inbox-reply-dialog img").count(), 0);
     await p.locator("#inbox-reply-close").click();
