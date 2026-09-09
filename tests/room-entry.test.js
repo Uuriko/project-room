@@ -11,7 +11,7 @@ test("unlisted entry opens the isolated Room without forwarding input or embeddi
   assert.match(html, /href="https:\/\/project-room-staging.getdasha.workers.dev"/);
   assert.match(html, /--ink:#0B120F/);
   assert.match(html, /href="\/contact"/);
-  assert.match(html, /member or account key/);
+  assert.match(html, /Paste your room key/);
   assert.match(html, /github.com\/Uuriko\/project-room/);
   assert.ok(!html.includes("untrusted"));
   assert.ok(!html.includes("<script"));

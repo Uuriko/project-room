@@ -20,7 +20,7 @@ Durable Object was not reset.
 ## How to test
 
 Follow [HOW-TO-TEST.md](HOW-TO-TEST.md): open https://www.trydemigod.com/room,
-then **Open Project Room**, then sign in with your member or account key (or an
+then **Open Project Room**, then paste a room key (or choose Account key, or an
 invitation). Footer **Project Room** on the Demigod home page is the same door.
 
 ## What is in this repo

@@ -31,12 +31,22 @@
       </div>
       <section id="auth-panel" class="auth-panel panel" aria-labelledby="auth-title" hidden>
         <h1 id="auth-title" tabindex="-1">Welcome.</h1>
+        <p id="auth-lead" class="form-hint">Paste your room key. Same browser as last time? You may already be in.</p>
+        <div id="auth-kind" class="auth-kind" role="radiogroup" aria-label="What are you signing in with?">
+          <button type="button" id="auth-kind-room" class="button ghost" aria-pressed="true">Room key</button>
+          <button type="button" id="auth-kind-account" class="button ghost" aria-pressed="false">Account key</button>
+        </div>
         <form id="auth-form">
           <label id="access-key-label" for="access-key">Member key</label>
-          <input id="access-key" type="password" autocomplete="off" spellcheck="false" required maxlength="128" aria-describedby="auth-error">
+          <div class="key-field">
+            <input id="access-key" type="password" autocomplete="off" spellcheck="false" required maxlength="128" placeholder="Paste your key" aria-describedby="auth-error">
+            <button type="button" id="access-key-reveal" class="button ghost" aria-pressed="false">Show</button>
+          </div>
           <button class="button primary" type="submit">Enter room</button>
           <p id="auth-error" class="status form-status" role="alert"></p>
         </form>
+        <label class="invite-paste" for="invite-link">Have an invite?</label>
+        <input id="invite-link" type="text" autocomplete="off" spellcheck="false" maxlength="512" placeholder="Paste the invite link">
         <details class="access-help"><summary>Need access?</summary>
           <p id="auth-description">Ask the room owner for an invite link or member key.</p>
           <p id="auth-hint" class="form-hint">Keep your key private. Lost guest access? Ask for a new invite.</p>
