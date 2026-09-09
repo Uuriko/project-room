@@ -58,7 +58,7 @@ CMC, DIE copy, Desk merge.
 - Guest expiry copy on the welcome screen.
 - Mobile: sticky Chat / Work / Catch-up / People jumps; 44px controls.
 
-### Phase 3 — later, still in-tree
+### Phase 3 — this slice
 
 - Account home: list rooms with “Open” instead of raw IDs where we already
   have titles.
@@ -90,4 +90,4 @@ CMC, DIE copy, Desk merge.
 | B | Phase 2 catch-up / Actions / guest copy | `src/app.js`, `index.html`, share-link copy, room-actions | A |
 | C | Account home titles + GitHub About notes | account rooms UI, CURRENT-ROOM | A |
 
-Phase A shipped as PR #37. This change is Phase B.
+Phase A shipped as PR #37. Phase B shipped as PR #38. This change is Phase C.

@@ -621,6 +621,10 @@ summary { overflow-wrap: anywhere; }
 .inbox-row { display: grid; gap: .4rem; width: 100%; padding: 1rem .75rem; border: 0; border-radius: .5rem; background: none; color: inherit; text-align: left; cursor: pointer; font: inherit; }
 .inbox-row span { font-size: .8rem; color: var(--muted); }
 .inbox-row strong { font-weight: 550; }
+#account-rooms-list .inbox-row { grid-template-columns: minmax(0, 1fr) auto; align-items: center; min-height: 44px; }
+#account-rooms-list .inbox-row span { font-size: .9rem; min-height: 44px; display: inline-flex; align-items: center; }
+#agent-import-checklist { margin: 0 0 1rem; padding-left: 1.25rem; display: grid; gap: .45rem; }
+#agent-import-checklist code { display: block; margin-top: .25rem; overflow-wrap: anywhere; }
 .inbox-row[aria-current="true"] { background: rgba(128, 160, 160, .12); }
 .inbox-row:hover { background: rgba(128, 160, 160, .08); }
 .inbox-reader { padding: clamp(1.2rem, 4vw, 3rem); max-height: calc(100vh - 12rem); overflow-y: auto; }

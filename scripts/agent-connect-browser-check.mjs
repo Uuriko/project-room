@@ -40,6 +40,9 @@ test("browser owner issues digest-only setup; a real external client imports, re
   f.page.on("request", request => { if (request.url().endsWith("/agent-connections") && request.method() === "POST") requests.push(request.postDataJSON()); });
   await f.open(); await f.capture("desktop-form"); await f.create();
   await f.page.locator("#agent-setup").waitFor({ state: "visible" });
+  assert.equal(await f.page.locator("#agent-import-checklist").isVisible(), true);
+  assert.match(await f.page.locator("#agent-import-checklist").innerText(), /pbpaste \| node scripts\/agent-inbox\.mjs import/);
+  assert.match(await f.page.locator("#agent-import-route").innerText(), /Copy, import into a new private directory/);
   await f.capture("desktop-ready"); const config = await f.config();
   assert.equal(JSON.stringify(requests).includes(config.token), false); assert.equal(requests[0].keyHash.length, 64);
   const env = { PATH: process.env.PATH }, directory = join(f.directory, "connection");
@@ -70,7 +73,7 @@ test("browser owner issues digest-only setup; a real external client imports, re
   assert.doesNotThrow(() => f.store.agentConnections.verify());
 });
 
-test("named roster fills Muse and Grok Build without creating access", { timeout: 20000 }, async t => {
+test("named roster fills Muse and Grok Build; Grok Build shows import checklist", { timeout: 25000 }, async t => {
   const f = await setup(t);
   await f.open();
   await f.page.locator('[data-roster="muse"]').click();
@@ -81,6 +84,10 @@ test("named roster fills Muse and Grok Build without creating access", { timeout
   assert.equal(await f.page.locator("#agent-connect-name").inputValue(), "Grok Build");
   assert.equal(await f.page.locator("#agent-connect-access").inputValue(), "contribute");
   assert.equal(f.store.db.prepare("SELECT count(*) n FROM agent_connections").get().n, 0);
+  await f.page.locator("#agent-create").click();
+  await f.page.locator("#agent-setup").waitFor({ state: "visible" });
+  assert.match(await f.page.locator("#agent-import-route").innerText(), /merge the printed MCP snippet/);
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM agent_connections").get().n, 1);
 });
 
 test("unknown enrollment survives close and retries the original digest and identity", { timeout: 30000 }, async t => {

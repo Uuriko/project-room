@@ -475,6 +475,13 @@
         <button id="agent-create" type="submit" class="button primary">Create access</button>
       </form>
       <section id="agent-setup" hidden>
+        <ol id="agent-import-checklist">
+          <li>Copy the private setup.</li>
+          <li>Import it into a new directory outside any git repo: <code>pbpaste | node scripts/agent-inbox.mjs import /absolute/new/private-directory</code></li>
+          <li>Set <code>ROOM_AGENT_CONFIG</code> to that directory and run <code>node scripts/agent-inbox.mjs check</code>.</li>
+          <li>Clear the clipboard.</li>
+        </ol>
+        <p id="agent-import-route" class="form-hint"></p>
         <details id="agent-private-details"><summary>Reveal private setup</summary>
           <p class="form-hint">Keep this out of chats, shared files and repositories.</p>
           <label for="agent-private-config">Private connection</label><textarea id="agent-private-config" rows="4" readonly autocomplete="off" spellcheck="false"></textarea>
