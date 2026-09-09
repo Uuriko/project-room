@@ -9,7 +9,7 @@ import { installAgentConnections } from "./agent-connections.js";
 import { installRoomInstructions } from "./room-instructions.js";
 import { installReminders } from "./reminders.js";
 import { installPortableWork, installResultCopy } from "./portable-work.js";
-import { replyDraftKey, replyDraftData, validReplyDraft, confirmsReplyCommand, REPLY_CANCELLED } from "./reply-requests.js";
+import { replyDraftKey, replyDraftData, validReplyDraft, creditQuestion, confirmsReplyCommand, REPLY_CANCELLED } from "./reply-requests.js";
 import { workHelpContext, validateHelpData } from "./work-help.js";
 import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
 import { installInbox } from "./inbox-ui.js";
@@ -883,8 +883,10 @@ function syncRequestComposer() {
   $("#request-reply").hidden = !state || active;
   const request = mode?.requestMessageId && state?.replyRequests?.[mode.requestMessageId];
   const changed = request && (request.revision !== mode.expectedRequestRevision || request.contextEventId !== mode.contextEventId);
-  const label = mode ? ({ request: "Request a reply", answered: "Answer", declined: "Decline", cancelled: "Cancel request" })[mode.kind] : "";
-  const subject = request ? conversation?.byId.get(request.id)?.body.slice(0, 80) : "";
+  const label = mode?.resultEventId ? "Ask about credit" : mode ? ({ request: "Request a reply", answered: "Answer", declined: "Decline", cancelled: "Cancel request" })[mode.kind] : "";
+  const work = mode?.resultEventId && state?.workItems[mode.workItemId];
+  const subject = work ? work.title + (work.receipt?.eventId !== mode.resultEventId ? " · Earlier result" : "")
+    : request ? conversation?.byId.get(request.id)?.body.slice(0, 80) : "";
   setText("#request-mode-label", requestReading ? "Reading request…" : [label, subject, pendingMessage ? "Retry original" : changed ? "Context changed" : ""].filter(Boolean).join(" · "));
   $("#request-refresh").hidden = !request || Boolean(pendingMessage) || requestReading || request.status !== "open";
   $("#request-exit").disabled = busy;
@@ -900,10 +902,10 @@ function syncRequestComposer() {
   input.placeholder = mode?.kind === "request" ? "What do you need?" : mode?.kind === "cancelled" ? "Reason…" : mode ? "Your reply…" : "Message…";
   if (active) $("#reply-bar").hidden = true;
 }
-function setRequestMode(mode) {
+function setRequestMode(mode, initial = {}) {
   saveComposer(); requestMode = mode;
   const key = composerKey();
-  if (!drafts.entries.has(key)) drafts.save(key, { body: "", toMemberId: mode.requesterId ?? "", replyToId: mode.requestMessageId ?? currentThreadId, pending: null, mode, threadId: currentThreadId });
+  if (!drafts.entries.has(key)) drafts.save(key, { body: "", toMemberId: mode.requesterId ?? "", replyToId: mode.requestMessageId ?? currentThreadId, ...initial, pending: null, mode, threadId: currentThreadId });
   else drafts.save(key, { mode });
   restoreComposer(drafts.get(key));
   syncRequestComposer(); renderComposerError(); persistDrafts();
@@ -941,6 +943,23 @@ async function openRequestMode(kind, id) {
   }
 }
 $("#request-reply").addEventListener("click", () => { if (!state || busy || requestReading) return; setRequestMode({ kind: "request" }); });
+document.addEventListener("click", event => {
+  const resume = event.target.closest("[data-resume-credit]");
+  if (resume && state && !busy && !requestReading) {
+    const saved = drafts.entries.get(resume.dataset.resumeCredit);
+    if (!saved?.mode?.resultEventId || !validReplyDraft(saved.mode, state)) return;
+    inboxUI?.showRooms(); switchThread(saved.threadId); setRequestMode(saved.mode);
+    $("#message-input").scrollIntoView({ block: "nearest", behavior: "instant" }); return;
+  }
+  const button = event.target.closest("[data-ask-credit]");
+  if (!button || !state || busy || requestReading) return;
+  const question = creditQuestion(state, button.dataset.askCredit, session.member.id, button.dataset.resultEvent);
+  if (!question) { notice("Result changed. Open it again."); return; }
+  inboxUI?.showRooms();
+  switchThread(question.replyToId ? conversation.rootById.get(question.replyToId) : null);
+  setRequestMode(question.mode, question);
+  $("#message-input").scrollIntoView({ block: "nearest", behavior: "instant" });
+});
 $("#request-exit").addEventListener("click", () => switchThread(currentThreadId, true));
 $("#request-refresh").addEventListener("click", () => { if (requestMode?.requestMessageId) openRequestMode(requestMode.kind, requestMode.requestMessageId); });
 function persistDrafts() {
@@ -950,6 +969,7 @@ function persistDrafts() {
 }
 function switchThread(threadId, focusComposer = false) {
   if (!state || busy || (threadId && !conversation.threads.has(threadId))) return;
+  const leavingResultQuestion = Boolean(requestMode?.resultEventId);
   requestEpoch++; requestReading = false;
   if (threadId !== currentThreadId || requestMode) {
     saveComposer(); viewPositions.set(currentThreadId ? `thread:${currentThreadId}` : "room", $("#message-list").scrollTop);
@@ -964,6 +984,7 @@ function switchThread(threadId, focusComposer = false) {
     select.value = draft.toMemberId; replyToId = draft.replyToId; pendingMessage = draft.pending;
   }
   updateReply(); renderMessages(); renderComposerError(); syncRequestComposer();
+  if (leavingResultQuestion) renderReturnBrief();
   if (focusComposer) $("#message-input").focus();
   else (currentThreadId ? $("#thread-title") : $("#conversation-title")).focus({ preventScroll: true });
 }
@@ -1125,6 +1146,10 @@ function claimStateLabel(i, now = Date.now()) {
 function receiptCard(i) {
   if (!i.receipt) return "";
   const receipt = i.receipt;
+  const earlier = [...drafts.entries].filter(([, draft]) => draft.mode?.resultEventId && draft.mode.workItemId === i.id
+    && draft.mode.resultEventId !== receipt.eventId && (draft.body.trim() || draft.pending) && validReplyDraft(draft.mode, state));
+  const resume = earlier.map(([key], index) => `<button type="button" class="button ghost" data-resume-credit="${esc(key)}"
+    data-focus-key="resume-credit:${esc(key)}"${busy ? " disabled" : ""}>Continue earlier question${earlier.length > 1 ? " " + (index + 1) : ""}</button>`).join("");
   const reporter = receipt.reportedById ? memberLabel(receipt.reportedById) : "Unknown reporter";
   const producer = receipt.producerAttribution === "reported" && receipt.producerId
     ? memberLabel(receipt.producerId)
@@ -1140,7 +1165,7 @@ function receiptCard(i) {
       : "";
     verification = `<p><strong>${esc(resultLabel)}</strong> reported by ${esc(memberLabel(i.verification.verifierId))}${independence}: ${esc(i.verification.summary)}</p>`;
   }
-  return `<div class="receipt"><p class="receipt-label">REPORTED COMPLETION · NOT AUTOMATIC VERIFICATION</p><dl class="receipt-attribution"><div><dt>Completion reporter</dt><dd>${esc(reporter)}</dd></div><div><dt>Producer</dt><dd>${esc(producer)}</dd></div></dl><p>${esc(receipt.summary)}</p>${receipt.nativeText ? "" : `<a href="${safeUrl(receipt.evidenceUrl)}" target="_blank" rel="noreferrer" data-focus-key="work-evidence:${esc(i.id)}">Open submitted evidence ↗</a>`}<code>${esc(receipt.evidenceVersion)}</code><p>${esc(receipt.nextAction)}</p>${verification}</div>`;
+  return `<div class="receipt"><p class="receipt-label">REPORTED COMPLETION · NOT AUTOMATIC VERIFICATION</p><dl class="receipt-attribution"><div><dt>Completion reporter</dt><dd>${esc(reporter)}</dd></div><div><dt>Producer</dt><dd>${esc(producer)}</dd></div></dl><p>${esc(receipt.summary)}</p>${receipt.nativeText ? "" : `<a href="${safeUrl(receipt.evidenceUrl)}" target="_blank" rel="noreferrer" data-focus-key="work-evidence:${esc(i.id)}">Open submitted evidence ↗</a>`}<code>${esc(receipt.evidenceVersion)}</code><p>${esc(receipt.nextAction)}</p>${verification}${receipt.producerAttribution !== "reported" ? `<button type="button" class="button ghost" data-ask-credit="${esc(i.id)}" data-result-event="${esc(receipt.eventId)}" data-focus-key="ask-credit:${esc(i.id)}"${busy ? " disabled" : ""}>Ask about credit</button>` : ""}${resume}</div>`;
 }
 function shareDraftButton(item, key = "task") {
   return `<button type="button" class="button secondary" data-portable-work="${esc(item.id)}" data-portable-mode="draft" data-focus-key="share-draft:${esc(item.id)}:${esc(key)}">Share draft</button>`;
@@ -1534,6 +1559,7 @@ function submitRequest(form) {
       if (generation !== client.generation || session !== identity || !state) return;
       drafts.clear(key); requestMode = null; requestEpoch++;
       restoreComposer(drafts.get(currentThreadId)); updateReply(); persistDrafts();
+      if (mode.resultEventId) renderReturnBrief();
       notice(mode.kind === "request" ? "Request saved." : mode.kind === "cancelled" ? "Request cancelled." : "Reply saved.");
     } catch (error) {
       if (generation !== client.generation || session !== identity || !state) return;

@@ -13,11 +13,36 @@ const requireValid = (valid, message) => { if (!valid) throw new Error(message);
 // Browser drafts have a separate identity for each explicit mode, even inside
 // one conversation. Keys cannot collide with a canonical message ID.
 export function replyDraftKey(mode, threadId = null) {
+  if (mode?.kind === "request" && mode.resultEventId) return JSON.stringify(["result-question", mode.workItemId, mode.resultEventId]);
   return mode ? JSON.stringify(["request", mode.kind, mode.requestMessageId ?? threadId]) : threadId;
+}
+const resultReceipt = (state, mode) => {
+  const work = state.workItems?.[mode.workItemId];
+  return [...(work?.receiptHistory ?? []), work?.receipt].find(receipt => receipt?.eventId === mode.resultEventId);
+};
+// A question gathers context. It never changes credit, work state or review authority.
+export function creditQuestion(state, workItemId, memberId, resultEventId) {
+  const work = state.workItems?.[workItemId], receipt = work?.receipt;
+  if (!receipt || receipt.eventId !== resultEventId || !state.members?.[memberId] || state.members[memberId].active === false) return null;
+  const mode = { kind: "request", workItemId, resultEventId, resultMessageId: receipt.nativeText?.messageId ?? null };
+  if (!validReplyDraft(mode, state)) return null;
+  const reporter = receipt.reportedById, member = state.members[reporter];
+  const credit = receipt.externalProducer ?? "Not reported";
+  return { mode, toMemberId: reporter !== memberId && member?.active !== false && member ? reporter : "",
+    replyToId: mode.resultMessageId,
+    body: `Who contributed to this result, and what did each person or AI do?\n\nReported credit: ${credit}`
+      + (receipt.nativeText ? "" : `\nResult record: ${receipt.eventId}`) };
 }
 export function validReplyDraft(mode, state) {
   if (!mode || typeof mode !== "object" || Array.isArray(mode)) return false;
-  if (mode.kind === "request") return Object.keys(mode).length === 1;
+  if (mode.kind === "request") {
+    if (Object.keys(mode).length === 1) return true;
+    const keys = ["kind", "workItemId", "resultEventId", "resultMessageId"], receipt = resultReceipt(state, mode);
+    return Object.keys(mode).length === keys.length && keys.every(key => own(mode, key))
+      && id(mode.workItemId) && id(mode.resultEventId) && Boolean(receipt)
+      && mode.resultMessageId === (receipt.nativeText?.messageId ?? null)
+      && (mode.resultMessageId === null || state.messages?.some(message => message.id === mode.resultMessageId && message.workItemId === mode.workItemId));
+  }
   const request = state.replyRequests?.[mode.requestMessageId];
   const keys = ["kind", "requestMessageId", "expectedRequestRevision", "requesterId", "workItemId", "contextEventId", "contextSequence"];
   return ["answered", "declined", "cancelled"].includes(mode.kind) && request
@@ -30,7 +55,8 @@ export function replyDraftData(mode, { body, toMemberId, replyToId, messageId })
   if (!mode) return { ...(messageId === undefined ? {} : { messageId }), body, toMemberId, replyToId };
   if (mode.kind === "cancelled") return { requestMessageId: mode.requestMessageId,
     expectedRequestRevision: mode.expectedRequestRevision, reason: body };
-  const data = mode.kind === "request" ? { messageId, body, toMemberId, replyToId, requestKind: "reply" }
+  const data = mode.kind === "request" ? { messageId, body, toMemberId, replyToId, requestKind: "reply",
+      ...(mode.resultEventId ? { workItemId: mode.workItemId, replyToId: mode.resultMessageId } : {}) }
     : { messageId, body, toMemberId: mode.requesterId, replyToId: mode.requestMessageId,
       workItemId: mode.workItemId, responseToRequestId: mode.requestMessageId,
       expectedRequestRevision: mode.expectedRequestRevision, responseOutcome: mode.kind,
