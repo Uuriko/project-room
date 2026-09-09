@@ -61,3 +61,6 @@ Review how selected helpers discover that their contribution was adopted or
 needs revision, while preserving alternatives and requiring explicit release.
 Do not silently equate an approved task result with fulfillment of every offer.
 Then reconnect this journey to private context and the existing reply workflow.
+
+Follow-up: [Contribution feedback](DRAFT-FEEDBACK-2026-09-08.md) makes current
+review outcomes visible beside exact drafts and keeps alternatives discoverable.

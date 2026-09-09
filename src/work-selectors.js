@@ -1,4 +1,4 @@
-import { terminalWork, nextWorkStep, workActions } from "./workflow.js";
+import { terminalWork, nextWorkStep, workActions, matchesReceipt, currentApproval } from "./workflow.js";
 // One shared current-state derivation for the browser, return brief and agent client.
 
 export class CursorError extends Error {
@@ -6,6 +6,32 @@ export class CursorError extends Error {
     super(message);
     this.code = code;
   }
+}
+
+// Feedback belongs to an exact immutable message, never every draft by a producer.
+// Current-state presentation only: no new assignment, notification or fulfillment.
+export function draftFeedback(item, message) {
+  if (!message?.proposal || !item || message.workItemId !== item.id) return null;
+  const selected = receipt => receipt?.nativeText?.messageId === message.id
+    && receipt.nativeText.postedById === message.authorId;
+  const feedback = (label, reason = null) => ({ label, reason });
+  if (!selected(item.receipt)) return feedback(
+    item.receiptHistory?.some(selected) ? "Earlier result" : "Draft");
+  if (item.supersededBy || item.state === "superseded") return feedback("Work replaced");
+  const decision = matchesReceipt(item.decision, item.receipt) ? item.decision : null;
+  const review = matchesReceipt(item.verification, item.receipt) ? item.verification : null;
+  if (item.state === "blocked") {
+    if (decision && decision.eventId === item.blocker?.eventId) return feedback(
+      decision.decision === "changes_requested" ? "Changes requested" : "Not accepted", decision.reason);
+    if (review?.eventId === item.blocker?.eventId && review?.result === "fail") return feedback("Review finding", review.summary);
+    return feedback("Work reopened", item.blocker?.reason);
+  }
+  if (item.state !== "completed") return feedback("Work reopened");
+  if (currentApproval(item)) return feedback("Approved", decision.reason);
+  const next = nextWorkStep(item);
+  return feedback(next.action === "verify" ? "Awaiting review"
+    : next.action === "decide" ? "Awaiting decision"
+    : next.action === "complete" ? "Completed" : "Saved as result");
 }
 
 const REQUEST_ROLES = ["accountableMemberId", "verifierMemberId", "humanDecisionMakerId"];

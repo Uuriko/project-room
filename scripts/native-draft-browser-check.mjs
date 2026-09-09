@@ -127,3 +127,79 @@ test("native unknown save retains exact input through scope changes and retry", 
   const posts = f.traffic.filter(c => c.type === "message.posted"); assert.equal(posts.length, 2); assert.deepEqual(posts[1], first);
   assert.equal(f.state().messages.filter(m => m.body === "Keep this exact contribution").length, 1); assert.deepEqual(f.errors, []);
 });
+
+for (const touch of [false, true]) test("draft feedback and revised result " + (touch ? "mobile" : "desktop"), { timeout: 40000 }, async t => {
+  const f = await setup(t, touch), guest = await f.open("guest"), owner = await f.open("owner");
+  const post = async body => {
+    await guest.draft(); await guest.page.locator("#portable-result").fill(body);
+    await guest.page.locator("#portable-submit").click(); await guest.page.locator("#portable-dialog").waitFor({ state: "hidden" });
+    return f.state().messages.find(m => m.body === body);
+  };
+  const row = message => guest.page.locator('[data-message-record-id="' + message.id + '"]');
+  const label = async (message, expected) => guest.page.waitForFunction(({ id, expected }) =>
+    document.querySelector('[data-message-record-id="' + id + '"] .draft-state')?.textContent === expected, { id: message.id, expected });
+  const adopt = async message => {
+    await owner.page.locator('[data-message-action="result"][data-message-id="' + message.id + '"]').click();
+    await owner.page.waitForFunction(body => document.querySelector("#action-text-body").textContent === body, message.body);
+    await owner.page.locator('[name="producerId"]').selectOption("guest");
+    await owner.page.locator('[name="summary"]').fill("Contributor guide"); await owner.page.locator('[name="nextAction"]').fill("Review");
+    await owner.page.locator("#action-form button[type=submit]").click(); await owner.page.locator("#action-dialog").waitFor({ state: "hidden" });
+  };
+  const review = async requestId => {
+    const receipt = f.item().receipt;
+    const read = (await f.reviewer.call("room_read_result", { workItemId: f.workItemId, completionEventId: receipt.eventId })).result.structuredContent;
+    assert.equal(read.result.text.evidenceVersion, receipt.evidenceVersion);
+    const result = (await f.reviewer.call("room_record_verification", { requestId, workItemId: f.workItemId,
+      expectedRevision: f.item().revision, result: "pass", completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion,
+      summary: "Checked this exact text" })).result;
+    assert.equal(result.isError, undefined, JSON.stringify(result));
+  };
+  const decide = async (decision, reason) => {
+    await owner.card.locator('[data-action="decide"]').click();
+    await owner.page.waitForFunction(() => !document.querySelector("#action-form button[type=submit]").disabled);
+    await owner.page.locator('[name="decision"]').selectOption(decision); await owner.page.locator('[name="reason"]').fill(reason);
+    await owner.page.locator("#action-form button[type=submit]").click(); await owner.page.locator("#action-dialog").waitFor({ state: "hidden" });
+  };
+  const original = await post("Welcome! Share a draft."), alternative = await post("An alternate introduction.");
+  await guest.page.locator("#message-input").fill("My unrelated chat draft");
+  await adopt(original); await label(original, "Awaiting review"); await label(alternative, "Draft");
+  await guest.card.locator(".work-drafts > summary").click();
+  assert.equal(await guest.card.locator(".work-drafts [data-open-message]").count(), 2);
+  await row(original).locator(".draft-state").focus();
+  await row(original).locator(".message-content > p").evaluate(node => { window.feedbackBody = node; });
+  await review("feedback-first"); await label(original, "Awaiting decision");
+  assert.equal(await row(original).locator(".draft-state").evaluate(node => node === document.activeElement), true);
+  const reason = "Name the reviewer. <img src=x onerror=alert(1)>";
+  await decide("changes_requested", reason); await label(original, "Changes requested");
+  assert.equal(await row(original).locator(".draft-state").evaluate(node => node === document.activeElement), true);
+  await row(original).locator(".draft-feedback summary").click();
+  assert.equal(await row(original).locator(".draft-feedback details p").textContent(), reason);
+  assert.equal(await row(original).locator(".draft-feedback img").count(), 0);
+  assert.equal(await row(original).locator(".message-content > p").evaluate(node => node === window.feedbackBody), true);
+  await row(original).scrollIntoViewIfNeeded();
+  const prefix = "test-results/feedback-" + (touch ? "mobile" : "desktop");
+  mkdirSync("test-results", { recursive: true }); await guest.page.screenshot({ path: prefix + "-changes.png" });
+  // An unrelated room update must not collapse the feedback or discard focus.
+  f.send("owner", "message.posted", { messageId: "feedback-update", body: "Still here" });
+  await guest.page.locator('[data-message-record-id="feedback-update"]').waitFor();
+  assert.equal(await row(original).locator(".draft-feedback details").evaluate(node => node.open), true);
+  await row(original).locator(".draft-feedback summary").focus();
+  await owner.card.locator('[data-action="resolve"]').click();
+  await owner.page.locator('[name="resolution"]').fill("Add the room owner as reviewer");
+  await owner.page.locator("#action-form button[type=submit]").click(); await owner.page.locator("#action-dialog").waitFor({ state: "hidden" });
+  await label(original, "Work reopened");
+  assert.equal(await row(original).locator(".draft-state").evaluate(node => node === document.activeElement), true);
+  const revised = await post("Welcome! Share a draft; the room owner reviews it.");
+  await adopt(revised); await label(original, "Earlier result"); await label(revised, "Awaiting review");
+  await review("feedback-revised"); await decide("approved", "Ready to use"); await label(revised, "Approved"); await label(alternative, "Draft");
+  assert.equal(await row(original).locator(".draft-feedback details").count(), 0);
+  assert.equal(await guest.card.locator(".work-drafts [data-open-message]").count(), 3);
+  assert.match(await guest.card.locator('[data-focus-key="work-draft-message:' + original.id + '"]').textContent(), /Earlier result/);
+  assert.match(await guest.card.locator('[data-focus-key="work-draft-message:' + revised.id + '"]').textContent(), /Approved/);
+  assert.equal(f.item().receipt.nativeText.messageId, revised.id);
+  assert.equal(f.state().helpOffers["human-offer"].status, "selected");
+  assert.equal(await guest.page.locator("#message-input").inputValue(), "My unrelated chat draft");
+  await row(revised).scrollIntoViewIfNeeded(); await guest.page.screenshot({ path: prefix + "-approved.png" });
+  assert.equal(await guest.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+  assert.deepEqual(f.errors, []);
+});
