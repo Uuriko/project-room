@@ -34,6 +34,7 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     assert.equal(await page.locator("#auth-error").textContent(), "");
     assert.equal(await page.getByLabel("Room key", { exact: true }).isVisible(), true);
     assert.equal(await page.locator("#auth-description").isVisible(), false);
+    assert.match(await page.locator("#auth-guest-note").textContent(), /eight hours/);
     await page.locator("#refresh-button").click();
     await page.waitForFunction(() => document.querySelector("#connection-status").dataset.state === "signed-out");
     assert.equal(await page.locator("#auth-error").textContent(), "", "normal signed-out refresh is not an error");
@@ -66,7 +67,7 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     await page.screenshot({ path: `test-results/quiet-copy-${label}-room.png`, fullPage: true });
     await page.locator("#invite-people-button").click();
     assert.equal(await page.locator("#share-local-note").isVisible(), true);
-    assert.match(await page.locator("#share-link-dialog").innerText(), /Anyone with the link can read/);
+    assert.match(await page.locator("#share-link-dialog").innerText(), /Send this link to a person/);
     await page.screenshot({ path: `test-results/quiet-copy-${label}-invite.png` });
     await page.locator("#share-link-close").click();
     await page.locator("#signout-button").click();

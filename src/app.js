@@ -122,7 +122,7 @@ const client = new RoomClient({
     remindersUI?.sync();
     agentConnectionsUI?.sync();
     updatePeopleHint();
-    if (firstSnapshot) showRoomGuide();
+    if (firstSnapshot) { showRoomGuide(); maybeOpenCatchUp(); }
     instructionsUI?.sync();
     resultCopyUI?.sync();
     portableWorkUI?.sync();
@@ -499,6 +499,13 @@ function showRoomGuide() {
   if (!guide) return;
   try { if (sessionStorage.getItem("pr-guide-dismissed") === "1") { guide.hidden = true; return; } } catch {}
   guide.hidden = false;
+}
+function maybeOpenCatchUp() {
+  const waiting = $("#room-attention-count")?.textContent?.trim();
+  const catchup = $("#catchup-count")?.textContent?.trim() ?? "";
+  if (!waiting && !/\bneed/.test(catchup)) return;
+  const panel = $("#return-brief-panel");
+  if (panel) panel.open = true;
 }
 function inviteSecretFromText(value) {
   const text = String(value ?? "").trim();
@@ -1732,8 +1739,13 @@ function roomActionEntries() {
     { id: "new-work", label: "New work", words: "create task request", target: "#new-work-button", activate: true },
     { id: "invite", label: "Invite people", words: "share join link", target: "#invite-people-button", activate: true },
     { id: "agent", label: "Connect agent", words: "ai assistant mcp tools instinct muse grok build grokbot grok bot", target: "#connect-agent-button", reveal: "#people-panel", activate: true },
+    { id: "how-invite", label: "How to invite someone", words: "how guest eight hours link help", always: true },
+    { id: "how-agent", label: "How to connect an agent", words: "how instinct muse grok help", always: true },
     { id: "instructions", label: "Room instructions", words: "guidance brief charter", target: "#room-instructions-open", reveal: "#room-about", activate: true }
-  ].filter(entry => { const target = $(entry.target); return target && !target.disabled && !target.closest("[hidden]"); });
+  ].filter(entry => {
+    if (entry.always) return true;
+    const target = $(entry.target); return target && !target.disabled && !target.closest("[hidden]");
+  });
 }
 function closeRoomActions(restore = true) {
   const context = roomActionsContext; roomActionsContext = null;
@@ -1767,6 +1779,21 @@ function chooseRoomAction(id) {
   const entry = roomActionEntries().find(value => value.id === id);
   if (!entry) { renderRoomActions(); $("#room-actions-query").focus(); return; }
   closeRoomActions(false);
+  if (id === "how-invite") {
+    const button = $("#invite-people-button");
+    if (button && !button.hidden) { button.click(); return; }
+    notice("Ask the owner to send an Invite link. Guests can chat for about eight hours in that browser.");
+    return;
+  }
+  if (id === "how-agent") {
+    $("#people-panel").open = true;
+    const button = $("#connect-agent-button");
+    const target = button && !button.hidden ? button : $("#people-panel > summary");
+    target.scrollIntoView({ block: "nearest" }); target.focus({ preventScroll: true });
+    if (button && !button.hidden) return;
+    notice("The owner connects assistants from People & agents. Instinct and Muse can also Use my AI without a key.");
+    return;
+  }
   if (entry.reveal) $(entry.reveal).open = true;
   const target = $(entry.target); target.scrollIntoView({ block: "nearest" }); target.focus({ preventScroll: true });
   if (entry.activate) target.click();
@@ -2546,6 +2573,9 @@ $("#room-navigation").addEventListener("click", e => {
     if (panel.open) loadReturnBrief();
     else panel.open = true;
     focusRecord($("#return-brief-panel > summary"));
+  } else if (section === "people") {
+    $("#people-panel").open = true;
+    focusRecord($("#people-panel > summary"));
   } else focusRecord($(section === "work" ? "#work-title" : "#conversation-title"));
 });
 $("#rb-refresh-button").addEventListener("click", loadReturnBrief);

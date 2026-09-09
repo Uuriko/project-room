@@ -218,10 +218,12 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     // The rail entry opens to live current sections and a frozen first page of history.
     const panel = page.locator("#return-brief-panel");
     await page.waitForFunction(() => document.querySelector("#rb-current-boundary").textContent && !document.querySelector("#rb-refresh-button").disabled);
-    await Promise.all([
-      page.waitForResponse(response => response.url().endsWith("/return-brief")),
-      panel.locator(":scope > summary").click()
-    ]);
+    if (!await panel.evaluate(node => node.open)) {
+      await Promise.all([
+        page.waitForResponse(response => response.url().endsWith("/return-brief")),
+        panel.locator(":scope > summary").click()
+      ]);
+    }
     assert.equal(await page.locator("#rb-history-list").isVisible(), false);
     await page.locator("#rb-history-section > summary").click();
     await page.locator("#rb-history-list .rb-event").first().waitFor();

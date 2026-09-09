@@ -123,6 +123,16 @@ test("Connect agent markup lists the four roster names", () => {
   assert.match(html, /id="room-guide"/);
   assert.match(html, /id="people-hint"/);
   assert.match(html, /Write to the room/);
+  assert.match(html, /id="auth-guest-note"/);
+  assert.match(html, /eight hours in that browser/);
+  assert.match(html, /id="share-link-intro"/);
+  assert.match(html, /Send this link to a person/);
+  assert.match(html, /data-room-section="people"/);
+  const app = readFileSync(join(checkout, "src/app.js"), "utf8");
+  assert.match(app, /How to invite someone/);
+  assert.match(app, /How to connect an agent/);
+  assert.match(app, /function maybeOpenCatchUp/);
+  assert.match(app, /\/\\bneed\/\.test\(catchup\)/);
   const source = readFileSync(join(checkout, "src/agent-connections.js"), "utf8");
   assert.match(source, /rosterSelection/);
   assert.match(source, /rosterNameTaken/);
@@ -131,5 +141,6 @@ test("Connect agent markup lists the four roster names", () => {
   const css = readFileSync(join(checkout, "src/styles.css"), "utf8");
   assert.match(css, /\.agent-roster \.button \{ width: auto; min-height: 44px;/);
   assert.match(css, /\.composer-toolbar select \{[^}]*min-height: 44px/);
+  assert.match(css, /\.room-navigation \{ position: sticky;/);
   assert.doesNotMatch(readFileSync(join(checkout, "docs/ROOM-ROSTER.md"), "utf8"), /member key cannot/i);
 });
