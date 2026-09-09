@@ -84,6 +84,36 @@ export class AccountClient {
       throw error;
     }
   }
+  async confirm() {
+    const session = this.currentSession("confirming access", { authenticated: true }), generation = this.generation;
+    const value = await this.request("/api/account-session");
+    if (!this.owns(generation, session)) return null;
+    if (!value?.authenticated || !sameAccountSession(value, session)) { this.invalidate(generation, session); return false; }
+    return true; // Keep object identity and generation: Room and Inbox own these.
+  }
+  async rooms(after = null) {
+    const session = this.currentSession("listing rooms", { authenticated: true }), generation = this.generation;
+    let value;
+    try { value = await this.request("/api/account-rooms" + (after === null ? "" : "?after=" + encodeURIComponent(after)), { session }); }
+    catch (error) {
+      if (!this.owns(generation, session)) return null;
+      if (error.status === 401 || ["session_binding_changed", "account_session_required"].includes(error.code)) this.invalidate(generation, session);
+      throw error;
+    }
+    if (!this.owns(generation, session)) return null;
+    const v = value?.viewer;
+    if (value?.contractVersion !== 1 || v?.accountId !== session.account.id || v.authEpoch !== session.account.authEpoch
+      || v.sessionRevision !== session.sessionRevision || v.sessionBinding !== session.sessionBinding) {
+      this.invalidate(generation, session); throw accountSessionError("Account changed");
+    }
+    const id = value => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value);
+    if (!Array.isArray(value.rooms) || value.rooms.length > 50 || !value.rooms.every(r => id(r?.id) && id(r.memberId) && typeof r.title === "string")
+      || (value.nextCursor !== null && !id(value.nextCursor))) throw new Error("Room list could not be confirmed");
+    let previous = after ?? "";
+    for (const room of value.rooms) { if (room.id <= previous) throw new Error("Room list order could not be confirmed"); previous = room.id; }
+    if (value.nextCursor !== null && (value.nextCursor <= (after ?? "") || value.nextCursor < previous)) throw new Error("Room continuation could not be confirmed");
+    return value;
+  }
   async logout() {
     const session = this.currentSession("signing out");
     const generation = ++this.generation;

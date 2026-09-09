@@ -242,6 +242,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         reject(404, "not_found", "Inbox route not found.");
       }
+      if (url.pathname === "/api/account-rooms" && req.method === "GET") {
+        const token = cookie(req, accountCookieName), binding = accountBinding(req);
+        if (url.searchParams.getAll("after").length > 1) reject(422, "invalid_room", "Invalid room continuation");
+        return json(res, 200, store.accountRooms(token, binding, { after: url.searchParams.get("after") }));
+      }
       if (url.pathname === "/api/account-session") {
         const slotToken = cookie(req, accountCookieName);
         if (req.method === "GET") {

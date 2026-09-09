@@ -2,11 +2,11 @@ import { InboxClient, inboxTextVersion } from "./inbox-client.js";
 import { installInboxSend } from "./inbox-send-ui.js";
 import { validId } from "./events.js";
 
-export function installInbox({ account, room, getRoom, onShared, onOpenWork }) {
+export function installInbox({ account, room, getRoom, onShared, onOpenWork, onAccountEnded = () => room.endAccess(), onRooms = () => {}, onNavigate = () => {} }) {
   const $ = selector => document.querySelector(selector);
-  const api = new InboxClient(account, { onAccessEnded: () => room.endAccess() });
+  const api = new InboxClient(account, { onAccessEnded: onAccountEnded });
   const drafts = new Map(), positions = new Map();
-  let owner = null, active = false, selected = null, epoch = 0, rows = [], sharing = null, sharingBusy = false, retryShare = null;
+  let owner = null, active = false, browsing = false, selected = null, epoch = 0, rows = [], sharing = null, sharingBusy = false, retryShare = null;
   const storageKey = "project-room:pending-private-share:v1";
   const positionKey = "project-room:inbox-position:v1";
   let storage; try { storage = sessionStorage; } catch {}
@@ -14,7 +14,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork }) {
   const text = (selector, value) => { $(selector).textContent = value; };
   const ownerKey = () => {
     const s = account.session;
-    return s?.authenticated && room.session?.authMode === "account" && room.ownsAccountSession()
+    return s?.authenticated
       ? JSON.stringify([s.account.id, s.account.authEpoch, s.sessionRevision, s.sessionBinding]) : null;
   };
   const owns = () => owner !== null && owner === ownerKey();
@@ -61,20 +61,27 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork }) {
   }
   function show(place, updateLocation = true) {
     remember(); // Capture before hiding the reader, when scroll offsets are meaningful.
+    onNavigate();
     active = place === "inbox";
+    browsing = false;
     if (updateLocation) history.replaceState(null, "", "#pr-view/" + (active ? "inbox" : "rooms"));
-    $("#main").hidden = active;
+    $("#main").hidden = active || !getRoom();
     $("#inbox-panel").hidden = !active;
+    $("#account-rooms-panel").hidden = active || Boolean(getRoom());
     $("#nav-inbox").setAttribute("aria-current", active ? "page" : "false");
     $("#nav-rooms").setAttribute("aria-current", active ? "false" : "page");
-    if (!active) $("#conversation-title").focus({ preventScroll: true });
+    if (!active) {
+      if (getRoom()) $("#conversation-title").focus({ preventScroll: true });
+      else onRooms();
+    }
   }
   function reset({ preservePending = false } = {}) {
     if (!preservePending) { try { storage?.removeItem(positionKey); } catch {} }
     sendUI.reset({ preservePending });
-    api.reset(); owner = null; epoch++; active = false; selected = null; rows = []; sharing = null; sharingBusy = false;
+    api.reset(); owner = null; epoch++; active = false; browsing = false; selected = null; rows = []; sharing = null; sharingBusy = false;
     drafts.clear(); positions.clear(); retryShare = null; if (!preservePending) persistShare();
     $("#workspace-nav").hidden = true; $("#inbox-panel").hidden = true; $("#inbox-share-dialog").close();
+    $("#account-rooms-panel").hidden = true;
     resultPreview = null; resultEpoch++; $("#inbox-result-dialog").close(); $("#inbox-results").hidden = true;
     for (const selector of ["#inbox-result-list", "#inbox-result-body", "#inbox-replaced-draft", "#inbox-result-status", "#inbox-origin"]) $(selector).replaceChildren();
     $("#inbox-panel").classList.remove("reading");
@@ -88,7 +95,10 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork }) {
     if (owner && owner !== next) reset();
     owner = next; $("#workspace-nav").hidden = false;
     // Room snapshot updates must not replace the current private destination.
-    $("#main").hidden = active;
+    $("#main").hidden = active || browsing || !getRoom();
+    $("#account-rooms-panel").hidden = !browsing && (active || Boolean(getRoom()));
+    $("#inbox-ask").disabled = Boolean(getRoom()) && !room.ownsAccountSession();
+    $("#choose-room").hidden = !getRoom();
   }
   const errorText = error => error.code === "obsolete_inbox" ? "" : error.status === 404 ? "Message unavailable." : "Couldn’t load inbox. Try again.";
   function renderList() {
@@ -190,6 +200,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork }) {
     sendUI.load(sourceId);
     const turn = ++resultEpoch;
     $("#inbox-results").hidden = true; $("#inbox-result-list").replaceChildren();
+    if (!getRoom() || !room.ownsAccountSession()) return;
     try {
       const value = await api.results(sourceId, getRoom().room.id);
       if (!owns() || selected !== sourceId || turn !== resultEpoch) return;
@@ -214,7 +225,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork }) {
   }
   async function previewResult(sourceId, workItemId) {
     const d = drafts.get(sourceId);
-    if (!owns() || d?.busy || d?.pending || d?.conflict) return;
+    if (!owns() || !getRoom() || !room.ownsAccountSession() || d?.busy || d?.pending || d?.conflict) return;
     const turn = ++resultEpoch; resultPreview = null;
     $("#inbox-result-dialog").showModal(); $("#inbox-result-use").disabled = true;
     text("#inbox-result-body", ""); text("#inbox-replaced-draft", d.body || "No current draft"); text("#inbox-result-status", "Loading…");
@@ -256,6 +267,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork }) {
   });
   async function ask() {
     if (!owns() || !selected) return;
+    if (!getRoom()) { show("rooms"); return; }
     $("#inbox-share-dialog").showModal(); text("#inbox-share-status", "Loading…");
     $("#inbox-share-confirm").disabled = true; $("#inbox-share-paragraphs").replaceChildren();
     const pending = pendingShare(), sourceId = pending?.sourceId ?? selected, turn = ++epoch;
@@ -318,6 +330,16 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork }) {
   });
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") remember(); });
   return { sync, reset, open: () => { if (!active) return load(); },
-    showRooms: () => { if (active) show("rooms", false); },
+    detachRoom: () => {
+      sharing = null; resultPreview = null; resultEpoch++;
+      $("#inbox-share-dialog").close(); $("#inbox-result-dialog").close();
+      $("#inbox-results").hidden = true; $("#inbox-result-list").replaceChildren();
+      sync();
+    },
+    showRoomList: () => { remember(); active = false; browsing = true; history.replaceState(null, "", "#pr-view/rooms");
+      $("#nav-inbox").setAttribute("aria-current", "false"); $("#nav-rooms").setAttribute("aria-current", "page");
+      $("#inbox-panel").hidden = true; $("#main").hidden = true;
+      $("#account-rooms-panel").hidden = false; onNavigate(); onRooms(); },
+    showRooms: () => { if (active || browsing) show("rooms", false); },
     hasPending: () => owns() && ([...drafts.values()].some(d => d.dirty || d.pending) || Boolean(pendingShare()) || sendUI.hasPending()) };
 }

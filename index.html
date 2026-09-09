@@ -46,7 +46,16 @@
       <nav id="workspace-nav" class="workspace-nav" aria-label="Workspace" hidden>
         <button id="nav-inbox" type="button" aria-current="false">Inbox</button>
         <button id="nav-rooms" type="button" aria-current="page">Rooms</button>
+        <button id="choose-room" type="button" class="text-button" hidden>Switch room</button>
       </nav>
+      <p id="account-status" class="form-hint" role="status" hidden></p>
+      <section id="account-rooms-panel" class="auth-panel panel" aria-labelledby="account-rooms-title" hidden>
+        <h1 id="account-rooms-title">Rooms</h1>
+        <p id="account-rooms-status" role="status"></p>
+        <div id="account-rooms-list"></div>
+        <button id="account-rooms-more" class="text-button" type="button" hidden>More</button>
+        <p class="form-hint">Join a room through its invitation.</p>
+      </section>
       <section id="inbox-panel" class="inbox-panel" aria-label="Your inbox" hidden>
         <aside class="inbox-sidebar">
           <header><h1>Inbox</h1><button id="inbox-refresh" class="button ghost icon-button" type="button" aria-label="Refresh inbox">↻</button></header>

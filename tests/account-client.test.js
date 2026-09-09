@@ -18,6 +18,33 @@ const accountSession = (id, sessionRevision, suffix = sessionRevision) => ({
   authenticatedUntil: id === null ? null : 888888
 });
 
+test("account confirmation preserves ownership on a matching read and invalidates a changed account", async () => {
+  const original = accountSession("personal", 2); let remote = original;
+  const client = new AccountClient({ fetcher: async () => response(remote) }); client.session = original;
+  assert.equal(await client.confirm(), true); assert.equal(client.session, original); assert.equal(client.generation, 0);
+  remote = accountSession("replacement", 3);
+  assert.equal(await client.confirm(), false); assert.equal(client.session, null); assert.equal(client.generation, 1);
+});
+test("late account confirmation cannot invalidate a replacement; network failure is not logout", async () => {
+  const pending = deferred(), client = new AccountClient({ fetcher: () => pending.promise });
+  client.session = accountSession("old", 1); const checking = client.confirm();
+  const replacement = accountSession("new", 2); client.generation++; client.session = replacement;
+  pending.resolve(response(accountSession(null, 3))); assert.equal(await checking, null); assert.equal(client.session, replacement);
+  client.fetcher = async () => { throw new Error("Offline"); };
+  await assert.rejects(client.confirm(), /Offline/); assert.equal(client.session, replacement);
+});
+test("room discovery pins the account and rejects malformed or nonprogressing pages", async () => {
+  const original = accountSession("personal", 1), calls = [];
+  let data = { contractVersion: 1, viewer: { accountId: original.account.id, authEpoch: 0, sessionRevision: 1, sessionBinding: original.sessionBinding },
+    rooms: [{ id: "commons", title: "Commons", memberId: "owner" }], nextCursor: null };
+  const client = new AccountClient({ fetcher: async (path, options) => { calls.push({ path, options }); return response(data); } }); client.session = original;
+  assert.equal((await client.rooms()).rooms[0].id, "commons");
+  assert.equal(calls[0].options.headers["X-Session-Binding"], original.sessionBinding);
+  data = { ...data, nextCursor: "commons" }; await assert.rejects(client.rooms("commons"), /order|continuation/);
+  data = { ...data, viewer: { ...data.viewer, accountId: "other" } };
+  await assert.rejects(client.rooms(), /Account changed/); assert.equal(client.session, null);
+});
+
 test("a delayed link join cannot replace a newer browser identity", async () => {
   const waiting = deferred(), replacement = accountSession("replacement", 3);
   const client = new AccountClient({ fetcher: async path => path === "/api/share-links/join" ? waiting.promise : response(replacement) });

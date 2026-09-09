@@ -53,6 +53,10 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.equal(joined.session.member.role, 'guest');
     const guestHeaders = { Cookie: slotCookie, 'X-CSRF-Token': joined.session.csrf,
       'X-Session-Binding': joined.session.sessionBinding, 'X-Project-Room-Auth': 'account' };
+    const roomList = await json(await call('/api/account-rooms', { headers: guestHeaders }));
+    assert.equal(roomList.viewer.accountId, joined.session.account.id);
+    assert.deepEqual(roomList.rooms.map(r => r.id), ['commons']); assert.equal(roomList.nextCursor, null);
+    await json(await call('/api/account-rooms', { headers: { Cookie: slotCookie } }), 422);
     const command = { id: randomUUID(), type: 'message.posted', data: { body: 'Shared HTTP on Cloudflare' } };
     const posted = await json(await call('/api/rooms/commons/commands', { headers: guestHeaders, data: command }), 201);
     await json(await call('/api/rooms/commons/commands', { headers: ownerHeaders, data: {

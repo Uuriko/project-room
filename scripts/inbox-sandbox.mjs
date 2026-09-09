@@ -28,7 +28,9 @@ export async function createInboxSandbox() {
     syntheticInboxTransport: new SyntheticInboxTransport(store.inbox, provider) });
   try { await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); }); }
   catch (error) { provider.close(); store.close(); throw error; }
-  return { directory, accountKey, store, provider, url: "http://127.0.0.1:" + server.address().port + "/?room=commons#pr-view/inbox",
+  return { directory, accountKey, store, provider,
+    accountUrl: "http://127.0.0.1:" + server.address().port + "/?account=1#pr-view/inbox",
+    url: "http://127.0.0.1:" + server.address().port + "/?room=commons#pr-view/inbox",
     close: async () => {
       server.closeStreams(); server.closeAllConnections();
       await new Promise(resolve => server.close(resolve)); provider.close(); store.close();
@@ -38,7 +40,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (process.argv.length !== 3 || process.argv[2] !== "--start") throw new Error("Explicit opt-in: node scripts/inbox-sandbox.mjs --start");
   const sample = await createInboxSandbox();
   console.log("Local sample only — no real messages or agents.");
-  console.log(sample.url);
+  console.log(sample.accountUrl);
   console.log("Private sample sign-in key: " + sample.accountKey);
   console.log("Sample data retained at: " + sample.directory);
   let closing = false;

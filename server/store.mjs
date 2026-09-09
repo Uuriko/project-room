@@ -728,6 +728,25 @@ export class RoomStore {
     this.verifyInvitedMembership(roomId, member);
     return { ...auth, member, roomId };
   }
+  accountRooms(token, binding, { after = null } = {}) {
+    if (after !== null && !validId(after)) fail(422, "invalid_room", "Invalid room continuation");
+    return this.transaction(() => {
+      const auth = this.authenticateAccountSession(token, null, binding);
+      const rows = this.db.prepare("SELECT room_id FROM member_accounts WHERE account_id=? AND room_id>? ORDER BY room_id LIMIT 51")
+        .all(auth.account.id, after ?? "");
+      const rooms = [];
+      for (const row of rows.slice(0, 50)) {
+        try {
+          const access = this.authenticateAccountSession(token, row.room_id, binding);
+          const room = this.db.prepare("SELECT json_extract(projection,'$.room.title') AS title FROM rooms WHERE id=?").get(row.room_id);
+          rooms.push({ id: row.room_id, title: room.title, memberId: access.member.id });
+        } catch (error) { if (error.status !== 403) throw error; }
+      }
+      return { contractVersion: 1, viewer: { accountId: auth.account.id, authEpoch: auth.account.authEpoch,
+        sessionRevision: auth.sessionRevision, sessionBinding: auth.sessionBinding },
+        rooms, nextCursor: rows.length > 50 ? rows[49].room_id : null };
+    });
+  }
   ensureHumanAccountBinding(roomId, memberId, requestedAccountId = null, origin = "local-provisioning") {
     const members = this.room(roomId).state.members;
     const member = validId(memberId) && Object.hasOwn(members, memberId) && members[memberId];

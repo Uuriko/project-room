@@ -48,4 +48,6 @@ Tests cover desktop/mobile direct replies, the reviewed-result return path, unkn
 
 Use the exact-commit evidence directory for final counts. Candidate failures and repairs are retained separately. All people and provider behavior in these exercises are synthetic/scripted; there is no independent LLM or real-human usability qualification.
 
+Account-home update: `/?account=1` now supports private Inbox use without room membership, plus scoped room discovery. See `ACCOUNT-FIRST-INBOX-2026-09-08.md`; its later checkpoint supersedes the room-coupling limitation recorded above. The sample launcher prints account home, while its programmatic room-bound URL is preserved for existing fixtures.
+
 Remaining work: broader source/adoption journeys and account-home onboarding, explicit operator resolution of permanent unknown states, actual-agent contribution parity, then authorized provider-specific email qualification. Attachments, true mailbox authority, external delivery and hosted operation are not established by this simulator. The full product goal remains active.
