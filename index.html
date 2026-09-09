@@ -47,8 +47,9 @@
         </form>
         <label class="invite-paste" for="invite-link">Have an invite?</label>
         <input id="invite-link" type="text" autocomplete="off" spellcheck="false" maxlength="512" placeholder="Paste the invite link">
+        <p id="auth-guest-note" class="form-hint">Guest invites last about eight hours in that browser. Room keys last until they are replaced.</p>
         <details class="access-help"><summary>Need access?</summary>
-          <p id="auth-description">Ask the room owner for an invite link or member key.</p>
+          <p id="auth-description">Ask the room owner for an invite link or room key.</p>
           <p id="auth-hint" class="form-hint">Keep your key private. Lost guest access? Ask for a new invite.</p>
         </details>
         <details class="return-help"><summary>Returning to the room?</summary><p>Use the same browser to resume an active session. Members can sign in again with their current key. If guest access has expired, ask the owner for a fresh invitation; joining again creates a new guest identity. Your earlier messages stay in the room.</p></details>
@@ -144,6 +145,7 @@
           <button class="text-button" type="button" data-room-section="chat">Chat</button>
           <button class="text-button" type="button" data-room-section="work">Work <span id="room-work-count"></span></button>
           <button class="text-button" type="button" data-room-section="catch-up">Catch-up <span id="room-attention-count"></span></button>
+          <button class="text-button" type="button" data-room-section="people">People</button>
         </nav>
         <section class="room-stage" aria-labelledby="room-title">
           <header class="room-heading">
@@ -493,7 +495,7 @@
     </dialog>
     <dialog id="share-link-dialog" aria-labelledby="share-link-title" class="share-dialog">
       <div class="panel-header"><h2 id="share-link-title">Invite people</h2><button id="share-link-close" class="button ghost" type="button" aria-label="Close invitation links">Close</button></div>
-      <p>Anyone with the link can read this room’s history and chat. Guests can’t manage members or approve work.</p>
+      <p id="share-link-intro">Send this link to a person. They can read the room and chat. They cannot invite others or approve work. Guest access lasts up to eight hours in their browser.</p>
       <p id="share-local-note" class="form-hint" hidden>Local preview: links work only on this Mac.</p>
       <form id="share-link-form">
         <details id="share-settings"><summary>Link limits <span id="share-settings-summary">24 hours · 10 guests</span></summary>

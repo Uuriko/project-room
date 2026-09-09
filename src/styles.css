@@ -502,9 +502,13 @@ button:disabled { cursor: wait; opacity: .6; }
 .room-navigation { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: .35rem 1rem; padding: .4rem 1.5rem; border-bottom: 1px solid var(--line); }
 .room-navigation button { min-height: 44px; padding: .35rem .6rem; }
 .room-navigation span { font-size: .85em; }
+#conversation-title, #work-title, #return-brief-panel { scroll-margin-top: 1rem; }
+@media (max-width: 1020px) {
+  .room-navigation { position: sticky; top: 0; z-index: 6; background: var(--bg); }
+  #work-title, #return-brief-panel, #conversation-title, #people-panel { scroll-margin-top: 3.5rem; }
+}
 .return-help { margin-top: 1rem; font-size: .9rem; }
 .return-help p { max-width: 44rem; }
-#conversation-title, #work-title, #return-brief-panel { scroll-margin-top: 1rem; }
 .room-stage .room-heading { align-items: center; gap: 1rem; margin-bottom: 1.25rem; }
 .room-stage h1 { font-size: clamp(1.5rem, 2.5vw, 2rem); line-height: 1.2; letter-spacing: -.035em; }
 .room-about { color: var(--muted); font-size: .875rem; }

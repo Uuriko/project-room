@@ -25,7 +25,7 @@ async function setup(t, { mobile = false, role = "owner" } = {}) {
     return route.continue();
   });
   page.on("pageerror", error => errors.push(error.message));
-  await page.goto(origin); await page.locator("#access-key").fill(f.keys[role]); await page.locator("#auth-form button").click();
+  await page.goto(origin); await page.locator("#access-key").fill(f.keys[role]); await page.getByRole("button", { name: "Enter room", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
   page.on("request", request => { if (request.method() !== "GET" && new URL(request.url()).pathname.startsWith("/api/rooms/")) writes.push(new URL(request.url()).pathname); });
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(external, []); assert.deepEqual(writes, []); });
@@ -91,12 +91,18 @@ test("room actions open existing work and catch-up flows; shortcuts do not inter
   await p.locator("#cancel-work-button").click();
   await f.open(); await f.action("people").click();
   assert.equal(await p.locator("#people-panel").evaluate(node => node.open), true);
+  await f.open(); await f.action("how-invite").click();
+  assert.equal(await p.locator("#share-link-dialog").isVisible(), true);
+  await p.locator("#share-link-close").click();
+  await f.open(); await f.action("how-agent").click();
+  assert.equal(await p.locator("#people-panel").evaluate(node => node.open), true);
+  assert.equal(await p.locator("#connect-agent-button").evaluate(node => node === document.activeElement), true);
 });
 
 test("room actions offer only the current member's available flows", { timeout: 30000 }, async t => {
   const f = await setup(t, { role: "guest" }); await f.open();
   for (const id of ["new-work", "invite", "agent"]) assert.equal(await f.action(id).count(), 0);
-  for (const id of ["write", "search", "catch-up", "people", "work"]) assert.equal(await f.action(id).count(), 1);
+  for (const id of ["write", "search", "catch-up", "people", "work", "how-invite", "how-agent"]) assert.equal(await f.action(id).count(), 1);
   await f.capture("guest");
 });
 

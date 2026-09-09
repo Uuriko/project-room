@@ -104,6 +104,7 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   assert.deepEqual(await producerSelect.locator("option").allTextContents(), [
     "Choose producer",
     "I produced this — Room owner (owner)",
+    "Outside person or AI",
     "Unknown / not reported",
     "Maya (maya) · human"
   ]);
@@ -144,7 +145,11 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
     await held;
     await route.fulfill({ response });
   });
-  await page.locator("#return-brief-panel > summary").click();
+  if (await page.locator("#return-brief-panel").evaluate(node => node.open)) {
+    await page.locator("#rb-refresh-button").click();
+  } else {
+    await page.locator("#return-brief-panel > summary").click();
+  }
   await captured;
   assert.equal(await page.locator("#return-brief-panel").getAttribute("aria-busy"), "true");
   assert.equal(await page.locator("#rb-ack-button").isDisabled(), true, "stale-horizon actions stay disabled during a fresh brief request");

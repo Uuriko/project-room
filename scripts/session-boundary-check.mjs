@@ -217,7 +217,11 @@ test("a shared browser cookie cannot expose another tab's return brief", { timeo
     new MutationObserver(() => window.returnBriefTexts.push(document.querySelector("#rb-attention-list").textContent))
       .observe(document.querySelector("#rb-attention-list"), { childList: true, characterData: true, subtree: true });
   });
-  await ownerTab.locator("#return-brief-panel > summary").click();
+  if (await ownerTab.locator("#return-brief-panel").evaluate(node => node.open)) {
+    await ownerTab.locator("#rb-refresh-button").click();
+  } else {
+    await ownerTab.locator("#return-brief-panel > summary").click();
+  }
   await ownerTab.locator("#auth-panel").waitFor({ state: "visible" });
   assert.equal(await ownerTab.locator("#main").isVisible(), false);
   assert.equal(await ownerTab.locator("#identity-label").textContent(), "Not signed in");
@@ -778,7 +782,9 @@ test("record identities and fragments remain collision-safe and legacy work link
   // while newly emitted room links use the collision-free application namespace.
   await page.evaluate(() => { location.hash = "#room-title"; });
   await page.waitForFunction(() => document.activeElement?.dataset.workRecordId === "room-title");
-  await page.locator("#return-brief-panel > summary").click();
+  if (!await page.locator("#return-brief-panel").evaluate(node => node.open)) {
+    await page.locator("#return-brief-panel > summary").click();
+  }
   const roomLink = page.locator("#rb-history-list [data-open-room]").first();
   await page.locator("#rb-history-section > summary").click();
   await roomLink.waitFor();

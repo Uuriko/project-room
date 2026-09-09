@@ -1,6 +1,6 @@
 # Project Room usability plan
 
-9 September 2026 · live Worker `90ba6c3f` · schema 26 · Durable Object not reset
+9 September 2026 · live Worker `94aa64ac` · schema 26 · Durable Object not reset
 
 This is the working plan for making the hosted Room easier to use, nicer to
 look at, and more capable **without** a mailbox, auto-enrollment, Durable Object
@@ -41,7 +41,7 @@ CMC, DIE copy, Desk merge.
 
 ## Phases
 
-### Phase 1 — this slice (execute now)
+### Phase 1 — shipped (PR #37)
 
 - Call the field **Room key** when that mode is selected.
 - Remember Room vs Account for this tab (`sessionStorage`), URL still wins.
@@ -50,13 +50,13 @@ CMC, DIE copy, Desk merge.
 - Composer placeholder “Write to the room…”.
 - How-to-test matches the labels.
 
-### Phase 2 — next (after Phase 1 is live)
+### Phase 2 — this slice
 
 - First-run: open Catch me up when it has items for you.
-- Invite dialog first sentence in plain English.
-- Actions (`⌘K`) include “How to invite” and “How to connect an agent”.
-- Guest expiry copy on the welcome screen, not only inside details.
-- Mobile: keep 44px controls; collapse the rail without losing Work.
+- Invite dialog first sentence in plain English (including eight-hour guest access).
+- Actions (`⌘K`) include **How to invite someone** and **How to connect an agent**.
+- Guest expiry copy on the welcome screen.
+- Mobile: sticky Chat / Work / Catch-up / People jumps; 44px controls.
 
 ### Phase 3 — later, still in-tree
 
@@ -90,4 +90,4 @@ CMC, DIE copy, Desk merge.
 | B | Phase 2 catch-up / Actions / guest copy | `src/app.js`, `index.html`, share-link copy, room-actions | A |
 | C | Account home titles + GitHub About notes | account rooms UI, CURRENT-ROOM | A |
 
-This document is Phase A’s spec. Implementation follows in the same change.
+Phase A shipped as PR #37. This change is Phase B.

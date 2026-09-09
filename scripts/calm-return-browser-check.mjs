@@ -64,18 +64,14 @@ for (const mobile of [false, true]) {
     };
     await ready(); await page.waitForFunction(() => document.querySelector("#reminder-count").textContent === "1 reminder");
     now += 6000; await page.clock.fastForward(6000); // Let the normal sign-in notice clear.
-    assert.equal(await panel.evaluate(node => node.open), false);
+    assert.equal(await panel.evaluate(node => node.open), true, "catch-up opens on first visit when work needs you");
     assert.equal(await page.locator("#return-brief-panel").count(), 1);
     assert.equal(await page.locator("#caught-up-button").count(), 0);
     assert.match(await page.locator("#catchup-count").textContent(), /^7 need you/);
     assert.equal(await panel.evaluate(node => Boolean(node.compareDocumentPosition(document.querySelector(".conversation-panel")) & Node.DOCUMENT_POSITION_FOLLOWING)), true);
-    await page.evaluate(() => scrollTo(0, 0)); await capture("closed");
+    await page.evaluate(() => scrollTo(0, 0)); await capture("open-on-return");
     assert.equal(await summary.evaluate(node => node.getBoundingClientRect().bottom < innerHeight), true);
-
-    // The native details toggle is queued after click. Wait for its new response,
-    // not the previous closed-panel brief that can still look ready momentarily.
-    const openedBrief = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/return-brief'));
-    await summary.click(); await openedBrief; await ready();
+    await ready();
     await page.waitForFunction(() => document.querySelector("#return-brief-panel").getAttribute("aria-busy") === "false");
     const horizon = Number(await page.locator("#rb-ack-button").getAttribute("data-horizon"));
     assert.ok(horizon > 0, 'the opened brief owns a populated history horizon');
