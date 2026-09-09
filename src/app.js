@@ -819,7 +819,7 @@ function draftFeedbackHTML(message) {
   if (!message.proposal) return "";
   const feedback = draftFeedback(state.workItems[message.workItemId], message);
   const label = feedback?.label ?? "Draft";
-return `<p class="form-hint"><a class="source-link draft-state" href="${esc(workHref(message.workItemId))}" data-open-work="${esc(message.workItemId)}">${esc(label)}</a> · based on revision ${esc(message.proposal.basisRevision)}${message.proposal.basisRevision < message.proposal.submittedAtRevision ? " · older work" : ""} · authorship unverified</p>${feedback?.reason ? `<details><summary>Feedback</summary><p>${esc(feedback.reason)}</p></details>` : ""}`;
+return `<p class="form-hint"><a class="source-link draft-state" href="${esc(workHref(message.workItemId))}" data-open-work="${esc(message.workItemId)}">${esc(label)}</a> · based on revision ${esc(message.proposal.basisRevision)}${message.proposal.basisRevision < message.proposal.submittedAtRevision ? " · older work" : ""} · authorship unverified · <button type="button" class="message-to-work" data-portable-work="${esc(message.workItemId)}" data-portable-mode="draft" data-portable-original="${esc(message.id)}" data-focus-key="refine:${esc(message.id)}">Refine draft</button></p>${feedback?.reason ? `<details><summary>Feedback</summary><p>${esc(feedback.reason)}</p></details>` : ""}`;
 }
 function messageContent(m) {
   const author = state.members[m.authorId];
@@ -1882,6 +1882,7 @@ function closeResult(restore = true) {
   const view = resultView;
   resultView = null; $("#result-dialog").close(); $("#result-title").textContent = "Result";
   $("#result-status").textContent = ""; $("#result-body").textContent = "";
+  $("#result-original").hidden = true;
   if (restore && view && sameSession(view.generation, view.roomId, view.memberId)) {
     if (view.fromResults && selectedWorkView === "results") {
       const row = [...$("#room-results-list").querySelectorAll("[data-result-work-id]")].find(node => node.dataset.resultWorkId === view.workItemId);
@@ -1892,6 +1893,13 @@ function closeResult(restore = true) {
   }
 }
 $("#close-result").addEventListener("click", () => closeResult());
+$("#result-original").addEventListener("click", () => {
+  const view = resultView;
+  if (!view?.loaded || busy || !sameSession(view.generation, view.roomId, view.memberId)
+    || !state.messages.some(message => message.id === view.originalId && message.workItemId === view.workItemId)) return;
+  closeResult(false);
+  history.replaceState(null, "", recordHref("message", view.originalId)); revealMessage(view.originalId);
+});
 $("#result-dialog").addEventListener("cancel", event => { event.preventDefault(); closeResult(); });
 function readResult(e) {
   const read = e.target.closest("[data-read-result]");
@@ -1903,12 +1911,17 @@ function readResult(e) {
     const view = { generation: client.generation, roomId: session.roomId, memberId: session.member.id, workItemId: item.id,
       fromResults, receipt: { completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion }, reportedById: receipt.reportedById }; resultView = view;
     $("#result-title").textContent = item.title; $("#result-status").textContent = "Loading exact text…"; $("#result-body").textContent = "";
+    $("#result-original").hidden = true;
     $("#result-dialog").showModal();
     const owns = () => resultView === view && sameSession(view.generation, view.roomId, view.memberId);
     client.workResult(item.id, { completionEventId: receipt.eventId }).then(value => {
       if (!owns() || !value) return;
       if (value.result.receipt?.evidenceVersion !== receipt.evidenceVersion) throw new Error("Pinned version changed");
       $("#result-body").textContent = value.result.text.body;
+      const message = state.messages.find(message => message.id === value.result.text.messageId && message.workItemId === item.id
+        && message.body === value.result.text.body);
+      const original = state.messages.find(original => original.id === message?.replyToId && original.workItemId === item.id && original.proposal);
+      view.originalId = original?.id; $("#result-original").hidden = !original;
       view.loaded = true; resultStatus();
     }).catch(() => { if (owns()) { view.error = true; resultStatus(); } });
     return;

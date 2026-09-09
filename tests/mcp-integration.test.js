@@ -22,13 +22,14 @@ test("real stdio process uses owner enrollment, selected work and stable draft r
   assert.equal((await mcp.call("room_check_access")).result.structuredContent.status, "credential_accepted");
   const selected = (await mcp.call("room_read_work", { workItemId: "test-handoff" })).result.structuredContent;
   assert.equal(selected.context.source.status, "not_requested");
-  const input = { requestId: "stable-mcp-draft", workItemId: "test-handoff", packetId: "mcp-fixture", basisRevision: 0, body: "Synthetic draft for human review." };
+  const input = { requestId: "stable-mcp-draft", workItemId: "test-handoff", packetId: "mcp-fixture", basisRevision: 0, body: "Synthetic draft for human review.", replyToId: "test-request" };
   const posted = (await mcp.call("room_post_draft", input)).result.structuredContent;
   assert.equal(posted.status, "draft_posted"); assert.equal(posted.duplicate, false);
   assert.equal((await mcp.close()).diagnostics, ""); mcp = await openMcpTestClient(directory);
   const retry = (await mcp.call("room_post_draft", input)).result.structuredContent;
   assert.equal(retry.duplicate, true); assert.equal(retry.eventId, posted.eventId);
   const after = f.store.snapshot(token, "commons"); assert.equal(after.sequence, before.sequence + 1);
+  assert.equal(after.state.messages.find(m => m.id === posted.messageId).replyToId, "test-request");
   assert.deepEqual(after.state.workItems, before.state.workItems); assert.equal(after.cursor, before.cursor);
   f.store.agentConnections.apply(session.token, "commons", { action: "disconnect", requestId: "end-mcp", memberId: "mcp-agent", expectedOwnerRevision: 0, expectedMemberRevision: 0, expectedGeneration: 1 }, session.session.sessionBinding);
   const ended = (await mcp.call("room_check_access")).result;

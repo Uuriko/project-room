@@ -338,7 +338,7 @@
         <button id="room-instructions-close" class="button secondary" type="button">Close</button>
       </div>
     </dialog>
-    <dialog id="result-dialog" aria-labelledby="result-title"><h2 id="result-title">Result</h2><p id="result-status" class="form-hint" role="status"></p><pre id="result-body"></pre><button id="close-result" type="button" class="button secondary">Close</button></dialog>
+    <dialog id="result-dialog" aria-labelledby="result-title"><h2 id="result-title">Result</h2><p id="result-status" class="form-hint" role="status"></p><pre id="result-body"></pre><button id="close-result" type="button" class="button secondary">Close</button><button id="result-original" type="button" class="button ghost" hidden>Original</button></dialog>
     <dialog id="action-dialog" aria-labelledby="action-title" aria-describedby="action-context">
       <form id="action-form">
         <h2 id="action-title"></h2>
@@ -422,6 +422,7 @@
         <div class="portable-actions"><button id="packet-copy" class="button primary" type="button">Copy</button><button id="portable-add-result" class="button secondary" type="button">Paste AI draft</button></div>
       </section>
       <form id="portable-form" class="portable-section" hidden>
+        <details id="portable-original" hidden><summary>Original</summary><pre id="portable-original-body"></pre></details>
         <label for="portable-result">Your AI’s answer</label>
         <textarea id="portable-result" rows="10" maxlength="16000" required placeholder="Paste the full answer, including its ROOM-RETURN line…" aria-describedby="portable-return-note"></textarea>
         <p id="portable-return-note" class="form-hint">Posts to chat; work status stays unchanged. Reload or sign-out clears unsent drafts.</p>

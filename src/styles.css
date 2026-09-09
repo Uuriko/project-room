@@ -293,6 +293,7 @@ dialog p { margin: 0; color: var(--muted); }
 .portable-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 #portable-work-title { overflow-wrap: anywhere; }
 #portable-status { margin-top: .8rem; }
+#portable-original-body { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.5; max-height: 14rem; overflow: auto; }
 #result-copy-dialog summary { cursor: pointer; min-height: 44px; padding-block: .65rem; color: var(--muted); font-size: .875rem; }
 #result-copy-dialog .form-hint { overflow-wrap: anywhere; }
 #result-copy-dialog > .panel-header { padding: 0 0 .75rem; align-items: flex-start; gap: .75rem; }

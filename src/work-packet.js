@@ -150,8 +150,8 @@ export function parseWorkReturn(text, { roomId, workItemId }) {
 
 // A room-authored draft uses the same proposal contract without a copied return
 // marker. Keep the exact text and inspected basis; this is not a completion.
-export function nativeWorkDraft(body, { workItemId, packetId, basisRevision }) {
-  if (!id(workItemId) || !id(packetId) || !revision(basisRevision)) invalid("Choose a current task before sharing a draft.");
+export function nativeWorkDraft(body, { workItemId, packetId, basisRevision, replyToId }) {
+  if (!id(workItemId) || !id(packetId) || !revision(basisRevision) || replyToId !== undefined && !id(replyToId)) invalid("Choose a current task before sharing a draft.");
   if (typeof body !== "string" || !body.isWellFormed() || !body.trim() || body.length > 4000) invalid("Write a draft of 1–4000 characters.");
-  return { workItemId, packetId, basisRevision, body };
+  return { workItemId, packetId, basisRevision, body, ...(replyToId === undefined ? {} : { replyToId }) };
 }

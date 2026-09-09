@@ -9,7 +9,7 @@ export function installPortableWork({ client, getState, onSaved }) {
   const dialog = $("portable-dialog");
   const drafts = new Map(); // Private memory only; cleared on identity loss.
   let entry = null, version = 0, pending = null, saving = false, copying = false, uncertain = false;
-  const draftKey = ticket => (ticket.native ? "native:" : "return:") + ticket.workId;
+  const draftKey = ticket => JSON.stringify([ticket.native ? "native" : "return", ticket.workId, ticket.source?.id ?? null]);
   const owns = ticket => Boolean(ticket && entry === ticket && ticket.version === version && dialog.open && client.generation === ticket.generation
     && client.session === ticket.session && client.ownsAccountSession() && getState()?.room?.id === ticket.session.roomId);
   const status = text => { $("portable-status").textContent = text; $("portable-status").classList.toggle("visible", Boolean(text)); };
@@ -19,6 +19,7 @@ export function installPortableWork({ client, getState, onSaved }) {
     version++; entry = null; pending = null; saving = uncertain = false;
     $("packet-preview").value = ""; $("portable-result").value = ""; $("portable-work-title").textContent = "";
     $("portable-source").checked = false; $("portable-older").checked = false; $("portable-older-label").hidden = true;
+    $("portable-original").hidden = true; $("portable-original").open = false; $("portable-original-body").textContent = "";
     status(""); dialog.close();
   }
   function reset() { drafts.clear(); clearView(); }
@@ -60,11 +61,13 @@ export function installPortableWork({ client, getState, onSaved }) {
   function mode(result) {
     $("portable-export").hidden = result; $("portable-form").hidden = !result;
     const native = entry?.native === true;
-    $("portable-title").textContent = native ? "Share draft" : result ? "Paste AI draft" : "Use my AI";
+    $("portable-title").textContent = entry?.source ? "Refine draft" : native ? "Share draft" : result ? "Paste AI draft" : "Use my AI";
     document.querySelector('label[for="portable-result"]').textContent = native ? "Your draft" : "Your AI’s answer";
     $("portable-result").maxLength = native ? 4000 : 16000;
     $("portable-result").rows = native ? 6 : 10;
     $("portable-result").placeholder = native ? "Share something useful…" : "Paste the full answer, including its ROOM-RETURN line…";
+    $("portable-return-note").textContent = entry?.source ? "Posts a new draft linked to the original. Work status stays unchanged."
+      : "Posts to chat; work status stays unchanged. Reload or sign-out clears unsent drafts.";
     status(result && uncertain ? "Save not confirmed. Retry the same draft." : ""); (result ? $("portable-result") : $("packet-copy")).focus();
     if (!result) $("packet-preview").scrollTop = 0;
   }
@@ -74,7 +77,11 @@ export function installPortableWork({ client, getState, onSaved }) {
     close();
     const state = getState(), workId = button.dataset.portableWork;
     if (!state || state.room.id !== client.session.roomId || !Object.hasOwn(state.workItems, workId)) return;
+    const source = button.dataset.portableOriginal ? state.messages.find(message => message.id === button.dataset.portableOriginal
+      && message.workItemId === workId && message.proposal && message.body.length <= 4000) : null;
+    if (button.dataset.portableOriginal && (!source || button.dataset.portableMode !== "draft")) return;
     entry = { version, generation: client.generation, session: client.session, state, workId, opener: button, focusKey: button.dataset.focusKey,
+      source,
       native: button.dataset.portableMode === "draft", basisRevision: state.workItems[workId].revision,
       packetOptions: { packetId: crypto.randomUUID(), exportedAt: new Date().toISOString() } };
     const draft = drafts.get(draftKey(entry));
@@ -82,7 +89,9 @@ export function installPortableWork({ client, getState, onSaved }) {
       $("portable-result").value = draft.text; pending = draft.pending; uncertain = draft.uncertain;
       $("portable-older").checked = draft.older; $("portable-older-label").hidden = !draft.showOlder;
       if (entry.native) { entry.basisRevision = draft.basisRevision; entry.packetOptions = draft.packetOptions; }
-    }
+    } else if (source) $("portable-result").value = source.body;
+    $("portable-original").hidden = !source;
+    $("portable-original-body").textContent = source?.body ?? "";
     $("portable-work-title").textContent = state.workItems[workId].title;
     $("portable-source-label").hidden = !state.workItems[workId].sourceMessageId;
     controls(); if (!entry.native) preview(); dialog.showModal(); mode(entry.native || button.dataset.portableMode === "result");
@@ -118,7 +127,8 @@ export function installPortableWork({ client, getState, onSaved }) {
       let data;
       try {
         data = ticket.native
-          ? nativeWorkDraft($("portable-result").value, { workItemId: ticket.workId, packetId: ticket.packetOptions.packetId, basisRevision: ticket.basisRevision })
+          ? nativeWorkDraft($("portable-result").value, { workItemId: ticket.workId, packetId: ticket.packetOptions.packetId, basisRevision: ticket.basisRevision,
+            ...(ticket.source ? { replyToId: ticket.source.id } : {}) })
           : parseWorkReturn($("portable-result").value, { roomId: ticket.session.roomId, workItemId: ticket.workId });
         if (ticket.native && getState()?.workItems?.[ticket.workId]?.revision > ticket.basisRevision && !$("portable-older").checked) {
           controls(); status("Work changed. Review before posting this older draft."); return;

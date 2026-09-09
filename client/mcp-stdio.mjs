@@ -26,7 +26,8 @@ export const roomTools = [
   }, ["workItemId"])),
   tool("room_post_draft", "Post a draft to one task for human review; does not accept, complete or approve work. Choose a stable requestId and keep the EXACT input for retries, including after cancellation or restart. A new MCP request ID must NOT create a new Room requestId. Read the task first; older-basis submission requires explicit consent.", schema({
     requestId: id, workItemId: id, packetId: { ...id, description: "Your stable correlation ID for this selected-task handoff, e.g. welcome-draft-01. It is not an access key or proof of authority. Keep it unchanged on exact retry." }, basisRevision: { type: "integer", minimum: 0 },
-    body: { type: "string", minLength: 1, maxLength: 4096 }, allowOlderBasis: { type: "boolean", default: false }
+    body: { type: "string", minLength: 1, maxLength: 4096 }, allowOlderBasis: { type: "boolean", default: false },
+    replyToId: { ...id, description: "Optional inspected original message. Post a separate refined artifact linked to it; leave original notes intact. A reply link is context, not verified derivation, authorship or inherited approval." }
   }, ["requestId", "workItemId", "packetId", "basisRevision", "body"]), false),
   ...workTools,
   ...helpTools,
@@ -49,7 +50,7 @@ function validArguments(tool, args) {
     && (args.since === undefined || Number.isSafeInteger(args.since) && args.since >= 0)
     && (args.limit === undefined || Number.isSafeInteger(args.limit) && args.limit >= 1 && args.limit <= 50)
     && (args.cursor === undefined || typeof args.cursor === "string" && args.cursor.length <= 2048 && /^[A-Za-z0-9_-]+$/.test(args.cursor) && args.since === undefined);
-  return Object.entries(args).every(([key, value]) => ["requestId", "workItemId", "packetId", "noticeId"].includes(key) ? validId(value)
+  return Object.entries(args).every(([key, value]) => ["requestId", "workItemId", "packetId", "noticeId", "replyToId"].includes(key) ? validId(value)
     : key === "body" ? typeof value === "string" && value.trim().length > 0 && value.length <= 4096
       : key === "basisRevision" ? Number.isSafeInteger(value) && value >= 0 : typeof value === "boolean");
 }
@@ -69,6 +70,7 @@ async function callTool(client, identity, name, args, signal) {
   const command = { id: args.requestId, type: "message.posted", data: {
     messageId: `mcp-${createHash("sha256").update(JSON.stringify([identity.roomId, identity.memberId, args.requestId])).digest("hex")}`,
     body: args.body, workItemId: args.workItemId, packetId: args.packetId, basisRevision: args.basisRevision,
+    ...(args.replyToId === undefined ? {} : { replyToId: args.replyToId }),
     ...(args.allowOlderBasis ? { allowOlderBasis: true } : {})
   } };
   const result = await client.command(command, { signal });

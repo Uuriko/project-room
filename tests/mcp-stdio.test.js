@@ -29,6 +29,18 @@ function harness(t, client = {}, options = {}) {
 const args = { requestId: "draft-one", workItemId: "work", packetId: "packet", basisRevision: 0, body: "A draft ☀️" };
 const receipt = command => ({ sequence: 4, duplicate: false, event: { id: "event", type: "message.posted", roomId: "commons", actorId: "agent", data: { ...command.data } } });
 
+test("MCP draft reply links are strict and must match the returned receipt", async t => {
+  let sent;
+  const h = harness(t, { command: async command => { sent = command; const result = receipt(command); delete result.event.data.replyToId; return result; } });
+  await h.ready();
+  for (const replyToId of [null, true, "", "constructor", "../wrong"]) {
+    assert.equal((await h.rpc("tools/call", { name: "room_post_draft", arguments: { ...args, replyToId } })).error.code, -32602);
+  }
+  assert.equal(sent, undefined);
+  const response = await h.rpc("tools/call", { name: "room_post_draft", arguments: { ...args, replyToId: "original" } });
+  assert.equal(sent.data.replyToId, "original"); assert.equal(response.result.structuredContent.status, "unconfirmed");
+});
+
 test("attention deadline before first authentication creates no state or late response", async t => {
   const f = createAcceptanceFixture(), directory = join(f.directory, "attention");
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });

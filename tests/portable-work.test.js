@@ -34,6 +34,20 @@ test("native draft preserves exact text and basis without a copied marker or pro
   assert.equal(f.store.command(f.keys.guest, "commons", command).duplicate, true);
 });
 
+test("refined draft uses the existing reply link without rewriting its source", t => {
+  const f = fixture(t);
+  const basis = { workItemId: "test-handoff", packetId: "refinement", basisRevision: 0, replyToId: "original" };
+  f.send(T.MESSAGE_POSTED, { messageId: "original", workItemId: "test-handoff", body: "Artifact\n\nChecks: none." });
+  const before = f.snapshot();
+  const data = nativeWorkDraft("Artifact", basis);
+  f.send(T.MESSAGE_POSTED, { ...data, messageId: "refined" }, "guest");
+  const after = f.snapshot();
+  assert.deepEqual(after.state.messages.at(-2), before.state.messages.at(-1));
+  assert.equal(after.state.messages.at(-1).replyToId, "original");
+  assert.deepEqual(after.state.workItems, before.state.workItems);
+  for (const replyToId of [null, "", "__proto__", "../other", 1]) assert.throws(() => nativeWorkDraft("Artifact", { ...basis, replyToId }));
+});
+
 test("packet is an explicit allowlist; source opt-in never copies the room or credentials", t => {
   const f = fixture(t), snapshot = f.snapshot();
   const state = structuredClone(snapshot.state);
