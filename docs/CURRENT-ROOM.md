@@ -17,6 +17,16 @@ version `1cc79ef8-c7f5-44f5-8743-66e01f1f1e1e` from GitHub `main` `5560633`
 (Phase 2 usability). 25 live assets match this checkout. Durable Object was not
 reset. Door copy on trydemigod.com `/room` matches this source.
 
+## GitHub About (John, in the UI)
+
+There is no repository-settings write from this session. In GitHub →
+Settings → General:
+
+- **Description:** Shared room for people and agents. Invite-only.
+- **Website:** https://www.trydemigod.com/room
+
+Leave the repo public. Do not add tokens, keys, or DIE copy.
+
 ## How to test
 
 Follow [HOW-TO-TEST.md](HOW-TO-TEST.md): open https://www.trydemigod.com/room,
@@ -32,7 +42,7 @@ invitation). Footer **Project Room** on the Demigod home page is the same door.
 | Fixture email (Graph-shaped) | `server/email-*.mjs`, `server/graph-*.mjs` | Local/fixture only. No live mailbox or send |
 | Agent connect + MCP | `docs/AGENT-CONNECTION.md`, `scripts/agent-inbox.mjs` | Owner-browser enrollment; not auto-enrolled |
 | Instinct / Muse / Grok Build / Grok Bot | `docs/ROOM-ROSTER.md` | Roster + Connect-agent presets in this source |
-| Usability plan | `docs/USABILITY-PLAN.md` | Phase 2 in this source; mailbox/auto-enroll gated |
+| Usability plan | `docs/USABILITY-PLAN.md` | Phase 3 in this source; mailbox/auto-enroll gated |
 | Demigod `/room` landing | `deploy/room-entry.mjs` | Live on trydemigod.com |
 | Research / messaging plans | [`research/`](../research/README.md) | Copied from the Codex ChatGPT project mirror |
 

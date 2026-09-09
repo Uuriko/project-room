@@ -1,5 +1,5 @@
 import { validId } from "./events.js";
-import { rosterSelection, rosterNameTaken } from "./room-roster.js";
+import { rosterSelection, rosterNameTaken, rosterById } from "./room-roster.js";
 
 const $ = selector => document.querySelector(selector);
 const newToken = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
@@ -8,7 +8,7 @@ const statuses = { key_issued: "Access ready · setup not verified", access_chan
 
 export function installAgentConnections({ client, getState }) {
   const dialog = $("#agent-connect-dialog"), form = $("#agent-connect-form"), list = $("#agent-connect-list");
-  let owner = null, generation = null, ownerRevision = null, pending = null, setup = null, setupMeta = null, expiryTimer = null, busy = false, copying = false, listVersion = 0, flow = 0;
+  let owner = null, generation = null, ownerRevision = null, pending = null, setup = null, setupMeta = null, expiryTimer = null, busy = false, copying = false, listVersion = 0, flow = 0, rosterId = null;
   const member = () => getState()?.members[client.session?.member?.id];
   const allowed = () => client.ownsAccountSession() && client.session?.account && member()?.active !== false
     && getState()?.room.id === client.session.roomId
@@ -34,8 +34,19 @@ export function installAgentConnections({ client, getState }) {
   function describeAccess() {
     if ($("#agent-access-hint")) $("#agent-access-hint").textContent = ACCESS_HINT[$("#agent-connect-access").value] ?? ACCESS_HINT.chat;
   }
+  function describeImport() {
+    const hint = $("#agent-import-route");
+    if (!hint) return;
+    const row = rosterId ? rosterById(rosterId) : null;
+    hint.textContent = row
+      ? row.route === "mcp"
+        ? `${row.today} After import, merge the printed MCP snippet into ~/.grok/config.toml. Do not put the key in a prompt.`
+        : row.today
+      : "Copy, import into a new private directory, then check access. Do not put the key in a prompt.";
+  }
   function render() {
     form.hidden = Boolean(setup); $("#agent-setup").hidden = !setup;
+    if (setup) describeImport();
     for (const input of form.querySelectorAll("input,select")) input.disabled = busy || Boolean(pending);
     $("#agent-create").disabled = busy;
     $("#agent-create").textContent = pending ? "Retry original" : "Create access";
@@ -50,7 +61,9 @@ export function installAgentConnections({ client, getState }) {
   }
   function reset() {
     flow++; listVersion++; owner = null; generation = null; ownerRevision = null; pending = null; forget(); busy = false;
-    conceal(); form.reset(); if ($("#agent-roster-hint")) $("#agent-roster-hint").textContent = "";
+    conceal(); form.reset(); rosterId = null;
+    if ($("#agent-roster-hint")) $("#agent-roster-hint").textContent = "";
+    if ($("#agent-import-route")) $("#agent-import-route").textContent = "";
     list.replaceChildren(); status(""); render(); dialog.close();
   }
   function sync() {
@@ -173,7 +186,10 @@ export function installAgentConnections({ client, getState }) {
   $("#agent-retry").addEventListener("click", () => { void submit(); });
   $("#agent-connect-done").addEventListener("click", () => {
     if (!busy && !copying) {
-      forget(); form.reset(); if ($("#agent-roster-hint")) $("#agent-roster-hint").textContent = ""; describeAccess(); status(""); render();
+      forget(); form.reset(); rosterId = null;
+      if ($("#agent-roster-hint")) $("#agent-roster-hint").textContent = "";
+      if ($("#agent-import-route")) $("#agent-import-route").textContent = "";
+      describeAccess(); status(""); render();
     }
   });
   for (const button of $("#agent-roster")?.querySelectorAll("[data-roster]") ?? []) {
@@ -183,6 +199,7 @@ export function installAgentConnections({ client, getState }) {
       if (!row) return;
       $("#agent-connect-name").value = row.name;
       $("#agent-connect-access").value = row.access;
+      rosterId = button.dataset.roster;
       describeAccess();
       if ($("#agent-roster-hint")) {
         $("#agent-roster-hint").textContent = rosterNameTaken(getState()?.members, row.name)

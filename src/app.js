@@ -309,7 +309,15 @@ async function loadAccountRooms(more = false) {
     if (version !== roomListVersion || accountClient.session !== owned || !value) return;
     for (const room of value.rooms) {
       const button = document.createElement("button"); button.type = "button"; button.className = "inbox-row";
-      button.textContent = room.title; button.dataset.accountRoom = room.id;
+      button.dataset.accountRoom = room.id;
+      const title = typeof room.title === "string" ? room.title.trim() : "";
+      const named = title && title !== room.id;
+      const heading = document.createElement("strong");
+      heading.textContent = named ? title : room.id;
+      const action = document.createElement("span");
+      action.textContent = "Open";
+      button.append(heading, action);
+      button.setAttribute("aria-label", `Open ${named ? title : room.id}`);
       button.addEventListener("click", () => openAccountRoom(room.id)); $("#account-rooms-list").append(button);
     }
     roomListCursor = value.nextCursor; $("#account-rooms-more").hidden = !roomListCursor;

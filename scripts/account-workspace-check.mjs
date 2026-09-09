@@ -35,7 +35,7 @@ async function setup(t, { mobile = false, member = false } = {}) {
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(outside, []); });
   const login = async (p = page, accessKey = key) => {
     await p.goto(origin + "/?account=1"); await p.locator("#access-key").fill(accessKey);
-    await p.locator("#auth-form button").click(); await p.locator("#inbox-panel").waitFor();
+    await p.locator('#auth-form button[type="submit"]').click(); await p.locator("#inbox-panel").waitFor();
   };
   const capture = async name => { mkdirSync("test-results/account-workspace", { recursive: true });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
@@ -63,7 +63,12 @@ for (const mobile of [false, true]) test(`account Inbox ${mobile ? "mobile" : "d
 test("account room discovery and room revocation preserve a private draft, account revocation clears it", { timeout: 35000 }, async t => {
   const f = await setup(t, { member: true }), p = f.page;
   await f.login(); await p.locator("#inbox-reader").waitFor(); await p.locator("#inbox-draft").fill("Unsent private thought");
-  await p.locator("#nav-rooms").click(); await p.locator('[data-account-room="commons"]').click(); await p.locator("#main").waitFor();
+  await p.locator("#nav-rooms").click();
+  const roomRow = p.locator('[data-account-room="commons"]');
+  await roomRow.waitFor();
+  assert.match(await roomRow.locator("strong").textContent(), /Project Room/);
+  assert.equal(await roomRow.locator("span").textContent(), "Open");
+  await roomRow.click(); await p.locator("#main").waitFor();
   await p.locator("#nav-inbox").click(); assert.equal(await p.locator("#inbox-draft").inputValue(), "Unsent private thought");
   f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type: "member.access_changed",
     data: { memberId: "guest", expectedMemberRevision: 0, permissions: [], active: false } });
@@ -87,7 +92,7 @@ test("account-only other-tab replacement clears a held private read and navigati
   await other.goto(f.origin + "/?account=1"); await other.locator("#inbox-panel").waitFor();
   await other.locator("#signout-button").click(); await other.locator("#auth-panel").waitFor();
   await other.locator("#access-key").fill(f.store.issueAccountAccessKey(account.id));
-  await other.locator("#auth-form button").click(); await other.locator("#inbox-panel").waitFor();
+  await other.locator('#auth-form button[type="submit"]').click(); await other.locator("#inbox-panel").waitFor();
   await p.locator("#auth-panel").waitFor(); release();
   await p.waitForLoadState("networkidle");
   assert.equal(await p.locator("#inbox-source-body").textContent(), "");
@@ -96,7 +101,7 @@ test("account-only other-tab replacement clears a held private read and navigati
 
 test("legacy member entry does not expose an account Inbox", { timeout: 20000 }, async t => {
   const f = await setup(t), p = f.page;
-  await p.goto(f.origin); await p.locator("#access-key").fill(f.keys.guest); await p.locator("#auth-form button").click();
+  await p.goto(f.origin); await p.locator("#access-key").fill(f.keys.guest); await p.locator('#auth-form button[type="submit"]').click();
   await p.locator("#main").waitFor(); assert.equal(await p.locator("#workspace-nav").isVisible(), false);
 });
 
@@ -126,7 +131,7 @@ test("a lost account-only sign-out response clears private text and leaves a usa
   await p.getByText("Sign-out unconfirmed. Sign in to check your account.", { exact: true }).waitFor();
   assert.equal(await p.locator("#inbox-source-body").textContent(), "");
   assert.equal(await p.locator("#access-key").isEnabled(), true);
-  await p.locator("#access-key").fill(f.key); await p.locator("#auth-form button").click(); await p.locator("#inbox-reader").waitFor();
+  await p.locator("#access-key").fill(f.key); await p.locator('#auth-form button[type="submit"]').click(); await p.locator("#inbox-reader").waitFor();
 });
 
 test("account confirmation failure keeps the draft and reports uncertainty without signing out", { timeout: 20000 }, async t => {

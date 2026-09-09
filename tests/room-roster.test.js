@@ -128,6 +128,8 @@ test("Connect agent markup lists the four roster names", () => {
   assert.match(html, /id="share-link-intro"/);
   assert.match(html, /Send this link to a person/);
   assert.match(html, /data-room-section="people"/);
+  assert.match(html, /id="agent-import-checklist"/);
+  assert.match(html, /pbpaste \| node scripts\/agent-inbox\.mjs import/);
   const app = readFileSync(join(checkout, "src/app.js"), "utf8");
   assert.match(app, /How to invite someone/);
   assert.match(app, /How to connect an agent/);
@@ -138,9 +140,13 @@ test("Connect agent markup lists the four roster names", () => {
   assert.match(source, /rosterNameTaken/);
   assert.match(source, /from "\.\/room-roster\.js"/);
   assert.match(source, /\$\{label\} for \$\{row\.displayName\}/);
+  assert.match(source, /function describeImport/);
+  assert.match(app, /aria-label.*Open /);
   const css = readFileSync(join(checkout, "src/styles.css"), "utf8");
   assert.match(css, /\.agent-roster \.button \{ width: auto; min-height: 44px;/);
   assert.match(css, /\.composer-toolbar select \{[^}]*min-height: 44px/);
   assert.match(css, /\.room-navigation \{ position: sticky;/);
+  assert.match(css, /#account-rooms-list \.inbox-row \{[^}]*grid-template-columns: minmax\(0, 1fr\) auto/);
+  assert.match(css, /#agent-import-checklist/);
   assert.doesNotMatch(readFileSync(join(checkout, "docs/ROOM-ROSTER.md"), "utf8"), /member key cannot/i);
 });
