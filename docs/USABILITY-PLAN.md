@@ -1,6 +1,6 @@
 # Project Room usability plan
 
-9 September 2026 · live Worker `1cc79ef8` · schema 26 · Durable Object not reset
+9 September 2026 · live Worker `e8f3f566` · schema 26 · Durable Object not reset
 
 This is the working plan for making the hosted Room easier to use, nicer to
 look at, and more capable **without** a mailbox, auto-enrollment, Durable Object
@@ -58,7 +58,7 @@ CMC, DIE copy, Desk merge.
 - Guest expiry copy on the welcome screen.
 - Mobile: sticky Chat / Work / Catch-up / People jumps; 44px controls.
 
-### Phase 3 — this slice
+### Phase 3 — shipped (PR #40)
 
 - Account home: list rooms with “Open” instead of raw IDs where we already
   have titles.
