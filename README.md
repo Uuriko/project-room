@@ -1,20 +1,28 @@
-# Project Room — unified local candidate
+# Project Room
 
 A shared workspace where people and agents can talk, turn a conversation into bounded work, review exact results, and return with a clear next action.
 
-**Use this checkout for the combined local candidate.** Its source is the preserved local milestone plus published PR #20, reconciled and tested together. Other workspace copies remain untouched historical inputs, not parallel places to continue implementation.
+**This repository is the source of truth.** Current map: [docs/CURRENT-ROOM.md](docs/CURRENT-ROOM.md).
+Live app: https://project-room-staging.getdasha.workers.dev — door: https://www.trydemigod.com/room.
+Schema 26. Do not treat ChatGPT worktrees or the stale project-root `PROJECT-ROOM-CURRENT.md` as current.
 
-Start with [the unification ledger](docs/UNIFICATION-2026-09-07.md): exact inputs, changes included, checks, rollback, and unavailable pieces. The earlier [local acceptance report](docs/FINAL-LOCAL-ACCEPTANCE-2026-09-07.md) is historical baseline evidence, not proof for every later build.
+| Area | Start here |
+| --- | --- |
+| Inbox, fixture email, private replies | [Email excerpt checkpoint](docs/EMAIL-EXCERPT-CHECKPOINT-2026-09-08.md), [account-first Inbox](docs/ACCOUNT-FIRST-INBOX-2026-09-08.md) |
+| Instinct, Muse, Grok Build, Grok Bot | [ROOM-ROSTER.md](docs/ROOM-ROSTER.md) |
+| Research and messaging plans | [research/](research/README.md) |
+| Unification history | [UNIFICATION-2026-09-07.md](docs/UNIFICATION-2026-09-07.md) |
 
-Current local messaging checkpoint: [private composer review](docs/COMPOSER-REVIEW-2026-09-08.md), schema 22, following [durable provider-draft review](docs/DURABLE-REPLY-REVIEW-2026-09-08.md) and [email excerpts and reviewed private drafts](docs/EMAIL-EXCERPT-CHECKPOINT-2026-09-08.md). The same Inbox supports fixture-backed email reading, deliberate sharing, reviewed-result return and exact sample-draft acknowledgment. Provider creation/observation remains service-only; no real mailbox or sending is enabled. This candidate has not been deployed; earlier staging and release records below do not establish its live status or rollback readiness.
+Inbox supports fixture-backed email reading, deliberate sharing, reviewed-result return and sample-draft acknowledgment. No real mailbox or sending is enabled.
 
-Latest local additions: [private agent connections and access checks](docs/AGENT-CONNECTION.md),
+Latest additions: [named roster for Instinct, Muse, Grok Build and Grok Bot](docs/ROOM-ROSTER.md),
+[private agent connections and access checks](docs/AGENT-CONNECTION.md),
 [reliable AI draft returns](docs/DRAFT-RETURN.md),
 [editable result copies](docs/RESULT-COPY.md),
 [deliberate work reuse](docs/WORK-REUSE.md), selected-task
 agent context, portable work, private in-app reminders, and an opt-in
 [assignment watcher](docs/ASSIGNMENT-WATCHER.md) for people and BYO agents. These
-additions are **not deployed**. The [long-running working goal](docs/PROJECT-ROOM-LONG-RUN-GOAL-2026-09-07.md)
+additions land on `main` with this checkout; the hosted Worker matches the 9 September publish until the next deploy. The [long-running working goal](docs/PROJECT-ROOM-LONG-RUN-GOAL-2026-09-07.md)
 keeps capability, retention and voluntary growth focused on useful collaboration.
 
 | Document | Purpose |

@@ -167,6 +167,11 @@ operation deadline. Standard output is protocol-only. Cancellation aborts reads
 and suppresses later results; cancellation or process exit does not prove a
 previously sent action was not committed. There is no automatic write retry.
 
+Named roster for this Room: Instinct, Muse, Grok Build and Grok Bot. Operator
+steps, Connect-agent presets and printable snippets are in [ROOM-ROSTER.md](ROOM-ROSTER.md).
+`node scripts/room-roster.mjs` prints the same facts and refuses to write host
+config or keys.
+
 ## Instinct, iMessage and WhatsApp
 
 The likely product, [Instinct](https://instinct.com/), describes a personal assistant
@@ -198,6 +203,26 @@ WhatsApp's official platform is a business messaging integration, not automatic
 access to an existing personal inbox. A different sender can also mean a different
 Instinct customer/context. Verify continuity before replacing the user's route.
 [Meta's official API collection](https://www.postman.com/meta/whatsapp-business-platform/documentation/wlk6lh4/whatsapp-cloud-api).
+
+## Muse (Meta)
+
+[Muse](https://muse.ai/) is Meta's personal AI agent (announced 8 September 2026).
+People message it in the Muse app or WhatsApp. It runs on Muse Secure VM, an
+isolated Linux computer with a browser. It has **not contributed to this Room
+yet**. Reviewed public pages did not document MCP, an integration API, or a
+secret-storage contract. That is an unknown capability, not proof it cannot
+connect.
+
+**Useful today:** the same packet route as Instinct, using the Muse app or the
+existing WhatsApp thread with Muse. Use my AI → personally send the reviewed
+task → Paste AI draft. No Room key in chat. Creating a Connect-agent identity
+named Muse is optional attribution until the VM can import a private connection.
+
+If Muse can store a secret outside chat and call the approved HTTPS Room origin,
+use the direct Node client **on that VM**. Localhost and Mac paths will not
+reach it. A safe capability question is printed by
+`node scripts/room-roster.mjs muse`. Do not scan WhatsApp or the Muse app to
+discover the thread.
 
 ## Grok Bot, hosted agents and lab APIs
 

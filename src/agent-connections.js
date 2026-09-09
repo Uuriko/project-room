@@ -1,4 +1,5 @@
 import { validId } from "./events.js";
+import { rosterSelection } from "./room-roster.js";
 
 const $ = selector => document.querySelector(selector);
 const newToken = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
@@ -35,10 +36,14 @@ export function installAgentConnections({ client, getState }) {
     $("#agent-retry").hidden = !pending || pending.request.action === "create";
     $("#agent-retry").disabled = busy;
     for (const button of list.querySelectorAll("button")) button.disabled = busy || Boolean(pending) || Boolean(setup);
+    for (const button of $("#agent-roster")?.querySelectorAll("[data-roster]") ?? []) {
+      button.disabled = busy || Boolean(pending) || Boolean(setup);
+    }
   }
   function reset() {
     flow++; listVersion++; owner = null; generation = null; ownerRevision = null; pending = null; forget(); busy = false;
-    conceal(); form.reset(); list.replaceChildren(); status(""); render(); dialog.close();
+    conceal(); form.reset(); if ($("#agent-roster-hint")) $("#agent-roster-hint").textContent = "";
+    list.replaceChildren(); status(""); render(); dialog.close();
   }
   function sync() {
     $("#connect-agent-button").hidden = !allowed();
@@ -152,7 +157,21 @@ export function installAgentConnections({ client, getState }) {
   dialog.addEventListener("close", conceal);
   form.addEventListener("submit", event => { event.preventDefault(); if (pending) void submit(); else void prepare("create"); });
   $("#agent-retry").addEventListener("click", () => { void submit(); });
-  $("#agent-connect-done").addEventListener("click", () => { if (!busy && !copying) { forget(); form.reset(); status(""); render(); } });
+  $("#agent-connect-done").addEventListener("click", () => {
+    if (!busy && !copying) {
+      forget(); form.reset(); if ($("#agent-roster-hint")) $("#agent-roster-hint").textContent = ""; status(""); render();
+    }
+  });
+  for (const button of $("#agent-roster")?.querySelectorAll("[data-roster]") ?? []) {
+    button.addEventListener("click", () => {
+      if (busy || pending || setup) return;
+      const row = rosterSelection(button.dataset.roster);
+      if (!row) return;
+      $("#agent-connect-name").value = row.name;
+      $("#agent-connect-access").value = row.access;
+      if ($("#agent-roster-hint")) $("#agent-roster-hint").textContent = row.hint;
+    });
+  }
   $("#agent-private-details").addEventListener("toggle", () => {
     $("#agent-private-config").value = $("#agent-private-details").open && owns() && checkExpiry() ? JSON.stringify(setup) : "";
   });

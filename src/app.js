@@ -1651,7 +1651,7 @@ function roomActionEntries() {
     { id: "people", label: "People & agents", words: "members collaborators team", target: "#people-panel > summary", reveal: "#people-panel" },
     { id: "new-work", label: "New work", words: "create task request", target: "#new-work-button", activate: true },
     { id: "invite", label: "Invite people", words: "share join link", target: "#invite-people-button", activate: true },
-    { id: "agent", label: "Connect agent", words: "ai assistant mcp tools", target: "#connect-agent-button", reveal: "#people-panel", activate: true },
+    { id: "agent", label: "Connect agent", words: "ai assistant mcp tools instinct muse grok build grokbot grok bot", target: "#connect-agent-button", reveal: "#people-panel", activate: true },
     { id: "instructions", label: "Room instructions", words: "guidance brief charter", target: "#room-instructions-open", reveal: "#room-about", activate: true }
   ].filter(entry => { const target = $(entry.target); return target && !target.disabled && !target.closest("[hidden]"); });
 }

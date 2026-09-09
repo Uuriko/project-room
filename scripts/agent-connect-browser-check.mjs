@@ -70,6 +70,19 @@ test("browser owner issues digest-only setup; a real external client imports, re
   assert.doesNotThrow(() => f.store.agentConnections.verify());
 });
 
+test("named roster fills Muse and Grok Build without creating access", { timeout: 20000 }, async t => {
+  const f = await setup(t);
+  await f.open();
+  await f.page.locator('[data-roster="muse"]').click();
+  assert.equal(await f.page.locator("#agent-connect-name").inputValue(), "Muse");
+  assert.equal(await f.page.locator("#agent-connect-access").inputValue(), "chat");
+  assert.match(await f.page.locator("#agent-roster-hint").innerText(), /has not contributed/);
+  await f.page.locator('[data-roster="grok-build"]').click();
+  assert.equal(await f.page.locator("#agent-connect-name").inputValue(), "Grok Build");
+  assert.equal(await f.page.locator("#agent-connect-access").inputValue(), "contribute");
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM agent_connections").get().n, 0);
+});
+
 test("unknown enrollment survives close and retries the original digest and identity", { timeout: 30000 }, async t => {
   const f = await setup(t), attempts = [];
   await f.page.route("**/agent-connections", async route => {

@@ -1,5 +1,8 @@
 # Research inputs
 
+Later Codex research (blueprint, Superhuman, email-next, messaging plan) is in
+[`research/`](../research/README.md). This page is the older v0 source list.
+
 These notes separate useful inspiration from claims that still need evidence.
 
 | Source | What it supports |

@@ -576,6 +576,8 @@ summary { overflow-wrap: anywhere; }
 /* Private setup stays within narrow mobile dialogs; never show it by default. */
 #agent-connect-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 #agent-connect-dialog textarea { max-width: 100%; overflow-wrap: anywhere; }
+.agent-roster { display: flex; flex-wrap: wrap; gap: .45rem; margin: .45rem 0 .2rem; }
+.agent-roster .button { width: auto; min-height: 2.2rem; padding: 0 .7rem; }
 .pending-save { margin: 0 1rem 1rem; max-width: calc(100% - 2rem); }
 #room-instructions-dialog { width: min(38rem, calc(100vw - 2rem)); box-sizing: border-box; }
 #room-instructions-dialog p { overflow-wrap: anywhere; }
