@@ -5,7 +5,7 @@ import { storedText } from "./text-results.mjs";
 import { ServiceError } from "./store.mjs";
 import { isSend, internalSend, validateSend, sendPreview, transitionSend } from "./inbox-outbox.mjs";
 import { readEmailEnvelope, EmailContractError } from "./email-envelope.mjs";
-import { prepareGraphReplyDraft, buildGraphReplyDraft, classifyGraphReplyCreation } from "./graph-reply-draft.mjs";
+import { prepareGraphReplyDraft, buildGraphReplyDraft, classifyGraphReplyCreation, normalizeReplyObservation } from "./graph-reply-draft.mjs";
 import { isReplyAttempt, validateReplyAttempt, transitionReplyAttempt } from "./graph-reply-journal.mjs";
 
 const transportAuthority = Symbol("private inbox transport");
@@ -276,7 +276,17 @@ export class Inbox {
   replyAttempts(token, sourceId, binding) {
     return this.store.readTransaction(() => {
       const auth = this.auth(token, binding); this.source(auth.account.id, sourceId);
-      return { contractVersion: 1, viewer: viewer(auth), sourceId, attempts: [...this.replyHistory(auth.account.id, sourceId).values()] };
+      const attempts = [...this.replyHistory(auth.account.id, sourceId).values()].map(attempt => {
+        if (!attempt.review) return attempt;
+        let reviewCurrent = false;
+        try {
+          const plan = prepareGraphReplyDraft({ store: this.store, token, binding, sourceId,
+            requestId: attempt.plan.requestId, mode: attempt.plan.mode });
+          reviewCurrent = plan.planVersion === attempt.plan.planVersion && attempt.review.authEpoch === auth.account.authEpoch;
+        } catch (error) { if (!(error instanceof ServiceError) && !(error instanceof EmailContractError)) throw error; }
+        return { ...attempt, reviewCurrent };
+      });
+      return { contractVersion: 1, viewer: viewer(auth), sourceId, attempts };
     });
   }
   // Fixture-only service boundary; not mounted as a browser or agent command.
@@ -294,6 +304,14 @@ export class Inbox {
       const result = this.reply(token, { action: "reply.created", requestId, sourceId, attemptId, expectedRevision,
         planVersion: attempt.plan.planVersion, providerDraftId: observed.providerDraftId }, binding);
       return { ...result, recorded: true };
+    });
+  }
+  recordReplyObservation(token, { sourceId, attemptId, expectedRevision, requestId, response }, binding) {
+    return this.store.transaction(() => {
+      const auth = this.auth(token, binding), attempt = this.replyHistory(auth.account.id, sourceId).get(attemptId);
+      if (!attempt?.providerDraftId) fail(409, "reply_draft_unconfirmed", "A confirmed mailbox draft identity is required.");
+      return this.reply(token, { action: "reply.observed", requestId, sourceId, attemptId, expectedRevision,
+        observation: normalizeReplyObservation(attempt.plan, response) }, binding);
     });
   }
   // Trusted, transaction-bound importer only. Ordinary HTTP commands cannot use it.
@@ -324,10 +342,10 @@ export class Inbox {
       if (isReplyAttempt(request)) {
         this.source(accountId, sourceId);
         const attempts = this.replyHistory(accountId), original = attempts.get(request.attemptId);
-        const plan = ["reply.reserve", "reply.dispatch"].includes(action) ? prepareGraphReplyDraft({ store: this.store, token, binding,
+        const plan = ["reply.reserve", "reply.dispatch", "reply.review"].includes(action) ? prepareGraphReplyDraft({ store: this.store, token, binding,
           sourceId, requestId: action === "reply.reserve" ? requestId : original?.plan.requestId,
           mode: action === "reply.reserve" ? request.mode : original?.plan.mode }) : null;
-        receipt.attempt = transitionReplyAttempt(attempts, request, { plan, at: now });
+        receipt.attempt = transitionReplyAttempt(attempts, request, { plan, authEpoch: auth.account.authEpoch, at: now });
       } else if (isSend(request)) {
         this.source(accountId, sourceId);
         receipt.send = transitionSend(this.outbox(accountId), request, {
@@ -388,7 +406,7 @@ export class Inbox {
         if (!replyBoxes.has(row.account_id)) replyBoxes.set(row.account_id, new Map());
         const attempts = replyBoxes.get(row.account_id), original = attempts.get(request.attemptId);
         let plan = null;
-        if (["reply.reserve", "reply.dispatch"].includes(request.action)) {
+        if (["reply.reserve", "reply.dispatch", "reply.review"].includes(request.action)) {
           const data = this.version(row.account_id, request.sourceId, prior.revision), draft = drafts.get(key);
           const profile = data.envelope?.connection;
           const configured = this.db.prepare("SELECT request_json,auth_epoch FROM private_email_commands WHERE account_id=? AND json_extract(request_json,'$.action')='connection.configure' AND json_extract(receipt_json,'$.connectionId')=? AND json_extract(receipt_json,'$.revision')=?")
@@ -401,7 +419,7 @@ export class Inbox {
             requestId: request.action === "reply.reserve" ? request.requestId : original?.plan.requestId,
             mode: request.action === "reply.reserve" ? request.mode : original?.plan.mode });
         }
-        expected.attempt = transitionReplyAttempt(attempts, request, { plan, at: row.at });
+        expected.attempt = transitionReplyAttempt(attempts, request, { plan, authEpoch: row.auth_epoch, at: row.at });
         attempts.set(expected.attempt.id, expected.attempt);
       } else if (isSend(request)) {
         require(prior);

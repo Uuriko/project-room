@@ -25,6 +25,10 @@ test('shared RoomStore: guests, retries, messages, journal rollback, cancellatio
     const resumed = await mf.dispatchFetch('http://localhost/resume', { method: 'POST', body: JSON.stringify(receipt) });
     assert.equal(resumed.status, 200, await resumed.clone().text());
     assert.deepEqual(await resumed.json(), { recovered: true, guests: 2, sequence: receipt.sequence });
+    await mf.dispose(); mf = new Miniflare(config);
+    const review = await mf.dispatchFetch('http://localhost/review-resume', { method: 'POST', body: JSON.stringify(receipt) });
+    assert.equal(review.status, 200, await review.clone().text());
+    assert.deepEqual(await review.json(), { reviewRecovered: true, invalidated: true, canSend: false });
     const guard = await mf.dispatchFetch('http://localhost/newer-version');
     assert.equal(guard.status, 200, await guard.clone().text());
     assert.deepEqual(await guard.json(), { rejected: true });

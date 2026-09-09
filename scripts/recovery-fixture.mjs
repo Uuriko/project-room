@@ -150,9 +150,19 @@ export function createRecoveryFixture(filename) {
     sourceId: emailEnvelope.sourceId, requestId: "recovery-provider-draft" });
   const replyRequests = [
     { action: "reply.reserve", requestId: replyPlan.requestId, sourceId: replyPlan.sourceId, mode: replyPlan.mode, planVersion: replyPlan.planVersion },
-    { action: "reply.dispatch", requestId: "recovery-provider-dispatch", sourceId: replyPlan.sourceId, attemptId: replyPlan.requestId, expectedRevision: 0 }
+    { action: "reply.dispatch", requestId: "recovery-provider-dispatch", sourceId: replyPlan.sourceId, attemptId: replyPlan.requestId, expectedRevision: 0 },
+    { action: "reply.created", requestId: "recovery-provider-created", sourceId: replyPlan.sourceId, attemptId: replyPlan.requestId,
+      expectedRevision: 1, planVersion: replyPlan.planVersion, providerDraftId: "recovery-provider-identity" },
+    { action: "reply.observed", requestId: "recovery-provider-observed", sourceId: replyPlan.sourceId, attemptId: replyPlan.requestId,
+      expectedRevision: 2, observation: createEmailEnvelope({ connection: emailProfile,
+        message: { ...emailEnvelope.message, id: "recovery-provider-identity", revision: "recovery-draft-v1", isDraft: true,
+          from: replyPlan.expected.from, sender: replyPlan.expected.from, to: replyPlan.expected.to, cc: replyPlan.expected.cc, bcc: [] },
+        body: { format: "text", content: replyPlan.expected.body }, replyHeaders: emailEnvelope.replyHeaders, attachments: emailEnvelope.attachments }) }
   ];
   const replyReceipts = replyRequests.map(request => store.inbox.reply(owner.token, request, owner.session.sessionBinding).receipt);
+  replyRequests.push({ action: "reply.review", requestId: "recovery-provider-review", sourceId: replyPlan.sourceId, attemptId: replyPlan.requestId,
+    expectedRevision: 3, reviewVersion: replyReceipts.at(-1).attempt.observation.reviewVersion });
+  replyReceipts.push(store.inbox.reply(owner.token, replyRequests.at(-1), owner.session.sessionBinding).receipt);
   const cursor = store.room("commons").sequence; store.markCaughtUp(keys.owner, "commons", cursor);
   return { store, filename, keys, owner, target, validSession, revokedSession, loggedOut, sharedSession, pending, invitation,
     shareRequest, link, linkToken, guestSlot, guest, joinRequest, reminders, command, commandResult, cursor, inboxRequests, inboxReceipts, inboxDraftBody, transportRequests, transportReceipts, replyRequests, replyReceipts,

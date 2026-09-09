@@ -15,7 +15,7 @@ import { inboxLimits } from "../server/inbox.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { backupRoom } from "../server/backup.mjs";
 import { createRuntimePackage } from "../scripts/runtime-package.mjs";
-import { frozenAcceptanceFixture, v20ReplyJournalBaseline } from "../scripts/frozen-runtime-fixture.mjs";
+import { frozenAcceptanceFixture, v20ReplyJournalBaseline, v21ReplyReviewBaseline } from "../scripts/frozen-runtime-fixture.mjs";
 
 function setup(t) {
   const f = createAcceptanceFixture(); f.filename = join(f.directory, "room.sqlite");
@@ -49,8 +49,124 @@ function setup(t) {
     const { action, ...request } = input;
     return f.store.inbox.recordReplyCreation(f.token, { ...request, response }, f.binding);
   };
+  f.created = () => { f.apply(f.reserve()); f.apply(f.command("reply.dispatch")); f.record(f.response()); };
+  f.provider = () => {
+    const expected = f.attempts()[0].plan.expected, address = value => ({ emailAddress: value });
+    const message = { ...structuredClone(f.raw.message), id: "opaque-provider+/=", changeKey: "draft-v1", isDraft: true, hasAttachments: false,
+      from: address(expected.from), sender: address(expected.from), replyTo: [], toRecipients: expected.to.map(address), ccRecipients: expected.cc.map(address),
+      bccRecipients: [], body: { contentType: "text", content: expected.body } };
+    return { status: 200, connection: f.raw.connection, message, options: { idType: "immutable",
+      attachmentObservation: { messageId: message.id, messageRevision: message.changeKey, complete: true, items: [] } } };
+  };
+  f.observe = (response = f.provider(), input = f.command("reply.observed")) => {
+    const { action, ...request } = input;
+    return f.store.inbox.recordReplyObservation(f.token, { ...request, response }, f.binding);
+  };
+  f.review = () => ({ ...f.command("reply.review"), reviewVersion: f.attempts()[0].observation.reviewVersion });
   return f;
 }
+
+test("exact provider observations and content review survive reopen, backup and retries without sending", async t => {
+  const f = setup(t); f.created();
+  const response = f.provider(); response.unretainedSecret = "not journaled";
+  const input = f.command("reply.observed"), observed = f.observe(response, input);
+  assert.equal(observed.receipt.attempt.status, "awaiting_review");
+  assert.equal(f.observe(response, input).duplicate, true);
+  assert.equal(JSON.stringify(f.store.db.prepare("SELECT request_json,receipt_json FROM private_inbox_commands").all()).includes("unretainedSecret"), false);
+  const request = f.review(), reviewed = f.apply(request);
+  assert.equal(reviewed.receipt.attempt.status, "draft_reviewed"); assert.equal(reviewed.receipt.attempt.canSend, false);
+  assert.equal(f.attempts()[0].reviewCurrent, true);
+  assert.deepEqual(reviewed.receipt.attempt.review, { version: request.reviewVersion, accountId: f.account.id,
+    authEpoch: f.account.authEpoch, at: reviewed.receipt.attempt.updatedAt });
+  const before = auditRecovery(f.store), attempts = f.attempts(); f.store.close(); f.store = new RoomStore(f.filename);
+  assert.deepEqual(auditRecovery(f.store), before); assert.deepEqual(f.attempts(), attempts); assert.equal(f.apply(request).duplicate, true);
+  const backup = await backupRoom(f.filename, f.directory), restored = new RoomStore(backup.filename, { readOnly: true });
+  try { assert.deepEqual(auditRecovery(restored), before); } finally { restored.close(); }
+  f.save("Newer local intent", 1);
+  assert.equal(f.attempts()[0].reviewCurrent, false); assert.equal(f.apply(request).duplicate, true);
+  assert.throws(() => f.apply(f.review()), { code: "stale_email_reply_plan" }); auditRecovery(f.store);
+});
+
+test("identical observations retain review; a changed opaque version or unavailable read invalidates it", t => {
+  const f = setup(t); f.created(); f.observe(); f.apply(f.review());
+  const review = f.attempts()[0].review;
+  assert.deepEqual(f.observe().receipt.attempt.review, review);
+  const response = f.provider(); response.message.changeKey = "opaque-not-sortable";
+  response.options.attachmentObservation.messageRevision = response.message.changeKey;
+  assert.equal(f.observe(response).receipt.attempt.review, null);
+  assert.equal(f.attempts()[0].status, "awaiting_review"); f.apply(f.review());
+  assert.equal(f.observe({ status: 404 }).receipt.attempt.status, "draft_unavailable");
+  assert.equal(f.attempts()[0].review, null); assert.equal(f.attempts()[0].providerDraftId, response.message.id);
+  assert.throws(() => f.apply({ ...f.command("reply.review"), reviewVersion: review.version }), { code: "stale_reply_review" });
+  assert.throws(() => f.apply(f.reserve()), { code: "email_reply_unresolved" }); auditRecovery(f.store);
+});
+
+test("old reads and old review versions cannot overwrite a newer observation", t => {
+  const f = setup(t); f.created(); f.observe();
+  const oldRead = f.command("reply.observed"), oldReview = f.review(), response = f.provider();
+  response.message.body.content = "A newer mailbox edit"; f.observe(response);
+  const before = auditRecovery(f.store);
+  assert.throws(() => f.observe(f.provider(), oldRead), { code: "stale_reply_attempt" });
+  assert.throws(() => f.apply(oldReview), { code: "stale_reply_attempt" });
+  assert.throws(() => f.apply({ ...f.review(), reviewVersion: oldReview.reviewVersion }), { code: "stale_reply_review" });
+  assert.deepEqual(auditRecovery(f.store), before);
+});
+
+test("human review may acknowledge the exact visible recipient, subject and body differences", t => {
+  const f = setup(t); f.created(); const response = f.provider();
+  response.message.subject = "Re: A small collaboration"; response.message.body.content = "Provider signature and revised body";
+  for (const field of ["toRecipients", "ccRecipients", "bccRecipients"]) response.message[field] = [{ emailAddress: { name: field, address: field + "@example.test" } }];
+  f.observe(response);
+  assert.deepEqual(f.attempts()[0].observation.differences, ["to", "cc", "bcc", "subject", "body"]);
+  assert.equal(f.apply(f.review()).receipt.attempt.status, "draft_reviewed");
+  assert.equal(f.attempts()[0].observation.draft.bcc[0].address, "bccRecipients@example.test");
+  auditRecovery(f.store);
+});
+
+for (const change of ["draft_state", "thread", "from", "sender", "html", "attachments", "empty_recipients"]) test(`unsupported ${change} cannot be acknowledged as a supported reply`, t => {
+  const f = setup(t); f.created(); const response = f.provider(), m = response.message;
+  if (change === "draft_state") m.isDraft = false;
+  if (change === "thread") m.conversationId = "different-thread";
+  if (["from", "sender"].includes(change)) m[change].emailAddress = { name: "Other", address: "other@example.test" };
+  if (change === "html") m.body = { contentType: "html", content: "<img src='https://example.test/not-requested'>" };
+  if (change === "attachments") response.options.attachmentObservation = null;
+  if (change === "empty_recipients") m.toRecipients = m.ccRecipients = m.bccRecipients = [];
+  f.observe(response); const before = auditRecovery(f.store);
+  assert.throws(() => f.apply(f.review()), { code: "unsupported_reply_review" });
+  assert.deepEqual(auditRecovery(f.store), before);
+});
+
+test("wrong identities, mismatched scopes and oversized observations are rejected without changing history", t => {
+  const f = setup(t); f.created(); f.observe(); f.apply(f.review());
+  const before = auditRecovery(f.store);
+  let response = f.provider(); response.message.id = "wrong"; response.options.attachmentObservation.messageId = "wrong";
+  assert.throws(() => f.observe(response), { code: "email_reply_identity_changed" });
+  response = f.provider(); response.connection = { ...response.connection, mailboxId: "wrong" };
+  assert.throws(() => f.observe(response), { code: "email_reply_scope_changed" });
+  response = f.provider(); response.message.body.content = "x".repeat(32768);
+  assert.throws(() => f.observe(response), { code: "reply_observation_limit" });
+  assert.throws(() => f.store.inbox.apply(f.token, f.review(), f.binding), { code: "reply_driver_required" });
+  assert.deepEqual(auditRecovery(f.store), before);
+});
+
+for (const change of ["source", "connection", "account"]) test(`changed ${change} leaves review historical, not current`, t => {
+  const f = setup(t); f.created(); f.observe(); f.apply(f.review()); const review = f.attempts()[0].review;
+  if (change === "source") {
+    f.raw.message.body.content = "Changed source"; const envelope = normalizeGraphEmail(f.raw.connection, f.raw.message, f.raw.options);
+    f.store.email.apply(f.token, { ...f.page, requestId: "changed-source", expectedRevision: 1, expectedCursor: "cursor", cursor: "next",
+      reset: false, observations: [{ kind: "message", expectedSourceRevision: 1, envelope }] }, f.binding);
+  }
+  if (change === "connection") f.store.email.apply(f.token, { action: "connection.disconnect", requestId: "disconnect",
+    connectionId: f.raw.connection.id, expectedRevision: 1 }, f.binding);
+  if (change === "account") {
+    f.store.changeAccountAccess(f.account.id, { expectedRevision: 0, active: false, reason: "fixture revoke" });
+    f.store.changeAccountAccess(f.account.id, { expectedRevision: 1, active: true, reason: "fixture restore" }); f.login();
+  }
+  assert.equal(f.attempts()[0].reviewCurrent, false); assert.deepEqual(f.attempts()[0].review, review);
+  assert.throws(() => f.apply(f.review()), error => ["stale_email_reply", "email_connection_changed"].includes(error.code));
+  f.observe(); if (change === "account") assert.equal(f.attempts()[0].review, null);
+  auditRecovery(f.store);
+});
 
 test("reply attempts reuse the private journal with exact retries and no room or draft mutation", t => {
   const f = setup(t), room = f.store.snapshot(f.keys.producer, "commons"), draft = f.store.inbox.read(f.token, f.sourceId, f.binding).draft;
@@ -195,10 +311,12 @@ test("provider inspection uses the journal's draft identity and original intent,
   assert.deepEqual(auditRecovery(f.store), before);
 });
 
-for (const action of ["reserve", "dispatch"]) test(`independent database connections admit exactly one reply ${action}`, { timeout: 15000 }, async t => {
+for (const action of ["reserve", "dispatch", "review-observation"]) test(`independent database connections admit exactly one reply ${action}`, { timeout: 15000 }, async t => {
   const f = setup(t);
   if (action === "dispatch") f.apply(f.reserve());
-  const commands = action === "reserve" ? [f.reserve(), f.reserve()] : [f.command("reply.dispatch"), f.command("reply.dispatch")];
+  if (action === "review-observation") { f.created(); f.observe(); }
+  const commands = action === "reserve" ? [f.reserve(), f.reserve()] : action === "dispatch" ? [f.command("reply.dispatch"), f.command("reply.dispatch")]
+    : [f.review(), { ...f.command("reply.observed"), observation: null }];
   const barrier = new SharedArrayBuffer(4);
   const workers = commands.map(command => new Worker(`
     const {parentPort,workerData:d}=require('node:worker_threads');
@@ -223,7 +341,10 @@ for (const action of ["reserve", "dispatch"]) test(`independent database connect
   assert.equal(observed.filter(value => value.result && !value.result.duplicate).length, 1);
   assert.equal(observed.filter(value => value.error).length, 1);
   assert.equal(f.attempts().length, 1);
-  assert.equal(f.attempts()[0].status, action === "reserve" ? "reserved" : "creation_unconfirmed");
+  if (action === "review-observation") {
+    assert.ok(["draft_reviewed", "draft_unavailable"].includes(f.attempts()[0].status));
+    assert.equal(f.attempts()[0].revision, 4);
+  } else assert.equal(f.attempts()[0].status, action === "reserve" ? "reserved" : "creation_unconfirmed");
   auditRecovery(f.store);
 });
 
@@ -251,4 +372,42 @@ test("pre-v21 reply namespace collisions are refused without upgrading the datab
     assert.equal(f.store.db.prepare("PRAGMA user_version").get().user_version, 20);
     assert.deepEqual(f.store.db.prepare("SELECT name,sql FROM sqlite_master ORDER BY name").all(), catalog);
   } finally { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); }
+});
+
+test("pre-v22 review namespace collisions are refused before retiring the v21 writer", async t => {
+  const root = mkdtempSync(join(tmpdir(), "room-review-migration-")); t.after(() => rmSync(root, { recursive: true, force: true }));
+  const repository = fileURLToPath(new URL("../", import.meta.url)), destination = join(root, "old");
+  createRuntimePackage({ repository, commit: v21ReplyReviewBaseline, destination });
+  const f = (await frozenAcceptanceFixture(repository, destination, v21ReplyReviewBaseline))();
+  try {
+    const account = f.store.accountForMember("commons", "owner");
+    f.store.db.prepare("INSERT INTO private_inbox_commands(account_id,request_id,fingerprint,request_json,receipt_json,auth_epoch,at) VALUES(?,?,?,?,?,?,?)")
+      .run(account.id, "collision", "invalid", JSON.stringify({ action: "reply.review" }), "{}", 0, 1);
+    const catalog = f.store.db.prepare("SELECT name,sql FROM sqlite_master ORDER BY name").all();
+    assert.throws(() => new RoomStore(join(f.directory, "room.sqlite")), /Pre-v22 reply review history/);
+    assert.equal(f.store.db.prepare("PRAGMA user_version").get().user_version, 21);
+    assert.deepEqual(f.store.db.prepare("SELECT name,sql FROM sqlite_master ORDER BY name").all(), catalog);
+  } finally { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); }
+});
+
+test("observation and review are atomic and bounded; their retained receipts are replay-verified", t => {
+  const f = setup(t); f.created(); f.observe(); const before = auditRecovery(f.store);
+  f.store.db.exec("CREATE TRIGGER test_reply_failure BEFORE INSERT ON private_inbox_commands BEGIN SELECT RAISE(ABORT,'fixture reply journal failure'); END");
+  assert.throws(() => f.apply(f.review()), /fixture reply journal failure/);
+  assert.throws(() => f.observe(null), /fixture reply journal failure/);
+  f.store.db.exec("DROP TRIGGER test_reply_failure"); assert.deepEqual(auditRecovery(f.store), before);
+  const prepare = f.store.db.prepare.bind(f.store.db);
+  f.store.db.prepare = sql => sql === "SELECT count(*) n FROM private_inbox_commands WHERE account_id=?"
+    ? { get: () => ({ n: inboxLimits.commands }) } : prepare(sql);
+  try {
+    assert.throws(() => f.apply(f.review()), { code: "inbox_limit" });
+    assert.throws(() => f.observe(), { code: "inbox_limit" });
+  } finally { f.store.db.prepare = prepare; }
+  assert.deepEqual(auditRecovery(f.store), before); f.apply(f.review());
+  const row = f.store.db.prepare("SELECT sequence,receipt_json FROM private_inbox_commands WHERE json_extract(request_json,'$.action')='reply.review'").get();
+  const receipt = JSON.parse(row.receipt_json); receipt.attempt.review.version = "0".repeat(64);
+  f.store.db.exec("DROP TRIGGER private_inbox_commands_no_update");
+  f.store.db.prepare("UPDATE private_inbox_commands SET receipt_json=? WHERE sequence=?").run(JSON.stringify(receipt), row.sequence);
+  f.store.db.exec("CREATE TRIGGER private_inbox_commands_no_update BEFORE UPDATE ON private_inbox_commands BEGIN SELECT RAISE(ABORT,'inbox receipts are immutable'); END");
+  assert.throws(() => auditRecovery(f.store), /reconciliation/);
 });

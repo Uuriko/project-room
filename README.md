@@ -6,7 +6,7 @@ A shared workspace where people and agents can talk, turn a conversation into bo
 
 Start with [the unification ledger](docs/UNIFICATION-2026-09-07.md): exact inputs, changes included, checks, rollback, and unavailable pieces. The earlier [local acceptance report](docs/FINAL-LOCAL-ACCEPTANCE-2026-09-07.md) is historical baseline evidence, not proof for every later build.
 
-Current local messaging checkpoint: [durable private reply attempts](docs/DURABLE-REPLY-ATTEMPTS-2026-09-08.md), schema 21, following [email excerpts and reviewed private drafts](docs/EMAIL-EXCERPT-CHECKPOINT-2026-09-08.md). The same Inbox supports fixture-backed email reading, deliberate sharing and reviewed-result return. Reply-attempt storage and provider comparisons are service-only; no real mailbox or sending is enabled. This candidate has not been deployed; earlier staging and release records below do not establish its live status or rollback readiness.
+Current local messaging checkpoint: [durable provider-draft review](docs/DURABLE-REPLY-REVIEW-2026-09-08.md), schema 22, following [durable private reply attempts](docs/DURABLE-REPLY-ATTEMPTS-2026-09-08.md) and [email excerpts and reviewed private drafts](docs/EMAIL-EXCERPT-CHECKPOINT-2026-09-08.md). The same Inbox supports fixture-backed email reading, deliberate sharing and reviewed-result return. Reply-attempt storage, observations and version-bound content review are service-only; no real mailbox or sending is enabled. This candidate has not been deployed; earlier staging and release records below do not establish its live status or rollback readiness.
 
 Latest local additions: [private agent connections and access checks](docs/AGENT-CONNECTION.md),
 [reliable AI draft returns](docs/DRAFT-RETURN.md),
@@ -62,7 +62,7 @@ HTTP and two-browser restart proofs pass. Following explicit owner approval,
 an earlier isolated staging version was deployed and its hosted owner/invitation/live-message checks passed at that checkpoint. Its current live version has not been reverified here.
 The prepared Node service is an alternative runtime, not automatic recovery of
 Durable Object data. The [historical v8 recovery runbook](docs/V8-RECOVERY-RUNBOOK.md)
-applies to v8-compatible artifacts, not the current schema-20 database. Never point an older writer at current data as a rollback procedure; current-version recovery and hosted recovery gates must be qualified separately.
+applies to v8-compatible artifacts, not the current schema-22 database. Never point an older writer at current data as a rollback procedure; current-version recovery and hosted recovery gates must be qualified separately.
 
 See [the Node deployment runbook](docs/INVITE-ONLY-DEPLOYMENT.md) for the fallback's production configuration and recovery checks; the Cloudflare handoff above records actual staging evidence and remaining gates. John selected an unlisted trydemigod.com destination; domain integration, provider recovery exercises and budget alerts remain outstanding. Guests still have an eight-hour browser identity; returning provisioned members use their own valid key with operator-assisted recovery.
 

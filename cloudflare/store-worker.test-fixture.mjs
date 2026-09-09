@@ -194,6 +194,17 @@ export class StoreTestRoom {
       const recorded = store.inbox.recordReplyCreation(email.token, { ...observation,
         response: { status: 201, idType: 'immutable', connection: email.replyPlan.connection, message: { id: 'worker-draft+/=' } } }, email.binding);
       assert.equal(recorded.receipt.attempt.status, 'created_unverified'); assert.equal(recorded.receipt.attempt.canSend, false);
+      const e = email.replyPlan.expected, address = emailAddress => ({ emailAddress });
+      const message = { ...emailContractFixture().message, id: 'worker-draft+/=', changeKey: 'worker-draft-v1',
+        isDraft: true, hasAttachments: false, from: address(e.from), sender: address(e.from), replyTo: [],
+        toRecipients: e.to.map(address), ccRecipients: e.cc.map(address), bccRecipients: [], body: { contentType: 'text', content: e.body } };
+      const observed = store.inbox.recordReplyObservation(email.token, { ...observation, expectedRevision: 2, requestId: 'worker-observed',
+        response: { status: 200, connection: email.replyPlan.connection, message, options: { idType: 'immutable',
+          attachmentObservation: { messageId: message.id, messageRevision: message.changeKey, complete: true, items: [] } } } }, email.binding);
+      assert.equal(observed.receipt.attempt.status, 'awaiting_review');
+      store.inbox.reply(email.token, { action: 'reply.review', requestId: 'worker-reviewed', sourceId: email.sourceId, attemptId: attempt.id,
+        expectedRevision: 3, reviewVersion: observed.receipt.attempt.observation.reviewVersion }, email.binding);
+      assert.equal(store.inbox.replyAttempts(email.token, email.sourceId, email.binding).attempts[0].reviewCurrent, true);
       assert.deepEqual(store.inbox.apply(email.token, email.excerpt, email.binding).receipt, email.shared.receipt);
       const emailView = store.inbox.read(email.token, email.sourceId, email.binding, { emailView: true });
       assert.equal(emailView.source.email.connectionState, 'active');
@@ -208,6 +219,20 @@ export class StoreTestRoom {
       store.email.apply(email.token, finalPage, email.binding);
       assert.equal(store.email.verify().sources, 1); auditRecovery(store);
       return Response.json({ recovered: true, guests: guests.length, sequence });
+    }
+    if (path === '/review-resume') {
+      const { email } = await request.json();
+      const attempt = store.inbox.replyAttempts(email.token, email.sourceId, email.binding).attempts[0];
+      assert.equal(attempt.status, 'draft_reviewed'); assert.equal(attempt.revision, 4); assert.equal(attempt.reviewCurrent, true);
+      assert.equal(attempt.canSend, false); auditRecovery(store);
+      const review = { action: 'reply.review', requestId: 'worker-reviewed', sourceId: email.sourceId, attemptId: attempt.id,
+        expectedRevision: 3, reviewVersion: attempt.observation.reviewVersion };
+      assert.equal(store.inbox.reply(email.token, review, email.binding).duplicate, true);
+      const unavailable = store.inbox.recordReplyObservation(email.token, { sourceId: email.sourceId, attemptId: attempt.id,
+        expectedRevision: 4, requestId: 'worker-unavailable', response: null }, email.binding);
+      assert.equal(unavailable.receipt.attempt.status, 'draft_unavailable'); assert.equal(unavailable.receipt.attempt.review, null);
+      assert.throws(() => store.inbox.reply(email.token, { ...review, requestId: 'worker-stale-review', expectedRevision: 5 }, email.binding), { code: 'stale_reply_review' });
+      auditRecovery(store); return Response.json({ reviewRecovered: true, invalidated: true, canSend: false });
     }
     if (path === '/newer-version') {
       store.transaction(() => durableStorage.setVersion(this.db, STORE_SCHEMA_VERSION + 1));

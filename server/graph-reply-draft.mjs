@@ -1,5 +1,5 @@
 // Provider-shaped qualification only. No fetch, credentials, persistence or sends.
-import { emailDigest, emailOpaqueId, emailInput, previewEmailReply, requireEmail, EmailContractError } from "./email-envelope.mjs";
+import { emailDigest, emailOpaqueId, emailInput, readEmailEnvelope, previewEmailReply, requireEmail, EmailContractError } from "./email-envelope.mjs";
 import { normalizeGraphEmail } from "./graph-email.mjs";
 import { validId } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
@@ -79,7 +79,7 @@ export function inspectGraphReplyDraft({ store, token, binding, plan, providerDr
 export function inspectRecordedGraphReplyDraft({ store, token, binding, sourceId, attemptId, response }) {
   return store.readTransaction(() => {
     const attempt = store.inbox.replyAttempts(token, sourceId, binding).attempts.find(value => value.id === attemptId);
-    if (!attempt || attempt.status !== "created_unverified" || !attempt.providerDraftId)
+    if (!attempt?.providerDraftId)
       fail("reply_draft_unconfirmed", "A confirmed mailbox draft identity is required.");
     return { ...compareGraphReplyDraft(attempt.plan, attempt.providerDraftId, response),
       basis: "retained_attempt", attemptId, attemptRevision: attempt.revision };
@@ -87,11 +87,23 @@ export function inspectRecordedGraphReplyDraft({ store, token, binding, sourceId
 }
 
 function compareGraphReplyDraft(current, providerDraftId, response) {
-  emailOpaqueId(providerDraftId); emailInput(response);
+  return compareReplyEnvelope(current, providerDraftId, normalizeReplyObservation(current, response));
+}
+
+// Strip arbitrary response fields before recording private evidence. No I/O.
+export function normalizeReplyObservation(plan, response) {
+  emailInput(response);
+  if (response?.status !== 200) return null;
+  requireEmail(same(response.connection, plan.connection), "email_reply_scope_changed");
+  return normalizeGraphEmail(plan.connection, response.message, response.options);
+}
+
+export function compareReplyEnvelope(current, providerDraftId, value) {
+  emailOpaqueId(providerDraftId);
   const base = { planVersion: current.planVersion, providerDraftId, canRetryCreate: false, canSend: false };
-  if (response?.status !== 200) return { ...base, status: "draft_unavailable", differences: [], reviewVersion: null };
-  requireEmail(same(response.connection, current.connection), "email_reply_scope_changed");
-  const observed = normalizeGraphEmail(current.connection, response.message, response.options);
+  if (value === null) return { ...base, status: "draft_unavailable", differences: [], reviewVersion: null };
+  const observed = readEmailEnvelope(value);
+  requireEmail(same(observed.connection, current.connection), "email_reply_scope_changed");
   requireEmail(observed.message.id === providerDraftId, "email_reply_identity_changed");
   const { message: m, body, attachments } = observed, e = current.expected, differences = [];
   const check = (name, condition) => { if (!condition) differences.push(name); };
