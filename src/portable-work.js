@@ -53,7 +53,7 @@ export function installPortableWork({ client, getState, onSaved }) {
   function preview() {
     try {
       const packet = workPacket(entry.state, entry.workId, { ...entry.packetOptions, includeSource: $("portable-source").checked });
-      $("packet-preview").value = packetMarkdown(packet); $("packet-preview").scrollTop = 0; status("");
+      $("packet-preview").value = packetMarkdown(packet); $("packet-preview").setSelectionRange(0, 0); status("");
     } catch (error) { $("packet-preview").value = ""; status(error.message); }
     controls();
   }
@@ -66,6 +66,7 @@ export function installPortableWork({ client, getState, onSaved }) {
     $("portable-result").rows = native ? 6 : 10;
     $("portable-result").placeholder = native ? "Share something useful…" : "Paste the full answer, including its ROOM-RETURN line…";
     status(result && uncertain ? "Save not confirmed. Retry the same draft." : ""); (result ? $("portable-result") : $("packet-copy")).focus();
+    if (!result) $("packet-preview").scrollTop = 0;
   }
   document.addEventListener("click", event => {
     const button = event.target.closest("[data-portable-work]");
