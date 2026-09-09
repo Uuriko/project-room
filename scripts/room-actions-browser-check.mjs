@@ -128,7 +128,7 @@ test("room actions ignore composition and held Enter without changing drafts", {
 test("room actions reach work, invitation, agent and instructions without creating anything", { timeout: 30000 }, async t => {
   const f = await setup(t), p = f.page;
   await f.open(); await f.action("work").click();
-  assert.equal(await p.locator("#work-title").evaluate(node => node === document.activeElement), true);
+  assert.equal(await p.locator("#work-view-work").evaluate(node => node === document.activeElement), true);
   for (const [action, dialog, close] of [
     ["invite", "#share-link-dialog", "#share-link-close"],
     ["agent", "#agent-connect-dialog", "#agent-connect-close"],

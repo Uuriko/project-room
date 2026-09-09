@@ -248,7 +248,10 @@
           <section class="panel work-panel" aria-labelledby="work-title">
             <div class="panel-header">
               <div>
-                <h2 id="work-title" tabindex="-1">Work</h2>
+                <div class="work-views" role="group" aria-label="Work view">
+                  <h2 id="work-title" tabindex="-1"><button id="work-view-work" type="button" aria-pressed="true">Work</button></h2>
+                  <button id="work-view-results" type="button" aria-pressed="false">Results</button>
+                </div>
               </div>
               <button id="new-work-button" class="button secondary" type="button">New</button>
             </div>
@@ -287,6 +290,7 @@
             </form>
             </dialog>
             <div id="work-list" class="work-list"></div>
+            <div id="room-results-list" class="work-list" aria-label="Completed results" hidden></div>
           </section>
 
           <details id="record-panel" class="panel record-panel">

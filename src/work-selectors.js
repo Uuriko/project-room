@@ -8,6 +8,21 @@ export class CursorError extends Error {
   }
 }
 
+// A result is current completion with all required gates satisfied, not an
+// accepted assignment, historical approval or permission to use it elsewhere.
+export function currentResult(item) {
+  if (!item || item.state !== "completed" || item.supersededBy || !item.receipt?.eventId
+    || !item.receipt.evidenceVersion || !terminalWork(item)) return null;
+  return { completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion,
+    kind: item.receipt.nativeText ? "room_text" : "external",
+    status: currentApproval(item) ? "approved" : "completed" };
+}
+
+export function completedResults(state) {
+  return Object.values(state.workItems).filter(item => currentResult(item))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
+}
+
 // Feedback belongs to an exact immutable message, never every draft by a producer.
 // Current-state presentation only: no new assignment, notification or fulfillment.
 export function draftFeedback(item, message) {

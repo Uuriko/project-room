@@ -1,7 +1,7 @@
 import { validId, PERMISSIONS, WORK_STATES } from "../src/events.js";
 import { nextWorkStep, workActions, reusableWorkDefinition, workCollaboration } from "../src/workflow.js";
 import { isDeepStrictEqual } from "node:util";
-import { searchWork } from "../src/work-selectors.js";
+import { searchWork, completedResults, currentResult } from "../src/work-selectors.js";
 import { workPacket, resultDraft, verifyWorkResult } from "../src/work-packet.js";
 import { submitWorkAction } from "./work-actions.mjs";
 import { submitHelpAction } from "./help-actions.mjs";
@@ -364,7 +364,7 @@ export class RoomAgentClient {
     return submitHelpAction(this, { roomId: this.#roomId, memberId: this.#memberId }, name, args, options);
   }
   async orient({ signal, focus = "all", query } = {}) {
-    if (!["all", "needs_me", "help_wanted"].includes(focus)) throw new RoomClientError(0, "invalid_focus", "Choose all work, work needing you, or explicit help invitations");
+    if (!["all", "needs_me", "help_wanted", "results"].includes(focus)) throw new RoomClientError(0, "invalid_focus", "Choose all work, work needing you, help invitations, or results");
     if (query !== undefined && !validWorkSearchQuery(query)) throw new RoomClientError(0, "invalid_query", "Use a nonblank work query of at most 200 UTF-16 code units");
     const snapshot = focus !== "all" || query !== undefined
       ? checkedWorkSnapshot(await this.#request("?view=work", undefined, signal, focus === "help_wanted"), this.#roomId)
@@ -378,7 +378,7 @@ export class RoomAgentClient {
     const now = focus === "help_wanted" ? Date.parse(snapshot.evaluatedAt) : Date.now(), items = Object.values(snapshot.state.workItems);
     const helpFor = item => workHelpContext(snapshot.state, item.id, member.id, snapshot.evaluatedAt);
     if (focus !== "all" || query !== undefined) {
-      const candidates = focus === "all" ? items : items.filter(item => {
+      const candidates = focus === "results" ? completedResults(snapshot.state) : focus === "all" ? items : items.filter(item => {
         if (focus === "help_wanted") return helpFor(item).canOffer;
         const next = nextWorkStep(item, now);
         return member.active && next.memberId === member.id && next.needsAttention;
@@ -389,6 +389,8 @@ export class RoomAgentClient {
         return { id: item.id, title: item.title, state: item.state, revision: item.revision, mode: item.mode, next: nextWorkStep(item, now),
           ...(excerpt === undefined ? {} : { excerpt }),
           ...(focus === "help_wanted" ? { help: helpFor(item) } : {}),
+          ...(focus === "results" ? { result: currentResult(item),
+            nextResultRead: item.receipt.nativeText ? { tool: "room_read_result", arguments: { workItemId: item.id, completionEventId: item.receipt.eventId } } : null } : {}),
           availableRoomActions: workActions(item, member, now).map(([action, label]) => ({ action, label })),
           nextRead: { tool: "room_read_work", arguments: { workItemId: item.id, ...(focus === "help_wanted" ? { includeOffers: true } : {}) } } };
       });
@@ -399,6 +401,8 @@ export class RoomAgentClient {
           matches: matches.total, shown: work.length, limit: 25, hasMore: matches.total > work.length,
           guidance: "Current work fields only; no message bodies, evidence files or history. Focus is applied before matching and the 25-hit limit; refine the query if truncated. Compact excerpts omit full task context. Read selected work before acting. A hit is not an assignment, suitability judgment or execution grant; empty does not mean the room is done."
             + (focus === "help_wanted" ? " Read selected work with includeOffers=true for current queue capacity and selection, then inspect scope and discussion. Invitation discovery alone is not offer eligibility. No automatic offer or dispatch." : "") }
+          : focus === "results" ? { totalWork: items.length, results: work.length,
+          guidance: "Current completed results with required review and decision gates satisfied. Approval is not execution or reuse permission. Native results have exact read pointers; read work for external evidence links. Reopened, superseded and awaiting-review work are excluded. No external content fetched." }
           : focus === "help_wanted" ? { totalWork: items.length, helpWanted: work.length,
           guidance: "Explicit current invitations, not assignments, queue eligibility or permission to execute. All matching invitations in this bounded Room are included. Follow nextRead to inspect current offer capacity and selection; review scope and discussion before contributing. Unsupported offer reads fail explicitly. No automatic offer or dispatch." }
           : { totalWork: items.length, needsMe: work.length,

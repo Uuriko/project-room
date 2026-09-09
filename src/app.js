@@ -1,7 +1,7 @@
 import { EVENT_TYPES as T, WORK_STATES as S } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief } from "./return-brief.js";
-import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback } from "./work-selectors.js";
+import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
 import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter } from "./conversation.js";
 import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer } from "./workflow.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation } from "./share-links.js";
@@ -65,6 +65,7 @@ let accessEndContext = null;
 let lastComposerSelection = null;
 let lastInvitationOpener = null;
 let roomActionsContext = null;
+let selectedWorkView = "work";
 const invitation = {
   phase: "idle", version: 0, secret: null, preview: null, redemptionId: null,
   opener: null, openerSelection: null
@@ -141,7 +142,9 @@ const client = new RoomClient({
     $("#resume-action").hidden = true; $("#refresh-action").hidden = true;
     $("#action-evidence").hidden = true; $("#action-evidence").removeAttribute("href");
     $("#action-text").hidden = true; $("#action-text-body").textContent = ""; $("#action-text-origin").textContent = "";
-    closeResult();
+    closeResult(false);
+    selectWorkView("work");
+    renderContent("#room-results-list", "");
     roomCursor = 0; roomGeneration = -1; showAllAttention = false; clearTimeout(returnClock); returnClock = null;
     shareLinksUI?.resetManagement();
     portableWorkUI?.reset();
@@ -979,6 +982,7 @@ function revealMessage(id) {
 }
 function focusRecord(node) {
   if (!node) return;
+  if (node.closest("#work-list")) selectWorkView("work");
   inboxUI?.showRooms();
   node.focus({ preventScroll: true });
   node.scrollIntoView({ block: "nearest", behavior: "instant" });
@@ -989,12 +993,14 @@ function workRecord(id) {
 }
 function revealWork(id) {
   if (!state?.workItems[id] || busy) return;
+  selectWorkView("work");
   const card = workRecord(id);
   if (card) card.querySelector(".work-details").open = true;
   focusRecord(card);
 }
 function revealDrafts(id) {
   if (!state?.workItems[id] || busy) return;
+  selectWorkView("work");
   const choices = workRecord(id)?.querySelector('.work-drafts');
   if (!choices) { revealWork(id); return; }
   inboxUI?.showRooms();
@@ -1608,7 +1614,8 @@ function roomActionEntries() {
     { id: "write", label: requestMode ? "Open composer" : $("#message-input").value ? "Continue writing" : "Write a message", words: "compose chat draft reply", target: "#message-input" },
     { id: "search", label: "Search room", words: "find messages work", target: "#message-search" },
     { id: "catch-up", label: "Catch me up", words: "updates attention needs me reminders", target: "#return-brief-panel > summary", reveal: "#return-brief-panel" },
-    { id: "work", label: "View work", words: "tasks projects results", target: "#work-title" },
+    { id: "work", label: "View work", words: "tasks projects", target: "#work-view-work", activate: true },
+    { id: "results", label: "View results", words: "completed approved finished artifacts", target: "#work-view-results", activate: true },
     { id: "people", label: "People & agents", words: "members collaborators team", target: "#people-panel > summary", reveal: "#people-panel" },
     { id: "new-work", label: "New work", words: "create task request", target: "#new-work-button", activate: true },
     { id: "invite", label: "Invite people", words: "share join link", target: "#invite-people-button", activate: true },
@@ -1678,6 +1685,8 @@ document.addEventListener("keydown", event => {
   event.preventDefault(); if ($("#room-actions-dialog").open) closeRoomActions(); else openRoomActions();
 });
 new MutationObserver(() => { if (roomActionsContext && !ownsRoomActions()) closeRoomActions(false); })
+  .observe($("#main"), { attributes: true, attributeFilter: ["hidden"] });
+new MutationObserver(() => { if (resultView && $("#main").hidden) closeResult(false); })
   .observe($("#main"), { attributes: true, attributeFilter: ["hidden"] });
 $("#main").addEventListener("click", e => {
   const link = e.target.closest("[data-open-message], [data-open-work], [data-open-member], [data-open-event], [data-open-room]");
@@ -1817,7 +1826,7 @@ function sendWorkProposal() {
       throw error;
     }
     setWorkRetry(false);
-    closeWorkForm(); notice("Work proposed. The accountable member must accept it; no external action was authorized.");
+    closeWorkForm(); selectWorkView("work"); notice("Work proposed. The accountable member must accept it; no external action was authorized.");
   }, { failureHint: "Your work proposal was kept; try again." });
 }
 const field = (name, label, type = "text") => `<label>${esc(label)}<input name="${name}" type="${type}" required maxlength="2000"></label>`;
@@ -1845,22 +1854,54 @@ const actionSpecs = {
   decide: [T.OWNER_DECISION_RECORDED, "Record your decision", '<label>Decision<select name="decision" required><option value="">Choose</option><option value="approved">Approve</option><option value="changes_requested">Request changes</option><option value="rejected">Reject</option></select></label>' + area("reason", "Reason") + "<p>Approval does not merge, deploy, or spend money.</p>" ]
 };
 let resultView = null;
-function closeResult() {
+function selectWorkView(view) {
+  selectedWorkView = view;
+  $("#work-list").hidden = view !== "work"; $("#room-results-list").hidden = view !== "results";
+  $("#new-work-button").textContent = view === "results" ? "New work" : "New";
+  for (const name of ["work", "results"]) $("#work-view-" + name).setAttribute("aria-pressed", String(view === name));
+}
+for (const name of ["work", "results"]) $("#work-view-" + name).addEventListener("click", () => {
+  if (ownsRoomActions(null)) selectWorkView(name);
+});
+function resultRow(item) {
+  const result = currentResult(item), title = esc(item.title);
+  const open = result.kind === "room_text"
+    ? `<button type="button" data-read-result="${esc(item.id)}" data-focus-key="result:${esc(item.id)}">${title}</button>`
+    : `<a href="${safeUrl(item.receipt.evidenceUrl)}" target="_blank" rel="noreferrer" data-focus-key="result:${esc(item.id)}">${title} ↗</a>`;
+  return `<article class="result-row" data-result-work-id="${esc(item.id)}">${open}<p>${esc([...item.receipt.summary].slice(0, 200).join(""))}${[...item.receipt.summary].length > 200 ? "…" : ""}</p><div class="result-meta"><span>${result.status === "approved" ? "Approved" : "Completed"}${result.kind === "external" ? " · External evidence" : ""}</span><button type="button" class="text-button" data-result-work="${esc(item.id)}">Work details</button></div></article>`;
+}
+function resultStatus() {
+  const view = resultView;
+  if (!view || !sameSession(view.generation, view.roomId, view.memberId)) return;
+  const item = state.workItems[view.workItemId];
+  const earlier = !matchesReceipt(view.receipt, item?.receipt) || (view.fromResults && !currentResult(item));
+  $("#result-status").textContent = (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Close and try again."
+    : view.loaded ? `Submitted by ${memberLabel(view.reportedById)} · exact stored text` : "Loading exact text…");
+}
+function closeResult(restore = true) {
   const view = resultView;
   resultView = null; $("#result-dialog").close(); $("#result-title").textContent = "Result";
   $("#result-status").textContent = ""; $("#result-body").textContent = "";
-  if (view && sameSession(view.generation, view.roomId, view.memberId)) {
+  if (restore && view && sameSession(view.generation, view.roomId, view.memberId)) {
+    if (view.fromResults && selectedWorkView === "results") {
+      const row = [...$("#room-results-list").querySelectorAll("[data-result-work-id]")].find(node => node.dataset.resultWorkId === view.workItemId);
+      (row?.querySelector("[data-read-result]") || $("#work-view-results")).focus({ preventScroll: true });
+      return;
+    }
     const card = workRecord(view.workItemId); focusRecord(card?.querySelector("[data-read-result]") || card);
   }
 }
-$("#close-result").addEventListener("click", closeResult);
+$("#close-result").addEventListener("click", () => closeResult());
 $("#result-dialog").addEventListener("cancel", event => { event.preventDefault(); closeResult(); });
-$("#work-list").addEventListener("click", e => {
+function readResult(e) {
   const read = e.target.closest("[data-read-result]");
   if (read && state && !busy) {
     const item = state.workItems[read.dataset.readResult], receipt = item?.receipt;
     if (!receipt?.nativeText) return;
-    const view = { generation: client.generation, roomId: session.roomId, memberId: session.member.id, workItemId: item.id }; resultView = view;
+    const fromResults = Boolean(read.closest("#room-results-list"));
+    if (fromResults && !currentResult(item)) return;
+    const view = { generation: client.generation, roomId: session.roomId, memberId: session.member.id, workItemId: item.id,
+      fromResults, receipt: { completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion }, reportedById: receipt.reportedById }; resultView = view;
     $("#result-title").textContent = item.title; $("#result-status").textContent = "Loading exact text…"; $("#result-body").textContent = "";
     $("#result-dialog").showModal();
     const owns = () => resultView === view && sameSession(view.generation, view.roomId, view.memberId);
@@ -1868,12 +1909,18 @@ $("#work-list").addEventListener("click", e => {
       if (!owns() || !value) return;
       if (value.result.receipt?.evidenceVersion !== receipt.evidenceVersion) throw new Error("Pinned version changed");
       $("#result-body").textContent = value.result.text.body;
-      $("#result-status").textContent = `Submitted by ${memberLabel(receipt.reportedById)} · exact stored text`;
-    }).catch(() => { if (owns()) $("#result-status").textContent = "Exact text unavailable. Close and try again."; });
+      view.loaded = true; resultStatus();
+    }).catch(() => { if (owns()) { view.error = true; resultStatus(); } });
     return;
   }
   const button = e.target.closest("[data-action]"); if (!button || busy) return;
   openWorkAction(state.workItems[button.dataset.workId], button.dataset.action, null, button.dataset.offerId);
+}
+$("#work-list").addEventListener("click", readResult);
+$("#room-results-list").addEventListener("click", e => {
+  readResult(e);
+  const work = e.target.closest("[data-result-work]");
+  if (work) revealWork(work.dataset.resultWork);
 });
 function openWorkAction(item, action, draftMessageId = null, offerId = null) {
   if (pendingAction?.uncertain) { resumeAction(); return; }
@@ -2288,6 +2335,10 @@ function renderReturnBrief() {
       draftsByWork.get(message.workItemId).push(message);
     }
     renderContent("#work-list", items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(i => workCard(i, now, draftsByWork.get(i.id) ?? [])).join("") || `<p class="empty-note">${can("steer") ? "Turn a message into work, or start something new." : "Suggest work in the conversation. The owner can create it."}</p>`);
+    const resultFocus = $("#room-results-list").contains(document.activeElement) ? document.activeElement : null;
+    renderContent("#room-results-list", completedResults(state).map(resultRow).join("") || '<p class="empty-note">Completed results appear here.</p>');
+    if (resultFocus && !resultFocus.isConnected && document.activeElement === document.body) $("#work-view-results").focus({ preventScroll: true });
+    resultStatus();
     syncActionForm();
     const expiry = items.flatMap(item => [item.claim?.status === "active" ? Date.parse(item.claim.expiresAt) : NaN,
       ...(item.helpWanted?.status === "open" ? [Date.parse(item.helpWanted.openedAt), Date.parse(item.helpWanted.expiresAt)] : [])]).filter(at => at > now).sort((a, b) => a - b)[0];

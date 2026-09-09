@@ -632,6 +632,15 @@ summary { overflow-wrap: anywhere; }
 #inbox-share-paragraphs span { white-space: pre-wrap; }
 .inbox-back { display: none; }
 .room-heading-actions { display: flex; align-items: center; gap: .75rem; flex-shrink: 0; }
+.work-views { display: flex; align-items: center; gap: .75rem; }
+.work-views h2 { margin: 0; font: inherit; }
+.work-views button { background: none; border: 0; padding: .35rem 0; min-height: 44px; font: inherit; color: var(--muted); cursor: pointer; }
+.work-views button[aria-pressed="true"] { color: var(--text); font-weight: 700; }
+.result-row { padding: 1rem 0; border-top: 1px solid var(--line-soft); overflow-wrap: anywhere; }
+.result-row:first-child { border-top: 0; }
+.result-row > button, .result-row > a { display: block; min-height: 44px; padding: .4rem 0; background: none; border: 0; color: var(--text); font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
+.result-row p { margin: .25rem 0 .5rem; color: var(--muted); font-size: .875rem; }
+.result-row .result-meta { display: flex; align-items: center; gap: .75rem; font-size: .75rem; color: var(--muted); }
 #room-actions-open { white-space: nowrap; min-height: 44px; }
 #room-actions-open kbd { margin-left: .4rem; color: var(--muted); font: inherit; font-size: .75rem; }
 #room-actions-dialog { width: min(30rem, calc(100vw - 1.5rem)); padding: 1rem; }
