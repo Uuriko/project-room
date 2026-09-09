@@ -23,6 +23,11 @@ Instinct through iMessage, ChatGPT, Claude, Grok, Gemini and other assistants.
 It does **not** automatically read their histories, send messages, or verify which
 model generated a pasted answer. Manual drafts remain visibly unverified proposals.
 
+The [manual coordinator exercise](ACTUAL-MANUAL-ACCEPTANCE-2026-09-09.md)
+qualifies an original answer through a copied packet, a fresh simulated-owner
+browser session and an exact stored result. It leaves unknown producer attribution
+and independent review unresolved; it does not qualify any particular chat app.
+
 ## Local MCP: one adapter, several hosts
 
 First follow [private setup](AGENT-CONNECTION.md): the owner creates access, then
