@@ -1,7 +1,9 @@
 # Research inputs
 
 Later Codex research (blueprint, Superhuman, email-next, messaging plan) is in
-[`research/`](../research/README.md). This page is the older v0 source list.
+[`research/`](../research/README.md). Adjacent 2026 products (Gemini Rooms,
+Perplexity Projects, AgentsRoom) are comparison context only. This page is the
+older v0 source list.
 
 These notes separate useful inspiration from claims that still need evidence.
 
