@@ -6,6 +6,7 @@ test("explicit local inbox sandbox serves the real UI and retains isolated sampl
   const sample = await createInboxSandbox();
   t.after(async () => { await sample.close(); rmSync(sample.directory, { recursive: true, force: true }); });
   assert.equal(new URL(sample.url).hostname, "127.0.0.1");
+  assert.equal(new URL(sample.url).hash, "#pr-view/inbox");
   assert.match(sample.accountKey, /^[A-Za-z0-9_-]{43}$/);
   const response = await fetch(sample.url);
   assert.equal(response.status, 200);

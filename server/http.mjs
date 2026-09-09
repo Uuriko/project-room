@@ -47,9 +47,11 @@ const rateHash = value => createHash("sha256").update(String(value)).digest("hex
 
 export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = 1000, trustedLocalProxy = false,
   loadAsset = path => readFile(new URL(path, assetRoot)), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
-  resolveRequestSignal = () => null, syntheticInboxTransport = null,
+  resolveRequestSignal = () => null, syntheticInboxTransport = null, cookieNamespace = "",
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot" }) {
   if (trustedLocalProxy && !origin?.startsWith("https://")) throw new Error("The deployment proxy requires a fixed HTTPS origin");
+  if (typeof cookieNamespace !== "string" || !/^[A-Za-z0-9_-]{0,64}$/.test(cookieNamespace))
+    throw new Error("Cookie namespace must contain at most 64 letters, digits, underscores or hyphens");
   if (syntheticInboxTransport && (!(syntheticInboxTransport instanceof SyntheticInboxTransport)
     || syntheticInboxTransport.inbox !== store.inbox || trustedLocalProxy
     || origin && !["localhost", "127.0.0.1", "[::1]"].includes(new URL(origin).hostname)))
@@ -60,7 +62,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     if (url.protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) throw new Error("Non-loopback origins require HTTPS");
   }
   const expectedOrigin = () => origin || `http://127.0.0.1:${server.address().port}`;
-  const scopedCookieName = name => expectedOrigin().startsWith("https:") ? `__Host-${name}` : name;
+  // Avoid local-instance sign-in collisions; namespacing is not host isolation.
+  const scopedCookieName = name => `${expectedOrigin().startsWith("https:") ? "__Host-" : ""}${cookieNamespace ? cookieNamespace + "_" : ""}${name}`;
   const streams = new Set();
   const rates = new Map();
   function rate(id, maximum) {

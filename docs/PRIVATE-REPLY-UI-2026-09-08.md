@@ -36,7 +36,11 @@ For an isolated manual sample:
 node scripts/inbox-sandbox.mjs --start
 ```
 
-The launcher creates a fresh temporary room database and a separate synthetic mail database, binds a sample owner account, seeds two clearly labeled private messages, and prints a loopback URL plus a private sample sign-in key. Sign in, choose Inbox and reply. Stop with Ctrl+C. The sample directory is retained for inspection; it never opens or overwrites an existing user database. The launcher and synthetic mail fixture are not in the production package.
+The launcher creates a fresh temporary room database and a separate synthetic mail database, binds a sample owner account, seeds two clearly labeled private messages, and prints a loopback URL plus a private sample sign-in key. Sign in and arrive in Inbox to reply. Stop with Ctrl+C. The sample directory is retained for inspection; it never opens or overwrites an existing user database. The launcher and synthetic mail fixture are not in the production package.
+
+Each sample has unique account/room cookie names. Separate samples in one browser no longer overwrite each other's sign-in or the default localhost cookie names. This avoids accidental collisions, not host-level isolation: cookies are still sent to the same hostname across ports. Use a separate browser profile if other localhost services are untrusted or contain sensitive sessions. Production cookie names, HTTPS prefixes and cookie attributes remain unchanged by default.
+
+Inbox and Rooms use namespaced destination fragments, so reload and copied arrival links retain the chosen destination without including credentials or private source IDs. Existing record and invitation routes retain their own semantics. Opening a room record from Inbox reveals Rooms; it does not discard the private draft. This does not yet preserve the selected private message across reload or make Inbox independent of room membership.
 
 ## Evidence and limits
 

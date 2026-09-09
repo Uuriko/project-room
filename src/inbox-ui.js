@@ -43,8 +43,9 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork }) {
     if (!selected || !drafts.has(selected)) return;
     positions.set(selected, $("#inbox-reader").scrollTop);
   }
-  function show(place) {
+  function show(place, updateLocation = true) {
     active = place === "inbox";
+    if (updateLocation) history.replaceState(null, "", "#pr-view/" + (active ? "inbox" : "rooms"));
     $("#main").hidden = active;
     $("#inbox-panel").hidden = !active;
     $("#nav-inbox").setAttribute("aria-current", active ? "page" : "false");
@@ -292,5 +293,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork }) {
     if (owns() && ([...drafts.values()].some(d => d.dirty || d.pending) || sendUI.hasPending())) { event.preventDefault(); event.returnValue = ""; }
   });
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") remember(); });
-  return { sync, reset, hasPending: () => owns() && ([...drafts.values()].some(d => d.dirty || d.pending) || Boolean(pendingShare()) || sendUI.hasPending()) };
+  return { sync, reset, open: () => { if (!active) return load(); },
+    showRooms: () => { if (active) show("rooms", false); },
+    hasPending: () => owns() && ([...drafts.values()].some(d => d.dirty || d.pending) || Boolean(pendingShare()) || sendUI.hasPending()) };
 }

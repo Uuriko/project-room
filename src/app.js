@@ -856,6 +856,7 @@ function switchThread(threadId, focusComposer = false) {
 }
 function revealMessage(id) {
   if (!state || busy || !conversation.byId.has(id)) return;
+  inboxUI?.showRooms();
   const message = conversation.byId.get(id);
   switchThread(message.replyToId ? conversation.rootById.get(id) : null);
   const row = [...$("#message-list").querySelectorAll("[data-message-record-id]")]
@@ -868,6 +869,7 @@ function revealMessage(id) {
 }
 function focusRecord(node) {
   if (!node) return;
+  inboxUI?.showRooms();
   node.focus({ preventScroll: true });
   node.scrollIntoView({ block: "nearest", behavior: "instant" });
 }
@@ -885,6 +887,7 @@ function revealDrafts(id) {
   if (!state?.workItems[id] || busy) return;
   const choices = workRecord(id)?.querySelector('.work-drafts');
   if (!choices) { revealWork(id); return; }
+  inboxUI?.showRooms();
   choices.open = true;
   const summary = choices.querySelector('summary');
   summary.focus({ preventScroll: true });
@@ -909,6 +912,8 @@ function decodeFragment(value) {
 function revealLocationHash() {
   if (!state || !location.hash) return;
   const hash = location.hash;
+  if (hash === "#pr-view/inbox") { inboxUI?.open(); return; }
+  if (hash === "#pr-view/rooms") { inboxUI?.showRooms(); return; }
   const current = /^#pr-record\/(message|work|member|event|room)\/(.+)$/.exec(hash);
   if (current) {
     const id = decodeFragment(current[2]);

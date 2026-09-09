@@ -192,13 +192,69 @@ test("sample launcher: an empty room owner can sign in and finish a sample reply
   page.setDefaultTimeout(9000); const errors = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.goto(sample.url); await page.locator("#access-key").fill(sample.accountKey); await page.locator("#auth-form button").click();
-  await page.locator("#main").waitFor(); await page.locator("#nav-inbox").click(); await page.locator("#inbox-reader").waitFor();
+  await page.locator("#inbox-reader").waitFor();
+  assert.equal(await page.locator("#main").isVisible(), false);
   await page.locator("#inbox-draft").fill("Let’s try one small idea.");
   await page.locator("#inbox-save").click(); await page.getByText("Saved · only you", { exact: true }).waitFor();
   await page.locator("#inbox-send-preview").click(); await page.locator("#inbox-send-confirm").click();
   await page.getByText("Sample accepted · delivery unconfirmed", { exact: true }).waitFor();
   mkdirSync("test-results", { recursive: true }); await page.screenshot({ path: "test-results/inbox-local-sandbox.png", fullPage: true });
   assert.deepEqual(errors, []);
+});
+
+test("sample arrival: two samples and existing localhost cookies coexist in one browser", { timeout: 35000 }, async t => {
+  const first = await createInboxSandbox(), second = await createInboxSandbox(), browser = await chromium.launch({ headless: true });
+  t.after(async () => {
+    await browser.close();
+    for (const sample of [first, second]) { await sample.close(); rmSync(sample.directory, { recursive: true, force: true }); }
+  });
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const original = ["account_session", "room_session"].map(name => ({
+    name, value: "existing-development-cookie", domain: "127.0.0.1", path: "/", httpOnly: true, sameSite: "Strict"
+  }));
+  await context.addCookies(original);
+  const allowed = new Set([first, second].map(s => new URL(s.url).origin)), external = [], errors = [];
+  await context.route("**/*", route => {
+    if (!allowed.has(new URL(route.request().url()).origin)) { external.push(route.request().url()); return route.abort(); }
+    return route.continue();
+  });
+  const pages = [];
+  for (const sample of [first, second]) {
+    const page = await context.newPage(); pages.push(page); page.setDefaultTimeout(9000);
+    page.on("pageerror", error => errors.push(error.message));
+    await page.goto(sample.url); await page.locator("#access-key").fill(sample.accountKey); await page.locator("#auth-form button").click();
+    await page.locator("#inbox-reader").waitFor();
+  }
+  const [a, b] = pages;
+  await a.locator("#inbox-draft").fill("Only in the first sample");
+  await a.locator("#inbox-save").click(); await a.getByText("Saved · only you", { exact: true }).waitFor();
+  await b.reload(); await b.locator("#inbox-reader").waitFor();
+  assert.equal(await b.locator("#inbox-draft").inputValue(), "");
+  await a.reload(); await a.locator("#inbox-reader").waitFor();
+  assert.equal(await a.locator("#inbox-draft").inputValue(), "Only in the first sample");
+  await b.locator("#signout-button").click(); await b.locator("#auth-panel").waitFor();
+  await a.reload(); await a.locator("#inbox-reader").waitFor();
+  assert.equal(await a.locator("#inbox-draft").inputValue(), "Only in the first sample");
+  const cookies = await context.cookies();
+  for (const cookie of original) assert.equal(cookies.find(c => c.name === cookie.name)?.value, cookie.value);
+  assert.equal(cookies.filter(c => /^sample_.*_account_session$/.test(c.name)).length, 2);
+  mkdirSync("test-results", { recursive: true });
+  await a.screenshot({ path: "test-results/inbox-sample-coexistence.png", fullPage: true });
+  assert.deepEqual(errors, []); assert.deepEqual(external, []);
+});
+
+for (const mobile of [false, true]) test(`inbox arrival ${mobile ? "mobile" : "desktop"}: destinations survive reload and record links return to Rooms`, { timeout: 35000 }, async t => {
+  const f = await setup(t, mobile), p = f.page;
+  await f.inbox(); assert.equal(new URL(p.url()).hash, "#pr-view/inbox");
+  await p.reload(); await p.locator("#inbox-reader").waitFor();
+  assert.equal(await p.locator("#main").isVisible(), false);
+  await p.evaluate(() => { location.hash = "#pr-record/room/commons"; });
+  await p.locator("#main").waitFor();
+  assert.equal(await p.locator("#inbox-panel").isVisible(), false);
+  await f.inbox(); await p.locator("#nav-rooms").click();
+  assert.equal(new URL(p.url()).hash, "#pr-view/rooms");
+  await p.reload(); await p.locator("#main").waitFor();
+  assert.equal(await p.locator("#inbox-panel").isVisible(), false);
 });
 
 for (const mobile of [false, true]) test(`real inbox ${mobile ? "mobile" : "desktop"}: private draft, navigation, reload and selected sharing`, { timeout: 35000 }, async t => {

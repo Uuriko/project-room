@@ -1,5 +1,6 @@
 // Explicit local sample launcher. Not part of the production runtime package.
 import { mkdtempSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -23,10 +24,11 @@ export async function createInboxSandbox() {
   ]) store.inbox.apply(slot.token, { action: "source.save", requestId: id, sourceId: id, expectedRevision: 0,
     data: { adapter: "synthetic", sender: "maya@example.test", recipient: "you@example.test", subject, paragraphs } }, session.sessionBinding);
   const provider = new SyntheticMailFixture(join(directory, "synthetic-mail.sqlite"));
-  const server = createRoomServer({ store, syntheticInboxTransport: new SyntheticInboxTransport(store.inbox, provider) });
+  const server = createRoomServer({ store, cookieNamespace: "sample_" + randomUUID(),
+    syntheticInboxTransport: new SyntheticInboxTransport(store.inbox, provider) });
   try { await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); }); }
   catch (error) { provider.close(); store.close(); throw error; }
-  return { directory, accountKey, url: "http://127.0.0.1:" + server.address().port + "/?room=commons",
+  return { directory, accountKey, url: "http://127.0.0.1:" + server.address().port + "/?room=commons#pr-view/inbox",
     close: async () => {
       server.closeStreams(); server.closeAllConnections();
       await new Promise(resolve => server.close(resolve)); provider.close(); store.close();
