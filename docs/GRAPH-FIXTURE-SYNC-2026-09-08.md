@@ -36,3 +36,18 @@ HTML stays inert envelope data; attachments remain descriptors, not bytes or dow
 Focused tests cover duplicate/removal hydration, exact retry after restart, unchanged source observations, expired cursor and explicit reset, invalid next links, wrong hydration identity, immutable-ID refusal, moved/not-found records, disconnect/reconnect, cross-folder source races, empty/nonprogressing pages, capacity, agent/account refusal and cold packaging. The existing Workers store restart fixture now prepares both initial and continuation pages through this driver.
 
 Tests use invented recordings, not a mailbox export or successful real-provider connection. See the checkpoint for exact-version results.
+
+## Verified checkpoint
+
+Runtime `fcc52b6ed982dd153b3452b870009a287b0c8336`, schema 19 unchanged:
+
+- Syntax and complete core suite: **788/788 passed**.
+- Complete local Workers suite: **21/21 passed**.
+- Focused account-home and Inbox browser suite: **38/38 passed**.
+- Fresh desktop/mobile account-home screenshots inspected and retained.
+
+Evidence: `test-results/graph-sync-fcc52b6/`. Earlier candidate logs are included: the first combined run lacked loopback permission, and the new agent-refusal test initially omitted the required account binding, so it exercised the binding guard instead of credential refusal. The test now supplies a binding and proves an agent token is refused before any fixture read. No production guard was weakened. Local Workers TLS compatibility diagnostics are not real provider traffic; the suite exited successfully.
+
+This turn did not rerun the full 233-browser suite; its prior exact-runtime result is recorded at `b0c0800`. The fresh 38-browser checks remain synthetic-provider, simulated-human evidence. Screenshots show the existing synthetic Inbox, not a connected mail view.
+
+Runtime code was unchanged during the final test runs. No mailbox access, real message, external model call, payment, push, deployment or other product edit occurred. The broad goal remains active. Next steps and source-specific send-control gating are recorded in `research/EMAIL-QUALIFICATION-NEXT.md` in the project mirror.
