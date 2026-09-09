@@ -5,7 +5,7 @@ import { storedText } from "./text-results.mjs";
 import { ServiceError } from "./store.mjs";
 import { isSend, internalSend, validateSend, sendPreview, transitionSend } from "./inbox-outbox.mjs";
 import { readEmailEnvelope, EmailContractError } from "./email-envelope.mjs";
-import { prepareGraphReplyDraft, buildGraphReplyDraft, classifyGraphReplyCreation, classifyGraphReplyUpdateAcknowledgment, normalizeReplyObservation, prepareGraphReplyUpdate, buildGraphReplyUpdate } from "./graph-reply-draft.mjs";
+import { prepareGraphReplyDraft, buildGraphReplyDraft, classifyGraphReplyCreation, classifyGraphReplyUpdateAcknowledgment, normalizeReplyObservation, prepareGraphReplyUpdate, buildGraphReplyUpdate, compareReplyUpdateEnvelope } from "./graph-reply-draft.mjs";
 import { isReplyAttempt, validateReplyAttempt, transitionReplyAttempt, replyObservationReviewable, isReplyUpdate, transitionReplyUpdate } from "./graph-reply-journal.mjs";
 import { buildUpdateInspection, buildUpdateReview, replyAttemptWithObservation } from "./graph-reply-update-review.mjs";
 
@@ -282,8 +282,12 @@ export class Inbox {
   }
   replyBaseAttempt(accountId, attempt) {
     if (!attempt?.providerDraftId) return attempt;
-    const row = this.db.prepare("SELECT request_json FROM private_inbox_commands WHERE account_id=? AND ((json_extract(request_json,'$.action')='reply.observed' AND json_extract(request_json,'$.attemptId')=?) OR (json_extract(request_json,'$.action') IN ('reply.update.observed','reply.update.inspected') AND json_extract(request_json,'$.attemptId')=?)) ORDER BY sequence DESC LIMIT 1").get(accountId, attempt.id, attempt.id);
-    return row ? replyAttemptWithObservation(attempt, JSON.parse(row.request_json).observation) : attempt;
+    const read = this.latestReplyRead(accountId, attempt.id);
+    return read ? replyAttemptWithObservation(attempt, read.observation) : attempt;
+  }
+  latestReplyRead(accountId, attemptId) {
+    const row = this.db.prepare("SELECT request_json FROM private_inbox_commands WHERE account_id=? AND json_extract(request_json,'$.action') IN ('reply.observed','reply.update.observed','reply.update.inspected') AND json_extract(request_json,'$.attemptId')=? ORDER BY sequence DESC LIMIT 1").get(accountId, attemptId);
+    return row ? JSON.parse(row.request_json) : null;
   }
   replyUpdateContext(token, sourceId, updateId, binding) {
     const auth = this.auth(token, binding), { source, draft } = this.read(token, sourceId, binding);
@@ -364,7 +368,13 @@ export class Inbox {
             let review = null;
             try { review = buildUpdateReview(context); }
             catch (error) { if (!(error instanceof ServiceError) && !(error instanceof EmailContractError)) throw error; }
-            const o = update.observation ?? prior.observation, d = o?.draft;
+            // Reading the sheet must not resurrect an older child snapshot after
+            // a newer parent read (including unavailable). This display does not
+            // grant child review authority; buildUpdateReview still qualifies it.
+            const read = this.latestReplyRead(auth.account.id, prior.id);
+            const o = read ? compareReplyUpdateEnvelope({ ...update.proposal,
+              connection: read.observation?.connection ?? update.proposal.connection }, read.observation)
+              : update.observation ?? prior.observation, d = o?.draft;
             const version = review?.reviewVersion ?? update.inspection?.version ?? (o ? digest(o) : null);
             value.update = { id: update.id, attemptId: prior.id, revision: update.revision, status: update.status,
               sourceRevision: context.source.revision, draftRevision: context.draft?.revision ?? 0,

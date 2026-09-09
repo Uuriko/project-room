@@ -220,19 +220,23 @@ export function installInboxReplyReview({ api, ownerKey }) {
   const reviewedLabel = a => a?.attemptId && differs(a) ? "Mailbox reviewed · local draft differs" : "Reviewed · not sent";
   const localBasis = () => JSON.stringify([draft?.body, draft?.base?.revision, draft?.source.revision, draft?.dirty, data?.comparison]);
   const active = () => data?.update ?? data?.attempt;
+  const targetBasis = a => JSON.stringify(a && [a.id, a.revision, a.sourceRevision, a.draftRevision,
+    a.observation?.version, a.canReview, a.review?.version, a.review?.current]);
+  const sameTarget = (a, b) => Boolean(a && b && targetBasis(a) === targetBasis(b));
   function render() {
     const a = active(), ownPending = pending?.sourceId === sourceId, email = draft?.source.adapter === "email";
     $("inbox-reply-panel").hidden = !ownerKey() || !email || !a && !ownPending;
     $("inbox-reply-open").disabled = busy || Boolean(pending && !ownPending);
-    $("inbox-reply-open").textContent = ownPending ? "Check review" : differs(a) ? "Compare reply" : current(a) ? "View reply" : "Review reply";
+    $("inbox-reply-open").textContent = ownPending ? "Check review" : differs(a) ? "Compare reply"
+      : current(a) || !a?.canReview ? "View reply" : "Review reply";
     const label = a?.status === "creation_unconfirmed" ? "Sample draft unconfirmed" : a?.status === "reserved" ? "Sample draft not created"
       : a?.status === "draft_unavailable" ? "Sample draft unavailable" : current(a) ? reviewedLabel(a)
-      : a?.status === "resolved" ? "Reviewed earlier · not sent" : "Sample draft · not sent";
+      : a?.status === "resolved" ? a.observation ? "Review out of date · not sent" : "Draft unavailable · not sent" : "Sample draft · not sent";
     const updateStatus = data?.comparison?.updateStatus;
     $("inbox-reply-status").textContent = note || (ownPending ? "Review unconfirmed" : updateStatus === "update_unconfirmed" ? "Sample update unconfirmed"
       : updateStatus === "update_acknowledged" ? a?.canReview ? "Updated draft · review needed" : "Sample update acknowledged · review pending"
       : updateStatus === "reserved" ? "Sample update not started" : label);
-    const matches = verified && preview?.id === a?.id && preview?.revision === a?.revision && previewBasis === localBasis();
+    const matches = verified && sameTarget(preview, a) && previewBasis === localBasis();
     $("inbox-reply-confirm").disabled = busy || Boolean(pending) || !matches || !clean(preview) || !preview?.canReview || !a?.canReview;
     if ($("inbox-reply-dialog").open && preview && (!matches || previewBasis !== localBasis()))
       $("inbox-reply-dialog-status").textContent = "Reply changed or unavailable. Close and review again.";
@@ -274,7 +278,11 @@ export function installInboxReplyReview({ api, ownerKey }) {
     if (turn !== modalTurn || id !== sourceId || owner !== ownerKey() || !$("inbox-reply-dialog").open) return;
     if (!loaded) { $("inbox-reply-dialog-status").textContent = "Couldn’t check this reply. Close and try again."; return; }
     preview = active(); previewLocal = draft?.body ?? ""; previewBasis = localBasis(); const o = preview?.observation;
-    if (!o) { $("inbox-reply-dialog-status").textContent = "No confirmed draft preview. Nothing sent."; return; }
+    if (!o) {
+      $("inbox-reply-dialog-status").textContent = "Draft unavailable · not sent";
+      $("inbox-reply-close").classList.add("primary"); $("inbox-reply-close").classList.remove("ghost");
+      return;
+    }
     const rows = [["From", [o.from]], ...(o.sender !== o.from ? [["Sender", [o.sender]]] : []), ["To", o.to], ["CC", o.cc], ["BCC", o.bcc]];
     $("inbox-reply-addresses").replaceChildren(...rows.filter(([, values]) => values.length).map(([label, values]) => {
       const row = document.createElement("div"), dt = document.createElement("dt"), dd = document.createElement("dd");
@@ -304,7 +312,9 @@ export function installInboxReplyReview({ api, ownerKey }) {
         ? preview.versionMismatch ? "Different mailbox version · not sent" : "Review only · not sent"
         : "Update acknowledged · review pending"
       : comparison?.updateStatus === "reserved" ? "Update not started"
-      : current(preview) ? reviewedLabel(preview) : comparing && !clean(preview) ? "Read-only comparison"
+      : current(preview) ? reviewedLabel(preview)
+      : preview.status === "resolved" && !preview.canReview ? "Review out of date · not sent"
+      : comparing && !clean(preview) ? "Read-only comparison"
       : preview.canReview && clean(preview) ? "Sample only · nothing will be sent" : "This draft needs a current, supported preview. Nothing sent.";
     render();
   }
@@ -312,7 +322,7 @@ export function installInboxReplyReview({ api, ownerKey }) {
     const id = sourceId, owner = ownerKey(), gen = generation, a = preview;
     if (!owner || busy || pending && pending.sourceId !== id) return;
     if (!pending && (!verified || !clean(a) || !a?.canReview || !active()?.canReview
-      || previewBasis !== localBasis() || a.id !== active()?.id || a.revision !== active()?.revision)) return;
+      || previewBasis !== localBasis() || !sameTarget(a, active()))) return;
     const request = pending ?? { action: a.attemptId ? "reply.update.review" : "reply.review", requestId: crypto.randomUUID(), sourceId: id,
       attemptId: a.attemptId ?? a.id, ...(a.attemptId ? { updateId: a.id } : {}),
       expectedRevision: a.revision, reviewVersion: a.observation.version };

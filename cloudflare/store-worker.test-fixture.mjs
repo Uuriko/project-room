@@ -324,6 +324,23 @@ export class StoreTestRoom {
       assert.equal(view().canSend, false); auditRecovery(store);
       return Response.json({ inspectionRecovered: true, reviewed: path !== '/update-inspect', canSend: false });
     }
+    if (['/update-read-unavailable', '/update-unavailable-resume'].includes(path)) {
+      const { email } = await request.json(), token = email.token, binding = email.binding;
+      const parent = store.inbox.replyAttempts(token, email.sourceId, binding).attempts[0];
+      const child = store.inbox.replyUpdates(token, email.sourceId, binding).updates[0];
+      if (path === '/update-read-unavailable') store.inbox.recordReplyObservation(token, {
+        requestId: 'worker-latest-unavailable', sourceId: email.sourceId, attemptId: parent.id,
+        expectedRevision: parent.revision, response: null }, binding);
+      const before = auditRecovery(store);
+      const view = store.inbox.replyReviewContext(token, email.sourceId, binding, { view: 'reply-review-v4' }).update;
+      assert.equal(view.observation, null); assert.equal(view.canReview, false); assert.equal(view.review, null);
+      assert.equal(view.status, 'resolved'); assert.equal(view.canSend, false);
+      assert.equal(child.observation.draft.body, 'Edited reply after review 🪷');
+      assert.deepEqual(store.inbox.replyUpdates(token, email.sourceId, binding).updates[0], child);
+      assert.equal(store.inbox.read(token, email.sourceId, binding).draft.body, 'Edited reply after review 🪷');
+      assert.deepEqual(auditRecovery(store), before);
+      return Response.json({ latestUnavailable: true, preservedLocal: true });
+    }
     if (path === '/newer-version') {
       store.transaction(() => durableStorage.setVersion(this.db, STORE_SCHEMA_VERSION + 1));
       assert.throws(() => new RoomStore(null, { database: this.db, storagePlatform: durableStorage }), /newer than this service/);

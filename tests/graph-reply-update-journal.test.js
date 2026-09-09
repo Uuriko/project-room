@@ -72,6 +72,33 @@ test("reads before acknowledgment and reads crossing it cannot become post-write
   f.inspect(); assert.equal(f.reviewContext().canReview, true); auditRecovery(f.store);
 });
 
+test("private updated-reply preview follows actual reads without rewriting or reviving its review", t => {
+  const f = setup(t); f.save("Edited"); f.apply(f.reserve());
+  const dispatch = f.command("dispatch"); f.apply(dispatch); f.ack(dispatch); f.inspect(); f.review();
+  const view = () => f.store.inbox.replyReviewContext(f.args.token, f.args.sourceId, f.args.binding, { view: "reply-review-v4" });
+  const child = f.updates().at(-1), local = f.store.inbox.read(f.args.token, f.args.sourceId, f.args.binding).draft;
+  assert.equal(view().update.review.current, true);
+  const response = f.response(); response.message.body.content = "Latest recorded mailbox text";
+  response.message.changeKey = "opaque-different-version";
+  response.options.attachmentObservation.messageRevision = response.message.changeKey;
+  f.record(response);
+  const updated = view();
+  assert.equal(updated.update.observation.body, "Latest recorded mailbox text");
+  assert.equal(updated.update.canReview, false); assert.equal(updated.update.review, null);
+  assert.equal(updated.update.revision, child.revision); assert.equal(updated.update.versionMismatch, true);
+  assert.deepEqual(f.updates().at(-1), child, "read projection never rewrites prior child evidence");
+  f.record(null);
+  assert.equal(view().update.observation, null, "unavailability must not fall back to an older successful read");
+  assert.equal(view().update.canReview, false); assert.equal(view().update.review, null);
+  response.message.body = { contentType: "html", content: "<b>Unsupported body</b>" };
+  f.record(response);
+  assert.equal(view().update.observation.format, "html"); assert.equal(view().update.observation.body, null);
+  assert.equal(view().update.canReview, false);
+  f.inspect(response); assert.equal(view().update.canReview, false, "an unsupported inspection remains read-only");
+  assert.deepEqual(f.store.inbox.read(f.args.token, f.args.sourceId, f.args.binding).draft, local);
+  auditRecovery(f.store);
+});
+
 test("review binds current local writing and exact inspection; changes stay available for a fresh comparison", t => {
   const f = setup(t); f.save("Edited"); f.apply(f.reserve()); const dispatch = f.command("dispatch"); f.apply(dispatch); f.ack(dispatch); f.inspect();
   const request = { ...f.command("review"), reviewVersion: f.reviewContext().reviewVersion };

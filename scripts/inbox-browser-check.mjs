@@ -261,6 +261,60 @@ test("updated reply review recovers a lost acknowledgment without another review
   auditRecovery(f.store);
 });
 
+for (const mobile of [false, true]) test(`updated reply newer-read refresh ${mobile ? "mobile" : "desktop"}: preserve captured text, revoke review and reopen latest`, { timeout: 35000 }, async t => {
+  const f = await updateFixture(t, mobile), p = f.page, token = f.slot.token, binding = f.session.sessionBinding;
+  f.inspect(); await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-confirm:not([disabled])").waitFor();
+  const captured = await p.locator("#inbox-reply-body").textContent();
+  const child = f.store.inbox.replyUpdates(token, f.sourceId, binding).updates[0];
+  f.recorded.observe({ body: { format: "text", content: "Tuesday instead. Keep my local draft separate." } });
+  const before = auditRecovery(f.store);
+  await p.evaluate(() => document.getElementById("inbox-refresh").click());
+  await p.locator("#inbox-reply-status").filter({ hasText: "Sample update acknowledged · review pending" }).waitFor();
+  await p.locator("#inbox-reply-dialog-status").filter({ hasText: "Reply changed or unavailable" }).waitFor();
+  assert.equal(await p.locator("#inbox-reply-body").textContent(), captured, "never replace text during a captured comparison");
+  assert.equal(await p.locator("#inbox-reply-confirm").isEnabled(), false);
+  let writes = 0; p.on("request", r => { if (new URL(r.url()).pathname === "/api/inbox/review") writes++; });
+  await p.evaluate(() => document.getElementById("inbox-reply-confirm").dispatchEvent(new MouseEvent("click")));
+  await f.capture("update-stale-open-" + (mobile ? "mobile" : "desktop"));
+  await p.locator("#inbox-reply-close").click(); await p.locator("#inbox-reply-open").click();
+  await p.locator("#inbox-reply-body").filter({ hasText: "Tuesday instead" }).waitFor();
+  assert.equal(await p.locator("#inbox-reply-confirm").isVisible(), false);
+  assert.equal(await p.locator("#inbox-reply-local-body").textContent(), captured);
+  await f.capture("update-latest-read-" + (mobile ? "mobile" : "desktop"));
+  assert.equal(writes, 0); assert.deepEqual(auditRecovery(f.store), before);
+  assert.deepEqual(f.store.inbox.replyUpdates(token, f.sourceId, binding).updates[0], child);
+  await p.locator("#inbox-reply-close").click();
+  f.inspect({ body: "Tuesday instead. Keep my local draft separate." });
+  await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-confirm:not([disabled])").waitFor();
+  await p.locator("#inbox-reply-confirm").click();
+  await p.locator("#inbox-reply-status").filter({ hasText: "Mailbox reviewed · local draft differs" }).waitFor();
+  assert.equal(await p.locator("#inbox-draft").inputValue(), captured); auditRecovery(f.store);
+});
+
+test("reviewed update becomes visibly out of date, and an unavailable read never resurrects old text", { timeout: 35000 }, async t => {
+  const f = await updateFixture(t), p = f.page; f.inspect();
+  await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-confirm:not([disabled])").waitFor();
+  await p.locator("#inbox-reply-confirm").click();
+  await p.locator("#inbox-reply-status").filter({ hasText: "Reviewed · not sent" }).waitFor();
+  const local = await p.locator("#inbox-draft").inputValue();
+  f.recorded.observe({ body: { format: "text", content: "A separate mailbox change." } });
+  await p.locator("#inbox-reply-open").click();
+  await p.locator("#inbox-reply-dialog-status").filter({ hasText: "Review out of date · not sent" }).waitFor();
+  assert.equal(await p.locator("#inbox-reply-body").textContent(), "A separate mailbox change.");
+  assert.equal(await p.locator("#inbox-reply-confirm").isVisible(), false);
+  await f.capture("update-review-outdated"); await p.locator("#inbox-reply-close").click();
+  f.recorded.observe(null); const before = auditRecovery(f.store);
+  await p.locator("#inbox-reply-open").click();
+  await p.locator("#inbox-reply-dialog-status").filter({ hasText: "Draft unavailable · not sent" }).waitFor();
+  assert.equal(await p.locator("#inbox-reply-body").textContent(), "");
+  assert.equal(await p.locator("#inbox-reply-confirm").isVisible(), false);
+  await f.capture("update-review-unavailable");
+  await p.locator("#inbox-reply-close").click(); await p.reload(); await p.locator("#inbox-reply-open").click();
+  await p.locator("#inbox-reply-dialog-status").filter({ hasText: "Draft unavailable · not sent" }).waitFor();
+  assert.equal(await p.locator("#inbox-reply-body").textContent(), "");
+  assert.equal(await p.locator("#inbox-draft").inputValue(), local); assert.deepEqual(auditRecovery(f.store), before);
+});
+
 test("reply comparison refresh revokes a captured review without changing the parent version", { timeout: 35000 }, async t => {
   const f = await reviewFixture(t), p = f.page, token = f.slot.token, binding = f.session.sessionBinding;
   // Outside editing makes an update possible without altering our saved draft.
