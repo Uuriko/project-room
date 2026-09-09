@@ -1,6 +1,6 @@
 # Project Room usability plan
 
-9 September 2026 · live Worker `94aa64ac` · schema 26 · Durable Object not reset
+9 September 2026 · live Worker `1cc79ef8` · schema 26 · Durable Object not reset
 
 This is the working plan for making the hosted Room easier to use, nicer to
 look at, and more capable **without** a mailbox, auto-enrollment, Durable Object
@@ -50,7 +50,7 @@ CMC, DIE copy, Desk merge.
 - Composer placeholder “Write to the room…”.
 - How-to-test matches the labels.
 
-### Phase 2 — this slice
+### Phase 2 — shipped (PR #38)
 
 - First-run: open Catch me up when it has items for you.
 - Invite dialog first sentence in plain English (including eight-hour guest access).
