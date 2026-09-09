@@ -32,6 +32,7 @@ invitation). Footer **Project Room** on the Demigod home page is the same door.
 | Fixture email (Graph-shaped) | `server/email-*.mjs`, `server/graph-*.mjs` | Local/fixture only. No live mailbox or send |
 | Agent connect + MCP | `docs/AGENT-CONNECTION.md`, `scripts/agent-inbox.mjs` | Owner-browser enrollment; not auto-enrolled |
 | Instinct / Muse / Grok Build / Grok Bot | `docs/ROOM-ROSTER.md` | Roster + Connect-agent presets in this source |
+| Usability plan | `docs/USABILITY-PLAN.md` | Phase 1 in this source; mailbox/auto-enroll gated |
 | Demigod `/room` landing | `deploy/room-entry.mjs` | Live on trydemigod.com |
 | Research / messaging plans | [`research/`](../research/README.md) | Copied from the Codex ChatGPT project mirror |
 

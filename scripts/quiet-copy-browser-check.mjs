@@ -32,7 +32,7 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     assert.equal(await page.locator(".connection-bar").isVisible(), false);
     assert.equal(await page.locator("#identity-label").isVisible(), false);
     assert.equal(await page.locator("#auth-error").textContent(), "");
-    assert.equal(await page.getByLabel("Member key", { exact: true }).isVisible(), true);
+    assert.equal(await page.getByLabel("Room key", { exact: true }).isVisible(), true);
     assert.equal(await page.locator("#auth-description").isVisible(), false);
     await page.locator("#refresh-button").click();
     await page.waitForFunction(() => document.querySelector("#connection-status").dataset.state === "signed-out");
@@ -45,13 +45,13 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     assert.match(await page.locator("#auth-hint").textContent(), /private.*guest access/i);
     await page.keyboard.press("Enter");
     await page.screenshot({ path: `test-results/quiet-copy-${label}-login.png` });
-    await page.getByLabel("Member key", { exact: true }).fill("invalid-key");
-    await page.getByLabel("Member key", { exact: true }).press("Enter");
+    await page.getByLabel("Room key", { exact: true }).fill("invalid-key");
+    await page.getByLabel("Room key", { exact: true }).press("Enter");
     await page.waitForFunction(() => document.querySelector("#auth-error").textContent.includes("Check the access key"));
     assert.equal(await page.locator("#auth-error").isVisible(), true);
     assert.equal(await page.locator("#status").textContent(), "", "one authentication error region");
-    await page.getByLabel("Member key", { exact: true }).fill(fixture.keys.owner);
-    await page.getByLabel("Member key", { exact: true }).press("Enter");
+    await page.getByLabel("Room key", { exact: true }).fill(fixture.keys.owner);
+    await page.getByLabel("Room key", { exact: true }).press("Enter");
     await page.locator("#main").waitFor({ state: "visible" });
     await page.waitForFunction(() => !document.querySelector("#access-key").disabled);
     assert.equal(await page.locator("#identity-label").isVisible(), true);

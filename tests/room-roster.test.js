@@ -120,6 +120,9 @@ test("Connect agent markup lists the four roster names", () => {
   assert.match(html, /id="access-key-reveal"/);
   assert.match(html, /id="invite-link"/);
   assert.match(html, /Paste your key/);
+  assert.match(html, /id="room-guide"/);
+  assert.match(html, /id="people-hint"/);
+  assert.match(html, /Write to the room/);
   const source = readFileSync(join(checkout, "src/agent-connections.js"), "utf8");
   assert.match(source, /rosterSelection/);
   assert.match(source, /rosterNameTaken/);

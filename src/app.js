@@ -41,7 +41,12 @@ function accountHomeFromLocation() {
   const values = new URLSearchParams(location.search).getAll("account");
   return values.length === 1 && values[0] === "1";
 }
-let authKind = accountHomeFromLocation() || selectedRoomFromLocation() ? "account" : "room";
+function storedAuthKind() {
+  try { return sessionStorage.getItem("pr-auth-kind"); } catch { return null; }
+}
+let authKind = accountHomeFromLocation() || selectedRoomFromLocation()
+  ? "account"
+  : storedAuthKind() === "account" ? "account" : "room";
 function accountSignIn() {
   return authKind === "account" || accountHomeFromLocation();
 }
@@ -116,6 +121,8 @@ const client = new RoomClient({
     shareLinksUI?.sync();
     remindersUI?.sync();
     agentConnectionsUI?.sync();
+    updatePeopleHint();
+    if (firstSnapshot) showRoomGuide();
     instructionsUI?.sync();
     resultCopyUI?.sync();
     portableWorkUI?.sync();
@@ -184,6 +191,8 @@ const client = new RoomClient({
     }
     $("#work-dialog").close();
     for (const id of ["people-panel", "composer-options", "work-options", "room-about", "connection-details", "rb-history-section", "rb-involving-section"]) $(`#${id}`).open = false;
+    if ($("#room-guide")) $("#room-guide").hidden = true;
+    if ($("#people-hint")) $("#people-hint").textContent = "";
     for (const control of document.querySelectorAll("#auth-form input, #auth-form button")) control.disabled = pendingSignout;
     setFormStatus($("#new-work-status"), ""); setFormStatus($("#action-error"), ""); setFormStatus($("#composer-status"), "");
     $("#action-dialog").close(); $("#new-work-form").hidden = true; $("#reply-bar").hidden = true;
@@ -452,7 +461,7 @@ function setInvitationFeedback(text, error = false) {
 function configureAuthPanel(roomId = selectedRoomFromLocation()) {
   const accountMode = accountSignIn();
   $("#auth-title").textContent = roomId && accountMode ? `#${roomId}` : "Welcome.";
-  $("#access-key-label").textContent = accountMode ? "Account key" : "Member key";
+  $("#access-key-label").textContent = accountMode ? "Account key" : "Room key";
   if ($("#auth-lead")) {
     $("#auth-lead").textContent = accountMode
       ? roomId ? `Paste the account key that can open #${roomId}. Have a room key? Choose Room key.` : "Paste your account key. Inbox does not need a room."
@@ -462,7 +471,7 @@ function configureAuthPanel(roomId = selectedRoomFromLocation()) {
   $("#auth-kind-account")?.setAttribute("aria-pressed", accountMode ? "true" : "false");
   $("#auth-description").textContent = accountMode
     ? roomId ? "Use an account key with membership in this room." : "Use your account key. No room membership is needed."
-    : "Ask the room owner for an invite link or member key.";
+    : "Ask the room owner for an invite link or room key.";
   $("#auth-hint").textContent = accountMode
     ? roomId ? "Need membership? Ask the room owner. Keep your key private." : "Keep your key private."
     : "Keep your key private. Lost guest access? Ask for a new invite.";
@@ -470,12 +479,26 @@ function configureAuthPanel(roomId = selectedRoomFromLocation()) {
 }
 function setAuthKind(kind) {
   authKind = kind === "account" ? "account" : "room";
+  try { sessionStorage.setItem("pr-auth-kind", authKind); } catch {}
   const url = new URL(location.href);
   if (authKind === "account" && !selectedRoomFromLocation()) url.searchParams.set("account", "1");
   else url.searchParams.delete("account");
   history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash}`);
   configureAuthPanel();
   $("#access-key").focus({ preventScroll: true });
+}
+function updatePeopleHint() {
+  const hint = $("#people-hint");
+  if (!hint) return;
+  hint.textContent = $("#connect-agent-button")?.hidden
+    ? "The owner connects Instinct, Muse, Grok Build, or Grok Bot from here."
+    : "Connect an assistant. Roster buttons fill the name; Create access issues the key.";
+}
+function showRoomGuide() {
+  const guide = $("#room-guide");
+  if (!guide) return;
+  try { if (sessionStorage.getItem("pr-guide-dismissed") === "1") { guide.hidden = true; return; } } catch {}
+  guide.hidden = false;
 }
 function inviteSecretFromText(value) {
   const text = String(value ?? "").trim();
@@ -1441,6 +1464,10 @@ $("#invitation-accept").addEventListener("click", async () => {
     }
     renderInvitation();
   }
+});
+$("#room-guide-dismiss")?.addEventListener("click", () => {
+  if ($("#room-guide")) $("#room-guide").hidden = true;
+  try { sessionStorage.setItem("pr-guide-dismissed", "1"); } catch {}
 });
 $("#auth-kind-room")?.addEventListener("click", () => setAuthKind("room"));
 $("#auth-kind-account")?.addEventListener("click", () => setAuthKind("account"));

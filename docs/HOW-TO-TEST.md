@@ -17,8 +17,9 @@ Use the same browser if you already have a session.
 
 On the welcome screen:
 
-- **Room key** (default, labeled Member key) — paste your current room
-  key, then **Enter room**. This works even if the URL has `?room=commons`.
+- **Room key** — paste your current room key, then **Enter room**. If the
+  URL has `?room=commons` the screen starts on Account key; tap **Room
+  key** to switch.
 - **Account key** — tap **Account key** (or open `?account=1`). Inbox
   works from account home without joining a room.
 - **Invitation** — paste the invite link in **Have an invite?**, or open
