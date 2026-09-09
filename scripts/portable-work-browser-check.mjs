@@ -68,6 +68,49 @@ for (const mobile of [false, true]) {
     assert.equal(await page.locator("#packet-preview").evaluate(node => node.selectionEnd - node.selectionStart), initial.length);
     assert.deepEqual(snapshot(), before, "preview/copy did not change Room state");
 
+    // The operating system can finish a copy after its dialog has closed.
+    // Do not let a reopened dialog race that pending write, or inherit its status.
+    for (const outcome of ["resolve", "reject"]) {
+      await page.evaluate(() => {
+        window.copyCalls = 0;
+        navigator.clipboard.writeText = () => {
+          window.copyCalls++;
+          return new Promise((resolve, reject) => { window.settleCopy = { resolve, reject }; });
+        };
+      });
+      await page.locator("#packet-copy").click();
+      await page.locator("#portable-close").click(); await open();
+      assert.equal(await page.locator("#packet-preview").evaluate(node => node.scrollTop), 0, "a new prompt starts at its task, not the old scroll position");
+      assert.equal(await page.locator("#packet-copy").isDisabled(), true, "reopening cannot overlap an issued clipboard write");
+      assert.equal(await page.locator("#packet-copy").textContent(), "Copying…");
+      await page.locator("#packet-copy").dispatchEvent("click");
+      assert.equal(await page.evaluate(() => window.copyCalls), 1, "handler also fences duplicate copies");
+      if (outcome === "resolve") await screenshot("copy-pending");
+      await page.evaluate(outcome => window.settleCopy[outcome](), outcome);
+      await page.waitForFunction(() => !document.getElementById("packet-copy").disabled);
+      assert.equal(await page.locator("#portable-status").textContent(), "", "retired copy cannot report on a new prompt");
+      assert.equal(await page.locator("#packet-copy").textContent(), "Copy");
+    }
+    for (const outcome of ["resolve", "reject"]) {
+      await page.locator("#packet-copy").click();
+      await page.locator("#portable-add-result").click();
+      await page.locator("#portable-result").fill("Answer without its return line");
+      await page.locator("#portable-submit").click();
+      const returnError = await page.locator("#portable-status").textContent();
+      assert.match(returnError, /Include the ROOM-RETURN line/);
+      await page.evaluate(outcome => window.settleCopy[outcome](), outcome);
+      await page.waitForFunction(() => !document.getElementById("packet-copy").disabled);
+      assert.equal(await page.locator("#portable-status").textContent(), returnError, "copy settlement cannot replace return feedback");
+      assert.equal(await page.locator("#portable-form").isVisible(), true);
+      await page.locator("#portable-result").fill("");
+      await page.locator("#portable-close").click(); await open();
+    }
+    await page.evaluate(() => { navigator.clipboard.writeText = window.originalCopy; });
+    await page.locator("#packet-copy").click();
+    await page.getByText("Copied. Paste into your AI.", { exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), await page.locator("#packet-preview").inputValue());
+    assert.deepEqual(snapshot(), before, "copy recovery remains read-only");
+
     await page.locator("#portable-add-result").click();
     const answer = reference(initial) + "\n\nProposed agenda: owner confirms priorities, team reviews blockers. No external tests performed.";
     await page.locator("#portable-result").fill(answer);
@@ -152,13 +195,17 @@ for (const mobile of [false, true]) {
     let confirmations = 0;
     page.on("dialog", dialog => { confirmations++; assert.match(dialog.message(), /clear unsent drafts/); return dialog.accept(); });
     await page.locator("#signout-button").click(); await page.locator("#auth-panel").waitFor({ state: "visible" });
-    await page.evaluate(() => window.finishCopy());
     assert.equal(confirmations, 1, "a closed portable draft alone warns before sign-out");
     assert.equal(await page.locator("#packet-preview").inputValue(), "");
     assert.equal(await page.locator("#portable-status").textContent(), "");
     await page.locator("#access-key").fill(f.keys.owner); await page.getByRole("button", { name: "Enter room", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" }); await open(true);
     assert.equal(await page.locator("#portable-result").inputValue(), "", "sign-out cleared the private draft and retry map");
+    await page.locator("#portable-close").click(); await open();
+    assert.equal(await page.locator("#packet-copy").isDisabled(), true, "sign-out cannot cancel an already issued system write");
+    await page.evaluate(() => window.finishCopy());
+    await page.waitForFunction(() => !document.getElementById("packet-copy").disabled);
+    assert.equal(await page.locator("#portable-status").textContent(), "", "previous session's copy has no status authority");
     assert.deepEqual(external, []); assert.deepEqual(errors, []);
   });
 }

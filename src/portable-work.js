@@ -14,7 +14,9 @@ export function installPortableWork({ client, getState, onSaved }) {
     && client.session === ticket.session && client.ownsAccountSession() && getState()?.room?.id === ticket.session.roomId);
   const status = text => { $("portable-status").textContent = text; $("portable-status").classList.toggle("visible", Boolean(text)); };
   function clearView() {
-    version++; entry = null; pending = null; saving = copying = uncertain = false;
+    // Closing a dialog or clearing identity cannot cancel an issued OS copy.
+    // Retain its latch until settlement so a new prompt cannot race that write.
+    version++; entry = null; pending = null; saving = uncertain = false;
     $("packet-preview").value = ""; $("portable-result").value = ""; $("portable-work-title").textContent = "";
     $("portable-source").checked = false; $("portable-older").checked = false; $("portable-older-label").hidden = true;
     status(""); dialog.close();
@@ -43,16 +45,17 @@ export function installPortableWork({ client, getState, onSaved }) {
     $("portable-result").readOnly = saving || uncertain;
     $("portable-older").disabled = saving || uncertain;
     $("portable-submit").textContent = uncertain ? "Retry draft" : "Post draft";
-    $("packet-copy").disabled = copying;
+    $("packet-copy").disabled = copying || !$("packet-preview").value;
+    $("packet-copy").textContent = copying ? "Copying…" : "Copy";
     $("portable-source").disabled = copying;
-    $("portable-add-result").disabled = copying;
     $("portable-form").setAttribute("aria-busy", String(saving));
   }
   function preview() {
     try {
       const packet = workPacket(entry.state, entry.workId, { ...entry.packetOptions, includeSource: $("portable-source").checked });
-      $("packet-preview").value = packetMarkdown(packet); status(""); $("packet-copy").disabled = false;
-    } catch (error) { $("packet-preview").value = ""; $("packet-copy").disabled = true; status(error.message); }
+      $("packet-preview").value = packetMarkdown(packet); $("packet-preview").scrollTop = 0; status("");
+    } catch (error) { $("packet-preview").value = ""; status(error.message); }
+    controls();
   }
   function mode(result) {
     $("portable-export").hidden = result; $("portable-form").hidden = !result;
@@ -94,10 +97,14 @@ export function installPortableWork({ client, getState, onSaved }) {
     copying = true; controls();
     try {
       await navigator.clipboard.writeText($("packet-preview").value);
-      if (owns(ticket)) status("Copied. Paste into your AI.");
+      if (owns(ticket) && !$("portable-export").hidden) status("Copied. Paste into your AI.");
     } catch {
-      if (owns(ticket)) { status("Select the prompt and copy it manually."); $("packet-preview").focus(); $("packet-preview").select(); }
-    } finally { if (owns(ticket)) { copying = false; controls(); } }
+      if (owns(ticket) && !$("portable-export").hidden) { status("Select the prompt and copy it manually."); $("packet-preview").focus(); $("packet-preview").select(); }
+    } finally {
+      copying = false;
+      // Release current controls without giving an old copy status authority.
+      if (owns(entry)) controls();
+    }
   });
   $("portable-result").addEventListener("keydown", event => {
     if (sendsOnEnter(event, window.matchMedia("(pointer: coarse)").matches)) { event.preventDefault(); $("portable-form").requestSubmit(); }
