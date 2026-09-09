@@ -55,6 +55,10 @@ for (const layout of ["split", "focus"]) for (const mobile of [false, true]) {
     assert.equal((await page.locator("#workspace").textContent()).includes("4,200"), false);
     assert.equal((await page.locator("#workspace").textContent()).includes("maya@example.test"), false);
     assert.equal(await page.locator(".excerpt").count(), 1);
+    assert.equal(await page.locator(".excerpt").evaluate(node => {
+      const visible = node.closest(".reader").getBoundingClientRect(), excerpt = node.getBoundingClientRect();
+      return excerpt.bottom <= visible.bottom + 1 && excerpt.bottom > visible.top;
+    }), true, "The newly shared excerpt is brought into view");
     await page.screenshot({ path: prefix + "-room.png" });
     await page.locator("[data-source]").click();
     assert.equal(await page.locator("#compose").inputValue(), "My private email draft\n");

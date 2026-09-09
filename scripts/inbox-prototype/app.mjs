@@ -103,7 +103,11 @@ $("share-refresh").addEventListener("click", () => {
 });
 $("share-form").addEventListener("submit", event => {
   event.preventDefault();
-  try { model.share(share.ticket, share.indexes, share.id); closeShare(); transition(() => { place = "rooms"; }); }
+  try {
+    const message = model.share(share.ticket, share.indexes, share.id);
+    closeShare(); transition(() => { place = "rooms"; });
+    document.querySelector('[data-room-message="' + message.id + '"]').scrollIntoView({ block: "end" });
+  }
   catch (error) { $("share-status").textContent = error.message; $("share-refresh").hidden = false; $("share-submit").disabled = true; }
 });
 $("nav-inbox").addEventListener("click", () => transition(() => { place = "inbox"; }));
