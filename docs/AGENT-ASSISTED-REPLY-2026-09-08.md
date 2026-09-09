@@ -15,7 +15,7 @@ Inbox now remembers the selected message and reading position across reload and 
 - The automated desktop/mobile counterparts use scripted MCP input, including exact retry through a fresh process. They do not call a model. They assert one draft event, one synthetic provider submission, no private source marker or addresses in agent responses, exact draft provenance and no automatic approval-to-send or approval-to-release transition.
 - Screenshots are viewport captures with overflow checks. Browser traffic is restricted to the disposable local origin. No real message, payment, provider request or deployment occurs.
 
-Candidate actual-assistant evidence: `room-inbox-collaboration-evidence-suPJMR` under the system temporary directory. Final test counts and exact commits belong in the accompanying checkpoint evidence, not inferred from earlier candidate passes.
+Candidate actual-assistant evidence: `room-inbox-collaboration-evidence-suPJMR` under the system temporary directory. The root repeated the full exercise on runtime commit `3858cfe` with a fresh original 91-byte draft, exact reconnect/retry and direct readback, simulated review/approval, one synthetic submission with status recovery and explicit release. Both temporary sample/credential directories were removed on normal close. Retained screenshots and readbacks are in `test-results/agent-assisted-reply-3858cfe/root-assistant` and `root-final`. Final automated test counts belong in the accompanying checkpoint evidence, not inferred from earlier candidate passes.
 
 ## Reuse
 
@@ -24,5 +24,7 @@ Run `node scripts/inbox-collaboration-journey.mjs --start` in a terminal. It pri
 `scripts/inbox-collaboration-check.mjs` is included in the full browser suite. Continuity checks live with the existing Inbox tests.
 
 ## Still unfinished
+
+Runtime `3858cfe` passed syntax checks, 734 core tests, 224 full browser tests and 18 local Workers tests, with all processes exiting zero. Final logs, classification and inspected screenshots are retained in `test-results/agent-assisted-reply-3858cfe`. This documentation update does not change runtime.
 
 Inbox independent of room membership, real email/provider qualification, native-host compatibility, independent human usability testing and the broader automation/rewards roadmap remain separate work. This checkpoint does not establish live deployment, real delivery, retention or genuine independent review.
