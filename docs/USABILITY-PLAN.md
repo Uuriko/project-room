@@ -1,6 +1,6 @@
 # Project Room usability plan
 
-9 September 2026 · live Worker `b7468e80` · schema 26 · Durable Object not reset
+9 September 2026 · live Worker `7d48391d` · schema 26 · Durable Object not reset
 
 This is the working plan for making the hosted Room easier to use, nicer to
 look at, and more capable **without** a mailbox, auto-enrollment, Durable Object
@@ -80,7 +80,7 @@ collapse is gated.
 - Actions include **How to open Inbox**. Room-key sessions get an honest notice.
 - Room guide states Inbox uses Account key.
 
-### Phase 5 — this slice (empty states as onboarding)
+### Phase 5 — shipped (PR #44)
 
 Research, 9 September 2026:
 
