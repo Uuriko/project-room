@@ -27,7 +27,11 @@ An additional regression reproduces account-only reauthentication inside an invi
 
 Service/client tests cover membership filtering, bounded pagination, binding requirements, unprivileged credential refusal, account replacement and delayed confirmation. The local Workers HTTP check exercises the same room-list route.
 
-Final committed-suite counts and screenshots belong in the accompanying checkpoint evidence; candidate passes are not deployment evidence.
+Final runtime `66de05d0e8eb0e4f57a2c2f6c28d1f879b23724a` passed 739 core tests, the complete 233-test browser suite and all 18 local Workers tests. Schema 17 is unchanged. Two supplemental delayed room-list success/refusal checks also preserved the replacement account. The separate Workers HTTP pass is a subset, not an additional unique suite check.
+
+Logs and five desktop/mobile screenshots are retained locally in `test-results/account-home-66de05d/`. The screenshots show account arrival, empty Rooms and room-only revocation; exact draft and clearing assertions supplement visual inspection. These are disposable browser simulations, not actual human usability sessions.
+
+The earlier full browser run spanned a source change and ended with 231 passes and one catch-up-view timeout. It is retained as exploratory evidence, not combined with the final count. The same check passed in the complete immutable final run and three additional focused repetitions; its intermittent earlier timeout is not evidence of a diagnosed or fixed defect. The repeat log is retained alongside the full runs.
 
 ## Remaining scope
 
