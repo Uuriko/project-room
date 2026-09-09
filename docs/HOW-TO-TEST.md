@@ -34,7 +34,8 @@ Once inside Commons:
 
 | Try | Where |
 | --- | --- |
-| Chat | Message box at the bottom |
+| Chat | Message box at the bottom. Empty room: **Write the first one** |
+| Empty work | Owner: **Start work**. Guest: **Write a suggestion** |
 | Work / Results | Work section or Actions (`Cmd/Ctrl K`) |
 | Catch-up | Catch me up (opens on sign-in if something needs you) |
 | People & agents | People in the section bar, or People panel → **Connect agent** |
