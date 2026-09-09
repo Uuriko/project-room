@@ -121,3 +121,93 @@ export function compareReplyEnvelope(current, providerDraftId, value) {
   return { ...base, status: differences.length ? "needs_review" : "content_matches", differences, draft,
     reviewVersion: emailDigest({ planVersion: current.planVersion, providerDraftId, observedVersion: observed.sourceVersion, differences }) };
 }
+
+// Only body text and its local revision may change relative to creation intent.
+// Keep all other intent fields in the comparison, including future fields.
+function replyContext(plan) {
+  return { ...plan, planVersion: null, draftRevision: null, expected: { ...plan.expected, body: null },
+    create: { ...plan.create, body: { ...plan.create.body, message: { ...plan.create.body.message,
+      body: { ...plan.create.body.message.body, content: null } } } } };
+}
+
+export function prepareGraphReplyUpdate({ store, token, binding, sourceId, attemptId, expectedRevision, requestId }) {
+  return store.readTransaction(() => {
+    const auth = store.inbox.auth(token, binding), { source, draft } = store.inbox.read(token, sourceId, binding);
+    const connection = source.adapter === "email" ? store.email.connection(auth.account.id, source.envelope.connection.id) : null;
+    const attempt = store.inbox.replyAttempts(token, sourceId, binding).attempts.find(value => value.id === attemptId);
+    return buildGraphReplyUpdate({ auth, source, draft, connection, attempt, expectedRevision, requestId });
+  });
+}
+
+// Pure qualification, not a dispatch token. The caller supplies authenticated
+// current data and the retained creation attempt, never a caller-selected draft ID.
+export function buildGraphReplyUpdate({ auth, source, draft, connection, attempt, expectedRevision, requestId }) {
+  requireEmail(validId(requestId) && Number.isSafeInteger(expectedRevision) && expectedRevision >= 0, "invalid_email_reply_update");
+  if (!attempt || attempt.sourceId !== source.id) fail("reply_attempt_not_found", "Reply attempt not found.");
+  if (attempt.revision !== expectedRevision) fail("stale_reply_attempt", "Reply status changed. Refresh it.");
+  if (!attempt.providerDraftId || !["created_unverified", "awaiting_review", "draft_reviewed", "draft_unavailable"].includes(attempt.status))
+    fail("reply_draft_unconfirmed", "A confirmed mailbox draft identity is required.");
+  const original = attempt.plan;
+  const current = buildGraphReplyDraft({ auth, source, draft, connection, requestId: original.requestId, mode: original.mode });
+  if (!same(replyContext(original), replyContext(current)))
+    fail("email_reply_context_changed", "The source or mailbox context changed. Review it before updating.");
+  const observation = attempt.observation, observed = observation?.draft;
+  if (!observation?.reviewVersion || observed?.format !== "text" || typeof observed.body !== "string"
+    || observed.id !== attempt.providerDraftId || observed.attachmentState !== "complete" || observed.attachmentCount !== 0
+    || observation.differences.some(field => ["draft_state", "thread", "from", "sender", "attachments"].includes(field))
+    || !(observed.to.length || observed.cc.length || observed.bcc.length))
+    fail("unsupported_reply_update", "Read a complete plain-text mailbox draft before proposing an update.");
+  emailOpaqueId(observed.revision);
+  const needsUpdate = lf(observed.body) !== lf(current.expected.body);
+  const proposal = {
+    contractVersion: 1, purpose: "fixture-reply-update", requestId,
+    accountId: current.accountId, authEpoch: current.authEpoch, sourceId: source.id,
+    sourceRevision: current.sourceRevision, sourceVersion: current.sourceVersion, draftRevision: current.draftRevision,
+    attemptId: attempt.id, attemptRevision: attempt.revision, originalPlanVersion: original.planVersion,
+    connection: current.connection,
+    providerDraftId: attempt.providerDraftId, observationVersion: observation.reviewVersion,
+    original: structuredClone(original.expected), observed: structuredClone(observed),
+    proposed: { ...structuredClone(observed), body: current.expected.body },
+    contextDifferences: observation.differences.filter(field => field !== "body"),
+    status: needsUpdate ? "update_proposed" : "no_update",
+    update: needsUpdate ? { method: "PATCH",
+      url: "https://graph.microsoft.com/v1.0/users/" + encodeURIComponent(current.connection.mailboxId)
+        + "/messages/" + encodeURIComponent(attempt.providerDraftId),
+      headers: { "Content-Type": "application/json", Prefer: 'IdType="ImmutableId"' },
+      body: { body: { contentType: "text", content: current.expected.body } } } : null,
+    conditionalWrite: "unqualified", canExecute: false, canRetryUpdate: false, canReview: false, canSend: false
+  };
+  return { ...proposal, updateVersion: emailDigest(proposal) };
+}
+
+export function currentGraphReplyUpdate({ store, token, binding, proposal }) {
+  emailInput(proposal);
+  if (!proposal || typeof proposal !== "object" || Array.isArray(proposal))
+    fail("stale_email_reply_update", "Prepare the current reply update first.");
+  const current = prepareGraphReplyUpdate({ store, token, binding, sourceId: proposal.sourceId,
+    attemptId: proposal.attemptId, expectedRevision: proposal.attemptRevision, requestId: proposal.requestId });
+  if (!same(current, proposal)) fail("stale_email_reply_update", "The reply update changed. Compare the current versions.");
+  return current;
+}
+
+export function inspectGraphReplyUpdate({ store, token, binding, proposal, response }) {
+  return compareGraphReplyUpdate(currentGraphReplyUpdate({ store, token, binding, proposal }), response);
+}
+
+// Classification of a caller-authenticated proposal/observation only. A match
+// does not prove which actor caused it, a conditional write, or successful send.
+export function compareGraphReplyUpdate(proposal, response) {
+  emailInput(proposal);
+  const expected = Object.fromEntries(["from", "to", "cc", "bcc", "subject", "body"].map(field => [field, proposal.proposed[field]]));
+  expected.threadId = proposal.original.threadId;
+  const basis = { planVersion: proposal.updateVersion, connection: proposal.connection, expected };
+  const compared = compareReplyEnvelope(basis, proposal.providerDraftId, normalizeReplyObservation(basis, response));
+  const unchanged = compared.differences.length === 1 && compared.differences[0] === "body"
+    && compared.draft?.format === "text" && lf(compared.draft.body) === lf(proposal.observed.body);
+  return { updateVersion: proposal.updateVersion, providerDraftId: proposal.providerDraftId,
+    status: compared.status === "draft_unavailable" ? "draft_unavailable" : compared.status === "content_matches"
+      ? "proposal_content_matches" : unchanged ? "observed_content_unchanged" : "needs_review",
+    differences: compared.differences, draft: compared.draft ?? null,
+    providerRevisionChanged: compared.draft ? compared.draft.revision !== proposal.observed.revision : null,
+    updateOutcome: "unproven", canExecute: false, canRetryUpdate: false, canReview: false, canSend: false };
+}
