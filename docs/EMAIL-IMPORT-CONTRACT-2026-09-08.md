@@ -55,3 +55,9 @@ Microsoft's reply guidance uses Reply-To rather than From where supplied, and se
 ## Evidence scope
 
 Tests cover normalization, recipient selection, exact versions, mailbox/account separation, unknown/inline attachments, mixed attachment versions, partial delta reads, folder moves, malformed and bounded input, and refusal by the current synthetic Inbox. There are no human participants, native vendor models, actual provider observations or new screen changes. No screenshot would prove this data boundary; exact fixture/assertion results are the relevant evidence. Full application regression results are recorded at checkpoint after committing the candidate.
+
+### Committed checkpoint
+
+Final tested commit `7e270f5323dbc265e7da5bc0c589e47ca8d96e5d` includes the email modules from `32b086d` and a browser-test synchronization correction. Syntax checks and all 758 core tests passed, including 19 new email-contract tests. All nine focused account-workspace browser tests passed on that same commit. Schema 17 and production routes are unchanged; these modules are not mounted as a provider API. The full 233-test browser suite and 18 local Workers checks were not rerun in this slice; their previous checkpoint must not be described as current-candidate proof.
+
+Local evidence: `test-results/email-contract-7e270f5/` contains final logs, a readable invented-message/Reply/Reply-all/folder-move trace and refreshed existing-Inbox screenshots. The first browser run ended 8/9 because the test treated a visible-but-disabled invitation button as completed reauthentication. The corrected test deliberately holds the sign-in response, verifies busy/disabled state, releases it, waits for confirmation, then verifies old private content is cleared. The failed run is retained; no app-code fix is claimed for that test synchronization defect.
