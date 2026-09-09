@@ -41,6 +41,10 @@ function accountHomeFromLocation() {
   const values = new URLSearchParams(location.search).getAll("account");
   return values.length === 1 && values[0] === "1";
 }
+let authKind = accountHomeFromLocation() || selectedRoomFromLocation() ? "account" : "room";
+function accountSignIn() {
+  return authKind === "account" || accountHomeFromLocation();
+}
 const initialJoinFragment = consumeJoinFragment();
 const initialInvitationFragment = consumeInvitationFragment();
 let shareLinksUI = null;
@@ -446,16 +450,38 @@ function setInvitationFeedback(text, error = false) {
   }
 }
 function configureAuthPanel(roomId = selectedRoomFromLocation()) {
-  const accountMode = Boolean(roomId) || accountHomeFromLocation();
-  $("#auth-title").textContent = roomId ? `#${roomId}` : "Welcome.";
+  const accountMode = accountSignIn();
+  $("#auth-title").textContent = roomId && accountMode ? `#${roomId}` : "Welcome.";
   $("#access-key-label").textContent = accountMode ? "Account key" : "Member key";
+  if ($("#auth-lead")) {
+    $("#auth-lead").textContent = accountMode
+      ? roomId ? `Paste the account key that can open #${roomId}. Have a room key? Choose Room key.` : "Paste your account key. Inbox does not need a room."
+      : "Paste your room key. Same browser as last time? You may already be in.";
+  }
+  $("#auth-kind-room")?.setAttribute("aria-pressed", accountMode ? "false" : "true");
+  $("#auth-kind-account")?.setAttribute("aria-pressed", accountMode ? "true" : "false");
   $("#auth-description").textContent = accountMode
     ? roomId ? "Use an account key with membership in this room." : "Use your account key. No room membership is needed."
     : "Ask the room owner for an invite link or member key.";
   $("#auth-hint").textContent = accountMode
     ? roomId ? "Need membership? Ask the room owner. Keep your key private." : "Keep your key private."
     : "Keep your key private. Lost guest access? Ask for a new invite.";
-  $("#auth-form button[type='submit']").textContent = roomId ? "Open room" : accountMode ? "Sign in" : "Enter room";
+  $("#auth-form button[type='submit']").textContent = accountMode ? (roomId ? "Open room" : "Sign in") : "Enter room";
+}
+function setAuthKind(kind) {
+  authKind = kind === "account" ? "account" : "room";
+  const url = new URL(location.href);
+  if (authKind === "account" && !selectedRoomFromLocation()) url.searchParams.set("account", "1");
+  else url.searchParams.delete("account");
+  history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash}`);
+  configureAuthPanel();
+  $("#access-key").focus({ preventScroll: true });
+}
+function inviteSecretFromText(value) {
+  const text = String(value ?? "").trim();
+  const fromLink = /#invite\/([A-Za-z0-9_-]{43})/.exec(text);
+  if (fromLink) return fromLink[1];
+  return invitationTokenPattern.test(text) ? text : null;
 }
 function renderInvitation() {
   const preview = invitation.preview;
@@ -1416,14 +1442,36 @@ $("#invitation-accept").addEventListener("click", async () => {
     renderInvitation();
   }
 });
+$("#auth-kind-room")?.addEventListener("click", () => setAuthKind("room"));
+$("#auth-kind-account")?.addEventListener("click", () => setAuthKind("account"));
+$("#access-key-reveal")?.addEventListener("click", () => {
+  const field = $("#access-key"), show = field.type === "password";
+  field.type = show ? "text" : "password";
+  $("#access-key-reveal").textContent = show ? "Hide" : "Show";
+  $("#access-key-reveal").setAttribute("aria-pressed", show ? "true" : "false");
+});
+$("#invite-link")?.addEventListener("change", () => {
+  const secret = inviteSecretFromText($("#invite-link").value);
+  if (!secret) return;
+  $("#invite-link").value = "";
+  openInvitation({ valid: true, secret });
+});
+$("#invite-link")?.addEventListener("paste", event => {
+  const secret = inviteSecretFromText(event.clipboardData?.getData("text") ?? $("#invite-link").value);
+  if (!secret) return;
+  event.preventDefault();
+  $("#invite-link").value = "";
+  openInvitation({ valid: true, secret });
+});
 $("#auth-form").addEventListener("submit", async e => {
   if (signoutLoading) { e.preventDefault(); return; }
   e.preventDefault(); setFormStatus($("#auth-error"), "");
   const accessKey = $("#access-key").value.trim();
   const requestedRoom = selectedRoomFromLocation();
+  const accountMode = accountSignIn();
   await submit(e.currentTarget, async current => {
     let identity;
-    if (requestedRoom || accountHomeFromLocation()) {
+    if (accountMode) {
       await ensureAccountSession();
       const account = await accountClient.login(accessKey);
       if (!account) return;
@@ -1432,7 +1480,9 @@ $("#auth-form").addEventListener("submit", async e => {
     } else identity = await client.login(accessKey);
     if (!current() || !identity || !state || session?.member.id !== identity.member.id || session?.roomId !== identity.roomId) return;
     $("#access-key").value = ""; $("#message-input").focus();
-  }, { failureHint: requestedRoom ? "Check the account key and Room membership, then try again." : "Check the access key and try again." });
+  }, { failureHint: accountMode
+    ? (requestedRoom ? "Check the account key and Room membership, then try again." : "Check the account key and try again.")
+    : "Check the access key and try again. If this is an account key, choose Account key." });
   if (state) revealLocationHash();
 });
 $("#signout-button").addEventListener("click", async () => {
@@ -2515,9 +2565,11 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
   if (requestedRoom || accountHomeFromLocation()) {
     const account = await ensureAccountSession();
     if (!account?.authenticated) {
+      authKind = "account";
       $("#identity-label").textContent = "Not signed in";
       setFormStatus($("#auth-error"), "");
       setConnectionStatus("Not connected · account sign-in required");
+      configureAuthPanel();
       $("#auth-panel").hidden = false;
       if (!$("#invitation-dialog").open) queueMicrotask(() => $("#access-key").focus({ preventScroll: true }));
       return;

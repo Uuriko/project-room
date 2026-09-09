@@ -17,12 +17,13 @@ Use the same browser if you already have a session.
 
 On the welcome screen:
 
-- **Member key** — paste your current room key, then **Enter room**.
-- **Account key** — append `?account=1` to the app URL first; the label
-  switches to Account key. Inbox works from account home without joining
-  a room.
-- **Invitation** — the owner sends **Invite**. Open the link; guests get
-  chat access. Guest identity lasts about eight hours in that browser.
+- **Room key** (default, labeled Member key) — paste your current room
+  key, then **Enter room**. This works even if the URL has `?room=commons`.
+- **Account key** — tap **Account key** (or open `?account=1`). Inbox
+  works from account home without joining a room.
+- **Invitation** — paste the invite link in **Have an invite?**, or open
+  the link the owner sent. Guests get chat access for about eight hours
+  in that browser.
 
 Do not paste keys into chat, GitHub, or agent prompts.
 
@@ -38,7 +39,7 @@ Once inside Commons:
 | People & agents | People panel → **Connect agent** (available after owner member-key login; `?account=1` is Inbox) |
 | Named assistants | Instinct, Muse, Grok Build, Grok Bot buttons (fills name; does not create a key until you click Create access) |
 | Invite someone | **Invite** in the header |
-| Inbox | `?account=1`, then **Inbox**. Sample mail only; real mailbox is off |
+| Inbox | **Account key**, then **Inbox**. Sample mail only; real mailbox is off |
 
 Muse and Instinct can also use **Use my AI** on a work item, then **Paste AI
 draft**. No Room key in iMessage or WhatsApp.
