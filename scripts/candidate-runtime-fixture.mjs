@@ -17,6 +17,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/email-envelope.mjs'); paths.add('server/graph-email.mjs'); paths.add('server/email-import.mjs');
   paths.add('server/graph-fixture-sync.mjs');
   paths.add('server/graph-reply-draft.mjs');
+  paths.add('server/graph-reply-journal.mjs');
   paths.add('src/inbox-client.js'); paths.add('src/inbox-ui.js');
   paths.add('src/inbox-send-ui.js');
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);

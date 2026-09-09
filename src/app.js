@@ -228,9 +228,9 @@ resultCopyUI = installResultCopy({ client, getState: () => state });
 inboxUI = installInbox({ account: accountClient, room: client, getRoom: () => state, onOpenWork: id => revealWork(id),
   onAccountEnded: endAccountAccess, onRooms: () => loadAccountRooms(),
   onNavigate: () => { if (!$("#status").classList.contains("error")) clearNotice(); },
-  onShared: async receipt => {
-  try { await client.refresh(); if (state) revealMessage(receipt.messageId); }
-  catch { notice("Shared. Refresh the room to view it.", true); }
+  onShared: async (receipt, isCurrent) => {
+  try { await client.refresh(); if (state && isCurrent()) revealMessage(receipt.messageId); }
+  catch { if (isCurrent()) notice("Shared. Refresh the room to view it.", true); }
 } });
 let accountCheckFlight = null, roomListVersion = 0, roomListCursor = null;
 function clearPrivateWorkspace(options) {

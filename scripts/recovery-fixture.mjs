@@ -5,6 +5,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { textVersion } from "../server/text-results.mjs";
 import { createEmailEnvelope } from "../server/email-envelope.mjs";
+import { prepareGraphReplyDraft } from "../server/graph-reply-draft.mjs";
 
 export function createRecoveryFixture(filename) {
   let store = new RoomStore(filename), now = Date.now();
@@ -145,9 +146,16 @@ export function createRecoveryFixture(filename) {
   store.email.apply(owner.token, emailPage, owner.session.sessionBinding);
   store.inbox.apply(owner.token, { action: "draft.save", requestId: "recovery-email-draft", sourceId: emailEnvelope.sourceId,
     expectedRevision: 0, sourceRevision: 1, body: "Keep this imported-email draft" }, owner.session.sessionBinding);
+  const replyPlan = prepareGraphReplyDraft({ store, token: owner.token, binding: owner.session.sessionBinding,
+    sourceId: emailEnvelope.sourceId, requestId: "recovery-provider-draft" });
+  const replyRequests = [
+    { action: "reply.reserve", requestId: replyPlan.requestId, sourceId: replyPlan.sourceId, mode: replyPlan.mode, planVersion: replyPlan.planVersion },
+    { action: "reply.dispatch", requestId: "recovery-provider-dispatch", sourceId: replyPlan.sourceId, attemptId: replyPlan.requestId, expectedRevision: 0 }
+  ];
+  const replyReceipts = replyRequests.map(request => store.inbox.reply(owner.token, request, owner.session.sessionBinding).receipt);
   const cursor = store.room("commons").sequence; store.markCaughtUp(keys.owner, "commons", cursor);
   return { store, filename, keys, owner, target, validSession, revokedSession, loggedOut, sharedSession, pending, invitation,
-    shareRequest, link, linkToken, guestSlot, guest, joinRequest, reminders, command, commandResult, cursor, inboxRequests, inboxReceipts, inboxDraftBody, transportRequests, transportReceipts,
+    shareRequest, link, linkToken, guestSlot, guest, joinRequest, reminders, command, commandResult, cursor, inboxRequests, inboxReceipts, inboxDraftBody, transportRequests, transportReceipts, replyRequests, replyReceipts,
     enrollmentToken, enrollmentRequest, enrollment, nativeBody, nativeCommand, nativeCompletion, charterCommand, charterSaved, emailProfile, emailPage, emailEnvelope,
     now: () => now, advance: ms => { now += ms; } };
 }

@@ -5,9 +5,12 @@ import { storedText } from "./text-results.mjs";
 import { ServiceError } from "./store.mjs";
 import { isSend, internalSend, validateSend, sendPreview, transitionSend } from "./inbox-outbox.mjs";
 import { readEmailEnvelope, EmailContractError } from "./email-envelope.mjs";
+import { prepareGraphReplyDraft, buildGraphReplyDraft, classifyGraphReplyCreation } from "./graph-reply-draft.mjs";
+import { isReplyAttempt, validateReplyAttempt, transitionReplyAttempt } from "./graph-reply-journal.mjs";
 
 const transportAuthority = Symbol("private inbox transport");
 const importAuthority = Symbol("private email importer");
+const replyAuthority = Symbol("private fixture reply driver");
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const canonical = value => Array.isArray(value) ? "[" + value.map(canonical).join(",") + "]" : value && typeof value === "object"
@@ -47,6 +50,7 @@ export const inboxSchema = `
   CREATE TRIGGER private_inbox_commands_no_delete BEFORE DELETE ON private_inbox_commands BEGIN SELECT RAISE(ABORT,'inbox receipts are retained'); END;
 `;
 function validate(request) {
+  if (isReplyAttempt(request)) return validateReplyAttempt(request);
   if (isSend(request)) return validateSend(request);
   const common = ["requestId", "action", "sourceId"], fields = {
     "source.save": [...common, "expectedRevision", "data"],
@@ -261,6 +265,37 @@ export class Inbox {
     if (!internalSend(request)) fail(422, "invalid_inbox_send", "Supply a transport transition.");
     return this.apply(token, request, binding, transportAuthority);
   }
+  replyHistory(accountId, sourceId = null) {
+    const attempts = new Map();
+    for (const row of this.db.prepare("SELECT receipt_json FROM private_inbox_commands WHERE account_id=? AND json_extract(receipt_json,'$.action') LIKE 'reply.%' ORDER BY sequence").all(accountId)) {
+      const receipt = JSON.parse(row.receipt_json);
+      if (sourceId === null || receipt.sourceId === sourceId) attempts.set(receipt.attempt.id, receipt.attempt);
+    }
+    return attempts;
+  }
+  replyAttempts(token, sourceId, binding) {
+    return this.store.readTransaction(() => {
+      const auth = this.auth(token, binding); this.source(auth.account.id, sourceId);
+      return { contractVersion: 1, viewer: viewer(auth), sourceId, attempts: [...this.replyHistory(auth.account.id, sourceId).values()] };
+    });
+  }
+  // Fixture-only service boundary; not mounted as a browser or agent command.
+  reply(token, request, binding) {
+    if (!isReplyAttempt(request)) fail(422, "invalid_reply_attempt", "Supply a reply transition.");
+    return this.apply(token, request, binding, replyAuthority);
+  }
+  recordReplyCreation(token, { sourceId, attemptId, expectedRevision, requestId, response }, binding) {
+    return this.store.transaction(() => {
+      const auth = this.auth(token, binding), attempt = this.replyHistory(auth.account.id, sourceId).get(attemptId);
+      if (!attempt) fail(404, "reply_attempt_not_found", "Reply attempt not found.");
+      // Reconciliation uses the retained intent, not today's edited draft or connection.
+      const observed = classifyGraphReplyCreation(attempt.plan, response);
+      if (observed.status === "creation_unconfirmed") return { attempt, recorded: false, canRetryCreate: false };
+      const result = this.reply(token, { action: "reply.created", requestId, sourceId, attemptId, expectedRevision,
+        planVersion: attempt.plan.planVersion, providerDraftId: observed.providerDraftId }, binding);
+      return { ...result, recorded: true };
+    });
+  }
   // Trusted, transaction-bound importer only. Ordinary HTTP commands cannot use it.
   importSource(token, request, binding) {
     if (!this.db.isTransaction || request?.action !== "source.import") fail(403, "email_importer_required", "Use the transactional email importer.");
@@ -269,6 +304,7 @@ export class Inbox {
   apply(token, request, binding, authority = null) {
     return this.store.transaction(() => {
       const auth = this.auth(token, binding); validate(request);
+      if (isReplyAttempt(request) && authority !== replyAuthority) fail(403, "reply_driver_required", "Use the configured reply driver.");
       if (internalSend(request) && authority !== transportAuthority) fail(403, "inbox_transport_required", "Only the configured transport can record this outcome.");
       if (request.action === "source.import" && authority !== importAuthority) fail(403, "email_importer_required", "Only the configured importer can record this source.");
       if (request.action === "source.import" && request.data.envelope.connection.accountId !== auth.account.id)
@@ -280,12 +316,19 @@ export class Inbox {
         if (prior.fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Request ID already used for different inbox content.");
         return { contractVersion: 1, viewer: viewer(auth), receipt: JSON.parse(prior.receipt_json), duplicate: true };
       }
-      if (!internalSend(request) && request.action !== "send.cancel"
+      if (!internalSend(request) && request.action !== "send.cancel" && !["reply.cancel", "reply.created"].includes(request.action)
         && this.db.prepare("SELECT count(*) n FROM private_inbox_commands WHERE account_id=?").get(accountId).n >= inboxLimits.commands)
         fail(409, "inbox_limit", "Private inbox pilot capacity reached.");
       const now = this.store.now(), { sourceId, action, requestId } = request;
       let receipt = { requestId, action, sourceId };
-      if (isSend(request)) {
+      if (isReplyAttempt(request)) {
+        this.source(accountId, sourceId);
+        const attempts = this.replyHistory(accountId), original = attempts.get(request.attemptId);
+        const plan = ["reply.reserve", "reply.dispatch"].includes(action) ? prepareGraphReplyDraft({ store: this.store, token, binding,
+          sourceId, requestId: action === "reply.reserve" ? requestId : original?.plan.requestId,
+          mode: action === "reply.reserve" ? request.mode : original?.plan.mode }) : null;
+        receipt.attempt = transitionReplyAttempt(attempts, request, { plan, at: now });
+      } else if (isSend(request)) {
         this.source(accountId, sourceId);
         receipt.send = transitionSend(this.outbox(accountId), request, {
           preview: ["send.reserve", "send.dispatch"].includes(action) ? this.preview(accountId, auth.account.authEpoch, sourceId) : null,
@@ -334,13 +377,33 @@ export class Inbox {
       const name = /^CREATE (?:TABLE|TRIGGER) ([a-z_]+)/.exec(sql.trim())[1];
       require(normalize(this.db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(name)?.sql) === normalize(sql));
     }
-    const sources = new Map(), drafts = new Map(), historicalRooms = new Map(), outboxes = new Map(); let versions = 0;
+    const sources = new Map(), drafts = new Map(), historicalRooms = new Map(), outboxes = new Map(), replyBoxes = new Map(); let versions = 0;
     for (const row of this.db.prepare("SELECT * FROM private_inbox_commands ORDER BY sequence").all()) {
       const request = JSON.parse(row.request_json), receipt = JSON.parse(row.receipt_json); validate(request);
       require(row.request_id === request.requestId && row.fingerprint === digest(request) && revision(row.auth_epoch) && Number.isSafeInteger(row.at));
       const key = canonical([row.account_id, request.sourceId]), prior = sources.get(key);
       const expected = { requestId: request.requestId, action: request.action, sourceId: request.sourceId };
-      if (isSend(request)) {
+      if (isReplyAttempt(request)) {
+        require(prior);
+        if (!replyBoxes.has(row.account_id)) replyBoxes.set(row.account_id, new Map());
+        const attempts = replyBoxes.get(row.account_id), original = attempts.get(request.attemptId);
+        let plan = null;
+        if (["reply.reserve", "reply.dispatch"].includes(request.action)) {
+          const data = this.version(row.account_id, request.sourceId, prior.revision), draft = drafts.get(key);
+          const profile = data.envelope?.connection;
+          const configured = this.db.prepare("SELECT request_json,auth_epoch FROM private_email_commands WHERE account_id=? AND json_extract(request_json,'$.action')='connection.configure' AND json_extract(receipt_json,'$.connectionId')=? AND json_extract(receipt_json,'$.revision')=?")
+            .get(row.account_id, profile?.id ?? "", profile?.revision ?? -1);
+          require(configured && configured.auth_epoch === row.auth_epoch && same(JSON.parse(configured.request_json).profile, profile));
+          plan = buildGraphReplyDraft({ auth: { account: { id: row.account_id, authEpoch: row.auth_epoch } },
+            source: { id: request.sourceId, revision: prior.revision, ...data },
+            draft: draft ? { revision: draft.revision, sourceRevision: draft.source_revision, body: draft.body } : null,
+            connection: { profile, mode: "fixture", state: "active", authEpoch: row.auth_epoch },
+            requestId: request.action === "reply.reserve" ? request.requestId : original?.plan.requestId,
+            mode: request.action === "reply.reserve" ? request.mode : original?.plan.mode });
+        }
+        expected.attempt = transitionReplyAttempt(attempts, request, { plan, at: row.at });
+        attempts.set(expected.attempt.id, expected.attempt);
+      } else if (isSend(request)) {
         require(prior);
         if (!outboxes.has(row.account_id)) outboxes.set(row.account_id, new Map());
         const sends = outboxes.get(row.account_id);

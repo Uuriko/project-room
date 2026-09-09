@@ -7,6 +7,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   const api = new InboxClient(account, { onAccessEnded: onAccountEnded });
   const drafts = new Map(), positions = new Map();
   let owner = null, active = false, browsing = false, selected = null, epoch = 0, rows = [], sharing = null, sharingBusy = false, retryShare = null;
+  let navigationEpoch = 0;
   const storageKey = "project-room:pending-private-share:v1";
   const positionKey = "project-room:inbox-position:v1";
   let storage; try { storage = sessionStorage; } catch {}
@@ -61,6 +62,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     try { storage?.setItem(positionKey, JSON.stringify({ owner, sourceId: selected, ...point })); } catch {}
   }
   function show(place, updateLocation = true) {
+    navigationEpoch++;
     remember(); // Capture before hiding the reader, when scroll offsets are meaningful.
     onNavigate();
     active = place === "inbox";
@@ -77,6 +79,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     }
   }
   function reset({ preservePending = false } = {}) {
+    navigationEpoch++;
     if (!preservePending) { try { storage?.removeItem(positionKey); } catch {} }
     sendUI.reset({ preservePending });
     api.reset(); owner = null; epoch++; active = false; browsing = false; selected = null; rows = []; sharing = null; sharingBusy = false;
@@ -357,8 +360,10 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     text("#inbox-share-status", "Sharing…");
     try {
       const result = await api.apply(current.request); if (!owns() || sharing !== current) return;
-      persistShare(); $("#inbox-share-dialog").close(); sharing = null; show("rooms");
-      text("#inbox-status", "Shared"); await onShared(result.receipt);
+      persistShare(); $("#inbox-share-dialog").close(); sharing = null; sharingBusy = false; show("rooms");
+      const navigation = navigationEpoch;
+      text("#inbox-status", "Shared"); await onShared(result.receipt, () => owns() && navigation === navigationEpoch
+        && !active && !browsing && getRoom()?.room.id === result.receipt.roomId);
     } catch (error) {
       if (!owns() || sharing !== current) return;
       if (["stale_inbox_source", "stale_inbox_audience"].includes(error.code)) {
@@ -368,7 +373,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
         persistShare(); current.request = null; sharing = null; text("#inbox-share-status", "Not shared. Close and try again.");
       } else { text("#inbox-share-status", retained ? "Share unconfirmed. Retry the original selection." : "Share unconfirmed. Keep this tab open and retry.");
         $("#inbox-share-confirm").textContent = "Confirm share"; $("#inbox-share-confirm").disabled = false; }
-    } finally { sharingBusy = false; }
+    } finally { if (sharing === current || sharing === null) sharingBusy = false; }
   });
   $("#inbox-share-close").addEventListener("click", () => $("#inbox-share-dialog").close());
   $("#inbox-ask").addEventListener("click", ask);
@@ -387,12 +392,13 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") remember(); });
   return { sync, reset, open: () => { if (!active) return load(); },
     detachRoom: () => {
+      navigationEpoch++;
       sharing = null; resultPreview = null; resultEpoch++;
       $("#inbox-share-dialog").close(); $("#inbox-result-dialog").close();
       $("#inbox-results").hidden = true; $("#inbox-result-list").replaceChildren();
       sync();
     },
-    showRoomList: () => { remember(); active = false; browsing = true; history.replaceState(null, "", "#pr-view/rooms");
+    showRoomList: () => { navigationEpoch++; remember(); active = false; browsing = true; history.replaceState(null, "", "#pr-view/rooms");
       $("#nav-inbox").setAttribute("aria-current", "false"); $("#nav-rooms").setAttribute("aria-current", "page");
       $("#inbox-panel").hidden = true; $("#main").hidden = true;
       $("#account-rooms-panel").hidden = false; onNavigate(); onRooms(); },

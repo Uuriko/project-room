@@ -80,6 +80,33 @@ async function selectExcerpt(page, value) {
   await page.keyboard.up("Shift");
   await page.locator("#inbox-share-confirm:not([disabled])").waitFor();
 }
+for (const mobile of [false, true]) test(`late share refresh respects newer Inbox navigation ${mobile ? "mobile" : "desktop"}`, { timeout: 30000 }, async t => {
+  const f = await setup(t, mobile), p = f.page;
+  await f.inbox(); await f.pick("note");
+  await p.locator("#inbox-ask").click(); await p.locator("#inbox-share-paragraphs input").first().check();
+  let release, reached;
+  const held = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { reached = resolve; });
+  t.after(() => release());
+  await p.route("**/api/rooms/commons", async route => {
+    const response = await route.fetch(); reached(); await held; await route.fulfill({ response });
+  });
+  await p.locator("#inbox-share-confirm").click(); await started;
+  await p.locator("#inbox-share-dialog").waitFor({ state: "hidden" });
+  await f.inbox(); await f.pick("note");
+  // A saved share must not keep later shares locked behind a slow room refresh.
+  await p.locator("#inbox-ask").click(); await p.locator("#inbox-share-paragraphs input").first().check();
+  await p.locator("#inbox-share-confirm").click(); await p.locator("#inbox-share-dialog").waitFor({ state: "hidden" });
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM private_inbox_commands WHERE json_extract(request_json,'$.action')='source.share'").get().n, 2);
+  await f.inbox(); await f.pick("note");
+  const row = f.store.db.prepare("SELECT receipt_json FROM private_inbox_commands WHERE json_extract(request_json,'$.action')='source.share' ORDER BY sequence DESC LIMIT 1").get();
+  const messageId = JSON.parse(row.receipt_json).messageId;
+  release();
+  await p.locator('[data-message-record-id="' + messageId + '"]').waitFor({ state: "attached" });
+  await p.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(await p.locator("#inbox-panel").isVisible(), true);
+  assert.equal(await p.locator("#nav-inbox").getAttribute("aria-current"), "page");
+  await f.capture("late-share-" + (mobile ? "mobile" : "desktop"));
+});
 for (const mobile of [false, true]) test(`email collaboration ${mobile ? "mobile" : "desktop"}: selected text becomes room work then an exact private draft`, { timeout: 45000 }, async t => {
   const f = await setup(t, mobile, true), p = f.page, mail = seedEmail(f), excerpt = "A warmer reply 🪷";
   mail.raw.message.body.content = excerpt + "\r\n\r\nPrivate budget: 4200";

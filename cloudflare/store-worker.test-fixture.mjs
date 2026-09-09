@@ -138,6 +138,11 @@ export class StoreTestRoom {
         expectedRevision: 0, sourceRevision: 1, body: 'Recover this private email draft' }, mailBinding);
       const replyPlan = prepareGraphReplyDraft({ store, token: mailToken, binding: mailBinding, sourceId: envelope.sourceId, requestId: 'mail-reply-plan' });
       assert.equal(replyPlan.canExecute, false); assert.equal(replyPlan.canSend, false);
+      store.inbox.reply(mailToken, { action: 'reply.reserve', requestId: replyPlan.requestId, sourceId: envelope.sourceId,
+        mode: replyPlan.mode, planVersion: replyPlan.planVersion }, mailBinding);
+      const replyDispatch = { action: 'reply.dispatch', requestId: 'mail-reply-dispatch', sourceId: envelope.sourceId,
+        attemptId: replyPlan.requestId, expectedRevision: 0 };
+      assert.equal(store.inbox.reply(mailToken, replyDispatch, mailBinding).receipt.attempt.status, 'creation_unconfirmed');
       const emailView = store.inbox.read(mailToken, envelope.sourceId, mailBinding, { emailView: true });
       assert.deepEqual(emailView.source.paragraphs, [mail.message.body.content]);
       assert.equal(emailView.source.envelope, undefined);
@@ -155,7 +160,7 @@ export class StoreTestRoom {
       store.db.exec('DROP TRIGGER mail_test_failure');
       assert.equal(auditRecovery(store).dataSha256, checkpoint);
       return Response.json({ guests, credentials, sequence: store.room('commons').sequence, eventId: receipt.event.id, owner, nativeBody, nativeCommand, nativeSaved,
-        email: { token: mailToken, binding: mailBinding, page: mailPage, sourceId: envelope.sourceId, excerpt, shared, replyPlan } });
+        email: { token: mailToken, binding: mailBinding, page: mailPage, sourceId: envelope.sourceId, excerpt, shared, replyPlan, replyDispatch } });
     }
     if (path === '/resume') {
       const { guests, credentials, sequence, eventId, owner, nativeBody, nativeCommand, nativeSaved, email } = await request.json();
@@ -181,6 +186,14 @@ export class StoreTestRoom {
       const uncertain = observeGraphReplyCreation({ ...replyArgs, response: null });
       assert.equal(uncertain.status, 'creation_unconfirmed'); assert.equal(uncertain.canRetryCreate, false);
       assert.equal(uncertain.canSend, false);
+      assert.equal(store.inbox.reply(email.token, email.replyDispatch, email.binding).duplicate, true);
+      const attempt = store.inbox.replyAttempts(email.token, email.sourceId, email.binding).attempts[0];
+      assert.equal(attempt.status, 'creation_unconfirmed'); assert.equal(attempt.revision, 1);
+      const observation = { sourceId: email.sourceId, attemptId: attempt.id, expectedRevision: attempt.revision, requestId: 'mail-reply-created' };
+      assert.equal(store.inbox.recordReplyCreation(email.token, { ...observation, response: null }, email.binding).recorded, false);
+      const recorded = store.inbox.recordReplyCreation(email.token, { ...observation,
+        response: { status: 201, idType: 'immutable', connection: email.replyPlan.connection, message: { id: 'worker-draft+/=' } } }, email.binding);
+      assert.equal(recorded.receipt.attempt.status, 'created_unverified'); assert.equal(recorded.receipt.attempt.canSend, false);
       assert.deepEqual(store.inbox.apply(email.token, email.excerpt, email.binding).receipt, email.shared.receipt);
       const emailView = store.inbox.read(email.token, email.sourceId, email.binding, { emailView: true });
       assert.equal(emailView.source.email.connectionState, 'active');

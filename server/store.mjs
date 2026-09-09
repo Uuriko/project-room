@@ -217,7 +217,7 @@ export class RoomStore {
     this.inbox = new Inbox(this);
     this.email = new EmailImport(this);
     const version = this.storagePlatform.version(this.db);
-    const supported = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, STORE_SCHEMA_VERSION]);
+    const supported = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, STORE_SCHEMA_VERSION]);
     const hasSchema = version === 0 && this.storagePlatform.hasSchema(this.db);
     if (!supported.has(version) || hasSchema) {
       this.db.close();
@@ -286,6 +286,8 @@ export class RoomStore {
       if (version < 9) this.db.exec(agentConnectionSchema);
       if (version < 15) this.db.exec(inboxSchema);
       if (version < 18) this.db.exec(emailImportSchema);
+      if (version < 21 && this.db.prepare("SELECT 1 FROM private_inbox_commands WHERE json_extract(request_json,'$.action') LIKE 'reply.%' OR json_type(receipt_json,'$.attempt') IS NOT NULL LIMIT 1").get())
+        throw new Error("Pre-v21 reply history requires operator reconciliation");
       if (version < STORE_SCHEMA_VERSION) this.storagePlatform.installWriterFence(this.db);
       this.storagePlatform.verifyWriterFence(this.db);
       this.verifyInvitationAudit();

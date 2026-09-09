@@ -6,7 +6,7 @@ A shared workspace where people and agents can talk, turn a conversation into bo
 
 Start with [the unification ledger](docs/UNIFICATION-2026-09-07.md): exact inputs, changes included, checks, rollback, and unavailable pieces. The earlier [local acceptance report](docs/FINAL-LOCAL-ACCEPTANCE-2026-09-07.md) is historical baseline evidence, not proof for every later build.
 
-Current local messaging checkpoint: [email excerpts and reviewed private drafts](docs/EMAIL-EXCERPT-CHECKPOINT-2026-09-08.md), schema 20. The same Inbox now supports fixture-backed email reading, deliberate text sharing and reviewed-result return. No real mailbox or email sending is enabled. This candidate has not been deployed; earlier staging and release records below do not establish its live status or rollback readiness.
+Current local messaging checkpoint: [durable private reply attempts](docs/DURABLE-REPLY-ATTEMPTS-2026-09-08.md), schema 21, following [email excerpts and reviewed private drafts](docs/EMAIL-EXCERPT-CHECKPOINT-2026-09-08.md). The same Inbox supports fixture-backed email reading, deliberate sharing and reviewed-result return. Reply-attempt storage and provider comparisons are service-only; no real mailbox or sending is enabled. This candidate has not been deployed; earlier staging and release records below do not establish its live status or rollback readiness.
 
 Latest local additions: [private agent connections and access checks](docs/AGENT-CONNECTION.md),
 [reliable AI draft returns](docs/DRAFT-RETURN.md),
