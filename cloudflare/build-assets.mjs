@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile, readdir, lstat } from 'node:fs/promises';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 export const assetPaths = ['index.html', ...['app.js', 'client.js', 'events.js', 'conversation.js', 'workflow.js',
-  'share-links.js', 'return-brief.js', 'work-selectors.js', 'work-status.js', 'work-packet.js', 'portable-work.js', 'reminders.js', 'reminder-time.js', 'styles.css', 'agent-connections.js', 'room-charter.js', 'room-instructions.js', 'reply-requests.js', 'work-help.js', 'help-offers.js', 'inbox-client.js', 'inbox-ui.js', 'inbox-send-ui.js'].map(file => 'src/' + file)];
+  'share-links.js', 'return-brief.js', 'work-selectors.js', 'work-status.js', 'work-packet.js', 'portable-work.js', 'reminders.js', 'reminder-time.js', 'styles.css', 'agent-connections.js', 'room-charter.js', 'room-instructions.js', 'reply-requests.js', 'work-help.js', 'help-offers.js', 'inbox-client.js', 'inbox-ui.js', 'inbox-send-ui.js', 'room-roster.js'].map(file => 'src/' + file)];
 
 // Fail closed on unexpected output instead of uploading or deleting unknown files.
 async function checkOutput(directory, prefix = '') {

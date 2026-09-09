@@ -1,72 +1,67 @@
 # Current Project Room
 
-Continue product work from **main**. PR #23 was merged with history preserved at
-63c3b712cf6df1c013be36104db6c6ca80c3f151 on September 8, 2026.
-Its candidate 2dcf3dee passed the contract, browser and Cloudflare CI jobs in run
-34174584668. Hosted app on 9 September 2026: Worker `project-room-staging`
-version `57044743-c92d-4625-be2b-d209e46ad7a8` serving merged source `9a7574c`
-(GitHub `main` `c5ec645`). Isolated origin remains
-https://project-room-staging.getdasha.workers.dev. Durable Object was not reset.
+**This GitHub repository (`Uuriko/project-room`, `main`) is the source of truth.**
+Do not continue from a ChatGPT worktree or the stale project-root
+`PROJECT-ROOM-CURRENT.md` (that file still describes schema 14).
 
-## Consolidation
+| | |
+| --- | --- |
+| Schema | 26 |
+| Live app | https://project-room-staging.getdasha.workers.dev |
+| Public door | https://www.trydemigod.com/room (`/project-room` alias) |
+| GitHub | https://github.com/Uuriko/project-room |
+| Durable Object | not reset |
 
-- #8 is included by ancestry and is now merged.
-- #12, #13, #14 and #20 are included by ancestry; their duplicate PRs are closed.
-- #3–#5 were reconciled through the older integration rather than retained as
-  unchanged ancestor commits. Their historical PRs are closed as superseded;
-  source branches remain as provenance. The only removed source path from #3/#4
-  is the prototype src/storage.js, replaced by the durable server. No #5 file path
-  is missing. See UNIFICATION-2026-09-07.md for the detailed reconciliation.
-- #9's separate harness, #16–#18 contributions and newer unpublished identity
-  work require deliberate adaptation. They are not counted as integrated.
-- #24 is an independent conformance contribution. #25/#26 are optional OpenAI
-  operator tooling; API-key work is deferred and does not block the room.
+Hosted Worker `project-room-staging` was last published 9 September 2026 as
+version `57044743-c92d-4625-be2b-d209e46ad7a8` from merged source `9a7574c`
+(then GitHub `c5ec645`). Later `main` adds the live `/room` landing source and,
+on this branch, the named-agent roster plus research notes. Re-deploy before
+claiming those later commits are on the Worker.
 
-## This usability change
+## What is in this repo
 
-The Room section navigation reaches Chat, Work and Catch-up without a long phone
-scroll. Counts use the same nextWorkStep function as work cards and agent
-orientation. Navigation preserves the unsent draft, moves focus to the selected
-section and only opens catch-up on request. It does not mark anything read.
-Returning-user help explains the existing member/guest identity limits without
-claiming durable guest recovery.
+| Area | Where | Status |
+| --- | --- | --- |
+| Room chat, work, catch-up | `src/`, `server/` | Live on the isolated Worker |
+| Private Inbox / account home | `src/inbox-*.js`, `server/inbox*.mjs` | In source and on the Worker; open `/?account=1` |
+| Fixture email (Graph-shaped) | `server/email-*.mjs`, `server/graph-*.mjs` | Local/fixture only. No live mailbox or send |
+| Agent connect + MCP | `docs/AGENT-CONNECTION.md`, `scripts/agent-inbox.mjs` | Owner-browser enrollment; not auto-enrolled |
+| Instinct / Muse / Grok Build / Grok Bot | `docs/ROOM-ROSTER.md` | Roster + Connect-agent presets in this source |
+| Demigod `/room` landing | `deploy/room-entry.mjs` | Live on trydemigod.com |
+| Research / messaging plans | [`research/`](../research/README.md) | Copied from the Codex ChatGPT project mirror |
 
-The unlisted Demigod entry handler is deploy/room-entry.mjs. Import roomEntry in
-the existing demigod-html source and call it before generic routing:
+## Inbox and email (yesterday’s Codex work)
 
-```js
-const entry = roomEntry(request);
-if (entry) return entry;
-```
+Account-owned Inbox, selected sharing, excerpt → room work → reviewed private
+draft, and fixture Graph reply journals are **in this tree**. Checkpoints:
 
-It handles GET/HEAD `www.trydemigod.com/room`, `/room/`, `/project-room` and
-`/project-room/`. It returns a noindex ink landing with one link to the isolated
-Room origin, and null for other routes. It does not proxy cookies/API paths or
-transfer invitation fragments. A small footer link to `/room` is live on the
-Demigod home/weekly/contact/hardware pages; it is not in the main nav.
+- [Account-first Inbox](ACCOUNT-FIRST-INBOX-2026-09-08.md)
+- [Email import](EMAIL-IMPORT-CHECKPOINT-2026-09-08.md)
+- [Email reader](EMAIL-READER-CHECKPOINT-2026-09-08.md)
+- [Email excerpts](EMAIL-EXCERPT-CHECKPOINT-2026-09-08.md)
+- [Composer review](COMPOSER-REVIEW-2026-09-08.md)
 
-Live 9 September 2026: `demigod-html` Worker serves that landing; `/hardware`,
-`/weekly` and `/ticket` still 200 after the footer change.
+Next gated slice (not done): a real mailbox. See
+[research/EMAIL-QUALIFICATION-NEXT.md](../research/EMAIL-QUALIFICATION-NEXT.md).
 
-## First real shared task
+## Agents
 
-The unlisted entry is shipped. Remaining independent checks: a real invited
-participant join/send/return on the current Worker, physical-phone evidence, and
-provider restore. The assignment was sent on issue
-#11 at comment 5590559552. No acceptance or completion by either peer is claimed
-without their response. Record in Room through existing memberships when those
-credentials are available; this session has no staging operator credential.
+Owner account session → People & agents → Connect agent. Guest links are not
+agent credentials. [ROOM-ROSTER.md](ROOM-ROSTER.md) is the Instinct / Muse /
+Grok Build / Grok Bot map.
 
-Done means the live entry opens the existing Room, the three neighboring pages
-still work, a real invited participant can join/send/return, and the independent
-result is recorded. A source merge alone does not complete this task.
+## Historical merge notes
 
-Local validation: 233 syntax/core/API tests pass, including three entry routing
-tests. The existing desktop/mobile browser suite includes section-navigation,
-focus and draft-preservation assertions; results are recorded in CI separately.
-Local browser installation timed out, so no new local browser pass is claimed.
+PR #23 is in history at `63c3b712`. #8, #12, #13, #14 and #20 are included by
+ancestry. #3–#5 were reconciled; see [UNIFICATION-2026-09-07.md](UNIFICATION-2026-09-07.md).
+#9’s harness and #16–#18 still need deliberate adaptation. #24 is independent
+conformance. #25/#26 operator API-key work is deferred.
 
-Remaining: entry deployment, staging login/runtime access for this environment,
-physical-phone evidence, durable self-service identity recovery, provider restore
-exercise and budget alerts. Existing reconnect and opt-in tab draft recovery
-were implemented before this change; this update preserves those contracts.
+The unlisted Demigod entry is `deploy/room-entry.mjs` (GET/HEAD `/room` and
+`/project-room`, noindex, one link to the isolated origin). A small footer link
+to `/room` is live on Demigod home/weekly/contact/hardware. It is not in the
+main nav.
+
+Remaining live gates: a real invited participant join/send/return on the current
+Worker, physical-phone evidence, provider restore, and a real mailbox only after
+separate authorization. Do not reset the Durable Object as rollback.

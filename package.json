@@ -13,7 +13,8 @@
     "provision": "node scripts/provision.mjs",
     "audit:invitations": "node scripts/audit-invitations.mjs",
     "test:handoff": "node --test tests/agent-handoff.test.js",
-    "agent:inbox": "node scripts/agent-inbox.mjs"
+    "agent:inbox": "node scripts/agent-inbox.mjs",
+    "agent:roster": "node scripts/room-roster.mjs"
   },
   "engines": {
     "node": ">=24.19.0"
