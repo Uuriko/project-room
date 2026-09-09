@@ -13,9 +13,9 @@ Do not continue from a ChatGPT worktree or the stale project-root
 | Durable Object | not reset |
 
 Hosted Worker `project-room-staging` was last published 9 September 2026 as
-version `ec942c10-2e35-4cbe-a11c-4fa8292a8fdf` from GitHub `main` `3a84008`
-(roster + research map + CI fetch-depth). 25 live assets match this checkout.
-Durable Object was not reset.
+version `90ba6c3f-0283-4a03-961e-295561fb2c4f` from GitHub `main` `b082970`
+(easier login). 25 live assets match this checkout. Durable Object was not
+reset. Door copy on trydemigod.com `/room` matches this source.
 
 ## How to test
 
