@@ -102,7 +102,9 @@ test("room actions open existing work and catch-up flows; shortcuts do not inter
 test("room actions offer only the current member's available flows", { timeout: 30000 }, async t => {
   const f = await setup(t, { role: "guest" }); await f.open();
   for (const id of ["new-work", "invite", "agent"]) assert.equal(await f.action(id).count(), 0);
-  for (const id of ["write", "search", "catch-up", "people", "work", "how-invite", "how-agent"]) assert.equal(await f.action(id).count(), 1);
+  for (const id of ["write", "search", "catch-up", "people", "work", "how-invite", "how-agent", "how-inbox"]) assert.equal(await f.action(id).count(), 1);
+  await f.action("how-inbox").click();
+  assert.match(await f.page.locator("#status").textContent(), /Inbox uses Account key/);
   await f.capture("guest");
 });
 

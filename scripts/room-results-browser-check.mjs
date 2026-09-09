@@ -27,7 +27,7 @@ async function setup(t, { mobile = false, guest = false, expectedWrites = 0 } = 
     return route.continue();
   });
   await p.goto(origin); await p.locator("#access-key").fill(f.keys[guest ? "guest" : "owner"]);
-  await p.locator("#auth-form button").click(); await p.locator("#main").waitFor({ state: "visible" });
+  await p.locator('#auth-form button[type="submit"]').click(); await p.locator("#main").waitFor({ state: "visible" });
   p.on("request", request => { if (request.method() !== "GET" && new URL(request.url()).pathname.startsWith("/api/rooms/")) writes.push(request.url()); });
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(outside, []); assert.equal(writes.length, expectedWrites); });
   const row = id => p.locator(`#room-results-list [data-result-work-id="${id}"]`);

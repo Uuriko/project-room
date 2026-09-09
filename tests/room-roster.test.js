@@ -121,6 +121,7 @@ test("Connect agent markup lists the four roster names", () => {
   assert.match(html, /id="invite-link"/);
   assert.match(html, /Paste your key/);
   assert.match(html, /id="room-guide"/);
+  assert.match(html, /Inbox uses <strong>Account key<\/strong>/);
   assert.match(html, /id="people-hint"/);
   assert.match(html, /Write to the room/);
   assert.match(html, /id="auth-guest-note"/);
@@ -133,6 +134,8 @@ test("Connect agent markup lists the four roster names", () => {
   const app = readFileSync(join(checkout, "src/app.js"), "utf8");
   assert.match(app, /How to invite someone/);
   assert.match(app, /How to connect an agent/);
+  assert.match(app, /How to open Inbox/);
+  assert.match(app, /Open this room/);
   assert.match(app, /function maybeOpenCatchUp/);
   assert.match(app, /\/\\bneed\/\.test\(catchup\)/);
   const source = readFileSync(join(checkout, "src/agent-connections.js"), "utf8");

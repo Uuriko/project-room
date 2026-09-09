@@ -41,7 +41,7 @@ Once inside Commons:
 | How-to | Actions (`⌘K` / `Ctrl K`) → How to invite / How to connect an agent |
 | Named assistants | Instinct, Muse, Grok Build, Grok Bot buttons (fills name; does not create a key until you click Create access) |
 | Invite someone | **Invite** in the header |
-| Inbox | **Account key**, then **Inbox**. Sample mail only; real mailbox is off |
+| Inbox | **Account key**, then **Inbox**. From a room-key login: Actions → How to open Inbox. Sample mail only; real mailbox is off |
 | Rooms list | Account key → **Rooms**. Each titled room shows **Open** |
 | After Create access | Connect agent shows a copy → import → check → clear-clipboard list |
 
