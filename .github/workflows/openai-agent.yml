@@ -1,0 +1,25 @@
+name: openai-agent
+on:
+  pull_request:
+    paths:
+      - "server/openai-complete.mjs"
+      - "scripts/room-openai-agent.mjs"
+      - "tests/openai-agent.test.js"
+      - "package.json"
+      - ".github/workflows/openai-agent.yml"
+  push:
+    paths:
+      - "server/openai-complete.mjs"
+      - "scripts/room-openai-agent.mjs"
+      - "tests/openai-agent.test.js"
+      - "package.json"
+      - ".github/workflows/openai-agent.yml"
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm test
