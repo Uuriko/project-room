@@ -44,4 +44,24 @@ The initial broader run is diagnostic only because the mobile correction landed 
 3. Improve comparison of existing alternative drafts before introducing a separate branching model.
 4. Retain the independently planned provider-draft update/reconciliation work. This UI checkpoint does not implement it or enable live messaging.
 
+### Shelf qualification before implementation
+
+The next smallest useful experiment is a read-only **Results** view of existing room records, opened through Actions or the Work panel. Do not begin with folders, uploads, favorites, a canvas and a new sidebar destination together.
+
+Use the current work projection and shared predicates in `src/workflow.js` and `src/work-selectors.js`. An assignment's accepted state is not an accepted result. A terminal item may be superseded, so terminality alone is insufficient for inclusion. Require a current receipt, no supersession, and the relevant completion/review/decision gates. Label completion without required review as completed, not independently approved.
+
+Open native text through the existing result reader. Show an external evidence URL as a link, not as fetched, verified or embedded content. Keep the receipt's exact event/version identity and show current state when reopened; do not copy a result into a separate mutable collection.
+
+Before building, qualify six fixtures: an empty room; completed native text with no remaining gates; an exact approved result; a result awaiting review; reopened work with historical approval; and superseded work. Include a participant with room-only access and a replacement session while the view is open. Results must never pull private Inbox sources or silently include other rooms.
+
+Acceptance: one optional compact view, direct return to conversation, no new write operations, no external fetches, no migration, and shared derivation usable by both the room UI and agent-facing code. A curated reference shelf can follow separately once ownership, edits and removal semantics are defined.
+
 No live mailbox access, sending, model execution, payment, push or deployment occurred. The overall product goal remains active.
+
+## Committed-runtime verification
+
+Runtime commit: `c811915092f569d4feca7f13d29425f224b0f858`. After that commit, **853 core** and **23 local Workers** checks passed with zero failures. Logs are `committed-core.log` and `committed-workers.log` in the evidence directory. Subsequent edits are documentation only.
+
+The initial full browser run finished with 258 passing checks and the single mobile-composer failure described above. Because it overlapped the correction, it is retained only as diagnostic evidence in `initial-full-browser.log`. The targeted mobile-polish run passed all 11 checks.
+
+The fresh full browser run against the committed runtime passed **259 checks**, zero failures, skips or cancellations. Evidence: `committed-browser.log`. This includes all nine Actions checks, mobile first use, the existing account/Inbox/collaboration journeys, composer behavior, quiet design, invitations, agent connection, recovery and work reuse. Final verified totals are **853 core + 259 browser + 23 local Workers**; this is local evidence, not a staging or live deployment claim.
