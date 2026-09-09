@@ -75,6 +75,9 @@ export async function runManualOwnerExercise({ ownerPath, stage, answerPath, out
       assert.equal(current.verification, null); assert.equal(current.decision, null);
       selectedResult = await client.workResult(config.workItemId, { completionEventId: current.receipt.eventId });
       assert.equal(selectedResult.result.text.body, parsed.body); assert.equal(selectedResult.result.receipt.producerAttribution, "unknown");
+      assert.equal(selectedResult.current.next.action, "establish_provenance");
+      assert.equal(selectedResult.current.next.memberId, work.accountableMemberId);
+      assert.equal(selectedResult.current.next.completionEventId, current.receipt.eventId);
       await card.locator('[data-read-result]').click();
       await page.waitForFunction(body => document.querySelector("#result-body").textContent === body, parsed.body);
       await page.screenshot({ path: join(directory, "result.png") });
@@ -84,6 +87,7 @@ export async function runManualOwnerExercise({ ownerPath, stage, answerPath, out
     assert.equal(await page.locator("#message-input").inputValue(), composer);
     assert.deepEqual(errors, []); assert.deepEqual(external, []);
     const after = await client.snapshot();
+    assert.deepEqual(after.state.members, before.state.members, "copying and returning cannot register or impersonate an agent");
     assert.deepEqual(after.state.helpOffers, before.state.helpOffers, "manual contribution does not invent agent coordination");
     assert.equal(after.state.workItems[config.workItemId].accountableMemberId, work.accountableMemberId);
     assert.equal(after.cursor, before.cursor);
