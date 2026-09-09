@@ -870,7 +870,7 @@ function renderMessages() {
     }
     if (list.children[index] !== node) list.insertBefore(node, list.children[index] || null);
   });
-  if (!messages.length) list.innerHTML = '<li class="empty-note">Say hello. What are we working on?</li>';
+  if (!messages.length) list.innerHTML = '<li class="empty-note">No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button></li>';
   list.dataset.view = view;
   if (!sameView) { list.scrollTop = viewPositions.get(view) ?? list.scrollHeight; newVisibleMessages = 0; }
   else if (nearBottom && !focused) { list.scrollTop = list.scrollHeight; newVisibleMessages = 0; }
@@ -1674,6 +1674,7 @@ function submitRequest(form) {
   }, { failureHint: "Draft kept. Retry the original, or refresh context after a refusal." });
 }
 $("#message-list").addEventListener("click", e => {
+  if (e.target.closest("[data-empty-write]")) { $("#message-input").focus(); return; }
   const button = e.target.closest("[data-message-id]"); if (!button || !state || busy) return;
   const id = button.dataset.messageId;
   if (button.dataset.messageAction?.startsWith("request-")) openRequestMode(button.dataset.messageAction.slice(8), id);
@@ -1959,6 +1960,8 @@ $("#new-work-form").addEventListener("change", syncWorkForm);
 $("#new-work-form").addEventListener("submit", e => { e.preventDefault(); sendWorkProposal(); });
 $("#retry-work-button").addEventListener("click", () => { if (workRetryLocked) sendWorkProposal(); });
 $("#work-list").addEventListener("click", e => {
+  if (e.target.closest("[data-empty-work]")) { $("#new-work-button").click(); return; }
+  if (e.target.closest("[data-empty-suggest]")) { $("#message-input").focus(); return; }
   const button = e.target.closest("[data-reuse-work]");
   if (button) openWork(null, button.dataset.reuseWork);
 });
@@ -2509,9 +2512,9 @@ function renderReturnBrief() {
       if (!draftsByWork.has(message.workItemId)) draftsByWork.set(message.workItemId, []);
       draftsByWork.get(message.workItemId).push(message);
     }
-    renderContent("#work-list", items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(i => workCard(i, now, draftsByWork.get(i.id) ?? [])).join("") || `<p class="empty-note">${can("steer") ? "Turn a message into work, or start something new." : "Suggest work in the conversation. The owner can create it."}</p>`);
+    renderContent("#work-list", items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(i => workCard(i, now, draftsByWork.get(i.id) ?? [])).join("") || `<p class="empty-note">${can("steer") ? 'Turn a message into work, or start something new. <button type="button" class="text-button" data-empty-work>Start work</button>' : 'Suggest work in the conversation. The owner can create it. <button type="button" class="text-button" data-empty-suggest>Write a suggestion</button>'}</p>`);
     const resultFocus = $("#room-results-list").contains(document.activeElement) ? document.activeElement : null;
-    renderContent("#room-results-list", completedResults(state).map(resultRow).join("") || '<p class="empty-note">Completed results appear here.</p>');
+    renderContent("#room-results-list", completedResults(state).map(resultRow).join("") || '<p class="empty-note">Completed results appear here after work is finished.</p>');
     if (resultFocus && !resultFocus.isConnected && document.activeElement === document.body) $("#work-view-results").focus({ preventScroll: true });
     resultStatus();
     syncActionForm();

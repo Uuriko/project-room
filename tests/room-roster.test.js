@@ -136,6 +136,9 @@ test("Connect agent markup lists the four roster names", () => {
   assert.match(app, /How to connect an agent/);
   assert.match(app, /How to open Inbox/);
   assert.match(app, /Open this room/);
+  assert.match(app, /data-empty-write/);
+  assert.match(app, /data-empty-work/);
+  assert.match(app, /Completed results appear here after work is finished/);
   assert.match(app, /function maybeOpenCatchUp/);
   assert.match(app, /\/\\bneed\/\.test\(catchup\)/);
   const source = readFileSync(join(checkout, "src/agent-connections.js"), "utf8");

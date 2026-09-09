@@ -79,7 +79,7 @@ test("results update after review and reopening; a pinned open reader becomes ea
   assert.equal(await p.locator("#work-view-results").evaluate(node => node === document.activeElement), true);
   f.reopen("pending-result"); f.reopen("approved-result");
   await p.locator("#room-results-list .empty-note").waitFor();
-  assert.equal(await p.locator("#room-results-list").textContent(), "Completed results appear here.");
+  assert.match(await p.locator("#room-results-list").textContent(), /Completed results appear here after work is finished/);
 });
 
 test("result read failure preserves the list and allows a deliberate retry", { timeout: 30000 }, async t => {

@@ -80,6 +80,55 @@ collapse is gated.
 - Actions include **How to open Inbox**. Room-key sessions get an honest notice.
 - Room guide states Inbox uses Account key.
 
+### Phase 5 — this slice (empty states as onboarding)
+
+Research, 9 September 2026:
+
+- NN/G: an empty container is not neutral. It must say what the space is
+  for, why it is empty, and the next step.
+- Slack activation is not a tour. Empty channels explain the space and
+  offer one first action (historically “say hi”). Linear/Raycast/Cursor
+  use just-in-time hints, not 8-step overlays.
+- AI-product empty states fail when they are a blank prompt. First value
+  is a starting verb, not a capability list. Do not invent sample
+  conversation in the live Commons Durable Object.
+- WEF 2026 workplace AI: value is shared, accountable work — not a
+  private chatbot. Empty work/results must point at named outcomes, not
+  “ask the AI anything.”
+- Progressive disclosure: one layer on first use. We already have a
+  dismissible You’re-in guide. Do not add a product tour.
+
+What is still thin in this tree:
+
+| Surface | Today | Problem |
+| --- | --- | --- |
+| Empty chat | “Say hello. What are we working on?” | Names the vibe, no control that focuses the composer |
+| Empty work (owner) | “Turn a message into work, or start something new.” | No button; New is in the header and easy to miss |
+| Empty work (guest) | “Suggest work in the conversation…” | No jump to the composer |
+| Empty results | “Completed results appear here.” | True, but no “after work is finished” |
+| Catch-up empty | “Nothing waiting for you.” | Fine; do not add a tour here |
+| People | hint already owner vs everyone else | Leave it |
+
+Decisions for this slice:
+
+- One primary control per empty state. Chat → focus composer. Work
+  (owner) → New work. Work (guest) → focus composer. Results stay
+  text-only so we do not force a task from Results (see
+  ROOM-RESULTS-2026-09-08).
+- No sample messages, no auto-posted hello, no checklist overlay.
+- Keep guest copy that first-use tests already match
+  (`Suggest work in the conversation`).
+- Do not auto-open People or Connect agent.
+
+Files: `src/app.js`, `src/styles.css`, `tests/room-roster.test.js`,
+`scripts/room-results-browser-check.mjs`, `docs/HOW-TO-TEST.md`.
+
+### Later, still in-tree (not this PR)
+
+- Door copy on `/room` if empty-state language should match.
+- GitHub About paste (John, Settings UI).
+- Remaining `#auth-form button` locators in lesser-run scripts if any.
+
 ### Gated (do not start here)
 
 - Real mailbox / send — [EMAIL-QUALIFICATION-NEXT.md](../research/EMAIL-QUALIFICATION-NEXT.md)
@@ -103,4 +152,5 @@ collapse is gated.
 | B | Phase 2 catch-up / Actions / guest copy | `src/app.js`, `index.html`, share-link copy, room-actions | A |
 | C | Account home titles + GitHub About notes | account rooms UI, CURRENT-ROOM | A |
 
-Phase A–C shipped as PRs #37, #38, and #40. This change is leftover login/inbox polish.
+Phases A–D shipped as PRs #37, #38, #40, and #42. This change is Phase 5
+empty-state onboarding.
