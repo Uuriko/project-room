@@ -56,6 +56,8 @@ Evidence directory: `test-results/reply-update-20260908/`. `three-versions.json`
 
 Exact committed test results are recorded below when complete.
 
+Runtime commit `05adfd3c59ce33db9fda73368dc81622aa54f032` passed **878 core**, **57 account/Inbox/collaboration browser** and **23 local Workers** checks with zero failures. Logs: `committed-core.log`, `committed-browser.log`, `committed-workers.log` in the evidence directory. The new functions are directly exercised in Node and the cold Node runtime package; the Workers suite guards the existing runtime, not a nonexistent Workers update endpoint. The browser run includes unchanged direct and room-assisted reply journeys on desktop/mobile. Subsequent edits to this checkpoint are documentation only.
+
 ## Next implementation, without widening authority
 
 1. Add child update-attempt records under the original creation attempt. Keep preparation, dispatch intent, provider evidence and observations distinct. Define cancellation before dispatch versus uncertainty after dispatch.
