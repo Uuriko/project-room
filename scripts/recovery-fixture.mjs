@@ -10,7 +10,7 @@ export function createRecoveryFixture(filename) {
   store.initialize(initialRoom());
   // Established v1 fixture route: migrate a pre-invitation/reminder database,
   // retaining its original event envelopes and generating a real checkpoint.
-  store.db.exec("DROP TABLE agent_connection_operations; DROP TABLE agent_connections; DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE membership_invitation_journal; DROP TABLE projection_checkpoints; PRAGMA user_version=1");
+  store.db.exec("DROP TABLE private_inbox_drafts; DROP TABLE private_inbox_versions; DROP TABLE private_inbox_sources; DROP TABLE private_inbox_commands; DROP TABLE agent_connection_operations; DROP TABLE agent_connections; DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE membership_invitation_journal; DROP TABLE projection_checkpoints; PRAGMA user_version=1");
   store.close(); store = new RoomStore(filename, { now: () => now });
   store.initialize(initialRoom("second", "second-owner"));
   const keys = { owner: store.issueAccessKey("commons", "owner"), second: store.issueAccessKey("second", "second-owner") };
@@ -82,8 +82,20 @@ export function createRecoveryFixture(filename) {
   store.changeAccountAccess("recovery-shared", { expectedRevision: 0, active: false, reason: "Synthetic suspension before capture" });
   const command = { id: "recovery-command", type: T.MESSAGE_POSTED, data: { body: "Synthetic message before recovery capture" } };
   const commandResult = store.command(keys.owner, "commons", command);
+  const inboxRequests = [
+    { action: "source.save", requestId: "recovery-inbox-source", sourceId: "recovery-source", expectedRevision: 0,
+      data: { adapter: "synthetic", sender: "sender@example.test", recipient: "owner@example.test", subject: "Private recovery source",
+        paragraphs: ["Shareable recovery excerpt", "Private recovery paragraph"] } },
+    { action: "draft.save", requestId: "recovery-inbox-draft", sourceId: "recovery-source", expectedRevision: 0,
+      sourceRevision: 1, body: "Private recovery reply" }
+  ];
+  const inboxReceipts = inboxRequests.map(request => store.inbox.apply(owner.token, request, owner.session.sessionBinding).receipt);
+  inboxRequests.push({ action: "source.share", requestId: "recovery-inbox-share", sourceId: "recovery-source", sourceRevision: 1,
+    roomId: "commons", audienceVersion: store.inbox.shareContext(owner.token, "recovery-source", "commons", owner.session.sessionBinding).audienceVersion,
+    paragraphs: [0] });
+  inboxReceipts.push(store.inbox.apply(owner.token, inboxRequests.at(-1), owner.session.sessionBinding).receipt);
   const cursor = store.room("commons").sequence; store.markCaughtUp(keys.owner, "commons", cursor);
   return { store, filename, keys, owner, target, validSession, revokedSession, loggedOut, sharedSession, pending, invitation,
-    shareRequest, link, linkToken, guestSlot, guest, joinRequest, reminders, command, commandResult, cursor,
+    shareRequest, link, linkToken, guestSlot, guest, joinRequest, reminders, command, commandResult, cursor, inboxRequests, inboxReceipts,
     enrollmentToken, enrollmentRequest, enrollment, nativeBody, nativeCommand, nativeCompletion, charterCommand, charterSaved, now: () => now, advance: ms => { now += ms; } };
 }

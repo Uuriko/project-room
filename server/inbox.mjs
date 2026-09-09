@@ -1,0 +1,207 @@
+import { createHash } from "node:crypto";
+import { validId, EVENT_TYPES as T } from "../src/events.js";
+import { ServiceError } from "./store.mjs";
+
+const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
+const canonical = value => Array.isArray(value) ? "[" + value.map(canonical).join(",") + "]" : value && typeof value === "object"
+  ? "{" + Object.keys(value).sort().map(k => JSON.stringify(k) + ":" + canonical(value[k])).join(",") + "}" : JSON.stringify(value);
+const digest = value => createHash("sha256").update(canonical(value)).digest("hex");
+const exact = (v, fields) => v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).length === fields.length && fields.every(f => Object.hasOwn(v, f));
+const revision = n => Number.isSafeInteger(n) && n >= 0;
+const text = (v, max, empty = false) => typeof v === "string" && v.isWellFormed() && v.length <= max && (empty || v.trim().length > 0);
+const same = (a, b) => canonical(a) === canonical(b);
+export const inboxLimits = Object.freeze({ sources: 100, versions: 100, commands: 5000, paragraphs: 20 });
+export const inboxSchema = `
+  CREATE TABLE private_inbox_sources (
+    account_id TEXT NOT NULL REFERENCES accounts(id), id TEXT NOT NULL, revision INTEGER NOT NULL CHECK(revision>0),
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(account_id,id)
+  );
+  CREATE TABLE private_inbox_versions (
+    account_id TEXT NOT NULL, source_id TEXT NOT NULL, revision INTEGER NOT NULL CHECK(revision>0),
+    data_json TEXT NOT NULL CHECK(json_valid(data_json)), PRIMARY KEY(account_id,source_id,revision),
+    FOREIGN KEY(account_id,source_id) REFERENCES private_inbox_sources(account_id,id)
+  );
+  CREATE TABLE private_inbox_drafts (
+    account_id TEXT NOT NULL, source_id TEXT NOT NULL, revision INTEGER NOT NULL CHECK(revision>0),
+    source_revision INTEGER NOT NULL, body TEXT NOT NULL, updated_at INTEGER NOT NULL,
+    PRIMARY KEY(account_id,source_id), FOREIGN KEY(account_id,source_id,source_revision) REFERENCES private_inbox_versions(account_id,source_id,revision)
+  );
+  CREATE TABLE private_inbox_commands (
+    sequence INTEGER PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts(id), request_id TEXT NOT NULL,
+    fingerprint TEXT NOT NULL, request_json TEXT NOT NULL CHECK(json_valid(request_json)),
+    receipt_json TEXT NOT NULL CHECK(json_valid(receipt_json)), auth_epoch INTEGER NOT NULL, at INTEGER NOT NULL,
+    UNIQUE(account_id,request_id)
+  );
+  CREATE TRIGGER private_inbox_versions_no_update BEFORE UPDATE ON private_inbox_versions BEGIN SELECT RAISE(ABORT,'source versions are immutable'); END;
+  CREATE TRIGGER private_inbox_versions_no_delete BEFORE DELETE ON private_inbox_versions BEGIN SELECT RAISE(ABORT,'source versions are retained'); END;
+  CREATE TRIGGER private_inbox_commands_no_update BEFORE UPDATE ON private_inbox_commands BEGIN SELECT RAISE(ABORT,'inbox receipts are immutable'); END;
+  CREATE TRIGGER private_inbox_commands_no_delete BEFORE DELETE ON private_inbox_commands BEGIN SELECT RAISE(ABORT,'inbox receipts are retained'); END;
+`;
+function validate(request) {
+  const common = ["requestId", "action", "sourceId"], fields = {
+    "source.save": [...common, "expectedRevision", "data"],
+    "draft.save": [...common, "expectedRevision", "sourceRevision", "body"],
+    "source.share": [...common, "sourceRevision", "roomId", "audienceVersion", "paragraphs"]
+  }[request?.action];
+  if (!fields || !exact(request, fields) || !validId(request.requestId) || !validId(request.sourceId))
+    fail(422, "invalid_inbox_request", "Supply an exact inbox operation and stable request ID.");
+  if (request.action !== "source.share" && !revision(request.expectedRevision)) fail(422, "invalid_inbox_request", "Current revision required.");
+  if (request.action !== "source.save" && (!revision(request.sourceRevision) || !request.sourceRevision)) fail(422, "invalid_inbox_request", "Source revision required.");
+  if (request.action === "source.save") {
+    const d = request.data;
+    if (!exact(d, ["adapter", "sender", "recipient", "subject", "paragraphs"]) || d.adapter !== "synthetic"
+      || !["sender", "recipient", "subject"].every(k => text(d[k], 240))
+      || !Array.isArray(d.paragraphs) || !d.paragraphs.length || d.paragraphs.length > inboxLimits.paragraphs
+      || !d.paragraphs.every(p => text(p, 4000)) || new TextEncoder().encode(JSON.stringify(d)).length > 12000)
+      fail(422, "invalid_inbox_source", "Supply a bounded synthetic source, not a provider connection.");
+  }
+  if (request.action === "draft.save" && !text(request.body, 4000, true)) fail(422, "invalid_inbox_draft", "Draft must be well-formed text up to 4,000 characters.");
+  if (request.action === "source.share" && (!validId(request.roomId) || typeof request.audienceVersion !== "string" || !/^[a-f0-9]{64}$/.test(request.audienceVersion)
+    || !Array.isArray(request.paragraphs) || !request.paragraphs.length || request.paragraphs.length > inboxLimits.paragraphs
+    || !request.paragraphs.every(n => revision(n) && n < inboxLimits.paragraphs) || new Set(request.paragraphs).size !== request.paragraphs.length))
+    fail(422, "invalid_inbox_share", "Select source paragraphs and the current room audience.");
+}
+export const inboxAudience = state => Object.values(state.members).filter(m => m.active === true)
+  .map(m => ({ memberId: m.id, revision: m.revision })).sort((a, b) => a.memberId.localeCompare(b.memberId));
+const viewer = auth => ({ accountId: auth.account.id, authEpoch: auth.account.authEpoch,
+  sessionBinding: auth.sessionBinding, sessionRevision: auth.sessionRevision });
+const sharedBody = (data, indexes) => {
+  if (indexes.some(i => !Object.hasOwn(data.paragraphs, i))) fail(422, "invalid_inbox_share", "Selected text does not exist.");
+  const body = "Shared sample excerpt\n\n" + indexes.map(i => data.paragraphs[i]).join("\n\n");
+  if (body.length > 4000) fail(422, "invalid_inbox_share", "Choose at most 4,000 characters including the excerpt label.");
+  return body;
+};
+export class Inbox {
+  constructor(store) { this.store = store; this.db = store.db; }
+  auth(token, binding, roomId = null) {
+    if (typeof binding !== "string" || !/^[a-f0-9]{64}$/.test(binding)) fail(422, "session_binding_required", "Current account session binding required.");
+    return this.store.authenticateAccountSession(token, roomId, binding);
+  }
+  source(accountId, id) {
+    if (!validId(id)) fail(422, "invalid_inbox_source", "Choose a source.");
+    const row = this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? AND id=?").get(accountId, id);
+    if (!row) fail(404, "inbox_source_not_found", "Source not found.");
+    return row;
+  }
+  version(accountId, id, number) {
+    const row = this.db.prepare("SELECT data_json FROM private_inbox_versions WHERE account_id=? AND source_id=? AND revision=?").get(accountId, id, number);
+    if (!row) fail(404, "inbox_source_not_found", "Source version not found.");
+    return JSON.parse(row.data_json);
+  }
+  list(token, binding) {
+    return this.store.readTransaction(() => {
+      const auth = this.auth(token, binding);
+      const sources = this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? ORDER BY updated_at DESC,id").all(auth.account.id)
+        .map(row => { const d = this.version(auth.account.id, row.id, row.revision); return { id: row.id, revision: row.revision, adapter: d.adapter,
+          sender: d.sender, recipient: d.recipient, subject: d.subject, updatedAt: row.updated_at }; });
+      return { contractVersion: 1, viewer: viewer(auth), sources };
+    });
+  }
+  read(token, sourceId, binding) {
+    return this.store.readTransaction(() => {
+      const auth = this.auth(token, binding), row = this.source(auth.account.id, sourceId);
+      const draft = this.db.prepare("SELECT revision,source_revision,body,updated_at FROM private_inbox_drafts WHERE account_id=? AND source_id=?").get(auth.account.id, sourceId);
+      return { contractVersion: 1, viewer: viewer(auth), source: { id: row.id, revision: row.revision, ...this.version(auth.account.id, row.id, row.revision) },
+        draft: draft ? { revision: draft.revision, sourceRevision: draft.source_revision, body: draft.body, updatedAt: draft.updated_at } : null };
+    });
+  }
+  shareContext(token, sourceId, roomId, binding) {
+    return this.store.readTransaction(() => {
+      const auth = this.auth(token, binding, roomId), row = this.source(auth.account.id, sourceId), state = this.store.room(roomId).state;
+      return { contractVersion: 1, viewer: viewer(auth), sourceId, sourceRevision: row.revision, roomId, roomTitle: state.room.title,
+        audienceVersion: digest(inboxAudience(state)), audience: inboxAudience(state),
+        members: Object.values(state.members).filter(m => m.active === true).map(m => ({ id: m.id, displayName: m.displayName, kind: m.kind })) };
+    });
+  }
+  apply(token, request, binding) {
+    return this.store.transaction(() => {
+      const auth = this.auth(token, binding); validate(request);
+      if (request.action === "source.share") this.auth(token, binding, request.roomId);
+      const accountId = auth.account.id, fingerprint = digest(request);
+      const prior = this.db.prepare("SELECT fingerprint,receipt_json FROM private_inbox_commands WHERE account_id=? AND request_id=?").get(accountId, request.requestId);
+      if (prior) {
+        if (prior.fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Request ID already used for different inbox content.");
+        return { contractVersion: 1, viewer: viewer(auth), receipt: JSON.parse(prior.receipt_json), duplicate: true };
+      }
+      if (this.db.prepare("SELECT count(*) n FROM private_inbox_commands WHERE account_id=?").get(accountId).n >= inboxLimits.commands)
+        fail(409, "inbox_limit", "Private inbox pilot capacity reached.");
+      const now = this.store.now(), { sourceId, action, requestId } = request;
+      let receipt = { requestId, action, sourceId };
+      if (action === "source.save") {
+        const previous = this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? AND id=?").get(accountId, sourceId);
+        if ((previous?.revision ?? 0) !== request.expectedRevision) fail(409, "stale_inbox_source", "Source changed. Review the current version.");
+        if ((previous?.revision ?? 0) >= inboxLimits.versions || !previous && this.db.prepare("SELECT count(*) n FROM private_inbox_sources WHERE account_id=?").get(accountId).n >= inboxLimits.sources)
+          fail(409, "inbox_limit", "Private inbox pilot capacity reached.");
+        receipt.revision = request.expectedRevision + 1;
+        this.db.prepare(`INSERT INTO private_inbox_sources VALUES(?,?,?,?,?) ON CONFLICT(account_id,id)
+          DO UPDATE SET revision=excluded.revision,updated_at=excluded.updated_at`).run(accountId, sourceId, receipt.revision, now, now);
+        this.db.prepare("INSERT INTO private_inbox_versions VALUES(?,?,?,?)").run(accountId, sourceId, receipt.revision, JSON.stringify(request.data));
+      } else {
+        const source = this.source(accountId, sourceId);
+        if (source.revision !== request.sourceRevision) fail(409, "stale_inbox_source", "Source changed. Review the current version.");
+        if (action === "draft.save") {
+          const old = this.db.prepare("SELECT revision FROM private_inbox_drafts WHERE account_id=? AND source_id=?").get(accountId, sourceId);
+          if ((old?.revision ?? 0) !== request.expectedRevision) fail(409, "stale_inbox_draft", "Draft changed. Keep both versions and review.");
+          Object.assign(receipt, { revision: request.expectedRevision + 1, sourceRevision: request.sourceRevision });
+          this.db.prepare(`INSERT INTO private_inbox_drafts VALUES(?,?,?,?,?,?) ON CONFLICT(account_id,source_id)
+            DO UPDATE SET revision=excluded.revision,source_revision=excluded.source_revision,body=excluded.body,updated_at=excluded.updated_at`)
+            .run(accountId, sourceId, receipt.revision, receipt.sourceRevision, request.body, now);
+        } else {
+          const room = this.store.room(request.roomId);
+          if (request.audienceVersion !== digest(inboxAudience(room.state))) fail(409, "stale_inbox_audience", "Room audience changed. Review who will see this excerpt.");
+          const messageId = "excerpt-" + digest([accountId, requestId]);
+          const result = this.store.command(token, request.roomId, { id: "inbox-" + digest([accountId, requestId]), type: T.MESSAGE_POSTED,
+            data: { messageId, body: sharedBody(this.version(accountId, sourceId, source.revision), request.paragraphs) } }, binding);
+          Object.assign(receipt, { sourceRevision: source.revision, roomId: request.roomId, messageId, eventId: result.event.id, sequence: result.sequence });
+        }
+      }
+      this.db.prepare("INSERT INTO private_inbox_commands(account_id,request_id,fingerprint,request_json,receipt_json,auth_epoch,at) VALUES(?,?,?,?,?,?,?)")
+        .run(accountId, requestId, fingerprint, JSON.stringify(request), JSON.stringify(receipt), auth.account.authEpoch, now);
+      return { contractVersion: 1, viewer: viewer(auth), receipt, duplicate: false };
+    });
+  }
+  verify() {
+    return this.store.readTransaction(() => {
+    const require = condition => { if (!condition) throw new Error("Private inbox requires operator reconciliation"); };
+    const normalize = sql => sql?.trim().replace(/;$/, "").replace(/\s+/g, " ");
+    for (const sql of inboxSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)) {
+      const name = /^CREATE (?:TABLE|TRIGGER) ([a-z_]+)/.exec(sql.trim())[1];
+      require(normalize(this.db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(name)?.sql) === normalize(sql));
+    }
+    const sources = new Map(), drafts = new Map(); let versions = 0;
+    for (const row of this.db.prepare("SELECT * FROM private_inbox_commands ORDER BY sequence").all()) {
+      const request = JSON.parse(row.request_json), receipt = JSON.parse(row.receipt_json); validate(request);
+      require(row.request_id === request.requestId && row.fingerprint === digest(request) && revision(row.auth_epoch) && Number.isSafeInteger(row.at));
+      const key = canonical([row.account_id, request.sourceId]), prior = sources.get(key);
+      const expected = { requestId: request.requestId, action: request.action, sourceId: request.sourceId };
+      if (request.action === "source.save") {
+        require(request.expectedRevision === (prior?.revision ?? 0));
+        expected.revision = request.expectedRevision + 1;
+        require(same(this.version(row.account_id, request.sourceId, expected.revision), request.data));
+        sources.set(key, { account_id: row.account_id, id: request.sourceId, revision: expected.revision, created_at: prior?.created_at ?? row.at, updated_at: row.at }); versions++;
+      } else {
+        require(prior?.revision === request.sourceRevision);
+        if (request.action === "draft.save") {
+          require(request.expectedRevision === (drafts.get(key)?.revision ?? 0));
+          Object.assign(expected, { revision: request.expectedRevision + 1, sourceRevision: request.sourceRevision });
+          drafts.set(key, { account_id: row.account_id, source_id: request.sourceId, revision: expected.revision, source_revision: request.sourceRevision, body: request.body, updated_at: row.at });
+        } else {
+          const eventRow = this.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND id=?").get(request.roomId, receipt.eventId);
+          require(eventRow); const event = JSON.parse(eventRow.body);
+          const member = this.db.prepare("SELECT member_id FROM member_accounts WHERE room_id=? AND account_id=?").get(request.roomId, row.account_id);
+          const messageId = "excerpt-" + digest([row.account_id, request.requestId]);
+          require(event.actorId === member?.member_id && event.type === T.MESSAGE_POSTED
+            && same(event.data, { messageId, body: sharedBody(this.version(row.account_id, request.sourceId, request.sourceRevision), request.paragraphs) }));
+          Object.assign(expected, { sourceRevision: request.sourceRevision, roomId: request.roomId, messageId, eventId: receipt.eventId, sequence: eventRow.sequence });
+        }
+      }
+      require(same(receipt, expected));
+    }
+    const rows = name => this.db.prepare("SELECT * FROM " + name).all().map(canonical).sort();
+    require(same(rows("private_inbox_sources"), [...sources.values()].map(canonical).sort()));
+    require(same(rows("private_inbox_drafts"), [...drafts.values()].map(canonical).sort()));
+    require(this.db.prepare("SELECT count(*) n FROM private_inbox_versions").get().n === versions);
+    return { sources: sources.size, drafts: drafts.size, versions };
+    });
+  }
+}

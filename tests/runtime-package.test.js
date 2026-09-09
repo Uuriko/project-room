@@ -8,20 +8,20 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRuntimePackage, verifyRuntimePackage, publicAssets } from "../scripts/runtime-package.mjs";
 import { assetPaths } from "../cloudflare/build-assets.mjs";
-import { createRecoveryFixture } from "../scripts/recovery-fixture.mjs";
-import { auditRecovery } from "../server/recovery.mjs";
 import { candidateRuntimeFixture } from "../scripts/candidate-runtime-fixture.mjs";
+import { frozenRecoveryFixture } from "../scripts/frozen-runtime-fixture.mjs";
 
 const repository = fileURLToPath(new URL("../", import.meta.url));
 
-test("exact-commit runtime package verifies cold, excludes private state and preserves populated v9 data", async t => {
+test("exact-commit runtime package verifies cold, excludes private state and preserves populated committed-schema data", async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-package-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim();
   const destination = join(directory, "runtime");
   const receipt = createRuntimePackage({ repository, commit, destination });
-  assert.equal(receipt.schemaVersion, 14); assert.deepEqual(publicAssets, assetPaths);
-  assert.equal(receipt.files, 47 + ["server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "src/agent-connections.js", "client/mcp-stdio.mjs", "scripts/agent-mcp.mjs", "client/work-actions.mjs", "server/work-discussion.mjs", "server/text-results.mjs", "client/attention-inbox.mjs", "src/room-charter.js", "src/room-instructions.js", "src/reply-requests.js", "server/reply-requests.mjs", "client/reply-actions.mjs", "scripts/agent-replies.mjs", "client/request-notices.mjs", "src/work-help.js", "server/work-help.mjs", "src/help-offers.js", "client/help-actions.mjs"].filter(path => existsSync(join(destination, path))).length);
+  const committedSchema = Number(/STORE_SCHEMA_VERSION = (\d+)/.exec(execFileSync("git", ["show", commit + ":server/writer-fence.mjs"], { cwd: repository, encoding: "utf8" }))[1]);
+  assert.equal(receipt.schemaVersion, committedSchema); assert.deepEqual(publicAssets, assetPaths);
+  assert.equal(receipt.files, 47 + ["server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "src/agent-connections.js", "client/mcp-stdio.mjs", "scripts/agent-mcp.mjs", "client/work-actions.mjs", "server/work-discussion.mjs", "server/text-results.mjs", "client/attention-inbox.mjs", "src/room-charter.js", "src/room-instructions.js", "src/reply-requests.js", "server/reply-requests.mjs", "client/reply-actions.mjs", "scripts/agent-replies.mjs", "client/request-notices.mjs", "src/work-help.js", "server/work-help.mjs", "src/help-offers.js", "client/help-actions.mjs", "server/inbox.mjs"].filter(path => existsSync(join(destination, path))).length);
   assert.equal(existsSync(join(destination, ".git")), false);
   assert.equal(existsSync(join(destination, "node_modules")), false);
   for (const path of ["server.mjs", "src/app.js", "cloudflare/room.mjs"]) {
@@ -51,7 +51,9 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   const assets = join(directory, "assets");
   assert.equal(await buildAssets(pathToFileURL(assets + "/")), 21);
   for (const path of publicAssets) assert.deepEqual(readFileSync(join(assets, path)), readFileSync(join(destination, path)));
-  const f = createRecoveryFixture(join(directory, "fixture.sqlite"));
+  const committedFixture = await frozenRecoveryFixture(repository, destination, commit);
+  const { auditRecovery } = await import(pathToFileURL(join(destination, "server/recovery.mjs")));
+  const f = committedFixture(join(directory, "fixture.sqlite"));
   try {
     const helpRetries = [];
     for (const status of ["open", "withdrawn"]) {
@@ -69,6 +71,12 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
     const restored = new RoomStore(f.filename, { now: f.now });
     try {
       assert.deepEqual(auditRecovery(restored), before);
+      for (const [index, request] of (f.inboxRequests ?? []).entries()) {
+        const result = restored.inbox.apply(f.owner.token, request, f.owner.session.sessionBinding);
+        assert.equal(result.duplicate, true);
+        assert.deepEqual(result.receipt, f.inboxReceipts[index]);
+      }
+      if (f.inboxRequests) assert.equal(restored.inbox.read(f.owner.token, "recovery-source", f.owner.session.sessionBinding).draft.body, "Private recovery reply");
       for (const { command, receipt } of helpRetries) assert.equal(restored.command(f.keys.owner, "commons", command).event.id, receipt.event.id);
       for (const status of ["open", "withdrawn"]) assert.equal(restored.room("commons").state.workItems[`packaged-help-${status}`].helpWanted.status, status);
       assert.deepEqual(auditRecovery(restored), before, "Cold exact-package help retries preserve every table");
@@ -136,7 +144,7 @@ test("uncommitted candidate packages cold in an isolated synthetic commit, inclu
   const directory = mkdtempSync(join(tmpdir(), "room-candidate-package-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const candidate = candidateRuntimeFixture(repository, directory), destination = join(directory, "runtime");
-  const receipt = createRuntimePackage({ ...candidate, destination }); assert.equal(receipt.files, 69);
+  const receipt = createRuntimePackage({ ...candidate, destination }); assert.equal(receipt.files, 70);
   const program = `
     import { RoomStore } from ${JSON.stringify(pathToFileURL(join(destination, "server/store.mjs")).href)};
     import { initialRoom } from ${JSON.stringify(pathToFileURL(join(destination, "server/bootstrap.mjs")).href)};

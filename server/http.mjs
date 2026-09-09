@@ -194,6 +194,29 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.writeHead(200, { "Content-Type": `${type}; charset=utf-8` });
         return res.end(req.method === "HEAD" ? undefined : data);
       }
+      if (url.pathname === "/api/inbox" || url.pathname.startsWith("/api/inbox/")) {
+        // Inbox authority is an account session, never a Room/agent bearer key.
+        if (req.headers.authorization) reject(401, "account_session_required", "Use your current account session.");
+        const token = cookie(req, accountCookieName), binding = accountBinding(req);
+        const auth = store.authenticateAccountSession(token, null, binding);
+        if (url.pathname === "/api/inbox" && req.method === "GET") return json(res, 200, store.inbox.list(token, binding));
+        const source = /^\/api\/inbox\/sources\/([^/]{1,384})(?:\/(share-context))?$/.exec(url.pathname);
+        if (source && req.method === "GET") {
+          const id = pathId(source[1]);
+          if (source[2]) {
+            const roomId = url.searchParams.get("roomId");
+            if (!roomId || url.searchParams.getAll("roomId").length !== 1) reject(422, "invalid_room", "Choose a room.");
+            return json(res, 200, store.inbox.shareContext(token, id, roomId, binding));
+          }
+          return json(res, 200, store.inbox.read(token, id, binding));
+        }
+        if (url.pathname === "/api/inbox/commands" && req.method === "POST") {
+          protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
+          const result = store.inbox.apply(token, await body(req), binding);
+          return json(res, result.duplicate ? 200 : 201, result);
+        }
+        reject(404, "not_found", "Inbox route not found.");
+      }
       if (url.pathname === "/api/account-session") {
         const slotToken = cookie(req, accountCookieName);
         if (req.method === "GET") {

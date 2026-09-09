@@ -22,6 +22,7 @@ import { ReplyRequests } from "./reply-requests.mjs";
 import { validateHelpData } from "../src/work-help.js";
 import { auditWorkHelp } from "./work-help.mjs";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, validateHelpOfferData } from "../src/help-offers.js";
+import { Inbox, inboxSchema } from "./inbox.mjs";
 
 export class ServiceError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -212,8 +213,9 @@ export class RoomStore {
     this.reminders = new Reminders(this);
     this.agentConnections = new AgentConnections(this);
     this.replyRequests = new ReplyRequests(this);
+    this.inbox = new Inbox(this);
     const version = this.storagePlatform.version(this.db);
-    const supported = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, STORE_SCHEMA_VERSION]);
+    const supported = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, STORE_SCHEMA_VERSION]);
     const hasSchema = version === 0 && this.storagePlatform.hasSchema(this.db);
     if (!supported.has(version) || hasSchema) {
       this.db.close();
@@ -229,6 +231,7 @@ export class RoomStore {
         this.reminders.verifySchema();
         this.agentConnections.verify();
         this.verifyHelpHistory();
+        this.inbox.verify();
         return;
       } catch (error) { this.db.close(); throw error; }
     }
@@ -278,6 +281,7 @@ export class RoomStore {
       if (version < 7) this.db.exec(shareLinkSchema);
       if (version < 8) this.db.exec(reminderSchema);
       if (version < 9) this.db.exec(agentConnectionSchema);
+      if (version < 15) this.db.exec(inboxSchema);
       if (version < STORE_SCHEMA_VERSION) this.storagePlatform.installWriterFence(this.db);
       this.storagePlatform.verifyWriterFence(this.db);
       this.verifyInvitationAudit();
@@ -285,6 +289,7 @@ export class RoomStore {
       this.reminders.verifySchema();
       this.agentConnections.verify();
       this.verifyHelpHistory();
+      this.inbox.verify();
     }); } catch (error) { this.db.close(); throw error; }
   }
 

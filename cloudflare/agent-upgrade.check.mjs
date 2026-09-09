@@ -8,9 +8,9 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
 import { createRuntimePackage } from '../scripts/runtime-package.mjs';
-import { frozenRecoveryFixture, v8ConnectionBaseline, v9TextBaseline, v10CharterBaseline, v11ReplyBaseline, v12HelpBaseline, v13OfferBaseline } from '../scripts/frozen-runtime-fixture.mjs';
+import { frozenRecoveryFixture, v8ConnectionBaseline, v9TextBaseline, v10CharterBaseline, v11ReplyBaseline, v12HelpBaseline, v13OfferBaseline, v14InboxBaseline } from '../scripts/frozen-runtime-fixture.mjs';
 
-for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline], [10, v10CharterBaseline], [11, v11ReplyBaseline], [12, v12HelpBaseline], [13, v13OfferBaseline]]) test(`real Workers v${sourceVersion}→v14 permit replacement, rollback, old-writer refusal and restart`, { timeout: 60000 }, async () => {
+for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline], [10, v10CharterBaseline], [11, v11ReplyBaseline], [12, v12HelpBaseline], [13, v13OfferBaseline], [14, v14InboxBaseline]]) test(`real Workers v${sourceVersion}→v15 permit replacement, rollback, old-writer refusal and restart`, { timeout: 60000 }, async () => {
   const directory = mkdtempSync(join(tmpdir(), 'room-agent-worker-upgrade-')), repository = fileURLToPath(new URL('../', import.meta.url));
   const destination = join(directory, 'old'); let f, mf;
   try {
@@ -47,7 +47,7 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
             let observed;
             AgentConnections.prototype.verifyHistory=()=>{observed={version:version(),permit:permit()};throw new Error('synthetic failure');};
             try{assert.throws(current,{code:'connection_integrity_error'});}finally{AgentConnections.prototype.verifyHistory=verify;}
-            assert.deepEqual(observed,{version:14,permit:14},'fault occurs after installing the new writer');
+            assert.deepEqual(observed,{version:15,permit:15},'fault occurs after installing the new writer');
             assert.equal(version(),${sourceVersion});assert.equal(permit(),0);assert.deepEqual(catalog(),before);assert.deepEqual(data(),records);assert.equal(oldWrite().changes,1);
             return Response.json({rolledBack:true});
           }
@@ -57,7 +57,7 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
             return Response.json({rejected:true});
           }
           if(path==='/upgrade') {
-            const before=data(), store=current(); assert.equal(version(),14);assert.equal(permit(),0);assert.deepEqual(data(),before);
+            const before=data(), store=current(); assert.equal(version(),15);assert.equal(permit(),0);assert.deepEqual(data(),before);
             assert.throws(oldWrite,/reconciliation/); assert.throws(()=>new OldStore(null,{database:new OldDatabase(this.ctx.storage),storagePlatform:oldStorage}),/newer than this service/);
             assert.equal(store.readTransaction(()=>permit()),0);assert.throws(()=>store.readTransaction(()=>store.createAccount('forbidden')),/read-only/);
             assert.equal(store.db.prepare("UPDATE accounts SET revision=revision WHERE id='missing'").run().changes,0);
@@ -94,10 +94,25 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
             const releaseCommand={id:'offer-release',type:'work.help_offer_updated',data:{workItemId:'help-task',offerId:'worker-offer',expectedRevision:1,expectedOfferRevision:1,status:'released',reason:'End coordination only',externalActivityUnverified:true}};
             const releaseSaved=store.command(this.env.AGENT,'commons',releaseCommand);
             assert.equal(store.room('commons').state.workItems['help-task'].revision,1);
-            return Response.json({upgraded:true,details,disconnect,receipt:result.receipt,charterCommand,charterSaved,question,asked,answer,answered,helpCommand,helpSaved,helpWithdraw,helpClosed,offerCommand,offerSaved,selectCommand,selectSaved,releaseCommand,releaseSaved,cursors,audit:auditRecovery(store)});
+            const inboxRequests = [
+              {action:'source.save',requestId:'worker-source',sourceId:'private-source',expectedRevision:0,
+                data:{adapter:'synthetic',sender:'sender@example.test',recipient:'owner@example.test',subject:'Private sample',
+                  paragraphs:['Shared sample paragraph','Excluded private paragraph']}},
+              {action:'draft.save',requestId:'worker-draft',sourceId:'private-source',expectedRevision:0,sourceRevision:1,body:'Keep private'}
+            ];
+            const inboxSaved = inboxRequests.map(req=>store.inbox.apply(f.token,req,f.session.sessionBinding));
+            const shareContext=store.inbox.shareContext(f.token,'private-source','commons',f.session.sessionBinding);
+            inboxRequests.push({action:'source.share',requestId:'worker-excerpt',sourceId:'private-source',sourceRevision:1,roomId:'commons',audienceVersion:shareContext.audienceVersion,paragraphs:[0]});
+            inboxSaved.push(store.inbox.apply(f.token,inboxRequests[2],f.session.sessionBinding));
+            assert.equal(store.inbox.read(f.token,'private-source',f.session.sessionBinding).draft.body,'Keep private');
+            assert.throws(()=>store.inbox.list(this.env.AGENT,f.session.sessionBinding),{status:401});
+            assert.equal(JSON.stringify(store.snapshot(this.env.AGENT,'commons')).includes('Excluded private paragraph'),false);
+            return Response.json({upgraded:true,details,disconnect,receipt:result.receipt,charterCommand,charterSaved,question,asked,answer,answered,helpCommand,helpSaved,helpWithdraw,helpClosed,offerCommand,offerSaved,selectCommand,selectSaved,releaseCommand,releaseSaved,inboxRequests,inboxSaved,cursors,audit:auditRecovery(store)});
           }
           if(path==='/restart') {
-            const proof=await request.json(),store=current();assert.equal(version(),14);assert.equal(permit(),0);
+            const proof=await request.json(),store=current();assert.equal(version(),15);assert.equal(permit(),0);
+            proof.inboxRequests.forEach((req,index)=>assert.deepEqual(store.inbox.apply(f.token,req,f.session.sessionBinding).receipt,proof.inboxSaved[index].receipt));
+            assert.equal(store.inbox.read(f.token,'private-source',f.session.sessionBinding).draft.body,'Keep private');
             assert.deepEqual(store.agentConnections.apply(f.token,'commons',proof.details,f.session.sessionBinding).receipt,proof.receipt);
             assert.equal(store.agentConnections.apply(f.token,'commons',proof.disconnect,f.session.sessionBinding).duplicate,true);
             assert.equal(store.agentConnections.list(f.token,'commons',f.session.sessionBinding).connections.find(c=>c.memberId==='worker-agent').status,'disconnected');

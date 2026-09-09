@@ -56,6 +56,7 @@ export function auditRecovery(store) {
     }
     const invitations = store.verifyInvitationAudit();
     store.shareLinks.verify(); store.reminders.verifySchema(); store.agentConnections.verify();
+    store.inbox.verify();
     const reminders = store.db.prepare("SELECT * FROM private_reminders").all();
     const receipts = store.db.prepare("SELECT * FROM private_reminder_commands").all();
     const byWork = new Map();

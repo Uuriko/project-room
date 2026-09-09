@@ -5,12 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRuntimePackage } from "../scripts/runtime-package.mjs";
-import { frozenRecoveryFixture, v8ConnectionBaseline, v9TextBaseline, v10CharterBaseline, v11ReplyBaseline, v12HelpBaseline, v13OfferBaseline } from "../scripts/frozen-runtime-fixture.mjs";
+import { frozenRecoveryFixture, v8ConnectionBaseline, v9TextBaseline, v10CharterBaseline, v11ReplyBaseline, v12HelpBaseline, v13OfferBaseline, v14InboxBaseline } from "../scripts/frozen-runtime-fixture.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { AgentConnections } from "../server/agent-connections.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 
-for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline], [10, v10CharterBaseline], [11, v11ReplyBaseline], [12, v12HelpBaseline], [13, v13OfferBaseline]]) test(`genuine v${version} data upgrades atomically; old writers cannot write v14`, async t => {
+for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline], [10, v10CharterBaseline], [11, v11ReplyBaseline], [12, v12HelpBaseline], [13, v13OfferBaseline], [14, v14InboxBaseline]]) test(`genuine v${version} data upgrades atomically; old writers cannot write v15`, async t => {
   const root = mkdtempSync(join(tmpdir(), "room-agent-upgrade-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const repository = fileURLToPath(new URL("../", import.meta.url)), destination = join(root, "v8");
@@ -27,18 +27,18 @@ for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline
   AgentConnections.prototype.verifyHistory = function () { observedVersion = this.store.storagePlatform.version(this.store.db); throw new Error("synthetic final failure"); };
   try { assert.throws(() => new RoomStore(f.filename), { code: "connection_integrity_error" }); }
   finally { AgentConnections.prototype.verifyHistory = verify; }
-  assert.equal(observedVersion, 14, "fault was injected after installing the new writer");
+  assert.equal(observedVersion, 15, "fault was injected after installing the new writer");
   assert.equal(f.store.db.prepare("PRAGMA user_version").get().user_version, version);
   assert.deepEqual(catalog(), oldCatalog); assert.deepEqual(oldAudit(f.store), before);
   assert.equal(cached.run(f.owner.session.account.id).changes, 1);
   const current = new RoomStore(f.filename, { now: f.now }); t.after(() => current.close());
-  assert.deepEqual(auditRecovery(current).tables.filter(row => version >= 9 || !row.table.startsWith("agent_connection")), before.tables);
+  assert.deepEqual(auditRecovery(current).tables.filter(row => !row.table.startsWith("private_inbox_") && (version >= 9 || !row.table.startsWith("agent_connection"))), before.tables);
   assert.equal(current.authenticate(f.keys.agent).member.id, "agent");
-  assert.throws(() => cached.run(f.owner.session.account.id), /project_room_writer_v(?:9|10|11|12|13|14)|unsupported database writer/);
+  assert.throws(() => cached.run(f.owner.session.account.id), /project_room_writer_v(?:9|10|11|12|13|14|15)|unsupported database writer/);
   assert.throws(() => new OldStore(f.filename), /newer than this service/);
-  current.createAccount("after-v14-upgrade");
-  assert.equal(current.account("after-v14-upgrade").active, true);
-  assert.equal(auditRecovery(current).schemaVersion, 14);
+  current.createAccount("after-v15-upgrade");
+  assert.equal(current.account("after-v15-upgrade").active, true);
+  assert.equal(auditRecovery(current).schemaVersion, 15);
   const cursors = current.db.prepare("SELECT * FROM cursors ORDER BY room_id,member_id").all();
   const question = { id: "upgrade-question", type: "message.posted", data: { messageId: "upgrade-question-message",
     body: "Can you check these instructions?", requestKind: "reply", toMemberId: "agent" } };
@@ -107,7 +107,8 @@ test("genuine v11 legacy request-like fields stay ordinary, while reserved marke
         const current = new RoomStore(filename);
         try {
           assert.equal(Object.hasOwn(current.room("commons").state, "replyRequests"), false);
-          assert.deepEqual(records().tables, before.tables);
+          for (const [table, rows] of Object.entries(before.tables)) assert.deepEqual(records().tables[table], rows);
+          assert.ok(Object.entries(records().tables).filter(([table]) => table.startsWith("private_inbox_")).every(([, rows]) => rows.length === 0));
           auditRecovery(current);
         } finally { current.close(); }
       } else {
