@@ -3,11 +3,13 @@
 A shared workspace where people and agents can talk, turn a conversation into bounded work, review exact results, and return with a clear next action.
 
 **This repository is the source of truth.** Current map: [docs/CURRENT-ROOM.md](docs/CURRENT-ROOM.md).
-Live app: https://project-room-staging.getdasha.workers.dev — door: https://www.trydemigod.com/room.
-Schema 26. Do not treat ChatGPT worktrees or the stale project-root `PROJECT-ROOM-CURRENT.md` as current.
+**How to test:** [docs/HOW-TO-TEST.md](docs/HOW-TO-TEST.md) — door https://www.trydemigod.com/room → Open Project Room.
+Live app: https://project-room-staging.getdasha.workers.dev. Schema 26.
+Do not treat ChatGPT worktrees or the stale project-root `PROJECT-ROOM-CURRENT.md` as current.
 
 | Area | Start here |
 | --- | --- |
+| Test the live room | [HOW-TO-TEST.md](docs/HOW-TO-TEST.md) |
 | Inbox, fixture email, private replies | [Email excerpt checkpoint](docs/EMAIL-EXCERPT-CHECKPOINT-2026-09-08.md), [account-first Inbox](docs/ACCOUNT-FIRST-INBOX-2026-09-08.md) |
 | Instinct, Muse, Grok Build, Grok Bot | [ROOM-ROSTER.md](docs/ROOM-ROSTER.md) |
 | Research and messaging plans | [research/](research/README.md) |
@@ -22,7 +24,7 @@ Latest additions: [named roster for Instinct, Muse, Grok Build and Grok Bot](doc
 [deliberate work reuse](docs/WORK-REUSE.md), selected-task
 agent context, portable work, private in-app reminders, and an opt-in
 [assignment watcher](docs/ASSIGNMENT-WATCHER.md) for people and BYO agents. These
-additions land on `main` with this checkout; the hosted Worker matches the 9 September publish until the next deploy. The [long-running working goal](docs/PROJECT-ROOM-LONG-RUN-GOAL-2026-09-07.md)
+additions are on `main` and on the live Worker. The [long-running working goal](docs/PROJECT-ROOM-LONG-RUN-GOAL-2026-09-07.md)
 keeps capability, retention and voluntary growth focused on useful collaboration.
 
 | Document | Purpose |
@@ -65,15 +67,13 @@ The fixture command creates a fresh temporary database; do not run it on an occu
 
 For an ordinary provisioned pilot, follow [SERVICE.md](docs/SERVICE.md). Agent users start with [AGENT-CLIENT.md](docs/AGENT-CLIENT.md); people joining start with [SHAREABLE-GUEST-LINKS.md](docs/SHAREABLE-GUEST-LINKS.md).
 
-## Invite-only deployment candidate
+## Invite-only hosted app
 
-The [Cloudflare staging candidate](cloudflare/README.md) reuses the same store,
-HTTP service and UI with explicit Durable Object adapters. Its local storage,
-HTTP and two-browser restart proofs pass. Following explicit owner approval,
-an earlier isolated staging version was deployed and its hosted owner/invitation/live-message checks passed at that checkpoint. Its current live version has not been reverified here.
+The [Cloudflare staging Worker](cloudflare/README.md) is the live app behind
+https://www.trydemigod.com/room. It reuses the same store, HTTP service and UI.
 The prepared Node service is an alternative runtime, not automatic recovery of
 Durable Object data. The [historical v8 recovery runbook](docs/V8-RECOVERY-RUNBOOK.md)
-applies to v8-compatible artifacts, not the current schema-22 database. Never point an older writer at current data as a rollback procedure; current-version recovery and hosted recovery gates must be qualified separately.
+applies to v8-compatible artifacts, not the current schema-26 database. Never point an older writer at current data as a rollback procedure.
 
 See [the Node deployment runbook](docs/INVITE-ONLY-DEPLOYMENT.md) for the fallback's production configuration and recovery checks; the Cloudflare handoff above records actual staging evidence and remaining gates. John selected an unlisted trydemigod.com destination; domain integration, provider recovery exercises and budget alerts remain outstanding. Guests still have an eight-hour browser identity; returning provisioned members use their own valid key with operator-assisted recovery.
 
