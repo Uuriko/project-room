@@ -139,6 +139,11 @@ export class StoreTestRoom {
       assert.deepEqual(emailView.source.paragraphs, [mail.message.body.content]);
       assert.equal(emailView.source.envelope, undefined);
       assert.deepEqual(emailView.source.capabilities, { draft: true, share: false, send: false });
+      const excerpt = { action: 'source.excerpt', requestId: 'mail-excerpt', sourceId: envelope.sourceId, sourceRevision: 1,
+        roomId: 'commons', audienceVersion: store.inbox.shareContext(mailToken, envelope.sourceId, 'commons', mailBinding).audienceVersion,
+        selection: { start: 0, end: 5 } };
+      const shared = store.inbox.apply(mailToken, excerpt, mailBinding);
+      assert.equal(store.room('commons').state.messages.find(m => m.id === shared.receipt.messageId).body, 'Shared email excerpt\n\nShall');
       const checkpoint = auditRecovery(store).dataSha256;
       store.db.exec("CREATE TRIGGER mail_test_failure BEFORE INSERT ON private_email_commands BEGIN SELECT RAISE(ABORT,'fixture mail failure'); END");
       assert.throws(() => store.email.apply(mailToken, { ...mailPage, requestId: 'mail-failed-page', expectedRevision: 1,
@@ -147,7 +152,7 @@ export class StoreTestRoom {
       store.db.exec('DROP TRIGGER mail_test_failure');
       assert.equal(auditRecovery(store).dataSha256, checkpoint);
       return Response.json({ guests, credentials, sequence: store.room('commons').sequence, eventId: receipt.event.id, owner, nativeBody, nativeCommand, nativeSaved,
-        email: { token: mailToken, binding: mailBinding, page: mailPage, sourceId: envelope.sourceId } });
+        email: { token: mailToken, binding: mailBinding, page: mailPage, sourceId: envelope.sourceId, excerpt, shared } });
     }
     if (path === '/resume') {
       const { guests, credentials, sequence, eventId, owner, nativeBody, nativeCommand, nativeSaved, email } = await request.json();
@@ -168,6 +173,7 @@ export class StoreTestRoom {
       store.shareLinks.verify();
       assert.equal(store.email.apply(email.token, email.page, email.binding).duplicate, true);
       assert.equal(store.inbox.read(email.token, email.sourceId, email.binding).draft.body, 'Recover this private email draft');
+      assert.deepEqual(store.inbox.apply(email.token, email.excerpt, email.binding).receipt, email.shared.receipt);
       const emailView = store.inbox.read(email.token, email.sourceId, email.binding, { emailView: true });
       assert.equal(emailView.source.email.connectionState, 'active');
       assert.equal(emailView.draft.body, 'Recover this private email draft');

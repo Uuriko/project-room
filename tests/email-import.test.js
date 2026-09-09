@@ -15,6 +15,7 @@ import { compareRecoveryCaptures } from "../scripts/compare-recovery.mjs";
 import { candidateRuntimeFixture } from "../scripts/candidate-runtime-fixture.mjs";
 import { createRuntimePackage } from "../scripts/runtime-package.mjs";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { prepareInboxResult } from "../scripts/inbox-result-fixture.mjs";
 
 function fixture(t) {
   const f = createAcceptanceFixture(); f.filename = join(f.directory, "room.sqlite");
@@ -38,8 +39,63 @@ function fixture(t) {
   f.read = () => f.store.inbox.read(f.auth.token, f.envelope().sourceId, f.auth.sessionBinding);
   f.draft = body => f.store.inbox.apply(f.auth.token, { action: "draft.save", requestId: randomUUID(), sourceId: f.envelope().sourceId,
     sourceRevision: f.read().source.revision, expectedRevision: f.read().draft?.revision ?? 0, body }, f.auth.sessionBinding);
+  f.excerpt = (selection = { start: 0, end: 4 }) => ({ action: "source.excerpt", requestId: randomUUID(), sourceId: f.envelope().sourceId,
+    sourceRevision: f.read().source.revision, roomId: "commons",
+    audienceVersion: f.store.inbox.shareContext(f.auth.token, f.envelope().sourceId, "commons", f.auth.sessionBinding).audienceVersion, selection });
+  f.share = request => f.store.inbox.apply(f.auth.token, request, f.auth.sessionBinding);
   return f;
 }
+test("exact email excerpt shares only selected normalized text and returns a reviewed private draft", async t => {
+  const f = fixture(t); f.raw.message.body.content = "Keep 🪷\r\nthis line\r\n\r\nPrivate budget: 4200";
+  f.configure(); f.apply(f.page()); f.draft("My original private draft");
+  const view = f.store.inbox.read(f.auth.token, f.envelope().sourceId, f.auth.sessionBinding, { emailView: true, excerptView: true });
+  assert.equal(view.source.email.view, "email-excerpt-v1"); assert.equal(view.source.capabilities.share, true);
+  assert.equal(view.source.paragraphs[0], "Keep 🪷\nthis line\n\nPrivate budget: 4200");
+  const selected = "Keep 🪷\nthis line", request = f.excerpt({ start: 0, end: selected.length }), shared = f.share(request);
+  const message = f.store.room("commons").state.messages.find(m => m.id === shared.receipt.messageId);
+  assert.equal(message.body, "Shared email excerpt\n\n" + selected);
+  for (const secret of ["4200", "observer@example.test", f.raw.message.subject, f.raw.message.id, "brief.txt"])
+    assert.equal(JSON.stringify(message).includes(secret), false);
+  assert.equal(f.share(request).duplicate, true);
+  assert.throws(() => f.share({ ...request, selection: { start: 0, end: 4 } }), { code: "idempotency_conflict" });
+  const result = prepareInboxResult(f, f.auth.token, f.auth.sessionBinding, { sourceId: request.sourceId, shareReceipt: shared, ready: false });
+  assert.equal(result.selected().status, "no_native_result"); result.complete(); result.review(); result.decide();
+  f.share(result.adoption()); assert.equal(f.read().draft.body, result.body); assert.equal(f.read().draft.origin.unchanged, true);
+  assert.equal(f.store.inbox.sends(f.auth.token, request.sourceId, f.auth.sessionBinding).sends.length, 0);
+  assert.throws(() => f.store.inbox.sendContext(f.auth.token, request.sourceId, f.auth.sessionBinding), { code: "email_sending_unavailable" });
+  const before = auditRecovery(f.store), backup = await backupRoom(f.filename, f.directory), restored = new RoomStore(backup.filename, { readOnly: true });
+  try { assert.deepEqual(auditRecovery(restored), before); } finally { restored.close(); }
+  f.store.close(); f.store = new RoomStore(f.filename);
+  assert.equal(f.share(request).duplicate, true); assert.equal(f.read().draft.body, result.body);
+});
+test("email selections reject invalid offsets, empty or oversized text, HTML and stale context atomically", t => {
+  const f = fixture(t); f.raw.message.body.content = "🪷\n  \n" + "x".repeat(5000); f.configure(); f.apply(f.page());
+  const before = auditRecovery(f.store);
+  for (const selection of [{ start: 0, end: 1 }, { start: 1, end: 2 }, { start: 2, end: 6 }, { start: -1, end: 3 },
+    { start: 0, end: 99999 }, { start: 2, end: 2 }, { start: 0, end: 5006 }, { start: 0, end: 2, body: "Injected" }])
+    assert.throws(() => f.share(f.excerpt(selection)), { code: "invalid_inbox_share" });
+  assert.throws(() => f.share({ ...f.excerpt(), audienceVersion: "0".repeat(64) }), { code: "stale_inbox_audience" });
+  assert.throws(() => f.store.inbox.apply(f.keys.producer, f.excerpt(), f.auth.sessionBinding), { status: 401 });
+  assert.deepEqual(auditRecovery(f.store), before);
+  const stale = f.excerpt({ start: 0, end: 2 });
+  f.raw.message.changeKey = "new-email-version"; f.raw.options.attachmentObservation.messageRevision = f.raw.message.changeKey;
+  f.raw.message.body.content = "Changed source"; f.apply(f.page());
+  assert.throws(() => f.share(stale), { code: "stale_inbox_source" });
+  f.raw.message.changeKey = "html-version"; f.raw.options.attachmentObservation.messageRevision = f.raw.message.changeKey;
+  f.raw.message.body = { contentType: "html", content: "<p>HTML</p>" }; f.apply(f.page());
+  assert.throws(() => f.share(f.excerpt()), { code: "email_sharing_unavailable" });
+});
+test("saved email can be deliberately shared after disconnect; failed journal writes leave no room excerpt", t => {
+  const f = fixture(t); f.configure(); f.apply(f.page());
+  f.apply({ action: "connection.disconnect", requestId: randomUUID(), connectionId: f.raw.connection.id, expectedRevision: 1 });
+  const request = f.excerpt(), before = auditRecovery(f.store);
+  f.store.db.exec("CREATE TRIGGER excerpt_failure BEFORE INSERT ON private_inbox_commands BEGIN SELECT RAISE(ABORT,'fixture excerpt failure'); END");
+  assert.throws(() => f.share(request), /fixture excerpt failure/);
+  f.store.db.exec("DROP TRIGGER excerpt_failure"); assert.deepEqual(auditRecovery(f.store), before);
+  const shared = f.share(request); assert.equal(f.share(request).duplicate, true);
+  assert.equal(f.store.room("commons").state.messages.filter(m => m.id === shared.receipt.messageId).length, 1);
+  assert.doesNotThrow(() => auditRecovery(f.store));
+});
 test("negotiated email reading projects inert text and private recipient details without raw provider context", t => {
   const f = fixture(t); f.configure(); f.apply(f.page());
   const before = auditRecovery(f.store);
@@ -99,7 +155,7 @@ test("fixture email import reuses private Inbox storage without changing rooms o
   assert.equal(f.store.inbox.list(f.auth.token, f.auth.sessionBinding, { includeEmail: true }).sources[0].subject, f.raw.message.subject);
   assert.deepEqual(f.store.room("commons"), before);
   assert.deepEqual(f.store.email.verify(), { connections: 1, folders: 1, sources: 1 });
-  assert.equal(auditRecovery(f.store).schemaVersion, 19);
+  assert.equal(auditRecovery(f.store).schemaVersion, 20);
 });
 test("exact page retries and unchanged observations do not create another source revision", t => {
   const f = fixture(t); f.configure(); const request = f.page(), original = f.apply(request);
@@ -278,11 +334,14 @@ test("offline recovery comparison flags disconnected email authority without emi
 });
 test("cold allowlisted candidate package reopens imported email and resumes the same partial scan", async t => {
   const f = fixture(t); f.configure(); const page = f.page({ complete: false }); f.apply(page); f.draft("Cold package private answer");
+  const excerpt = f.excerpt(), shared = f.share(excerpt), before = auditRecovery(f.store);
   const candidate = candidateRuntimeFixture(fileURLToPath(new URL("../", import.meta.url)), f.directory);
   const destination = join(f.directory, "email-runtime"); createRuntimePackage({ ...candidate, destination });
   const { RoomStore: ColdStore } = await import(pathToFileURL(join(destination, "server/store.mjs")));
   const cold = new ColdStore(f.filename);
   try {
+    assert.deepEqual(auditRecovery(cold), before);
+    assert.deepEqual(cold.inbox.apply(f.auth.token, excerpt, f.auth.sessionBinding).receipt, shared.receipt);
     assert.equal(cold.email.apply(f.auth.token, page, f.auth.sessionBinding).duplicate, true);
     assert.equal(cold.inbox.read(f.auth.token, f.envelope().sourceId, f.auth.sessionBinding).draft.body, "Cold package private answer");
     const view = cold.inbox.read(f.auth.token, f.envelope().sourceId, f.auth.sessionBinding, { emailView: true });

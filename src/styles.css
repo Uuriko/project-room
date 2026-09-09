@@ -634,6 +634,8 @@ summary { overflow-wrap: anywhere; }
 }
 #inbox-share-paragraphs label { color: var(--text); font-weight: 400; letter-spacing: normal; }
 #inbox-share-audience { max-height: 8rem; overflow-y: auto; }
+#inbox-excerpt-text { box-sizing: border-box; }
+#inbox-excerpt-preview { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 16rem; overflow: auto; font: inherit; }
 @media (max-width: 720px) {
   .inbox-panel { grid-template-columns: minmax(0, 1fr); }
   .inbox-sidebar { border-right: 0; }

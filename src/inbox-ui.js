@@ -35,8 +35,9 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     if (retryShare) return retryShare;
     try {
       const saved = JSON.parse(storage?.getItem(storageKey) ?? "null"), r = saved?.request;
-      if (saved?.owner === owner && r?.action === "source.share" && typeof r.requestId === "string"
-        && typeof r.sourceId === "string" && typeof r.roomId === "string" && Array.isArray(r.paragraphs)) return (retryShare = r);
+      if (saved?.owner === owner && ["source.share", "source.excerpt"].includes(r?.action) && typeof r.requestId === "string"
+        && typeof r.sourceId === "string" && typeof r.roomId === "string"
+        && (r.action === "source.share" ? Array.isArray(r.paragraphs) : Number.isSafeInteger(r.selection?.start) && Number.isSafeInteger(r.selection?.end))) return (retryShare = r);
       storage?.removeItem(storageKey);
     } catch { return null; }
     return null;
@@ -148,13 +149,13 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     text("#inbox-subject", d.source.subject || "(No subject)");
     const email = d.source.email;
     text("#inbox-source-label", email ? "Sample email · only you" : "Sample message · only you");
-    $("#inbox-ask").hidden = Boolean(email);
+    $("#inbox-ask").hidden = Boolean(email) && !d.source.capabilities.share && !pendingShare();
     $("#inbox-email-details").hidden = !email;
     const metadata = email ? ["Mailbox: " + d.source.recipient,
       ...["to", "cc", "bcc"].filter(k => email[k].length).map(k => (k === "to" ? "To" : k.toUpperCase()) + ": " + email[k].join(", ")),
       email.attachmentState === "complete" ? (email.attachmentCount ? `${email.attachmentCount} ${email.attachmentCount === 1 ? "attachment" : "attachments"} · files unavailable` : "No attachments")
         : "Attachments " + (email.attachmentState === "partial" ? "partly listed" : "not loaded") + " · files unavailable",
-      "Sharing and sending unavailable"] : [];
+      d.source.capabilities.share ? "Sending unavailable" : "Sharing and sending unavailable"] : [];
     $("#inbox-email-metadata").replaceChildren(...metadata.map(value => { const p = document.createElement("p"); p.textContent = value; return p; }));
     const notices = email ? [email.connectionState === "disconnected" ? "Disconnected · saved copy" : email.connectionState === "reconnect_required" ? "Reconnect required · saved copy" : "",
       email.format === "html" ? "HTML preview unavailable." : !d.source.paragraphs[0] ? "No message text." : ""].filter(Boolean) : [];
@@ -289,7 +290,8 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     render();
   });
   async function ask() {
-    if (!owns() || !selected || drafts.get(selected)?.source.adapter === "email") return;
+    if (!owns() || !selected) return;
+    const d = drafts.get(selected); if (d?.source.adapter === "email" && !d.source.capabilities.share && !pendingShare()) return;
     if (!getRoom()) { show("rooms"); return; }
     $("#inbox-share-dialog").showModal(); text("#inbox-share-status", "Loading…");
     $("#inbox-share-confirm").disabled = true; $("#inbox-share-paragraphs").replaceChildren();
@@ -305,6 +307,35 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
         input.type = "checkbox"; input.value = index; input.checked = pending?.paragraphs.includes(index) ?? false;
         input.disabled = Boolean(pending); span.textContent = value; label.append(input, span); return label;
       }));
+      if (!pending && source.source.adapter === "email") {
+        if (!source.source.capabilities.share) throw new Error("Sharing unavailable");
+        const selectionOwner = sharing;
+        const label = document.createElement("p"), input = document.createElement("textarea"), preview = document.createElement("pre");
+        label.id = "inbox-excerpt-label"; label.textContent = "Select text to share";
+        input.id = "inbox-excerpt-text"; input.setAttribute("aria-labelledby", label.id); input.setAttribute("aria-readonly", "true"); input.rows = 6;
+        input.value = source.source.paragraphs[0]; preview.id = "inbox-excerpt-preview"; preview.hidden = true;
+        // Native readonly textareas on macOS do not move a selection with arrow
+        // keys. Block edits while retaining normal keyboard selection behavior.
+        input.addEventListener("beforeinput", event => event.preventDefault());
+        input.addEventListener("input", () => {
+          if (sharing !== selectionOwner || !owns()) return;
+          input.value = source.source.paragraphs[0]; input.setSelectionRange(0, 0);
+          if (sharing && !sharing.request) sharing.selection = null;
+          preview.textContent = ""; preview.hidden = true; $("#inbox-share-confirm").disabled = true;
+        });
+        const select = () => {
+          if (sharing !== selectionOwner || !owns() || sharing.request || sharingBusy) return;
+          const start = input.selectionStart, end = input.selectionEnd, value = input.value.slice(start, end);
+          const body = "Shared email excerpt\n\n" + value;
+          const valid = Boolean(value.trim()) && value.isWellFormed() && body.length <= 4000;
+          sharing.selection = valid ? { start, end } : null;
+          preview.textContent = valid ? body : ""; preview.hidden = !valid;
+          text("#inbox-share-status", body.length > 4000 ? "Select a shorter excerpt." : "");
+          $("#inbox-share-confirm").disabled = !valid;
+        };
+        for (const event of ["select", "keyup", "mouseup", "touchend"]) input.addEventListener(event, select);
+        $("#inbox-share-paragraphs").replaceChildren(label, input, preview);
+      }
       text("#inbox-share-status", pending ? "Share unconfirmed. Retry the original selection." : "");
       $("#inbox-share-confirm").textContent = pending ? "Confirm share" : "Share";
       $("#inbox-share-confirm").disabled = !pending;
@@ -316,11 +347,13 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   $("#inbox-share-confirm").addEventListener("click", async () => {
     if (!sharing || sharingBusy || !owns()) return;
     const current = sharing, c = current.context;
-    current.request ??= { action: "source.share", requestId: crypto.randomUUID(), sourceId: current.source.id,
+    if (!current.request && current.source.adapter === "email" && !current.selection) return;
+    current.request ??= { action: current.source.adapter === "email" ? "source.excerpt" : "source.share", requestId: crypto.randomUUID(), sourceId: current.source.id,
       sourceRevision: c.sourceRevision, roomId: c.roomId, audienceVersion: c.audienceVersion,
-      paragraphs: [...document.querySelectorAll("#inbox-share-paragraphs input:checked")].map(el => Number(el.value)) };
+      ...(current.source.adapter === "email" ? { selection: current.selection }
+        : { paragraphs: [...document.querySelectorAll("#inbox-share-paragraphs input:checked")].map(el => Number(el.value)) }) };
     const retained = persistShare(current.request); sharingBusy = true; $("#inbox-share-confirm").disabled = true;
-    for (const el of document.querySelectorAll("#inbox-share-paragraphs input")) el.disabled = true;
+    for (const el of document.querySelectorAll("#inbox-share-paragraphs input, #inbox-share-paragraphs textarea")) el.disabled = true;
     text("#inbox-share-status", "Sharing…");
     try {
       const result = await api.apply(current.request); if (!owns() || sharing !== current) return;

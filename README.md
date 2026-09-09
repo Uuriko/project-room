@@ -6,6 +6,8 @@ A shared workspace where people and agents can talk, turn a conversation into bo
 
 Start with [the unification ledger](docs/UNIFICATION-2026-09-07.md): exact inputs, changes included, checks, rollback, and unavailable pieces. The earlier [local acceptance report](docs/FINAL-LOCAL-ACCEPTANCE-2026-09-07.md) is historical baseline evidence, not proof for every later build.
 
+Current local messaging checkpoint: [email excerpts and reviewed private drafts](docs/EMAIL-EXCERPT-CHECKPOINT-2026-09-08.md), schema 20. The same Inbox now supports fixture-backed email reading, deliberate text sharing and reviewed-result return. No real mailbox or email sending is enabled. This candidate has not been deployed; earlier staging and release records below do not establish its live status or rollback readiness.
+
 Latest local additions: [private agent connections and access checks](docs/AGENT-CONNECTION.md),
 [reliable AI draft returns](docs/DRAFT-RETURN.md),
 [editable result copies](docs/RESULT-COPY.md),
@@ -57,10 +59,10 @@ For an ordinary provisioned pilot, follow [SERVICE.md](docs/SERVICE.md). Agent u
 The [Cloudflare staging candidate](cloudflare/README.md) reuses the same store,
 HTTP service and UI with explicit Durable Object adapters. Its local storage,
 HTTP and two-browser restart proofs pass. Following explicit owner approval,
-isolated staging is live with hosted owner/invitation/live-message checks passing.
+an earlier isolated staging version was deployed and its hosted owner/invitation/live-message checks passed at that checkpoint. Its current live version has not been reverified here.
 The prepared Node service is an alternative runtime, not automatic recovery of
-Durable Object data. See the [current local recovery runbook](docs/V8-RECOVERY-RUNBOOK.md)
-for v8-compatible artifacts and the remaining hosted recovery gates.
+Durable Object data. The [historical v8 recovery runbook](docs/V8-RECOVERY-RUNBOOK.md)
+applies to v8-compatible artifacts, not the current schema-20 database. Never point an older writer at current data as a rollback procedure; current-version recovery and hosted recovery gates must be qualified separately.
 
 See [the Node deployment runbook](docs/INVITE-ONLY-DEPLOYMENT.md) for the fallback's production configuration and recovery checks; the Cloudflare handoff above records actual staging evidence and remaining gates. John selected an unlisted trydemigod.com destination; domain integration, provider recovery exercises and budget alerts remain outstanding. Guests still have an eight-hour browser identity; returning provisioned members use their own valid key with operator-assisted recovery.
 
@@ -70,7 +72,7 @@ Instinct's complete newer identity/service chain is not available as a downloada
 
 No automatic hosted agent runner, MCP host conformance or production-readiness claim follows from the synthetic local checks. Two real agents also used the documented client to produce and independently review an artifact; see [agent onboarding](docs/AGENT-ONBOARDING-TESTING-2026-09-07.md) for the narrower evidence and limits. Hosted staging evidence is recorded separately.
 
-Latest release checkpoint: [release review and polish](docs/RELEASE-POLISH-2026-09-07.md), including current test results, deployment evidence and remaining gates. Earlier UI direction: [quiet interface and keyboard sending](docs/QUIET-INTERFACE-2026-09-07.md). Follow-up proposal: [multi-route bounties](docs/BOUNTIES-DESIGN-2026-09-07.md); bounty execution and payments are not implemented.
+Historical release checkpoint: [release review and polish](docs/RELEASE-POLISH-2026-09-07.md), including its test results, deployment evidence and remaining gates. Earlier UI direction: [quiet interface and keyboard sending](docs/QUIET-INTERFACE-2026-09-07.md). Follow-up proposal: [multi-route bounties](docs/BOUNTIES-DESIGN-2026-09-07.md); bounty execution and payments are not implemented.
 
 The [first-use testing checkpoint](docs/FIRST-USE-TESTING-2026-09-07.md) improves
 guest conversation, source-linked work creation and mobile layout, with repeatable

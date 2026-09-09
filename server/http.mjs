@@ -209,9 +209,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const token = cookie(req, accountCookieName), binding = accountBinding(req);
         const auth = store.authenticateAccountSession(token, null, binding);
         const view = url.searchParams.get("view");
-        if (view !== null && (view !== "email-text-v1" || url.searchParams.getAll("view").length !== 1))
+        if (view !== null && (!["email-text-v1", "email-excerpt-v1"].includes(view) || url.searchParams.getAll("view").length !== 1))
           reject(422, "unsupported_inbox_view", "This inbox view is not supported.");
-        if (url.pathname === "/api/inbox" && req.method === "GET") return json(res, 200, store.inbox.list(token, binding, { includeEmail: view === "email-text-v1" }));
+        if (url.pathname === "/api/inbox" && req.method === "GET") return json(res, 200, store.inbox.list(token, binding, { includeEmail: view !== null }));
         const source = /^\/api\/inbox\/sources\/([^/]{1,384})(?:\/(share-context|room-results|send-context|sends))?$/.exec(url.pathname);
         if (source && req.method === "GET") {
           const id = pathId(source[1]);
@@ -226,7 +226,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             }
             return json(res, 200, store.inbox.shareContext(token, id, roomId, binding));
           }
-          return json(res, 200, store.inbox.read(token, id, binding, { emailView: view === "email-text-v1" }));
+          return json(res, 200, store.inbox.read(token, id, binding, { emailView: view !== null, excerptView: view === "email-excerpt-v1" }));
         }
         if (url.pathname === "/api/inbox/commands" && req.method === "POST") {
           protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);

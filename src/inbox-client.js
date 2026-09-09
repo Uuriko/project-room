@@ -8,15 +8,16 @@ function validSource(source, sourceId, accountId) {
   if (source.adapter === "synthetic") return ["sender", "recipient", "subject"].every(k => boundedText(source[k], 240))
     && Array.isArray(source.paragraphs) && source.paragraphs.length <= 20 && source.paragraphs.every(p => boundedText(p, 4000));
   const e = source.email, c = source.capabilities;
-  return source.adapter === "email" && e?.view === "email-text-v1" && e.accountId === accountId
+  return source.adapter === "email" && e?.view === "email-excerpt-v1" && e.accountId === accountId
     && ["text", "html"].includes(e.format) && ["active", "disconnected", "reconnect_required"].includes(e.connectionState)
     && ["sender", "recipient"].every(k => boundedText(source[k], 320)) && boundedText(source.subject, 4096)
-    && c?.draft === true && c.share === false && c.send === false
+    && c?.draft === true && c.send === false
     && ["to", "cc", "bcc"].every(k => Array.isArray(e[k]) && e[k].length <= 200 && e[k].every(a => boundedText(a, 320)))
     && e.to.length + e.cc.length + e.bcc.length <= 200
     && ["not_loaded", "partial", "complete"].includes(e.attachmentState) && revision(e.attachmentCount) && e.attachmentCount <= 100
     && Array.isArray(source.paragraphs) && (e.format === "html" ? source.paragraphs.length === 0
-      : source.paragraphs.length === 1 && boundedText(source.paragraphs[0], 262144));
+      : source.paragraphs.length === 1 && boundedText(source.paragraphs[0], 262144) && !source.paragraphs[0].includes("\r"))
+    && c.share === (e.format === "text" && Boolean(source.paragraphs[0].trim()));
 }
 const canonical = value => value && typeof value === "object"
   ? "{" + Object.keys(value).sort().map(k => JSON.stringify(k) + ":" + canonical(value[k])).join(",") + "}" : JSON.stringify(value);
@@ -83,9 +84,9 @@ export class InboxClient {
       throw error;
     }
   }
-  list() { return this.request("?view=email-text-v1", {}, v => Array.isArray(v.sources) && v.sources.every(s => id(s.id) && revision(s.revision) && s.revision > 0 && typeof s.subject === "string")); }
+  list() { return this.request("?view=email-excerpt-v1", {}, v => Array.isArray(v.sources) && v.sources.every(s => id(s.id) && revision(s.revision) && s.revision > 0 && typeof s.subject === "string")); }
   read(sourceId) {
-    return this.request("/sources/" + encodeURIComponent(sourceId) + "?view=email-text-v1", {}, v => validSource(v.source, sourceId, v.viewer.accountId)
+    return this.request("/sources/" + encodeURIComponent(sourceId) + "?view=email-excerpt-v1", {}, v => validSource(v.source, sourceId, v.viewer.accountId)
       && (v.draft === null || revision(v.draft?.revision) && v.draft.revision > 0 && revision(v.draft.sourceRevision)
         && v.draft.sourceRevision > 0 && v.draft.sourceRevision <= v.source.revision && boundedText(v.draft.body, 4000)));
   }
@@ -140,7 +141,7 @@ export class InboxClient {
           || proof.shareRequestId !== data.shareRequestId) return false;
       }
       return typeof v.duplicate === "boolean" && r?.requestId === data.requestId && r.action === data.action && r.sourceId === data.sourceId
-        && (data.action === "source.share" ? r.roomId === data.roomId && r.sourceRevision === data.sourceRevision && id(r.messageId) && id(r.eventId) && revision(r.sequence)
+        && (["source.share", "source.excerpt"].includes(data.action) ? r.roomId === data.roomId && r.sourceRevision === data.sourceRevision && id(r.messageId) && id(r.eventId) && revision(r.sequence)
           : r.revision === data.expectedRevision + 1 && (!data.action.startsWith("draft.") || r.sourceRevision === data.sourceRevision));
     });
   }

@@ -2,12 +2,12 @@
 import { randomUUID } from "node:crypto";
 import { textVersion } from "../server/text-results.mjs";
 
-export function prepareInboxResult(f, token, binding, { sourceId = "note", ready = true } = {}) {
+export function prepareInboxResult(f, token, binding, { sourceId = "note", ready = true, shareReceipt = null, selection = null } = {}) {
   const roomId = "commons", workItemId = "inbox-reply-" + randomUUID();
   const source = f.store.inbox.read(token, sourceId, binding).source;
   const context = f.store.inbox.shareContext(token, sourceId, roomId, binding);
-  const share = f.store.inbox.apply(token, { action: "source.share", requestId: randomUUID(), sourceId,
-    sourceRevision: source.revision, roomId, audienceVersion: context.audienceVersion, paragraphs: [0] }, binding);
+  const share = shareReceipt ?? f.store.inbox.apply(token, { action: selection ? "source.excerpt" : "source.share", requestId: randomUUID(), sourceId,
+    sourceRevision: source.revision, roomId, audienceVersion: context.audienceVersion, ...(selection ? { selection } : { paragraphs: [0] }) }, binding);
   const send = (actor, type, data) => f.store.command(f.keys[actor], roomId, { id: randomUUID(), type, data });
   send("owner", "work.proposed", { workItemId, title: "A warmer reply", definitionOfDone: "Warm, concise reply based only on the shared excerpt.",
     sourceMessageId: share.receipt.messageId, accountableMemberId: "producer", verifierMemberId: "reviewer", humanDecisionMakerId: "owner",

@@ -34,7 +34,7 @@ test("exact reviewed result adoption changes only a private draft and retains hi
   f.mutate("producer", "work.blocker_resolved", { resolution: "New approach" });
   f.complete("A different result"); f.review(); f.decide();
   assert.equal(f.read().draft.origin.completionEventId, saved.receipt.origin.completionEventId);
-  assert.equal(auditRecovery(f.store).schemaVersion, 19);
+  assert.equal(auditRecovery(f.store).schemaVersion, 20);
   const backup = await backupRoom(join(f.directory, "room.sqlite"), f.directory);
   const restored = new RoomStore(backup.filename, { readOnly: true });
   try { assert.deepEqual(auditRecovery(restored), auditRecovery(f.store)); } finally { restored.close(); }

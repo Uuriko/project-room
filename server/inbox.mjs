@@ -15,6 +15,8 @@ const canonical = value => Array.isArray(value) ? "[" + value.map(canonical).joi
 const digest = value => createHash("sha256").update(canonical(value)).digest("hex");
 const exact = (v, fields) => v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).length === fields.length && fields.every(f => Object.hasOwn(v, f));
 const revision = n => Number.isSafeInteger(n) && n >= 0;
+const isShare = request => ["source.share", "source.excerpt"].includes(request.action);
+const emailSelectionText = body => body.content.replace(/\r\n?/g, "\n");
 const text = (v, max, empty = false) => typeof v === "string" && v.isWellFormed() && v.length <= max && (empty || v.trim().length > 0);
 const same = (a, b) => canonical(a) === canonical(b);
 export const inboxLimits = Object.freeze({ sources: 100, versions: 100, commands: 5000, paragraphs: 20 });
@@ -51,11 +53,12 @@ function validate(request) {
     "source.import": [...common, "expectedRevision", "data"],
     "draft.save": [...common, "expectedRevision", "sourceRevision", "body"],
     "draft.adopt": [...common, "expectedRevision", "sourceRevision", "roomId", "workItemId", "shareRequestId", "resultVersion"],
-    "source.share": [...common, "sourceRevision", "roomId", "audienceVersion", "paragraphs"]
+    "source.share": [...common, "sourceRevision", "roomId", "audienceVersion", "paragraphs"],
+    "source.excerpt": [...common, "sourceRevision", "roomId", "audienceVersion", "selection"]
   }[request?.action];
   if (!fields || !exact(request, fields) || !validId(request.requestId) || !validId(request.sourceId))
     fail(422, "invalid_inbox_request", "Supply an exact inbox operation and stable request ID.");
-  if (request.action !== "source.share" && !revision(request.expectedRevision)) fail(422, "invalid_inbox_request", "Current revision required.");
+  if (!isShare(request) && !revision(request.expectedRevision)) fail(422, "invalid_inbox_request", "Current revision required.");
   if (!["source.save", "source.import"].includes(request.action) && (!revision(request.sourceRevision) || !request.sourceRevision)) fail(422, "invalid_inbox_request", "Source revision required.");
   if (request.action === "source.import") {
     if (!exact(request.data, ["adapter", "envelope"]) || request.data.adapter !== "email") fail(422, "invalid_inbox_source", "Supply a qualified email observation.");
@@ -80,12 +83,25 @@ function validate(request) {
     || !Array.isArray(request.paragraphs) || !request.paragraphs.length || request.paragraphs.length > inboxLimits.paragraphs
     || !request.paragraphs.every(n => revision(n) && n < inboxLimits.paragraphs) || new Set(request.paragraphs).size !== request.paragraphs.length))
     fail(422, "invalid_inbox_share", "Select source paragraphs and the current room audience.");
+  if (request.action === "source.excerpt" && (!validId(request.roomId) || typeof request.audienceVersion !== "string" || !/^[a-f0-9]{64}$/.test(request.audienceVersion)
+    || !exact(request.selection, ["start", "end"]) || !revision(request.selection.start) || !revision(request.selection.end)
+    || request.selection.start >= request.selection.end || request.selection.end > 262144))
+    fail(422, "invalid_inbox_share", "Select exact email text and the current room audience.");
 }
 export const inboxAudience = state => Object.values(state.members).filter(m => m.active === true)
   .map(m => ({ memberId: m.id, revision: m.revision })).sort((a, b) => a.memberId.localeCompare(b.memberId));
 const viewer = auth => ({ accountId: auth.account.id, authEpoch: auth.account.authEpoch,
   sessionBinding: auth.sessionBinding, sessionRevision: auth.sessionRevision });
-const sharedBody = (data, indexes) => {
+const sharedBody = (data, request) => {
+  if (request.action === "source.excerpt") {
+    if (data.adapter !== "email" || data.envelope.body.format !== "text") fail(409, "email_sharing_unavailable", "Only plain-text email excerpts can be shared.");
+    const content = emailSelectionText(readEmailEnvelope(data.envelope).body), { start, end } = request.selection;
+    const excerpt = content.slice(start, end), body = "Shared email excerpt\n\n" + excerpt;
+    if (end > content.length || !text(excerpt, 4000) || body.length > 4000)
+      fail(422, "invalid_inbox_share", "Choose nonempty text up to 4,000 characters including the excerpt label.");
+    return body;
+  }
+  const indexes = request.paragraphs;
   if (data.adapter !== "synthetic") fail(409, "email_sharing_unavailable", "Email excerpt sharing is not yet available.");
   if (indexes.some(i => !Object.hasOwn(data.paragraphs, i))) fail(422, "invalid_inbox_share", "Selected text does not exist.");
   const body = "Shared sample excerpt\n\n" + indexes.map(i => data.paragraphs[i]).join("\n\n");
@@ -122,18 +138,18 @@ export class Inbox {
       return { contractVersion: 1, viewer: viewer(auth), sources };
     });
   }
-  read(token, sourceId, binding, { emailView = false } = {}) {
+  read(token, sourceId, binding, { emailView = false, excerptView = false } = {}) {
     return this.store.readTransaction(() => {
       const auth = this.auth(token, binding), row = this.source(auth.account.id, sourceId);
       const draft = this.db.prepare("SELECT revision,source_revision,body,updated_at FROM private_inbox_drafts WHERE account_id=? AND source_id=?").get(auth.account.id, sourceId);
       const data = this.version(auth.account.id, row.id, row.revision);
-      const source = emailView && data.adapter === "email" ? this.emailView(auth, row, data.envelope) : { id: row.id, revision: row.revision, ...data };
+      const source = emailView && data.adapter === "email" ? this.emailView(auth, row, data.envelope, excerptView) : { id: row.id, revision: row.revision, ...data };
       return { contractVersion: 1, viewer: viewer(auth), source,
         draft: draft ? { revision: draft.revision, sourceRevision: draft.source_revision, body: draft.body, updatedAt: draft.updated_at,
           origin: this.draftOrigin(auth.account.id, sourceId, draft.body, row.revision) } : null };
     });
   }
-  emailView(auth, row, value) {
+  emailView(auth, row, value, excerptView = false) {
     const envelope = readEmailEnvelope(value), { message, body, attachments } = envelope;
     const saved = this.db.prepare("SELECT data_json FROM private_email_connections WHERE account_id=? AND id=?")
       .get(auth.account.id, envelope.connection.id);
@@ -145,9 +161,9 @@ export class Inbox {
     // cursors, headers, HTML, attachment descriptors and mailbox IDs off this path.
     return { id: row.id, revision: row.revision, adapter: "email", sender: message.from.address,
       recipient: envelope.connection.identity.address, subject: message.subject,
-      paragraphs: body.format === "text" ? [body.content] : [],
-      capabilities: { draft: true, share: false, send: false },
-      email: { view: "email-text-v1", accountId: auth.account.id, format: body.format, connectionState,
+      paragraphs: body.format === "text" ? [excerptView ? emailSelectionText(body) : body.content] : [],
+      capabilities: { draft: true, share: excerptView && body.format === "text" && Boolean(body.content.trim()), send: false },
+      email: { view: excerptView ? "email-excerpt-v1" : "email-text-v1", accountId: auth.account.id, format: body.format, connectionState,
         to: message.to.map(a => a.address), cc: message.cc.map(a => a.address), bcc: message.bcc.map(a => a.address),
         attachmentState: attachments.state, attachmentCount: attachments.items.length } };
   }
@@ -162,7 +178,7 @@ export class Inbox {
   shares(accountId, sourceId, roomId, before = Number.MAX_SAFE_INTEGER) {
     return this.db.prepare(`SELECT sequence,request_id,request_json,receipt_json FROM private_inbox_commands WHERE account_id=? AND sequence<?
       AND json_extract(request_json,'$.sourceId')=? AND json_extract(request_json,'$.roomId')=?
-      AND json_extract(request_json,'$.action')='source.share' ORDER BY sequence DESC`).all(accountId, before, sourceId, roomId)
+      AND json_extract(request_json,'$.action') IN ('source.share','source.excerpt') ORDER BY sequence DESC`).all(accountId, before, sourceId, roomId)
       .map(row => ({ ...row, request: JSON.parse(row.request_json), receipt: JSON.parse(row.receipt_json) }));
   }
   resultRecord(sourceRevision, share, item, state) {
@@ -257,7 +273,7 @@ export class Inbox {
       if (request.action === "source.import" && authority !== importAuthority) fail(403, "email_importer_required", "Only the configured importer can record this source.");
       if (request.action === "source.import" && request.data.envelope.connection.accountId !== auth.account.id)
         fail(403, "email_account_mismatch", "Email observation belongs to another account.");
-      if (["source.share", "draft.adopt"].includes(request.action)) this.auth(token, binding, request.roomId);
+      if (isShare(request) || request.action === "draft.adopt") this.auth(token, binding, request.roomId);
       const accountId = auth.account.id, fingerprint = digest(request);
       const prior = this.db.prepare("SELECT fingerprint,receipt_json FROM private_inbox_commands WHERE account_id=? AND request_id=?").get(accountId, request.requestId);
       if (prior) {
@@ -301,7 +317,7 @@ export class Inbox {
           if (request.audienceVersion !== digest(inboxAudience(room.state))) fail(409, "stale_inbox_audience", "Room audience changed. Review who will see this excerpt.");
           const messageId = "excerpt-" + digest([accountId, requestId]);
           const result = this.store.command(token, request.roomId, { id: "inbox-" + digest([accountId, requestId]), type: T.MESSAGE_POSTED,
-            data: { messageId, body: sharedBody(this.version(accountId, sourceId, source.revision), request.paragraphs) } }, binding);
+            data: { messageId, body: sharedBody(this.version(accountId, sourceId, source.revision), request) } }, binding);
           Object.assign(receipt, { sourceRevision: source.revision, roomId: request.roomId, messageId, eventId: result.event.id, sequence: result.sequence });
         }
       }
@@ -358,7 +374,7 @@ export class Inbox {
           const member = this.db.prepare("SELECT member_id FROM member_accounts WHERE room_id=? AND account_id=?").get(request.roomId, row.account_id);
           const messageId = "excerpt-" + digest([row.account_id, request.requestId]);
           require(event.actorId === member?.member_id && event.type === T.MESSAGE_POSTED
-            && same(event.data, { messageId, body: sharedBody(this.version(row.account_id, request.sourceId, request.sourceRevision), request.paragraphs) }));
+            && same(event.data, { messageId, body: sharedBody(this.version(row.account_id, request.sourceId, request.sourceRevision), request) }));
           Object.assign(expected, { sourceRevision: request.sourceRevision, roomId: request.roomId, messageId, eventId: receipt.eventId, sequence: eventRow.sequence });
         }
       }

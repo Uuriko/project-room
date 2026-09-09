@@ -72,6 +72,84 @@ async function previewReply(f, body = "A private reply 🪷") {
   await p.locator("#inbox-send-preview").click();
   await p.waitForFunction(() => !document.getElementById("inbox-send-confirm").disabled);
 }
+async function selectExcerpt(page, value) {
+  const field = page.locator("#inbox-excerpt-text"); await field.focus();
+  await field.press("ControlOrMeta+A"); await field.press("ArrowLeft");
+  await page.keyboard.down("Shift");
+  for (const point of value) await page.keyboard.press("ArrowRight");
+  await page.keyboard.up("Shift");
+  await page.locator("#inbox-share-confirm:not([disabled])").waitFor();
+}
+for (const mobile of [false, true]) test(`email collaboration ${mobile ? "mobile" : "desktop"}: selected text becomes room work then an exact private draft`, { timeout: 45000 }, async t => {
+  const f = await setup(t, mobile, true), p = f.page, mail = seedEmail(f), excerpt = "A warmer reply 🪷";
+  mail.raw.message.body.content = excerpt + "\r\n\r\nPrivate budget: 4200";
+  const id = mail.importMessage(); await f.inbox(); await f.pick(id);
+  await p.locator("#inbox-draft").fill("Keep my private draft"); await p.locator("#inbox-save").click(); await p.getByText("Saved · only you", { exact: true }).waitFor();
+  await p.locator("#inbox-ask").click(); await p.locator("#inbox-excerpt-text").waitFor();
+  assert.equal(await p.locator("#inbox-share-confirm").isEnabled(), false);
+  await p.locator("#inbox-excerpt-text").focus(); await p.keyboard.type("Do not rewrite the source");
+  assert.equal(await p.locator("#inbox-excerpt-text").inputValue(), mail.raw.message.body.content.replace(/\r\n?/g, "\n"));
+  assert.doesNotMatch(await p.locator("#inbox-share-dialog").textContent(), /observer@example.test|brief.txt/);
+  await selectExcerpt(p, excerpt);
+  assert.equal(await p.locator("#inbox-excerpt-preview").textContent(), "Shared email excerpt\n\n" + excerpt);
+  assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await f.capture("email-excerpt-" + (mobile ? "mobile" : "desktop"));
+  await p.locator("#inbox-share-confirm").click(); await p.locator("#inbox-share-dialog").waitFor({ state: "hidden" });
+  const record = f.store.db.prepare("SELECT receipt_json FROM private_inbox_commands WHERE json_extract(request_json,'$.action')='source.excerpt'").get();
+  const shared = { receipt: JSON.parse(record.receipt_json) }, posted = f.store.room("commons").state.messages.find(m => m.id === shared.receipt.messageId);
+  assert.equal(posted.body, "Shared email excerpt\n\n" + excerpt); assert.equal(JSON.stringify(posted).includes("4200"), false);
+  const work = prepareInboxResult(f, f.slot.token, f.session.sessionBinding, { sourceId: id, shareReceipt: shared, ready: false });
+  await f.inbox(); await f.pick(id); await p.getByText("Work in progress", { exact: true }).waitFor();
+  work.complete(); work.review(); work.decide();
+  await p.locator("#nav-rooms").click(); await f.inbox();
+  await p.locator("[data-inbox-result]").click(); await p.locator("#inbox-result-use:not([disabled])").waitFor();
+  assert.equal(await p.locator("#inbox-replaced-draft").textContent(), "Keep my private draft");
+  await p.locator("#inbox-result-use").click(); await p.getByText("Saved · only you", { exact: true }).waitFor();
+  assert.equal(await p.locator("#inbox-draft").inputValue(), work.body);
+  assert.equal(f.store.inbox.read(f.slot.token, id, f.session.sessionBinding).draft.origin.unchanged, true);
+  assert.equal(f.provider.submits, 0); assert.equal(await p.locator("#inbox-send-panel").isVisible(), false);
+  await f.capture("email-return-" + (mobile ? "mobile" : "desktop"));
+  await p.reload(); await p.locator("#inbox-reader").waitFor();
+  assert.equal(await p.locator("#inbox-draft").inputValue(), work.body);
+});
+test("email excerpt lost acknowledgement retries the original offsets after reload and a source change", { timeout: 40000 }, async t => {
+  const f = await setup(t), p = f.page, mail = seedEmail(f), excerpt = "Share just this";
+  mail.raw.message.body.content = excerpt + "\nPrivate rest"; const id = mail.importMessage();
+  await f.inbox(); await f.pick(id); await p.locator("#inbox-ask").click(); await p.locator("#inbox-excerpt-text").waitFor();
+  await selectExcerpt(p, excerpt); const requests = [];
+  await p.route("**/api/inbox/commands", async route => {
+    const body = route.request().postDataJSON();
+    if (body.action !== "source.excerpt") return route.continue();
+    requests.push(body); const result = await route.fetch();
+    if (requests.length === 1) return route.abort("failed"); return route.fulfill({ response: result });
+  });
+  await p.locator("#inbox-share-confirm").click(); await p.getByText("Share unconfirmed. Retry the original selection.", { exact: true }).waitFor();
+  const retained = await p.evaluate(() => sessionStorage.getItem("project-room:pending-private-share:v1"));
+  assert.equal(retained.includes(excerpt), false); assert.equal(retained.includes("Private rest"), false);
+  mail.raw.message.body = { contentType: "html", content: "<p>Changed private source</p>" }; mail.importMessage();
+  await p.reload(); await p.locator("#inbox-reader").waitFor(); await p.locator("#inbox-ask").click();
+  await p.getByRole("button", { name: "Confirm share", exact: true }).click();
+  await p.locator("#inbox-share-dialog").waitFor({ state: "hidden" });
+  assert.equal(requests.length, 2); assert.deepEqual(requests[1], requests[0]);
+  assert.equal(f.store.room("commons").state.messages.filter(m => m.body === "Shared email excerpt\n\n" + excerpt).length, 1);
+  assert.equal(await p.evaluate(() => sessionStorage.getItem("project-room:pending-private-share:v1")), null);
+});
+test("email excerpt changed source requires a fresh selection and retains the private draft", { timeout: 35000 }, async t => {
+  const f = await setup(t), p = f.page, mail = seedEmail(f);
+  mail.raw.message.body.content = "Original line\nPrivate rest"; const id = mail.importMessage();
+  await f.inbox(); await f.pick(id); await p.locator("#inbox-draft").fill("My unfinished private answer");
+  await p.locator("#inbox-ask").click(); await p.locator("#inbox-excerpt-text").waitFor(); await selectExcerpt(p, "Original line");
+  const before = f.store.room("commons").sequence;
+  mail.raw.message.body.content = "Different line\nPrivate rest"; mail.importMessage();
+  await p.locator("#inbox-share-confirm").click(); await p.getByText("Source or audience changed. Close and review again.", { exact: true }).waitFor();
+  assert.equal(f.store.room("commons").sequence, before);
+  await p.locator("#inbox-share-close").click(); assert.equal(await p.locator("#inbox-draft").inputValue(), "My unfinished private answer");
+  await p.locator("#inbox-ask").click(); await p.locator("#inbox-excerpt-text").waitFor();
+  assert.equal(await p.locator("#inbox-share-confirm").isEnabled(), false);
+  assert.equal(await p.locator("#inbox-excerpt-text").inputValue(), mail.raw.message.body.content);
+  await selectExcerpt(p, "Different line"); await p.locator("#inbox-share-confirm").click(); await p.locator("#inbox-share-dialog").waitFor({ state: "hidden" });
+  assert.equal(f.store.room("commons").state.messages.filter(m => m.body === "Shared email excerpt\n\nDifferent line").length, 1);
+});
 for (const mobile of [false, true]) test(`email reader ${mobile ? "mobile" : "desktop"}: inert text, private drafts and current disconnected state`, { timeout: 35000 }, async t => {
   const f = await setup(t, mobile, true), p = f.page, mail = seedEmail(f), before = f.store.room("commons");
   mail.raw.message.body.content = '<img src="https://example.invalid/tracker">\n\nCould we make this simpler?';
@@ -79,7 +157,7 @@ for (const mobile of [false, true]) test(`email reader ${mobile ? "mobile" : "de
   assert.equal(await p.locator("#inbox-source-label").textContent(), "Sample email · only you");
   assert.equal(await p.locator("#inbox-source-body").textContent(), mail.raw.message.body.content);
   assert.equal(await p.locator("#inbox-source-body img").count(), 0);
-  assert.equal(await p.locator("#inbox-ask").isVisible(), false);
+  assert.equal(await p.locator("#inbox-ask").isVisible(), true);
   assert.equal(await p.locator("#inbox-send-panel").isVisible(), false);
   await p.locator("#inbox-email-details summary").click();
   assert.match(await p.locator("#inbox-email-metadata").textContent(), /observer@example.test/);
@@ -461,7 +539,7 @@ test("real inbox: another tab changing the browser account clears private conten
   // inbox's timestamp ordering and which earlier source is already cached.
   f.apply(f.source("held")); await f.inbox();
   let release, reached; const held = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { reached = resolve; });
-  await p.route("**/api/inbox/sources/held?view=email-text-v1", async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); });
+  await p.route("**/api/inbox/sources/held?view=email-excerpt-v1", async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); });
   const read = p.locator('[data-source-id="held"]').click(); await started; await read;
   const other = await p.context().newPage(); await other.goto(f.origin + "/?room=commons");
   await other.locator("#main").waitFor({ state: "visible" }); await other.locator("#signout-button").click();
