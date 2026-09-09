@@ -64,6 +64,7 @@ let submitControls = null, noticeTimer = null, noticeVersion = 0, workFormOpener
 let accessEndContext = null;
 let lastComposerSelection = null;
 let lastInvitationOpener = null;
+let roomActionsContext = null;
 const invitation = {
   phase: "idle", version: 0, secret: null, preview: null, redemptionId: null,
   opener: null, openerSelection: null
@@ -128,6 +129,7 @@ const client = new RoomClient({
   },
   onStatus(text) { setConnectionStatus(text); },
   onAccessEnded() {
+    closeRoomActions(false);
     const endedContext = accessEndContext;
     accessEndContext = null;
     const pendingSignout = signoutLoading;
@@ -1208,7 +1210,7 @@ async function submit(form, fn, { failureHint } = {}) {
 }
 $("#invitation-dismiss").addEventListener("click", () => closeInvitation());
 $("#invitation-retry").addEventListener("click", () => { if (invitation.phase === "preview-failed") previewCurrentInvitation(); });
-for (const id of ["invitation-dialog", "work-dialog", "action-dialog", "result-dialog"]) $(`#${id}`).addEventListener("keydown", e => {
+for (const id of ["invitation-dialog", "work-dialog", "action-dialog", "result-dialog", "room-actions-dialog"]) $(`#${id}`).addEventListener("keydown", e => {
   if (e.key !== "Tab") return;
   const controls = [...e.currentTarget.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, a[href], [tabindex]:not([tabindex='-1'])")]
     .filter(element => element.getClientRects().length > 0);
@@ -1593,6 +1595,90 @@ $("#message-input").addEventListener("keydown", e => {
 $("#search-form").addEventListener("submit", e => { e.preventDefault(); if (state) renderSearch(); });
 $("#message-search").addEventListener("input", () => { if (state) renderSearch(); });
 $("#clear-search").addEventListener("click", () => { $("#message-search").value = ""; renderSearch(); $("#message-search").focus(); });
+
+// Navigation only: all consequential actions stay in their existing forms.
+// Resolve the current target again on selection; an open menu is not authority.
+function ownsRoomActions(context = roomActionsContext) {
+  return Boolean(state && session && client.session === session && client.generation === roomGeneration
+    && client.ownsAccountSession() && !$("#main").hidden && $("#inbox-panel").hidden
+    && (!context || context.session === session && context.generation === client.generation));
+}
+function roomActionEntries() {
+  return [
+    { id: "write", label: requestMode ? "Open composer" : $("#message-input").value ? "Continue writing" : "Write a message", words: "compose chat draft reply", target: "#message-input" },
+    { id: "search", label: "Search room", words: "find messages work", target: "#message-search" },
+    { id: "catch-up", label: "Catch me up", words: "updates attention needs me reminders", target: "#return-brief-panel > summary", reveal: "#return-brief-panel" },
+    { id: "work", label: "View work", words: "tasks projects results", target: "#work-title" },
+    { id: "people", label: "People & agents", words: "members collaborators team", target: "#people-panel > summary", reveal: "#people-panel" },
+    { id: "new-work", label: "New work", words: "create task request", target: "#new-work-button", activate: true },
+    { id: "invite", label: "Invite people", words: "share join link", target: "#invite-people-button", activate: true },
+    { id: "agent", label: "Connect agent", words: "ai assistant mcp tools", target: "#connect-agent-button", reveal: "#people-panel", activate: true },
+    { id: "instructions", label: "Room instructions", words: "guidance brief charter", target: "#room-instructions-open", reveal: "#room-about", activate: true }
+  ].filter(entry => { const target = $(entry.target); return target && !target.disabled && !target.closest("[hidden]"); });
+}
+function closeRoomActions(restore = true) {
+  const context = roomActionsContext; roomActionsContext = null;
+  $("#room-actions-dialog").close(); $("#room-actions-list").replaceChildren(); $("#room-actions-query").value = "";
+  $("#room-actions-empty").hidden = true;
+  if (restore && context && ownsRoomActions(context) && context.opener?.isConnected && context.opener.getClientRects().length) {
+    context.opener.focus({ preventScroll: true });
+    if (context.selection && context.opener.value === context.value) context.opener.setSelectionRange(...context.selection);
+  }
+}
+function renderRoomActions() {
+  if (!roomActionsContext || !ownsRoomActions()) { closeRoomActions(false); return; }
+  const terms = $("#room-actions-query").value.toLowerCase().trim().split(/\s+/).filter(Boolean);
+  const entries = roomActionEntries().filter(entry => terms.every(term => `${entry.label} ${entry.words}`.toLowerCase().includes(term)));
+  $("#room-actions-list").replaceChildren(...entries.map(entry => {
+    const button = document.createElement("button"); button.type = "button"; button.dataset.roomAction = entry.id;
+    button.textContent = entry.label; return button;
+  }));
+  $("#room-actions-empty").hidden = entries.length > 0;
+}
+function openRoomActions() {
+  if (!ownsRoomActions(null) || document.querySelector("dialog[open]")) return;
+  const opener = document.activeElement;
+  roomActionsContext = { session, generation: client.generation, opener, value: opener?.value,
+    selection: typeof opener?.selectionStart === "number" ? [opener.selectionStart, opener.selectionEnd, opener.selectionDirection] : null };
+  $("#room-actions-query").value = ""; renderRoomActions();
+  $("#room-actions-dialog").showModal(); $("#room-actions-query").focus();
+}
+function chooseRoomAction(id) {
+  if (!roomActionsContext || !ownsRoomActions()) { closeRoomActions(false); return; }
+  const entry = roomActionEntries().find(value => value.id === id);
+  if (!entry) { renderRoomActions(); $("#room-actions-query").focus(); return; }
+  closeRoomActions(false);
+  if (entry.reveal) $(entry.reveal).open = true;
+  const target = $(entry.target); target.scrollIntoView({ block: "nearest" }); target.focus({ preventScroll: true });
+  if (entry.activate) target.click();
+}
+$("#room-actions-open kbd").textContent = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘ K" : "Ctrl K";
+$("#room-actions-open").addEventListener("click", openRoomActions);
+$("#room-actions-close").addEventListener("click", () => closeRoomActions());
+$("#room-actions-dialog").addEventListener("cancel", event => { event.preventDefault(); closeRoomActions(); });
+$("#room-actions-query").addEventListener("input", renderRoomActions);
+$("#room-actions-list").addEventListener("click", event => { const id = event.target.closest("[data-room-action]")?.dataset.roomAction; if (id) chooseRoomAction(id); });
+$("#room-actions-dialog").addEventListener("keydown", event => {
+  if (event.isComposing || event.keyCode === 229) { if (event.key === "Enter") event.preventDefault(); return; }
+  if (event.altKey || event.ctrlKey || event.metaKey) return;
+  if (event.key === "Enter" && event.repeat) { event.preventDefault(); return; }
+  const buttons = [...$("#room-actions-list").querySelectorAll("button")], index = buttons.indexOf(document.activeElement);
+  if (["ArrowDown", "ArrowUp"].includes(event.key)) {
+    event.preventDefault();
+    const next = event.key === "ArrowDown" ? index + 1 : index < 0 ? buttons.length - 1 : index - 1;
+    (buttons[next] || $("#room-actions-query")).focus();
+  } else if (event.key === "Enter" && document.activeElement === $("#room-actions-query")) {
+    event.preventDefault(); if (!event.repeat && buttons[0]) chooseRoomAction(buttons[0].dataset.roomAction);
+  }
+});
+document.addEventListener("keydown", event => {
+  if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== "k"
+    || event.isComposing || event.keyCode === 229 || event.repeat || !ownsRoomActions(null)) return;
+  if (document.querySelector("dialog[open]") && !$("#room-actions-dialog").open) return;
+  event.preventDefault(); if ($("#room-actions-dialog").open) closeRoomActions(); else openRoomActions();
+});
+new MutationObserver(() => { if (roomActionsContext && !ownsRoomActions()) closeRoomActions(false); })
+  .observe($("#main"), { attributes: true, attributeFilter: ["hidden"] });
 $("#main").addEventListener("click", e => {
   const link = e.target.closest("[data-open-message], [data-open-work], [data-open-member], [data-open-event], [data-open-room]");
   if (!link || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;

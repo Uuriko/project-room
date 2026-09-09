@@ -130,9 +130,12 @@
               <h1 id="room-title" tabindex="-1">Project Room</h1>
               <details id="room-about" class="room-about"><summary>About</summary><p class="room-purpose"></p><button id="room-instructions-open" class="button ghost" type="button" hidden>Room instructions</button></details>
             </div>
-            <div class="room-presence-summary">
-              <div id="member-stack" class="member-stack" aria-hidden="true"></div>
-              <span id="presence-count">Membership loading…</span>
+            <div class="room-heading-actions">
+              <div class="room-presence-summary">
+                <div id="member-stack" class="member-stack" aria-hidden="true"></div>
+                <span id="presence-count">Membership loading…</span>
+              </div>
+              <button id="room-actions-open" class="button ghost" type="button" aria-haspopup="dialog" aria-controls="room-actions-dialog">Actions <kbd aria-hidden="true">⌘ K</kbd></button>
             </div>
           </header>
 
@@ -297,6 +300,13 @@
         </aside>
       </main>
     </div>
+    <dialog id="room-actions-dialog" aria-labelledby="room-actions-title">
+      <div class="panel-header"><h2 id="room-actions-title">Room actions</h2><button id="room-actions-close" class="button ghost" type="button">Close</button></div>
+      <label class="sr-only" for="room-actions-query">Find an action</label>
+      <input id="room-actions-query" type="search" placeholder="Find an action…" autocomplete="off" maxlength="100" aria-controls="room-actions-list" autofocus>
+      <div id="room-actions-list" aria-label="Available room actions"></div>
+      <p id="room-actions-empty" class="form-hint" role="status" hidden>No matching actions.</p>
+    </dialog>
     <dialog id="room-instructions-dialog" aria-labelledby="room-instructions-title">
       <h2 id="room-instructions-title">Room instructions</h2>
       <p id="room-instructions-version" class="form-hint"></p>
