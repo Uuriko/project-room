@@ -48,7 +48,15 @@ No live mailbox access, sending, model execution, payments, pushing or deploymen
 
 ## Next work
 
+The next implementation priority is the existing provider-draft update/reconciliation plan: qualify the immutable original/observed/proposed comparison first, then its durable lifecycle and compact composer interaction. This completes a missing messaging transition rather than adding more navigation. Dedicated mailbox access and actual transport still require separate qualification/authority. The native follow-ups below remain useful, but do not displace that milestone.
+
 1. Make useful results easier to reuse through the established preview/copy and private reply flows, without implying that completion grants sharing authority.
 2. Compare existing alternative drafts in context before introducing a separate branching abstraction.
 3. Qualify optional curated references and pinning separately: ownership, deletion, source freshness and audiences need explicit semantics.
 4. Resume the independently planned provider-draft update/reconciliation milestone. Results discovery is not a substitute for finishing authorized real messaging and deeper agent collaboration.
+
+## Committed verification
+
+Exact runtime commit: `4e808ea8b5598040f46f2132dc114dc7208deedc`. The committed runtime passed **857 core** and **23 local Workers** checks, with zero failures. Logs are `committed-core.log` and `committed-workers.log` in the evidence directory. Subsequent edits are documentation only. Full browser results are recorded here after that run finishes.
+
+The full committed-runtime browser suite passed **266 checks**, zero failures, skips or cancellations. Evidence: `committed-browser.log`. This includes all seven Results browser journeys, existing Inbox/room-assisted reply flows, Actions, first use, exact-result handling, recovery, agent connection and work reuse. The final desktop Results screenshot was visually inspected again after this run. Totals: **857 core + 266 browser + 23 local Workers**. No claim of deployed parity or overall goal completion follows from these local results.
