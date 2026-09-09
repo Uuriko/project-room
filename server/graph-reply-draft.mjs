@@ -197,11 +197,16 @@ export function inspectGraphReplyUpdate({ store, token, binding, proposal, respo
 // Classification of a caller-authenticated proposal/observation only. A match
 // does not prove which actor caused it, a conditional write, or successful send.
 export function compareGraphReplyUpdate(proposal, response) {
+  return compareReplyUpdateEnvelope(proposal, normalizeReplyObservation(proposal, response));
+}
+
+// Replay uses the same bounded normalized evidence as the private journal.
+export function compareReplyUpdateEnvelope(proposal, observation) {
   emailInput(proposal);
   const expected = Object.fromEntries(["from", "to", "cc", "bcc", "subject", "body"].map(field => [field, proposal.proposed[field]]));
   expected.threadId = proposal.original.threadId;
   const basis = { planVersion: proposal.updateVersion, connection: proposal.connection, expected };
-  const compared = compareReplyEnvelope(basis, proposal.providerDraftId, normalizeReplyObservation(basis, response));
+  const compared = compareReplyEnvelope(basis, proposal.providerDraftId, observation);
   const unchanged = compared.differences.length === 1 && compared.differences[0] === "body"
     && compared.draft?.format === "text" && lf(compared.draft.body) === lf(proposal.observed.body);
   return { updateVersion: proposal.updateVersion, providerDraftId: proposal.providerDraftId,

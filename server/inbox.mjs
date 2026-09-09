@@ -5,8 +5,8 @@ import { storedText } from "./text-results.mjs";
 import { ServiceError } from "./store.mjs";
 import { isSend, internalSend, validateSend, sendPreview, transitionSend } from "./inbox-outbox.mjs";
 import { readEmailEnvelope, EmailContractError } from "./email-envelope.mjs";
-import { prepareGraphReplyDraft, buildGraphReplyDraft, classifyGraphReplyCreation, normalizeReplyObservation } from "./graph-reply-draft.mjs";
-import { isReplyAttempt, validateReplyAttempt, transitionReplyAttempt, replyObservationReviewable } from "./graph-reply-journal.mjs";
+import { prepareGraphReplyDraft, buildGraphReplyDraft, classifyGraphReplyCreation, normalizeReplyObservation, prepareGraphReplyUpdate, buildGraphReplyUpdate } from "./graph-reply-draft.mjs";
+import { isReplyAttempt, validateReplyAttempt, transitionReplyAttempt, replyObservationReviewable, isReplyUpdate, transitionReplyUpdate, unresolvedReplyUpdate } from "./graph-reply-journal.mjs";
 
 const transportAuthority = Symbol("private inbox transport");
 const importAuthority = Symbol("private email importer");
@@ -266,12 +266,24 @@ export class Inbox {
     return this.apply(token, request, binding, transportAuthority);
   }
   replyHistory(accountId, sourceId = null) {
+    return this.replyRecords(accountId, sourceId, "attempt");
+  }
+  replyUpdateHistory(accountId, sourceId = null) {
+    return this.replyRecords(accountId, sourceId, "update");
+  }
+  replyRecords(accountId, sourceId, field) {
     const attempts = new Map();
     for (const row of this.db.prepare("SELECT receipt_json FROM private_inbox_commands WHERE account_id=? AND json_extract(receipt_json,'$.action') LIKE 'reply.%' ORDER BY sequence").all(accountId)) {
       const receipt = JSON.parse(row.receipt_json);
-      if (sourceId === null || receipt.sourceId === sourceId) attempts.set(receipt.attempt.id, receipt.attempt);
+      if (receipt[field] && (sourceId === null || receipt.sourceId === sourceId)) attempts.set(receipt[field].id, receipt[field]);
     }
     return attempts;
+  }
+  replyUpdates(token, sourceId, binding) {
+    return this.store.readTransaction(() => {
+      const auth = this.auth(token, binding); this.source(auth.account.id, sourceId);
+      return { contractVersion: 1, viewer: viewer(auth), sourceId, updates: [...this.replyUpdateHistory(auth.account.id, sourceId).values()] };
+    });
   }
   replyAttempts(token, sourceId, binding) {
     return this.store.readTransaction(() => {
@@ -286,6 +298,7 @@ export class Inbox {
   }
   replyPlanCurrent(token, attempt, binding) {
     try {
+      if (unresolvedReplyUpdate(this.replyUpdateHistory(attempt.plan.accountId, attempt.sourceId), attempt.id)) return false;
       const plan = prepareGraphReplyDraft({ store: this.store, token, binding, sourceId: attempt.sourceId,
         requestId: attempt.plan.requestId, mode: attempt.plan.mode });
       return plan.planVersion === attempt.plan.planVersion;
@@ -346,6 +359,14 @@ export class Inbox {
         observation: normalizeReplyObservation(attempt.plan, response) }, binding);
     });
   }
+  recordReplyUpdateObservation(token, { sourceId, attemptId, updateId, expectedRevision, requestId, response }, binding) {
+    return this.store.transaction(() => {
+      const auth = this.auth(token, binding), update = this.replyUpdateHistory(auth.account.id, sourceId).get(updateId);
+      if (!update || update.attemptId !== attemptId) fail(404, "reply_update_not_found", "Reply update not found.");
+      return this.reply(token, { action: "reply.update.observed", requestId, sourceId, attemptId, updateId, expectedRevision,
+        observation: normalizeReplyObservation(update.proposal, response) }, binding);
+    });
+  }
   // Trusted, transaction-bound importer only. Ordinary HTTP commands cannot use it.
   importSource(token, request, binding) {
     if (!this.db.isTransaction || request?.action !== "source.import") fail(403, "email_importer_required", "Use the transactional email importer.");
@@ -366,14 +387,23 @@ export class Inbox {
         if (prior.fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Request ID already used for different inbox content.");
         return { contractVersion: 1, viewer: viewer(auth), receipt: JSON.parse(prior.receipt_json), duplicate: true };
       }
-      if (!internalSend(request) && request.action !== "send.cancel" && !["reply.cancel", "reply.created"].includes(request.action)
+      if (!internalSend(request) && request.action !== "send.cancel" && !["reply.cancel", "reply.created", "reply.update.cancel"].includes(request.action)
         && this.db.prepare("SELECT count(*) n FROM private_inbox_commands WHERE account_id=?").get(accountId).n >= inboxLimits.commands)
         fail(409, "inbox_limit", "Private inbox pilot capacity reached.");
       const now = this.store.now(), { sourceId, action, requestId } = request;
       let receipt = { requestId, action, sourceId };
-      if (isReplyAttempt(request)) {
+      if (isReplyUpdate(request)) {
+        this.source(accountId, sourceId);
+        const updates = this.replyUpdateHistory(accountId), prior = updates.get(request.updateId);
+        const proposal = ["reply.update.reserve", "reply.update.dispatch"].includes(action) ? prepareGraphReplyUpdate({ store: this.store, token, binding,
+          sourceId, attemptId: request.attemptId, requestId: action === "reply.update.reserve" ? requestId : prior?.proposal.requestId,
+          expectedRevision: action === "reply.update.reserve" ? request.expectedRevision : prior?.proposal.attemptRevision }) : null;
+        receipt.update = transitionReplyUpdate(updates, request, { proposal, at: now });
+      } else if (isReplyAttempt(request)) {
         this.source(accountId, sourceId);
         const attempts = this.replyHistory(accountId), original = attempts.get(request.attemptId);
+        if (action === "reply.review" && unresolvedReplyUpdate(this.replyUpdateHistory(accountId), request.attemptId))
+          fail(409, "reply_update_unresolved", "Check the existing update before reviewing.");
         const plan = ["reply.reserve", "reply.dispatch", "reply.review"].includes(action) ? prepareGraphReplyDraft({ store: this.store, token, binding,
           sourceId, requestId: action === "reply.reserve" ? requestId : original?.plan.requestId,
           mode: action === "reply.reserve" ? request.mode : original?.plan.mode }) : null;
@@ -427,7 +457,7 @@ export class Inbox {
       const name = /^CREATE (?:TABLE|TRIGGER) ([a-z_]+)/.exec(sql.trim())[1];
       require(normalize(this.db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(name)?.sql) === normalize(sql));
     }
-    const sources = new Map(), drafts = new Map(), historicalRooms = new Map(), outboxes = new Map(), replyBoxes = new Map(); let versions = 0;
+    const sources = new Map(), drafts = new Map(), historicalRooms = new Map(), outboxes = new Map(), replyBoxes = new Map(), updateBoxes = new Map(); let versions = 0;
     for (const row of this.db.prepare("SELECT * FROM private_inbox_commands ORDER BY sequence").all()) {
       const request = JSON.parse(row.request_json), receipt = JSON.parse(row.receipt_json); validate(request);
       require(row.request_id === request.requestId && row.fingerprint === digest(request) && revision(row.auth_epoch) && Number.isSafeInteger(row.at));
@@ -436,23 +466,35 @@ export class Inbox {
       if (isReplyAttempt(request)) {
         require(prior);
         if (!replyBoxes.has(row.account_id)) replyBoxes.set(row.account_id, new Map());
+        if (!updateBoxes.has(row.account_id)) updateBoxes.set(row.account_id, new Map());
         const attempts = replyBoxes.get(row.account_id), original = attempts.get(request.attemptId);
-        let plan = null;
-        if (["reply.reserve", "reply.dispatch", "reply.review"].includes(request.action)) {
+        const updates = updateBoxes.get(row.account_id), child = updates.get(request.updateId);
+        let plan = null, proposal = null;
+        if (["reply.reserve", "reply.dispatch", "reply.review", "reply.update.reserve", "reply.update.dispatch"].includes(request.action)) {
           const data = this.version(row.account_id, request.sourceId, prior.revision), draft = drafts.get(key);
           const profile = data.envelope?.connection;
           const configured = this.db.prepare("SELECT request_json,auth_epoch FROM private_email_commands WHERE account_id=? AND json_extract(request_json,'$.action')='connection.configure' AND json_extract(receipt_json,'$.connectionId')=? AND json_extract(receipt_json,'$.revision')=?")
             .get(row.account_id, profile?.id ?? "", profile?.revision ?? -1);
           require(configured && configured.auth_epoch === row.auth_epoch && same(JSON.parse(configured.request_json).profile, profile));
-          plan = buildGraphReplyDraft({ auth: { account: { id: row.account_id, authEpoch: row.auth_epoch } },
+          const context = { auth: { account: { id: row.account_id, authEpoch: row.auth_epoch } },
             source: { id: request.sourceId, revision: prior.revision, ...data },
             draft: draft ? { revision: draft.revision, sourceRevision: draft.source_revision, body: draft.body } : null,
-            connection: { profile, mode: "fixture", state: "active", authEpoch: row.auth_epoch },
+            connection: { profile, mode: "fixture", state: "active", authEpoch: row.auth_epoch } };
+          if (isReplyUpdate(request)) proposal = buildGraphReplyUpdate({ ...context, attempt: original,
+            requestId: request.action === "reply.update.reserve" ? request.requestId : child?.proposal.requestId,
+            expectedRevision: request.action === "reply.update.reserve" ? request.expectedRevision : child?.proposal.attemptRevision });
+          else plan = buildGraphReplyDraft({ ...context,
             requestId: request.action === "reply.reserve" ? request.requestId : original?.plan.requestId,
             mode: request.action === "reply.reserve" ? request.mode : original?.plan.mode });
         }
-        expected.attempt = transitionReplyAttempt(attempts, request, { plan, authEpoch: row.auth_epoch, at: row.at });
-        attempts.set(expected.attempt.id, expected.attempt);
+        if (isReplyUpdate(request)) {
+          expected.update = transitionReplyUpdate(updates, request, { proposal, at: row.at });
+          updates.set(expected.update.id, expected.update);
+        } else {
+          require(request.action !== "reply.review" || !unresolvedReplyUpdate(updates, request.attemptId));
+          expected.attempt = transitionReplyAttempt(attempts, request, { plan, authEpoch: row.auth_epoch, at: row.at });
+          attempts.set(expected.attempt.id, expected.attempt);
+        }
       } else if (isSend(request)) {
         require(prior);
         if (!outboxes.has(row.account_id)) outboxes.set(row.account_id, new Map());

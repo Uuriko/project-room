@@ -195,7 +195,7 @@ test("genuine schema13 rejects offer commands and upgrades only collision-free r
         assert.deepEqual(f.store.db.prepare("SELECT name,sql FROM sqlite_master ORDER BY name").all(), catalog);
       } else {
         const current = new RoomStore(filename);
-        try { assert.equal(auditRecovery(current).schemaVersion, 22); assert.deepEqual(current.room("commons"), row); }
+        try { assert.equal(auditRecovery(current).schemaVersion, 23); assert.deepEqual(current.room("commons"), row); }
         finally { current.close(); }
       }
     } finally { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); }

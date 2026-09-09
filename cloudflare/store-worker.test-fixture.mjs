@@ -11,7 +11,7 @@ import { textVersion } from '../server/text-results.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
 import { emailContractFixture } from '../scripts/email-contract-fixture.mjs';
 import { RecordedGraphMailbox, prepareGraphFixturePage, graphFixtureStart } from '../server/graph-fixture-sync.mjs';
-import { prepareGraphReplyDraft, currentGraphReplyDraft, observeGraphReplyCreation } from '../server/graph-reply-draft.mjs';
+import { prepareGraphReplyDraft, currentGraphReplyDraft, observeGraphReplyCreation, prepareGraphReplyUpdate } from '../server/graph-reply-draft.mjs';
 
 function checkNarrowAuthentication(store, credentials) {
   const { state, sequence } = store.room('commons'), before = auditRecovery(store).dataSha256;
@@ -228,11 +228,48 @@ export class StoreTestRoom {
       const review = { action: 'reply.review', requestId: 'worker-reviewed', sourceId: email.sourceId, attemptId: attempt.id,
         expectedRevision: 3, reviewVersion: attempt.observation.reviewVersion };
       assert.equal(store.inbox.reply(email.token, review, email.binding).duplicate, true);
+      store.inbox.apply(email.token, { action: 'draft.save', requestId: 'worker-update-text', sourceId: email.sourceId,
+        sourceRevision: 1, expectedRevision: 1, body: 'Edited reply after review 🪷' }, email.binding);
+      const proposal = prepareGraphReplyUpdate({ store, token: email.token, binding: email.binding, sourceId: email.sourceId,
+        attemptId: attempt.id, expectedRevision: attempt.revision, requestId: 'worker-update-plan' });
+      store.inbox.reply(email.token, { action: 'reply.update.reserve', requestId: proposal.requestId, sourceId: email.sourceId,
+        attemptId: attempt.id, expectedRevision: attempt.revision, updateVersion: proposal.updateVersion }, email.binding);
+      const updateDispatch = { action: 'reply.update.dispatch', requestId: 'worker-update-dispatch', sourceId: email.sourceId,
+        attemptId: attempt.id, updateId: proposal.requestId, expectedRevision: 0 };
+      assert.throws(() => store.readTransaction(() => store.inbox.reply(email.token, updateDispatch, email.binding)), /read-only/);
+      assert.equal(store.inbox.reply(email.token, updateDispatch, email.binding).receipt.update.status, 'update_unconfirmed');
       const unavailable = store.inbox.recordReplyObservation(email.token, { sourceId: email.sourceId, attemptId: attempt.id,
         expectedRevision: 4, requestId: 'worker-unavailable', response: null }, email.binding);
       assert.equal(unavailable.receipt.attempt.status, 'draft_unavailable'); assert.equal(unavailable.receipt.attempt.review, null);
-      assert.throws(() => store.inbox.reply(email.token, { ...review, requestId: 'worker-stale-review', expectedRevision: 5 }, email.binding), { code: 'stale_reply_review' });
+      assert.throws(() => store.inbox.reply(email.token, { ...review, requestId: 'worker-stale-review', expectedRevision: 5 }, email.binding), { code: 'reply_update_unresolved' });
       auditRecovery(store); return Response.json({ reviewRecovered: true, invalidated: true, canSend: false });
+    }
+    if (path === '/update-resume' || path === '/update-evidence-resume') {
+      const { email } = await request.json();
+      const update = store.inbox.replyUpdates(email.token, email.sourceId, email.binding).updates[0], parent = store.inbox.replyAttempts(email.token, email.sourceId, email.binding).attempts[0];
+      assert.equal(update.status, 'update_unconfirmed'); assert.equal(parent.revision, 5);
+      assert.equal(parent.observation.status, 'draft_unavailable');
+      const before = auditRecovery(store), dispatch = { action: 'reply.update.dispatch', requestId: 'worker-update-dispatch',
+        sourceId: email.sourceId, attemptId: parent.id, updateId: update.id, expectedRevision: 0 };
+      assert.equal(store.inbox.reply(email.token, dispatch, email.binding).duplicate, true);
+      assert.deepEqual(auditRecovery(store), before);
+      if (path === '/update-resume') {
+        assert.equal(update.revision, 1); assert.equal(update.observation, null);
+        const p = update.proposal, e = p.proposed, address = emailAddress => ({ emailAddress });
+        const message = { ...emailContractFixture().message, id: p.providerDraftId, changeKey: 'worker-update-observed', isDraft: true,
+          hasAttachments: false, from: address(e.from), sender: address(e.sender), replyTo: [], toRecipients: e.to.map(address),
+          ccRecipients: e.cc.map(address), bccRecipients: e.bcc.map(address), subject: e.subject, body: { contentType: 'text', content: e.body } };
+        store.inbox.recordReplyUpdateObservation(email.token, { sourceId: email.sourceId, attemptId: parent.id, updateId: update.id,
+          expectedRevision: 1, requestId: 'worker-update-observed', response: { status: 200, connection: p.connection, message,
+            options: { idType: 'immutable', attachmentObservation: { messageId: message.id, messageRevision: message.changeKey, complete: true, items: [] } } } }, email.binding);
+      }
+      const current = store.inbox.replyUpdates(email.token, email.sourceId, email.binding).updates[0];
+      assert.equal(current.revision, 2); assert.equal(current.status, 'update_unconfirmed');
+      assert.equal(current.observation.status, 'proposal_content_matches'); assert.equal(current.observation.updateOutcome, 'unproven');
+      assert.equal(current.canRetryUpdate, false); assert.equal(current.canSend, false);
+      assert.deepEqual(store.inbox.replyAttempts(email.token, email.sourceId, email.binding).attempts[0], parent);
+      assert.equal(store.inbox.read(email.token, email.sourceId, email.binding).draft.body, 'Edited reply after review 🪷');
+      auditRecovery(store); return Response.json({ updateRecovered: true, outcome: 'unproven', canSend: false });
     }
     if (path === '/newer-version') {
       store.transaction(() => durableStorage.setVersion(this.db, STORE_SCHEMA_VERSION + 1));

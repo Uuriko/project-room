@@ -1,7 +1,7 @@
 // Pure private reply-attempt transitions. No provider I/O or new storage engine.
 import { validId } from "../src/events.js";
 import { emailInput, emailOpaqueId, exactEmailFields } from "./email-envelope.mjs";
-import { compareReplyEnvelope } from "./graph-reply-draft.mjs";
+import { compareReplyEnvelope, compareReplyUpdateEnvelope } from "./graph-reply-draft.mjs";
 import { ServiceError } from "./store.mjs";
 
 const fail = (code, message, status = 409) => { throw new ServiceError(status, code, message); };
@@ -12,7 +12,10 @@ export const replyObservationReviewable = observation => Boolean(observation?.re
   && !observation.differences.some(value => ["draft_state", "thread", "from", "sender", "attachments"].includes(value))
   && (observation.draft.to.length || observation.draft.cc.length || observation.draft.bcc.length));
 export const isReplyAttempt = request => typeof request?.action === "string" && request.action.startsWith("reply.");
+export const isReplyUpdate = request => typeof request?.action === "string" && request.action.startsWith("reply.update.");
+export const unresolvedReplyUpdate = (updates, attemptId) => [...updates.values()].some(update => update.attemptId === attemptId && update.status !== "cancelled");
 export function validateReplyAttempt(request) {
+  if (isReplyUpdate(request)) return validateReplyUpdate(request);
   emailInput(request);
   const common = ["action", "requestId", "sourceId"];
   const fields = {
@@ -39,7 +42,55 @@ export function validateReplyAttempt(request) {
   if (request.action === "reply.observed" && (request.observation === undefined || Buffer.byteLength(JSON.stringify(request.observation)) > replyObservationBytes))
     fail("reply_observation_limit", "This draft is too large for the review pilot.", 422);
 }
+
+function validateReplyUpdate(request) {
+  emailInput(request);
+  const common = ["action", "requestId", "sourceId", "attemptId", "expectedRevision"];
+  const fields = {
+    "reply.update.reserve": [...common, "updateVersion"],
+    "reply.update.cancel": [...common, "updateId"],
+    "reply.update.dispatch": [...common, "updateId"],
+    "reply.update.observed": [...common, "updateId", "observation"]
+  }[request?.action];
+  if (!fields || !exactEmailFields(request, fields) || ![request.requestId, request.sourceId, request.attemptId].every(validId)
+    || !revision(request.expectedRevision) || (request.action === "reply.update.reserve" ? !hash(request.updateVersion) : !validId(request.updateId)))
+    fail("invalid_reply_update", "Choose an exact reply update.", 422);
+  if (request.action === "reply.update.observed" && (request.observation === undefined || Buffer.byteLength(JSON.stringify(request.observation)) > replyObservationBytes))
+    fail("reply_observation_limit", "This draft is too large for the review pilot.", 422);
+}
+
+// Child evidence never mutates creation intent, the parent preview or local text.
+export function transitionReplyUpdate(updates, request, { proposal, at }) {
+  validateReplyUpdate(request);
+  if (!Number.isSafeInteger(at)) fail("invalid_reply_time", "Reply timestamp is unavailable.");
+  if (request.action === "reply.update.reserve") {
+    if (!proposal || proposal.requestId !== request.requestId || proposal.sourceId !== request.sourceId
+      || proposal.attemptId !== request.attemptId || proposal.attemptRevision !== request.expectedRevision || proposal.updateVersion !== request.updateVersion)
+      fail("stale_email_reply_update", "The reply changed. Compare it again.");
+    if (proposal.status !== "update_proposed" || !proposal.update) fail("reply_update_not_needed", "The text already matches.");
+    if (unresolvedReplyUpdate(updates, request.attemptId)) fail("reply_update_unresolved", "Check the existing update first.");
+    return { id: request.requestId, sourceId: request.sourceId, attemptId: request.attemptId, revision: 0,
+      status: "reserved", proposal: structuredClone(proposal), observation: null, dispatchedAt: null,
+      createdAt: at, updatedAt: at, canExecute: false, canRetryUpdate: false, canReview: false, canSend: false };
+  }
+  const prior = updates.get(request.updateId);
+  if (!prior || prior.sourceId !== request.sourceId || prior.attemptId !== request.attemptId)
+    fail("reply_update_not_found", "Reply update not found.", 404);
+  if (prior.revision !== request.expectedRevision) fail("stale_reply_update", "Update status changed. Refresh it.");
+  if (request.action === "reply.update.observed") {
+    if (prior.status !== "update_unconfirmed") fail("reply_update_not_started", "No update has started.");
+    return { ...prior, revision: prior.revision + 1, updatedAt: at,
+      observation: compareReplyUpdateEnvelope(prior.proposal, request.observation) };
+  }
+  if (prior.status !== "reserved") fail("reply_update_started", "The update may have started. Check this attempt.");
+  if (request.action === "reply.update.dispatch" && JSON.stringify(proposal) !== JSON.stringify(prior.proposal))
+    fail("stale_email_reply_update", "The reply changed. Cancel and compare again.");
+  return { ...prior, revision: prior.revision + 1, updatedAt: at,
+    status: request.action === "reply.update.cancel" ? "cancelled" : "update_unconfirmed",
+    dispatchedAt: request.action === "reply.update.dispatch" ? at : null };
+}
 export function transitionReplyAttempt(attempts, request, { plan, authEpoch, at }) {
+  if (isReplyUpdate(request)) fail("invalid_reply_attempt", "Use the child update transition.", 422);
   validateReplyAttempt(request);
   if (!Number.isSafeInteger(at)) fail("invalid_reply_time", "Reply timestamp is unavailable.");
   if (request.action === "reply.reserve") {

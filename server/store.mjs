@@ -141,6 +141,7 @@ const invitationSchema = `
 const compact = state => ({ ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} });
 // Platform differences stay at the database boundary; identity, invitation and
 // command rules below are shared by every runtime. The default remains Node.
+const nodeReadTransactions = new WeakSet();
 const nodeStorage = {
   version: db => db.prepare("PRAGMA user_version").get().user_version,
   setVersion: (db, version) => db.exec(`PRAGMA user_version=${version}`),
@@ -151,10 +152,18 @@ const nodeStorage = {
   },
   registerWriter, installWriterFence, verifyWriterFence,
   transaction(db, fn, readOnly) {
-    if (db.isTransaction) return fn();
+    if (db.isTransaction) {
+      if (!readOnly && nodeReadTransactions.has(db)) throw new Error("Cannot write inside a read-only transaction");
+      return fn();
+    }
+    const queryOnly = readOnly ? db.prepare("PRAGMA query_only").get().query_only : null;
     db.exec(readOnly ? "BEGIN" : "BEGIN IMMEDIATE");
-    try { const result = fn(); db.exec("COMMIT"); return result; }
+    try {
+      if (readOnly) { db.exec("PRAGMA query_only=ON"); nodeReadTransactions.add(db); }
+      const result = fn(); db.exec("COMMIT"); return result;
+    }
     catch (error) { db.exec("ROLLBACK"); throw error; }
+    finally { if (readOnly) { nodeReadTransactions.delete(db); db.exec(`PRAGMA query_only=${queryOnly}`); } }
   }
 };
 const work = "workItemId expectedRevision";
@@ -217,7 +226,7 @@ export class RoomStore {
     this.inbox = new Inbox(this);
     this.email = new EmailImport(this);
     const version = this.storagePlatform.version(this.db);
-    const supported = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, STORE_SCHEMA_VERSION]);
+    const supported = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, STORE_SCHEMA_VERSION]);
     const hasSchema = version === 0 && this.storagePlatform.hasSchema(this.db);
     if (!supported.has(version) || hasSchema) {
       this.db.close();
@@ -290,6 +299,8 @@ export class RoomStore {
         throw new Error("Pre-v21 reply history requires operator reconciliation");
       if (version < 22 && this.db.prepare("SELECT 1 FROM private_inbox_commands WHERE json_extract(request_json,'$.action') IN ('reply.observed','reply.review') OR json_type(receipt_json,'$.attempt.observation') IS NOT NULL OR json_type(receipt_json,'$.attempt.review') IS NOT NULL LIMIT 1").get())
         throw new Error("Pre-v22 reply review history requires operator reconciliation");
+      if (version < 23 && this.db.prepare("SELECT 1 FROM private_inbox_commands WHERE json_extract(request_json,'$.action') LIKE 'reply.update.%' OR json_type(receipt_json,'$.update') IS NOT NULL LIMIT 1").get())
+        throw new Error("Pre-v23 reply update history requires operator reconciliation");
       if (version < STORE_SCHEMA_VERSION) this.storagePlatform.installWriterFence(this.db);
       this.storagePlatform.verifyWriterFence(this.db);
       this.verifyInvitationAudit();

@@ -8,6 +8,27 @@ import { RoomStore } from "../server/store.mjs";
 import { writerFenceDefinitions, verifyWriterFence, fenceDefinitions } from "../server/writer-fence.mjs";
 
 // Construct a synthetic pre-upgrade database. Never use this fixture on user data.
+test("Node read transactions reject nested and direct writes, retain outer writes and restore mode after failures", t => {
+  const directory = mkdtempSync(join(tmpdir(), "room-read-transaction-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const store = new RoomStore(join(directory, "room.sqlite")); t.after(() => store.close());
+  store.createAccount("fixture-account");
+  const original = store.account("fixture-account");
+  store.readTransaction(() => {
+    assert.throws(() => store.createAccount("nested"), /read-only/);
+    assert.throws(() => store.db.prepare("UPDATE accounts SET revision=revision+1 WHERE id=?").run("fixture-account"), /readonly/);
+    assert.deepEqual(store.readTransaction(() => store.account("fixture-account")), original);
+  });
+  assert.equal(store.db.prepare("PRAGMA query_only").get().query_only, 0);
+  assert.throws(() => store.readTransaction(() => { throw new Error("fixture read failure"); }), /fixture read failure/);
+  assert.equal(store.db.prepare("PRAGMA query_only").get().query_only, 0);
+  store.transaction(() => {
+    store.readTransaction(() => assert.deepEqual(store.account("fixture-account"), original));
+    store.createAccount("after-read");
+  });
+  assert.equal(store.account("after-read").active, true);
+});
+
 function legacyFixture(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-upgrade-contract-"));
   const filename = join(directory, "fixture.sqlite");
@@ -27,11 +48,11 @@ test("schema upgrade preserves existing records and fences a previously opened c
   legacyStatement.run("fixture-account");
   const current = new RoomStore(filename);
   try {
-    assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 22);
+    assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 23);
     assert.deepEqual(current.db.prepare("SELECT * FROM accounts").all(), before);
     assert.doesNotThrow(() => verifyWriterFence(current.db));
     assert.equal(writerFenceDefinitions.length, 81);
-    assert.throws(() => legacyStatement.run("fixture-account"), /project_room_writer_v22|unsupported database writer/);
+    assert.throws(() => legacyStatement.run("fixture-account"), /project_room_writer_v23|unsupported database writer/);
     current.createAccount("new-fixture-account");
     assert.equal(current.account("new-fixture-account").active, true);
   } finally { current.close(); earlier.close(); }
@@ -66,7 +87,7 @@ test("failure after fence installation rolls back its schema marker and all trig
   const inspected = new DatabaseSync(filename, { readOnly: true });
   try {
     assert.equal(inspected.prepare("PRAGMA user_version").get().user_version, 5);
-    assert.equal(inspected.prepare("SELECT count(*) n FROM sqlite_master WHERE type='trigger' AND name LIKE 'writer_v22_%'").get().n, 0);
+    assert.equal(inspected.prepare("SELECT count(*) n FROM sqlite_master WHERE type='trigger' AND name LIKE 'writer_v23_%'").get().n, 0);
     assert.equal(inspected.prepare("SELECT count(*) n FROM accounts").get().n, 1);
   } finally { inspected.close(); }
   const retry = new RoomStore(filename);
@@ -75,7 +96,7 @@ test("failure after fence installation rolls back its schema marker and all trig
 
 test("read-only audit does not upgrade a pre-fence database", t => {
   const filename = legacyFixture(t);
-  assert.throws(() => new RoomStore(filename, { readOnly: true }), /requires schema v22/);
+  assert.throws(() => new RoomStore(filename, { readOnly: true }), /requires schema v23/);
   const inspected = new DatabaseSync(filename, { readOnly: true });
   try { assert.equal(inspected.prepare("PRAGMA user_version").get().user_version, 5); }
   finally { inspected.close(); }
@@ -90,8 +111,8 @@ test("the v9 migration preserves v6 guards while retiring pre-open v6 writers", 
   oldWrite.run();
   const current = new RoomStore(filename);
   try {
-    assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 22);
-    assert.throws(() => oldWrite.run(), /project_room_writer_v22|unsupported database writer/);
+    assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 23);
+    assert.throws(() => oldWrite.run(), /project_room_writer_v23|unsupported database writer/);
     current.createAccount("current-writer");
     assert.equal(current.account("current-writer").active, true);
   } finally { current.close(); earlier.close(); }
@@ -108,7 +129,7 @@ test("v7 to v9 preserves every existing table row and retires a pre-open v7 conn
   const current = new RoomStore(filename);
   try {
     assert.deepEqual(Object.fromEntries(tables.map(name => [name, current.db.prepare(`SELECT * FROM ${name}`).all()])), before);
-    assert.throws(() => cached.run(), /project_room_writer_v22|unsupported database writer/);
+    assert.throws(() => cached.run(), /project_room_writer_v23|unsupported database writer/);
     assert.equal(current.db.prepare("SELECT count(*) n FROM private_reminders").get().n, 0);
   } finally { current.close(); old.close(); }
 });
