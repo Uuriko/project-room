@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
-import { validId, EVENT_TYPES as T } from "../src/events.js";
+import { validId, EVENT_TYPES as T, hasConfirmedIndependentPass } from "../src/events.js";
+import { currentApproval } from "../src/workflow.js";
+import { storedText } from "./text-results.mjs";
 import { ServiceError } from "./store.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -41,6 +43,7 @@ function validate(request) {
   const common = ["requestId", "action", "sourceId"], fields = {
     "source.save": [...common, "expectedRevision", "data"],
     "draft.save": [...common, "expectedRevision", "sourceRevision", "body"],
+    "draft.adopt": [...common, "expectedRevision", "sourceRevision", "roomId", "workItemId", "shareRequestId", "resultVersion"],
     "source.share": [...common, "sourceRevision", "roomId", "audienceVersion", "paragraphs"]
   }[request?.action];
   if (!fields || !exact(request, fields) || !validId(request.requestId) || !validId(request.sourceId))
@@ -56,6 +59,9 @@ function validate(request) {
       fail(422, "invalid_inbox_source", "Supply a bounded synthetic source, not a provider connection.");
   }
   if (request.action === "draft.save" && !text(request.body, 4000, true)) fail(422, "invalid_inbox_draft", "Draft must be well-formed text up to 4,000 characters.");
+  if (request.action === "draft.adopt" && (![request.roomId, request.workItemId, request.shareRequestId].every(validId)
+    || typeof request.resultVersion !== "string" || !/^[a-f0-9]{64}$/.test(request.resultVersion)))
+    fail(422, "invalid_inbox_result", "Choose an exact reviewed room result.");
   if (request.action === "source.share" && (!validId(request.roomId) || typeof request.audienceVersion !== "string" || !/^[a-f0-9]{64}$/.test(request.audienceVersion)
     || !Array.isArray(request.paragraphs) || !request.paragraphs.length || request.paragraphs.length > inboxLimits.paragraphs
     || !request.paragraphs.every(n => revision(n) && n < inboxLimits.paragraphs) || new Set(request.paragraphs).size !== request.paragraphs.length))
@@ -102,8 +108,63 @@ export class Inbox {
       const auth = this.auth(token, binding), row = this.source(auth.account.id, sourceId);
       const draft = this.db.prepare("SELECT revision,source_revision,body,updated_at FROM private_inbox_drafts WHERE account_id=? AND source_id=?").get(auth.account.id, sourceId);
       return { contractVersion: 1, viewer: viewer(auth), source: { id: row.id, revision: row.revision, ...this.version(auth.account.id, row.id, row.revision) },
-        draft: draft ? { revision: draft.revision, sourceRevision: draft.source_revision, body: draft.body, updatedAt: draft.updated_at } : null };
+        draft: draft ? { revision: draft.revision, sourceRevision: draft.source_revision, body: draft.body, updatedAt: draft.updated_at,
+          origin: this.draftOrigin(auth.account.id, sourceId, draft.body, row.revision) } : null };
     });
+  }
+  draftOrigin(accountId, sourceId, body, sourceRevision) {
+    const row = this.db.prepare(`SELECT request_json,receipt_json FROM private_inbox_commands WHERE account_id=?
+      AND json_extract(request_json,'$.sourceId')=? AND (json_extract(request_json,'$.action')='draft.adopt'
+      OR (json_extract(request_json,'$.action')='draft.save' AND json_extract(request_json,'$.body')='')) ORDER BY sequence DESC LIMIT 1`).get(accountId, sourceId);
+    if (!row || JSON.parse(row.request_json).action !== "draft.adopt") return null;
+    const adopted = JSON.parse(row.receipt_json);
+    return { ...adopted.origin, unchanged: body === adopted.body, sourceChanged: sourceRevision !== adopted.sourceRevision };
+  }
+  shares(accountId, sourceId, roomId, before = Number.MAX_SAFE_INTEGER) {
+    return this.db.prepare(`SELECT sequence,request_id,request_json,receipt_json FROM private_inbox_commands WHERE account_id=? AND sequence<?
+      AND json_extract(request_json,'$.sourceId')=? AND json_extract(request_json,'$.roomId')=?
+      AND json_extract(request_json,'$.action')='source.share' ORDER BY sequence DESC`).all(accountId, before, sourceId, roomId)
+      .map(row => ({ ...row, request: JSON.parse(row.request_json), receipt: JSON.parse(row.receipt_json) }));
+  }
+  resultRecord(sourceRevision, share, item, state) {
+    const base = { workItemId: item.id, title: item.title, shareRequestId: share.request_id,
+      sourceRevision: share.request.sourceRevision, messageId: share.receipt.messageId };
+    const status = share.request.sourceRevision !== sourceRevision ? "source_changed"
+      : item.supersededBy || item.state === "superseded" ? "superseded"
+      : !item.receipt?.nativeText ? "no_native_result"
+      : !hasConfirmedIndependentPass(item) || !currentApproval(item) || state.members[item.decision?.actorId]?.kind !== "human" ? "needs_review" : "ready";
+    if (status !== "ready") return { ...base, status, resultVersion: null };
+    const evidence = storedText(this.db, state, item.id, item.receipt.nativeText.messageId, item.receipt.nativeText.messageEventId);
+    if (evidence.body.length > 4000) return { ...base, status: "too_long", resultVersion: null };
+    const proof = { roomId: state.room.id, workItemId: item.id, shareRequestId: share.request_id,
+      sourceRevision, messageId: share.receipt.messageId, workRevision: item.revision,
+      completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion,
+      verificationEventId: item.verification.eventId, decisionEventId: item.decision.eventId };
+    return { ...base, status, resultVersion: digest(proof), proof, body: evidence.body };
+  }
+  results(token, sourceId, roomId, binding, workItemId = null) {
+    return this.store.readTransaction(() => {
+      const auth = this.auth(token, binding, roomId), source = this.source(auth.account.id, sourceId), { state } = this.store.room(roomId);
+      if (workItemId !== null && !validId(workItemId)) fail(422, "invalid_inbox_result", "Choose a result.");
+      const shares = new Map(this.shares(auth.account.id, sourceId, roomId).map(s => [s.receipt.messageId, s]));
+      const items = Object.values(state.workItems).filter(i => shares.has(i.sourceMessageId) && (workItemId === null || i.id === workItemId));
+      if (workItemId !== null && !items.length) fail(404, "inbox_result_not_found", "Result not found.");
+      return { contractVersion: 1, viewer: viewer(auth), sourceId, roomId, sourceRevision: source.revision,
+        results: items.map(item => {
+          const value = this.resultRecord(source.revision, shares.get(item.sourceMessageId), item, state);
+          if (workItemId === null) { delete value.body; delete value.proof; }
+          return value;
+        }) };
+    });
+  }
+  adopted(accountId, request, room, before) {
+    const share = this.shares(accountId, request.sourceId, request.roomId, before).find(s => s.request_id === request.shareRequestId);
+    const item = room.state.workItems[request.workItemId];
+    if (!share || !item || item.sourceMessageId !== share.receipt.messageId) fail(404, "inbox_result_not_found", "Result not found.");
+    const result = this.resultRecord(request.sourceRevision, share, item, room.state);
+    if (result.status !== "ready" || result.resultVersion !== request.resultVersion)
+      fail(409, "stale_inbox_result", "Result or review changed. Review again.");
+    return { body: result.body, origin: { ...result.proof, roomSequence: room.sequence } };
   }
   shareContext(token, sourceId, roomId, binding) {
     return this.store.readTransaction(() => {
@@ -116,7 +177,7 @@ export class Inbox {
   apply(token, request, binding) {
     return this.store.transaction(() => {
       const auth = this.auth(token, binding); validate(request);
-      if (request.action === "source.share") this.auth(token, binding, request.roomId);
+      if (["source.share", "draft.adopt"].includes(request.action)) this.auth(token, binding, request.roomId);
       const accountId = auth.account.id, fingerprint = digest(request);
       const prior = this.db.prepare("SELECT fingerprint,receipt_json FROM private_inbox_commands WHERE account_id=? AND request_id=?").get(accountId, request.requestId);
       if (prior) {
@@ -139,13 +200,14 @@ export class Inbox {
       } else {
         const source = this.source(accountId, sourceId);
         if (source.revision !== request.sourceRevision) fail(409, "stale_inbox_source", "Source changed. Review the current version.");
-        if (action === "draft.save") {
+        if (action === "draft.save" || action === "draft.adopt") {
           const old = this.db.prepare("SELECT revision FROM private_inbox_drafts WHERE account_id=? AND source_id=?").get(accountId, sourceId);
           if ((old?.revision ?? 0) !== request.expectedRevision) fail(409, "stale_inbox_draft", "Draft changed. Keep both versions and review.");
           Object.assign(receipt, { revision: request.expectedRevision + 1, sourceRevision: request.sourceRevision });
+          if (action === "draft.adopt") Object.assign(receipt, this.adopted(accountId, request, this.store.room(request.roomId)));
           this.db.prepare(`INSERT INTO private_inbox_drafts VALUES(?,?,?,?,?,?) ON CONFLICT(account_id,source_id)
             DO UPDATE SET revision=excluded.revision,source_revision=excluded.source_revision,body=excluded.body,updated_at=excluded.updated_at`)
-            .run(accountId, sourceId, receipt.revision, receipt.sourceRevision, request.body, now);
+            .run(accountId, sourceId, receipt.revision, receipt.sourceRevision, action === "draft.adopt" ? receipt.body : request.body, now);
         } else {
           const room = this.store.room(request.roomId);
           if (request.audienceVersion !== digest(inboxAudience(room.state))) fail(409, "stale_inbox_audience", "Room audience changed. Review who will see this excerpt.");
@@ -168,7 +230,7 @@ export class Inbox {
       const name = /^CREATE (?:TABLE|TRIGGER) ([a-z_]+)/.exec(sql.trim())[1];
       require(normalize(this.db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(name)?.sql) === normalize(sql));
     }
-    const sources = new Map(), drafts = new Map(); let versions = 0;
+    const sources = new Map(), drafts = new Map(), historicalRooms = new Map(); let versions = 0;
     for (const row of this.db.prepare("SELECT * FROM private_inbox_commands ORDER BY sequence").all()) {
       const request = JSON.parse(row.request_json), receipt = JSON.parse(row.receipt_json); validate(request);
       require(row.request_id === request.requestId && row.fingerprint === digest(request) && revision(row.auth_epoch) && Number.isSafeInteger(row.at));
@@ -181,10 +243,17 @@ export class Inbox {
         sources.set(key, { account_id: row.account_id, id: request.sourceId, revision: expected.revision, created_at: prior?.created_at ?? row.at, updated_at: row.at }); versions++;
       } else {
         require(prior?.revision === request.sourceRevision);
-        if (request.action === "draft.save") {
+        if (request.action === "draft.save" || request.action === "draft.adopt") {
           require(request.expectedRevision === (drafts.get(key)?.revision ?? 0));
           Object.assign(expected, { revision: request.expectedRevision + 1, sourceRevision: request.sourceRevision });
-          drafts.set(key, { account_id: row.account_id, source_id: request.sourceId, revision: expected.revision, source_revision: request.sourceRevision, body: request.body, updated_at: row.at });
+          if (request.action === "draft.adopt") {
+            require(revision(receipt.origin?.roomSequence) && receipt.origin.roomSequence > 0);
+            const roomKey = canonical([request.roomId, receipt.origin.roomSequence]);
+            if (!historicalRooms.has(roomKey)) historicalRooms.set(roomKey, this.store.rebuildProjection(request.roomId, receipt.origin.roomSequence));
+            Object.assign(expected, this.adopted(row.account_id, request, historicalRooms.get(roomKey), row.sequence));
+          }
+          drafts.set(key, { account_id: row.account_id, source_id: request.sourceId, revision: expected.revision, source_revision: request.sourceRevision,
+            body: request.action === "draft.adopt" ? expected.body : request.body, updated_at: row.at });
         } else {
           const eventRow = this.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND id=?").get(request.roomId, receipt.eventId);
           require(eventRow); const event = JSON.parse(eventRow.body);

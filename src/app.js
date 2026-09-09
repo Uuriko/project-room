@@ -210,7 +210,7 @@ portableWorkUI = installPortableWork({ client, getState: () => state, onSaved: m
   notice(visible ? "Draft posted. Work status is unchanged." : "Draft posted. Refresh to view it. Work status is unchanged.");
 } });
 resultCopyUI = installResultCopy({ client, getState: () => state });
-inboxUI = installInbox({ account: accountClient, room: client, getRoom: () => state, onShared: async receipt => {
+inboxUI = installInbox({ account: accountClient, room: client, getRoom: () => state, onOpenWork: id => revealWork(id), onShared: async receipt => {
   try { await client.refresh(); if (state) revealMessage(receipt.messageId); }
   catch { notice("Shared. Refresh the room to view it.", true); }
 } });

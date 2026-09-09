@@ -59,10 +59,12 @@
           <header class="inbox-source-heading"><div><span class="form-hint">Sample message · only you</span><h2 id="inbox-subject"></h2></div><button id="inbox-ask" class="button secondary" type="button">Ask room</button></header>
           <p id="inbox-addresses" class="form-hint"></p>
           <div id="inbox-source-body" class="inbox-source-body"></div>
+          <section id="inbox-results" class="inbox-results" aria-label="Related room work" hidden><h3>From the room</h3><div id="inbox-result-list"></div></section>
           <form id="inbox-draft-form" class="inbox-draft-form">
             <label for="inbox-draft">Private reply draft</label>
             <textarea id="inbox-draft" rows="5" maxlength="4000" placeholder="Write a reply…"></textarea>
             <div class="inbox-draft-actions"><span id="inbox-draft-status" role="status"></span><button id="inbox-review" class="button ghost" type="button" hidden>Review changes</button><button id="inbox-save" class="button primary" type="submit" disabled>Save draft</button></div>
+            <p id="inbox-origin" class="form-hint"></p>
           </form>
           <section id="inbox-conflict" class="inbox-conflict" aria-label="Draft changes" hidden>
             <h3>Saved draft</h3><pre id="inbox-remote-draft"></pre>
@@ -75,6 +77,13 @@
         <p class="form-hint">Selected text becomes room history, including for future members.</p>
         <div id="inbox-share-paragraphs"></div><p id="inbox-share-status" role="status"></p>
         <div class="inbox-draft-actions"><button id="inbox-share-close" class="button ghost" type="button">Close</button><button id="inbox-share-confirm" class="button primary" type="button" disabled>Share</button></div>
+      </dialog>
+      <dialog id="inbox-result-dialog" class="inbox-share-dialog" aria-labelledby="inbox-result-title">
+        <h2 id="inbox-result-title">Use as private draft</h2><p id="inbox-result-status" role="status"></p>
+        <pre id="inbox-result-body"></pre>
+        <details><summary>Replaces your current draft</summary><pre id="inbox-replaced-draft"></pre></details>
+        <p class="form-hint">Nothing will be sent.</p>
+        <div class="inbox-draft-actions"><button id="inbox-result-close" type="button" class="button ghost">Cancel</button><button id="inbox-result-use" type="button" class="button primary" disabled>Use as draft</button></div>
       </dialog>
       <main id="main" class="community-shell" hidden>
         <section class="room-stage" aria-labelledby="room-title">

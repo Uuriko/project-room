@@ -215,7 +215,7 @@ export class RoomStore {
     this.replyRequests = new ReplyRequests(this);
     this.inbox = new Inbox(this);
     const version = this.storagePlatform.version(this.db);
-    const supported = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, STORE_SCHEMA_VERSION]);
+    const supported = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, STORE_SCHEMA_VERSION]);
     const hasSchema = version === 0 && this.storagePlatform.hasSchema(this.db);
     if (!supported.has(version) || hasSchema) {
       this.db.close();
@@ -562,18 +562,21 @@ export class RoomStore {
     const [ownerId, members] = JSON.parse(row.authority);
     return { sequence: row.sequence, ownerId, members };
   }
-  rebuildProjection(roomId) {
+  rebuildProjection(roomId, through = null) {
     const room = this.room(roomId);
+    through ??= room.sequence;
+    if (!Number.isSafeInteger(through) || through < 0 || through > room.sequence) throw new Error("Invalid historical room boundary");
     const checkpoint = this.db.prepare("SELECT sequence,projection FROM projection_checkpoints WHERE room_id=?").get(roomId);
     let state = checkpoint ? JSON.parse(checkpoint.projection) : emptyRoomState();
     let sequence = checkpoint?.sequence ?? 0;
-    const rows = this.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND sequence>? ORDER BY sequence").all(roomId, sequence);
+    if (sequence > through) throw new Error("Historical room boundary predates the retained checkpoint");
+    const rows = this.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence").all(roomId, sequence, through);
     for (const row of rows) {
       if (row.sequence !== sequence + 1) throw new Error("Event sequence is not contiguous");
       state = applyEvent(state, JSON.parse(row.body));
       sequence = row.sequence;
     }
-    if (sequence !== room.sequence) throw new Error("Event sequence does not reach the room projection");
+    if (sequence !== through) throw new Error("Event sequence does not reach the room projection");
     return { sequence, state: compact(state) };
   }
   // Administrative bootstrap, never exposed over HTTP. Historical demo events are test fixtures only.

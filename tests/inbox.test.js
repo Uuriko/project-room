@@ -58,7 +58,7 @@ test("private drafts pin source and draft revisions; exact retries survive repla
   assert.equal(f.save(first).duplicate, true); assert.equal(f.read().source.revision, 2);
   f.save({ ...draft, requestId: "reviewed", sourceRevision: 2, expectedRevision: 1, body: "" });
   assert.equal(f.read().draft.revision, 2); assert.equal(f.read().draft.body, "");
-  assert.equal(auditRecovery(f.store).schemaVersion, 15);
+  assert.equal(auditRecovery(f.store).schemaVersion, 16);
 });
 test("sharing posts only selected text through the existing room command, with one durable receipt", t => {
   const f = fixture(t); f.save(f.source()); const before = f.store.room("commons"), request = f.share();

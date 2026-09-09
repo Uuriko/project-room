@@ -608,6 +608,13 @@ summary { overflow-wrap: anywhere; }
 .inbox-conflict h3 { font-size: 1rem; }
 .inbox-conflict pre { white-space: pre-wrap; font: inherit; }
 .inbox-conflict > div { display: flex; flex-wrap: wrap; gap: .5rem; }
+.inbox-results { margin-bottom: 2rem; }
+.inbox-results h3 { font-size: .9rem; color: var(--muted); }
+.inbox-result-row { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; padding: .6rem 0; }
+.inbox-result-row > span { color: var(--muted); font-size: .85rem; flex: 1; }
+#inbox-result-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; }
+#inbox-result-dialog details { margin: 1rem 0; }
+#inbox-origin:empty { display: none; }
 .inbox-share-dialog { width: min(38rem, calc(100vw - 2rem)); box-sizing: border-box; max-height: 90vh; overflow: auto; }
 #inbox-share-paragraphs label { display: flex; align-items: flex-start; gap: .75rem; padding: 1rem 0; line-height: 1.5; }
 #inbox-share-paragraphs input { flex: 0 0 auto; width: 1.1rem; height: 1.1rem; min-height: 1.1rem; margin-top: .3rem; }

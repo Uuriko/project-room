@@ -5,6 +5,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { prepareInboxResult } from "./inbox-result-fixture.mjs";
 
 async function setup(t, mobile = false) {
   const f = createAcceptanceFixture(), account = f.store.accountForMember("commons", "owner"), accountKey = f.store.issueAccountAccessKey(account.id);
@@ -177,4 +178,66 @@ test("real inbox: unavailable browser storage retains an unknown share in the op
   assert.equal(await p.locator("#inbox-share-paragraphs input").count(), 0);
   await p.locator("#inbox-share-confirm").click(); await p.locator("#inbox-share-dialog").waitFor({ state: "hidden" });
   assert.equal(f.store.room("commons").sequence, before + 1);
+});
+
+for (const mobile of [false, true]) test(`reviewed reply ${mobile ? "mobile" : "desktop"}: room work returns as a private draft with editable provenance`, { timeout: 35000 }, async t => {
+  const f = await setup(t, mobile), p = f.page, work = prepareInboxResult(f, f.slot.token, f.session.sessionBinding, { ready: false });
+  await f.inbox(); await f.pick("note");
+  await p.getByText("Work in progress", { exact: true }).waitFor();
+  assert.equal(await p.locator("[data-inbox-result]").count(), 0);
+  work.complete(); work.review();
+  await p.locator("#nav-rooms").click(); await f.inbox();
+  await p.getByText("Needs review and approval", { exact: true }).waitFor();
+  work.decide();
+  await p.locator("#nav-rooms").click(); await f.inbox();
+  await p.locator("#inbox-draft").fill("Earlier private draft");
+  await p.locator("[data-inbox-result]").click();
+  await p.waitForFunction(body => document.querySelector("#inbox-result-body").textContent === body, work.body);
+  assert.equal(await p.locator("#inbox-replaced-draft").textContent(), "Earlier private draft");
+  await f.capture(mobile ? "reviewed-mobile" : "reviewed-desktop");
+  const before = f.store.room("commons").sequence;
+  await p.locator("#inbox-result-use").click(); await p.getByText("Saved · only you", { exact: true }).waitFor();
+  assert.equal(await p.locator("#inbox-draft").inputValue(), work.body);
+  assert.equal(f.saved().draft.origin.unchanged, true);
+  assert.equal(await p.locator("#inbox-origin").textContent(), "Copied from room review");
+  assert.equal(f.store.room("commons").sequence, before, "Adoption is private, not a room command or send");
+  await p.locator("#inbox-draft").fill(work.body + "\nAn extra private thought.");
+  assert.equal(await p.locator("#inbox-origin").textContent(), "Edited since room review");
+  await p.locator("#inbox-save").click(); await p.getByText("Saved · only you", { exact: true }).waitFor();
+  assert.equal(f.saved().draft.origin.unchanged, false);
+  await p.reload(); await p.locator("#nav-inbox").waitFor(); await f.inbox(); await f.pick("note");
+  assert.equal(await p.locator("#inbox-origin").textContent(), "Edited since room review");
+  assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await f.capture(mobile ? "reviewed-mobile-edited" : "reviewed-desktop-edited");
+});
+
+test("reviewed reply: changed review and a lost adoption acknowledgement preserve exact intent", { timeout: 30000 }, async t => {
+  const f = await setup(t), p = f.page, work = prepareInboxResult(f, f.slot.token, f.session.sessionBinding);
+  await f.inbox(); await f.pick("note"); await p.locator("#inbox-draft").fill("Keep this until adoption succeeds");
+  await p.locator("[data-inbox-result]").click(); await p.locator("#inbox-result-use:not([disabled])").waitFor();
+  work.review(); await p.locator("#inbox-result-use").click();
+  await p.getByText("Result changed. Review again.", { exact: true }).waitFor();
+  assert.equal(await p.locator("#inbox-draft").inputValue(), "Keep this until adoption succeeds"); assert.equal(f.saved().draft, null);
+  await p.locator("[data-inbox-result]").click(); await p.locator("#inbox-result-use:not([disabled])").waitFor();
+  let lost = false; const ids = [];
+  await p.route("**/api/inbox/commands", async route => {
+    ids.push(route.request().postDataJSON().requestId);
+    if (!lost) { lost = true; await route.fetch(); await route.abort(); } else await route.continue();
+  });
+  await p.locator("#inbox-result-use").click(); await p.getByRole("button", { name: "Confirm save", exact: true }).waitFor();
+  assert.equal(f.saved().draft.revision, 1); await p.locator("#inbox-save").click();
+  await p.getByText("Saved · only you", { exact: true }).waitFor(); assert.deepEqual(ids, [ids[0], ids[0]]);
+  assert.equal(f.saved().draft.revision, 1); assert.equal(await p.locator("#inbox-draft").inputValue(), work.body);
+});
+
+test("reviewed reply: mismatched preview text never enables adoption", { timeout: 30000 }, async t => {
+  const f = await setup(t), p = f.page; prepareInboxResult(f, f.slot.token, f.session.sessionBinding);
+  await f.inbox(); await f.pick("note");
+  await p.route("**/room-results?*workItemId=*", async route => {
+    const response = await route.fetch(), data = await response.json(); data.results[0].body = "Text that was never reviewed";
+    await route.fulfill({ json: data });
+  });
+  await p.locator("[data-inbox-result]").click();
+  await p.getByText("Couldn’t verify the result. Close and try again.", { exact: true }).waitFor();
+  assert.equal(await p.locator("#inbox-result-use").isEnabled(), false); assert.equal(f.saved().draft, null);
 });

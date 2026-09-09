@@ -76,7 +76,7 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
         assert.equal(result.duplicate, true);
         assert.deepEqual(result.receipt, f.inboxReceipts[index]);
       }
-      if (f.inboxRequests) assert.equal(restored.inbox.read(f.owner.token, "recovery-source", f.owner.session.sessionBinding).draft.body, "Private recovery reply");
+      if (f.inboxRequests) assert.equal(restored.inbox.read(f.owner.token, "recovery-source", f.owner.session.sessionBinding).draft.body, f.inboxDraftBody ?? "Private recovery reply");
       for (const { command, receipt } of helpRetries) assert.equal(restored.command(f.keys.owner, "commons", command).event.id, receipt.event.id);
       for (const status of ["open", "withdrawn"]) assert.equal(restored.room("commons").state.workItems[`packaged-help-${status}`].helpWanted.status, status);
       assert.deepEqual(auditRecovery(restored), before, "Cold exact-package help retries preserve every table");

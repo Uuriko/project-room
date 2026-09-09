@@ -1,12 +1,13 @@
-import { InboxClient } from "./inbox-client.js";
+import { InboxClient, inboxTextVersion } from "./inbox-client.js";
 
-export function installInbox({ account, room, getRoom, onShared }) {
+export function installInbox({ account, room, getRoom, onShared, onOpenWork }) {
   const $ = selector => document.querySelector(selector);
   const api = new InboxClient(account, { onAccessEnded: () => room.endAccess() });
   const drafts = new Map(), positions = new Map();
   let owner = null, active = false, selected = null, epoch = 0, rows = [], sharing = null, sharingBusy = false, retryShare = null;
   const storageKey = "project-room:pending-private-share:v1";
   let storage; try { storage = sessionStorage; } catch {}
+  let resultPreview = null, resultEpoch = 0;
   const text = (selector, value) => { $(selector).textContent = value; };
   const ownerKey = () => {
     const s = account.session;
@@ -49,6 +50,8 @@ export function installInbox({ account, room, getRoom, onShared }) {
     api.reset(); owner = null; epoch++; active = false; selected = null; rows = []; sharing = null; sharingBusy = false;
     drafts.clear(); positions.clear(); retryShare = null; if (!preservePending) persistShare();
     $("#workspace-nav").hidden = true; $("#inbox-panel").hidden = true; $("#inbox-share-dialog").close();
+    resultPreview = null; resultEpoch++; $("#inbox-result-dialog").close(); $("#inbox-results").hidden = true;
+    for (const selector of ["#inbox-result-list", "#inbox-result-body", "#inbox-replaced-draft", "#inbox-result-status", "#inbox-origin"]) $(selector).replaceChildren();
     $("#inbox-panel").classList.remove("reading");
     $("#nav-inbox").setAttribute("aria-current", "false"); $("#nav-rooms").setAttribute("aria-current", "page");
     for (const selector of ["#inbox-list", "#inbox-source-body", "#inbox-subject", "#inbox-addresses", "#inbox-draft-status", "#inbox-status", "#inbox-remote-draft", "#inbox-share-paragraphs", "#inbox-share-audience", "#inbox-share-status"]) $(selector).replaceChildren();
@@ -80,7 +83,7 @@ export function installInbox({ account, room, getRoom, onShared }) {
       const result = await api.list(); if (!owns() || turn !== epoch) return;
       rows = result.sources; renderList(); text("#inbox-status", rows.length ? "" : "No messages yet.");
       $("#inbox-empty").hidden = rows.length > 0;
-      if (selected && drafts.has(selected)) { render(); return; }
+      if (selected && drafts.has(selected)) { render(); loadResults(selected); return; }
       const pending = pendingShare();
       if (rows.length) await open(rows.find(r => r.id === pending?.sourceId)?.id ?? rows[0].id);
     } catch (error) { if (owns() && turn === epoch) text("#inbox-status", errorText(error)); }
@@ -89,14 +92,14 @@ export function installInbox({ account, room, getRoom, onShared }) {
     if (!owns()) return;
     remember(); selected = sourceId; renderList();
     $("#inbox-panel").classList.add("reading");
-    if (drafts.has(sourceId)) { render(); return; }
+    if (drafts.has(sourceId)) { render(); loadResults(sourceId); return; }
     $("#inbox-reader").hidden = true; text("#inbox-status", "Loading…");
     const turn = ++epoch;
     try {
       const result = await api.read(sourceId); if (!owns() || turn !== epoch || selected !== sourceId) return;
       drafts.set(sourceId, { source: result.source, base: result.draft, reviewedSource: result.draft?.sourceRevision ?? result.source.revision,
         body: result.draft?.body ?? "", dirty: false, pending: null, busy: false, conflict: null });
-      text("#inbox-status", ""); render();
+      text("#inbox-status", ""); render(); loadResults(sourceId);
     } catch (error) { if (owns() && turn === epoch) text("#inbox-status", errorText(error)); }
   }
   function render() {
@@ -115,31 +118,90 @@ export function installInbox({ account, room, getRoom, onShared }) {
     text("#inbox-remote-draft", d.conflict?.draft?.body || "No saved draft");
     text("#inbox-draft-status", d.note ?? (d.pending ? "Save unconfirmed. Confirm before editing." : d.reviewedSource !== d.source.revision ? "Source changed. Review before saving." : d.dirty ? "Not saved" : d.base ? "Saved · only you" : "Only you · nothing sent"));
     $("#inbox-reader").scrollTop = positions.get(selected) ?? 0;
+    const origin = d.base?.origin;
+    text("#inbox-origin", origin ? (d.dirty || !origin.unchanged ? "Edited since room review" : "Copied from room review")
+      + (origin.sourceChanged ? " · source changed" : "") : "");
   }
   $("#inbox-draft").addEventListener("input", () => {
     const d = drafts.get(selected); if (!d || !owns()) return;
     d.body = $("#inbox-draft").value; d.dirty = d.body !== (d.base?.body ?? ""); d.note = null;
     $("#inbox-save").disabled = !d.dirty || d.reviewedSource !== d.source.revision;
     text("#inbox-draft-status", d.reviewedSource !== d.source.revision ? "Source changed. Review before saving." : d.dirty ? "Not saved" : d.base ? "Saved · only you" : "Only you · nothing sent");
+    if (d.base?.origin) text("#inbox-origin", d.dirty || !d.base.origin.unchanged ? "Edited since room review" : "Copied from room review");
   });
-  $("#inbox-draft-form").addEventListener("submit", async event => {
-    event.preventDefault(); const sourceId = selected, d = drafts.get(sourceId);
-    if (!d || d.busy || d.conflict || !owns() || (!d.dirty && !d.pending) || (!d.pending && d.reviewedSource !== d.source.revision)) return;
-    const request = d.pending ?? { action: "draft.save", requestId: crypto.randomUUID(), sourceId,
+  async function saveDraft(adoption = null) {
+    const sourceId = selected, d = drafts.get(sourceId);
+    if (!d || d.busy || d.conflict || !owns() || (!adoption && !d.dirty && !d.pending) || (!d.pending && d.reviewedSource !== d.source.revision)) return;
+    const request = d.pending ?? adoption ?? { action: "draft.save", requestId: crypto.randomUUID(), sourceId,
       sourceRevision: d.source.revision, expectedRevision: d.base?.revision ?? 0, body: d.body };
     d.pending = request; d.busy = true; d.note = null; remember(); render();
     try {
       const result = await api.apply(request); if (!owns() || drafts.get(sourceId) !== d) return;
-      d.base = { revision: result.receipt.revision, sourceRevision: request.sourceRevision, body: request.body };
+      const body = request.action === "draft.adopt" ? result.receipt.body : request.body;
+      let origin = result.receipt.origin ? { ...result.receipt.origin, unchanged: true, sourceChanged: false } : d.base?.origin ?? null;
+      if (origin && !result.receipt.origin) origin = body ? { ...origin, unchanged: await inboxTextVersion(body) === origin.evidenceVersion } : null;
+      if (!owns() || drafts.get(sourceId) !== d) return;
+      d.body = body; d.base = { revision: result.receipt.revision, sourceRevision: request.sourceRevision, body, origin };
       d.pending = null; d.dirty = false; d.note = "Saved · only you";
     } catch (error) {
       if (!owns() || drafts.get(sourceId) !== d) return;
       if (["stale_inbox_source", "stale_inbox_draft"].includes(error.code)) {
         d.pending = null; d.note = "Changed elsewhere. Review before saving.";
         await review(sourceId, d);
-      } else if (Number.isSafeInteger(error.status) && error.status < 500) { d.pending = null; d.note = "Draft not saved. Try again."; }
+      } else if (error.code === "stale_inbox_result") { d.pending = null; d.note = "Result changed. Review again."; loadResults(sourceId); }
+      else if (Number.isSafeInteger(error.status) && error.status < 500) { d.pending = null; d.note = "Draft not saved. Try again."; }
       else d.note = "Save unconfirmed. Confirm before editing.";
     } finally { if (owns() && drafts.get(sourceId) === d) { d.busy = false; if (selected === sourceId) render(); } }
+  }
+  $("#inbox-draft-form").addEventListener("submit", event => { event.preventDefault(); saveDraft(); });
+  async function loadResults(sourceId) {
+    const turn = ++resultEpoch;
+    $("#inbox-results").hidden = true; $("#inbox-result-list").replaceChildren();
+    try {
+      const value = await api.results(sourceId, getRoom().room.id);
+      if (!owns() || selected !== sourceId || turn !== resultEpoch) return;
+      const labels = { source_changed: "Source changed", superseded: "Replaced", no_native_result: "Work in progress", needs_review: "Needs review and approval", too_long: "Result exceeds draft size" };
+      $("#inbox-results").hidden = !value.results.length;
+      $("#inbox-result-list").replaceChildren(...value.results.map(result => {
+        const row = document.createElement("div"), open = document.createElement("button"), detail = document.createElement("span");
+        row.className = "inbox-result-row"; open.type = "button"; open.className = "text-button"; open.textContent = result.title;
+        open.addEventListener("click", () => { show("rooms"); onOpenWork(result.workItemId); });
+        detail.textContent = labels[result.status] ?? "Reviewed and approved"; row.append(open, detail);
+        if (result.status === "ready") {
+          const use = document.createElement("button"); use.type = "button"; use.className = "button secondary"; use.textContent = "Use result";
+          use.dataset.inboxResult = result.workItemId; use.addEventListener("click", () => previewResult(sourceId, result.workItemId)); row.append(use);
+        }
+        return row;
+      }));
+    } catch (error) {
+      if (owns() && selected === sourceId && turn === resultEpoch && error.status !== 404) {
+        $("#inbox-results").hidden = false; text("#inbox-result-list", "Room results unavailable. Refresh to retry.");
+      }
+    }
+  }
+  async function previewResult(sourceId, workItemId) {
+    const d = drafts.get(sourceId);
+    if (!owns() || d?.busy || d?.pending || d?.conflict) return;
+    const turn = ++resultEpoch; resultPreview = null;
+    $("#inbox-result-dialog").showModal(); $("#inbox-result-use").disabled = true;
+    text("#inbox-result-body", ""); text("#inbox-replaced-draft", d.body || "No current draft"); text("#inbox-result-status", "Loading…");
+    try {
+      const value = await api.results(sourceId, getRoom().room.id, workItemId);
+      if (!owns() || selected !== sourceId || turn !== resultEpoch || !$("#inbox-result-dialog").open) return;
+      const result = value.results[0];
+      if (value.sourceRevision !== d.source.revision || d.reviewedSource !== d.source.revision) { text("#inbox-result-status", "Review source changes first."); return; }
+      if (result.status !== "ready") { text("#inbox-result-status", "Result changed. Review the work again."); return; }
+      resultPreview = { sourceId, expectedRevision: d.base?.revision ?? 0, sourceRevision: value.sourceRevision, roomId: value.roomId, ...result };
+      text("#inbox-result-body", result.body); text("#inbox-result-status", "Independently reviewed · approved by a human");
+      $("#inbox-result-use").disabled = false;
+    } catch { if (owns() && turn === resultEpoch) text("#inbox-result-status", "Couldn’t verify the result. Close and try again."); }
+  }
+  $("#inbox-result-close").addEventListener("click", () => { resultEpoch++; resultPreview = null; $("#inbox-result-dialog").close(); });
+  $("#inbox-result-use").addEventListener("click", () => {
+    const p = resultPreview; if (!p || !owns() || selected !== p.sourceId) return;
+    $("#inbox-result-dialog").close(); resultPreview = null;
+    saveDraft({ action: "draft.adopt", requestId: crypto.randomUUID(), sourceId: p.sourceId, sourceRevision: p.sourceRevision,
+      expectedRevision: p.expectedRevision, roomId: p.roomId, workItemId: p.workItemId, shareRequestId: p.shareRequestId, resultVersion: p.resultVersion });
   });
   async function review(sourceId, d) {
     try {
@@ -213,7 +275,7 @@ export function installInbox({ account, room, getRoom, onShared }) {
   $("#nav-rooms").addEventListener("click", () => show("rooms"));
   $("#inbox-refresh").addEventListener("click", async () => {
     const sourceId = selected, d = drafts.get(sourceId);
-    if (d && !d.busy && !d.pending) { await review(sourceId, d); if (owns() && selected === sourceId) render(); }
+    if (d && !d.busy && !d.pending) { await review(sourceId, d); if (owns() && selected === sourceId) { render(); loadResults(sourceId); } }
     else await load();
   });
   $("#inbox-back").addEventListener("click", () => { remember(); $("#inbox-panel").classList.remove("reading"); $("#inbox-list button[aria-current=true]")?.focus(); });

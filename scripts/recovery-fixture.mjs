@@ -94,8 +94,30 @@ export function createRecoveryFixture(filename) {
     roomId: "commons", audienceVersion: store.inbox.shareContext(owner.token, "recovery-source", "commons", owner.session.sessionBinding).audienceVersion,
     paragraphs: [0] });
   inboxReceipts.push(store.inbox.apply(owner.token, inboxRequests.at(-1), owner.session.sessionBinding).receipt);
+  send("commons", keys.owner, T.MEMBER_ADDED, { memberId: "reply-reviewer", displayName: "Synthetic reply reviewer", kind: "agent", permissions: ["verify"] });
+  const reviewerKey = store.issueAccessKey("commons", "reply-reviewer"), workItemId = "recovery-reply";
+  send("commons", keys.owner, T.WORK_PROPOSED, { workItemId, title: "Private reply", definitionOfDone: "Reply to the shared excerpt",
+    sourceMessageId: inboxReceipts.at(-1).messageId, accountableMemberId: "owner", verifierMemberId: "reply-reviewer",
+    humanDecisionMakerId: "owner", independentVerificationRequired: true, ownerDecisionRequired: true });
+  const item = () => store.room("commons").state.workItems[workItemId];
+  const replyCommand = (key, type, data = {}) => send("commons", key, type, { workItemId, expectedRevision: item().revision, ...data });
+  replyCommand(keys.owner, T.WORK_ACCEPTED);
+  const inboxDraftBody = "Reviewed private recovery reply 🪷";
+  const replyPost = send("commons", keys.owner, T.MESSAGE_POSTED, { messageId: "recovery-reply-text", workItemId,
+    packetId: "recovery-reply-packet", basisRevision: item().revision, body: inboxDraftBody });
+  replyCommand(keys.owner, T.WORK_COMPLETED, { evidenceKind: "room_text", evidenceMessageId: "recovery-reply-text",
+    evidenceMessageEventId: replyPost.event.id, evidenceVersion: textVersion(inboxDraftBody), previousCompletionEventId: null,
+    producerId: "owner", summary: "Private reply", nextAction: "Review" });
+  replyCommand(reviewerKey, T.VERIFICATION_RECORDED, { result: "pass", completionEventId: item().receipt.eventId,
+    evidenceVersion: item().receipt.evidenceVersion, summary: "Checked the exact text" });
+  replyCommand(keys.owner, T.OWNER_DECISION_RECORDED, { decision: "approved", completionEventId: item().receipt.eventId,
+    evidenceVersion: item().receipt.evidenceVersion, reason: "Private draft only" });
+  const selected = store.inbox.results(owner.token, "recovery-source", "commons", owner.session.sessionBinding, workItemId).results[0];
+  inboxRequests.push({ action: "draft.adopt", requestId: "recovery-inbox-adopt", sourceId: "recovery-source", expectedRevision: 1,
+    sourceRevision: 1, roomId: "commons", workItemId, shareRequestId: "recovery-inbox-share", resultVersion: selected.resultVersion });
+  inboxReceipts.push(store.inbox.apply(owner.token, inboxRequests.at(-1), owner.session.sessionBinding).receipt);
   const cursor = store.room("commons").sequence; store.markCaughtUp(keys.owner, "commons", cursor);
   return { store, filename, keys, owner, target, validSession, revokedSession, loggedOut, sharedSession, pending, invitation,
-    shareRequest, link, linkToken, guestSlot, guest, joinRequest, reminders, command, commandResult, cursor, inboxRequests, inboxReceipts,
+    shareRequest, link, linkToken, guestSlot, guest, joinRequest, reminders, command, commandResult, cursor, inboxRequests, inboxReceipts, inboxDraftBody,
     enrollmentToken, enrollmentRequest, enrollment, nativeBody, nativeCommand, nativeCompletion, charterCommand, charterSaved, now: () => now, advance: ms => { now += ms; } };
 }
