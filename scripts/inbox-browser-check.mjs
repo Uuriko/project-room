@@ -257,6 +257,42 @@ for (const mobile of [false, true]) test(`inbox arrival ${mobile ? "mobile" : "d
   assert.equal(await p.locator("#inbox-panel").isVisible(), false);
 });
 
+for (const mobile of [false, true]) test(`inbox continuity ${mobile ? "mobile" : "desktop"}: restore selected message and reading position without storing content`, { timeout: 35000 }, async t => {
+  const f = await setup(t, mobile), p = f.page;
+  f.apply(f.source("note", 1, Array.from({ length: 15 }, (_, i) => `Paragraph ${i}. ` + "A longer private message to read carefully. ".repeat(12))));
+  f.apply(f.source("second", 1));
+  await f.inbox(); await f.pick("note");
+  await p.evaluate(mobile => { if (mobile) scrollTo(0, 500); else document.querySelector("#inbox-reader").scrollTop = 500; }, mobile);
+  const top = await p.evaluate(mobile => mobile ? scrollY : document.querySelector("#inbox-reader").scrollTop, mobile);
+  assert.ok(top > 300);
+  await p.reload(); await p.locator("#inbox-reader").waitFor();
+  assert.equal(await p.locator("#inbox-list [aria-current=true]").getAttribute("data-source-id"), "note");
+  await p.waitForFunction(({ mobile, top }) => Math.abs((mobile ? scrollY : document.querySelector("#inbox-reader").scrollTop) - top) < 3, { mobile, top });
+  mkdirSync("test-results", { recursive: true });
+  await p.screenshot({ path: `test-results/inbox-continuity-${mobile ? "mobile" : "desktop"}.png` });
+  const raw = await p.evaluate(() => sessionStorage.getItem("project-room:inbox-position:v1"));
+  assert.equal(JSON.parse(raw).sourceId, "note");
+  assert.equal(raw.includes("longer private"), false); assert.equal(raw.includes("maya@example.test"), false);
+  assert.equal(new URL(p.url()).hash, "#pr-view/inbox", "private source IDs are not shared in the URL");
+  await p.locator("#nav-rooms").click(); await f.inbox();
+  await p.waitForFunction(({ mobile, top }) => Math.abs((mobile ? scrollY : document.querySelector("#inbox-reader").scrollTop) - top) < 3, { mobile, top });
+  await p.locator("#signout-button").click(); await p.locator("#auth-panel").waitFor();
+  assert.equal(await p.evaluate(() => sessionStorage.getItem("project-room:inbox-position:v1")), null);
+});
+
+test("inbox continuity: a changed source keeps selection but discards its old reading position", { timeout: 35000 }, async t => {
+  const f = await setup(t), p = f.page;
+  const paragraphs = Array.from({ length: 15 }, (_, i) => `Earlier paragraph ${i}. ` + "Read this long message. ".repeat(15));
+  f.apply(f.source("note", 1, paragraphs)); await f.inbox(); await f.pick("note");
+  await p.locator("#inbox-reader").evaluate(node => { node.scrollTop = 500; });
+  await p.locator("#nav-rooms").click();
+  f.apply(f.source("note", 2, ["Updated first paragraph.", ...paragraphs.slice(1)]));
+  await p.reload(); await p.locator("#main").waitFor(); await f.inbox();
+  assert.equal(await p.locator("#inbox-list [aria-current=true]").getAttribute("data-source-id"), "note");
+  assert.equal(await p.locator("#inbox-reader").evaluate(node => node.scrollTop), 0);
+  assert.match(await p.locator("#inbox-source-body").textContent(), /^Updated first paragraph/);
+});
+
 for (const mobile of [false, true]) test(`real inbox ${mobile ? "mobile" : "desktop"}: private draft, navigation, reload and selected sharing`, { timeout: 35000 }, async t => {
   const f = await setup(t, mobile), p = f.page;
   await p.locator("#message-input").fill("Unsent room thought"); await f.inbox(); await f.pick("note");
@@ -374,6 +410,7 @@ test("real inbox: another tab changing the browser account clears private conten
   assert.equal(await p.locator("#inbox-draft").inputValue(), "");
   assert.equal(await p.locator("#inbox-source-body").textContent(), "");
   assert.equal(await p.locator("#inbox-panel").isVisible(), false);
+  assert.equal(await p.evaluate(() => sessionStorage.getItem("project-room:inbox-position:v1")), null);
   await other.locator("#nav-inbox").click(); await other.getByText("No messages yet.", { exact: true }).waitFor();
   assert.equal(await other.locator("#inbox-list button").count(), 0);
 });

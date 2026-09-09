@@ -28,7 +28,7 @@ export async function createInboxSandbox() {
     syntheticInboxTransport: new SyntheticInboxTransport(store.inbox, provider) });
   try { await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); }); }
   catch (error) { provider.close(); store.close(); throw error; }
-  return { directory, accountKey, url: "http://127.0.0.1:" + server.address().port + "/?room=commons#pr-view/inbox",
+  return { directory, accountKey, store, provider, url: "http://127.0.0.1:" + server.address().port + "/?room=commons#pr-view/inbox",
     close: async () => {
       server.closeStreams(); server.closeAllConnections();
       await new Promise(resolve => server.close(resolve)); provider.close(); store.close();

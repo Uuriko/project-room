@@ -629,6 +629,9 @@ summary { overflow-wrap: anywhere; }
 .app-shell:has(#inbox-panel:not([hidden])) .connection-bar,
 .app-shell:has(#inbox-panel:not([hidden])) #invite-people-button,
 .app-shell:has(#inbox-panel:not([hidden])) #refresh-button { display: none; }
+.app-shell:has(#inbox-panel:not([hidden])) .workspace-nav {
+  position: sticky; top: 0; z-index: 3; background: var(--bg);
+}
 #inbox-share-paragraphs label { color: var(--text); font-weight: 400; letter-spacing: normal; }
 #inbox-share-audience { max-height: 8rem; overflow-y: auto; }
 @media (max-width: 720px) {

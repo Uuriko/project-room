@@ -1,5 +1,6 @@
 import { InboxClient, inboxTextVersion } from "./inbox-client.js";
 import { installInboxSend } from "./inbox-send-ui.js";
+import { validId } from "./events.js";
 
 export function installInbox({ account, room, getRoom, onShared, onOpenWork }) {
   const $ = selector => document.querySelector(selector);
@@ -7,6 +8,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork }) {
   const drafts = new Map(), positions = new Map();
   let owner = null, active = false, selected = null, epoch = 0, rows = [], sharing = null, sharingBusy = false, retryShare = null;
   const storageKey = "project-room:pending-private-share:v1";
+  const positionKey = "project-room:inbox-position:v1";
   let storage; try { storage = sessionStorage; } catch {}
   let resultPreview = null, resultEpoch = 0;
   const text = (selector, value) => { $(selector).textContent = value; };
@@ -39,20 +41,36 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork }) {
     } catch { return null; }
     return null;
   }
+  function savedPosition() {
+    try {
+      const raw = storage?.getItem(positionKey);
+      const saved = raw && raw.length <= 1024 ? JSON.parse(raw) : null;
+      if (saved?.owner === owner && Object.keys(saved).length === 5 && validId(saved.sourceId) && Number.isSafeInteger(saved.sourceRevision) && saved.sourceRevision > 0
+        && [saved.reader, saved.page].every(n => Number.isFinite(n) && n >= 0 && n <= 1000000)) return saved;
+      storage?.removeItem(positionKey);
+    } catch {}
+    return null;
+  }
   function remember() {
-    if (!selected || !drafts.has(selected)) return;
-    positions.set(selected, $("#inbox-reader").scrollTop);
+    const d = drafts.get(selected);
+    if (!active || !owns() || !d) return;
+    const point = { sourceRevision: d.source.revision, reader: $("#inbox-reader").scrollTop, page: window.scrollY };
+    positions.set(selected, point);
+    // Per-tab navigation metadata only: never source text, addresses or draft text.
+    try { storage?.setItem(positionKey, JSON.stringify({ owner, sourceId: selected, ...point })); } catch {}
   }
   function show(place, updateLocation = true) {
+    remember(); // Capture before hiding the reader, when scroll offsets are meaningful.
     active = place === "inbox";
     if (updateLocation) history.replaceState(null, "", "#pr-view/" + (active ? "inbox" : "rooms"));
     $("#main").hidden = active;
     $("#inbox-panel").hidden = !active;
     $("#nav-inbox").setAttribute("aria-current", active ? "page" : "false");
     $("#nav-rooms").setAttribute("aria-current", active ? "false" : "page");
-    if (!active) { remember(); $("#conversation-title").focus({ preventScroll: true }); }
+    if (!active) $("#conversation-title").focus({ preventScroll: true });
   }
   function reset({ preservePending = false } = {}) {
+    if (!preservePending) { try { storage?.removeItem(positionKey); } catch {} }
     sendUI.reset({ preservePending });
     api.reset(); owner = null; epoch++; active = false; selected = null; rows = []; sharing = null; sharingBusy = false;
     drafts.clear(); positions.clear(); retryShare = null; if (!preservePending) persistShare();
@@ -91,8 +109,10 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork }) {
       rows = result.sources; renderList(); text("#inbox-status", rows.length ? "" : "No messages yet.");
       $("#inbox-empty").hidden = rows.length > 0;
       if (selected && drafts.has(selected)) { render(); loadResults(selected); return; }
-      const pending = pendingShare();
-      if (rows.length) await open(rows.find(r => r.id === pending?.sourceId)?.id ?? rows[0].id);
+      const pending = pendingShare(), saved = savedPosition();
+      if (saved && rows.some(r => r.id === saved.sourceId && r.revision === saved.sourceRevision))
+        positions.set(saved.sourceId, { sourceRevision: saved.sourceRevision, reader: saved.reader, page: saved.page });
+      if (rows.length) await open(rows.find(r => r.id === pending?.sourceId)?.id ?? rows.find(r => r.id === saved?.sourceId)?.id ?? rows[0].id);
     } catch (error) { if (owns() && turn === epoch) text("#inbox-status", errorText(error)); }
   }
   async function open(sourceId) {
@@ -106,7 +126,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork }) {
       const result = await api.read(sourceId); if (!owns() || turn !== epoch || selected !== sourceId) return;
       drafts.set(sourceId, { source: result.source, base: result.draft, reviewedSource: result.draft?.sourceRevision ?? result.source.revision,
         body: result.draft?.body ?? "", dirty: false, pending: null, busy: false, conflict: null });
-      text("#inbox-status", ""); render(); loadResults(sourceId);
+      text("#inbox-status", ""); render(); remember(); loadResults(sourceId);
     } catch (error) { if (owns() && turn === epoch) text("#inbox-status", errorText(error)); }
   }
   function render() {
@@ -124,7 +144,10 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork }) {
     $("#inbox-conflict").hidden = !d.conflict;
     text("#inbox-remote-draft", d.conflict?.draft?.body || "No saved draft");
     text("#inbox-draft-status", d.note ?? (d.pending ? "Save unconfirmed. Confirm before editing." : d.reviewedSource !== d.source.revision ? "Source changed. Review before saving." : d.dirty ? "Not saved" : d.base ? "Saved · only you" : "Only you · nothing sent"));
-    $("#inbox-reader").scrollTop = positions.get(selected) ?? 0;
+    const saved = positions.get(selected);
+    const point = saved?.sourceRevision === d.source.revision ? saved : { reader: 0, page: 0 };
+    $("#inbox-reader").scrollTop = point.reader;
+    window.scrollTo({ top: point.page, behavior: "instant" });
     const origin = d.base?.origin;
     sendUI.update(selected, d);
     text("#inbox-origin", origin ? (d.dirty || !origin.unchanged ? "Edited since room review" : "Copied from room review")
@@ -290,6 +313,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork }) {
   });
   $("#inbox-back").addEventListener("click", () => { remember(); $("#inbox-panel").classList.remove("reading"); $("#inbox-list button[aria-current=true]")?.focus(); });
   window.addEventListener("beforeunload", event => {
+    remember();
     if (owns() && ([...drafts.values()].some(d => d.dirty || d.pending) || sendUI.hasPending())) { event.preventDefault(); event.returnValue = ""; }
   });
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") remember(); });
