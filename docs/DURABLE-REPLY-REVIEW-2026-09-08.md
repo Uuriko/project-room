@@ -14,6 +14,8 @@ The key distinction is between a historical review and a current authorization. 
 
 These are conservative product decisions based on documentation, not claims about live-provider qualification or atomic send guarantees.
 
+One live-integration caveat matters: Graph's body-format preference controls the returned representation, and the default documented representation is HTML. A returned text body is therefore not proof that the outgoing message contains only that representation. Before enabling real sending, qualify full message content, HTML/alternative representations and version consistency; do not promote this fixture's text comparison into a wire-content guarantee. [Get message request headers and examples](https://learn.microsoft.com/en-us/graph/api/message-get?view=graph-rest-1.0).
+
 ## Implementation plan
 
 1. Reuse the existing private Inbox command journal. Persist only bounded normalized observations, not arbitrary provider response fields. Extract a deterministic comparison shared by inspection and history replay.
@@ -27,6 +29,14 @@ These are conservative product decisions based on documentation, not claims abou
 ## Next product slice
 
 Once this service boundary is qualified, expose a compact fixture-only preview/review in the existing composer. Show recipients and content, with advanced metadata collapsed. Use “Review changes” only when action is needed; keep transport unavailable until separately authorized provider qualification. Do not describe fixture review as a live integration.
+
+Implementation order for that next slice:
+
+1. Add an explicitly negotiated, account-private read projection and narrowly scoped content-review command. Keep reserve, dispatch, provider identity and observation writes restricted to the fixture driver; never mount the whole reply service as a public command handler.
+2. Use one existing-composer review sheet: mailbox identity, visible To/CC/Bcc, subject and complete plain-text body. Do not hide changed recipients behind collapsed metadata. Advanced provider identifiers stay out of the default view.
+3. Use one acknowledgment action, not a “Send” control. A historical acknowledgment must not look current after an edit, reconnect or failed read. Preserve the private local draft and make returning to it immediate.
+4. Cover two tabs, account switching during review, lost acknowledgments, changed provider content, unavailable reads, blocked formats and keyboard/mobile return paths. Capture screenshots of the exact review and changed states.
+5. Only after that fixture journey is usable, seek narrowly bounded authorization for a real mailbox read/draft pilot. Keep send reconciliation and external-send approval separate. Do not broaden to other channels until this path works end to end.
 
 ## Implemented contract
 
@@ -45,3 +55,5 @@ Desktop and mobile screenshots show the unchanged fixture Inbox, inspected for l
 The final edited recovery fixture and upgrade assertions passed a second full core run: **851 passed, zero failures** (`core-final.log`). The focused account/Inbox/collaboration browser regression passed **49 checks, zero failures** (`browser.log`). Workers evidence is **23 passed, zero failures** (`workers.log`). These runs qualify local synthetic behavior only, not real-person usability or a connected mailbox.
 
 No live provider access, external message, AI execution, money movement, push or deployment occurred. This is a local schema-22 candidate; old live/staging evidence does not certify it.
+
+Committed runtime checkpoint: `6cb11e5a7182c95634d59a1b606a423be2809590`. After committing, the full core/cold-package suite passed **851** checks (`committed-core.log`) and local Workers suite passed **23** (`committed-workers.log`), both with zero failures. Browser evidence covers the same runtime before its commit; subsequent changes are documentation only. The broader product goal remains active and incomplete.
