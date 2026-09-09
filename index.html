@@ -37,7 +37,7 @@
           <button type="button" id="auth-kind-account" class="button ghost" aria-pressed="false">Account key</button>
         </div>
         <form id="auth-form">
-          <label id="access-key-label" for="access-key">Member key</label>
+          <label id="access-key-label" for="access-key">Room key</label>
           <div class="key-field">
             <input id="access-key" type="password" autocomplete="off" spellcheck="false" required maxlength="128" placeholder="Paste your key" aria-describedby="auth-error">
             <button type="button" id="access-key-reveal" class="button ghost" aria-pressed="false">Show</button>
@@ -225,6 +225,10 @@
               <div><h3 id="thread-title" tabindex="-1"></h3><p id="thread-context"></p></div>
             </div>
             <p id="conversation-announcement" class="sr-only" role="status" aria-live="polite"></p>
+            <div id="room-guide" class="room-guide" hidden>
+              <p>You’re in. Write below, open <strong>Catch me up</strong> for what needs you, or <strong>People &amp; agents</strong> to connect Instinct, Muse, Grok Build, or Grok Bot.</p>
+              <button type="button" id="room-guide-dismiss" class="button ghost">Got it</button>
+            </div>
             <ol id="message-list" class="message-list" tabindex="0" aria-label="Conversation messages"></ol>
             <button id="new-messages-button" class="new-messages-button" type="button" hidden></button>
             <div id="reply-bar" class="reply-bar" hidden><span id="reply-context"></span><button id="cancel-reply" type="button" class="button ghost">Cancel reply</button></div>
@@ -242,7 +246,7 @@
                 <button id="request-exit" class="button ghost" type="button">Back to chat</button>
               </div>
               <div class="composer-row">
-                <textarea id="message-input" rows="2" maxlength="4000" placeholder="Message…" aria-describedby="draft-hint" required></textarea>
+                <textarea id="message-input" rows="2" maxlength="4000" placeholder="Write to the room…" aria-describedby="draft-hint" required></textarea>
                 <button class="button primary icon-button" type="submit" aria-label="Send" title="Send"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>
               </div>
               <p id="composer-status" class="status form-status" role="status"></p>
@@ -262,6 +266,7 @@
           <details id="people-panel" class="panel presence-panel">
             <summary id="presence-title">People & agents</summary>
             <button id="connect-agent-button" class="button secondary" type="button" hidden>Connect agent</button>
+            <p id="people-hint" class="form-hint"></p>
             <div id="presence-list" class="presence-list"></div>
           </details>
 
