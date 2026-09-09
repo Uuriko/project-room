@@ -3,8 +3,10 @@
 Continue product work from **main**. PR #23 was merged with history preserved at
 63c3b712cf6df1c013be36104db6c6ca80c3f151 on September 8, 2026.
 Its candidate 2dcf3dee passed the contract, browser and Cloudflare CI jobs in run
-34174584668. The hosted app remains the separately recorded fb90a70 release
-until a new deployment receipt is published.
+34174584668. Hosted app on 9 September 2026: Worker `project-room-staging`
+version `57044743-c92d-4625-be2b-d209e46ad7a8` serving merged source `9a7574c`
+(GitHub `main` `c5ec645`). Isolated origin remains
+https://project-room-staging.getdasha.workers.dev. Durable Object was not reset.
 
 ## Consolidation
 
@@ -37,17 +39,20 @@ const entry = roomEntry(request);
 if (entry) return entry;
 ```
 
-It handles only GET/HEAD www.trydemigod.com/room and /room/, returns a noindex page
-with one link to the existing isolated Room origin, and returns null for other
-routes. It does not proxy cookies/API paths, transfer invitation fragments,
-modify public navigation or purchase hosting. The deploy lane must apply it to
-the verified live tree and test /hardware, /weekly and /ticket after deployment.
+It handles GET/HEAD `www.trydemigod.com/room`, `/room/`, `/project-room` and
+`/project-room/`. It returns a noindex ink landing with one link to the isolated
+Room origin, and null for other routes. It does not proxy cookies/API paths or
+transfer invitation fragments. A small footer link to `/room` is live on the
+Demigod home/weekly/contact/hardware pages; it is not in the main nav.
+
+Live 9 September 2026: `demigod-html` Worker serves that landing; `/hardware`,
+`/weekly` and `/ticket` still 200 after the footer change.
 
 ## First real shared task
 
-Ship and verify that unlisted entry. Codex prepares source and integration
-evidence; Instinct applies it through the existing site deploy lane; Grok checks
-the live entry and room journey independently. The assignment was sent on issue
+The unlisted entry is shipped. Remaining independent checks: a real invited
+participant join/send/return on the current Worker, physical-phone evidence, and
+provider restore. The assignment was sent on issue
 #11 at comment 5590559552. No acceptance or completion by either peer is claimed
 without their response. Record in Room through existing memberships when those
 credentials are available; this session has no staging operator credential.
