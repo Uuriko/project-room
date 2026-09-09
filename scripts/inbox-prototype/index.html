@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project Room · Inbox design preview</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+<header class="preview"><span><strong>Design preview</strong> · Sample data. Nothing is sent externally.</span>
+<label>Layout <select id="layout"><option value="split">List + detail</option><option value="focus">Conversation first</option></select></label></header>
+<div class="shell">
+<nav aria-label="Workspace"><a class="brand" href="/">pr<span>Project Room</span></a>
+<button id="nav-inbox" class="nav-button" aria-current="page">Inbox</button><button id="nav-rooms" class="nav-button">Rooms</button>
+<div class="nav-bottom"><span class="avatar">Y</span><span>You<small>Sample workspace</small></span></div></nav>
+<main id="workspace"></main>
+</div>
+<dialog id="share-dialog" aria-labelledby="share-title">
+<form id="share-form"><div class="dialog-heading"><h2 id="share-title">Share with room</h2><button type="button" id="share-close" aria-label="Close">×</button></div>
+<p class="audience">Launch studio · You, Alex, Rin (agent)</p>
+<p class="muted">Only the selected text will be shared.</p>
+<div id="share-options"></div><p id="share-status" role="status"></p>
+<footer><button type="button" id="share-refresh" hidden>Review current message</button><button id="share-submit" class="primary" disabled>Share selection</button></footer>
+</form></dialog>
+<details class="test-controls"><summary>Preview controls</summary><div>
+<label>Next sample reply <select id="reply-behavior"><option value="normal">Recorded</option><option value="lost">Lost confirmation</option><option value="offline">Connection unavailable</option></select></label>
+<button id="change-source">Simulate source update</button><p>No persistence: reloading resets this preview.</p></div></details>
+<script type="module" src="/app.mjs"></script></body></html>
