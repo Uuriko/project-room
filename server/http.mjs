@@ -201,9 +201,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const token = cookie(req, accountCookieName), binding = accountBinding(req);
         const auth = store.authenticateAccountSession(token, null, binding);
         if (url.pathname === "/api/inbox" && req.method === "GET") return json(res, 200, store.inbox.list(token, binding));
-        const source = /^\/api\/inbox\/sources\/([^/]{1,384})(?:\/(share-context|room-results))?$/.exec(url.pathname);
+        const source = /^\/api\/inbox\/sources\/([^/]{1,384})(?:\/(share-context|room-results|send-context|sends))?$/.exec(url.pathname);
         if (source && req.method === "GET") {
           const id = pathId(source[1]);
+          if (source[2] === "send-context") return json(res, 200, store.inbox.sendContext(token, id, binding));
+          if (source[2] === "sends") return json(res, 200, store.inbox.sends(token, id, binding));
           if (source[2]) {
             const roomId = url.searchParams.get("roomId");
             if (!roomId || url.searchParams.getAll("roomId").length !== 1) reject(422, "invalid_room", "Choose a room.");

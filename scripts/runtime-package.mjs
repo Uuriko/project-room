@@ -32,6 +32,7 @@ optional.push("src/work-help.js", "server/work-help.mjs");
 optional.push("src/help-offers.js");
 optional.push("client/help-actions.mjs");
 optional.push("server/inbox.mjs");
+optional.push("server/inbox-outbox.mjs", "server/inbox-transport.mjs");
 optional.push("src/inbox-client.js", "src/inbox-ui.js");
 const allowed = new Set([...required, ...optional]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
@@ -44,7 +45,7 @@ function runtimeMetadata(files) {
   const schema = /export const STORE_SCHEMA_VERSION = (\d+);/.exec(files.get("server/writer-fence.mjs").toString());
   const pkg = JSON.parse(files.get("package.json"));
   const config = JSON.parse(files.get("cloudflare/wrangler.jsonc"));
-  check(["8", "9", "10", "11", "12", "13", "14", "15", "16"].includes(schema?.[1]) && typeof pkg.engines?.node === "string");
+  check(["8", "9", "10", "11", "12", "13", "14", "15", "16", "17"].includes(schema?.[1]) && typeof pkg.engines?.node === "string");
   return { schemaVersion: Number(schema[1]), node: pkg.engines.node, cloudflare: { compatibilityDate: config.compatibility_date,
     compatibilityFlags: config.compatibility_flags, durableObjects: config.durable_objects, migrations: config.migrations } };
 }

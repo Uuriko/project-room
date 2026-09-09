@@ -21,7 +21,7 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   const receipt = createRuntimePackage({ repository, commit, destination });
   const committedSchema = Number(/STORE_SCHEMA_VERSION = (\d+)/.exec(execFileSync("git", ["show", commit + ":server/writer-fence.mjs"], { cwd: repository, encoding: "utf8" }))[1]);
   assert.equal(receipt.schemaVersion, committedSchema); assert.deepEqual(publicAssets, assetPaths);
-  assert.equal(receipt.files, 47 + ["src/inbox-client.js", "src/inbox-ui.js", "server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "src/agent-connections.js", "client/mcp-stdio.mjs", "scripts/agent-mcp.mjs", "client/work-actions.mjs", "server/work-discussion.mjs", "server/text-results.mjs", "client/attention-inbox.mjs", "src/room-charter.js", "src/room-instructions.js", "src/reply-requests.js", "server/reply-requests.mjs", "client/reply-actions.mjs", "scripts/agent-replies.mjs", "client/request-notices.mjs", "src/work-help.js", "server/work-help.mjs", "src/help-offers.js", "client/help-actions.mjs", "server/inbox.mjs"].filter(path => existsSync(join(destination, path))).length);
+  assert.equal(receipt.files, 47 + ["src/inbox-client.js", "src/inbox-ui.js", "server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "src/agent-connections.js", "client/mcp-stdio.mjs", "scripts/agent-mcp.mjs", "client/work-actions.mjs", "server/work-discussion.mjs", "server/text-results.mjs", "client/attention-inbox.mjs", "src/room-charter.js", "src/room-instructions.js", "src/reply-requests.js", "server/reply-requests.mjs", "client/reply-actions.mjs", "scripts/agent-replies.mjs", "client/request-notices.mjs", "src/work-help.js", "server/work-help.mjs", "src/help-offers.js", "client/help-actions.mjs", "server/inbox.mjs", "server/inbox-outbox.mjs", "server/inbox-transport.mjs"].filter(path => existsSync(join(destination, path))).length);
   assert.equal(existsSync(join(destination, ".git")), false);
   assert.equal(existsSync(join(destination, "node_modules")), false);
   for (const path of ["server.mjs", "src/app.js", "cloudflare/room.mjs"]) {
@@ -77,6 +77,10 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
         assert.deepEqual(result.receipt, f.inboxReceipts[index]);
       }
       if (f.inboxRequests) assert.equal(restored.inbox.read(f.owner.token, "recovery-source", f.owner.session.sessionBinding).draft.body, f.inboxDraftBody ?? "Private recovery reply");
+      for (const [index, request] of (f.transportRequests ?? []).entries()) {
+        assert.deepEqual(restored.inbox.transport(f.owner.token, request, f.owner.session.sessionBinding).receipt, f.transportReceipts[index]);
+      }
+      if (f.transportRequests) assert.equal(restored.inbox.sends(f.owner.token, "recovery-source", f.owner.session.sessionBinding).sends[0].status, "accepted");
       for (const { command, receipt } of helpRetries) assert.equal(restored.command(f.keys.owner, "commons", command).event.id, receipt.event.id);
       for (const status of ["open", "withdrawn"]) assert.equal(restored.room("commons").state.workItems[`packaged-help-${status}`].helpWanted.status, status);
       assert.deepEqual(auditRecovery(restored), before, "Cold exact-package help retries preserve every table");
@@ -144,9 +148,10 @@ test("uncommitted candidate packages cold in an isolated synthetic commit, inclu
   const directory = mkdtempSync(join(tmpdir(), "room-candidate-package-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const candidate = candidateRuntimeFixture(repository, directory), destination = join(directory, "runtime");
-  const receipt = createRuntimePackage({ ...candidate, destination }); assert.equal(receipt.files, 72);
+  const receipt = createRuntimePackage({ ...candidate, destination }); assert.equal(receipt.files, 74);
   const program = `
     import { RoomStore } from ${JSON.stringify(pathToFileURL(join(destination, "server/store.mjs")).href)};
+    import { SyntheticInboxTransport } from ${JSON.stringify(pathToFileURL(join(destination, "server/inbox-transport.mjs")).href)};
     import { initialRoom } from ${JSON.stringify(pathToFileURL(join(destination, "server/bootstrap.mjs")).href)};
     import { currentAttention } from ${JSON.stringify(pathToFileURL(join(destination, "client/attention-inbox.mjs")).href)};
     import { helpTools, buildHelpCommand } from ${JSON.stringify(pathToFileURL(join(destination, "client/help-actions.mjs")).href)};
@@ -156,6 +161,7 @@ test("uncommitted candidate packages cold in an isolated synthetic commit, inclu
       expectedHelpRevision: 1, helpEventId: "invitation", plan: "Two agenda items" });
     if (offer.type !== "work.help_offer_opened") throw new Error("Incorrect offer command");
     const store = new RoomStore(":memory:"); store.initialize(initialRoom());
+    if (typeof SyntheticInboxTransport !== "function" || typeof store.inbox.sendContext !== "function") throw new Error("Missing outbox runtime");
     const key = store.issueAccessKey("commons", "owner"), client = {
       snapshot: async () => store.snapshot(key, "commons"), changes: async (after, limit) => store.eventsAfter(key, "commons", after, limit)
     };

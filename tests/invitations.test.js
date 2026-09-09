@@ -447,7 +447,7 @@ test("v3 to v4 is additive and a failed migration leaves the v3 database untouch
   store.close();
 
   store = new RoomStore(filename);
-  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 16);
+  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 17);
   assert.deepEqual({
     rooms: store.db.prepare("SELECT * FROM rooms ORDER BY id").all().map(row => ({ ...row })),
     events: store.db.prepare("SELECT * FROM events ORDER BY room_id,sequence").all().map(row => ({ ...row })),

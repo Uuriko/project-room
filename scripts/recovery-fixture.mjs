@@ -94,6 +94,7 @@ export function createRecoveryFixture(filename) {
     roomId: "commons", audienceVersion: store.inbox.shareContext(owner.token, "recovery-source", "commons", owner.session.sessionBinding).audienceVersion,
     paragraphs: [0] });
   inboxReceipts.push(store.inbox.apply(owner.token, inboxRequests.at(-1), owner.session.sessionBinding).receipt);
+  // Populated send history is added after reviewed adoption below.
   send("commons", keys.owner, T.MEMBER_ADDED, { memberId: "reply-reviewer", displayName: "Synthetic reply reviewer", kind: "agent", permissions: ["verify"] });
   const reviewerKey = store.issueAccessKey("commons", "reply-reviewer"), workItemId = "recovery-reply";
   send("commons", keys.owner, T.WORK_PROPOSED, { workItemId, title: "Private reply", definitionOfDone: "Reply to the shared excerpt",
@@ -116,8 +117,18 @@ export function createRecoveryFixture(filename) {
   inboxRequests.push({ action: "draft.adopt", requestId: "recovery-inbox-adopt", sourceId: "recovery-source", expectedRevision: 1,
     sourceRevision: 1, roomId: "commons", workItemId, shareRequestId: "recovery-inbox-share", resultVersion: selected.resultVersion });
   inboxReceipts.push(store.inbox.apply(owner.token, inboxRequests.at(-1), owner.session.sessionBinding).receipt);
+  const sendPreview = store.inbox.sendContext(owner.token, "recovery-source", owner.session.sessionBinding).preview;
+  inboxRequests.push({ action: "send.reserve", requestId: "recovery-send", sourceId: "recovery-source",
+    sourceRevision: sendPreview.sourceRevision, draftRevision: sendPreview.draftRevision, previewVersion: sendPreview.previewVersion });
+  inboxReceipts.push(store.inbox.apply(owner.token, inboxRequests.at(-1), owner.session.sessionBinding).receipt);
+  const transportRequests = [
+    { action: "send.dispatch", requestId: "recovery-dispatch", sourceId: "recovery-source", sendId: "recovery-send", expectedRevision: 0 },
+    { action: "send.observe", requestId: "recovery-accepted", sourceId: "recovery-source", sendId: "recovery-send", expectedRevision: 1,
+      outcome: "accepted", providerId: "synthetic-recovery-message" }
+  ];
+  const transportReceipts = transportRequests.map(request => store.inbox.transport(owner.token, request, owner.session.sessionBinding).receipt);
   const cursor = store.room("commons").sequence; store.markCaughtUp(keys.owner, "commons", cursor);
   return { store, filename, keys, owner, target, validSession, revokedSession, loggedOut, sharedSession, pending, invitation,
-    shareRequest, link, linkToken, guestSlot, guest, joinRequest, reminders, command, commandResult, cursor, inboxRequests, inboxReceipts, inboxDraftBody,
+    shareRequest, link, linkToken, guestSlot, guest, joinRequest, reminders, command, commandResult, cursor, inboxRequests, inboxReceipts, inboxDraftBody, transportRequests, transportReceipts,
     enrollmentToken, enrollmentRequest, enrollment, nativeBody, nativeCommand, nativeCompletion, charterCommand, charterSaved, now: () => now, advance: ms => { now += ms; } };
 }

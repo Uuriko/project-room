@@ -176,7 +176,7 @@ test("genuine schema12 upgrade preserves old help-like message text and refuses 
       }
       const current = new RoomStore(f.filename, { now: f.now });
       try {
-        assert.equal(auditRecovery(current).schemaVersion, 16);
+        assert.equal(auditRecovery(current).schemaVersion, 17);
         assert.equal(current.room("old-text").state.messages[0].body, "Help wanted, just ordinary text");
         assert.equal(Object.hasOwn(current.room("old-text").state.messages[0], "helpWanted"), false);
         assert.equal(Object.hasOwn(current.room("commons").state.workItems[Object.keys(row.state.workItems)[0]], "helpWanted"), false);

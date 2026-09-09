@@ -3,6 +3,9 @@ import { validId, EVENT_TYPES as T, hasConfirmedIndependentPass } from "../src/e
 import { currentApproval } from "../src/workflow.js";
 import { storedText } from "./text-results.mjs";
 import { ServiceError } from "./store.mjs";
+import { isSend, internalSend, validateSend, sendPreview, transitionSend } from "./inbox-outbox.mjs";
+
+const transportAuthority = Symbol("private inbox transport");
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const canonical = value => Array.isArray(value) ? "[" + value.map(canonical).join(",") + "]" : value && typeof value === "object"
@@ -40,6 +43,7 @@ export const inboxSchema = `
   CREATE TRIGGER private_inbox_commands_no_delete BEFORE DELETE ON private_inbox_commands BEGIN SELECT RAISE(ABORT,'inbox receipts are retained'); END;
 `;
 function validate(request) {
+  if (isSend(request)) return validateSend(request);
   const common = ["requestId", "action", "sourceId"], fields = {
     "source.save": [...common, "expectedRevision", "data"],
     "draft.save": [...common, "expectedRevision", "sourceRevision", "body"],
@@ -174,9 +178,42 @@ export class Inbox {
         members: Object.values(state.members).filter(m => m.active === true).map(m => ({ id: m.id, displayName: m.displayName, kind: m.kind })) };
     });
   }
-  apply(token, request, binding) {
+  outbox(accountId, sourceId = null) {
+    const sends = new Map();
+    for (const row of this.db.prepare("SELECT receipt_json FROM private_inbox_commands WHERE account_id=? AND json_extract(receipt_json,'$.action') LIKE 'send.%' ORDER BY sequence").all(accountId)) {
+      const receipt = JSON.parse(row.receipt_json);
+      if (isSend(receipt) && (sourceId === null || receipt.sourceId === sourceId)) sends.set(receipt.send.id, receipt.send);
+    }
+    return sends;
+  }
+  preview(accountId, authEpoch, sourceId) {
+    const source = this.source(accountId, sourceId), data = this.version(accountId, sourceId, source.revision);
+    const draft = this.db.prepare("SELECT * FROM private_inbox_drafts WHERE account_id=? AND source_id=?").get(accountId, sourceId);
+    return sendPreview(accountId, authEpoch, source, data, draft);
+  }
+  sendContext(token, sourceId, binding) {
+    return this.store.readTransaction(() => {
+      const auth = this.auth(token, binding);
+      return { contractVersion: 1, viewer: viewer(auth), sourceId,
+        preview: this.preview(auth.account.id, auth.account.authEpoch, sourceId) };
+    });
+  }
+  sends(token, sourceId, binding) {
+    return this.store.readTransaction(() => {
+      const auth = this.auth(token, binding); this.source(auth.account.id, sourceId);
+      return { contractVersion: 1, viewer: viewer(auth), sourceId, sends: [...this.outbox(auth.account.id, sourceId).values()] };
+    });
+  }
+  // For a trusted adapter driver only. HTTP commands cannot manufacture provider
+  // outcomes or mark an attempt dispatchable. This method performs no I/O.
+  transport(token, request, binding) {
+    if (!internalSend(request)) fail(422, "invalid_inbox_send", "Supply a transport transition.");
+    return this.apply(token, request, binding, transportAuthority);
+  }
+  apply(token, request, binding, authority = null) {
     return this.store.transaction(() => {
       const auth = this.auth(token, binding); validate(request);
+      if (internalSend(request) && authority !== transportAuthority) fail(403, "inbox_transport_required", "Only the configured transport can record this outcome.");
       if (["source.share", "draft.adopt"].includes(request.action)) this.auth(token, binding, request.roomId);
       const accountId = auth.account.id, fingerprint = digest(request);
       const prior = this.db.prepare("SELECT fingerprint,receipt_json FROM private_inbox_commands WHERE account_id=? AND request_id=?").get(accountId, request.requestId);
@@ -184,11 +221,17 @@ export class Inbox {
         if (prior.fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Request ID already used for different inbox content.");
         return { contractVersion: 1, viewer: viewer(auth), receipt: JSON.parse(prior.receipt_json), duplicate: true };
       }
-      if (this.db.prepare("SELECT count(*) n FROM private_inbox_commands WHERE account_id=?").get(accountId).n >= inboxLimits.commands)
+      if (!internalSend(request) && request.action !== "send.cancel"
+        && this.db.prepare("SELECT count(*) n FROM private_inbox_commands WHERE account_id=?").get(accountId).n >= inboxLimits.commands)
         fail(409, "inbox_limit", "Private inbox pilot capacity reached.");
       const now = this.store.now(), { sourceId, action, requestId } = request;
       let receipt = { requestId, action, sourceId };
-      if (action === "source.save") {
+      if (isSend(request)) {
+        this.source(accountId, sourceId);
+        receipt.send = transitionSend(this.outbox(accountId), request, {
+          preview: ["send.reserve", "send.dispatch"].includes(action) ? this.preview(accountId, auth.account.authEpoch, sourceId) : null,
+          authEpoch: auth.account.authEpoch, at: now });
+      } else if (action === "source.save") {
         const previous = this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? AND id=?").get(accountId, sourceId);
         if ((previous?.revision ?? 0) !== request.expectedRevision) fail(409, "stale_inbox_source", "Source changed. Review the current version.");
         if ((previous?.revision ?? 0) >= inboxLimits.versions || !previous && this.db.prepare("SELECT count(*) n FROM private_inbox_sources WHERE account_id=?").get(accountId).n >= inboxLimits.sources)
@@ -230,13 +273,21 @@ export class Inbox {
       const name = /^CREATE (?:TABLE|TRIGGER) ([a-z_]+)/.exec(sql.trim())[1];
       require(normalize(this.db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(name)?.sql) === normalize(sql));
     }
-    const sources = new Map(), drafts = new Map(), historicalRooms = new Map(); let versions = 0;
+    const sources = new Map(), drafts = new Map(), historicalRooms = new Map(), outboxes = new Map(); let versions = 0;
     for (const row of this.db.prepare("SELECT * FROM private_inbox_commands ORDER BY sequence").all()) {
       const request = JSON.parse(row.request_json), receipt = JSON.parse(row.receipt_json); validate(request);
       require(row.request_id === request.requestId && row.fingerprint === digest(request) && revision(row.auth_epoch) && Number.isSafeInteger(row.at));
       const key = canonical([row.account_id, request.sourceId]), prior = sources.get(key);
       const expected = { requestId: request.requestId, action: request.action, sourceId: request.sourceId };
-      if (request.action === "source.save") {
+      if (isSend(request)) {
+        require(prior);
+        if (!outboxes.has(row.account_id)) outboxes.set(row.account_id, new Map());
+        const sends = outboxes.get(row.account_id);
+        const preview = ["send.reserve", "send.dispatch"].includes(request.action)
+          ? sendPreview(row.account_id, row.auth_epoch, prior, this.version(row.account_id, request.sourceId, prior.revision), drafts.get(key)) : null;
+        expected.send = transitionSend(sends, request, { preview, authEpoch: row.auth_epoch, at: row.at });
+        sends.set(expected.send.id, expected.send);
+      } else if (request.action === "source.save") {
         require(request.expectedRevision === (prior?.revision ?? 0));
         expected.revision = request.expectedRevision + 1;
         require(same(this.version(row.account_id, request.sourceId, expected.revision), request.data));
