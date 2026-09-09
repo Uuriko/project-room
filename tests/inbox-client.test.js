@@ -11,6 +11,25 @@ function setup(fetcher) {
   let ended = 0; const client = new InboxClient(account, { onAccessEnded: () => ended++ });
   return { account, client, ended: () => ended };
 }
+test("email reader negotiates a bounded account-qualified projection with no send or share capability", async () => {
+  const source = { id: "mail", revision: 1, adapter: "email", sender: "from@example.test", recipient: "me@example.test", subject: "", paragraphs: ["Plain text"],
+    capabilities: { draft: true, share: false, send: false }, email: { view: "email-text-v1", accountId: "owner", format: "text", connectionState: "active",
+      to: ["me@example.test"], cc: [], bcc: [], attachmentState: "not_loaded", attachmentCount: 0 } };
+  const f = setup(async path => {
+    assert.equal(path, "/api/inbox/sources/mail?view=email-text-v1");
+    return reply({ contractVersion: 1, viewer, source, draft: null });
+  });
+  assert.equal((await f.client.read("mail")).source.email.format, "text");
+  for (const change of [s => s.email.accountId = "other", s => s.capabilities.send = true,
+    s => s.capabilities.share = true, s => s.email.view = "email-v2", s => s.email.format = "html",
+    s => s.paragraphs = ["x".repeat(262145)], s => s.email.attachmentCount = -1]) {
+    const invalid = structuredClone(source); change(invalid);
+    const g = setup(async () => reply({ contractVersion: 1, viewer, source: invalid, draft: null }));
+    await assert.rejects(g.client.read("mail"), { code: "invalid_inbox_response" });
+  }
+  source.email.format = "html"; source.paragraphs = [];
+  assert.equal((await f.client.read("mail")).source.email.format, "html");
+});
 test("private browser client uses account credentials and verifies exact draft receipt", async () => {
   const command = { action: "draft.save", requestId: "save", sourceId: "note", expectedRevision: 0, sourceRevision: 1, body: "Private" };
   const f = setup(async (path, options) => {

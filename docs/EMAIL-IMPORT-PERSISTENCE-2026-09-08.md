@@ -4,7 +4,7 @@
 
 Schema 18 introduced an account-owned, fixture-backed email import journal, connection state and folder checkpoints. Schema 19 adds a per-message revision guard and retires older writers that do not enforce it. Imported message versions and private drafts reuse the existing Inbox tables. This is not a live provider connection: configuration is explicitly `mode: fixture`, has no credentials or sending capability, and is not exposed as a public HTTP setup/import endpoint.
 
-The service entry is `store.email`; `server/email-import.mjs` owns its transitions. Ordinary Inbox commands cannot record `source.import`, change a source's channel origin or send imported email through the synthetic transport. The existing browser list remains synthetic-only until its email detail and sharing UI are qualified. Authorized service callers can explicitly request email list metadata and read a stored source using the same private account boundary.
+The service entry is `store.email`; `server/email-import.mjs` owns its transitions. Ordinary Inbox commands cannot record `source.import`, change a source's channel origin or send imported email through the synthetic transport. The browser explicitly negotiates `view=email-text-v1` for email list/detail support and private drafting; requests without that view retain the synthetic-only list. Authorized service callers can still read the stored envelope using the same private account boundary. Browser email sharing and sending remain unavailable.
 
 ## Connection and source lifetime
 
@@ -32,11 +32,13 @@ The same deterministic transition produces live mutations and replay expectation
 
 Schema-19 write guards cover old and new tables. Genuine older packages, including populated schema-18 email data, are used in upgrade tests. A failed migration must leave their catalog/data unchanged, and successful upgrade must retire their already-open writers. Both Node and local Workers retain the shared service semantics. Runtime packaging includes the new envelope/import dependencies so a cold recovery does not depend on checkout files.
 
-## Next: make imported email useful in the same Inbox
+## Browser reader and next steps
 
-Add negotiated list/detail support, an account/channel label, recipient details and attachment availability to the existing Inbox. Preserve private drafts, selection and reading position. Plain text can be selected deliberately for room sharing; HTML requires a separate inert/sanitized rendering and selection contract, not regex flattening. Do not automatically include headers, Bcc, attachment descriptors or later messages in shared excerpts.
+The negotiated browser view provides bounded plain text, a sample/private label, collapsed recipient details and attachment availability in the existing Inbox. Private drafts survive reload and disconnection; metadata-only refreshes do not invent draft conflicts. HTML content is omitted with an unavailable-preview notice, and attachment bytes are not offered. See [the reader checkpoint](EMAIL-READER-CHECKPOINT-2026-09-08.md).
 
-The next provider step remains an offline recorded-fixture driver with repeat/expiry/reconnect tests, then an explicitly authorized dedicated mailbox. Real OAuth and secret storage, background grants, HTML/media handling, attachment bytes, deletion/retention, real sending and provider reconciliation remain incomplete. No live compatibility or delivery claim follows from these local tests.
+Next, qualify deliberate plain-text excerpt sharing and the reviewed return path. Sharing is not enabled by this reader change. HTML requires a separate inert/sanitized rendering and selection contract, not regex flattening. Do not automatically include headers, Bcc, attachment descriptors or later messages in shared excerpts.
+
+An offline recorded-fixture driver now exists; its scope is recorded in [the Graph fixture checkpoint](GRAPH-FIXTURE-SYNC-2026-09-08.md). A live provider step still requires an explicitly authorized dedicated mailbox. Real OAuth and secret storage, background grants, HTML/media handling, attachment bytes, deletion/retention, real sending and provider reconciliation remain incomplete. No live compatibility or delivery claim follows from these local tests.
 
 ## Verification
 

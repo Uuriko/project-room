@@ -81,7 +81,7 @@ test("account room discovery and room revocation preserve a private draft, accou
 test("account-only other-tab replacement clears a held private read and navigation metadata", { timeout: 35000 }, async t => {
   const f = await setup(t), p = f.page; await f.login(); await p.locator("#inbox-reader").waitFor();
   let release, started; const held = new Promise(r => { release = r; }), reached = new Promise(r => { started = r; });
-  await p.route("**/api/inbox/sources/private", async route => { const response = await route.fetch(); started(); await held; await route.fulfill({ response }); });
+  await p.route("**/api/inbox/sources/private?view=email-text-v1", async route => { const response = await route.fetch(); started(); await held; await route.fulfill({ response }); });
   await p.locator("#inbox-refresh").click(); await reached;
   const other = await f.context.newPage(); const account = f.store.accountForMember("commons", "owner");
   await other.goto(f.origin + "/?account=1"); await other.locator("#inbox-panel").waitFor();

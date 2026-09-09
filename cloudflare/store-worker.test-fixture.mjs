@@ -135,6 +135,10 @@ export class StoreTestRoom {
       store.email.apply(mailToken, mailPage, mailBinding);
       store.inbox.apply(mailToken, { action: 'draft.save', requestId: 'mail-private-draft', sourceId: envelope.sourceId,
         expectedRevision: 0, sourceRevision: 1, body: 'Recover this private email draft' }, mailBinding);
+      const emailView = store.inbox.read(mailToken, envelope.sourceId, mailBinding, { emailView: true });
+      assert.deepEqual(emailView.source.paragraphs, [mail.message.body.content]);
+      assert.equal(emailView.source.envelope, undefined);
+      assert.deepEqual(emailView.source.capabilities, { draft: true, share: false, send: false });
       const checkpoint = auditRecovery(store).dataSha256;
       store.db.exec("CREATE TRIGGER mail_test_failure BEFORE INSERT ON private_email_commands BEGIN SELECT RAISE(ABORT,'fixture mail failure'); END");
       assert.throws(() => store.email.apply(mailToken, { ...mailPage, requestId: 'mail-failed-page', expectedRevision: 1,
@@ -164,6 +168,9 @@ export class StoreTestRoom {
       store.shareLinks.verify();
       assert.equal(store.email.apply(email.token, email.page, email.binding).duplicate, true);
       assert.equal(store.inbox.read(email.token, email.sourceId, email.binding).draft.body, 'Recover this private email draft');
+      const emailView = store.inbox.read(email.token, email.sourceId, email.binding, { emailView: true });
+      assert.equal(emailView.source.email.connectionState, 'active');
+      assert.equal(emailView.draft.body, 'Recover this private email draft');
       const mailState = store.email.state(email.token, email.page.connectionId, email.page.folderId, email.binding);
       assert.equal(mailState.folder.complete, false); assert.equal(mailState.expectedCursor, email.page.cursor);
       const finalPage = await prepareGraphFixturePage({ store, token: email.token, binding: email.binding,

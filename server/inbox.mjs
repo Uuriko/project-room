@@ -122,14 +122,34 @@ export class Inbox {
       return { contractVersion: 1, viewer: viewer(auth), sources };
     });
   }
-  read(token, sourceId, binding) {
+  read(token, sourceId, binding, { emailView = false } = {}) {
     return this.store.readTransaction(() => {
       const auth = this.auth(token, binding), row = this.source(auth.account.id, sourceId);
       const draft = this.db.prepare("SELECT revision,source_revision,body,updated_at FROM private_inbox_drafts WHERE account_id=? AND source_id=?").get(auth.account.id, sourceId);
-      return { contractVersion: 1, viewer: viewer(auth), source: { id: row.id, revision: row.revision, ...this.version(auth.account.id, row.id, row.revision) },
+      const data = this.version(auth.account.id, row.id, row.revision);
+      const source = emailView && data.adapter === "email" ? this.emailView(auth, row, data.envelope) : { id: row.id, revision: row.revision, ...data };
+      return { contractVersion: 1, viewer: viewer(auth), source,
         draft: draft ? { revision: draft.revision, sourceRevision: draft.source_revision, body: draft.body, updatedAt: draft.updated_at,
           origin: this.draftOrigin(auth.account.id, sourceId, draft.body, row.revision) } : null };
     });
+  }
+  emailView(auth, row, value) {
+    const envelope = readEmailEnvelope(value), { message, body, attachments } = envelope;
+    const saved = this.db.prepare("SELECT data_json FROM private_email_connections WHERE account_id=? AND id=?")
+      .get(auth.account.id, envelope.connection.id);
+    if (!saved || envelope.connection.accountId !== auth.account.id) fail(409, "email_connection_unavailable", "Email connection unavailable.");
+    const connection = JSON.parse(saved.data_json);
+    const connectionState = connection.state === "disconnected" ? "disconnected"
+      : connection.authEpoch !== auth.account.authEpoch ? "reconnect_required" : "active";
+    // A bounded, inert reading projection, never a provider/send envelope. Keep
+    // cursors, headers, HTML, attachment descriptors and mailbox IDs off this path.
+    return { id: row.id, revision: row.revision, adapter: "email", sender: message.from.address,
+      recipient: envelope.connection.identity.address, subject: message.subject,
+      paragraphs: body.format === "text" ? [body.content] : [],
+      capabilities: { draft: true, share: false, send: false },
+      email: { view: "email-text-v1", accountId: auth.account.id, format: body.format, connectionState,
+        to: message.to.map(a => a.address), cc: message.cc.map(a => a.address), bcc: message.bcc.map(a => a.address),
+        attachmentState: attachments.state, attachmentCount: attachments.items.length } };
   }
   draftOrigin(accountId, sourceId, body, sourceRevision) {
     const row = this.db.prepare(`SELECT request_json,receipt_json FROM private_inbox_commands WHERE account_id=?

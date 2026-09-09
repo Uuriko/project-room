@@ -65,8 +65,10 @@
         </aside>
         <button id="inbox-back" class="text-button inbox-back" type="button">← Inbox</button>
         <article id="inbox-reader" class="inbox-reader" hidden>
-          <header class="inbox-source-heading"><div><span class="form-hint">Sample message · only you</span><h2 id="inbox-subject"></h2></div><button id="inbox-ask" class="button secondary" type="button">Ask room</button></header>
+          <header class="inbox-source-heading"><div><span id="inbox-source-label" class="form-hint">Sample message · only you</span><h2 id="inbox-subject"></h2></div><button id="inbox-ask" class="button secondary" type="button">Ask room</button></header>
           <p id="inbox-addresses" class="form-hint"></p>
+          <details id="inbox-email-details" class="form-hint" hidden><summary>Details</summary><div id="inbox-email-metadata"></div></details>
+          <p id="inbox-source-notice" class="form-hint" hidden></p>
           <div id="inbox-source-body" class="inbox-source-body"></div>
           <section id="inbox-results" class="inbox-results" aria-label="Related room work" hidden><h3>From the room</h3><div id="inbox-result-list"></div></section>
           <form id="inbox-draft-form" class="inbox-draft-form">

@@ -31,6 +31,9 @@ export function installInboxSend({ api, ownerKey, reviewChanges }) {
     && draft.reviewedSource === draft.source.revision && draft.body.trim();
   function render() {
     if (!sourceId || !ownerKey()) return;
+    if (draft?.source.adapter === "email") {
+      $("inbox-send-panel").hidden = true; $("inbox-save").hidden = false; return;
+    }
     const s = state(sourceId), send = latest(s), unresolved = send && ["queued", "unknown"].includes(send.status);
     const already = send && !["cancelled", "rejected"].includes(send.status)
       && send.envelope.draftRevision === draft?.base?.revision && send.envelope.sourceRevision === draft?.source.revision;
@@ -54,6 +57,7 @@ export function installInboxSend({ api, ownerKey, reviewChanges }) {
   }
   async function load(id) {
     if (!ownerKey()) return;
+    if (id === sourceId && draft?.source.adapter === "email") { render(); return true; }
     const s = state(id), owner = ownerKey(), turn = ++s.turn, gen = generation;
     s.pending ??= pending().find(r => r.sourceId === id) ?? null;
     try {
@@ -81,7 +85,7 @@ export function installInboxSend({ api, ownerKey, reviewChanges }) {
     $("inbox-send-confirm").disabled = !canSend;
   }
   async function open(existing = false, readOnly = false) {
-    if (!sourceId || !ownerKey()) return;
+    if (!sourceId || !ownerKey() || draft?.source.adapter === "email") return;
     const id = sourceId, s = state(id), owner = ownerKey(), turn = ++modalTurn;
     if (s.busy || s.pending || (!existing && !clean())) return;
     preview = null; $("inbox-send-dialog").showModal();

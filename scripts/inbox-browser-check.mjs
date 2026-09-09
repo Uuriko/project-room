@@ -10,6 +10,24 @@ import { SyntheticInboxTransport } from "../server/inbox-transport.mjs";
 import { SyntheticMailFixture } from "./synthetic-mail-fixture.mjs";
 import { join } from "node:path";
 import { createInboxSandbox } from "./inbox-sandbox.mjs";
+import { emailContractFixture } from "./email-contract-fixture.mjs";
+import { normalizeGraphEmail } from "../server/graph-email.mjs";
+
+function seedEmail(f) {
+  const raw = emailContractFixture(); raw.connection.accountId = f.store.accountForMember("commons", "owner").id;
+  const apply = request => f.store.email.apply(f.slot.token, request, f.session.sessionBinding);
+  apply({ action: "connection.configure", requestId: crypto.randomUUID(), connectionId: raw.connection.id, expectedRevision: 0, profile: raw.connection });
+  const importMessage = () => {
+    const envelope = normalizeGraphEmail(raw.connection, raw.message, raw.options);
+    const state = f.store.email.state(f.slot.token, raw.connection.id, raw.message.parentFolderId, f.session.sessionBinding);
+    let revision = 0; try { revision = f.store.inbox.read(f.slot.token, envelope.sourceId, f.session.sessionBinding).source.revision; } catch (e) { if (e.status !== 404) throw e; }
+    apply({ action: "page.apply", requestId: crypto.randomUUID(), connectionId: raw.connection.id, connectionRevision: 1,
+      folderId: raw.message.parentFolderId, expectedRevision: state.folder?.revision ?? 0, expectedCursor: state.expectedCursor,
+      cursor: crypto.randomUUID(), complete: true, reset: state.needsReset, observations: [{ kind: "message", expectedSourceRevision: revision, envelope }] });
+    return envelope.sourceId;
+  };
+  return { raw, importMessage, disconnect: () => apply({ action: "connection.disconnect", requestId: crypto.randomUUID(), connectionId: raw.connection.id, expectedRevision: 1 }) };
+}
 
 async function setup(t, mobile = false, simulate = false) {
   const f = createAcceptanceFixture(), account = f.store.accountForMember("commons", "owner"), accountKey = f.store.issueAccountAccessKey(account.id);
@@ -54,6 +72,51 @@ async function previewReply(f, body = "A private reply 🪷") {
   await p.locator("#inbox-send-preview").click();
   await p.waitForFunction(() => !document.getElementById("inbox-send-confirm").disabled);
 }
+for (const mobile of [false, true]) test(`email reader ${mobile ? "mobile" : "desktop"}: inert text, private drafts and current disconnected state`, { timeout: 35000 }, async t => {
+  const f = await setup(t, mobile, true), p = f.page, mail = seedEmail(f), before = f.store.room("commons");
+  mail.raw.message.body.content = '<img src="https://example.invalid/tracker">\n\nCould we make this simpler?';
+  const id = mail.importMessage(); await f.inbox(); await f.pick(id);
+  assert.equal(await p.locator("#inbox-source-label").textContent(), "Sample email · only you");
+  assert.equal(await p.locator("#inbox-source-body").textContent(), mail.raw.message.body.content);
+  assert.equal(await p.locator("#inbox-source-body img").count(), 0);
+  assert.equal(await p.locator("#inbox-ask").isVisible(), false);
+  assert.equal(await p.locator("#inbox-send-panel").isVisible(), false);
+  await p.locator("#inbox-email-details summary").click();
+  assert.match(await p.locator("#inbox-email-metadata").textContent(), /observer@example.test/);
+  assert.match(await p.locator("#inbox-email-metadata").textContent(), /files unavailable/);
+  await p.locator("#inbox-email-details summary").click();
+  await p.locator("#inbox-draft").fill("A draft to keep 🪷"); await p.locator("#inbox-save").click();
+  await p.getByText("Saved · only you", { exact: true }).waitFor();
+  await f.capture("email-reader-" + (mobile ? "mobile" : "desktop"));
+  await p.reload(); await p.locator("#nav-inbox").waitFor(); await f.inbox(); await f.pick(id);
+  assert.equal(await p.locator("#inbox-draft").inputValue(), "A draft to keep 🪷");
+  mail.disconnect();
+  if (mobile) await p.locator("#inbox-back").click();
+  await p.locator("#inbox-refresh").click();
+  if (mobile) await f.pick(id);
+  await p.getByText("Disconnected · saved copy", { exact: true }).waitFor();
+  // A connection-only change is not a source or draft conflict.
+  assert.equal(await p.locator("#inbox-conflict").isVisible(), false);
+  await p.getByText("Saved · only you", { exact: true }).waitFor();
+  assert.equal(await p.locator("#inbox-draft").inputValue(), "A draft to keep 🪷");
+  assert.equal(f.store.inbox.read(f.slot.token, id, f.session.sessionBinding).draft.revision, 1);
+  assert.deepEqual(f.store.room("commons"), before); assert.equal(f.provider.submits, 0);
+  await f.capture("email-disconnected-" + (mobile ? "mobile" : "desktop"));
+  assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await f.pick("note"); assert.equal(await p.locator("#inbox-ask").isVisible(), true);
+  assert.equal(await p.locator("#inbox-email-details").isVisible(), false);
+});
+test("email HTML is explicitly unavailable and never fetched or injected into the reader", { timeout: 35000 }, async t => {
+  const f = await setup(t), p = f.page, mail = seedEmail(f);
+  mail.raw.message.body = { contentType: "html", content: '<img src="https://example.invalid/remote"><script>window.untrustedMail=true</script>' };
+  const id = mail.importMessage(); await f.inbox(); await f.pick(id);
+  await p.getByText("HTML preview unavailable.", { exact: true }).waitFor();
+  assert.equal(await p.locator("#inbox-source-body").textContent(), "");
+  assert.equal(await p.evaluate(() => window.untrustedMail), undefined);
+  await p.locator("#inbox-draft").fill("Notes kept privately"); await p.locator("#inbox-save").click();
+  await p.getByText("Saved · only you", { exact: true }).waitFor();
+  await f.capture("email-html-unavailable");
+});
 for (const mobile of [false, true]) test(`sample reply ${mobile ? "mobile" : "desktop"}: direct reply needs no work and preserves conversation drafts`, { timeout: 35000 }, async t => {
   const f = await setup(t, mobile, true), p = f.page, before = f.store.room("commons");
   await p.locator("#message-input").fill("Unsent room note"); await f.inbox(); await f.pick("note");
@@ -398,7 +461,7 @@ test("real inbox: another tab changing the browser account clears private conten
   // inbox's timestamp ordering and which earlier source is already cached.
   f.apply(f.source("held")); await f.inbox();
   let release, reached; const held = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { reached = resolve; });
-  await p.route("**/api/inbox/sources/held", async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); });
+  await p.route("**/api/inbox/sources/held?view=email-text-v1", async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); });
   const read = p.locator('[data-source-id="held"]').click(); await started; await read;
   const other = await p.context().newPage(); await other.goto(f.origin + "/?room=commons");
   await other.locator("#main").waitFor({ state: "visible" }); await other.locator("#signout-button").click();

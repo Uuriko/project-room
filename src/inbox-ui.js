@@ -88,6 +88,8 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     $("#nav-inbox").setAttribute("aria-current", "false"); $("#nav-rooms").setAttribute("aria-current", "page");
     for (const selector of ["#inbox-list", "#inbox-source-body", "#inbox-subject", "#inbox-addresses", "#inbox-draft-status", "#inbox-status", "#inbox-remote-draft", "#inbox-share-paragraphs", "#inbox-share-audience", "#inbox-share-status"]) $(selector).replaceChildren();
     $("#inbox-draft").value = ""; $("#inbox-reader").hidden = true; $("#inbox-conflict").hidden = true;
+    $("#inbox-email-details").hidden = true; $("#inbox-email-details").open = false;
+    $("#inbox-email-metadata").replaceChildren(); text("#inbox-source-notice", ""); $("#inbox-source-notice").hidden = true;
   }
   function sync() {
     const next = ownerKey();
@@ -106,7 +108,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       const button = document.createElement("button"); button.type = "button"; button.className = "inbox-row";
       button.dataset.sourceId = source.id; button.setAttribute("aria-current", selected === source.id ? "true" : "false");
       const sender = document.createElement("span"), subject = document.createElement("strong");
-      sender.textContent = source.sender; subject.textContent = source.subject;
+      sender.textContent = source.sender; subject.textContent = source.subject || "(No subject)";
       button.append(sender, subject); button.addEventListener("click", () => open(source.id)); return button;
     }));
   }
@@ -127,6 +129,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   }
   async function open(sourceId) {
     if (!owns()) return;
+    if (selected !== sourceId) $("#inbox-email-details").open = false;
     remember(); selected = sourceId; renderList();
     $("#inbox-panel").classList.add("reading");
     if (drafts.has(sourceId)) { render(); loadResults(sourceId); return; }
@@ -142,7 +145,20 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   function render() {
     const d = drafts.get(selected); if (!d || !owns()) return;
     $("#inbox-reader").hidden = false;
-    text("#inbox-subject", d.source.subject);
+    text("#inbox-subject", d.source.subject || "(No subject)");
+    const email = d.source.email;
+    text("#inbox-source-label", email ? "Sample email · only you" : "Sample message · only you");
+    $("#inbox-ask").hidden = Boolean(email);
+    $("#inbox-email-details").hidden = !email;
+    const metadata = email ? ["Mailbox: " + d.source.recipient,
+      ...["to", "cc", "bcc"].filter(k => email[k].length).map(k => (k === "to" ? "To" : k.toUpperCase()) + ": " + email[k].join(", ")),
+      email.attachmentState === "complete" ? (email.attachmentCount ? `${email.attachmentCount} ${email.attachmentCount === 1 ? "attachment" : "attachments"} · files unavailable` : "No attachments")
+        : "Attachments " + (email.attachmentState === "partial" ? "partly listed" : "not loaded") + " · files unavailable",
+      "Sharing and sending unavailable"] : [];
+    $("#inbox-email-metadata").replaceChildren(...metadata.map(value => { const p = document.createElement("p"); p.textContent = value; return p; }));
+    const notices = email ? [email.connectionState === "disconnected" ? "Disconnected · saved copy" : email.connectionState === "reconnect_required" ? "Reconnect required · saved copy" : "",
+      email.format === "html" ? "HTML preview unavailable." : !d.source.paragraphs[0] ? "No message text." : ""].filter(Boolean) : [];
+    text("#inbox-source-notice", notices.join(" · ")); $("#inbox-source-notice").hidden = !notices.length;
     text("#inbox-addresses", d.source.sender + " → " + d.source.recipient);
     $("#inbox-source-body").replaceChildren(...d.source.paragraphs.map(value => { const p = document.createElement("p"); p.textContent = value; return p; }));
     $("#inbox-draft").value = d.body;
@@ -248,12 +264,19 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       expectedRevision: p.expectedRevision, roomId: p.roomId, workItemId: p.workItemId, shareRequestId: p.shareRequestId, resultVersion: p.resultVersion });
   });
   async function review(sourceId, d) {
+    const turn = d.reviewTurn = (d.reviewTurn ?? 0) + 1;
     try {
-      const result = await api.read(sourceId); if (!owns() || drafts.get(sourceId) !== d) return;
+      const result = await api.read(sourceId); if (!owns() || drafts.get(sourceId) !== d || turn !== d.reviewTurn) return;
+      if (result.source.revision === d.source.revision && d.reviewedSource === result.source.revision
+        && result.draft?.revision === d.base?.revision && result.draft?.sourceRevision === d.base?.sourceRevision
+        && result.draft?.body === d.base?.body) {
+        // Metadata-only refreshes must not turn unchanged drafts into conflicts.
+        d.source = result.source; d.base = result.draft; d.note = null; return;
+      }
       d.conflict = result;
       // Show the changed source before the user decides which draft to retain.
       d.source = result.source; d.note = "Review the source and saved draft.";
-    } catch (error) { if (owns()) d.note = "Couldn’t review changes. Try again."; }
+    } catch (error) { if (owns() && drafts.get(sourceId) === d && turn === d.reviewTurn) d.note = "Couldn’t review changes. Try again."; }
   }
   $("#inbox-review").addEventListener("click", async () => {
     const sourceId = selected, d = drafts.get(sourceId); if (!d || d.busy || d.pending) return;
@@ -266,7 +289,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     render();
   });
   async function ask() {
-    if (!owns() || !selected) return;
+    if (!owns() || !selected || drafts.get(selected)?.source.adapter === "email") return;
     if (!getRoom()) { show("rooms"); return; }
     $("#inbox-share-dialog").showModal(); text("#inbox-share-status", "Loading…");
     $("#inbox-share-confirm").disabled = true; $("#inbox-share-paragraphs").replaceChildren();

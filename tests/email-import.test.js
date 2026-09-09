@@ -7,6 +7,7 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { emailContractFixture } from "../scripts/email-contract-fixture.mjs";
 import { normalizeGraphEmail } from "../server/graph-email.mjs";
 import { RoomStore } from "../server/store.mjs";
+import { createRoomServer } from "../server/http.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { backupRoom } from "../server/backup.mjs";
 import { emailImportLimits } from "../server/email-import.mjs";
@@ -39,6 +40,56 @@ function fixture(t) {
     sourceRevision: f.read().source.revision, expectedRevision: f.read().draft?.revision ?? 0, body }, f.auth.sessionBinding);
   return f;
 }
+test("negotiated email reading projects inert text and private recipient details without raw provider context", t => {
+  const f = fixture(t); f.configure(); f.apply(f.page());
+  const before = auditRecovery(f.store);
+  const v = f.store.inbox.read(f.auth.token, f.envelope().sourceId, f.auth.sessionBinding, { emailView: true });
+  assert.deepEqual(v.source.paragraphs, [f.raw.message.body.content]);
+  assert.deepEqual(v.source.capabilities, { draft: true, share: false, send: false });
+  assert.equal(v.source.email.accountId, f.account.id);
+  assert.deepEqual(v.source.email.bcc, ["observer@example.test"]);
+  assert.equal(v.source.email.attachmentCount, 1);
+  assert.equal(v.source.envelope, undefined);
+  for (const secret of [f.raw.connection.mailboxId, f.raw.message.id, "do not project this header", "brief.txt"])
+    assert.equal(JSON.stringify(v).includes(secret), false);
+  assert.deepEqual(auditRecovery(f.store), before);
+  assert.deepEqual(f.read().source.envelope, f.envelope()); // Existing importer contract is unchanged.
+});
+test("HTML reading emits no HTML while keeping the existing private draft", t => {
+  const f = fixture(t); f.raw.message.body = { contentType: "html", content: '<img src="https://example.invalid/pixel"><script>throw 1</script>Private HTML' };
+  f.configure(); f.apply(f.page()); f.draft("A retained draft");
+  const v = f.store.inbox.read(f.auth.token, f.envelope().sourceId, f.auth.sessionBinding, { emailView: true });
+  assert.equal(v.source.email.format, "html"); assert.deepEqual(v.source.paragraphs, []);
+  assert.equal(JSON.stringify(v).includes("example.invalid/pixel"), false);
+  assert.equal(v.draft.body, "A retained draft");
+});
+test("reader uses current disconnected connection state, not the source's historical grant", t => {
+  const f = fixture(t); f.configure(); f.apply(f.page()); f.draft("Keep this");
+  f.apply({ action: "connection.disconnect", requestId: randomUUID(), connectionId: f.raw.connection.id, expectedRevision: 1 });
+  const v = f.store.inbox.read(f.auth.token, f.envelope().sourceId, f.auth.sessionBinding, { emailView: true });
+  assert.equal(v.source.email.connectionState, "disconnected"); assert.equal(v.draft.body, "Keep this");
+  assert.equal(v.source.capabilities.send, false); assert.equal(v.source.capabilities.share, false);
+});
+test("HTTP email view is explicit, private, no-store and refuses unknown negotiations", async t => {
+  const f = fixture(t); f.configure(); f.apply(f.page());
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const origin = "http://127.0.0.1:" + server.address().port;
+  const headers = { Cookie: "account_session=" + f.auth.token, "X-Session-Binding": f.auth.sessionBinding };
+  const get = path => fetch(origin + "/api/inbox" + path, { headers });
+  assert.deepEqual((await (await get("")).json()).sources, []);
+  assert.equal((await (await get("?view=email-text-v1")).json()).sources.length, 1);
+  const path = "/sources/" + f.envelope().sourceId + "?view=email-text-v1";
+  const response = await get(path); assert.equal(response.status, 200); assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal((await response.json()).source.email.format, "text");
+  for (const query of ["?view=unknown", "?view=email-text-v1&view=email-text-v1", "?view="])
+    assert.equal((await get(query)).status, 422);
+  assert.equal((await fetch(origin + "/api/inbox" + path, { headers: { Authorization: "Bearer " + f.keys.producer } })).status, 401);
+  const guest = f.store.accountForMember("commons", "guest"), key = f.store.issueAccountAccessKey(guest.id), slot = f.store.createAccountSessionSlot();
+  const session = f.store.loginAccountSession(slot.token, key, 0);
+  assert.equal((await fetch(origin + "/api/inbox" + path, { headers: { Cookie: "account_session=" + slot.token, "X-Session-Binding": session.sessionBinding } })).status, 404);
+});
 test("fixture email import reuses private Inbox storage without changing rooms or old-client lists", t => {
   const f = fixture(t), before = f.store.room("commons"); f.configure();
   const request = f.page(), result = f.apply(request), source = f.read().source;
@@ -234,6 +285,9 @@ test("cold allowlisted candidate package reopens imported email and resumes the 
   try {
     assert.equal(cold.email.apply(f.auth.token, page, f.auth.sessionBinding).duplicate, true);
     assert.equal(cold.inbox.read(f.auth.token, f.envelope().sourceId, f.auth.sessionBinding).draft.body, "Cold package private answer");
+    const view = cold.inbox.read(f.auth.token, f.envelope().sourceId, f.auth.sessionBinding, { emailView: true });
+    assert.deepEqual(view.source.paragraphs, [f.raw.message.body.content]);
+    assert.equal(view.source.capabilities.send, false); assert.equal(view.source.email.connectionState, "active");
     const next = f.page({ complete: true, observations: [] }); cold.email.apply(f.auth.token, next, f.auth.sessionBinding);
     assert.equal(cold.email.state(f.auth.token, page.connectionId, page.folderId, f.auth.sessionBinding).folder.complete, true);
     assert.deepEqual(cold.email.verify(), { connections: 1, folders: 1, sources: 1 });
