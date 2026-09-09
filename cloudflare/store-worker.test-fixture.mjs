@@ -11,6 +11,7 @@ import { textVersion } from '../server/text-results.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
 import { emailContractFixture } from '../scripts/email-contract-fixture.mjs';
 import { RecordedGraphMailbox, prepareGraphFixturePage, graphFixtureStart } from '../server/graph-fixture-sync.mjs';
+import { prepareGraphReplyDraft, currentGraphReplyDraft, observeGraphReplyCreation } from '../server/graph-reply-draft.mjs';
 
 function checkNarrowAuthentication(store, credentials) {
   const { state, sequence } = store.room('commons'), before = auditRecovery(store).dataSha256;
@@ -135,6 +136,8 @@ export class StoreTestRoom {
       store.email.apply(mailToken, mailPage, mailBinding);
       store.inbox.apply(mailToken, { action: 'draft.save', requestId: 'mail-private-draft', sourceId: envelope.sourceId,
         expectedRevision: 0, sourceRevision: 1, body: 'Recover this private email draft' }, mailBinding);
+      const replyPlan = prepareGraphReplyDraft({ store, token: mailToken, binding: mailBinding, sourceId: envelope.sourceId, requestId: 'mail-reply-plan' });
+      assert.equal(replyPlan.canExecute, false); assert.equal(replyPlan.canSend, false);
       const emailView = store.inbox.read(mailToken, envelope.sourceId, mailBinding, { emailView: true });
       assert.deepEqual(emailView.source.paragraphs, [mail.message.body.content]);
       assert.equal(emailView.source.envelope, undefined);
@@ -152,7 +155,7 @@ export class StoreTestRoom {
       store.db.exec('DROP TRIGGER mail_test_failure');
       assert.equal(auditRecovery(store).dataSha256, checkpoint);
       return Response.json({ guests, credentials, sequence: store.room('commons').sequence, eventId: receipt.event.id, owner, nativeBody, nativeCommand, nativeSaved,
-        email: { token: mailToken, binding: mailBinding, page: mailPage, sourceId: envelope.sourceId, excerpt, shared } });
+        email: { token: mailToken, binding: mailBinding, page: mailPage, sourceId: envelope.sourceId, excerpt, shared, replyPlan } });
     }
     if (path === '/resume') {
       const { guests, credentials, sequence, eventId, owner, nativeBody, nativeCommand, nativeSaved, email } = await request.json();
@@ -173,6 +176,11 @@ export class StoreTestRoom {
       store.shareLinks.verify();
       assert.equal(store.email.apply(email.token, email.page, email.binding).duplicate, true);
       assert.equal(store.inbox.read(email.token, email.sourceId, email.binding).draft.body, 'Recover this private email draft');
+      const replyArgs = { store, token: email.token, binding: email.binding, plan: email.replyPlan };
+      assert.deepEqual(currentGraphReplyDraft(replyArgs), email.replyPlan);
+      const uncertain = observeGraphReplyCreation({ ...replyArgs, response: null });
+      assert.equal(uncertain.status, 'creation_unconfirmed'); assert.equal(uncertain.canRetryCreate, false);
+      assert.equal(uncertain.canSend, false);
       assert.deepEqual(store.inbox.apply(email.token, email.excerpt, email.binding).receipt, email.shared.receipt);
       const emailView = store.inbox.read(email.token, email.sourceId, email.binding, { emailView: true });
       assert.equal(emailView.source.email.connectionState, 'active');

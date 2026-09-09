@@ -21,7 +21,7 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   const receipt = createRuntimePackage({ repository, commit, destination });
   const committedSchema = Number(/STORE_SCHEMA_VERSION = (\d+)/.exec(execFileSync("git", ["show", commit + ":server/writer-fence.mjs"], { cwd: repository, encoding: "utf8" }))[1]);
   assert.equal(receipt.schemaVersion, committedSchema); assert.deepEqual(publicAssets, assetPaths);
-  assert.equal(receipt.files, 47 + ["src/inbox-client.js", "src/inbox-ui.js", "src/inbox-send-ui.js", "server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "src/agent-connections.js", "client/mcp-stdio.mjs", "scripts/agent-mcp.mjs", "client/work-actions.mjs", "server/work-discussion.mjs", "server/text-results.mjs", "client/attention-inbox.mjs", "src/room-charter.js", "src/room-instructions.js", "src/reply-requests.js", "server/reply-requests.mjs", "client/reply-actions.mjs", "scripts/agent-replies.mjs", "client/request-notices.mjs", "src/work-help.js", "server/work-help.mjs", "src/help-offers.js", "client/help-actions.mjs", "server/inbox.mjs", "server/inbox-outbox.mjs", "server/inbox-transport.mjs", "server/email-envelope.mjs", "server/graph-email.mjs", "server/email-import.mjs", "server/graph-fixture-sync.mjs"].filter(path => existsSync(join(destination, path))).length);
+  assert.equal(receipt.files, 47 + ["src/inbox-client.js", "src/inbox-ui.js", "src/inbox-send-ui.js", "server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "src/agent-connections.js", "client/mcp-stdio.mjs", "scripts/agent-mcp.mjs", "client/work-actions.mjs", "server/work-discussion.mjs", "server/text-results.mjs", "client/attention-inbox.mjs", "src/room-charter.js", "src/room-instructions.js", "src/reply-requests.js", "server/reply-requests.mjs", "client/reply-actions.mjs", "scripts/agent-replies.mjs", "client/request-notices.mjs", "src/work-help.js", "server/work-help.mjs", "src/help-offers.js", "client/help-actions.mjs", "server/inbox.mjs", "server/inbox-outbox.mjs", "server/inbox-transport.mjs", "server/email-envelope.mjs", "server/graph-email.mjs", "server/email-import.mjs", "server/graph-fixture-sync.mjs", "server/graph-reply-draft.mjs"].filter(path => existsSync(join(destination, path))).length);
   assert.equal(existsSync(join(destination, ".git")), false);
   assert.equal(existsSync(join(destination, "node_modules")), false);
   for (const path of ["server.mjs", "src/app.js", "cloudflare/room.mjs"]) {
@@ -148,7 +148,7 @@ test("uncommitted candidate packages cold in an isolated synthetic commit, inclu
   const directory = mkdtempSync(join(tmpdir(), "room-candidate-package-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const candidate = candidateRuntimeFixture(repository, directory), destination = join(directory, "runtime");
-  const receipt = createRuntimePackage({ ...candidate, destination }); assert.equal(receipt.files, 79);
+  const receipt = createRuntimePackage({ ...candidate, destination }); assert.equal(receipt.files, 80);
   const program = `
     import { RoomStore } from ${JSON.stringify(pathToFileURL(join(destination, "server/store.mjs")).href)};
     import { SyntheticInboxTransport } from ${JSON.stringify(pathToFileURL(join(destination, "server/inbox-transport.mjs")).href)};
