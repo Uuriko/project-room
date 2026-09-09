@@ -1,4 +1,5 @@
 import { InboxClient, inboxTextVersion } from "./inbox-client.js";
+import { installInboxSend } from "./inbox-send-ui.js";
 
 export function installInbox({ account, room, getRoom, onShared, onOpenWork }) {
   const $ = selector => document.querySelector(selector);
@@ -15,6 +16,10 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork }) {
       ? JSON.stringify([s.account.id, s.account.authEpoch, s.sessionRevision, s.sessionBinding]) : null;
   };
   const owns = () => owner !== null && owner === ownerKey();
+  const sendUI = installInboxSend({ api, ownerKey: () => owns() ? owner : null, reviewChanges: async () => {
+    const id = selected, d = drafts.get(id); if (!d || !owns()) return;
+    await review(id, d); if (owns() && selected === id) render();
+  } });
   function persistShare(request = null) {
     // Only operation metadata; never private bodies, addresses, CSRF or access keys.
     retryShare = request;
@@ -47,6 +52,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork }) {
     if (!active) { remember(); $("#conversation-title").focus({ preventScroll: true }); }
   }
   function reset({ preservePending = false } = {}) {
+    sendUI.reset({ preservePending });
     api.reset(); owner = null; epoch++; active = false; selected = null; rows = []; sharing = null; sharingBusy = false;
     drafts.clear(); positions.clear(); retryShare = null; if (!preservePending) persistShare();
     $("#workspace-nav").hidden = true; $("#inbox-panel").hidden = true; $("#inbox-share-dialog").close();
@@ -119,6 +125,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork }) {
     text("#inbox-draft-status", d.note ?? (d.pending ? "Save unconfirmed. Confirm before editing." : d.reviewedSource !== d.source.revision ? "Source changed. Review before saving." : d.dirty ? "Not saved" : d.base ? "Saved · only you" : "Only you · nothing sent"));
     $("#inbox-reader").scrollTop = positions.get(selected) ?? 0;
     const origin = d.base?.origin;
+    sendUI.update(selected, d);
     text("#inbox-origin", origin ? (d.dirty || !origin.unchanged ? "Edited since room review" : "Copied from room review")
       + (origin.sourceChanged ? " · source changed" : "") : "");
   }
@@ -128,6 +135,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork }) {
     $("#inbox-save").disabled = !d.dirty || d.reviewedSource !== d.source.revision;
     text("#inbox-draft-status", d.reviewedSource !== d.source.revision ? "Source changed. Review before saving." : d.dirty ? "Not saved" : d.base ? "Saved · only you" : "Only you · nothing sent");
     if (d.base?.origin) text("#inbox-origin", d.dirty || !d.base.origin.unchanged ? "Edited since room review" : "Copied from room review");
+    sendUI.update(selected, d);
   });
   async function saveDraft(adoption = null) {
     const sourceId = selected, d = drafts.get(sourceId);
@@ -155,6 +163,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork }) {
   }
   $("#inbox-draft-form").addEventListener("submit", event => { event.preventDefault(); saveDraft(); });
   async function loadResults(sourceId) {
+    sendUI.load(sourceId);
     const turn = ++resultEpoch;
     $("#inbox-results").hidden = true; $("#inbox-result-list").replaceChildren();
     try {
@@ -280,8 +289,8 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork }) {
   });
   $("#inbox-back").addEventListener("click", () => { remember(); $("#inbox-panel").classList.remove("reading"); $("#inbox-list button[aria-current=true]")?.focus(); });
   window.addEventListener("beforeunload", event => {
-    if (owns() && [...drafts.values()].some(d => d.dirty || d.pending)) { event.preventDefault(); event.returnValue = ""; }
+    if (owns() && ([...drafts.values()].some(d => d.dirty || d.pending) || sendUI.hasPending())) { event.preventDefault(); event.returnValue = ""; }
   });
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") remember(); });
-  return { sync, reset, hasPending: () => owns() && ([...drafts.values()].some(d => d.dirty || d.pending) || Boolean(pendingShare())) };
+  return { sync, reset, hasPending: () => owns() && ([...drafts.values()].some(d => d.dirty || d.pending) || Boolean(pendingShare()) || sendUI.hasPending()) };
 }

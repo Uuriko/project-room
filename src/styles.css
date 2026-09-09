@@ -615,6 +615,12 @@ summary { overflow-wrap: anywhere; }
 #inbox-result-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; }
 #inbox-result-dialog details { margin: 1rem 0; }
 #inbox-origin:empty { display: none; }
+.inbox-send-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; margin-top: 1rem; }
+.inbox-send-panel > p { flex: 1; margin: 0; }
+.inbox-send-panel > div { margin-left: auto; }
+.inbox-send-panel p:empty { display: none; }
+#inbox-send-body { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; }
+#inbox-send-subject { font-size: 1rem; }
 .inbox-share-dialog { width: min(38rem, calc(100vw - 2rem)); box-sizing: border-box; max-height: 90vh; overflow: auto; }
 #inbox-share-paragraphs label { display: flex; align-items: flex-start; gap: .75rem; padding: 1rem 0; line-height: 1.5; }
 #inbox-share-paragraphs input { flex: 0 0 auto; width: 1.1rem; height: 1.1rem; min-height: 1.1rem; margin-top: .3rem; }

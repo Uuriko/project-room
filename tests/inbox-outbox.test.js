@@ -200,3 +200,23 @@ test("late account revocation retains unknown status and a new authorized sessio
   assert.equal(f.provider.submits, 1);
   assert.doesNotThrow(() => auditRecovery(f.store));
 });
+test("optional loopback simulation endpoint uses the existing intent and never accepts claimed outcomes", async t => {
+  const f = setup(t), driver = f.driver();
+  assert.throws(() => createRoomServer({ store: f.store, origin: "https://example.test", trustedLocalProxy: true, syntheticInboxTransport: driver }), /loopback/);
+  const server = createRoomServer({ store: f.store, syntheticInboxTransport: driver });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const origin = "http://127.0.0.1:" + server.address().port;
+  const request = f.reserve(); f.apply(request);
+  const dispatch = { action: "dispatch", sourceId: "note", sendId: request.requestId };
+  const call = (data, csrf = f.session.csrf) => fetch(origin + "/api/inbox/simulation", { method: "POST",
+    headers: { Cookie: "account_session=" + f.token, "X-Session-Binding": f.session.sessionBinding, Origin: origin,
+      "Content-Type": "application/json", "X-CSRF-Token": csrf }, body: JSON.stringify(data) });
+  assert.equal((await call(dispatch, "wrong")).status, 403);
+  assert.equal((await call({ ...dispatch, outcome: "delivered" })).status, 422);
+  f.provider.mode = "after";
+  let response = await call(dispatch); assert.equal(response.status, 200); assert.equal((await response.json()).send.status, "unknown");
+  response = await call(dispatch); assert.equal(response.status, 200); assert.equal(f.provider.submits, 1);
+  response = await call({ ...dispatch, action: "reconcile" }); assert.equal(response.status, 200); assert.equal((await response.json()).send.status, "accepted");
+  assert.equal(f.provider.submits, 1);
+});

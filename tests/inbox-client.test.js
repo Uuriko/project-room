@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { AccountClient } from "../src/client.js";
-import { InboxClient } from "../src/inbox-client.js";
+import { InboxClient, inboxTextVersion } from "../src/inbox-client.js";
 
 const session = { authenticated: true, account: { id: "owner", authEpoch: 2 }, sessionRevision: 4, sessionBinding: "a".repeat(64), csrf: "csrf" };
 const viewer = { accountId: "owner", authEpoch: 2, sessionRevision: 4, sessionBinding: session.sessionBinding };
@@ -37,4 +37,27 @@ test("wrong private ownership clears current view; malformed exact receipts rema
   const g = setup(async () => reply({ contractVersion: 1, viewer, duplicate: false, receipt: { action: "draft.save", requestId: "another", sourceId: "note", revision: 1, sourceRevision: 1 } }));
   await assert.rejects(g.client.apply({ action: "draft.save", requestId: "save", sourceId: "note", expectedRevision: 0, sourceRevision: 1, body: "Private" }), { code: "invalid_inbox_response" });
   assert.equal(g.ended(), 0);
+});
+test("send previews pin recipients, body, revisions and current account authority", async () => {
+  const envelope = { adapter: "synthetic", accountId: "owner", authEpoch: 2, sourceId: "note", sourceRevision: 1, draftRevision: 1,
+    from: "you@example.test", to: ["maya@example.test"], subject: "Launch", body: "Exact reply 🪷", attachments: [] };
+  const preview = { ...envelope, previewVersion: (await inboxTextVersion(JSON.stringify(envelope))).slice(7) };
+  const response = { contractVersion: 1, viewer, sourceId: "note", simulationAvailable: true, preview };
+  const f = setup(async () => reply(response));
+  assert.deepEqual((await f.client.sendContext("note")).preview, preview);
+  for (const patch of [{ body: "Changed" }, { to: ["other@example.test"] }, { draftRevision: 2 }, { authEpoch: 1 }]) {
+    const g = setup(async () => reply({ ...response, preview: { ...preview, ...patch } }));
+    await assert.rejects(g.client.sendContext("note"), { code: "invalid_inbox_response" });
+  }
+});
+test("accepted sample status requires a provider identity, not just a label", async () => {
+  const envelope = { adapter: "synthetic", accountId: "owner", authEpoch: 2, sourceId: "note", sourceRevision: 1, draftRevision: 1,
+    from: "you@example.test", to: ["maya@example.test"], subject: "Launch", body: "Reply", attachments: [] };
+  envelope.previewVersion = (await inboxTextVersion(JSON.stringify(envelope))).slice(7);
+  const send = { id: "reply", sourceId: "note", revision: 2, status: "accepted", envelope, providerId: null, createdAt: 1, updatedAt: 2 };
+  const response = { contractVersion: 1, viewer, sourceId: "note", simulationAvailable: true, sends: [send] };
+  const f = setup(async () => reply(response));
+  await assert.rejects(f.client.sends("note"), { code: "invalid_inbox_response" });
+  send.providerId = "provider-message";
+  assert.equal((await f.client.sends("note")).sends[0].status, "accepted");
 });

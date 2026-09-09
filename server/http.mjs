@@ -4,6 +4,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { ServiceError } from "./store.mjs";
 import { clientAddress } from "./deployment.mjs";
 import { validId } from "../src/events.js";
+import { SyntheticInboxTransport } from "./inbox-transport.mjs";
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -12,7 +13,7 @@ const bindingPattern = /^[a-f0-9]{64}$/;
 const assets = new Map([
   ["/", ["index.html", "text/html"]], ["/index.html", ["index.html", "text/html"]],
   ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js", "agent-connections.js", "return-brief.js", "work-selectors.js", "work-status.js", "work-packet.js", "portable-work.js", "reminders.js", "reminder-time.js", "room-charter.js", "room-instructions.js", "reply-requests.js", "work-help.js", "help-offers.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
-  ...["inbox-client.js", "inbox-ui.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
+  ...["inbox-client.js", "inbox-ui.js", "inbox-send-ui.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
   ["/src/styles.css", ["src/styles.css", "text/css"]]
 ]);
 const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -46,9 +47,13 @@ const rateHash = value => createHash("sha256").update(String(value)).digest("hex
 
 export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = 1000, trustedLocalProxy = false,
   loadAsset = path => readFile(new URL(path, assetRoot)), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
-  resolveRequestSignal = () => null,
+  resolveRequestSignal = () => null, syntheticInboxTransport = null,
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot" }) {
   if (trustedLocalProxy && !origin?.startsWith("https://")) throw new Error("The deployment proxy requires a fixed HTTPS origin");
+  if (syntheticInboxTransport && (!(syntheticInboxTransport instanceof SyntheticInboxTransport)
+    || syntheticInboxTransport.inbox !== store.inbox || trustedLocalProxy
+    || origin && !["localhost", "127.0.0.1", "[::1]"].includes(new URL(origin).hostname)))
+    throw new Error("Synthetic inbox transport requires its own loopback test service");
   if (origin) {
     const url = new URL(origin);
     if (url.origin !== origin || !["http:", "https:"].includes(url.protocol)) throw new Error("Origin must be a fixed HTTP(S) origin without a path");
@@ -204,8 +209,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const source = /^\/api\/inbox\/sources\/([^/]{1,384})(?:\/(share-context|room-results|send-context|sends))?$/.exec(url.pathname);
         if (source && req.method === "GET") {
           const id = pathId(source[1]);
-          if (source[2] === "send-context") return json(res, 200, store.inbox.sendContext(token, id, binding));
-          if (source[2] === "sends") return json(res, 200, store.inbox.sends(token, id, binding));
+          if (source[2] === "send-context") return json(res, 200, { ...store.inbox.sendContext(token, id, binding), simulationAvailable: Boolean(syntheticInboxTransport) });
+          if (source[2] === "sends") return json(res, 200, { ...store.inbox.sends(token, id, binding), simulationAvailable: Boolean(syntheticInboxTransport) });
           if (source[2]) {
             const roomId = url.searchParams.get("roomId");
             if (!roomId || url.searchParams.getAll("roomId").length !== 1) reject(422, "invalid_room", "Choose a room.");
@@ -221,6 +226,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
           const result = store.inbox.apply(token, await body(req), binding);
           return json(res, result.duplicate ? 200 : 201, result);
+        }
+        if (url.pathname === "/api/inbox/simulation" && req.method === "POST") {
+          protectWrite(req, auth, false); rate(`inbox-simulation:${auth.account.id}`, 60);
+          if (!["127.0.0.1", "::1"].includes(remoteAddress)) reject(403, "inbox_simulation_local_only", "Sample sending is local only.");
+          if (!syntheticInboxTransport) reject(409, "inbox_simulation_unavailable", "Sample sending is unavailable here.");
+          const data = await body(req);
+          if (!data || !exact(data, ["action", "sourceId", "sendId"]) || !["dispatch", "reconcile"].includes(data.action)
+            || !validId(data.sourceId) || !validId(data.sendId)) reject(422, "invalid_inbox_send", "Choose the existing sample reply.");
+          const send = await syntheticInboxTransport[data.action](token, data.sourceId, data.sendId, binding);
+          return json(res, 200, { ...store.inbox.sends(token, data.sourceId, binding), simulationAvailable: true, send });
         }
         reject(404, "not_found", "Inbox route not found.");
       }

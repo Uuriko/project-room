@@ -66,6 +66,16 @@
             <div class="inbox-draft-actions"><span id="inbox-draft-status" role="status"></span><button id="inbox-review" class="button ghost" type="button" hidden>Review changes</button><button id="inbox-save" class="button primary" type="submit" disabled>Save draft</button></div>
             <p id="inbox-origin" class="form-hint"></p>
           </form>
+          <section id="inbox-send-panel" class="inbox-send-panel" aria-label="Sample reply" hidden>
+            <p id="inbox-send-status" class="form-hint" role="status"></p>
+            <div class="inbox-draft-actions">
+              <button id="inbox-send-view" class="text-button" type="button" hidden>View reply</button>
+              <button id="inbox-send-cancel" class="button ghost" type="button" hidden>Cancel reply</button>
+              <button id="inbox-send-check" class="button secondary" type="button" hidden>Check status</button>
+              <button id="inbox-send-resume" class="button secondary" type="button" hidden>Review reply</button>
+              <button id="inbox-send-preview" class="button secondary" type="button">Preview reply</button>
+            </div>
+          </section>
           <section id="inbox-conflict" class="inbox-conflict" aria-label="Draft changes" hidden>
             <h3>Saved draft</h3><pre id="inbox-remote-draft"></pre>
             <div><button id="inbox-use-saved" class="button secondary" type="button">Use saved</button><button id="inbox-use-mine" class="button secondary" type="button">Keep mine</button></div>
@@ -84,6 +94,12 @@
         <details><summary>Replaces your current draft</summary><pre id="inbox-replaced-draft"></pre></details>
         <p class="form-hint">Nothing will be sent.</p>
         <div class="inbox-draft-actions"><button id="inbox-result-close" type="button" class="button ghost">Cancel</button><button id="inbox-result-use" type="button" class="button primary" disabled>Use as draft</button></div>
+      </dialog>
+      <dialog id="inbox-send-dialog" class="inbox-share-dialog" aria-labelledby="inbox-send-title">
+        <h2 id="inbox-send-title">Sample reply</h2>
+        <p id="inbox-send-addresses" class="form-hint"></p><h3 id="inbox-send-subject"></h3>
+        <pre id="inbox-send-body"></pre><p id="inbox-send-dialog-status" class="form-hint" role="status"></p>
+        <div class="inbox-draft-actions"><button id="inbox-send-close" class="button ghost" type="button">Close</button><button id="inbox-send-confirm" class="button primary" type="button" disabled>Send sample</button></div>
       </dialog>
       <main id="main" class="community-shell" hidden>
         <section class="room-stage" aria-labelledby="room-title">

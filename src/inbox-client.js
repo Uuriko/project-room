@@ -12,6 +12,32 @@ async function validResult(proof, body, version, sourceRevision, roomId, workIte
     && proof.evidenceVersion === await inboxTextVersion(body)
     && version === (await inboxTextVersion(canonical(proof))).slice(7);
 }
+async function validEnvelope(p, accountId, sourceId) {
+  if (!p || p.adapter !== "synthetic" || p.accountId !== accountId || p.sourceId !== sourceId
+    || !revision(p.authEpoch) || ![p.sourceRevision, p.draftRevision].every(n => revision(n) && n > 0)
+    || ![p.from, p.subject].every(v => typeof v === "string" && v.length <= 240)
+    || !Array.isArray(p.to) || p.to.length !== 1 || typeof p.to[0] !== "string" || p.to[0].length > 240
+    || typeof p.body !== "string" || !p.body.trim() || p.body.length > 4000 || !Array.isArray(p.attachments) || p.attachments.length) return false;
+  const envelope = { adapter: p.adapter, accountId: p.accountId, authEpoch: p.authEpoch, sourceId: p.sourceId,
+    sourceRevision: p.sourceRevision, draftRevision: p.draftRevision, from: p.from, to: p.to, subject: p.subject, body: p.body, attachments: p.attachments };
+  return p.previewVersion === (await inboxTextVersion(JSON.stringify(envelope))).slice(7);
+}
+async function validSend(send, accountId, sourceId) {
+  return id(send?.id) && send.sourceId === sourceId && revision(send.revision)
+    && ["queued", "unknown", "accepted", "delivered", "rejected", "bounced", "cancelled"].includes(send.status)
+    && (["accepted", "delivered", "bounced"].includes(send.status) ? id(send.providerId) : send.providerId === null)
+    && revision(send.createdAt) && revision(send.updatedAt)
+    && await validEnvelope(send.envelope, accountId, sourceId);
+}
+async function validSends(v, sourceId) {
+  if (v.sourceId !== sourceId || typeof v.simulationAvailable !== "boolean" || !Array.isArray(v.sends)) return false;
+  const seen = new Set();
+  for (const send of v.sends) {
+    if (!send || seen.has(send.id) || !await validSend(send, v.viewer.accountId, sourceId)) return false;
+    seen.add(send.id);
+  }
+  return true;
+}
 export class InboxClient {
   constructor(account, { onAccessEnded = () => {} } = {}) { this.account = account; this.onAccessEnded = onAccessEnded; this.generation = 0; }
   reset() { this.generation++; }
@@ -55,6 +81,17 @@ export class InboxClient {
         && /^[a-f0-9]{64}$/.test(v.audienceVersion) && typeof v.roomTitle === "string"
         && Array.isArray(v.members) && v.members.every(m => id(m.id) && typeof m.displayName === "string" && ["human", "agent"].includes(m.kind)));
   }
+  sendContext(sourceId) {
+    return this.request("/sources/" + encodeURIComponent(sourceId) + "/send-context", {}, async v => v.sourceId === sourceId
+      && typeof v.simulationAvailable === "boolean" && v.preview?.authEpoch === v.viewer.authEpoch
+      && await validEnvelope(v.preview, v.viewer.accountId, sourceId));
+  }
+  sends(sourceId) { return this.request("/sources/" + encodeURIComponent(sourceId) + "/sends", {}, v => validSends(v, sourceId)); }
+  simulate(action, sourceId, sendId) {
+    return this.request("/simulation", { method: "POST", data: { action, sourceId, sendId } }, async v =>
+      v.simulationAvailable === true && await validSends(v, sourceId) && v.send?.id === sendId
+      && await validSend(v.send, v.viewer.accountId, sourceId));
+  }
   results(sourceId, roomId, workItemId = null) {
     return this.request("/sources/" + encodeURIComponent(sourceId) + "/room-results?roomId=" + encodeURIComponent(roomId)
       + (workItemId === null ? "" : "&workItemId=" + encodeURIComponent(workItemId)), {}, async v => {
@@ -74,6 +111,15 @@ export class InboxClient {
     const data = structuredClone(request);
     return this.request("/commands", { method: "POST", data }, async v => {
       const r = v.receipt;
+      if (data.action.startsWith("send.")) {
+        if (!["send.reserve", "send.cancel"].includes(data.action) || typeof v.duplicate !== "boolean"
+          || r?.requestId !== data.requestId || r.action !== data.action || r.sourceId !== data.sourceId
+          || !await validSend(r.send, v.viewer.accountId, data.sourceId)) return false;
+        return data.action === "send.reserve" ? r.send.id === data.requestId && r.send.revision === 0 && r.send.status === "queued"
+          && r.send.envelope.previewVersion === data.previewVersion && r.send.envelope.sourceRevision === data.sourceRevision
+          && r.send.envelope.draftRevision === data.draftRevision
+          : r.send.id === data.sendId && r.send.revision === data.expectedRevision + 1 && r.send.status === "cancelled";
+      }
       if (data.action === "draft.adopt") {
         const { roomSequence, ...proof } = r?.origin ?? {};
         if (!revision(roomSequence) || !await validResult(proof, r?.body, data.resultVersion, data.sourceRevision, data.roomId, data.workItemId)

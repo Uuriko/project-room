@@ -6,8 +6,12 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { prepareInboxResult } from "./inbox-result-fixture.mjs";
+import { SyntheticInboxTransport } from "../server/inbox-transport.mjs";
+import { SyntheticMailFixture } from "./synthetic-mail-fixture.mjs";
+import { join } from "node:path";
+import { createInboxSandbox } from "./inbox-sandbox.mjs";
 
-async function setup(t, mobile = false) {
+async function setup(t, mobile = false, simulate = false) {
   const f = createAcceptanceFixture(), account = f.store.accountForMember("commons", "owner"), accountKey = f.store.issueAccountAccessKey(account.id);
   const slot = f.store.createAccountSessionSlot(), session = f.store.loginAccountSession(slot.token, accountKey, 0);
   const apply = request => f.store.inbox.apply(slot.token, request, session.sessionBinding);
@@ -16,9 +20,11 @@ async function setup(t, mobile = false) {
     data: { adapter: "synthetic", sender: "maya@example.test", recipient: "you@example.test", subject: sourceId === "note" ? "A quieter launch" : "Friday catch-up", paragraphs }
   });
   apply(source()); apply(source("second"));
-  const server = createRoomServer({ store: f.store, streamInterval: 50 }); await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const provider = simulate ? new SyntheticMailFixture(join(f.directory, "mail.sqlite")) : null;
+  const server = createRoomServer({ store: f.store, streamInterval: 50,
+    syntheticInboxTransport: provider ? new SyntheticInboxTransport(f.store.inbox, provider) : null }); await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = "http://127.0.0.1:" + server.address().port, browser = await chromium.launch({ headless: true });
-  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); provider?.close(); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const context = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 }, isMobile: mobile, hasTouch: mobile, reducedMotion: "reduce" });
   const page = await context.newPage();
   page.setDefaultTimeout(9000); const errors = [], external = [];
@@ -38,8 +44,162 @@ async function setup(t, mobile = false) {
   const saved = () => f.store.inbox.read(slot.token, "note", session.sessionBinding);
   const capture = async name => { mkdirSync("test-results", { recursive: true }); await page.screenshot({ path: "test-results/inbox-" + name + ".png", fullPage: true }); };
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(external, []); });
-  return { ...f, page, origin, browser, inbox, pick, saved, capture, apply, source, slot, session };
+  return { ...f, page, origin, browser, inbox, pick, saved, capture, apply, source, slot, session, provider };
 }
+
+async function previewReply(f, body = "A private reply 🪷") {
+  const p = f.page;
+  await p.locator("#inbox-draft").fill(body); await p.locator("#inbox-save").click();
+  await p.getByText("Saved · only you", { exact: true }).waitFor();
+  await p.locator("#inbox-send-preview").click();
+  await p.waitForFunction(() => !document.getElementById("inbox-send-confirm").disabled);
+}
+for (const mobile of [false, true]) test(`sample reply ${mobile ? "mobile" : "desktop"}: direct reply needs no work and preserves conversation drafts`, { timeout: 35000 }, async t => {
+  const f = await setup(t, mobile, true), p = f.page, before = f.store.room("commons");
+  await p.locator("#message-input").fill("Unsent room note"); await f.inbox(); await f.pick("note");
+  await previewReply(f); assert.equal(f.provider.count(), 0);
+  assert.match(await p.locator("#inbox-send-addresses").textContent(), /you@example.test → maya@example.test/);
+  assert.equal(await p.locator("#inbox-send-body").textContent(), "A private reply 🪷");
+  await f.capture(mobile ? "sample-preview-mobile" : "sample-preview-desktop");
+  await p.locator("#inbox-send-confirm").click();
+  await p.getByText("Sample accepted · delivery unconfirmed", { exact: true }).waitFor();
+  assert.equal(f.provider.count(), 1); assert.equal(f.provider.submits, 1);
+  assert.deepEqual(f.store.room("commons"), before);
+  assert.equal(f.saved().draft.body, "A private reply 🪷");
+  await p.locator("#nav-rooms").click(); assert.equal(await p.locator("#message-input").inputValue(), "Unsent room note");
+  await f.inbox(); await f.pick("note");
+  await p.locator("#inbox-send-view").click(); assert.equal(await p.locator("#inbox-send-confirm").isVisible(), false);
+  await p.locator("#inbox-send-close").click();
+  await p.reload(); await p.locator("#nav-inbox").waitFor(); await f.inbox(); await f.pick("note");
+  await p.getByText("Sample accepted · delivery unconfirmed", { exact: true }).waitFor();
+  assert.equal(await p.locator("#inbox-send-preview").isVisible(), false);
+  assert.equal(f.provider.submits, 1);
+  await f.capture(mobile ? "sample-accepted-mobile" : "sample-accepted-desktop");
+  assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+});
+test("sample reply: reviewed result returns privately, then unknown acceptance reconciles without resending", { timeout: 35000 }, async t => {
+  const f = await setup(t, false, true), p = f.page;
+  const result = prepareInboxResult(f, f.slot.token, f.session.sessionBinding);
+  await f.inbox(); await f.pick("note");
+  await p.locator("[data-inbox-result]").click(); await p.locator("#inbox-result-use").click();
+  await p.getByText("Saved · only you", { exact: true }).waitFor();
+  await p.locator("#inbox-send-preview").click();
+  await p.waitForFunction(() => !document.getElementById("inbox-send-confirm").disabled);
+  assert.equal(await p.locator("#inbox-send-body").textContent(), result.body);
+  f.provider.mode = "after"; await p.locator("#inbox-send-confirm").click();
+  await p.getByText("Sample outcome unknown", { exact: true }).waitFor();
+  await f.capture("sample-unknown");
+  assert.equal(f.provider.submits, 1); assert.equal(f.provider.count(), 1);
+  await p.locator("#inbox-send-check").click();
+  await p.getByText("Sample accepted · delivery unconfirmed", { exact: true }).waitFor();
+  const send = f.store.inbox.sends(f.slot.token, "note", f.session.sessionBinding).sends[0];
+  f.provider.outcome(send.providerId, "delivered");
+  await p.locator("#inbox-send-check").click(); await p.getByText("Sample delivered", { exact: true }).waitFor();
+  assert.equal(f.provider.submits, 1);
+  assert.equal(JSON.stringify(f.store.snapshot(f.keys.producer, "commons")).includes("maya@example.test"), false);
+});
+test("sample reply: lost reservation acknowledgement survives reload as metadata, then requires review before dispatch", { timeout: 35000 }, async t => {
+  const f = await setup(t, false, true), p = f.page; await f.inbox(); await f.pick("note"); await previewReply(f);
+  let lost = true;
+  await p.route("**/api/inbox/commands", async route => {
+    if (lost && route.request().postDataJSON()?.action === "send.reserve") { lost = false; await route.fetch(); return route.abort(); }
+    return route.continue();
+  });
+  await p.locator("#inbox-send-confirm").click(); await p.getByText("Reply unconfirmed. Check status.", { exact: true }).waitFor();
+  const retained = await p.evaluate(() => sessionStorage.getItem("project-room:pending-private-send:v1"));
+  assert.ok(retained); assert.equal(retained.includes("A private reply"), false); assert.equal(retained.includes("maya@"), false);
+  assert.equal(f.provider.submits, 0);
+  await p.reload(); await p.locator("#nav-inbox").waitFor(); await f.inbox(); await f.pick("note");
+  await p.locator("#inbox-send-check").click(); await p.locator("#inbox-send-resume").waitFor();
+  assert.equal(f.provider.submits, 0);
+  await p.locator("#inbox-send-resume").click(); await p.locator("#inbox-send-confirm").click();
+  await p.getByText("Sample accepted · delivery unconfirmed", { exact: true }).waitFor();
+  assert.equal(f.provider.submits, 1); assert.equal(f.store.inbox.sends(f.slot.token, "note", f.session.sessionBinding).sends.length, 1);
+});
+test("sample reply: changed saved text refuses an old preview without sending", { timeout: 35000 }, async t => {
+  const f = await setup(t, false, true), p = f.page; await f.inbox(); await f.pick("note"); await previewReply(f);
+  f.apply({ action: "draft.save", requestId: "changed-draft", sourceId: "note", sourceRevision: 1, expectedRevision: 1, body: "A changed reply" });
+  await p.locator("#inbox-send-confirm").click(); await p.locator("#inbox-conflict").waitFor();
+  assert.equal(f.provider.submits, 0); assert.equal(f.store.inbox.sends(f.slot.token, "note", f.session.sessionBinding).sends.length, 0);
+  assert.equal(await p.locator("#inbox-draft").inputValue(), "A private reply 🪷");
+});
+test("sample reply: mismatched preview text is never actionable", { timeout: 35000 }, async t => {
+  const f = await setup(t, false, true), p = f.page; await f.inbox(); await f.pick("note");
+  await p.locator("#inbox-draft").fill("Original"); await p.locator("#inbox-save").click();
+  await p.getByText("Saved · only you", { exact: true }).waitFor();
+  await p.route("**/send-context", async route => { const response = await route.fetch(), json = await response.json(); json.preview.body = "Altered"; await route.fulfill({ response, json }); });
+  await p.locator("#inbox-send-preview").click();
+  await p.getByText("Couldn’t verify this reply. Close and try again.", { exact: true }).waitFor();
+  assert.equal(await p.locator("#inbox-send-confirm").isEnabled(), false);
+  assert.equal(f.provider.count(), 0);
+});
+test("sample reply: queued cancellation has an exact retry after a lost acknowledgement", { timeout: 35000 }, async t => {
+  const f = await setup(t, false, true), p = f.page; await f.inbox(); await f.pick("note"); await previewReply(f);
+  const preview = f.store.inbox.sendContext(f.slot.token, "note", f.session.sessionBinding).preview;
+  f.apply({ action: "send.reserve", requestId: "queued-reply", sourceId: "note", sourceRevision: preview.sourceRevision, draftRevision: preview.draftRevision, previewVersion: preview.previewVersion });
+  await p.locator("#inbox-send-close").click(); await p.locator("#nav-rooms").click(); await f.inbox();
+  await p.locator("#inbox-send-cancel").waitFor();
+  let lost = true;
+  await p.route("**/api/inbox/commands", async route => {
+    if (lost && route.request().postDataJSON()?.action === "send.cancel") { lost = false; await route.fetch(); return route.abort(); }
+    return route.continue();
+  });
+  await p.locator("#inbox-send-cancel").click(); await p.getByText("Reply unconfirmed. Check status.", { exact: true }).waitFor();
+  await p.locator("#inbox-send-check").click(); await p.getByText("Sample cancelled · not sent", { exact: true }).waitFor();
+  assert.equal(f.provider.submits, 0);
+  assert.equal(f.store.inbox.sends(f.slot.token, "note", f.session.sessionBinding).sends[0].revision, 1);
+});
+test("sample reply: lost dispatch response plus failed status read offers checking, never another send", { timeout: 35000 }, async t => {
+  const f = await setup(t, false, true), p = f.page; await f.inbox(); await f.pick("note"); await previewReply(f);
+  let lost = true, unavailable = false;
+  await p.route("**/api/inbox/simulation", async route => {
+    if (lost && route.request().postDataJSON()?.action === "dispatch") { lost = false; await route.fetch(); unavailable = true; return route.abort(); }
+    return route.continue();
+  });
+  await p.route("**/sources/note/sends", async route => unavailable ? route.fulfill({ status: 503, json: { error: { code: "unavailable" } } }) : route.continue());
+  await p.locator("#inbox-send-confirm").click();
+  await p.getByText("Outcome unconfirmed. Check status before continuing.", { exact: true }).waitFor();
+  assert.equal(await p.locator("#inbox-send-resume").isVisible(), false);
+  assert.equal(await p.locator("#inbox-send-preview").isVisible(), false);
+  unavailable = false; await p.locator("#inbox-send-check").click();
+  await p.getByText("Sample accepted · delivery unconfirmed", { exact: true }).waitFor();
+  assert.equal(f.provider.submits, 1); assert.equal(f.provider.count(), 1);
+});
+test("sample reply: a late preview cannot reopen private text after another tab changes account", { timeout: 35000 }, async t => {
+  const f = await setup(t, false, true), p = f.page; await f.inbox(); await f.pick("note");
+  await p.locator("#inbox-draft").fill("Original account private reply"); await p.locator("#inbox-save").click();
+  await p.getByText("Saved · only you", { exact: true }).waitFor();
+  let release, reached; const held = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { reached = resolve; });
+  await p.route("**/send-context", async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); });
+  await p.locator("#inbox-send-preview").click(); await started;
+  const other = await p.context().newPage(); await other.goto(f.origin + "/?room=commons");
+  await other.locator("#main").waitFor(); await other.locator("#signout-button").click();
+  await other.locator("#auth-panel").waitFor();
+  const guest = f.store.accountForMember("commons", "guest"), key = f.store.issueAccountAccessKey(guest.id);
+  await other.locator("#access-key").fill(key); await other.locator("#auth-form button").click();
+  await other.locator("#main").waitFor(); await p.locator("#auth-panel").waitFor(); release();
+  await p.waitForLoadState("networkidle");
+  assert.equal(await p.locator("#inbox-send-dialog").isVisible(), false);
+  assert.equal(await p.locator("#inbox-send-body").textContent(), "");
+  assert.equal(await p.locator("#inbox-send-addresses").textContent(), "");
+  assert.equal(await p.evaluate(() => sessionStorage.getItem("project-room:pending-private-send:v1")), null);
+  assert.equal(f.provider.submits, 0);
+});
+test("sample launcher: an empty room owner can sign in and finish a sample reply", { timeout: 35000 }, async t => {
+  const sample = await createInboxSandbox(), browser = await chromium.launch({ headless: true });
+  t.after(async () => { await browser.close(); await sample.close(); rmSync(sample.directory, { recursive: true, force: true }); });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  page.setDefaultTimeout(9000); const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.goto(sample.url); await page.locator("#access-key").fill(sample.accountKey); await page.locator("#auth-form button").click();
+  await page.locator("#main").waitFor(); await page.locator("#nav-inbox").click(); await page.locator("#inbox-reader").waitFor();
+  await page.locator("#inbox-draft").fill("Let’s try one small idea.");
+  await page.locator("#inbox-save").click(); await page.getByText("Saved · only you", { exact: true }).waitFor();
+  await page.locator("#inbox-send-preview").click(); await page.locator("#inbox-send-confirm").click();
+  await page.getByText("Sample accepted · delivery unconfirmed", { exact: true }).waitFor();
+  mkdirSync("test-results", { recursive: true }); await page.screenshot({ path: "test-results/inbox-local-sandbox.png", fullPage: true });
+  assert.deepEqual(errors, []);
+});
 
 for (const mobile of [false, true]) test(`real inbox ${mobile ? "mobile" : "desktop"}: private draft, navigation, reload and selected sharing`, { timeout: 35000 }, async t => {
   const f = await setup(t, mobile), p = f.page;
