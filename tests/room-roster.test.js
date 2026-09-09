@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import {
-  ROOM_ROSTER, rosterById, rosterSelection, suggestedConfigDir,
+  ROOM_ROSTER, rosterById, rosterSelection, suggestedConfigDir, rosterNameTaken,
   grokBuildToml, mcpJson, importCommand, roomRosterMain
 } from "../src/room-roster.js";
 
@@ -50,6 +50,9 @@ test("MCP snippets require absolute private paths and never mention tokens", () 
   assert.throws(() => grokBuildToml({ nodePath: "node", adapterPath: "/a", configDir }), /absolute/);
   assert.throws(() => grokBuildToml({ nodePath: "/n", adapterPath: "/a", configDir: "/Users/x/.grok/config.toml" }), /Grok config/);
   assert.throws(() => grokBuildToml({ nodePath: "/n", adapterPath: "/a", configDir: "/tmp/token-secret" }), /secrets/);
+  assert.doesNotThrow(() => grokBuildToml({
+    nodePath: "/opt/secret-bin/node", adapterPath: "/opt/adapter/agent-mcp.mjs", configDir
+  }));
   assert.match(importCommand(configDir), /pbpaste \| node scripts\/agent-inbox.mjs import '\/absolute\/private\/room-agent-grok-build'/);
 });
 
@@ -59,7 +62,11 @@ test("CLI prints Muse packet route and refuses to write host config", () => {
   assert.match(all, /Instinct/);
   assert.match(all, /Grok Build/);
   assert.match(all, /Grok Bot/);
-  assert.match(all, /account session/);
+  assert.match(all, /bound account/);
+  assert.doesNotMatch(all, /member key cannot/i);
+  const help = roomRosterMain(["--help"], options);
+  assert.match(help, /member key or account key/);
+  assert.doesNotMatch(help, /not a member key/);
   const muse = roomRosterMain(["muse"], options);
   assert.match(muse, /Muse app or WhatsApp/);
   assert.match(muse, /has not contributed/);
@@ -88,13 +95,34 @@ test("script spawn matches the module and rejects write flags", () => {
   assert.equal(write.stdout, "");
 });
 
+test("roster name collision is case-insensitive and ignores inactive or human members", () => {
+  const members = {
+    "agent-1": { kind: "agent", active: true, displayName: "Instinct" },
+    "agent-2": { kind: "agent", active: false, displayName: "Muse" },
+    potter: { kind: "human", active: true, displayName: "Grok Build" }
+  };
+  assert.equal(rosterNameTaken(members, "instinct"), true);
+  assert.equal(rosterNameTaken(members, " Muse "), false);
+  assert.equal(rosterNameTaken(members, "Grok Build"), false);
+  assert.equal(rosterNameTaken(members, "Grok Bot"), false);
+  assert.equal(rosterNameTaken(null, "Instinct"), false);
+});
+
 test("Connect agent markup lists the four roster names", () => {
   const html = readFileSync(join(checkout, "index.html"), "utf8");
   for (const id of ["instinct", "muse", "grok-build", "grok-bot"]) {
     assert.match(html, new RegExp(`data-roster="${id}"`));
   }
   assert.match(html, /Muse app or WhatsApp/);
+  assert.match(html, /id="agent-access-hint"/);
+  assert.match(html, /id="inbox-heading"/);
   const source = readFileSync(join(checkout, "src/agent-connections.js"), "utf8");
   assert.match(source, /rosterSelection/);
+  assert.match(source, /rosterNameTaken/);
   assert.match(source, /from "\.\/room-roster\.js"/);
+  assert.match(source, /\$\{label\} for \$\{row\.displayName\}/);
+  const css = readFileSync(join(checkout, "src/styles.css"), "utf8");
+  assert.match(css, /\.agent-roster \.button \{ width: auto; min-height: 44px;/);
+  assert.match(css, /\.composer-toolbar select \{[^}]*min-height: 44px/);
+  assert.doesNotMatch(readFileSync(join(checkout, "docs/ROOM-ROSTER.md"), "utf8"), /member key cannot/i);
 });

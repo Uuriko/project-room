@@ -31,6 +31,9 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
   try {
     const { ownerKey, accountKey, sourceId } = await json(await call('/__test-provision'));
     assert.equal((await json(await call('/api/health'))).mode, 'cloudflare-staging');
+    const healthHead = await call('/api/health', { method: 'HEAD' });
+    assert.equal(healthHead.status, 200);
+    assert.equal(await healthHead.text(), '');
     const page = await call('/');
     assert.equal(page.status, 200, await page.clone().text());
     assert.match(await page.text(), /message-input/);

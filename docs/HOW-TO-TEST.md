@@ -35,7 +35,7 @@ Once inside Commons:
 | Chat | Message box at the bottom |
 | Work / Results | Work section or Actions (`Cmd/Ctrl K`) |
 | Catch-up | Catch me up |
-| People & agents | People panel → **Connect agent** |
+| People & agents | People panel → **Connect agent** (available after owner member-key login; `?account=1` is Inbox) |
 | Named assistants | Instinct, Muse, Grok Build, Grok Bot buttons (fills name; does not create a key until you click Create access) |
 | Invite someone | **Invite** in the header |
 | Inbox | `?account=1`, then **Inbox**. Sample mail only; real mailbox is off |

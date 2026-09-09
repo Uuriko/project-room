@@ -59,7 +59,7 @@
       </section>
       <section id="inbox-panel" class="inbox-panel" aria-label="Your inbox" hidden>
         <aside class="inbox-sidebar">
-          <header><h1>Inbox</h1><button id="inbox-refresh" class="button ghost icon-button" type="button" aria-label="Refresh inbox">↻</button></header>
+          <header><h1 id="inbox-heading" tabindex="-1">Inbox</h1><button id="inbox-refresh" class="button ghost icon-button" type="button" aria-label="Refresh inbox">↻</button></header>
           <p id="inbox-status" role="status"></p>
           <div id="inbox-list" aria-label="Messages"></div>
           <p id="inbox-empty" class="form-hint">Sample inbox. Mail connections are not available yet.</p>
@@ -450,7 +450,7 @@
           <button type="button" class="button ghost" data-roster="grok-bot">Grok Bot</button>
         </div>
         <p id="agent-roster-hint" class="form-hint"></p>
-        <p class="form-hint">Can read this room’s history and post messages.</p>
+        <p id="agent-access-hint" class="form-hint">Can read this room’s history and post messages.</p>
         <details><summary>Access & expiry</summary><div class="share-settings">
           <label>Access<select id="agent-connect-access"><option value="chat">Read & chat</option><option value="contribute">Contribute work</option><option value="review">Review work</option></select></label>
           <label>Expires in<select id="agent-connect-expiry"><option value="1">1 day</option><option value="7" selected>7 days</option><option value="30">30 days</option></select></label>

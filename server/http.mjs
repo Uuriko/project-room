@@ -123,9 +123,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   function setCookie(res, name, token, maxAge) {
     res.setHeader("Set-Cookie", `${scopedCookieName(name)}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${expectedOrigin().startsWith("https:") ? "; Secure" : ""}`);
   }
-  function json(res, status, value) {
-    res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify(value));
+  function json(res, status, value, head = false) {
+    const body = JSON.stringify(value);
+    res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Content-Length": Buffer.byteLength(body) });
+    res.end(head ? undefined : body);
   }
   async function body(req) {
     if (!/^application\/json(?:\s*;|$)/i.test(req.headers["content-type"] || "")) reject(415, "json_required", "Use application/json");
@@ -190,12 +191,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       try { remoteAddress = resolveClientAddress(req); }
       catch { reject(403, "proxy_denied", "Invalid proxy configuration"); }
       const url = new URL(req.url, expectedOrigin());
-      if (url.pathname === "/api/health" && req.method === "GET") return json(res, 200, { status: "ok", mode: serviceMode });
-      if (url.pathname === "/api/ready" && req.method === "GET") {
+      if (url.pathname === "/api/health" && ["GET", "HEAD"].includes(req.method)) {
+        return json(res, 200, { status: "ok", mode: serviceMode }, req.method === "HEAD");
+      }
+      if (url.pathname === "/api/ready" && ["GET", "HEAD"].includes(req.method)) {
         try {
           if (!store.db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) throw new Error("No room");
-          return json(res, 200, { status: "ready" });
-        } catch { return json(res, 503, { status: "unavailable" }); }
+          return json(res, 200, { status: "ready" }, req.method === "HEAD");
+        } catch { return json(res, 503, { status: "unavailable" }, req.method === "HEAD"); }
       }
       if (assets.has(url.pathname) && ["GET", "HEAD"].includes(req.method)) {
         const [path, type] = assets.get(url.pathname);

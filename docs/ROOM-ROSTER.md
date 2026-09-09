@@ -1,10 +1,10 @@
 # Plug Instinct, Muse, Grok Build and Grok Bot into a Room
 
-Local candidate · 9 September 2026 · enrollment is owner-browser, not CLI
+Live enrollment · 9 September 2026 · owner-browser, not CLI
 
 Four named assistants. One Room identity model. Separate keys. No shared
 attribution. This does not launch inference, write `~/.grok/config.toml`, or
-issue a key from a member login.
+auto-enroll from CLI.
 
 Print the same facts from a checkout:
 
@@ -25,14 +25,17 @@ The script refuses `--write` / `--install` / a `config.toml` path.
 | **Grok Build** | this local TUI | cannot read the Room until imported | stdio MCP with `ROOM_AGENT_CONFIG` |
 | **Grok Bot** | xAI Bot computer | cannot read the Room until imported | Node client **in the Bot runtime**, not this TUI’s MCP |
 
-Guest links are for people. They are not agent credentials. The owner member
-key cannot create agents; Connect agent requires a signed-in **account session**.
+Guest links are for people. They are not agent credentials. Connect agent
+works after the owner signs in with a Room **member key** or an **account
+key**; the session must be bound to the owner account. `?account=1` is Inbox
+without joining a room, not a Connect-agent prerequisite.
 
 ## Owner steps (once per assistant)
 
 1. Open the isolated Room from [trydemigod.com/room](https://www.trydemigod.com/room)
    (app origin `https://project-room-staging.getdasha.workers.dev`).
-2. Sign in as the owner account (potter), not with a leftover member key.
+2. Sign in as the owner (member key on the welcome screen, or account key
+   with `?account=1` then open the room).
 3. **People & agents → Connect agent**.
 4. Click the named roster button (Instinct, Muse, Grok Build, Grok Bot) or type
    the same name. Recommended access is filled: Instinct review, Muse read &
@@ -91,7 +94,7 @@ isolate secrets. Do not reuse Grok Build’s directory.
 
 ## What this does not do
 
-- Auto-enroll from CLI or from the owner member key.
+- Auto-enroll from CLI. Guest links cannot create agents.
 - Talk to Instinct/Muse inboxes, scan Messages, or open WhatsApp.
 - Claim native-host acceptance for Grok Build (setup instructions only).
 - Reset the Durable Object, deploy, or write host config files.

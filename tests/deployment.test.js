@@ -44,6 +44,14 @@ test("deployed HTTP checks proxy identity, separate visitor limits, secure cooki
     }); req.on("error", reject); req.end();
   });
   assert.equal((await get("/api/ready")).status, 200);
+  assert.equal((await get("/api/health")).status, 200);
+  const healthHead = await new Promise((resolve, reject) => {
+    const req = request({ host: "127.0.0.1", port: server.address().port, path: "/api/health", method: "HEAD", headers: { host: "room.example.com", "x-real-ip": "192.0.2.10" } }, res => {
+      let body = ""; res.on("data", chunk => body += chunk); res.on("end", () => resolve({ status: res.statusCode, body }));
+    }); req.on("error", reject); req.end();
+  });
+  assert.equal(healthHead.status, 200);
+  assert.equal(healthHead.body, "");
   assert.equal((await get("/api/ready", { "x-real-ip": "bad" })).status, 403);
   assert.equal((await get("/api/ready", { host: "elsewhere.example" })).status, 403);
   const first = await get("/api/account-session");

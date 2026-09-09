@@ -17,7 +17,10 @@ import { installInbox } from "./inbox-ui.js";
 const $ = selector => document.querySelector(selector);
 $("#skip-link").addEventListener("click", event => {
   event.preventDefault();
-  $($("#auth-panel").hidden ? "#connection-status" : "#auth-title").focus();
+  const target = !$("#inbox-panel").hidden ? "#inbox-heading"
+    : $("#auth-panel").hidden ? "#connection-status"
+    : "#auth-title";
+  $(target).focus();
 });
 const setText = (selector, text) => { const node = $(selector); if (node.textContent !== text) node.textContent = text; };
 const invitationTokenPattern = /^[A-Za-z0-9_-]{43}$/;

@@ -81,6 +81,14 @@ export function suggestedConfigDir(id) {
   return `/absolute/private/room-agent-${row.id}`;
 }
 
+export function rosterNameTaken(members, name) {
+  if (!members || typeof name !== "string") return false;
+  const needle = name.trim().toLocaleLowerCase();
+  if (!needle) return false;
+  return Object.values(members).some(member => member?.kind === "agent" && member.active !== false
+    && typeof member.displayName === "string" && member.displayName.trim().toLocaleLowerCase() === needle);
+}
+
 export function grokBuildToml({ nodePath, adapterPath, configDir }) {
   for (const [name, value] of [["nodePath", nodePath], ["adapterPath", adapterPath], ["configDir", configDir]]) {
     if (typeof value !== "string" || !value.startsWith("/") || value.includes("\n") || value.includes("\0")) {
@@ -89,7 +97,7 @@ export function grokBuildToml({ nodePath, adapterPath, configDir }) {
   }
   if (configDir === nodePath || configDir === adapterPath) throw new Error("configDir must be a private directory, not the adapter");
   if (/(^|\/)\.grok(\/|$)/.test(configDir) || /config\.toml$/i.test(configDir)) throw new Error("configDir must not be a Grok config path");
-  if (/token|secret|password/i.test(`${nodePath}\n${adapterPath}\n${configDir}`)) throw new Error("paths must not look like secrets");
+  if (/token|secret|password/i.test(configDir)) throw new Error("paths must not look like secrets");
   return [
     "[mcp_servers.project-room]",
     `command = ${tomlString(nodePath)}`,
@@ -226,14 +234,15 @@ Does not enroll agents, issue keys, or write ~/.grok/config.toml.
   node scripts/room-roster.mjs muse
   node scripts/room-roster.mjs grok-build --snippet
 
-Owner must sign in with an account session (not a member key), then
-People & agents → Connect agent. Import each private setup into its own
-directory. Packet agents (Instinct, Muse) work today via Use my AI.
+Owner signs in as the room owner in the browser (member key or account key),
+then People & agents → Connect agent. The owner session must be bound to
+the owner account. Guest links are not agent credentials. Inbox without
+joining a room uses ?account=1.
 `;
 }
 
 function footer() {
-  return `Enrollment requires a signed-in owner account session. Guest links are not agent credentials.
+  return `Enrollment is owner-browser: a signed-in owner with a bound account. Guest links are not agent credentials.
 Never put a key in a prompt, URL, or repository. Clear the clipboard after each import.
 `;
 }
