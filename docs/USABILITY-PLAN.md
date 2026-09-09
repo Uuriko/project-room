@@ -67,6 +67,19 @@ CMC, DIE copy, Desk merge.
 - GitHub repository About + homepage (`https://www.trydemigod.com/room`) —
   needs a GitHub settings write John can do in the UI.
 
+### Phase 4 — this slice (login recovery)
+
+Research: NN/G form errors should name the fix next to the field. Slack/Discord/Linear
+put “how do I…” on Cmd+K. Unified login in SaaS is SSO/email, which we will not
+add here (no third credential, no mailbox). Databricks-style account+workspace
+collapse is gated.
+
+- `?room=` account-mode heading is **Open this room**, not `#commons`.
+- Failed account login with a room in the URL tells you to choose **Room key**.
+- Room key toggle is visually suggested in that case.
+- Actions include **How to open Inbox**. Room-key sessions get an honest notice.
+- Room guide states Inbox uses Account key.
+
 ### Gated (do not start here)
 
 - Real mailbox / send — [EMAIL-QUALIFICATION-NEXT.md](../research/EMAIL-QUALIFICATION-NEXT.md)
@@ -90,4 +103,4 @@ CMC, DIE copy, Desk merge.
 | B | Phase 2 catch-up / Actions / guest copy | `src/app.js`, `index.html`, share-link copy, room-actions | A |
 | C | Account home titles + GitHub About notes | account rooms UI, CURRENT-ROOM | A |
 
-Phase A shipped as PR #37. Phase B shipped as PR #38. This change is Phase C.
+Phase A–C shipped as PRs #37, #38, and #40. This change is leftover login/inbox polish.

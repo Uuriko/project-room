@@ -85,7 +85,8 @@ test("quiet copy: account entry is not an error, actual service failure remains 
   const { page, errors, origin } = await setup(t, { width: 1280, height: 900 });
   await page.goto(`${origin}/?room=commons`);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  assert.equal(await page.locator("#auth-title").textContent(), "#commons");
+  assert.equal(await page.locator("#auth-title").textContent(), "Open this room");
+  assert.equal(await page.locator("#auth-kind-room").evaluate(node => node.classList.contains("suggested")), true);
   assert.equal(await page.locator("#auth-panel").getByLabel("Account key", { exact: true }).isVisible(), true);
   assert.equal(await page.getByRole("button", { name: "Open room", exact: true }).isVisible(), true);
   assert.equal(await page.locator("#auth-error").textContent(), "");

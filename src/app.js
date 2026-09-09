@@ -468,7 +468,7 @@ function setInvitationFeedback(text, error = false) {
 }
 function configureAuthPanel(roomId = selectedRoomFromLocation()) {
   const accountMode = accountSignIn();
-  $("#auth-title").textContent = roomId && accountMode ? `#${roomId}` : "Welcome.";
+  $("#auth-title").textContent = roomId && accountMode ? "Open this room" : "Welcome.";
   $("#access-key-label").textContent = accountMode ? "Account key" : "Room key";
   if ($("#auth-lead")) {
     $("#auth-lead").textContent = accountMode
@@ -477,6 +477,7 @@ function configureAuthPanel(roomId = selectedRoomFromLocation()) {
   }
   $("#auth-kind-room")?.setAttribute("aria-pressed", accountMode ? "false" : "true");
   $("#auth-kind-account")?.setAttribute("aria-pressed", accountMode ? "true" : "false");
+  $("#auth-kind-room")?.classList.toggle("suggested", Boolean(accountMode && roomId));
   $("#auth-description").textContent = accountMode
     ? roomId ? "Use an account key with membership in this room." : "Use your account key. No room membership is needed."
     : "Ask the room owner for an invite link or room key.";
@@ -1523,7 +1524,7 @@ $("#auth-form").addEventListener("submit", async e => {
     if (!current() || !identity || !state || session?.member.id !== identity.member.id || session?.roomId !== identity.roomId) return;
     $("#access-key").value = ""; $("#message-input").focus();
   }, { failureHint: accountMode
-    ? (requestedRoom ? "Check the account key and Room membership, then try again." : "Check the account key and try again.")
+    ? (requestedRoom ? "Check the account key and Room membership. Have a room key? Choose Room key." : "Check the account key and try again.")
     : "Check the access key and try again. If this is an account key, choose Account key." });
   if (state) revealLocationHash();
 });
@@ -1749,6 +1750,7 @@ function roomActionEntries() {
     { id: "agent", label: "Connect agent", words: "ai assistant mcp tools instinct muse grok build grokbot grok bot", target: "#connect-agent-button", reveal: "#people-panel", activate: true },
     { id: "how-invite", label: "How to invite someone", words: "how guest eight hours link help", always: true },
     { id: "how-agent", label: "How to connect an agent", words: "how instinct muse grok help", always: true },
+    { id: "how-inbox", label: "How to open Inbox", words: "how inbox mail email account", always: true },
     { id: "instructions", label: "Room instructions", words: "guidance brief charter", target: "#room-instructions-open", reveal: "#room-about", activate: true }
   ].filter(entry => {
     if (entry.always) return true;
@@ -1800,6 +1802,11 @@ function chooseRoomAction(id) {
     target.scrollIntoView({ block: "nearest" }); target.focus({ preventScroll: true });
     if (button && !button.hidden) return;
     notice("The owner connects assistants from People & agents. Instinct and Muse can also Use my AI without a key.");
+    return;
+  }
+  if (id === "how-inbox") {
+    if (!$("#workspace-nav").hidden) { $("#nav-inbox").click(); return; }
+    notice("Inbox uses Account key. Sign out, then choose Account key on the welcome screen.");
     return;
   }
   if (entry.reveal) $(entry.reveal).open = true;

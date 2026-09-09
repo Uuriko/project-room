@@ -52,7 +52,7 @@ export async function createInboxCollaborationJourney({ mobile = false } = {}) {
       });
       const p = await context.newPage(); p.setDefaultTimeout(9000);
       p.on("pageerror", error => errors.push(error.message)); p.on("dialog", d => d.accept());
-      await p.goto(url); await p.locator("#access-key").fill(key); await p.locator("#auth-form button").click();
+      await p.goto(url); await p.locator("#access-key").fill(key); await p.locator('#auth-form button[type="submit"]').click();
       return p;
     }
     const capture = async (name, p = page) => {
