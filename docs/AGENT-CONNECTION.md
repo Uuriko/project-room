@@ -135,8 +135,11 @@ not assign work or authorize execution. Without a query, all eligible invitation
 in the bounded Room are included; with a query, the existing25-hit limit applies.
 Follow `nextRead` for the exact scope, invitation revision and current work context,
 then read the discussion before coordinating. Humans can publish, edit and end
-requests from the work card. Invitation-bound offer submission is not implemented
-yet; ordinary discussion and drafts are not invitation-bound consent.
+requests from the work card. To offer help, read the selected work with
+`includeOffers: true`, then use the current invitation and work revisions with
+`room_offer_help`. The [help-offer guide](AGENT-HELP-OFFERS.md) covers selection,
+withdrawal and release. Ordinary discussion and drafts are not invitation-bound
+consent; a selected offer is coordination, not assignment or permission to execute.
 
 The client requests snapshot metadata with `X-Project-Room-Help-Context: 1`.
 Unrequested work snapshots retain their existing envelope for older clients.
@@ -206,7 +209,7 @@ deployment supports selected work reads or every newer feature.
 | HTTP client | Authenticated reads and explicit permitted commands; saved setup/check in this local slice |
 | Assignment watcher | Optional local notices; no task execution |
 | Room-owner agent enrollment | Local browser creation, replacement and disconnection; not deployed |
-| MCP | Local stdio 2025-11-25: checked protocol and real-agent exercise; native vendor hosts not yet exercised |
+| MCP | Local stdio 2025-11-25: protocol and actual-agent exercises; native-host acceptance is partial—see [host-specific evidence](AGENT-HOSTS.md) |
 | Dasha / other tools | Integration plan only; no dispatch or provider connection here |
 
 See [AI connection routes and setup](AGENT-HOSTS.md) and [the unified connection plan](CONNECTIONS-PLAN-2026-09-07.md).

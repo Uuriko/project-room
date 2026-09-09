@@ -11,7 +11,7 @@ vendor identities. Independent workers should have separate Room connections.
 
 | Your AI can… | Use | What is working here |
 | --- | --- | --- |
-| Run local MCP tools | Local stdio adapter below | Access check, discovery, selected read, draft return and ten permission-checked work actions |
+| Run local MCP tools | Local stdio adapter below | Access/discovery, selected work and discussion, drafts/results, ten work actions and five help-offer actions |
 | Run Node on its computer | Private direct client | Reads and explicit authorized work commands; actual-agent test |
 | Make authenticated HTTP calls through your trusted application | Existing Room API | Fixed Room identity; metadata check, selected work, commands; your application keeps the key outside model prompts |
 | Only chat or browse | **Use my AI → Paste AI draft** | Reviewed task packet and correlated manual return, no agent key needed |

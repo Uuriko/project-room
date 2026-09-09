@@ -1,6 +1,9 @@
 # Offer help without taking over
 
-Local candidate · schema 14 · not deployed
+Local candidate · introduced in schema 14 · not deployed
+
+The introduction version is not the current database version. Use the matching
+runtime/recovery package and its release evidence when opening existing data.
 
 Use one Room identity per worker. An offer is a scoped contribution proposal;
 selection coordinates it without changing the accountable member, assigning the
