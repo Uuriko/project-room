@@ -567,6 +567,10 @@ test("inbox continuity: a changed source keeps selection but discards its old re
 
 for (const mobile of [false, true]) test(`real inbox ${mobile ? "mobile" : "desktop"}: private draft, navigation, reload and selected sharing`, { timeout: 35000 }, async t => {
   const f = await setup(t, mobile), p = f.page;
+  // Public IDs can legitimately contain a short number from an unshared paragraph.
+  // Check exact private content below, not coincidental identifier substrings.
+  f.store.command(f.keys.owner, "commons", { id: "public-reference-4200", type: "message.posted",
+    data: { messageId: "public-reference-4200", body: "An ordinary public reference." } });
   await p.locator("#message-input").fill("Unsent room thought"); await f.inbox(); await f.pick("note");
   const before = f.store.room("commons").sequence;
   await p.locator("#inbox-draft").fill("A warm hello"); await p.locator("#inbox-draft").press("Enter"); await p.locator("#inbox-draft").press("x");
@@ -585,7 +589,9 @@ for (const mobile of [false, true]) test(`real inbox ${mobile ? "mobile" : "desk
   await p.locator("#inbox-share-dialog").waitFor({ state: "hidden" }); await p.locator("#main").waitFor({ state: "visible" });
   assert.equal(f.store.room("commons").sequence, before + 1);
   const snapshot = JSON.stringify(f.store.snapshot(f.keys.producer, "commons"));
-  for (const privateText of ["4200", "maya@example.test", "A warm hello"]) assert.equal(snapshot.includes(privateText), false);
+  assert.equal(snapshot.includes("public-reference-4200"), true);
+  for (const privateText of ["Private budget: 4200.", "maya@example.test", "A warm hello"])
+    assert.equal(snapshot.includes(privateText), false, `Unshared private content appeared: ${privateText}`);
   assert.equal(snapshot.includes("Could we make the launch note warmer?"), true);
   await f.inbox(); assert.equal(await p.locator("#inbox-draft").inputValue(), "A warm hello\nx");
   assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
