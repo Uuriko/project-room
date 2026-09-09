@@ -52,7 +52,9 @@ Focused tests cover:
 
 The Workers fixture also reserves and dispatches, restarts its storage runtime, retries the exact marker, retains an unknown response and records a provider-shaped creation result. This is synthetic local evidence, not a real Cloudflare deployment or mailbox test.
 
-Implementation checks passed: 16 focused journal tests, 832 core tests, 22 local Workers checks and the 242-test browser suite. The browser run began before the final share-lock refinement, so it is broad regression evidence rather than an exact-version certificate. The refined delayed-refresh tests also pass independently. The standard recovery fixture now includes an uncertain reply attempt, so subsequent version-upgrade checks retain this state too. Final committed-version checks are recorded below when complete. No new reply-attempt UI is claimed.
+Implementation checks passed: 16 focused journal tests, 832 core tests, 22 local Workers checks and the 242-test browser suite. The browser run began before the final share-lock refinement, so it is broad regression evidence rather than an exact-version certificate. The refined delayed-refresh tests also pass independently. The standard recovery fixture now includes an uncertain reply attempt, so subsequent version-upgrade checks retain this state too. No new reply-attempt UI is claimed.
+
+**Exact committed runtime beec67b109fd4202e600a16de8d5eeea2082d56d:** all 832 core tests (including cold exact-commit packaging and populated recovery), 49 focused account/Inbox/collaboration browser tests, and 22 local Workers tests passed. Logs: committed-core.log, committed-browser.log and committed-workers.log under the evidence directory below. The subsequent documentation-only checkpoint does not change those runtime bytes.
 
 Local logs and inspected desktop/mobile screenshots are retained in test-results/reply-journal-20260908, including the initial browser failure and controlled before/after navigation checks. They contain disposable synthetic data only. Existing source files under the project mirror's sources directory were not changed.
 
