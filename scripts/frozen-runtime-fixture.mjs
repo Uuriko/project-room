@@ -11,6 +11,7 @@ export const v13OfferBaseline = "61f12941e0b195487a3718451725e78cf444675b";
 export const v14InboxBaseline = "a96887c30b124077bfa675c4bec584c224d3b66c";
 export const v15AdoptionBaseline = "6081c46a0536d215dc0fafe2a253997f88b8dd22";
 export const v16SendBaseline = "acac701e5dceba5293ac729a5d761ae252cfb4dc";
+export const v17EmailBaseline = "ea71f70b004503e7a07bb7cac29ed4cf08bda543";
 async function frozenFixture(repository, packagePath, commit, file, name) {
   const source = execFileSync("git", ["show", `${commit}:scripts/${file}.mjs`], { cwd: repository, encoding: "utf8" })
     .replace(/from "\.\.\/([^"]+)"/g, (_, path) => `from ${JSON.stringify(pathToFileURL(join(packagePath, path)).href)}`);

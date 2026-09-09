@@ -30,6 +30,7 @@ export function validateSend(request) {
     fail(422, "invalid_inbox_send", "Supply a supported, correlated provider observation.");
 }
 export function sendPreview(accountId, authEpoch, source, data, draft) {
+  if (data.adapter !== "synthetic") fail(409, "email_sending_unavailable", "Real email sending is not enabled.");
   if (!draft || !draft.body.trim() || draft.source_revision !== source.revision)
     fail(409, "stale_inbox_reply", "Save a reply to the current source before sending.");
   // Synthetic sources have one sender/recipient and no attachments. A real

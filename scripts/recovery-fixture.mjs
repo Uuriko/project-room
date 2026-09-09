@@ -4,13 +4,14 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { textVersion } from "../server/text-results.mjs";
+import { createEmailEnvelope } from "../server/email-envelope.mjs";
 
 export function createRecoveryFixture(filename) {
   let store = new RoomStore(filename), now = Date.now();
   store.initialize(initialRoom());
   // Established v1 fixture route: migrate a pre-invitation/reminder database,
   // retaining its original event envelopes and generating a real checkpoint.
-  store.db.exec("DROP TABLE private_inbox_drafts; DROP TABLE private_inbox_versions; DROP TABLE private_inbox_sources; DROP TABLE private_inbox_commands; DROP TABLE agent_connection_operations; DROP TABLE agent_connections; DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE membership_invitation_journal; DROP TABLE projection_checkpoints; PRAGMA user_version=1");
+  store.db.exec("DROP TABLE private_email_folders; DROP TABLE private_email_commands; DROP TABLE private_email_connections; DROP TABLE private_inbox_drafts; DROP TABLE private_inbox_versions; DROP TABLE private_inbox_sources; DROP TABLE private_inbox_commands; DROP TABLE agent_connection_operations; DROP TABLE agent_connections; DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE membership_invitation_journal; DROP TABLE projection_checkpoints; PRAGMA user_version=1");
   store.close(); store = new RoomStore(filename, { now: () => now });
   store.initialize(initialRoom("second", "second-owner"));
   const keys = { owner: store.issueAccessKey("commons", "owner"), second: store.issueAccessKey("second", "second-owner") };
@@ -127,8 +128,26 @@ export function createRecoveryFixture(filename) {
       outcome: "accepted", providerId: "synthetic-recovery-message" }
   ];
   const transportReceipts = transportRequests.map(request => store.inbox.transport(owner.token, request, owner.session.sessionBinding).receipt);
+  const emailProfile = { accountId: owner.session.account.id, id: "recovery-email", revision: 1, provider: "microsoft-graph", mailboxId: "recovery-mailbox",
+    identity: { name: "Owner", address: "owner@example.test" }, aliases: [] };
+  store.email.apply(owner.token, { action: "connection.configure", requestId: "recovery-email-configure", connectionId: emailProfile.id,
+    expectedRevision: 0, profile: emailProfile }, owner.session.sessionBinding);
+  const emailEnvelope = createEmailEnvelope({ connection: emailProfile,
+    message: { id: "fixture-email-message", revision: "fixture-email-version", threadId: "fixture-email-thread", internetMessageId: "<fixture@example.test>",
+      folderId: "fixture-inbox", subject: "Private imported recovery mail", sentAt: null, receivedAt: null,
+      from: { name: "Friend", address: "friend@example.test" }, sender: { name: "Friend", address: "friend@example.test" },
+      replyTo: [], to: [emailProfile.identity], cc: [], bcc: [], isDraft: false, isRead: false },
+    body: { format: "text", content: "Imported private recovery content" }, replyHeaders: { state: "complete", inReplyTo: [], references: [] },
+    attachments: { state: "complete", hint: false, items: [] } });
+  const emailPage = { action: "page.apply", requestId: "recovery-email-page", connectionId: emailProfile.id, connectionRevision: 1,
+    folderId: "fixture-inbox", expectedRevision: 0, expectedCursor: null, cursor: "fixture-next-cursor", complete: false, reset: true,
+    observations: [{ kind: "message", envelope: emailEnvelope }] };
+  store.email.apply(owner.token, emailPage, owner.session.sessionBinding);
+  store.inbox.apply(owner.token, { action: "draft.save", requestId: "recovery-email-draft", sourceId: emailEnvelope.sourceId,
+    expectedRevision: 0, sourceRevision: 1, body: "Keep this imported-email draft" }, owner.session.sessionBinding);
   const cursor = store.room("commons").sequence; store.markCaughtUp(keys.owner, "commons", cursor);
   return { store, filename, keys, owner, target, validSession, revokedSession, loggedOut, sharedSession, pending, invitation,
     shareRequest, link, linkToken, guestSlot, guest, joinRequest, reminders, command, commandResult, cursor, inboxRequests, inboxReceipts, inboxDraftBody, transportRequests, transportReceipts,
-    enrollmentToken, enrollmentRequest, enrollment, nativeBody, nativeCommand, nativeCompletion, charterCommand, charterSaved, now: () => now, advance: ms => { now += ms; } };
+    enrollmentToken, enrollmentRequest, enrollment, nativeBody, nativeCommand, nativeCompletion, charterCommand, charterSaved, emailProfile, emailPage, emailEnvelope,
+    now: () => now, advance: ms => { now += ms; } };
 }

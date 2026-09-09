@@ -14,7 +14,7 @@ const digest = value => createHash('sha256').update(canonical(value)).digest('he
 const quote = name => `"${name.replaceAll('"', '""')}"`;
 const accessTables = new Set(['accounts', 'member_accounts', 'account_access_events', 'credentials',
   'account_credentials', 'account_session_slots', 'membership_invitations', 'membership_invitation_events',
-  'membership_invitation_journal', 'share_links', 'share_link_joins', 'agent_connections', 'agent_connection_operations']);
+  'membership_invitation_journal', 'share_links', 'share_link_joins', 'agent_connections', 'agent_connection_operations', 'private_email_connections']);
 
 function difference(older, reference) {
   let added = 0, removed = 0, changed = 0;

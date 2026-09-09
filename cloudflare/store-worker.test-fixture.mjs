@@ -9,6 +9,8 @@ import { DurableDatabase, durableStorage } from './storage.mjs';
 import { STORE_SCHEMA_VERSION } from '../server/writer-fence.mjs';
 import { textVersion } from '../server/text-results.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
+import { emailContractFixture } from '../scripts/email-contract-fixture.mjs';
+import { normalizeGraphEmail } from '../server/graph-email.mjs';
 
 function checkNarrowAuthentication(store, credentials) {
   const { state, sequence } = store.room('commons'), before = auditRecovery(store).dataSha256;
@@ -117,10 +119,30 @@ export class StoreTestRoom {
       assert.throws(() => store.command(owner, 'commons', { ...nativeCommand, data: { ...nativeCommand.data, evidenceVersion: textVersion('wrong') } }), { code: 'command_rejected' });
       const nativeSaved = store.command(owner, 'commons', nativeCommand);
       assert.equal(store.workResult(owner, 'commons', 'native-text').result.text.body, nativeBody); auditRecovery(store);
-      return Response.json({ guests, credentials, sequence: store.room('commons').sequence, eventId: receipt.event.id, owner, nativeBody, nativeCommand, nativeSaved });
+      const mail = emailContractFixture(), mailSlot = store.createAccountSessionSlot();
+      mail.connection.accountId = store.accountForMember('commons', 'owner').id;
+      const mailSession = store.loginAccountSession(mailSlot.token, store.issueAccountAccessKey(mail.connection.accountId), 0);
+      const mailToken = mailSlot.token, mailBinding = mailSession.sessionBinding;
+      store.email.apply(mailToken, { action: 'connection.configure', requestId: 'mail-connection', connectionId: mail.connection.id,
+        expectedRevision: 0, profile: mail.connection }, mailBinding);
+      const envelope = normalizeGraphEmail(mail.connection, mail.message, mail.options);
+      const mailPage = { action: 'page.apply', requestId: 'mail-first-page', connectionId: mail.connection.id, connectionRevision: 1,
+        folderId: mail.message.parentFolderId, expectedRevision: 0, expectedCursor: null, cursor: 'fixture-next-page', complete: false,
+        reset: true, observations: [{ kind: 'message', envelope }] };
+      store.email.apply(mailToken, mailPage, mailBinding);
+      store.inbox.apply(mailToken, { action: 'draft.save', requestId: 'mail-private-draft', sourceId: envelope.sourceId,
+        expectedRevision: 0, sourceRevision: 1, body: 'Recover this private email draft' }, mailBinding);
+      const checkpoint = auditRecovery(store).dataSha256;
+      store.db.exec("CREATE TRIGGER mail_test_failure BEFORE INSERT ON private_email_commands BEGIN SELECT RAISE(ABORT,'fixture mail failure'); END");
+      assert.throws(() => store.email.apply(mailToken, { ...mailPage, requestId: 'mail-failed-page', expectedRevision: 1,
+        expectedCursor: mailPage.cursor, cursor: 'fixture-final', complete: true, reset: false }, mailBinding), /fixture mail failure/);
+      store.db.exec('DROP TRIGGER mail_test_failure');
+      assert.equal(auditRecovery(store).dataSha256, checkpoint);
+      return Response.json({ guests, credentials, sequence: store.room('commons').sequence, eventId: receipt.event.id, owner, nativeBody, nativeCommand, nativeSaved,
+        email: { token: mailToken, binding: mailBinding, page: mailPage, sourceId: envelope.sourceId } });
     }
     if (path === '/resume') {
-      const { guests, credentials, sequence, eventId, owner, nativeBody, nativeCommand, nativeSaved } = await request.json();
+      const { guests, credentials, sequence, eventId, owner, nativeBody, nativeCommand, nativeSaved, email } = await request.json();
       checkNarrowAuthentication(store, credentials);
       for (const guest of guests) {
         assert.equal(store.authenticateAccountSession(guest.token, 'commons', guest.binding).member.id, guest.member);
@@ -136,6 +158,13 @@ export class StoreTestRoom {
       assert.deepEqual(store.rebuildProjection('commons').state.messages, store.room('commons').state.messages);
       assert.equal(store.verifyInvitationAudit().consistent, true);
       store.shareLinks.verify();
+      assert.equal(store.email.apply(email.token, email.page, email.binding).duplicate, true);
+      assert.equal(store.inbox.read(email.token, email.sourceId, email.binding).draft.body, 'Recover this private email draft');
+      const mailState = store.email.state(email.token, email.page.connectionId, email.page.folderId, email.binding);
+      assert.equal(mailState.folder.complete, false); assert.equal(mailState.expectedCursor, 'fixture-next-page');
+      store.email.apply(email.token, { ...email.page, requestId: 'mail-final-page', expectedRevision: 1, expectedCursor: email.page.cursor,
+        cursor: 'fixture-final', reset: false, complete: true, observations: [] }, email.binding);
+      assert.equal(store.email.verify().sources, 1); auditRecovery(store);
       return Response.json({ recovered: true, guests: guests.length, sequence });
     }
     if (path === '/newer-version') {

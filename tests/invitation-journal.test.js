@@ -110,10 +110,10 @@ for (const status of ["pending", "accepted", "revoked"]) test(`v4 ${status} migr
   const audits = f.store.db.prepare("SELECT * FROM membership_invitation_events WHERE invitation_id=? ORDER BY sequence").all(f.id).map(row => ({ ...row }));
   const events = f.store.db.prepare("SELECT * FROM events ORDER BY room_id,sequence").all().map(row => ({ ...row }));
   // All pre-journal tables remain exactly the schema-v4 representation.
-  f.store.db.exec("DROP TABLE private_inbox_drafts; DROP TABLE private_inbox_versions; DROP TABLE private_inbox_sources; DROP TABLE private_inbox_commands; DROP TABLE agent_connection_operations; DROP TABLE agent_connections; DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE membership_invitation_journal; PRAGMA user_version=4");
+  f.store.db.exec("DROP TABLE private_email_folders; DROP TABLE private_email_commands; DROP TABLE private_email_connections; DROP TABLE private_inbox_drafts; DROP TABLE private_inbox_versions; DROP TABLE private_inbox_sources; DROP TABLE private_inbox_commands; DROP TABLE agent_connection_operations; DROP TABLE agent_connections; DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE membership_invitation_journal; PRAGMA user_version=4");
   f.close();
   const migrated = f.reopen();
-  assert.equal(migrated.db.prepare("PRAGMA user_version").get().user_version, 17);
+  assert.equal(migrated.db.prepare("PRAGMA user_version").get().user_version, 18);
   assert.deepEqual({ ...f.record() }, record);
   assert.deepEqual(migrated.db.prepare("SELECT * FROM membership_invitation_events WHERE invitation_id=? ORDER BY sequence").all(f.id).map(row => ({ ...row })), audits);
   assert.deepEqual(migrated.db.prepare("SELECT * FROM events ORDER BY room_id,sequence").all().map(row => ({ ...row })), events);
@@ -128,7 +128,7 @@ for (const status of ["pending", "accepted", "revoked"]) test(`v4 ${status} migr
 
 test("failed v4 journal migration leaves the version and existing tables untouched", t => {
   const f = fixture(t), record = { ...f.record() };
-  f.store.db.exec("DROP TABLE private_inbox_drafts; DROP TABLE private_inbox_versions; DROP TABLE private_inbox_sources; DROP TABLE private_inbox_commands; DROP TABLE agent_connection_operations; DROP TABLE agent_connections; DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE membership_invitation_journal; PRAGMA user_version=4");
+  f.store.db.exec("DROP TABLE private_email_folders; DROP TABLE private_email_commands; DROP TABLE private_email_connections; DROP TABLE private_inbox_drafts; DROP TABLE private_inbox_versions; DROP TABLE private_inbox_sources; DROP TABLE private_inbox_commands; DROP TABLE agent_connection_operations; DROP TABLE agent_connections; DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE membership_invitation_journal; PRAGMA user_version=4");
   f.close();
   const append = RoomStore.prototype.appendInvitationJournal;
   RoomStore.prototype.appendInvitationJournal = function (...args) {
@@ -180,9 +180,9 @@ test("damaged invited-member projection fails closed during access and startup; 
 
 test("read-only audit refuses a v4 input without migrating or creating a journal", t => {
   const f = fixture(t);
-  f.store.db.exec("DROP TABLE private_inbox_drafts; DROP TABLE private_inbox_versions; DROP TABLE private_inbox_sources; DROP TABLE private_inbox_commands; DROP TABLE agent_connection_operations; DROP TABLE agent_connections; DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE membership_invitation_journal; PRAGMA user_version=4");
+  f.store.db.exec("DROP TABLE private_email_folders; DROP TABLE private_email_commands; DROP TABLE private_email_connections; DROP TABLE private_inbox_drafts; DROP TABLE private_inbox_versions; DROP TABLE private_inbox_sources; DROP TABLE private_inbox_commands; DROP TABLE agent_connection_operations; DROP TABLE agent_connections; DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE membership_invitation_journal; PRAGMA user_version=4");
   f.close();
-  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v17/);
+  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v18/);
   const raw = new DatabaseSync(f.filename, { readOnly: true });
   try {
     assert.equal(raw.prepare("PRAGMA user_version").get().user_version, 4);

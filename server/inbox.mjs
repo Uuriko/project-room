@@ -4,8 +4,10 @@ import { currentApproval } from "../src/workflow.js";
 import { storedText } from "./text-results.mjs";
 import { ServiceError } from "./store.mjs";
 import { isSend, internalSend, validateSend, sendPreview, transitionSend } from "./inbox-outbox.mjs";
+import { readEmailEnvelope, EmailContractError } from "./email-envelope.mjs";
 
 const transportAuthority = Symbol("private inbox transport");
+const importAuthority = Symbol("private email importer");
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const canonical = value => Array.isArray(value) ? "[" + value.map(canonical).join(",") + "]" : value && typeof value === "object"
@@ -46,6 +48,7 @@ function validate(request) {
   if (isSend(request)) return validateSend(request);
   const common = ["requestId", "action", "sourceId"], fields = {
     "source.save": [...common, "expectedRevision", "data"],
+    "source.import": [...common, "expectedRevision", "data"],
     "draft.save": [...common, "expectedRevision", "sourceRevision", "body"],
     "draft.adopt": [...common, "expectedRevision", "sourceRevision", "roomId", "workItemId", "shareRequestId", "resultVersion"],
     "source.share": [...common, "sourceRevision", "roomId", "audienceVersion", "paragraphs"]
@@ -53,7 +56,14 @@ function validate(request) {
   if (!fields || !exact(request, fields) || !validId(request.requestId) || !validId(request.sourceId))
     fail(422, "invalid_inbox_request", "Supply an exact inbox operation and stable request ID.");
   if (request.action !== "source.share" && !revision(request.expectedRevision)) fail(422, "invalid_inbox_request", "Current revision required.");
-  if (request.action !== "source.save" && (!revision(request.sourceRevision) || !request.sourceRevision)) fail(422, "invalid_inbox_request", "Source revision required.");
+  if (!["source.save", "source.import"].includes(request.action) && (!revision(request.sourceRevision) || !request.sourceRevision)) fail(422, "invalid_inbox_request", "Source revision required.");
+  if (request.action === "source.import") {
+    if (!exact(request.data, ["adapter", "envelope"]) || request.data.adapter !== "email") fail(422, "invalid_inbox_source", "Supply a qualified email observation.");
+    let envelope;
+    try { envelope = readEmailEnvelope(request.data.envelope); }
+    catch (error) { if (error instanceof EmailContractError) fail(422, "invalid_inbox_source", "Email observation could not be confirmed."); throw error; }
+    if (envelope.sourceId !== request.sourceId) fail(422, "invalid_inbox_source", "Source identity does not match the email observation.");
+  }
   if (request.action === "source.save") {
     const d = request.data;
     if (!exact(d, ["adapter", "sender", "recipient", "subject", "paragraphs"]) || d.adapter !== "synthetic"
@@ -76,6 +86,7 @@ export const inboxAudience = state => Object.values(state.members).filter(m => m
 const viewer = auth => ({ accountId: auth.account.id, authEpoch: auth.account.authEpoch,
   sessionBinding: auth.sessionBinding, sessionRevision: auth.sessionRevision });
 const sharedBody = (data, indexes) => {
+  if (data.adapter !== "synthetic") fail(409, "email_sharing_unavailable", "Email excerpt sharing is not yet available.");
   if (indexes.some(i => !Object.hasOwn(data.paragraphs, i))) fail(422, "invalid_inbox_share", "Selected text does not exist.");
   const body = "Shared sample excerpt\n\n" + indexes.map(i => data.paragraphs[i]).join("\n\n");
   if (body.length > 4000) fail(422, "invalid_inbox_share", "Choose at most 4,000 characters including the excerpt label.");
@@ -98,12 +109,16 @@ export class Inbox {
     if (!row) fail(404, "inbox_source_not_found", "Source version not found.");
     return JSON.parse(row.data_json);
   }
-  list(token, binding) {
+  list(token, binding, { includeEmail = false } = {}) {
     return this.store.readTransaction(() => {
       const auth = this.auth(token, binding);
       const sources = this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? ORDER BY updated_at DESC,id").all(auth.account.id)
-        .map(row => { const d = this.version(auth.account.id, row.id, row.revision); return { id: row.id, revision: row.revision, adapter: d.adapter,
-          sender: d.sender, recipient: d.recipient, subject: d.subject, updatedAt: row.updated_at }; });
+        .map(row => { const d = this.version(auth.account.id, row.id, row.revision);
+          if (d.adapter === "email" && !includeEmail) return null;
+          return { id: row.id, revision: row.revision, adapter: d.adapter,
+            sender: d.adapter === "email" ? d.envelope.message.from.address : d.sender,
+            recipient: d.adapter === "email" ? d.envelope.connection.identity.address : d.recipient,
+            subject: d.adapter === "email" ? d.envelope.message.subject : d.subject, updatedAt: row.updated_at }; }).filter(Boolean);
       return { contractVersion: 1, viewer: viewer(auth), sources };
     });
   }
@@ -210,10 +225,18 @@ export class Inbox {
     if (!internalSend(request)) fail(422, "invalid_inbox_send", "Supply a transport transition.");
     return this.apply(token, request, binding, transportAuthority);
   }
+  // Trusted, transaction-bound importer only. Ordinary HTTP commands cannot use it.
+  importSource(token, request, binding) {
+    if (!this.db.isTransaction || request?.action !== "source.import") fail(403, "email_importer_required", "Use the transactional email importer.");
+    return this.apply(token, request, binding, importAuthority);
+  }
   apply(token, request, binding, authority = null) {
     return this.store.transaction(() => {
       const auth = this.auth(token, binding); validate(request);
       if (internalSend(request) && authority !== transportAuthority) fail(403, "inbox_transport_required", "Only the configured transport can record this outcome.");
+      if (request.action === "source.import" && authority !== importAuthority) fail(403, "email_importer_required", "Only the configured importer can record this source.");
+      if (request.action === "source.import" && request.data.envelope.connection.accountId !== auth.account.id)
+        fail(403, "email_account_mismatch", "Email observation belongs to another account.");
       if (["source.share", "draft.adopt"].includes(request.action)) this.auth(token, binding, request.roomId);
       const accountId = auth.account.id, fingerprint = digest(request);
       const prior = this.db.prepare("SELECT fingerprint,receipt_json FROM private_inbox_commands WHERE account_id=? AND request_id=?").get(accountId, request.requestId);
@@ -231,8 +254,10 @@ export class Inbox {
         receipt.send = transitionSend(this.outbox(accountId), request, {
           preview: ["send.reserve", "send.dispatch"].includes(action) ? this.preview(accountId, auth.account.authEpoch, sourceId) : null,
           authEpoch: auth.account.authEpoch, at: now });
-      } else if (action === "source.save") {
+      } else if (["source.save", "source.import"].includes(action)) {
         const previous = this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? AND id=?").get(accountId, sourceId);
+        if (previous && this.version(accountId, sourceId, previous.revision).adapter !== request.data.adapter)
+          fail(409, "inbox_source_origin_changed", "A source cannot change its channel origin.");
         if ((previous?.revision ?? 0) !== request.expectedRevision) fail(409, "stale_inbox_source", "Source changed. Review the current version.");
         if ((previous?.revision ?? 0) >= inboxLimits.versions || !previous && this.db.prepare("SELECT count(*) n FROM private_inbox_sources WHERE account_id=?").get(accountId).n >= inboxLimits.sources)
           fail(409, "inbox_limit", "Private inbox pilot capacity reached.");
@@ -287,8 +312,10 @@ export class Inbox {
           ? sendPreview(row.account_id, row.auth_epoch, prior, this.version(row.account_id, request.sourceId, prior.revision), drafts.get(key)) : null;
         expected.send = transitionSend(sends, request, { preview, authEpoch: row.auth_epoch, at: row.at });
         sends.set(expected.send.id, expected.send);
-      } else if (request.action === "source.save") {
+      } else if (["source.save", "source.import"].includes(request.action)) {
         require(request.expectedRevision === (prior?.revision ?? 0));
+        if (request.action === "source.import") require(request.data.envelope.connection.accountId === row.account_id);
+        if (prior) require(this.version(row.account_id, request.sourceId, prior.revision).adapter === request.data.adapter);
         expected.revision = request.expectedRevision + 1;
         require(same(this.version(row.account_id, request.sourceId, expected.revision), request.data));
         sources.set(key, { account_id: row.account_id, id: request.sourceId, revision: expected.revision, created_at: prior?.created_at ?? row.at, updated_at: row.at }); versions++;
