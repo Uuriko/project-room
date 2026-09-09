@@ -1,6 +1,6 @@
 # Project Room usability plan
 
-9 September 2026 · live Worker `e8f3f566` · schema 26 · Durable Object not reset
+9 September 2026 · live Worker `b7468e80` · schema 26 · Durable Object not reset
 
 This is the working plan for making the hosted Room easier to use, nicer to
 look at, and more capable **without** a mailbox, auto-enrollment, Durable Object
@@ -67,7 +67,7 @@ CMC, DIE copy, Desk merge.
 - GitHub repository About + homepage (`https://www.trydemigod.com/room`) —
   needs a GitHub settings write John can do in the UI.
 
-### Phase 4 — this slice (login recovery)
+### Phase 4 — shipped (PR #42)
 
 Research: NN/G form errors should name the fix next to the field. Slack/Discord/Linear
 put “how do I…” on Cmd+K. Unified login in SaaS is SSO/email, which we will not
