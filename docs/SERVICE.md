@@ -70,7 +70,7 @@ All API responses are JSON except the event stream. Non-success responses have `
 
 | Method and route | Meaning |
 | --- | --- |
-| `GET /api/health` | Process responds; not a database restore or availability guarantee |
+| `GET`/`HEAD /api/health` | Process responds; not a database restore or availability guarantee |
 | `GET /api/account-session` | Inspect the stable account-session slot; when absent, create an anonymous slot and set its HttpOnly cookie |
 | `POST /api/account-session` | Compare-and-swap login with `{accountAccessKey,expectedSessionRevision}`; exact Origin and current slot CSRF required; no `Set-Cookie` |
 | `DELETE /api/account-session` | Compare-and-swap logout with `{expectedSessionRevision}`; advances and clears the server slot; no `Set-Cookie` |

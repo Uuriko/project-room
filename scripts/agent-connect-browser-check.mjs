@@ -60,11 +60,11 @@ test("browser owner issues digest-only setup; a real external client imports, re
   await f.page.locator("#agent-connect-done").click();
   await f.page.getByText("Manage connections", { exact: true }).click();
   f.page.on("dialog", dialog => dialog.accept());
-  await f.page.getByRole("button", { name: "Replace key", exact: true }).click();
+  await f.page.getByRole("button", { name: /Replace key/ }).click();
   await f.page.locator("#agent-setup").waitFor({ state: "visible" }); const replacement = await f.config();
   await assert.rejects(agent.checkConnection(), { status: 401 });
   const current = new RoomAgentClient(replacement); assert.equal((await current.checkConnection()).memberId, config.memberId);
-  await f.page.locator("#agent-connect-done").click(); await f.page.getByRole("button", { name: "Disconnect", exact: true }).click();
+  await f.page.locator("#agent-connect-done").click(); await f.page.getByRole("button", { name: /Disconnect/ }).click();
   await f.page.getByText("Room access ended.", { exact: true }).waitFor(); await assert.rejects(current.checkConnection(), { status: 401 });
   assert.equal(f.store.room("commons").state.members[config.memberId].active, false);
   assert.doesNotThrow(() => f.store.agentConnections.verify());
@@ -160,7 +160,7 @@ test("a rotation ahead of an older inactive snapshot keeps the new private setup
   await f.page.locator("#agent-connect-close").click(); await f.open();
   await f.page.getByText("Manage connections", { exact: true }).click();
   f.page.once("dialog", dialog => dialog.accept());
-  await f.page.getByRole("button", { name: "Replace key", exact: true }).click();
+  await f.page.getByRole("button", { name: /Replace key/ }).click();
   await f.page.locator("#agent-setup").waitFor({ state: "visible" }); const replacement = await f.config();
   await f.page.evaluate(() => new Promise(requestAnimationFrame));
   assert.equal(await f.page.locator("#agent-setup").isVisible(), true);

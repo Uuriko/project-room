@@ -246,6 +246,15 @@ test("HTTP session exchange protects cookie writes, rejects agent browser sessio
 
 test("HTTP endpoints deny anonymous and oversized commands and expose only explicit assets", async t => {
   const { request } = await http(t);
+  const health = await request("/api/health", { token: null });
+  assert.equal(health.status, 200);
+  assert.equal((await health.json()).status, "ok");
+  const healthHead = await request("/api/health", { token: null, method: "HEAD" });
+  assert.equal(healthHead.status, 200);
+  assert.equal(await healthHead.text(), "");
+  const readyHead = await request("/api/ready", { token: null, method: "HEAD" });
+  assert.equal(readyHead.status, 200);
+  assert.equal(await readyHead.text(), "");
   assert.equal((await request("/api/rooms/commons", { token: null })).status, 401);
   assert.equal((await request("/api/rooms/commons/commands", { method: "POST", data: command(T.MESSAGE_POSTED, { body: "x".repeat(17000) }) })).status, 413);
   for (const path of ["/server.mjs", "/server/store.mjs", "/.data/room.sqlite", "/src/seed.js", "/src/storage.js", "/package.json"]) assert.equal((await request(path, { token: null })).status, 404);

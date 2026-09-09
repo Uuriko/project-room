@@ -111,7 +111,7 @@ export class AgentConnections {
       let now = this.store.now();
       const before = this.row(roomId, memberId);
       if (expectedOwnerRevision !== auth.member.revision) fail(409, "stale_member_revision", "Your room access changed; refresh first");
-      if (action !== "disconnect" && (expiresAt <= now || expiresAt > now + 30 * 86400000)) fail(422, "invalid_expiry", "Choose an expiry within 30 days");
+      if (action !== "disconnect" && (expiresAt <= now || expiresAt > now + 30 * 86400000 + 3600000)) fail(422, "invalid_expiry", "Choose an expiry within 30 days");
       if (action === "create" ? Boolean(before || this.store.room(roomId).state.members[memberId])
         : !before || before.status === "disconnected" || before.generation !== expectedGeneration
           || this.store.room(roomId).state.members[memberId]?.revision !== expectedMemberRevision) fail(409, "connection_changed", "This connection changed; refresh first");

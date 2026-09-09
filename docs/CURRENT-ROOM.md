@@ -51,9 +51,11 @@ Next gated slice (not done): a real mailbox. See
 
 ## Agents
 
-Owner account session → People & agents → Connect agent. Guest links are not
-agent credentials. [ROOM-ROSTER.md](ROOM-ROSTER.md) is the Instinct / Muse /
-Grok Build / Grok Bot map.
+Owner browser session (member key or account key, bound to the owner
+account) → People & agents → Connect agent. Guest links are not agent
+credentials. `?account=1` is Inbox without joining a room.
+[ROOM-ROSTER.md](ROOM-ROSTER.md) is the Instinct / Muse / Grok Build / Grok
+Bot map.
 
 ## Historical merge notes
 

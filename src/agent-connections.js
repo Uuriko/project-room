@@ -1,5 +1,5 @@
 import { validId } from "./events.js";
-import { rosterSelection } from "./room-roster.js";
+import { rosterSelection, rosterNameTaken } from "./room-roster.js";
 
 const $ = selector => document.querySelector(selector);
 const newToken = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
@@ -26,6 +26,14 @@ export function installAgentConnections({ client, getState }) {
     if (setup) expiryTimer = setTimeout(() => { if (checkExpiry()) armExpiry(); else render(); }, Math.max(1, Math.min(2e9, setupMeta.expiresAt - Date.now() + 1)));
   }
   const accessDenied = error => [401, 403].includes(error?.status) || ["session_binding_changed", "session_binding_required", "invalid_session_binding"].includes(error?.code);
+  const ACCESS_HINT = {
+    chat: "Can read this room’s history and post messages.",
+    contribute: "Can read this room, post messages, and contribute work.",
+    review: "Can read this room, post messages, and review work."
+  };
+  function describeAccess() {
+    if ($("#agent-access-hint")) $("#agent-access-hint").textContent = ACCESS_HINT[$("#agent-connect-access").value] ?? ACCESS_HINT.chat;
+  }
   function render() {
     form.hidden = Boolean(setup); $("#agent-setup").hidden = !setup;
     for (const input of form.querySelectorAll("input,select")) input.disabled = busy || Boolean(pending);
@@ -72,6 +80,7 @@ export function installAgentConnections({ client, getState }) {
         li.append(name, text);
         if (row.status !== "disconnected") for (const [action, label] of [["rotate", "Replace key"], ["disconnect", "Disconnect"]]) {
           const button = document.createElement("button"); button.type = "button"; button.className = "button ghost"; button.textContent = label;
+          button.setAttribute("aria-label", `${label} for ${row.displayName}`);
           button.addEventListener("click", () => {
             if (!owns() || busy || pending || setup) return;
             const message = action === "rotate" ? "The old key will stop working. Set up the new key afterward. Replace it?"
@@ -125,8 +134,12 @@ export function installAgentConnections({ client, getState }) {
     } catch (error) {
       if (!owns() || pending !== operation) return;
       if (accessDenied(error)) { reset(); client.handleFailure(error); return; }
-      if ([409, 422].includes(error.status)) {
+      if (error.status === 409) {
         pending = null; status("Access changed. Review the current settings before trying again."); void load();
+      } else if (error.status === 422) {
+        pending = null;
+        status(typeof error.message === "string" && error.message.length <= 120 ? error.message : "Choose a name, access and expiry.");
+        void load();
       } else status("Change not confirmed. Retry the original.");
     } finally { if (owns() && flow === currentFlow) { busy = false; render(); } }
   }
@@ -139,7 +152,7 @@ export function installAgentConnections({ client, getState }) {
       const request = { action, requestId: crypto.randomUUID(), memberId: row?.memberId ?? `agent-${crypto.randomUUID()}`, expectedOwnerRevision: member().revision,
         ...(action === "create" ? { displayName: $("#agent-connect-name").value.trim(), access: $("#agent-connect-access").value }
           : { expectedGeneration: row.generation, expectedMemberRevision: row.memberRevision }),
-        ...(token ? { keyHash: await digest(token), expiresAt: Date.now() + Number($("#agent-connect-expiry").value) * 86400000 } : {}) };
+        ...(token ? { keyHash: await digest(token), expiresAt: Date.now() + Number($("#agent-connect-expiry").value) * 86400000 - 60000 } : {}) };
       if (!owns() || owner !== identity || generation !== epoch || flow !== currentFlow) return;
       pending = { request, token }; busy = false; await submit();
     } catch { if (owns() && owner === identity && generation === epoch && flow === currentFlow) status("Could not prepare access. Try again."); }
@@ -149,17 +162,18 @@ export function installAgentConnections({ client, getState }) {
     if (!allowed()) return;
     if (!owner) { owner = client.session; generation = client.generation; ownerRevision = member().revision; }
     if (!owns()) { reset(); return; }
-    checkExpiry(); conceal(); render(); dialog.showModal(); void load();
+    checkExpiry(); conceal(); describeAccess(); render(); dialog.showModal(); void load();
     if (pending) status("Change not confirmed. Retry the original.");
     if (!setup && !pending) $("#agent-connect-name").focus();
   });
   $("#agent-connect-close").addEventListener("click", () => dialog.close());
   dialog.addEventListener("close", conceal);
   form.addEventListener("submit", event => { event.preventDefault(); if (pending) void submit(); else void prepare("create"); });
+  $("#agent-connect-access")?.addEventListener("change", describeAccess);
   $("#agent-retry").addEventListener("click", () => { void submit(); });
   $("#agent-connect-done").addEventListener("click", () => {
     if (!busy && !copying) {
-      forget(); form.reset(); if ($("#agent-roster-hint")) $("#agent-roster-hint").textContent = ""; status(""); render();
+      forget(); form.reset(); if ($("#agent-roster-hint")) $("#agent-roster-hint").textContent = ""; describeAccess(); status(""); render();
     }
   });
   for (const button of $("#agent-roster")?.querySelectorAll("[data-roster]") ?? []) {
@@ -169,7 +183,12 @@ export function installAgentConnections({ client, getState }) {
       if (!row) return;
       $("#agent-connect-name").value = row.name;
       $("#agent-connect-access").value = row.access;
-      if ($("#agent-roster-hint")) $("#agent-roster-hint").textContent = row.hint;
+      describeAccess();
+      if ($("#agent-roster-hint")) {
+        $("#agent-roster-hint").textContent = rosterNameTaken(getState()?.members, row.name)
+          ? `${row.hint} A member with this name already exists. Create access only if you want a second identity.`
+          : row.hint;
+      }
     });
   }
   $("#agent-private-details").addEventListener("toggle", () => {

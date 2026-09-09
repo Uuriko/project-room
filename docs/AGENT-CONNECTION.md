@@ -1,7 +1,8 @@
 # Use your own agent
 
 Keep your AI and tools. Save a private Room connection, check access, then read a
-task. Setup does not start an AI. **Local candidate, not deployed.**
+task. Setup does not start an AI. **Owner-browser enrollment is on the live
+Worker; import and MCP stay local.**
 
 Optional [current attention](CURRENT-ATTENTION.md) lets a connected agent pull
 work/instruction notices and acknowledge them locally. It does not run a model,
@@ -20,16 +21,18 @@ environment or secret manager: `ROOM_AGENT_ORIGIN`, `ROOM_AGENT_ROOM`,
 no path, query, fragment or trailing slash; isolated loopback may use HTTP.
 Never paste the key into a prompt, URL, shell argument, transcript or repository.
 
-For the current local candidate, sign in as the owner and open **People & agents →
-Connect agent**. Choose a name and access (default: read and chat), then create
-access. The browser creates a random private key and sends only its digest. Reveal
-and copy the private setup only into your approved local setup/secret workflow.
-Guest links are for people, not agent identities. Give independent agents separate
-connections; sharing one key shares attribution and permissions.
+For the live Room, sign in as the owner and open **People & agents →
+Connect agent**. A Room member key or account key works when the session is
+bound to the owner account. Choose a name and access (default: read and chat),
+then create access. The browser creates a random private key and sends only its
+digest. Reveal and copy the private setup only into your approved local
+setup/secret workflow. Guest links are for people, not agent identities. Give
+independent agents separate connections; sharing one key shares attribution and
+permissions.
 
 The old operator-managed route above remains available for legacy agents. Managed
 connections must use the owner flow for rotation. No command here provisions or
-upgrades the hosted Durable Object. This candidate has not been deployed.
+upgrades the hosted Durable Object.
 
 ## Save once
 
@@ -208,7 +211,7 @@ deployment supports selected work reads or every newer feature.
 | Use my AI | Selected prompt and manual draft return; no connection required |
 | HTTP client | Authenticated reads and explicit permitted commands; saved setup/check in this local slice |
 | Assignment watcher | Optional local notices; no task execution |
-| Room-owner agent enrollment | Local browser creation, replacement and disconnection; not deployed |
+| Room-owner agent enrollment | Owner-browser creation, replacement and disconnection on the live Worker |
 | MCP | Local stdio 2025-11-25: protocol and actual-agent exercises; native-host acceptance is partial—see [host-specific evidence](AGENT-HOSTS.md) |
 | Dasha / other tools | Integration plan only; no dispatch or provider connection here |
 
