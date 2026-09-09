@@ -8,9 +8,9 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
 import { createRuntimePackage } from '../scripts/runtime-package.mjs';
-import { frozenRecoveryFixture, v8ConnectionBaseline, v9TextBaseline, v10CharterBaseline, v11ReplyBaseline, v12HelpBaseline, v13OfferBaseline, v14InboxBaseline, v15AdoptionBaseline, v16SendBaseline, v17EmailBaseline, v18EmailSourceBaseline, v19EmailExcerptBaseline, v20ReplyJournalBaseline, v21ReplyReviewBaseline, v22ReplyUpdateBaseline } from '../scripts/frozen-runtime-fixture.mjs';
+import { frozenRecoveryFixture, v8ConnectionBaseline, v9TextBaseline, v10CharterBaseline, v11ReplyBaseline, v12HelpBaseline, v13OfferBaseline, v14InboxBaseline, v15AdoptionBaseline, v16SendBaseline, v17EmailBaseline, v18EmailSourceBaseline, v19EmailExcerptBaseline, v20ReplyJournalBaseline, v21ReplyReviewBaseline, v22ReplyUpdateBaseline, v23ReplyAcknowledgmentBaseline } from '../scripts/frozen-runtime-fixture.mjs';
 
-for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline], [10, v10CharterBaseline], [11, v11ReplyBaseline], [12, v12HelpBaseline], [13, v13OfferBaseline], [14, v14InboxBaseline], [15, v15AdoptionBaseline], [16, v16SendBaseline], [17, v17EmailBaseline], [18, v18EmailSourceBaseline], [19, v19EmailExcerptBaseline], [20, v20ReplyJournalBaseline], [21, v21ReplyReviewBaseline], [22, v22ReplyUpdateBaseline]]) test(`real Workers v${sourceVersion}→v23 permit replacement, rollback, old-writer refusal and restart`, { timeout: 60000 }, async () => {
+for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline], [10, v10CharterBaseline], [11, v11ReplyBaseline], [12, v12HelpBaseline], [13, v13OfferBaseline], [14, v14InboxBaseline], [15, v15AdoptionBaseline], [16, v16SendBaseline], [17, v17EmailBaseline], [18, v18EmailSourceBaseline], [19, v19EmailExcerptBaseline], [20, v20ReplyJournalBaseline], [21, v21ReplyReviewBaseline], [22, v22ReplyUpdateBaseline], [23, v23ReplyAcknowledgmentBaseline]]) test(`real Workers v${sourceVersion}→v24 permit replacement, rollback, old-writer refusal and restart`, { timeout: 60000 }, async () => {
   const directory = mkdtempSync(join(tmpdir(), 'room-agent-worker-upgrade-')), repository = fileURLToPath(new URL('../', import.meta.url));
   const destination = join(directory, 'old'); let f, mf;
   try {
@@ -48,7 +48,7 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
             let observed;
             AgentConnections.prototype.verifyHistory=()=>{observed={version:version(),permit:permit()};throw new Error('synthetic failure');};
             try{assert.throws(current,{code:'connection_integrity_error'});}finally{AgentConnections.prototype.verifyHistory=verify;}
-            assert.deepEqual(observed,{version:23,permit:23},'fault occurs after installing the new writer');
+            assert.deepEqual(observed,{version:24,permit:24},'fault occurs after installing the new writer');
             assert.equal(version(),${sourceVersion});assert.equal(permit(),0);assert.deepEqual(catalog(),before);assert.deepEqual(data(),records);assert.equal(oldWrite().changes,1);
             return Response.json({rolledBack:true});
           }
@@ -58,7 +58,7 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
             return Response.json({rejected:true});
           }
           if(path==='/upgrade') {
-            const before=data(), store=current(); assert.equal(version(),23);assert.equal(permit(),0);assert.deepEqual(data(),before);
+            const before=data(), store=current(); assert.equal(version(),24);assert.equal(permit(),0);assert.deepEqual(data(),before);
             assert.throws(oldWrite,/reconciliation/); assert.throws(()=>new OldStore(null,{database:new OldDatabase(this.ctx.storage),storagePlatform:oldStorage}),/newer than this service/);
             assert.equal(store.readTransaction(()=>permit()),0);assert.throws(()=>store.readTransaction(()=>store.createAccount('forbidden')),/read-only/);
             assert.equal(store.db.prepare("UPDATE accounts SET revision=revision WHERE id='missing'").run().changes,0);
@@ -127,7 +127,7 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
             return Response.json({upgraded:true,details,disconnect,receipt:result.receipt,charterCommand,charterSaved,question,asked,answer,answered,helpCommand,helpSaved,helpWithdraw,helpClosed,offerCommand,offerSaved,selectCommand,selectSaved,releaseCommand,releaseSaved,inboxRequests,inboxSaved,sendRequests,sendSaved,cursors,audit:auditRecovery(store)});
           }
           if(path==='/restart') {
-            const proof=await request.json(),store=current();assert.equal(version(),23);assert.equal(permit(),0);
+            const proof=await request.json(),store=current();assert.equal(version(),24);assert.equal(permit(),0);
             proof.inboxRequests.forEach((req,index)=>assert.deepEqual(store.inbox.apply(f.token,req,f.session.sessionBinding).receipt,proof.inboxSaved[index].receipt));
             proof.sendRequests.forEach((req,index)=>assert.deepEqual((req.action==='send.reserve'?store.inbox.apply(f.token,req,f.session.sessionBinding):store.inbox.transport(f.token,req,f.session.sessionBinding)).receipt,proof.sendSaved[index]));
             assert.equal(store.inbox.sends(f.token,'private-source',f.session.sessionBinding).sends[0].status,'accepted');

@@ -45,6 +45,14 @@ export function validateReplyAttempt(request) {
 
 function validateReplyUpdate(request) {
   emailInput(request);
+  if (request.action === "reply.update.acknowledged") {
+    if (!exactEmailFields(request, ["action", "requestId", "sourceId", "attemptId", "updateId", "dispatchRequestId", "updateVersion", "providerDraftId", "providerRevision"])
+      || ![request.requestId, request.sourceId, request.attemptId, request.updateId, request.dispatchRequestId].every(validId)
+      || !hash(request.updateVersion))
+      fail("invalid_reply_update", "Choose the exact dispatched update.", 422);
+    emailOpaqueId(request.providerDraftId); emailOpaqueId(request.providerRevision);
+    return;
+  }
   const common = ["action", "requestId", "sourceId", "attemptId", "expectedRevision"];
   const fields = {
     "reply.update.reserve": [...common, "updateVersion"],
@@ -60,7 +68,7 @@ function validateReplyUpdate(request) {
 }
 
 // Child evidence never mutates creation intent, the parent preview or local text.
-export function transitionReplyUpdate(updates, request, { proposal, at }) {
+export function transitionReplyUpdate(updates, request, { proposal, dispatch, at }) {
   validateReplyUpdate(request);
   if (!Number.isSafeInteger(at)) fail("invalid_reply_time", "Reply timestamp is unavailable.");
   if (request.action === "reply.update.reserve") {
@@ -76,9 +84,24 @@ export function transitionReplyUpdate(updates, request, { proposal, at }) {
   const prior = updates.get(request.updateId);
   if (!prior || prior.sourceId !== request.sourceId || prior.attemptId !== request.attemptId)
     fail("reply_update_not_found", "Reply update not found.", 404);
+  if (request.action === "reply.update.acknowledged") {
+    // A write acknowledgment can arrive after newer reads. Bind it to the
+    // immutable dispatch, not a stale child revision, and preserve those reads.
+    if (prior.status !== "update_unconfirmed" || prior.acknowledgment
+      || dispatch?.action !== "reply.update.dispatch" || dispatch.requestId !== request.dispatchRequestId
+      || dispatch.sourceId !== prior.sourceId || dispatch.update?.id !== prior.id
+      || dispatch.update.attemptId !== prior.attemptId || dispatch.update.status !== "update_unconfirmed"
+      || dispatch.update.revision !== 1 || dispatch.update.dispatchedAt !== prior.dispatchedAt
+      || JSON.stringify(dispatch.update.proposal) !== JSON.stringify(prior.proposal)
+      || request.updateVersion !== prior.proposal.updateVersion || request.providerDraftId !== prior.proposal.providerDraftId)
+      fail("conflicting_reply_update_acknowledgment", "The acknowledgment does not match this dispatched update.");
+    return { ...prior, revision: prior.revision + 1, updatedAt: at, status: "update_acknowledged",
+      acknowledgment: { dispatchRequestId: request.dispatchRequestId, updateVersion: request.updateVersion,
+        providerDraftId: request.providerDraftId, providerRevision: request.providerRevision, at } };
+  }
   if (prior.revision !== request.expectedRevision) fail("stale_reply_update", "Update status changed. Refresh it.");
   if (request.action === "reply.update.observed") {
-    if (prior.status !== "update_unconfirmed") fail("reply_update_not_started", "No update has started.");
+    if (!["update_unconfirmed", "update_acknowledged"].includes(prior.status)) fail("reply_update_not_started", "No update has started.");
     return { ...prior, revision: prior.revision + 1, updatedAt: at,
       observation: compareReplyUpdateEnvelope(prior.proposal, request.observation) };
   }

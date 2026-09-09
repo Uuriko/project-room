@@ -175,6 +175,55 @@ test("reply comparison shows pending update uncertainty without enabling review 
   assert.deepEqual(auditRecovery(f.store), before);
 });
 
+for (const mobile of [false, true]) test(`reply acknowledgment ${mobile ? "mobile" : "desktop"}: recovery does not imply content review or sending`, { timeout: 35000 }, async t => {
+  const f = await reviewFixture(t, mobile), p = f.page, token = f.slot.token, binding = f.session.sessionBinding;
+  await p.locator("#inbox-draft").fill("Friday works. Let’s build one small thing together.");
+  await p.locator("#inbox-save").click(); await p.getByText("Saved · only you", { exact: true }).waitFor();
+  const proposal = prepareGraphReplyUpdate({ store: f.store, token, binding, sourceId: f.sourceId,
+    attemptId: f.recorded.plan.requestId, expectedRevision: 3, requestId: "acknowledged-update" });
+  const apply = request => f.store.inbox.reply(token, { sourceId: f.sourceId, attemptId: proposal.attemptId, ...request }, binding);
+  apply({ action: "reply.update.reserve", requestId: proposal.requestId, expectedRevision: 3, updateVersion: proposal.updateVersion });
+  apply({ action: "reply.update.dispatch", requestId: "acknowledged-dispatch", updateId: proposal.requestId, expectedRevision: 0 });
+  f.store.inbox.recordReplyUpdateAcknowledgment(token, { sourceId: f.sourceId, attemptId: proposal.attemptId, updateId: proposal.requestId,
+    dispatchRequestId: "acknowledged-dispatch", requestId: "write-acknowledgment",
+    response: { status: 200, method: "PATCH", idType: "immutable", connection: proposal.connection,
+      message: { id: proposal.providerDraftId, changeKey: "acknowledged-version" } } }, binding);
+  const before = auditRecovery(f.store);
+  await p.locator("#inbox-reply-open").click();
+  await p.locator("#inbox-reply-dialog-status").filter({ hasText: "Update acknowledged · review pending" }).waitFor();
+  assert.equal(await p.locator("#inbox-reply-mailbox-label").textContent(), "Last checked draft");
+  assert.equal(await p.locator("#inbox-reply-confirm").isVisible(), false);
+  assert.equal(await p.locator("#inbox-reply-close").textContent(), "Keep writing");
+  await f.capture("acknowledged-" + (mobile ? "mobile" : "desktop"));
+  await p.locator("#inbox-reply-close").click(); await p.reload(); await p.locator("#inbox-reply-open").click();
+  await p.locator("#inbox-reply-dialog-status").filter({ hasText: "Update acknowledged · review pending" }).waitFor();
+  assert.deepEqual(auditRecovery(f.store), before);
+});
+
+test("reply comparison refresh revokes a captured review without changing the parent version", { timeout: 35000 }, async t => {
+  const f = await reviewFixture(t), p = f.page, token = f.slot.token, binding = f.session.sessionBinding;
+  // Outside editing makes an update possible without altering our saved draft.
+  f.recorded.observe({ body: { format: "text", content: "Outside mailbox edit" } });
+  await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-confirm:not([disabled])").waitFor();
+  const parent = f.store.inbox.replyAttempts(token, f.sourceId, binding).attempts[0];
+  const proposal = prepareGraphReplyUpdate({ store: f.store, token, binding, sourceId: f.sourceId,
+    attemptId: parent.id, expectedRevision: parent.revision, requestId: "background-update" });
+  f.store.inbox.reply(token, { action: "reply.update.reserve", requestId: proposal.requestId, sourceId: f.sourceId,
+    attemptId: parent.id, expectedRevision: parent.revision, updateVersion: proposal.updateVersion }, binding);
+  const before = auditRecovery(f.store);
+  // Exercise the real refresh listener while the sheet retains its old preview.
+  await p.evaluate(() => document.getElementById("inbox-refresh").click());
+  await p.locator("#inbox-reply-status").filter({ hasText: "Sample update not started" }).waitFor();
+  assert.equal(await p.locator("#inbox-reply-confirm").isEnabled(), false);
+  // Even a queued/programmatic click cannot send the now-obsolete review.
+  let writes = 0; p.on("request", r => { if (new URL(r.url()).pathname === "/api/inbox/review") writes++; });
+  await p.evaluate(() => document.getElementById("inbox-reply-confirm").dispatchEvent(new MouseEvent("click")));
+  await p.locator("#inbox-reply-close").click();
+  await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-dialog-status").filter({ hasText: "Update not started" }).waitFor();
+  assert.equal(writes, 0); assert.deepEqual(auditRecovery(f.store), before);
+  assert.equal(f.store.inbox.replyAttempts(token, f.sourceId, binding).attempts[0].revision, parent.revision);
+});
+
 for (const mobile of [false, true]) test(`provider draft review ${mobile ? "mobile" : "desktop"}: exact visible content, deliberate acknowledgment, reload and unchanged local draft`, { timeout: 35000 }, async t => {
   const f = await reviewFixture(t, mobile), p = f.page, before = f.store.inbox.read(f.slot.token, f.sourceId, f.session.sessionBinding).draft;
   f.recorded.observe({ message: { cc: [{ name: "CC", address: "cc@example.test" }], bcc: [{ name: "BCC", address: "bcc@example.test" }] },
@@ -233,7 +282,7 @@ test("provider preview cannot repopulate private content after another tab chang
   const f = await reviewFixture(t), p = f.page;
   let release, reached; const held = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { reached = resolve; });
   t.after(() => release());
-  await p.route("**/reply-review?view=reply-review-v2", async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); });
+  await p.route("**/reply-review?view=reply-review-v3", async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); });
   await p.locator("#inbox-reply-open").click(); await started;
   const other = await p.context().newPage(); await other.goto(f.origin + "/?room=commons");
   await other.locator("#main").waitFor(); await other.locator("#signout-button").click(); await other.locator("#auth-panel").waitFor();

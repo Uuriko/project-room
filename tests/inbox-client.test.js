@@ -15,9 +15,13 @@ test("provider review client negotiates a narrow view and validates its content,
   const attempt = { id: "attempt", revision: 3, status: "awaiting_review", sourceRevision: 1, draftRevision: 1, canSend: false, canReview: true,
     observation: { version: "a".repeat(64), from: "me@example.test", sender: "me@example.test", to: ["you@example.test"], cc: [], bcc: [],
       subject: "Reply", body: "A private draft", format: "text", attachmentState: "complete", attachmentCount: 0, differences: [] }, review: null };
-  const response = { contractVersion: 1, viewer, view: "reply-review-v2", sourceId: "mail", attempt, comparison: { originalBody: "Original reply", updateStatus: null } };
-  const f = setup(async path => { assert.equal(path, "/api/inbox/sources/mail/reply-review?view=reply-review-v2"); return reply(response); });
+  const response = { contractVersion: 1, viewer, view: "reply-review-v3", sourceId: "mail", attempt, comparison: { originalBody: "Original reply", updateStatus: null } };
+  const f = setup(async path => { assert.equal(path, "/api/inbox/sources/mail/reply-review?view=reply-review-v3"); return reply(response); });
   assert.equal((await f.client.replyReview("mail")).attempt.canReview, true);
+  const acknowledged = structuredClone(response); acknowledged.comparison.updateStatus = "update_acknowledged"; acknowledged.attempt.canReview = false;
+  assert.equal((await setup(async () => reply(acknowledged)).client.replyReview("mail")).attempt.canReview, false);
+  acknowledged.attempt.canReview = true;
+  await assert.rejects(setup(async () => reply(acknowledged)).client.replyReview("mail"), { code: "invalid_inbox_response" });
   for (const change of [v => v.view = "other", v => v.sourceId = "other", v => v.attempt.canSend = true,
     v => v.attempt.observation.body = "x".repeat(32769), v => v.attempt.observation.format = "html",
     v => v.attempt.observation.attachmentState = "not_loaded", v => v.attempt.observation.differences = ["sender"],

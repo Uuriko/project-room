@@ -5,7 +5,7 @@ import { storedText } from "./text-results.mjs";
 import { ServiceError } from "./store.mjs";
 import { isSend, internalSend, validateSend, sendPreview, transitionSend } from "./inbox-outbox.mjs";
 import { readEmailEnvelope, EmailContractError } from "./email-envelope.mjs";
-import { prepareGraphReplyDraft, buildGraphReplyDraft, classifyGraphReplyCreation, normalizeReplyObservation, prepareGraphReplyUpdate, buildGraphReplyUpdate } from "./graph-reply-draft.mjs";
+import { prepareGraphReplyDraft, buildGraphReplyDraft, classifyGraphReplyCreation, classifyGraphReplyUpdateAcknowledgment, normalizeReplyObservation, prepareGraphReplyUpdate, buildGraphReplyUpdate } from "./graph-reply-draft.mjs";
 import { isReplyAttempt, validateReplyAttempt, transitionReplyAttempt, replyObservationReviewable, isReplyUpdate, transitionReplyUpdate, unresolvedReplyUpdate } from "./graph-reply-journal.mjs";
 
 const transportAuthority = Symbol("private inbox transport");
@@ -309,7 +309,7 @@ export class Inbox {
   }
   // Negotiated, account-private projection; no transport plan or provider IDs.
   replyReviewContext(token, sourceId, binding, { view = "reply-review-v1" } = {}) {
-    if (!["reply-review-v1", "reply-review-v2"].includes(view)) fail(422, "unsupported_inbox_view", "Choose the supported reply review.");
+    if (!["reply-review-v1", "reply-review-v2", "reply-review-v3"].includes(view)) fail(422, "unsupported_inbox_view", "Choose the supported reply review.");
     return this.store.readTransaction(() => {
       const auth = this.auth(token, binding); this.source(auth.account.id, sourceId);
       const prior = [...this.replyHistory(auth.account.id, sourceId).values()].find(value => value.status !== "cancelled");
@@ -327,9 +327,13 @@ export class Inbox {
             current: current && prior.review.authEpoch === auth.account.authEpoch } : null };
       }
       const value = { contractVersion: 1, view, viewer: viewer(auth), sourceId, attempt };
-      if (view === "reply-review-v2") {
+      if (view !== "reply-review-v1") {
         const update = prior && [...this.replyUpdateHistory(auth.account.id, sourceId).values()].find(u => u.attemptId === prior.id && u.status !== "cancelled");
-        value.comparison = prior ? { originalBody: prior.plan.expected.body, updateStatus: update?.status ?? null } : null;
+        // v2 knows only unresolved completion; v3 can distinguish the write
+        // acknowledgment from the still-pending content review.
+        const status = update?.status ?? null;
+        value.comparison = prior ? { originalBody: prior.plan.expected.body,
+          updateStatus: view === "reply-review-v2" && status === "update_acknowledged" ? "update_unconfirmed" : status } : null;
       }
       return value;
     });
@@ -373,6 +377,16 @@ export class Inbox {
         observation: normalizeReplyObservation(update.proposal, response) }, binding);
     });
   }
+  recordReplyUpdateAcknowledgment(token, { sourceId, attemptId, updateId, dispatchRequestId, requestId, response }, binding) {
+    return this.store.transaction(() => {
+      const auth = this.auth(token, binding), update = this.replyUpdateHistory(auth.account.id, sourceId).get(updateId);
+      if (!update || update.attemptId !== attemptId) fail(404, "reply_update_not_found", "Reply update not found.");
+      const acknowledgment = classifyGraphReplyUpdateAcknowledgment(update.proposal, response);
+      if (!acknowledgment) return { update, recorded: false, canRetryUpdate: false };
+      return { ...this.reply(token, { action: "reply.update.acknowledged", requestId, sourceId, attemptId, updateId,
+        dispatchRequestId, ...acknowledgment }, binding), recorded: true };
+    });
+  }
   // Trusted, transaction-bound importer only. Ordinary HTTP commands cannot use it.
   importSource(token, request, binding) {
     if (!this.db.isTransaction || request?.action !== "source.import") fail(403, "email_importer_required", "Use the transactional email importer.");
@@ -393,7 +407,7 @@ export class Inbox {
         if (prior.fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Request ID already used for different inbox content.");
         return { contractVersion: 1, viewer: viewer(auth), receipt: JSON.parse(prior.receipt_json), duplicate: true };
       }
-      if (!internalSend(request) && request.action !== "send.cancel" && !["reply.cancel", "reply.created", "reply.update.cancel"].includes(request.action)
+      if (!internalSend(request) && request.action !== "send.cancel" && !["reply.cancel", "reply.created", "reply.update.cancel", "reply.update.acknowledged"].includes(request.action)
         && this.db.prepare("SELECT count(*) n FROM private_inbox_commands WHERE account_id=?").get(accountId).n >= inboxLimits.commands)
         fail(409, "inbox_limit", "Private inbox pilot capacity reached.");
       const now = this.store.now(), { sourceId, action, requestId } = request;
@@ -404,7 +418,9 @@ export class Inbox {
         const proposal = ["reply.update.reserve", "reply.update.dispatch"].includes(action) ? prepareGraphReplyUpdate({ store: this.store, token, binding,
           sourceId, attemptId: request.attemptId, requestId: action === "reply.update.reserve" ? requestId : prior?.proposal.requestId,
           expectedRevision: action === "reply.update.reserve" ? request.expectedRevision : prior?.proposal.attemptRevision }) : null;
-        receipt.update = transitionReplyUpdate(updates, request, { proposal, at: now });
+        const dispatch = action === "reply.update.acknowledged"
+          ? this.db.prepare("SELECT receipt_json FROM private_inbox_commands WHERE account_id=? AND request_id=?").get(accountId, request.dispatchRequestId) : null;
+        receipt.update = transitionReplyUpdate(updates, request, { proposal, dispatch: dispatch && JSON.parse(dispatch.receipt_json), at: now });
       } else if (isReplyAttempt(request)) {
         this.source(accountId, sourceId);
         const attempts = this.replyHistory(accountId), original = attempts.get(request.attemptId);
@@ -463,7 +479,7 @@ export class Inbox {
       const name = /^CREATE (?:TABLE|TRIGGER) ([a-z_]+)/.exec(sql.trim())[1];
       require(normalize(this.db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(name)?.sql) === normalize(sql));
     }
-    const sources = new Map(), drafts = new Map(), historicalRooms = new Map(), outboxes = new Map(), replyBoxes = new Map(), updateBoxes = new Map(); let versions = 0;
+    const sources = new Map(), drafts = new Map(), historicalRooms = new Map(), outboxes = new Map(), replyBoxes = new Map(), updateBoxes = new Map(), dispatches = new Map(); let versions = 0;
     for (const row of this.db.prepare("SELECT * FROM private_inbox_commands ORDER BY sequence").all()) {
       const request = JSON.parse(row.request_json), receipt = JSON.parse(row.receipt_json); validate(request);
       require(row.request_id === request.requestId && row.fingerprint === digest(request) && revision(row.auth_epoch) && Number.isSafeInteger(row.at));
@@ -494,8 +510,10 @@ export class Inbox {
             mode: request.action === "reply.reserve" ? request.mode : original?.plan.mode });
         }
         if (isReplyUpdate(request)) {
-          expected.update = transitionReplyUpdate(updates, request, { proposal, at: row.at });
+          expected.update = transitionReplyUpdate(updates, request, { proposal,
+            dispatch: dispatches.get(canonical([row.account_id, request.dispatchRequestId])), at: row.at });
           updates.set(expected.update.id, expected.update);
+          if (request.action === "reply.update.dispatch") dispatches.set(canonical([row.account_id, request.requestId]), expected);
         } else {
           require(request.action !== "reply.review" || !unresolvedReplyUpdate(updates, request.attemptId));
           expected.attempt = transitionReplyAttempt(attempts, request, { plan, authEpoch: row.auth_epoch, at: row.at });

@@ -69,6 +69,18 @@ export function classifyGraphReplyCreation(plan, response) {
   return { ...unknown, status: "created_unverified", providerDraftId: response.message.id };
 }
 
+// A trusted driver's PATCH response, not a GET/readback. The retained dispatch
+// receipt supplies operation identity; these diagnostics are not a retry grant.
+export function classifyGraphReplyUpdateAcknowledgment(proposal, response) {
+  emailInput(response);
+  if (response?.status !== 200 || response.method !== "PATCH") return null;
+  requireEmail(response.idType === "immutable" && same(response.connection, proposal.connection), "email_reply_scope_changed");
+  requireEmail(response.message?.id === proposal.providerDraftId, "email_reply_identity_changed");
+  emailOpaqueId(response.message.changeKey);
+  return { updateVersion: proposal.updateVersion, providerDraftId: response.message.id,
+    providerRevision: response.message.changeKey };
+}
+
 export function inspectGraphReplyDraft({ store, token, binding, plan, providerDraftId, response }) {
   const current = currentGraphReplyDraft({ store, token, binding, plan });
   return compareGraphReplyDraft(current, providerDraftId, response);

@@ -15,7 +15,7 @@ import { inboxLimits } from "../server/inbox.mjs";
 import { transitionReplyAttempt } from "../server/graph-reply-journal.mjs";
 import { createRuntimePackage } from "../scripts/runtime-package.mjs";
 import { candidateRuntimeFixture } from "../scripts/candidate-runtime-fixture.mjs";
-import { frozenAcceptanceFixture, v22ReplyUpdateBaseline } from "../scripts/frozen-runtime-fixture.mjs";
+import { frozenAcceptanceFixture, frozenRecoveryFixture, v22ReplyUpdateBaseline, v23ReplyAcknowledgmentBaseline } from "../scripts/frozen-runtime-fixture.mjs";
 
 function setup(t) {
   const f = createReplyUpdateFixture(t), { token, binding, sourceId, attemptId } = f.args;
@@ -32,8 +32,111 @@ function setup(t) {
     const { action, ...rest } = request;
     return f.store.inbox.recordReplyUpdateObservation(token, { ...rest, response }, binding);
   };
-  return { ...f, apply, updates, reserve, command, observe, filename: join(f.directory, "room.sqlite") };
+  const ack = (dispatch, response = { ...f.response(), method: "PATCH", idType: "immutable" }, requestId = randomUUID()) =>
+    f.store.inbox.recordReplyUpdateAcknowledgment(token, { sourceId, attemptId, updateId: dispatch.updateId,
+      dispatchRequestId: dispatch.requestId, requestId, response }, binding);
+  return { ...f, apply, updates, reserve, command, observe, ack, filename: join(f.directory, "room.sqlite") };
 }
+
+test("write acknowledgment binds the exact dispatch and preserves later reads, parent and local writing", t => {
+  const f = setup(t); f.save("Proposed update"); f.apply(f.reserve()); const dispatch = f.command("dispatch"); f.apply(dispatch);
+  const response = { ...f.response(), method: "PATCH", idType: "immutable" }; response.message.changeKey = "write-version";
+  response.headers = { Authorization: "fictional-private-header-not-for-journal" };
+  response.message.body.content = "untrusted-write-response-body-not-for-preview";
+  f.observe(); const observation = f.updates()[0].observation;
+  f.save("Even newer local writing"); const parent = f.attempt(), requestId = randomUUID();
+  const result = f.ack(dispatch, response, requestId), update = result.receipt.update;
+  assert.equal(result.recorded, true); assert.equal(update.status, "update_acknowledged"); assert.equal(update.revision, 3);
+  assert.deepEqual(update.observation, observation);
+  assert.equal(update.acknowledgment.dispatchRequestId, dispatch.requestId);
+  assert.equal(update.acknowledgment.providerRevision, "write-version");
+  const row = f.store.db.prepare("SELECT request_json,receipt_json FROM private_inbox_commands WHERE request_id=?").get(requestId);
+  assert.doesNotMatch(JSON.stringify(row), /fictional-private-header-not-for-journal|untrusted-write-response-body-not-for-preview/);
+  assert.deepEqual(f.attempt(), parent);
+  assert.equal(f.store.inbox.read(f.args.token, f.args.sourceId, f.args.binding).draft.body, "Even newer local writing");
+  for (const key of ["canExecute", "canRetryUpdate", "canReview", "canSend"]) assert.equal(update[key], false);
+  const before = auditRecovery(f.store);
+  assert.equal(f.ack(dispatch, response, requestId).duplicate, true);
+  assert.deepEqual(f.ack(dispatch, response, requestId).receipt, result.receipt);
+  assert.deepEqual(auditRecovery(f.store), before);
+  assert.throws(() => f.ack(dispatch, response), { code: "conflicting_reply_update_acknowledgment" });
+  f.observe(); assert.deepEqual(f.updates()[0].acknowledgment, update.acknowledgment);
+  assert.equal(f.updates()[0].observation.updateOutcome, "unproven", "readback never claims causation");
+  assert.equal(f.updates()[0].revision, 4);
+  assert.equal(f.ack(dispatch, response, requestId).receipt.update.revision, 3, "exact replay returns the original receipt");
+  auditRecovery(f.store);
+});
+
+test("unknown responses and GET matches never manufacture a write acknowledgment", t => {
+  const f = setup(t); f.save("Edited"); f.apply(f.reserve()); const dispatch = f.command("dispatch"); f.apply(dispatch);
+  const before = auditRecovery(f.store), response = { ...f.response(), method: "PATCH", idType: "immutable" };
+  for (const value of [null, f.response(), { ...response, method: "GET" }, ...[201, 204, 429, 503].map(status => ({ ...response, status }))]) {
+    const result = f.ack(dispatch, value); assert.equal(result.recorded, false); assert.equal(result.canRetryUpdate, false);
+    assert.equal(result.update.status, "update_unconfirmed");
+  }
+  for (const [value, code] of [
+    [{ ...response, connection: { ...response.connection, accountId: "different-account" } }, "email_reply_scope_changed"],
+    [{ ...response, idType: "mutable" }, "email_reply_scope_changed"],
+    [{ ...response, message: { ...response.message, id: "different-draft" } }, "email_reply_identity_changed"]
+  ]) assert.throws(() => f.ack(dispatch, value), { code });
+  assert.throws(() => f.ack(dispatch, { ...response, message: { ...response.message, changeKey: "" } }));
+  assert.deepEqual(auditRecovery(f.store), before);
+});
+
+test("only the trusted driver can bind acknowledgment to an earlier dispatch in this account", t => {
+  const f = setup(t); f.save("Edited"); f.apply(f.reserve()); const dispatch = f.command("dispatch");
+  assert.throws(() => f.ack(dispatch), { code: "conflicting_reply_update_acknowledgment" });
+  f.apply(dispatch); const before = auditRecovery(f.store);
+  assert.throws(() => f.ack({ ...dispatch, requestId: "missing-dispatch" }), { code: "conflicting_reply_update_acknowledgment" });
+  assert.throws(() => f.ack({ ...dispatch, requestId: dispatch.updateId }), { code: "conflicting_reply_update_acknowledgment" });
+  const p = f.updates()[0].proposal, request = { action: "reply.update.acknowledged", requestId: randomUUID(),
+    sourceId: f.args.sourceId, attemptId: f.args.attemptId, updateId: dispatch.updateId, dispatchRequestId: dispatch.requestId,
+    updateVersion: p.updateVersion, providerDraftId: p.providerDraftId, providerRevision: "write-version" };
+  assert.throws(() => f.store.inbox.apply(f.args.token, request, f.args.binding), { code: "reply_driver_required" });
+  assert.throws(() => f.apply({ ...request, expectedRevision: 1 }), { code: "invalid_reply_update" });
+  assert.throws(() => f.apply({ ...request, updateVersion: "f".repeat(64) }), { code: "conflicting_reply_update_acknowledgment" });
+  assert.throws(() => f.store.readTransaction(() => f.apply(request)), /read-only/);
+  assert.deepEqual(auditRecovery(f.store), before);
+});
+
+test("acknowledgment remains recordable at capacity after disconnection, but never after session revocation", t => {
+  const f = setup(t); f.save("Edited"); f.apply(f.reserve()); const dispatch = f.command("dispatch"); f.apply(dispatch);
+  f.store.email.apply(f.args.token, { action: "connection.disconnect", requestId: "disconnect-for-ack",
+    connectionId: f.raw.connection.id, expectedRevision: 1 }, f.args.binding);
+  const prepare = f.store.db.prepare.bind(f.store.db);
+  f.store.db.prepare = sql => sql === "SELECT count(*) n FROM private_inbox_commands WHERE account_id=?"
+    ? { get: () => ({ n: inboxLimits.commands }) } : prepare(sql);
+  assert.equal(f.ack(dispatch).recorded, true); f.store.db.prepare = prepare;
+  auditRecovery(f.store);
+  f.store.logoutAccountSession(f.args.token, f.store.authenticateAccountSession(f.args.token, null, f.args.binding).sessionRevision);
+  assert.throws(() => f.ack(dispatch));
+});
+
+test("negotiated acknowledgment stays read-only and preserves the legacy comparison vocabulary", t => {
+  const f = setup(t); f.save("Edited"); f.apply(f.reserve()); const dispatch = f.command("dispatch"); f.apply(dispatch); f.ack(dispatch);
+  const read = view => f.store.inbox.replyReviewContext(f.args.token, f.args.sourceId, f.args.binding, { view });
+  const v1 = read("reply-review-v1"), v2 = read("reply-review-v2"), v3 = read("reply-review-v3");
+  assert.equal(v1.comparison, undefined); assert.equal(v2.comparison.updateStatus, "update_unconfirmed");
+  assert.equal(v3.comparison.updateStatus, "update_acknowledged"); assert.equal(v3.attempt.canReview, false);
+  assert.doesNotMatch(JSON.stringify(v3), /dispatchRequestId|providerRevision|providerDraftId|updateVersion/);
+  assert.throws(() => f.apply(f.command("cancel")), { code: "reply_update_started" });
+  assert.throws(() => f.apply(f.reserve()), { code: "reply_update_unresolved" });
+  auditRecovery(f.store);
+});
+
+test("acknowledgment rollback and exact replay reject rewritten receipt history", t => {
+  const f = setup(t); f.save("Edited"); f.apply(f.reserve()); const dispatch = f.command("dispatch"); f.apply(dispatch);
+  const before = auditRecovery(f.store);
+  f.store.db.exec("CREATE TRIGGER test_ack_failure BEFORE INSERT ON private_inbox_commands BEGIN SELECT RAISE(ABORT,'fixture ack failure'); END");
+  assert.throws(() => f.ack(dispatch), /fixture ack failure/);
+  f.store.db.exec("DROP TRIGGER test_ack_failure"); assert.deepEqual(auditRecovery(f.store), before);
+  const result = f.ack(dispatch), row = f.store.db.prepare("SELECT sequence,receipt_json FROM private_inbox_commands WHERE request_id=?").get(result.receipt.requestId);
+  const receipt = JSON.parse(row.receipt_json); receipt.update.acknowledgment.dispatchRequestId = "rewritten-dispatch";
+  f.store.db.exec("DROP TRIGGER private_inbox_commands_no_update");
+  f.store.db.prepare("UPDATE private_inbox_commands SET receipt_json=? WHERE sequence=?").run(JSON.stringify(receipt), row.sequence);
+  f.store.db.exec("CREATE TRIGGER private_inbox_commands_no_update BEFORE UPDATE ON private_inbox_commands BEGIN SELECT RAISE(ABORT,'inbox receipts are immutable'); END");
+  assert.throws(() => auditRecovery(f.store), /reconciliation/);
+});
 
 test("durable child preserves all three versions and exact retry without changing the parent or local writing", async t => {
   const f = setup(t); f.save("My edited reply 🪷");
@@ -186,11 +289,19 @@ test("update transitions are atomic, read-only calls cannot write, and historica
   assert.throws(() => auditRecovery(f.store), /reconciliation/);
 });
 
-for (const action of ["reserve", "dispatch", "observed"]) test(`independent connections admit one competing child ${action}`, { timeout: 15000 }, async t => {
+for (const action of ["reserve", "dispatch", "observed", "acknowledged"]) test(`independent connections admit one competing child ${action}`, { timeout: 15000 }, async t => {
   const f = setup(t); f.save("Edited");
   if (action !== "reserve") f.apply(f.reserve());
-  if (action === "observed") f.apply(f.command("dispatch"));
-  const commands = [0, 1].map(() => action === "reserve" ? f.reserve() : action === "observed" ? { ...f.command(action), observation: null } : f.command(action));
+  let dispatch;
+  if (["observed", "acknowledged"].includes(action)) { dispatch = f.command("dispatch"); f.apply(dispatch); }
+  const commands = [0, 1].map(() => {
+    if (action === "reserve") return f.reserve();
+    if (action === "observed") return { ...f.command(action), observation: null };
+    if (action !== "acknowledged") return f.command(action);
+    const { expectedRevision, ...request } = f.command(action), p = f.updates()[0].proposal;
+    return { ...request, dispatchRequestId: dispatch.requestId, updateVersion: p.updateVersion,
+      providerDraftId: p.providerDraftId, providerRevision: "competing-ack-version" };
+  });
   const barrier = new SharedArrayBuffer(4), workers = commands.map(command => new Worker(`
     const {parentPort,workerData:d}=require('node:worker_threads');
     import(d.module).then(({RoomStore})=>{ const store=new RoomStore(d.filename);
@@ -210,8 +321,9 @@ for (const action of ["reserve", "dispatch", "observed"]) test(`independent conn
   assert.equal(f.updates().length, 1); auditRecovery(f.store);
 });
 
-test("cold allowlisted runtime recovers child dispatch and evidence without resubmitting", async t => {
+test("cold allowlisted runtime recovers child dispatch, acknowledgment and evidence without resubmitting", async t => {
   const f = setup(t); f.save("Cold reply"); f.apply(f.reserve()); const dispatch = f.command("dispatch"); f.apply(dispatch); f.observe();
+  f.ack(dispatch);
   const before = auditRecovery(f.store), destination = join(f.directory, "update-package");
   createRuntimePackage({ ...candidateRuntimeFixture(fileURLToPath(new URL("../", import.meta.url)), f.directory), destination });
   const { RoomStore: ColdStore } = await import(pathToFileURL(join(destination, "server/store.mjs")));
@@ -239,6 +351,56 @@ test("pre-v23 child namespace collisions refuse migration before touching old ro
   } finally { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); }
 });
 
+test("genuine v23 dispatched child migrates unchanged before a late acknowledgment", async t => {
+  const root = mkdtempSync(join(tmpdir(), "room-ack-migration-")); t.after(() => rmSync(root, { recursive: true, force: true }));
+  const repository = fileURLToPath(new URL("../", import.meta.url)), destination = join(root, "v23");
+  createRuntimePackage({ repository, commit: v23ReplyAcknowledgmentBaseline, destination });
+  const create = await frozenRecoveryFixture(repository, destination, v23ReplyAcknowledgmentBaseline), f = create(join(root, "room.sqlite"));
+  t.after(() => f.store.close());
+  const { prepareGraphReplyUpdate: prepare } = await import(pathToFileURL(join(destination, "server/graph-reply-draft.mjs")));
+  const token = f.owner.token, binding = f.owner.session.sessionBinding, sourceId = f.emailEnvelope.sourceId;
+  const { source, draft } = f.store.inbox.read(token, sourceId, binding), parent = f.store.inbox.replyAttempts(token, sourceId, binding).attempts[0];
+  f.store.inbox.apply(token, { action: "draft.save", requestId: "legacy-update-text", sourceId,
+    sourceRevision: source.revision, expectedRevision: draft.revision, body: "Legacy update in flight" }, binding);
+  const proposal = prepare({ store: f.store, token, binding, sourceId, attemptId: parent.id,
+    expectedRevision: parent.revision, requestId: "legacy-update" });
+  const apply = request => f.store.inbox.reply(token, { sourceId, attemptId: parent.id, ...request }, binding);
+  apply({ action: "reply.update.reserve", requestId: proposal.requestId, expectedRevision: parent.revision, updateVersion: proposal.updateVersion });
+  const dispatch = apply({ action: "reply.update.dispatch", requestId: "legacy-dispatch", updateId: proposal.requestId, expectedRevision: 0 });
+  const history = f.store.db.prepare("SELECT * FROM private_inbox_commands ORDER BY sequence").all();
+  const cached = f.store.db.prepare("UPDATE accounts SET revision=revision WHERE id=?");
+  const current = new RoomStore(f.filename, { now: f.now }); t.after(() => current.close());
+  assert.deepEqual(current.db.prepare("SELECT * FROM private_inbox_commands ORDER BY sequence").all(), history);
+  assert.throws(() => cached.run(f.owner.session.account.id), /project_room_writer_v24|unsupported database writer/);
+  const result = current.inbox.recordReplyUpdateAcknowledgment(token, { sourceId, attemptId: parent.id, updateId: proposal.requestId,
+    dispatchRequestId: dispatch.receipt.requestId, requestId: "legacy-late-ack",
+    response: { status: 200, method: "PATCH", idType: "immutable", connection: proposal.connection,
+      message: { id: proposal.providerDraftId, changeKey: "legacy-write-version" } } }, binding);
+  assert.equal(result.receipt.update.status, "update_acknowledged"); auditRecovery(current);
+});
+
+test("pre-v24 acknowledgment namespace collisions roll back without installing new fences", async t => {
+  const root = mkdtempSync(join(tmpdir(), "room-ack-collision-")); t.after(() => rmSync(root, { recursive: true, force: true }));
+  const repository = fileURLToPath(new URL("../", import.meta.url)), destination = join(root, "v23");
+  createRuntimePackage({ repository, commit: v23ReplyAcknowledgmentBaseline, destination });
+  for (const [request, receipt] of [
+    [{ action: "reply.update.acknowledged" }, {}],
+    [{ action: "draft.save" }, { update: { acknowledgment: null } }],
+    [{ action: "draft.save" }, { update: { status: "update_acknowledged" } }]
+  ]) {
+    const f = (await frozenAcceptanceFixture(repository, destination, v23ReplyAcknowledgmentBaseline))();
+    try {
+      const account = f.store.accountForMember("commons", "owner");
+      f.store.db.prepare("INSERT INTO private_inbox_commands(account_id,request_id,fingerprint,request_json,receipt_json,auth_epoch,at) VALUES(?,?,?,?,?,?,?)")
+        .run(account.id, "collision", "invalid", JSON.stringify(request), JSON.stringify(receipt), 0, 1);
+      const catalog = f.store.db.prepare("SELECT name,sql FROM sqlite_master ORDER BY name").all();
+      assert.throws(() => new RoomStore(join(f.directory, "room.sqlite")), /Pre-v24 reply acknowledgment history/);
+      assert.equal(f.store.db.prepare("PRAGMA user_version").get().user_version, 23);
+      assert.deepEqual(f.store.db.prepare("SELECT name,sql FROM sqlite_master ORDER BY name").all(), catalog);
+    } finally { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); }
+  }
+});
+
 test("HTTP exposes neither update dispatch nor child plans through the existing review projection", async t => {
   const f = setup(t); f.save("Edited"); const request = f.reserve();
   const server = createRoomServer({ store: f.store }); await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -264,4 +426,13 @@ test("HTTP exposes neither update dispatch nor child plans through the existing 
   const beforeRead = auditRecovery(f.store);
   assert.equal(f.store.inbox.replyReviewContext(f.args.token, f.args.sourceId, f.args.binding, { view: "reply-review-v2" }).comparison.updateStatus, "update_unconfirmed");
   assert.deepEqual(auditRecovery(f.store), beforeRead);
+  const dispatch = f.store.db.prepare("SELECT request_id FROM private_inbox_commands WHERE json_extract(request_json,'$.action')='reply.update.dispatch'").get();
+  f.ack({ requestId: dispatch.request_id, updateId: request.requestId });
+  const latest = await fetch(origin + "/api/inbox/sources/" + f.args.sourceId + "/reply-review?view=reply-review-v3", { headers });
+  const v3 = await latest.json(); assert.equal(latest.status, 200);
+  assert.equal(v3.comparison.updateStatus, "update_acknowledged"); assert.equal(v3.attempt.canReview, false);
+  assert.doesNotMatch(JSON.stringify(v3), /dispatchRequestId|providerRevision|providerDraftId|updateVersion/);
+  const ackRequest = JSON.parse(f.store.db.prepare("SELECT request_json FROM private_inbox_commands WHERE json_extract(request_json,'$.action')='reply.update.acknowledged'").get().request_json);
+  const denied = await fetch(origin + "/api/inbox/commands", { method: "POST", headers, body: JSON.stringify(ackRequest) });
+  assert.equal(denied.status, 403);
 });

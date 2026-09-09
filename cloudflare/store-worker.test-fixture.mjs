@@ -271,6 +271,27 @@ export class StoreTestRoom {
       assert.equal(store.inbox.read(email.token, email.sourceId, email.binding).draft.body, 'Edited reply after review 🪷');
       auditRecovery(store); return Response.json({ updateRecovered: true, outcome: 'unproven', canSend: false });
     }
+    if (path === '/update-ack' || path === '/update-ack-resume') {
+      const { email } = await request.json();
+      const update = store.inbox.replyUpdates(email.token, email.sourceId, email.binding).updates[0], p = update.proposal;
+      const requestAck = { sourceId: email.sourceId, attemptId: update.attemptId, updateId: update.id,
+        dispatchRequestId: 'worker-update-dispatch', requestId: 'worker-update-ack',
+        response: { status: 200, method: 'PATCH', idType: 'immutable', connection: p.connection,
+          message: { id: p.providerDraftId, changeKey: 'worker-write-version' } } };
+      const before = auditRecovery(store), parent = store.inbox.replyAttempts(email.token, email.sourceId, email.binding).attempts[0];
+      const result = store.inbox.recordReplyUpdateAcknowledgment(email.token, requestAck, email.binding);
+      assert.equal(result.duplicate, path === '/update-ack-resume');
+      const current = store.inbox.replyUpdates(email.token, email.sourceId, email.binding).updates[0];
+      assert.equal(current.revision, 3); assert.equal(current.status, 'update_acknowledged');
+      assert.deepEqual(current.observation, update.observation);
+      assert.equal(current.acknowledgment.providerRevision, 'worker-write-version');
+      assert.equal(current.canReview, false); assert.equal(current.canRetryUpdate, false); assert.equal(current.canSend, false);
+      assert.deepEqual(store.inbox.replyAttempts(email.token, email.sourceId, email.binding).attempts[0], parent);
+      const after = auditRecovery(store); if (path === '/update-ack-resume') assert.deepEqual(after, before);
+      assert.equal(store.inbox.recordReplyUpdateAcknowledgment(email.token, requestAck, email.binding).duplicate, true);
+      assert.deepEqual(auditRecovery(store), after);
+      return Response.json({ acknowledgmentRecovered: true, reviewed: false, canSend: false });
+    }
     if (path === '/newer-version') {
       store.transaction(() => durableStorage.setVersion(this.db, STORE_SCHEMA_VERSION + 1));
       assert.throws(() => new RoomStore(null, { database: this.db, storagePlatform: durableStorage }), /newer than this service/);

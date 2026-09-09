@@ -6,8 +6,8 @@ const boundedText = (value, max) => typeof value === "string" && value.isWellFor
 const hash = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 function validReplyReview(value, sourceId, view = "reply-review-v1") {
   if (value.view !== view || value.sourceId !== sourceId) return false;
-  if (view === "reply-review-v2" && (value.attempt === null ? value.comparison !== null
-    : !boundedText(value.comparison?.originalBody, 4000) || ![null, "reserved", "update_unconfirmed"].includes(value.comparison?.updateStatus)
+  if (view !== "reply-review-v1" && (value.attempt === null ? value.comparison !== null
+    : !boundedText(value.comparison?.originalBody, 4000) || ![null, "reserved", "update_unconfirmed", ...(view === "reply-review-v3" ? ["update_acknowledged"] : [])].includes(value.comparison?.updateStatus)
       || Object.keys(value.comparison).some(k => !["originalBody", "updateStatus"].includes(k)))) return false;
   const a = value.attempt; if (a === null) return true;
   if (!id(a?.id) || !revision(a.revision) || ![a.sourceRevision, a.draftRevision].every(n => revision(n) && n > 0)
@@ -24,7 +24,7 @@ function validReplyReview(value, sourceId, view = "reply-review-v1") {
   const supported = o?.format === "text" && o.attachmentState === "complete" && o.attachmentCount === 0
     && o.to.length + o.cc.length + o.bcc.length > 0 && !o.differences.some(v => ["draft_state", "thread", "from", "sender", "attachments"].includes(v));
   return (!a.canReview || supported) && (!r?.current || a.canReview) && (a.status !== "draft_reviewed" || r !== null)
-    && (view !== "reply-review-v2" || value.comparison.updateStatus === null || !a.canReview && !r?.current);
+    && (view === "reply-review-v1" || value.comparison.updateStatus === null || !a.canReview && !r?.current);
 }
 function validSource(source, sourceId, accountId) {
   if (source?.id !== sourceId || !revision(source.revision) || !source.revision) return false;
@@ -126,7 +126,7 @@ export class InboxClient {
   }
   sends(sourceId) { return this.request("/sources/" + encodeURIComponent(sourceId) + "/sends", {}, v => validSends(v, sourceId)); }
   replyReview(sourceId) {
-    return this.request("/sources/" + encodeURIComponent(sourceId) + "/reply-review?view=reply-review-v2", {}, v => validReplyReview(v, sourceId, "reply-review-v2"));
+    return this.request("/sources/" + encodeURIComponent(sourceId) + "/reply-review?view=reply-review-v3", {}, v => validReplyReview(v, sourceId, "reply-review-v3"));
   }
   reviewReply(request) {
     const data = structuredClone(request);

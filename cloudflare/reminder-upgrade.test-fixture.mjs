@@ -62,7 +62,7 @@ export class ReminderUpgradeRoom {
       const tables = JSON.parse(this.env.TABLES);
       const rows = () => Object.fromEntries(tables.map(table => [table, sql.exec(`SELECT * FROM ${table}`).toArray()]));
       const before = rows(), store = fresh();
-      assert.equal(marker(), 23); assert.equal(permit(), 0);
+      assert.equal(marker(), 24); assert.equal(permit(), 0);
       assert.deepEqual(rows(), before);
       assert.throws(legacyWrite, /unsupported database writer/);
       assert.equal(sql.exec("SELECT count(*) n FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v7_*'").one().n, 0);
