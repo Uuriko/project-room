@@ -211,8 +211,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const view = url.searchParams.get("view");
         const replySource = /^\/api\/inbox\/sources\/([^/]{1,384})\/reply-review$/.exec(url.pathname);
         if (replySource && req.method === "GET") {
-          if (view !== "reply-review-v1" || [...url.searchParams.keys()].length !== 1) reject(422, "unsupported_inbox_view", "Choose the supported reply review.");
-          return json(res, 200, store.inbox.replyReviewContext(token, pathId(replySource[1]), binding));
+          if (!["reply-review-v1", "reply-review-v2"].includes(view) || [...url.searchParams.keys()].length !== 1) reject(422, "unsupported_inbox_view", "Choose the supported reply review.");
+          return json(res, 200, store.inbox.replyReviewContext(token, pathId(replySource[1]), binding, { view }));
         }
         if (url.pathname === "/api/inbox/review" && req.method === "POST") {
           protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);

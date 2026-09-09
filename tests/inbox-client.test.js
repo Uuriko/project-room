@@ -15,13 +15,15 @@ test("provider review client negotiates a narrow view and validates its content,
   const attempt = { id: "attempt", revision: 3, status: "awaiting_review", sourceRevision: 1, draftRevision: 1, canSend: false, canReview: true,
     observation: { version: "a".repeat(64), from: "me@example.test", sender: "me@example.test", to: ["you@example.test"], cc: [], bcc: [],
       subject: "Reply", body: "A private draft", format: "text", attachmentState: "complete", attachmentCount: 0, differences: [] }, review: null };
-  const response = { contractVersion: 1, viewer, view: "reply-review-v1", sourceId: "mail", attempt };
-  const f = setup(async path => { assert.equal(path, "/api/inbox/sources/mail/reply-review?view=reply-review-v1"); return reply(response); });
+  const response = { contractVersion: 1, viewer, view: "reply-review-v2", sourceId: "mail", attempt, comparison: { originalBody: "Original reply", updateStatus: null } };
+  const f = setup(async path => { assert.equal(path, "/api/inbox/sources/mail/reply-review?view=reply-review-v2"); return reply(response); });
   assert.equal((await f.client.replyReview("mail")).attempt.canReview, true);
   for (const change of [v => v.view = "other", v => v.sourceId = "other", v => v.attempt.canSend = true,
     v => v.attempt.observation.body = "x".repeat(32769), v => v.attempt.observation.format = "html",
     v => v.attempt.observation.attachmentState = "not_loaded", v => v.attempt.observation.differences = ["sender"],
-    v => v.attempt.review = { version: "b".repeat(64), current: true, at: 1 }]) {
+    v => v.attempt.review = { version: "b".repeat(64), current: true, at: 1 },
+    v => delete v.comparison, v => v.comparison.originalBody = "x".repeat(4001), v => v.comparison.updateStatus = "sent",
+    v => v.comparison.canExecute = true, v => v.view = "reply-review-v1", v => v.comparison.updateStatus = "update_unconfirmed"]) {
     const value = structuredClone(response); change(value);
     await assert.rejects(setup(async () => reply(value)).client.replyReview("mail"), { code: "invalid_inbox_response" });
   }

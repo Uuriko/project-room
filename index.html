@@ -113,7 +113,12 @@
       <dialog id="inbox-reply-dialog" class="inbox-share-dialog" aria-labelledby="inbox-reply-title">
         <h2 id="inbox-reply-title">Review sample reply</h2>
         <dl id="inbox-reply-addresses" class="inbox-reply-addresses"></dl>
-        <h3 id="inbox-reply-subject"></h3><pre id="inbox-reply-body"></pre>
+        <h3 id="inbox-reply-subject"></h3>
+        <div id="inbox-reply-versions" class="inbox-reply-versions">
+          <section><h3 id="inbox-reply-mailbox-label" hidden>Mailbox draft</h3><pre id="inbox-reply-body"></pre></section>
+          <section id="inbox-reply-local" hidden><h3>Your draft <span id="inbox-reply-local-state"></span></h3><pre id="inbox-reply-local-body"></pre></section>
+        </div>
+        <details id="inbox-reply-original" hidden><summary>Original draft</summary><pre id="inbox-reply-original-body"></pre></details>
         <p id="inbox-reply-dialog-status" class="form-hint" role="status"></p>
         <div class="inbox-draft-actions"><button id="inbox-reply-close" class="button ghost" type="button">Close</button><button id="inbox-reply-confirm" class="button primary" type="button" disabled>Mark reviewed</button></div>
       </dialog>

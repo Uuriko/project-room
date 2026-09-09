@@ -308,7 +308,8 @@ export class Inbox {
     }
   }
   // Negotiated, account-private projection; no transport plan or provider IDs.
-  replyReviewContext(token, sourceId, binding) {
+  replyReviewContext(token, sourceId, binding, { view = "reply-review-v1" } = {}) {
+    if (!["reply-review-v1", "reply-review-v2"].includes(view)) fail(422, "unsupported_inbox_view", "Choose the supported reply review.");
     return this.store.readTransaction(() => {
       const auth = this.auth(token, binding); this.source(auth.account.id, sourceId);
       const prior = [...this.replyHistory(auth.account.id, sourceId).values()].find(value => value.status !== "cancelled");
@@ -325,7 +326,12 @@ export class Inbox {
           review: prior.review ? { version: prior.review.version, at: prior.review.at,
             current: current && prior.review.authEpoch === auth.account.authEpoch } : null };
       }
-      return { contractVersion: 1, view: "reply-review-v1", viewer: viewer(auth), sourceId, attempt };
+      const value = { contractVersion: 1, view, viewer: viewer(auth), sourceId, attempt };
+      if (view === "reply-review-v2") {
+        const update = prior && [...this.replyUpdateHistory(auth.account.id, sourceId).values()].find(u => u.attemptId === prior.id && u.status !== "cancelled");
+        value.comparison = prior ? { originalBody: prior.plan.expected.body, updateStatus: update?.status ?? null } : null;
+      }
+      return value;
     });
   }
   // Narrow human acknowledgment boundary. Never expose provider/dispatch writes.

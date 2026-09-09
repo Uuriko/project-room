@@ -13,6 +13,8 @@ import { createInboxSandbox } from "./inbox-sandbox.mjs";
 import { emailContractFixture } from "./email-contract-fixture.mjs";
 import { normalizeGraphEmail } from "../server/graph-email.mjs";
 import { seedRecordedReply } from "./reply-review-fixture.mjs";
+import { prepareGraphReplyUpdate } from "../server/graph-reply-draft.mjs";
+import { auditRecovery } from "../server/recovery.mjs";
 
 function seedEmail(f) {
   const raw = emailContractFixture(); raw.connection.accountId = f.store.accountForMember("commons", "owner").id;
@@ -79,6 +81,100 @@ async function reviewFixture(t, mobile = false) {
   await f.inbox(); await f.pick(sourceId); await f.page.locator("#inbox-reply-open").waitFor();
   return { ...f, mail, sourceId, recorded: provider };
 }
+
+for (const mobile of [false, true]) test(`reply comparison ${mobile ? "mobile" : "desktop"}: three versions, unsaved writing and no implicit changes`, { timeout: 35000 }, async t => {
+  const f = await reviewFixture(t, mobile), p = f.page;
+  await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-body").filter({ hasText: f.recorded.plan.expected.body }).waitFor();
+  assert.equal(await p.locator("#inbox-reply-local").isVisible(), false);
+  assert.equal(await p.locator("#inbox-reply-original").isVisible(), false); await p.locator("#inbox-reply-close").click();
+  f.recorded.observe({ message: { cc: [{ name: "Reviewer", address: "reviewer@example.test" }], subject: "A shared first step" },
+    body: { format: "text", content: "The mailbox version.\nSomeone suggested meeting on Friday." } });
+  const local = "My unsaved alternative.\nLet’s pick one small thing to build together.\n\n<em>Keep this as text.</em>";
+  await p.locator("#inbox-draft").fill(local); const before = auditRecovery(f.store);
+  await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-local-body").filter({ hasText: "My unsaved alternative" }).waitFor();
+  assert.equal(await p.locator("#inbox-reply-local-body").textContent(), local);
+  assert.match(await p.locator("#inbox-reply-local-state").textContent(), /unsaved/);
+  assert.match(await p.locator("#inbox-reply-body").textContent(), /mailbox version/);
+  assert.match(await p.locator("#inbox-reply-addresses").textContent(), /reviewer@example.test/);
+  assert.equal(await p.locator("#inbox-reply-confirm").isEnabled(), false);
+  assert.equal(await p.locator("#inbox-reply-local-body em").count(), 0);
+  assert.equal(await p.locator("#inbox-reply-original").evaluate(node => node.open), false);
+  await f.capture("comparison-" + (mobile ? "mobile" : "desktop"));
+  const boxes = await p.locator("#inbox-reply-versions > section").evaluateAll(nodes => nodes.map(n => { const r = n.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width }; }));
+  assert.equal(mobile ? boxes[1].y > boxes[0].y : boxes[1].x > boxes[0].x, true);
+  await p.locator("#inbox-reply-original summary").click();
+  assert.equal(await p.locator("#inbox-reply-original-body").textContent(), f.recorded.plan.expected.body);
+  await f.capture("comparison-original-" + (mobile ? "mobile" : "desktop"));
+  await p.locator("#inbox-reply-close").click();
+  assert.equal(await p.locator("#inbox-draft").inputValue(), local); assert.deepEqual(auditRecovery(f.store), before);
+  assert.equal(await p.locator("#inbox-draft").evaluate(node => node === document.activeElement), true);
+  for (const id of ["inbox-reply-original-body", "inbox-reply-local-body"]) assert.equal(await p.locator("#" + id).textContent(), "");
+  await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-local-body").filter({ hasText: "My unsaved alternative" }).waitFor();
+  assert.equal(await p.locator("#inbox-reply-original").evaluate(node => node.open), false);
+  assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+});
+
+test("reply comparison preserves a captured version when local writing changes, then refreshes on reopen", { timeout: 35000 }, async t => {
+  const f = await reviewFixture(t), p = f.page;
+  await p.locator("#inbox-draft").fill("First local edit"); await p.locator("#inbox-reply-open").click();
+  await p.locator("#inbox-reply-local-body").filter({ hasText: "First local edit" }).waitFor();
+  await p.locator("#inbox-draft").evaluate(node => { node.value = "Newer local edit"; node.dispatchEvent(new Event("input", { bubbles: true })); });
+  await p.locator("#inbox-reply-dialog-status").filter({ hasText: "Reply changed" }).waitFor();
+  assert.equal(await p.locator("#inbox-reply-local-body").textContent(), "First local edit");
+  assert.equal(await p.locator("#inbox-reply-confirm").isEnabled(), false);
+  await p.locator("#inbox-reply-close").click(); await p.locator("#inbox-reply-open").click();
+  await p.locator("#inbox-reply-local-body").filter({ hasText: "Newer local edit" }).waitFor();
+  for (let n = 0; n < 3; n++) {
+    await p.evaluate(() => { document.getElementById("inbox-reply-close").click(); document.getElementById("inbox-reply-open").click(); });
+    await p.locator("#inbox-reply-local-body").filter({ hasText: "Newer local edit" }).waitFor();
+  }
+});
+
+test("reply comparison clears already visible original and unsaved text when another tab signs out", { timeout: 35000 }, async t => {
+  const f = await reviewFixture(t), p = f.page;
+  await p.locator("#inbox-draft").fill("Only this account's unsaved writing"); await p.locator("#inbox-reply-open").click();
+  await p.locator("#inbox-reply-local-body").filter({ hasText: "Only this account" }).waitFor();
+  await p.locator("#inbox-reply-original summary").click();
+  assert.equal(await p.locator("#inbox-reply-original-body").textContent(), f.recorded.plan.expected.body);
+  const other = await p.context().newPage(); await other.goto(f.origin + "/?room=commons");
+  await other.locator("#main").waitFor(); await other.locator("#signout-button").click(); await p.locator("#auth-panel").waitFor();
+  assert.equal(await p.locator("#inbox-reply-dialog").isVisible(), false);
+  for (const id of ["inbox-reply-local-body", "inbox-reply-original-body", "inbox-reply-body"])
+    assert.equal(await p.locator("#" + id).textContent(), "");
+});
+
+test("reply comparison handles empty and long mobile drafts without changing saved text", { timeout: 35000 }, async t => {
+  const f = await reviewFixture(t, true), p = f.page, before = auditRecovery(f.store);
+  for (const local of ["", "A long unbroken word: " + "界🪷".repeat(800)]) {
+    await p.locator("#inbox-draft").fill(local); await p.locator("#inbox-reply-open").click();
+    await p.locator("#inbox-reply-local").waitFor();
+    assert.equal(await p.locator("#inbox-reply-local-body").textContent(), local || "(Empty draft)");
+    assert.equal(await p.locator("#inbox-reply-confirm").isVisible(), false);
+    assert.equal(await p.locator("#inbox-reply-dialog").evaluate(node => node.scrollWidth <= node.clientWidth), true);
+    await p.locator("#inbox-reply-close").click(); assert.equal(await p.locator("#inbox-draft").inputValue(), local);
+  }
+  assert.deepEqual(auditRecovery(f.store), before);
+});
+
+test("reply comparison shows pending update uncertainty without enabling review or repeating the update", { timeout: 35000 }, async t => {
+  const f = await reviewFixture(t), p = f.page, token = f.slot.token, binding = f.session.sessionBinding;
+  await p.locator("#inbox-draft").fill("Proposed mailbox update"); await p.locator("#inbox-save").click();
+  await p.getByText("Saved · only you", { exact: true }).waitFor();
+  const proposal = prepareGraphReplyUpdate({ store: f.store, token, binding, sourceId: f.sourceId,
+    attemptId: f.recorded.plan.requestId, expectedRevision: 3, requestId: "comparison-update" });
+  const apply = request => f.store.inbox.reply(token, { sourceId: f.sourceId, attemptId: f.recorded.plan.requestId, ...request }, binding);
+  apply({ action: "reply.update.reserve", requestId: proposal.requestId, expectedRevision: 3, updateVersion: proposal.updateVersion });
+  await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-dialog-status").filter({ hasText: "Update not started" }).waitFor();
+  assert.equal(await p.locator("#inbox-reply-confirm").isVisible(), false); await p.locator("#inbox-reply-close").click();
+  apply({ action: "reply.update.dispatch", requestId: "comparison-dispatch", updateId: proposal.requestId, expectedRevision: 0 });
+  const before = auditRecovery(f.store);
+  await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-dialog-status").filter({ hasText: "Update unconfirmed" }).waitFor();
+  assert.equal(await p.locator("#inbox-reply-confirm").isVisible(), false); await f.capture("comparison-unknown");
+  await p.locator("#inbox-reply-close").click(); await p.reload(); await p.locator("#inbox-reply-open").click();
+  await p.locator("#inbox-reply-dialog-status").filter({ hasText: "Update unconfirmed" }).waitFor();
+  assert.deepEqual(auditRecovery(f.store), before);
+});
+
 for (const mobile of [false, true]) test(`provider draft review ${mobile ? "mobile" : "desktop"}: exact visible content, deliberate acknowledgment, reload and unchanged local draft`, { timeout: 35000 }, async t => {
   const f = await reviewFixture(t, mobile), p = f.page, before = f.store.inbox.read(f.slot.token, f.sourceId, f.session.sessionBinding).draft;
   f.recorded.observe({ message: { cc: [{ name: "CC", address: "cc@example.test" }], bcc: [{ name: "BCC", address: "bcc@example.test" }] },
@@ -137,7 +233,7 @@ test("provider preview cannot repopulate private content after another tab chang
   const f = await reviewFixture(t), p = f.page;
   let release, reached; const held = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { reached = resolve; });
   t.after(() => release());
-  await p.route("**/reply-review?view=reply-review-v1", async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); });
+  await p.route("**/reply-review?view=reply-review-v2", async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); });
   await p.locator("#inbox-reply-open").click(); await started;
   const other = await p.context().newPage(); await other.goto(f.origin + "/?room=commons");
   await other.locator("#main").waitFor(); await other.locator("#signout-button").click(); await other.locator("#auth-panel").waitFor();
@@ -146,6 +242,7 @@ test("provider preview cannot repopulate private content after another tab chang
   await other.locator("#main").waitFor(); await p.locator("#auth-panel").waitFor(); release(); await p.waitForLoadState("networkidle");
   assert.equal(await p.locator("#inbox-reply-dialog").isVisible(), false);
   assert.equal(await p.locator("#inbox-reply-body").textContent(), ""); assert.equal(await p.locator("#inbox-reply-addresses").textContent(), "");
+  for (const id of ["inbox-reply-original-body", "inbox-reply-local-body"]) assert.equal(await p.locator("#" + id).textContent(), "");
   assert.equal(await p.evaluate(() => sessionStorage.getItem("project-room:pending-reply-review:v1")), null);
 });
 test("two browser tabs reviewing the same version record one acknowledgment", { timeout: 35000 }, async t => {

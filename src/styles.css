@@ -620,6 +620,17 @@ summary { overflow-wrap: anywhere; }
 .inbox-send-panel > div { margin-left: auto; }
 .inbox-send-panel p:empty { display: none; }
 #inbox-send-body, #inbox-reply-body { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; }
+#inbox-reply-local-body, #inbox-reply-original-body { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; }
+#inbox-reply-dialog.comparing { width: min(58rem, calc(100vw - 2rem)); }
+.inbox-reply-versions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.5rem; }
+.inbox-reply-versions h3 { margin: 0; font-size: .85rem; color: var(--muted); }
+#inbox-reply-local-state { font-weight: 400; }
+#inbox-reply-original { margin: 1rem 0; color: var(--muted); }
+#inbox-reply-original pre { color: var(--text); }
+@media (min-width: 700px) {
+  .comparing .inbox-reply-versions { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .comparing #inbox-reply-local { border-left: 1px solid var(--line-soft); padding-left: 1.5rem; }
+}
 .inbox-reply-addresses { display: grid; gap: .4rem; font-size: .85rem; }
 .inbox-reply-addresses > div { display: grid; grid-template-columns: 3.5rem minmax(0, 1fr); gap: .6rem; }
 .inbox-reply-addresses dt { color: var(--muted); }

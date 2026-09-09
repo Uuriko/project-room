@@ -255,4 +255,13 @@ test("HTTP exposes neither update dispatch nor child plans through the existing 
   const response = await fetch(origin + "/api/inbox/sources/" + f.args.sourceId + "/reply-review?view=reply-review-v1", { headers });
   const context = await response.json(); assert.equal(response.status, 200); assert.equal(context.attempt.canReview, false);
   assert.doesNotMatch(JSON.stringify(context), /updateVersion|providerDraftId|conditionalWrite|https:\/\/graph/);
+  assert.equal(context.comparison, undefined, "v1 never acquires additional history");
+  const compare = await fetch(origin + "/api/inbox/sources/" + f.args.sourceId + "/reply-review?view=reply-review-v2", { headers });
+  const v2 = await compare.json(); assert.equal(compare.status, 200); assert.equal(compare.headers.get("cache-control"), "no-store");
+  assert.deepEqual(v2.comparison, { originalBody: f.seed.plan.expected.body, updateStatus: "reserved" });
+  assert.doesNotMatch(JSON.stringify(v2), /updateVersion|providerDraftId|conditionalWrite|https:\/\/graph/);
+  f.apply(f.command("dispatch"));
+  const beforeRead = auditRecovery(f.store);
+  assert.equal(f.store.inbox.replyReviewContext(f.args.token, f.args.sourceId, f.args.binding, { view: "reply-review-v2" }).comparison.updateStatus, "update_unconfirmed");
+  assert.deepEqual(auditRecovery(f.store), beforeRead);
 });
