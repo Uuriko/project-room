@@ -2,7 +2,7 @@
 
 ## Implemented scope
 
-Schema 18 adds an account-owned, fixture-backed email import journal, connection state and folder checkpoints. Imported message versions and private drafts reuse the existing Inbox tables. This is not a live provider connection: configuration is explicitly `mode: fixture`, has no credentials or sending capability, and is not exposed as a public HTTP setup/import endpoint.
+Schema 18 introduced an account-owned, fixture-backed email import journal, connection state and folder checkpoints. Schema 19 adds a per-message revision guard and retires older writers that do not enforce it. Imported message versions and private drafts reuse the existing Inbox tables. This is not a live provider connection: configuration is explicitly `mode: fixture`, has no credentials or sending capability, and is not exposed as a public HTTP setup/import endpoint.
 
 The service entry is `store.email`; `server/email-import.mjs` owns its transitions. Ordinary Inbox commands cannot record `source.import`, change a source's channel origin or send imported email through the synthetic transport. The existing browser list remains synthetic-only until its email detail and sharing UI are qualified. Authorized service callers can explicitly request email list metadata and read a stored source using the same private account boundary.
 
@@ -20,6 +20,8 @@ Each page includes a stable request ID, expected folder revision, expected curso
 
 Initial connection and reconnect require a full scan. Full-scan membership is accumulated separately while the old completed membership view remains available; only the completed scan replaces that folder's membership set. Explicit reset supports an expired cursor. Subsequent delta pages apply folder membership changes without inventing a mailbox-wide deletion. No absence, folder move or completed-scan omission deletes a source or draft.
 
+Every new hydrated observation must include `expectedSourceRevision`, captured before fetching that message. Folder checkpoints alone cannot stop a late response from folder A overwriting a newer observation already imported through folder B. A source conflict rolls back the whole page. The driver must fetch the message again, not merely update the revision on an old payload. Historical schema-18 requests remain replayable and can retrieve their exact existing receipts under current authority; new requests without the source revision are rejected.
+
 Folder cursors remain private opaque data and this code never fetches them. A future driver must validate origin/path before using credentials, hydrate incomplete provider observations, coalesce repeated invalidations, verify attachment/body version consistency, and choose reset only after an established provider outcome. A folder scan does not establish coverage of every mailbox folder.
 
 Limits currently bound a page to 50 observations, a folder membership set to 1,000 IDs, account connections to 20, request data to the envelope's 2 MiB input bound, and each account's import journal to 5,000 commands/16 MiB of request bytes. Existing Inbox source/version/draft limits also apply. Exact retries and disconnect remain available at the import-journal limit. These are fixture-pilot bounds, not a large-mailbox performance qualification or final retention policy.
@@ -28,7 +30,7 @@ Limits currently bound a page to 50 observations, a folder membership set to 1,0
 
 The same deterministic transition produces live mutations and replay expectations. Opening a store verifies the import journal against connection/folder projections and exact Inbox import receipts. Orphan importer writes and unjournaled projection changes require reconciliation. The existing Inbox verifier independently checks message versions, drafts and their receipts. Offline recovery compares all 27 application tables and treats changed email connection records as access differences; it never authorizes reopening on its own.
 
-Schema-18 write guards cover old and new tables. Genuine older packages, including the previous schema-17 runtime, are used in upgrade tests. A failed migration must leave their catalog/data unchanged, and successful upgrade must retire their already-open writers. Both Node and local Workers retain the shared service semantics. Runtime packaging includes the new envelope/import dependencies so a cold recovery does not depend on checkout files.
+Schema-19 write guards cover old and new tables. Genuine older packages, including populated schema-18 email data, are used in upgrade tests. A failed migration must leave their catalog/data unchanged, and successful upgrade must retire their already-open writers. Both Node and local Workers retain the shared service semantics. Runtime packaging includes the new envelope/import dependencies so a cold recovery does not depend on checkout files.
 
 ## Next: make imported email useful in the same Inbox
 

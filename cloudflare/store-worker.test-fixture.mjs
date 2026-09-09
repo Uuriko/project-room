@@ -128,14 +128,15 @@ export class StoreTestRoom {
       const envelope = normalizeGraphEmail(mail.connection, mail.message, mail.options);
       const mailPage = { action: 'page.apply', requestId: 'mail-first-page', connectionId: mail.connection.id, connectionRevision: 1,
         folderId: mail.message.parentFolderId, expectedRevision: 0, expectedCursor: null, cursor: 'fixture-next-page', complete: false,
-        reset: true, observations: [{ kind: 'message', envelope }] };
+        reset: true, observations: [{ kind: 'message', expectedSourceRevision: 0, envelope }] };
       store.email.apply(mailToken, mailPage, mailBinding);
       store.inbox.apply(mailToken, { action: 'draft.save', requestId: 'mail-private-draft', sourceId: envelope.sourceId,
         expectedRevision: 0, sourceRevision: 1, body: 'Recover this private email draft' }, mailBinding);
       const checkpoint = auditRecovery(store).dataSha256;
       store.db.exec("CREATE TRIGGER mail_test_failure BEFORE INSERT ON private_email_commands BEGIN SELECT RAISE(ABORT,'fixture mail failure'); END");
       assert.throws(() => store.email.apply(mailToken, { ...mailPage, requestId: 'mail-failed-page', expectedRevision: 1,
-        expectedCursor: mailPage.cursor, cursor: 'fixture-final', complete: true, reset: false }, mailBinding), /fixture mail failure/);
+        expectedCursor: mailPage.cursor, cursor: 'fixture-final', complete: true, reset: false,
+        observations: [{ kind: 'message', expectedSourceRevision: 1, envelope }] }, mailBinding), /fixture mail failure/);
       store.db.exec('DROP TRIGGER mail_test_failure');
       assert.equal(auditRecovery(store).dataSha256, checkpoint);
       return Response.json({ guests, credentials, sequence: store.room('commons').sequence, eventId: receipt.event.id, owner, nativeBody, nativeCommand, nativeSaved,

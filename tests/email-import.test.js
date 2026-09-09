@@ -28,10 +28,11 @@ function fixture(t) {
   f.envelope = () => normalizeGraphEmail(f.raw.connection, f.raw.message, f.raw.options);
   f.state = () => f.store.email.state(f.auth.token, f.raw.connection.id, f.raw.message.parentFolderId, f.auth.sessionBinding);
   f.page = (extra = {}) => {
-    const state = f.state();
+    const state = f.state(), envelope = f.envelope();
+    const head = f.store.db.prepare("SELECT revision FROM private_inbox_sources WHERE account_id=? AND id=?").get(f.account.id, envelope.sourceId);
     return { action: "page.apply", requestId: randomUUID(), connectionId: f.raw.connection.id, connectionRevision: f.raw.connection.revision,
       folderId: f.raw.message.parentFolderId, expectedRevision: state.folder?.revision ?? 0, expectedCursor: state.expectedCursor,
-      cursor: randomUUID(), reset: state.needsReset, complete: true, observations: [{ kind: "message", envelope: f.envelope() }], ...extra };
+      cursor: randomUUID(), reset: state.needsReset, complete: true, observations: [{ kind: "message", expectedSourceRevision: head?.revision ?? 0, envelope }], ...extra };
   };
   f.read = () => f.store.inbox.read(f.auth.token, f.envelope().sourceId, f.auth.sessionBinding);
   f.draft = body => f.store.inbox.apply(f.auth.token, { action: "draft.save", requestId: randomUUID(), sourceId: f.envelope().sourceId,
@@ -47,7 +48,7 @@ test("fixture email import reuses private Inbox storage without changing rooms o
   assert.equal(f.store.inbox.list(f.auth.token, f.auth.sessionBinding, { includeEmail: true }).sources[0].subject, f.raw.message.subject);
   assert.deepEqual(f.store.room("commons"), before);
   assert.deepEqual(f.store.email.verify(), { connections: 1, folders: 1, sources: 1 });
-  assert.equal(auditRecovery(f.store).schemaVersion, 18);
+  assert.equal(auditRecovery(f.store).schemaVersion, 19);
 });
 test("exact page retries and unchanged observations do not create another source revision", t => {
   const f = fixture(t); f.configure(); const request = f.page(), original = f.apply(request);
@@ -125,6 +126,20 @@ test("a message moved between folders keeps one source identity and a stale priv
   assert.deepEqual(f.store.email.state(f.auth.token, f.raw.connection.id, originalFolder, f.auth.sessionBinding).folder.members, []);
   assert.equal(f.store.email.verify().sources, 1);
 });
+test("a delayed observation from an old folder cannot overwrite a newer imported message", t => {
+  const f = fixture(t); f.configure(); f.apply(f.page());
+  const late = f.page(), oldFolder = f.raw.message.parentFolderId;
+  f.raw.message.parentFolderId = "new-folder";
+  f.raw.message.body.content = "A newer provider observation";
+  f.raw.message.changeKey = "new-provider-version";
+  f.raw.options.attachmentObservation.messageRevision = f.raw.message.changeKey;
+  f.apply(f.page());
+  const before = auditRecovery(f.store), oldState = f.store.email.state(f.auth.token, f.raw.connection.id, oldFolder, f.auth.sessionBinding);
+  assert.throws(() => f.apply(late), { code: "stale_email_source" });
+  assert.equal(f.read().source.envelope.body.content, "A newer provider observation");
+  assert.deepEqual(f.store.email.state(f.auth.token, f.raw.connection.id, oldFolder, f.auth.sessionBinding), oldState);
+  assert.deepEqual(auditRecovery(f.store), before);
+});
 test("account bindings, epoch changes and room-agent credentials cannot import another mailbox", t => {
   const f = fixture(t); f.configure(); const request = f.page();
   assert.throws(() => f.store.email.apply(f.keys.producer, request, f.auth.sessionBinding), { status: 401 });
@@ -162,7 +177,8 @@ test("ordinary Inbox commands cannot import, overwrite channel origin, send or s
 });
 test("bounded malformed or out-of-scope observations roll back without consuming sync progress", t => {
   const f = fixture(t); f.configure(); const before = auditRecovery(f.store), envelope = f.envelope();
-  for (const changes of [{ observations: [{ kind: "message", envelope }, { kind: "message", envelope }] },
+  for (const changes of [{ observations: [{ kind: "message", envelope }] },
+    { observations: [{ kind: "message", envelope, expectedSourceRevision: 0 }, { kind: "message", envelope, expectedSourceRevision: 0 }] },
     { folderId: "wrong-folder" }, { reset: false }, { expectedCursor: "not-current" }, { observations: new Array(2) }]) {
     assert.throws(() => f.apply(f.page(changes))); assert.deepEqual(auditRecovery(f.store), before);
   }

@@ -141,7 +141,7 @@ export function createRecoveryFixture(filename) {
     attachments: { state: "complete", hint: false, items: [] } });
   const emailPage = { action: "page.apply", requestId: "recovery-email-page", connectionId: emailProfile.id, connectionRevision: 1,
     folderId: "fixture-inbox", expectedRevision: 0, expectedCursor: null, cursor: "fixture-next-cursor", complete: false, reset: true,
-    observations: [{ kind: "message", envelope: emailEnvelope }] };
+    observations: [{ kind: "message", expectedSourceRevision: 0, envelope: emailEnvelope }] };
   store.email.apply(owner.token, emailPage, owner.session.sessionBinding);
   store.inbox.apply(owner.token, { action: "draft.save", requestId: "recovery-email-draft", sourceId: emailEnvelope.sourceId,
     expectedRevision: 0, sourceRevision: 1, body: "Keep this imported-email draft" }, owner.session.sessionBinding);

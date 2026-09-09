@@ -25,7 +25,7 @@ export const emailImportSchema = `
   CREATE TRIGGER private_email_commands_no_update BEFORE UPDATE ON private_email_commands BEGIN SELECT RAISE(ABORT,'email receipts are immutable'); END;
   CREATE TRIGGER private_email_commands_no_delete BEFORE DELETE ON private_email_commands BEGIN SELECT RAISE(ABORT,'email receipts are retained'); END;
 `;
-function validate(request) {
+function validate(request, legacy = false) {
   emailInput(request);
   const common = ["action", "requestId", "connectionId", "expectedRevision"], fields = {
     "connection.configure": [...common, "profile"], "connection.disconnect": common,
@@ -43,7 +43,9 @@ function validate(request) {
     require(Array.isArray(request.observations) && request.observations.length <= 50);
     const ids = new Set();
     for (const observation of request.observations) {
-      require(exactEmailFields(observation, observation?.kind === "message" ? ["kind", "envelope"] : ["kind", "messageId"]));
+      const legacySource = legacy && observation?.kind === "message" && !Object.hasOwn(observation, "expectedSourceRevision");
+      require(exactEmailFields(observation, observation?.kind === "message" ? legacySource ? ["kind", "envelope"] : ["kind", "envelope", "expectedSourceRevision"] : ["kind", "messageId"]));
+      if (observation.kind === "message" && !legacySource) require(revision(observation.expectedSourceRevision));
       require(["message", "absent"].includes(observation.kind));
       const id = observation.kind === "message" ? readEmailEnvelope(observation.envelope).message.id : emailOpaqueId(observation.messageId);
       require(!ids.has(id), "ambiguous_email_observation"); ids.add(id);
@@ -55,8 +57,8 @@ function currentConnection(connection, request, authEpoch) {
     fail("email_connection_changed", "Email connection changed. Reconnect before importing.");
 }
 // Same deterministic transition drives live persistence and independent journal replay.
-function plan(request, { accountId, authEpoch, at, connection, folder, source, mailbox, connectionCount }) {
-  validate(request); require(revision(authEpoch) && revision(at));
+function plan(request, { accountId, authEpoch, at, connection, folder, source, mailbox, connectionCount }, legacy = false) {
+  validate(request, legacy); require(revision(authEpoch) && revision(at));
   const receipt = { requestId: request.requestId, action: request.action, connectionId: request.connectionId };
   if (request.action.startsWith("connection.")) {
     if ((connection?.profile.revision ?? 0) !== request.expectedRevision) fail("stale_email_connection", "Connection changed. Refresh before editing.");
@@ -88,6 +90,8 @@ function plan(request, { accountId, authEpoch, at, connection, folder, source, m
     const envelope = observation.envelope;
     require(same(envelope.connection, connection.profile) && envelope.message.folderId === request.folderId, "email_observation_scope_changed");
     const previous = source(envelope.sourceId);
+    if ((!legacy || Object.hasOwn(observation, "expectedSourceRevision")) && (previous?.revision ?? 0) !== observation.expectedSourceRevision)
+      fail("stale_email_source", "This message changed during import. Fetch it again before retrying.");
     if (previous && (previous.data.adapter !== "email" || previous.data.envelope.connection.id !== request.connectionId))
       fail("email_source_collision", "An existing source has a different origin.");
     const unchanged = previous?.data.envelope.sourceVersion === envelope.sourceVersion;
@@ -127,7 +131,9 @@ export class EmailImport {
   }
   apply(token, request, binding) {
     return this.store.transaction(() => {
-      const auth = this.store.inbox.auth(token, binding), accountId = auth.account.id; validate(request);
+      const auth = this.store.inbox.auth(token, binding), accountId = auth.account.id;
+      // Historical requests may retrieve their receipt, never perform an unfenced write.
+      validate(request, true);
       const connection = this.connection(accountId, request.connectionId);
       if (request.action === "page.apply") currentConnection(connection, request, auth.account.authEpoch);
       const prior = this.db.prepare("SELECT fingerprint,receipt_json FROM private_email_commands WHERE account_id=? AND request_id=?").get(accountId, request.requestId);
@@ -136,6 +142,7 @@ export class EmailImport {
         if (prior.fingerprint !== fingerprint) fail("idempotency_conflict", "Request ID already used for different import content.");
         return { receipt: JSON.parse(prior.receipt_json), duplicate: true };
       }
+      validate(request);
       if (request.action !== "connection.disconnect") {
         const usage = this.db.prepare("SELECT count(*) n, COALESCE(sum(length(CAST(request_json AS BLOB))),0) bytes FROM private_email_commands WHERE account_id=?").get(accountId);
         if (usage.n >= emailImportLimits.commands || usage.bytes + Buffer.byteLength(JSON.stringify(request)) > emailImportLimits.journalBytes)
@@ -180,7 +187,7 @@ export class EmailImport {
         const accountConnections = [...connections.values()].filter(c => c.profile.accountId === row.account_id);
         const output = plan(request, { accountId: row.account_id, authEpoch: row.auth_epoch, at: row.at, connection: connections.get(key), folder: folders.get(folderKey),
           source: id => sources.get(JSON.stringify([row.account_id, id])), connectionCount: accountConnections.length,
-          mailbox: request.profile ? accountConnections.find(c => c.profile.provider === request.profile.provider && c.profile.mailboxId === request.profile.mailboxId)?.profile.id : null });
+          mailbox: request.profile ? accountConnections.find(c => c.profile.provider === request.profile.provider && c.profile.mailboxId === request.profile.mailboxId)?.profile.id : null }, true);
         check(same(output.receipt, JSON.parse(row.receipt_json)));
         if (output.connection) connections.set(key, output.connection);
         if (output.folder) folders.set(folderKey, output.folder);

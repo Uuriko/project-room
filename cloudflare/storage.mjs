@@ -59,13 +59,13 @@ export const durableStorage = {
     if (!db.isTransaction) throw new Error('Writer fence installation requires the migration transaction');
     // Marker-based old guards must be removed before moving the shared marker.
     // Only exact, previously verified historical definitions may be removed.
-    const known = new Map([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17].flatMap(durableFenceDefinitions).map(def => [def.name, def.sql]));
+    const known = new Map([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18].flatMap(durableFenceDefinitions).map(def => [def.name, def.sql]));
     for (const row of db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v*'").all()) {
       if (known.get(row.name) !== row.sql) reconciliation();
       db.exec(`DROP TRIGGER ${row.name}`);
     }
     if (hasPermit(db)) {
-      if (![8, 9, 10, 11, 12, 13, 14, 15, 16, 17].includes(db.migrationSource)) reconciliation();
+      if (![8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18].includes(db.migrationSource)) reconciliation();
       verifyPermit(db, db.migrationSource, db.migrationSource);
       db.exec(`DROP TABLE ${permit}`);
     }
@@ -79,7 +79,7 @@ export const durableStorage = {
     this.setVersion(db, STORE_SCHEMA_VERSION);
   },
   verifyWriterFence(db, version = STORE_SCHEMA_VERSION) {
-    const expected = new Map([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18].filter(v => version < 8 ? v <= version : v === version).flatMap(durableFenceDefinitions).map(def => [def.name, def.sql]));
+    const expected = new Map([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19].filter(v => version < 8 ? v <= version : v === version).flatMap(durableFenceDefinitions).map(def => [def.name, def.sql]));
     for (const row of db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v*'").all()) {
       if (expected.get(row.name) !== row.sql) reconciliation();
     }
