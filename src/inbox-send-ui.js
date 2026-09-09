@@ -186,3 +186,128 @@ export function installInboxSend({ api, ownerKey, reviewChanges }) {
     hasPending: () => [...states.values()].some(s => s.pending || s.busy)
   };
 }
+
+// Exact content acknowledgment only. Provider creation/observation stays outside
+// the browser; pending storage contains operation IDs and versions, never mail.
+export function installInboxReplyReview({ api, ownerKey }) {
+  const $ = id => document.getElementById(id), key = "project-room:pending-reply-review:v1";
+  let storage; try { storage = sessionStorage; } catch {}
+  let sourceId = null, draft = null, data = null, preview = null, pending = null;
+  let generation = 0, readTurn = 0, modalTurn = 0, busy = false, verified = false, note = "";
+  const validPending = r => r?.action === "reply.review" && [r.requestId, r.sourceId, r.attemptId].every(v => typeof v === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(v))
+    && Number.isSafeInteger(r.expectedRevision) && r.expectedRevision >= 0 && typeof r.reviewVersion === "string" && /^[a-f0-9]{64}$/.test(r.reviewVersion);
+  function restore() {
+    if (pending) return;
+    try {
+      const raw = storage?.getItem(key), saved = raw && raw.length <= 1600 ? JSON.parse(raw) : null;
+      if (saved?.owner === ownerKey() && validPending(saved.request)) pending = saved.request;
+    } catch {}
+  }
+  function retain(request) {
+    pending = request;
+    try {
+      if (!storage) return false;
+      request ? storage.setItem(key, JSON.stringify({ owner: ownerKey(), request })) : storage.removeItem(key);
+      return true;
+    } catch { return false; }
+  }
+  const clean = a => a && draft && !draft.dirty && !draft.busy && !draft.pending && !draft.conflict
+    && a.sourceRevision === draft.source.revision && a.draftRevision === draft.base?.revision;
+  const current = a => Boolean(a?.review?.current && clean(a));
+  function render() {
+    const a = data?.attempt, ownPending = pending?.sourceId === sourceId, email = draft?.source.adapter === "email";
+    $("inbox-reply-panel").hidden = !ownerKey() || !email || !a && !ownPending;
+    $("inbox-reply-open").disabled = busy || Boolean(pending && !ownPending);
+    $("inbox-reply-open").textContent = ownPending ? "Check review" : current(a) ? "View reply" : "Review reply";
+    const label = a?.status === "creation_unconfirmed" ? "Sample draft unconfirmed" : a?.status === "reserved" ? "Sample draft not created"
+      : a?.status === "draft_unavailable" ? "Sample draft unavailable" : current(a) ? "Reviewed · not sent" : "Sample draft · not sent";
+    $("inbox-reply-status").textContent = note || (ownPending ? "Review unconfirmed" : label);
+    const matches = verified && preview?.id === a?.id && preview?.revision === a?.revision;
+    $("inbox-reply-confirm").disabled = busy || Boolean(pending) || !matches || !clean(preview) || !preview?.canReview;
+    if ($("inbox-reply-dialog").open && preview && (!matches || !clean(preview)))
+      $("inbox-reply-dialog-status").textContent = "Reply changed or unavailable. Close and review again.";
+  }
+  async function load(id = sourceId) {
+    if (!ownerKey() || id !== sourceId || draft?.source.adapter !== "email") return false;
+    restore(); const owner = ownerKey(), gen = generation, turn = ++readTurn;
+    verified = false; render();
+    try {
+      const value = await api.replyReview(id);
+      if (gen !== generation || turn !== readTurn || owner !== ownerKey() || id !== sourceId) return false;
+      if (data?.attempt && (!value.attempt || value.attempt.id !== data.attempt.id || value.attempt.revision < data.attempt.revision))
+        throw new Error("Reply history changed unexpectedly");
+      data = value; verified = true; note = ""; render(); return true;
+    } catch {
+      if (gen !== generation || turn !== readTurn || owner !== ownerKey() || id !== sourceId) return false;
+      note = "Couldn’t check this reply"; render(); return false;
+    }
+  }
+  function clearPreview() {
+    preview = null;
+    for (const id of ["inbox-reply-addresses", "inbox-reply-subject", "inbox-reply-body", "inbox-reply-dialog-status"]) $(id).replaceChildren();
+    $("inbox-reply-confirm").hidden = true; $("inbox-reply-confirm").disabled = true;
+  }
+  async function open() {
+    if (!ownerKey() || busy) return;
+    if (pending?.sourceId === sourceId) return acknowledge();
+    const turn = ++modalTurn, id = sourceId, owner = ownerKey();
+    clearPreview(); $("inbox-reply-dialog").showModal(); $("inbox-reply-dialog-status").textContent = "Loading…";
+    const loaded = await load(id);
+    if (turn !== modalTurn || id !== sourceId || owner !== ownerKey() || !$("inbox-reply-dialog").open) return;
+    if (!loaded) { $("inbox-reply-dialog-status").textContent = "Couldn’t check this reply. Close and try again."; return; }
+    preview = data.attempt; const o = preview?.observation;
+    if (!o) { $("inbox-reply-dialog-status").textContent = "No confirmed draft preview. Nothing sent."; return; }
+    const rows = [["From", [o.from]], ...(o.sender !== o.from ? [["Sender", [o.sender]]] : []), ["To", o.to], ["CC", o.cc], ["BCC", o.bcc]];
+    $("inbox-reply-addresses").replaceChildren(...rows.filter(([, values]) => values.length).map(([label, values]) => {
+      const row = document.createElement("div"), dt = document.createElement("dt"), dd = document.createElement("dd");
+      dt.textContent = label; dd.textContent = values.join(", "); row.append(dt, dd); return row;
+    }));
+    $("inbox-reply-subject").textContent = o.subject || "(No subject)";
+    $("inbox-reply-body").textContent = o.body ?? "HTML preview unavailable.";
+    $("inbox-reply-confirm").hidden = current(preview) || !preview.canReview;
+    $("inbox-reply-dialog-status").textContent = current(preview) ? "Reviewed · not sent" : preview.canReview && clean(preview)
+      ? "Sample only · nothing will be sent" : "This draft needs a current, supported preview. Nothing sent.";
+    render();
+  }
+  async function acknowledge() {
+    const id = sourceId, owner = ownerKey(), gen = generation, a = preview;
+    if (!owner || busy || pending && pending.sourceId !== id) return;
+    if (!pending && (!verified || !clean(a) || !a?.canReview || a.id !== data?.attempt?.id || a.revision !== data?.attempt?.revision)) return;
+    const request = pending ?? { action: "reply.review", requestId: crypto.randomUUID(), sourceId: id,
+      attemptId: a.id, expectedRevision: a.revision, reviewVersion: a.observation.version };
+    const retained = retain(request); busy = true; render();
+    try {
+      await api.reviewReply(request);
+      if (gen !== generation || owner !== ownerKey()) return;
+      retain(null); note = "";
+    } catch (error) {
+      if (gen !== generation || owner !== ownerKey()) return;
+      if (error.status && error.status < 500) { retain(null); note = "Review not recorded. Open the current reply."; }
+      else note = retained ? "Review unconfirmed. Check review." : "Review unconfirmed. Keep this tab open.";
+    } finally {
+      if (gen === generation && owner === ownerKey()) {
+        busy = false;
+        if (id === sourceId) {
+          const message = note; $("inbox-reply-dialog").close();
+          await load(id); if (gen === generation && owner === ownerKey() && id === sourceId) { note = message; render(); }
+        } else render();
+      }
+    }
+  }
+  $("inbox-reply-open").addEventListener("click", open);
+  $("inbox-reply-confirm").addEventListener("click", acknowledge);
+  $("inbox-reply-close").addEventListener("click", () => $("inbox-reply-dialog").close());
+  $("inbox-reply-dialog").addEventListener("close", () => { modalTurn++; clearPreview(); });
+  return {
+    update(id, value) {
+      if (sourceId !== id) { readTurn++; modalTurn++; data = null; verified = false; note = ""; $("inbox-reply-dialog").close(); clearPreview(); }
+      sourceId = id; draft = value; restore(); render();
+    }, load,
+    reset({ preservePending = false } = {}) {
+      generation++; readTurn++; modalTurn++; sourceId = null; draft = null; data = null; busy = false; verified = false; note = "";
+      if (!preservePending) retain(null); pending = null;
+      $("inbox-reply-dialog").close(); clearPreview(); $("inbox-reply-panel").hidden = true; $("inbox-reply-status").textContent = "";
+    },
+    hasPending: () => Boolean(pending || busy)
+  };
+}

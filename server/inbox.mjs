@@ -6,7 +6,7 @@ import { ServiceError } from "./store.mjs";
 import { isSend, internalSend, validateSend, sendPreview, transitionSend } from "./inbox-outbox.mjs";
 import { readEmailEnvelope, EmailContractError } from "./email-envelope.mjs";
 import { prepareGraphReplyDraft, buildGraphReplyDraft, classifyGraphReplyCreation, normalizeReplyObservation } from "./graph-reply-draft.mjs";
-import { isReplyAttempt, validateReplyAttempt, transitionReplyAttempt } from "./graph-reply-journal.mjs";
+import { isReplyAttempt, validateReplyAttempt, transitionReplyAttempt, replyObservationReviewable } from "./graph-reply-journal.mjs";
 
 const transportAuthority = Symbol("private inbox transport");
 const importAuthority = Symbol("private email importer");
@@ -278,16 +278,48 @@ export class Inbox {
       const auth = this.auth(token, binding); this.source(auth.account.id, sourceId);
       const attempts = [...this.replyHistory(auth.account.id, sourceId).values()].map(attempt => {
         if (!attempt.review) return attempt;
-        let reviewCurrent = false;
-        try {
-          const plan = prepareGraphReplyDraft({ store: this.store, token, binding, sourceId,
-            requestId: attempt.plan.requestId, mode: attempt.plan.mode });
-          reviewCurrent = plan.planVersion === attempt.plan.planVersion && attempt.review.authEpoch === auth.account.authEpoch;
-        } catch (error) { if (!(error instanceof ServiceError) && !(error instanceof EmailContractError)) throw error; }
+        const reviewCurrent = this.replyPlanCurrent(token, attempt, binding) && attempt.review.authEpoch === auth.account.authEpoch;
         return { ...attempt, reviewCurrent };
       });
       return { contractVersion: 1, viewer: viewer(auth), sourceId, attempts };
     });
+  }
+  replyPlanCurrent(token, attempt, binding) {
+    try {
+      const plan = prepareGraphReplyDraft({ store: this.store, token, binding, sourceId: attempt.sourceId,
+        requestId: attempt.plan.requestId, mode: attempt.plan.mode });
+      return plan.planVersion === attempt.plan.planVersion;
+    } catch (error) {
+      if (!(error instanceof ServiceError) && !(error instanceof EmailContractError)) throw error;
+      return false;
+    }
+  }
+  // Negotiated, account-private projection; no transport plan or provider IDs.
+  replyReviewContext(token, sourceId, binding) {
+    return this.store.readTransaction(() => {
+      const auth = this.auth(token, binding); this.source(auth.account.id, sourceId);
+      const prior = [...this.replyHistory(auth.account.id, sourceId).values()].find(value => value.status !== "cancelled");
+      let attempt = null;
+      if (prior) {
+        const current = this.replyPlanCurrent(token, prior, binding);
+        const o = prior.observation, d = o?.draft;
+        attempt = { id: prior.id, revision: prior.revision, status: prior.status, sourceRevision: prior.plan.sourceRevision,
+          draftRevision: prior.plan.draftRevision, canSend: false, canReview: current && replyObservationReviewable(o),
+          observation: d ? { version: o.reviewVersion, from: d.from.address, sender: d.sender.address,
+            to: d.to.map(a => a.address), cc: d.cc.map(a => a.address), bcc: d.bcc.map(a => a.address),
+            subject: d.subject, body: d.body, format: d.format, attachmentState: d.attachmentState,
+            attachmentCount: d.attachmentCount, differences: o.differences } : null,
+          review: prior.review ? { version: prior.review.version, at: prior.review.at,
+            current: current && prior.review.authEpoch === auth.account.authEpoch } : null };
+      }
+      return { contractVersion: 1, view: "reply-review-v1", viewer: viewer(auth), sourceId, attempt };
+    });
+  }
+  // Narrow human acknowledgment boundary. Never expose provider/dispatch writes.
+  reviewReply(token, request, binding) {
+    if (request?.action !== "reply.review") fail(422, "invalid_reply_review", "Choose the exact observed draft.");
+    const result = this.reply(token, request, binding), { attempt, ...receipt } = result.receipt;
+    return { ...result, receipt: { ...receipt, attemptId: attempt.id, revision: attempt.revision, reviewVersion: attempt.review.version } };
   }
   // Fixture-only service boundary; not mounted as a browser or agent command.
   reply(token, request, binding) {

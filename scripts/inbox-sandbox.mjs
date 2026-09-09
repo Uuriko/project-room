@@ -9,8 +9,11 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { SyntheticInboxTransport } from "../server/inbox-transport.mjs";
 import { SyntheticMailFixture } from "./synthetic-mail-fixture.mjs";
+import { emailContractFixture } from "./email-contract-fixture.mjs";
+import { normalizeGraphEmail } from "../server/graph-email.mjs";
+import { seedRecordedReply } from "./reply-review-fixture.mjs";
 
-export async function createInboxSandbox() {
+export async function createInboxSandbox({ includeEmailReview = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-inbox-sample-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
   store.initialize(initialRoom());
@@ -18,6 +21,16 @@ export async function createInboxSandbox() {
   store.createAccount(accountId); store.bindHumanAccount("commons", "owner", accountId);
   const accountKey = store.issueAccountAccessKey(accountId), slot = store.createAccountSessionSlot();
   const session = store.loginAccountSession(slot.token, accountKey, 0);
+  if (includeEmailReview) {
+    const raw = emailContractFixture(); raw.connection.accountId = accountId;
+    store.email.apply(slot.token, { action: "connection.configure", requestId: "sample-email-connect", connectionId: raw.connection.id,
+      expectedRevision: 0, profile: raw.connection }, session.sessionBinding);
+    const envelope = normalizeGraphEmail(raw.connection, raw.message, raw.options);
+    store.email.apply(slot.token, { action: "page.apply", requestId: "sample-email-page", connectionId: raw.connection.id,
+      connectionRevision: 1, folderId: raw.message.parentFolderId, expectedRevision: 0, expectedCursor: null, cursor: "sample-complete",
+      complete: true, reset: true, observations: [{ kind: "message", expectedSourceRevision: 0, envelope }] }, session.sessionBinding);
+    seedRecordedReply({ store, token: slot.token, binding: session.sessionBinding, sourceId: envelope.sourceId });
+  }
   for (const [id, subject, paragraphs] of [
     ["launch", "A quieter launch", ["Could we make the launch note warmer?", "One clear next step would be perfect."]],
     ["weekend", "A small idea for the weekend", ["Want to sketch out something useful together?"]]
@@ -38,7 +51,7 @@ export async function createInboxSandbox() {
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   if (process.argv.length !== 3 || process.argv[2] !== "--start") throw new Error("Explicit opt-in: node scripts/inbox-sandbox.mjs --start");
-  const sample = await createInboxSandbox();
+  const sample = await createInboxSandbox({ includeEmailReview: true });
   console.log("Local sample only — no real messages or agents.");
   console.log(sample.accountUrl);
   console.log("Private sample sign-in key: " + sample.accountKey);

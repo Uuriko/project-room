@@ -11,6 +11,7 @@ import { emailContractFixture } from "../scripts/email-contract-fixture.mjs";
 import { normalizeGraphEmail } from "../server/graph-email.mjs";
 import { prepareGraphReplyDraft, inspectRecordedGraphReplyDraft } from "../server/graph-reply-draft.mjs";
 import { RoomStore } from "../server/store.mjs";
+import { createRoomServer } from "../server/http.mjs";
 import { inboxLimits } from "../server/inbox.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { backupRoom } from "../server/backup.mjs";
@@ -65,6 +66,50 @@ function setup(t) {
   f.review = () => ({ ...f.command("reply.review"), reviewVersion: f.attempts()[0].observation.reviewVersion });
   return f;
 }
+
+test("negotiated private review projection strips provider internals; HTTP accepts only exact human acknowledgment", async t => {
+  const f = setup(t); f.created(); f.observe();
+  const server = createRoomServer({ store: f.store }); await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const origin = "http://127.0.0.1:" + server.address().port, session = f.store.authenticateAccountSession(f.token, null, f.binding);
+  const headers = { Cookie: "account_session=" + f.token, "X-Session-Binding": f.binding, "X-CSRF-Token": session.csrf,
+    Origin: origin, "Content-Type": "application/json" };
+  const path = "/api/inbox/sources/" + f.sourceId + "/reply-review";
+  const get = suffix => fetch(origin + path + suffix, { headers });
+  for (const suffix of ["", "?view=wrong", "?view=reply-review-v1&view=reply-review-v1", "?view=reply-review-v1&extra=1"])
+    assert.equal((await get(suffix)).status, 422);
+  const response = await get("?view=reply-review-v1"), context = await response.json();
+  assert.equal(response.status, 200); assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(context.attempt.canReview, true); assert.equal(context.attempt.canSend, false);
+  for (const value of ["planVersion", "providerDraftId", "sourceMessageId", "create", "4200", "internetMessageHeaders"])
+    assert.equal(JSON.stringify(context).includes('"' + value + '"'), false);
+  for (const value of [f.raw.message.body.content, "observer@example.test", f.attempts()[0].providerDraftId])
+    assert.equal(JSON.stringify(context).includes(value), false);
+  const post = (request, extra = {}, route = "/api/inbox/review") => fetch(origin + route,
+    { method: "POST", headers: { ...headers, ...extra }, body: JSON.stringify(request) });
+  const request = f.review();
+  assert.equal((await post(request, { "X-CSRF-Token": "" })).status, 403);
+  assert.equal((await post(request, { "X-Session-Binding": "f".repeat(64) })).status, 409);
+  assert.equal((await fetch(origin + path + "?view=reply-review-v1", { headers: { ...headers, Authorization: "Bearer " + f.keys.producer } })).status, 401);
+  const guest = f.store.accountForMember("commons", "guest"), slot = f.store.createAccountSessionSlot();
+  const guestSession = f.store.loginAccountSession(slot.token, f.store.issueAccountAccessKey(guest.id), 0);
+  const guestHeaders = { Cookie: "account_session=" + slot.token, "X-Session-Binding": guestSession.sessionBinding, "X-CSRF-Token": guestSession.csrf };
+  assert.equal((await fetch(origin + path + "?view=reply-review-v1", { headers: guestHeaders })).status, 404);
+  assert.equal((await post(request, guestHeaders)).status, 404);
+  for (const action of ["reply.reserve", "reply.dispatch", "reply.created", "reply.observed", "send.reserve"]) {
+    assert.equal((await post({ ...request, action })).status, 422);
+  }
+  assert.equal((await post(request, {}, "/api/inbox/commands")).status, 403);
+  const savedResponse = await post(request), saved = await savedResponse.json();
+  assert.equal(savedResponse.status, 201); assert.equal(saved.receipt.attempt, undefined);
+  assert.deepEqual(saved.receipt, { action: request.action, requestId: request.requestId, sourceId: request.sourceId,
+    attemptId: request.attemptId, revision: request.expectedRevision + 1, reviewVersion: request.reviewVersion });
+  f.save("Changed local draft", 1);
+  assert.equal((await post(request)).status, 200);
+  assert.equal((await (await get("?view=reply-review-v1")).json()).attempt.review.current, false);
+  assert.equal((await post({ ...request, requestId: randomUUID(), expectedRevision: f.attempts()[0].revision })).status, 409);
+  auditRecovery(f.store);
+});
 
 test("exact provider observations and content review survive reopen, backup and retries without sending", async t => {
   const f = setup(t); f.created();

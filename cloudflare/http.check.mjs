@@ -29,7 +29,7 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     return response.json();
   };
   try {
-    const { ownerKey } = await json(await call('/__test-provision'));
+    const { ownerKey, accountKey, sourceId } = await json(await call('/__test-provision'));
     assert.equal((await json(await call('/api/health'))).mode, 'cloudflare-staging');
     const page = await call('/');
     assert.equal(page.status, 200, await page.clone().text());
@@ -40,6 +40,24 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.match(cookie, /HttpOnly; SameSite=Strict;.*Secure/);
     const owner = await json(login, 201);
     const ownerHeaders = { Cookie: cookie.split(';')[0], 'X-CSRF-Token': owner.csrf, 'X-Session-Binding': owner.sessionBinding };
+    const mailSlotResponse = await call('/api/account-session', { ip: '192.0.2.20' });
+    const mailCookie = mailSlotResponse.headers.get('set-cookie').split(';')[0], mailSlot = await json(mailSlotResponse);
+    const mailSession = await json(await call('/api/account-session', { method: 'POST', ip: '192.0.2.20',
+      headers: { Cookie: mailCookie, 'X-CSRF-Token': mailSlot.csrf, 'X-Session-Binding': mailSlot.sessionBinding },
+      data: { accountAccessKey: accountKey, expectedSessionRevision: mailSlot.sessionRevision } }), 201);
+    const mailHeaders = { Cookie: mailCookie, 'X-CSRF-Token': mailSession.csrf, 'X-Session-Binding': mailSession.sessionBinding };
+    const reviewPath = '/api/inbox/sources/' + sourceId + '/reply-review?view=reply-review-v1';
+    const draftReview = await json(await call(reviewPath, { headers: mailHeaders }));
+    assert.equal(draftReview.attempt.canReview, true); assert.equal(draftReview.attempt.canSend, false);
+    const reviewCommand = { action: 'reply.review', requestId: 'worker-browser-review', sourceId, attemptId: draftReview.attempt.id,
+      expectedRevision: draftReview.attempt.revision, reviewVersion: draftReview.attempt.observation.version };
+    await json(await call('/api/inbox/review', { headers: { ...mailHeaders, 'X-CSRF-Token': '' }, data: reviewCommand }), 403);
+    await json(await call('/api/inbox/review', { headers: mailHeaders, data: { ...reviewCommand, action: 'reply.dispatch' } }), 422);
+    const reviewed = await json(await call('/api/inbox/review', { headers: mailHeaders, data: reviewCommand }), 201);
+    assert.equal(reviewed.receipt.attempt, undefined); assert.equal(reviewed.receipt.reviewVersion, reviewCommand.reviewVersion);
+    assert.equal((await json(await call('/api/inbox/review', { headers: mailHeaders, data: reviewCommand }))).duplicate, true);
+    assert.equal((await json(await call(reviewPath, { headers: mailHeaders }))).attempt.review.current, true);
+    await json(await call(reviewPath, { headers: { Authorization: 'Bearer ' + ownerKey } }), 401);
     const linkToken = randomBytes(32).toString('base64url');
     const link = await json(await call('/api/rooms/commons/share-links', { headers: ownerHeaders,
       data: { requestId: randomUUID(), linkToken, expiresAt: Date.now() + 3600000, maxJoins: 3, expectedMemberRevision: 0 } }), 201);

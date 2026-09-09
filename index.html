@@ -77,6 +77,10 @@
             <div class="inbox-draft-actions"><span id="inbox-draft-status" role="status"></span><button id="inbox-review" class="button ghost" type="button" hidden>Review changes</button><button id="inbox-save" class="button primary" type="submit" disabled>Save draft</button></div>
             <p id="inbox-origin" class="form-hint"></p>
           </form>
+          <section id="inbox-reply-panel" class="inbox-send-panel" aria-label="Sample email review" hidden>
+            <p id="inbox-reply-status" class="form-hint" role="status"></p>
+            <button id="inbox-reply-open" class="button secondary" type="button">Review reply</button>
+          </section>
           <section id="inbox-send-panel" class="inbox-send-panel" aria-label="Sample reply" hidden>
             <p id="inbox-send-status" class="form-hint" role="status"></p>
             <div class="inbox-draft-actions">
@@ -105,6 +109,13 @@
         <details><summary>Replaces your current draft</summary><pre id="inbox-replaced-draft"></pre></details>
         <p class="form-hint">Nothing will be sent.</p>
         <div class="inbox-draft-actions"><button id="inbox-result-close" type="button" class="button ghost">Cancel</button><button id="inbox-result-use" type="button" class="button primary" disabled>Use as draft</button></div>
+      </dialog>
+      <dialog id="inbox-reply-dialog" class="inbox-share-dialog" aria-labelledby="inbox-reply-title">
+        <h2 id="inbox-reply-title">Review sample reply</h2>
+        <dl id="inbox-reply-addresses" class="inbox-reply-addresses"></dl>
+        <h3 id="inbox-reply-subject"></h3><pre id="inbox-reply-body"></pre>
+        <p id="inbox-reply-dialog-status" class="form-hint" role="status"></p>
+        <div class="inbox-draft-actions"><button id="inbox-reply-close" class="button ghost" type="button">Close</button><button id="inbox-reply-confirm" class="button primary" type="button" disabled>Mark reviewed</button></div>
       </dialog>
       <dialog id="inbox-send-dialog" class="inbox-share-dialog" aria-labelledby="inbox-send-title">
         <h2 id="inbox-send-title">Sample reply</h2>

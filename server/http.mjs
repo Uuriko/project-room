@@ -209,6 +209,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const token = cookie(req, accountCookieName), binding = accountBinding(req);
         const auth = store.authenticateAccountSession(token, null, binding);
         const view = url.searchParams.get("view");
+        const replySource = /^\/api\/inbox\/sources\/([^/]{1,384})\/reply-review$/.exec(url.pathname);
+        if (replySource && req.method === "GET") {
+          if (view !== "reply-review-v1" || [...url.searchParams.keys()].length !== 1) reject(422, "unsupported_inbox_view", "Choose the supported reply review.");
+          return json(res, 200, store.inbox.replyReviewContext(token, pathId(replySource[1]), binding));
+        }
+        if (url.pathname === "/api/inbox/review" && req.method === "POST") {
+          protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
+          const result = store.inbox.reviewReply(token, await body(req), binding);
+          return json(res, result.duplicate ? 200 : 201, result);
+        }
         if (view !== null && (!["email-text-v1", "email-excerpt-v1"].includes(view) || url.searchParams.getAll("view").length !== 1))
           reject(422, "unsupported_inbox_view", "This inbox view is not supported.");
         if (url.pathname === "/api/inbox" && req.method === "GET") return json(res, 200, store.inbox.list(token, binding, { includeEmail: view !== null }));

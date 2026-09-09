@@ -11,6 +11,30 @@ function setup(fetcher) {
   let ended = 0; const client = new InboxClient(account, { onAccessEnded: () => ended++ });
   return { account, client, ended: () => ended };
 }
+test("provider review client negotiates a narrow view and validates its content, authority and exact receipt", async () => {
+  const attempt = { id: "attempt", revision: 3, status: "awaiting_review", sourceRevision: 1, draftRevision: 1, canSend: false, canReview: true,
+    observation: { version: "a".repeat(64), from: "me@example.test", sender: "me@example.test", to: ["you@example.test"], cc: [], bcc: [],
+      subject: "Reply", body: "A private draft", format: "text", attachmentState: "complete", attachmentCount: 0, differences: [] }, review: null };
+  const response = { contractVersion: 1, viewer, view: "reply-review-v1", sourceId: "mail", attempt };
+  const f = setup(async path => { assert.equal(path, "/api/inbox/sources/mail/reply-review?view=reply-review-v1"); return reply(response); });
+  assert.equal((await f.client.replyReview("mail")).attempt.canReview, true);
+  for (const change of [v => v.view = "other", v => v.sourceId = "other", v => v.attempt.canSend = true,
+    v => v.attempt.observation.body = "x".repeat(32769), v => v.attempt.observation.format = "html",
+    v => v.attempt.observation.attachmentState = "not_loaded", v => v.attempt.observation.differences = ["sender"],
+    v => v.attempt.review = { version: "b".repeat(64), current: true, at: 1 }]) {
+    const value = structuredClone(response); change(value);
+    await assert.rejects(setup(async () => reply(value)).client.replyReview("mail"), { code: "invalid_inbox_response" });
+  }
+  const request = { action: "reply.review", requestId: "review", sourceId: "mail", attemptId: "attempt", expectedRevision: 3, reviewVersion: "a".repeat(64) };
+  const receipt = { action: request.action, requestId: request.requestId, sourceId: request.sourceId, attemptId: request.attemptId, revision: 4, reviewVersion: request.reviewVersion };
+  const g = setup(async (path, options) => {
+    assert.equal(path, "/api/inbox/review"); assert.deepEqual(JSON.parse(options.body), request);
+    return reply({ contractVersion: 1, viewer, duplicate: true, receipt });
+  });
+  assert.equal((await g.client.reviewReply(request)).duplicate, true);
+  receipt.reviewVersion = "b".repeat(64);
+  await assert.rejects(g.client.reviewReply(request), { code: "invalid_inbox_response" });
+});
 test("email reader negotiates bounded account-qualified excerpt support without sending", async () => {
   const source = { id: "mail", revision: 1, adapter: "email", sender: "from@example.test", recipient: "me@example.test", subject: "", paragraphs: ["Plain text"],
     capabilities: { draft: true, share: true, send: false }, email: { view: "email-excerpt-v1", accountId: "owner", format: "text", connectionState: "active",

@@ -8,6 +8,9 @@ const fail = (code, message, status = 409) => { throw new ServiceError(status, c
 const revision = n => Number.isSafeInteger(n) && n >= 0;
 const hash = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 export const replyObservationBytes = 32768;
+export const replyObservationReviewable = observation => Boolean(observation?.reviewVersion && observation.draft?.format === "text"
+  && !observation.differences.some(value => ["draft_state", "thread", "from", "sender", "attachments"].includes(value))
+  && (observation.draft.to.length || observation.draft.cc.length || observation.draft.bcc.length));
 export const isReplyAttempt = request => typeof request?.action === "string" && request.action.startsWith("reply.");
 export function validateReplyAttempt(request) {
   emailInput(request);
@@ -84,9 +87,7 @@ export function transitionReplyAttempt(attempts, request, { plan, authEpoch, at 
         fail("stale_email_reply_plan", "Reply or authority changed. Review the current reply.");
       if (!observation?.reviewVersion || request.reviewVersion !== observation.reviewVersion)
         fail("stale_reply_review", "The mailbox draft changed. Review it again.");
-      const unsupported = ["draft_state", "thread", "from", "sender", "attachments"];
-      if (observation.draft.format !== "text" || observation.differences.some(value => unsupported.includes(value))
-        || !observation.draft.to.length && !observation.draft.cc.length && !observation.draft.bcc.length)
+      if (!replyObservationReviewable(observation))
         fail("unsupported_reply_review", "This draft needs a supported, complete mailbox preview.");
       review = { version: request.reviewVersion, accountId: plan.accountId, authEpoch, at };
     }

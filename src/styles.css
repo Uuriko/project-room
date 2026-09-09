@@ -619,7 +619,12 @@ summary { overflow-wrap: anywhere; }
 .inbox-send-panel > p { flex: 1; margin: 0; }
 .inbox-send-panel > div { margin-left: auto; }
 .inbox-send-panel p:empty { display: none; }
-#inbox-send-body { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; }
+#inbox-send-body, #inbox-reply-body { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; }
+.inbox-reply-addresses { display: grid; gap: .4rem; font-size: .85rem; }
+.inbox-reply-addresses > div { display: grid; grid-template-columns: 3.5rem minmax(0, 1fr); gap: .6rem; }
+.inbox-reply-addresses dt { color: var(--muted); }
+.inbox-reply-addresses dd { margin: 0; }
+#inbox-reply-subject { font-size: 1.05rem; margin-top: 1.4rem; }
 #inbox-send-subject { font-size: 1rem; }
 .inbox-share-dialog { width: min(38rem, calc(100vw - 2rem)); box-sizing: border-box; max-height: 90vh; overflow: auto; }
 #inbox-share-paragraphs label { display: flex; align-items: flex-start; gap: .75rem; padding: 1rem 0; line-height: 1.5; }

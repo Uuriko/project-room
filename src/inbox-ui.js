@@ -1,5 +1,5 @@
 import { InboxClient, inboxTextVersion } from "./inbox-client.js";
-import { installInboxSend } from "./inbox-send-ui.js";
+import { installInboxSend, installInboxReplyReview } from "./inbox-send-ui.js";
 import { validId } from "./events.js";
 
 export function installInbox({ account, room, getRoom, onShared, onOpenWork, onAccountEnded = () => room.endAccess(), onRooms = () => {}, onNavigate = () => {} }) {
@@ -19,6 +19,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       ? JSON.stringify([s.account.id, s.account.authEpoch, s.sessionRevision, s.sessionBinding]) : null;
   };
   const owns = () => owner !== null && owner === ownerKey();
+  const replyUI = installInboxReplyReview({ api, ownerKey: () => owns() ? owner : null });
   const sendUI = installInboxSend({ api, ownerKey: () => owns() ? owner : null, reviewChanges: async () => {
     const id = selected, d = drafts.get(id); if (!d || !owns()) return;
     await review(id, d); if (owns() && selected === id) render();
@@ -82,6 +83,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     navigationEpoch++;
     if (!preservePending) { try { storage?.removeItem(positionKey); } catch {} }
     sendUI.reset({ preservePending });
+    replyUI.reset({ preservePending });
     api.reset(); owner = null; epoch++; active = false; browsing = false; selected = null; rows = []; sharing = null; sharingBusy = false;
     drafts.clear(); positions.clear(); retryShare = null; if (!preservePending) persistShare();
     $("#workspace-nav").hidden = true; $("#inbox-panel").hidden = true; $("#inbox-share-dialog").close();
@@ -180,6 +182,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     window.scrollTo({ top: point.page, behavior: "instant" });
     const origin = d.base?.origin;
     sendUI.update(selected, d);
+    replyUI.update(selected, d);
     text("#inbox-origin", origin ? (d.dirty || !origin.unchanged ? "Edited since room review" : "Copied from room review")
       + (origin.sourceChanged ? " · source changed" : "") : "");
   }
@@ -190,6 +193,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     text("#inbox-draft-status", d.reviewedSource !== d.source.revision ? "Source changed. Review before saving." : d.dirty ? "Not saved" : d.base ? "Saved · only you" : "Only you · nothing sent");
     if (d.base?.origin) text("#inbox-origin", d.dirty || !d.base.origin.unchanged ? "Edited since room review" : "Copied from room review");
     sendUI.update(selected, d);
+    replyUI.update(selected, d);
   });
   async function saveDraft(adoption = null) {
     const sourceId = selected, d = drafts.get(sourceId);
@@ -218,6 +222,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   $("#inbox-draft-form").addEventListener("submit", event => { event.preventDefault(); saveDraft(); });
   async function loadResults(sourceId) {
     sendUI.load(sourceId);
+    replyUI.load(sourceId);
     const turn = ++resultEpoch;
     $("#inbox-results").hidden = true; $("#inbox-result-list").replaceChildren();
     if (!getRoom() || !room.ownsAccountSession()) return;
@@ -387,7 +392,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   $("#inbox-back").addEventListener("click", () => { remember(); $("#inbox-panel").classList.remove("reading"); $("#inbox-list button[aria-current=true]")?.focus(); });
   window.addEventListener("beforeunload", event => {
     remember();
-    if (owns() && ([...drafts.values()].some(d => d.dirty || d.pending) || sendUI.hasPending())) { event.preventDefault(); event.returnValue = ""; }
+    if (owns() && ([...drafts.values()].some(d => d.dirty || d.pending) || sendUI.hasPending() || replyUI.hasPending())) { event.preventDefault(); event.returnValue = ""; }
   });
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") remember(); });
   return { sync, reset, open: () => { if (!active) return load(); },
@@ -403,5 +408,5 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       $("#inbox-panel").hidden = true; $("#main").hidden = true;
       $("#account-rooms-panel").hidden = false; onNavigate(); onRooms(); },
     showRooms: () => { if (active || browsing) show("rooms", false); },
-    hasPending: () => owns() && ([...drafts.values()].some(d => d.dirty || d.pending) || Boolean(pendingShare()) || sendUI.hasPending()) };
+    hasPending: () => owns() && ([...drafts.values()].some(d => d.dirty || d.pending) || Boolean(pendingShare()) || sendUI.hasPending() || replyUI.hasPending()) };
 }

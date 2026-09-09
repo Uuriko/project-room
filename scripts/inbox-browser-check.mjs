@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { createInboxSandbox } from "./inbox-sandbox.mjs";
 import { emailContractFixture } from "./email-contract-fixture.mjs";
 import { normalizeGraphEmail } from "../server/graph-email.mjs";
+import { seedRecordedReply } from "./reply-review-fixture.mjs";
 
 function seedEmail(f) {
   const raw = emailContractFixture(); raw.connection.accountId = f.store.accountForMember("commons", "owner").id;
@@ -72,6 +73,102 @@ async function previewReply(f, body = "A private reply 🪷") {
   await p.locator("#inbox-send-preview").click();
   await p.waitForFunction(() => !document.getElementById("inbox-send-confirm").disabled);
 }
+async function reviewFixture(t, mobile = false) {
+  const f = await setup(t, mobile), mail = seedEmail(f), sourceId = mail.importMessage();
+  const provider = seedRecordedReply({ store: f.store, token: f.slot.token, binding: f.session.sessionBinding, sourceId });
+  await f.inbox(); await f.pick(sourceId); await f.page.locator("#inbox-reply-open").waitFor();
+  return { ...f, mail, sourceId, recorded: provider };
+}
+for (const mobile of [false, true]) test(`provider draft review ${mobile ? "mobile" : "desktop"}: exact visible content, deliberate acknowledgment, reload and unchanged local draft`, { timeout: 35000 }, async t => {
+  const f = await reviewFixture(t, mobile), p = f.page, before = f.store.inbox.read(f.slot.token, f.sourceId, f.session.sessionBinding).draft;
+  f.recorded.observe({ message: { cc: [{ name: "CC", address: "cc@example.test" }], bcc: [{ name: "BCC", address: "bcc@example.test" }] },
+    body: { format: "text", content: "A revised reply.\n\nLet’s meet on Friday and pick one small thing to build together." } });
+  await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-confirm:not([disabled])").waitFor();
+  assert.match(await p.locator("#inbox-reply-addresses").textContent(), /BCCbcc@example.test/);
+  assert.match(await p.locator("#inbox-reply-body").textContent(), /A revised reply/);
+  assert.equal(await p.locator("#inbox-reply-dialog img").count(), 0);
+  await f.capture("provider-review-" + (mobile ? "mobile" : "desktop"));
+  await p.locator("#inbox-reply-confirm").click(); await p.locator("#inbox-reply-dialog").waitFor({ state: "hidden" });
+  await p.locator("#inbox-reply-status").filter({ hasText: "Reviewed · not sent" }).waitFor();
+  await p.reload(); await p.locator("#inbox-reply-open").waitFor();
+  await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-body").filter({ hasText: "A revised reply" }).waitFor();
+  assert.equal(await p.locator("#inbox-reply-confirm").isVisible(), false);
+  await p.locator("#inbox-reply-close").click();
+  assert.deepEqual(f.store.inbox.read(f.slot.token, f.sourceId, f.session.sessionBinding).draft, before);
+  assert.equal(f.store.inbox.replyAttempts(f.slot.token, f.sourceId, f.session.sessionBinding).attempts[0].canSend, false);
+});
+test("provider review lost acknowledgment retains only operation metadata and retries once after reload", { timeout: 35000 }, async t => {
+  const f = await reviewFixture(t), p = f.page;
+  await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-confirm:not([disabled])").waitFor();
+  await p.route("**/api/inbox/review", async route => { await route.fetch(); await route.abort("failed"); }, { times: 1 });
+  await p.locator("#inbox-reply-confirm").click(); await p.locator("#inbox-reply-dialog").waitFor({ state: "hidden" });
+  await p.locator("#inbox-reply-open").filter({ hasText: "Check review" }).waitFor();
+  const stored = await p.evaluate(() => sessionStorage.getItem("project-room:pending-reply-review:v1"));
+  assert.equal(stored.includes("That sounds good"), false); assert.equal(stored.includes("example.test"), false);
+  await p.reload(); await p.locator("#inbox-reply-open").filter({ hasText: "Check review" }).waitFor();
+  await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-status").filter({ hasText: "Reviewed · not sent" }).waitFor();
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM private_inbox_commands WHERE json_extract(request_json,'$.action')='reply.review'").get().n, 1);
+  assert.equal(await p.evaluate(() => sessionStorage.getItem("project-room:pending-reply-review:v1")), null);
+});
+test("provider changes while the sheet is open cannot be acknowledged under the old version", { timeout: 35000 }, async t => {
+  const f = await reviewFixture(t), p = f.page;
+  await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-confirm:not([disabled])").waitFor();
+  f.recorded.observe({ body: { format: "text", content: "Mailbox changed while reading" } });
+  await p.locator("#inbox-reply-confirm").click(); await p.locator("#inbox-reply-dialog").waitFor({ state: "hidden" });
+  assert.equal(f.store.inbox.replyAttempts(f.slot.token, f.sourceId, f.session.sessionBinding).attempts[0].review, null);
+  await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-body").filter({ hasText: "Mailbox changed while reading" }).waitFor();
+  await p.locator("#inbox-reply-confirm:not([disabled])").waitFor();
+  await f.capture("provider-review-changed"); await p.locator("#inbox-reply-close").click();
+  await p.locator("#inbox-draft").fill("Different local draft");
+  await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-body").filter({ hasText: "Mailbox changed while reading" }).waitFor();
+  assert.equal(await p.locator("#inbox-reply-confirm").isEnabled(), false);
+});
+test("unavailable and HTML provider drafts never show an acknowledgment action", { timeout: 35000 }, async t => {
+  const f = await reviewFixture(t), p = f.page;
+  for (const observation of [null, { body: { format: "html", content: "<img src='https://example.invalid/private'>" } }]) {
+    f.recorded.observe(observation); await p.locator("#inbox-reply-open").click();
+    await p.locator("#inbox-reply-dialog-status").filter({ hasText: "Nothing sent" }).waitFor();
+    assert.equal(await p.locator("#inbox-reply-confirm").isVisible(), false);
+    assert.equal(await p.locator("#inbox-reply-dialog img").count(), 0);
+    await p.locator("#inbox-reply-close").click();
+  }
+});
+test("provider preview cannot repopulate private content after another tab changes account", { timeout: 35000 }, async t => {
+  const f = await reviewFixture(t), p = f.page;
+  let release, reached; const held = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { reached = resolve; });
+  t.after(() => release());
+  await p.route("**/reply-review?view=reply-review-v1", async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); });
+  await p.locator("#inbox-reply-open").click(); await started;
+  const other = await p.context().newPage(); await other.goto(f.origin + "/?room=commons");
+  await other.locator("#main").waitFor(); await other.locator("#signout-button").click(); await other.locator("#auth-panel").waitFor();
+  const guest = f.store.accountForMember("commons", "guest");
+  await other.locator("#access-key").fill(f.store.issueAccountAccessKey(guest.id)); await other.locator("#auth-form button").click();
+  await other.locator("#main").waitFor(); await p.locator("#auth-panel").waitFor(); release(); await p.waitForLoadState("networkidle");
+  assert.equal(await p.locator("#inbox-reply-dialog").isVisible(), false);
+  assert.equal(await p.locator("#inbox-reply-body").textContent(), ""); assert.equal(await p.locator("#inbox-reply-addresses").textContent(), "");
+  assert.equal(await p.evaluate(() => sessionStorage.getItem("project-room:pending-reply-review:v1")), null);
+});
+test("two browser tabs reviewing the same version record one acknowledgment", { timeout: 35000 }, async t => {
+  const f = await reviewFixture(t), p = f.page, other = await p.context().newPage();
+  await other.goto(f.origin + "/?account=1#pr-view/inbox");
+  await other.locator(`[data-source-id="${f.sourceId}"]`).click(); await other.locator("#inbox-reply-open").waitFor();
+  for (const page of [p, other]) { await page.locator("#inbox-reply-open").click(); await page.locator("#inbox-reply-confirm:not([disabled])").waitFor(); }
+  await p.locator("#inbox-reply-confirm").click(); await p.locator("#inbox-reply-dialog").waitFor({ state: "hidden" });
+  await other.locator("#inbox-reply-confirm").click(); await other.locator("#inbox-reply-dialog").waitFor({ state: "hidden" });
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM private_inbox_commands WHERE json_extract(request_json,'$.action')='reply.review'").get().n, 1);
+  await other.locator("#inbox-reply-open").click(); await other.locator("#inbox-reply-dialog-status").filter({ hasText: "Reviewed · not sent" }).waitFor();
+  assert.equal(await other.locator("#inbox-reply-confirm").isVisible(), false);
+});
+test("opt-in sample mailbox review is usable from account Inbox without entering a room", { timeout: 35000 }, async t => {
+  const sample = await createInboxSandbox({ includeEmailReview: true }), browser = await chromium.launch({ headless: true });
+  t.after(async () => { await browser.close(); await sample.close(); rmSync(sample.directory, { recursive: true, force: true }); });
+  const page = await browser.newPage(); page.setDefaultTimeout(9000);
+  await page.goto(sample.accountUrl); await page.locator("#access-key").fill(sample.accountKey); await page.locator("#auth-form button").click();
+  await page.locator("#inbox-list").getByText("A small collaboration", { exact: true }).click();
+  await page.locator("#inbox-reply-open").click(); await page.locator("#inbox-reply-confirm:not([disabled])").waitFor();
+  await page.locator("#inbox-reply-confirm").click(); await page.locator("#inbox-reply-status").filter({ hasText: "Reviewed · not sent" }).waitFor();
+  assert.equal(await page.locator("#main").isVisible(), false); assert.equal(sample.provider.submits, 0);
+});
 async function selectExcerpt(page, value) {
   const field = page.locator("#inbox-excerpt-text"); await field.focus();
   await field.press("ControlOrMeta+A"); await field.press("ArrowLeft");
@@ -107,7 +204,7 @@ for (const mobile of [false, true]) test(`late share refresh respects newer Inbo
   assert.equal(await p.locator("#nav-inbox").getAttribute("aria-current"), "page");
   await f.capture("late-share-" + (mobile ? "mobile" : "desktop"));
 });
-for (const mobile of [false, true]) test(`email collaboration ${mobile ? "mobile" : "desktop"}: selected text becomes room work then an exact private draft`, { timeout: 45000 }, async t => {
+for (const mobile of [false, true]) test(`email collaboration ${mobile ? "mobile" : "desktop"}: selected text becomes room work, a private draft and a reviewed sample reply`, { timeout: 45000 }, async t => {
   const f = await setup(t, mobile, true), p = f.page, mail = seedEmail(f), excerpt = "A warmer reply 🪷";
   mail.raw.message.body.content = excerpt + "\r\n\r\nPrivate budget: 4200";
   const id = mail.importMessage(); await f.inbox(); await f.pick(id);
@@ -136,8 +233,15 @@ for (const mobile of [false, true]) test(`email collaboration ${mobile ? "mobile
   assert.equal(f.store.inbox.read(f.slot.token, id, f.session.sessionBinding).draft.origin.unchanged, true);
   assert.equal(f.provider.submits, 0); assert.equal(await p.locator("#inbox-send-panel").isVisible(), false);
   await f.capture("email-return-" + (mobile ? "mobile" : "desktop"));
+  seedRecordedReply({ store: f.store, token: f.slot.token, binding: f.session.sessionBinding, sourceId: id });
   await p.reload(); await p.locator("#inbox-reader").waitFor();
   assert.equal(await p.locator("#inbox-draft").inputValue(), work.body);
+  await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-confirm:not([disabled])").waitFor();
+  assert.equal(await p.locator("#inbox-reply-body").textContent(), work.body);
+  await f.capture("email-room-provider-review-" + (mobile ? "mobile" : "desktop"));
+  await p.locator("#inbox-reply-confirm").click(); await p.locator("#inbox-reply-status").filter({ hasText: "Reviewed · not sent" }).waitFor();
+  assert.equal(f.store.inbox.read(f.slot.token, id, f.session.sessionBinding).draft.origin.unchanged, true);
+  assert.equal(f.provider.submits, 0);
 });
 test("email excerpt lost acknowledgement retries the original offsets after reload and a source change", { timeout: 40000 }, async t => {
   const f = await setup(t), p = f.page, mail = seedEmail(f), excerpt = "Share just this";
