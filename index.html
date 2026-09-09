@@ -41,6 +41,7 @@
           <p id="auth-description">Ask the room owner for an invite link or member key.</p>
           <p id="auth-hint" class="form-hint">Keep your key private. Lost guest access? Ask for a new invite.</p>
         </details>
+        <details class="return-help"><summary>Returning to the room?</summary><p>Use the same browser to resume an active session. Members can sign in again with their current key. If guest access has expired, ask the owner for a fresh invitation; joining again creates a new guest identity. Your earlier messages stay in the room.</p></details>
       </section>
 
       <nav id="workspace-nav" class="workspace-nav" aria-label="Workspace" hidden>
@@ -129,6 +130,11 @@
         <div class="inbox-draft-actions"><button id="inbox-send-close" class="button ghost" type="button">Close</button><button id="inbox-send-confirm" class="button primary" type="button" disabled>Send sample</button></div>
       </dialog>
       <main id="main" class="community-shell" hidden>
+        <nav id="room-navigation" class="room-navigation" aria-label="Room sections">
+          <button class="text-button" type="button" data-room-section="chat">Chat</button>
+          <button class="text-button" type="button" data-room-section="work">Work <span id="room-work-count"></span></button>
+          <button class="text-button" type="button" data-room-section="catch-up">Catch-up <span id="room-attention-count"></span></button>
+        </nav>
         <section class="room-stage" aria-labelledby="room-title">
           <header class="room-heading">
             <div>

@@ -726,6 +726,11 @@ function render() {
   for (const id of ["new-work-button", "composer-work-button"]) {
     $("#" + id).hidden = !can("steer"); $("#" + id).disabled = !can("steer");
   }
+  const items = Object.values(state.workItems);
+  const openWork = items.map(item => nextWorkStep(item)).filter(step => !["complete", "superseded"].includes(step.action));
+  const waiting = openWork.filter(step => step.needsAttention && step.memberId === session?.member?.id).length;
+  setText("#room-work-count", openWork.length ? `(${openWork.length})` : "");
+  setText("#room-attention-count", waiting ? `(${waiting} need you)` : "");
   renderMessages();
   syncRequestComposer();
   $("#event-count").textContent = `${client.sequence}`;
@@ -2451,6 +2456,17 @@ function renderReturnBrief() {
 }
 $("#return-brief-panel").addEventListener("toggle", e => {
   if (e.currentTarget.open && state) loadReturnBrief(); // reopening replaces the pagination chain
+});
+$("#room-navigation").addEventListener("click", e => {
+  const section = e.target.closest("[data-room-section]")?.dataset.roomSection;
+  if (!section || !state || busy) return;
+  saveComposer();
+  if (section === "catch-up") {
+    const panel = $("#return-brief-panel");
+    if (panel.open) loadReturnBrief();
+    else panel.open = true;
+    focusRecord($("#return-brief-panel > summary"));
+  } else focusRecord($(section === "work" ? "#work-title" : "#conversation-title"));
 });
 $("#rb-refresh-button").addEventListener("click", loadReturnBrief);
 $("#rb-more-button").addEventListener("click", async () => {
