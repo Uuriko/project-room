@@ -159,7 +159,22 @@ test("invitation account replacement warns about an account-only draft and clear
   await p.locator("#invitation-account-form button").click();
   assert.equal(warnings, 1); assert.equal(await p.locator("#inbox-draft").inputValue(), "Private thought from the original account");
   p.removeAllListeners("dialog"); p.on("dialog", d => d.accept());
-  await p.locator("#invitation-account-form button").click(); await p.locator("#invitation-accept").waitFor();
+  let release, observed;
+  const held = new Promise(resolve => { release = resolve; }), committed = new Promise(resolve => { observed = resolve; });
+  t.after(() => release());
+  await p.route("**/api/account-session", async route => {
+    if (route.request().method() !== "POST") return route.continue();
+    const response = await route.fetch(); observed(); await held; return route.fulfill({ response });
+  });
+  await p.locator("#invitation-account-form button").click(); await committed;
+  // Visible is not ready: the existing accept button is disabled during sign-in.
+  // Hold the response to qualify that intermediate state, then await confirmation.
+  try {
+    assert.equal(await p.locator("#invitation-dialog").getAttribute("aria-busy"), "true");
+    assert.equal(await p.locator("#invitation-accept").isDisabled(), true);
+  } finally { release(); }
+  await p.waitForFunction(() => document.querySelector("#invitation-dialog").getAttribute("aria-busy") === "false"
+    && !document.querySelector("#invitation-accept").disabled && document.querySelector("#invitation-account-key").value === "");
   assert.equal(await p.locator("#inbox-draft").inputValue(), "");
   assert.equal(await p.locator("#inbox-source-body").textContent(), "");
   await p.locator("#invitation-dismiss").click(); await p.locator("#inbox-panel").waitFor();
