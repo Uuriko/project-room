@@ -10,6 +10,9 @@ const addresses = values => values.map(({ address }) => {
   const at = address.lastIndexOf("@"); return address.slice(0, at) + address.slice(at).toLowerCase();
 }).sort();
 const same = (a, b) => a !== undefined && b !== undefined && emailDigest(a) === emailDigest(b);
+export const replyObservationReviewable = observation => Boolean(observation?.reviewVersion && observation.draft?.format === "text"
+  && !observation.differences.some(value => ["draft_state", "thread", "from", "sender", "attachments"].includes(value))
+  && (observation.draft.to.length || observation.draft.cc.length || observation.draft.bcc.length));
 
 export function prepareGraphReplyDraft({ store, token, binding, sourceId, requestId, mode = "reply" }) {
   return store.readTransaction(() => {
@@ -147,7 +150,8 @@ export function prepareGraphReplyUpdate({ store, token, binding, sourceId, attem
     const auth = store.inbox.auth(token, binding), { source, draft } = store.inbox.read(token, sourceId, binding);
     const connection = source.adapter === "email" ? store.email.connection(auth.account.id, source.envelope.connection.id) : null;
     const attempt = store.inbox.replyAttempts(token, sourceId, binding).attempts.find(value => value.id === attemptId);
-    return buildGraphReplyUpdate({ auth, source, draft, connection, attempt, expectedRevision, requestId });
+    return buildGraphReplyUpdate({ auth, source, draft, connection,
+      attempt: store.inbox.replyBaseAttempt(auth.account.id, attempt), expectedRevision, requestId });
   });
 }
 

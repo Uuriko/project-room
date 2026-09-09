@@ -56,6 +56,8 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.doesNotMatch(JSON.stringify(comparison.comparison), /providerDraftId|Authorization|https:/);
     const latest = await json(await call(reviewPath.replace('reply-review-v1', 'reply-review-v3'), { headers: mailHeaders }));
     assert.deepEqual(latest.attempt, comparison.attempt); assert.deepEqual(latest.comparison, comparison.comparison);
+    const updated = await json(await call(reviewPath.replace('reply-review-v1', 'reply-review-v4'), { headers: mailHeaders }));
+    assert.deepEqual(updated.attempt, latest.attempt); assert.deepEqual(updated.comparison, latest.comparison); assert.equal(updated.update, null);
     const reviewCommand = { action: 'reply.review', requestId: 'worker-browser-review', sourceId, attemptId: draftReview.attempt.id,
       expectedRevision: draftReview.attempt.revision, reviewVersion: draftReview.attempt.observation.version };
     await json(await call('/api/inbox/review', { headers: { ...mailHeaders, 'X-CSRF-Token': '' }, data: reviewCommand }), 403);

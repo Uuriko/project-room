@@ -1,19 +1,18 @@
 // Pure private reply-attempt transitions. No provider I/O or new storage engine.
 import { validId } from "../src/events.js";
 import { emailInput, emailOpaqueId, exactEmailFields } from "./email-envelope.mjs";
-import { compareReplyEnvelope, compareReplyUpdateEnvelope } from "./graph-reply-draft.mjs";
+import { compareReplyEnvelope, compareReplyUpdateEnvelope, replyObservationReviewable } from "./graph-reply-draft.mjs";
+export { replyObservationReviewable };
 import { ServiceError } from "./store.mjs";
+import { inspectUpdate } from "./graph-reply-update-review.mjs";
 
 const fail = (code, message, status = 409) => { throw new ServiceError(status, code, message); };
 const revision = n => Number.isSafeInteger(n) && n >= 0;
 const hash = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 export const replyObservationBytes = 32768;
-export const replyObservationReviewable = observation => Boolean(observation?.reviewVersion && observation.draft?.format === "text"
-  && !observation.differences.some(value => ["draft_state", "thread", "from", "sender", "attachments"].includes(value))
-  && (observation.draft.to.length || observation.draft.cc.length || observation.draft.bcc.length));
 export const isReplyAttempt = request => typeof request?.action === "string" && request.action.startsWith("reply.");
 export const isReplyUpdate = request => typeof request?.action === "string" && request.action.startsWith("reply.update.");
-export const unresolvedReplyUpdate = (updates, attemptId) => [...updates.values()].some(update => update.attemptId === attemptId && update.status !== "cancelled");
+export const unresolvedReplyUpdate = (updates, attemptId) => [...updates.values()].some(update => update.attemptId === attemptId && !["cancelled", "resolved"].includes(update.status));
 export function validateReplyAttempt(request) {
   if (isReplyUpdate(request)) return validateReplyUpdate(request);
   emailInput(request);
@@ -58,25 +57,30 @@ function validateReplyUpdate(request) {
     "reply.update.reserve": [...common, "updateVersion"],
     "reply.update.cancel": [...common, "updateId"],
     "reply.update.dispatch": [...common, "updateId"],
-    "reply.update.observed": [...common, "updateId", "observation"]
+    "reply.update.observed": [...common, "updateId", "observation"],
+    "reply.update.inspected": [...common, "updateId", "observation", "inspectionVersion", "connectionRevision"],
+    "reply.update.review": [...common, "updateId", "reviewVersion"]
   }[request?.action];
   if (!fields || !exactEmailFields(request, fields) || ![request.requestId, request.sourceId, request.attemptId].every(validId)
     || !revision(request.expectedRevision) || (request.action === "reply.update.reserve" ? !hash(request.updateVersion) : !validId(request.updateId)))
     fail("invalid_reply_update", "Choose an exact reply update.", 422);
-  if (request.action === "reply.update.observed" && (request.observation === undefined || Buffer.byteLength(JSON.stringify(request.observation)) > replyObservationBytes))
+  if (["reply.update.observed", "reply.update.inspected"].includes(request.action) && (request.observation === undefined || Buffer.byteLength(JSON.stringify(request.observation)) > replyObservationBytes))
     fail("reply_observation_limit", "This draft is too large for the review pilot.", 422);
+  if (request.action === "reply.update.inspected" && (!hash(request.inspectionVersion) || !revision(request.connectionRevision) || request.connectionRevision === 0)
+    || request.action === "reply.update.review" && !hash(request.reviewVersion))
+    fail("invalid_reply_update", "Choose the exact checked update.", 422);
 }
 
 // Child evidence never mutates creation intent, the parent preview or local text.
-export function transitionReplyUpdate(updates, request, { proposal, dispatch, at }) {
+export function transitionReplyUpdate(updates, request, { proposal, dispatch, inspection, review, at }) {
   validateReplyUpdate(request);
   if (!Number.isSafeInteger(at)) fail("invalid_reply_time", "Reply timestamp is unavailable.");
   if (request.action === "reply.update.reserve") {
     if (!proposal || proposal.requestId !== request.requestId || proposal.sourceId !== request.sourceId
       || proposal.attemptId !== request.attemptId || proposal.attemptRevision !== request.expectedRevision || proposal.updateVersion !== request.updateVersion)
       fail("stale_email_reply_update", "The reply changed. Compare it again.");
-    if (proposal.status !== "update_proposed" || !proposal.update) fail("reply_update_not_needed", "The text already matches.");
     if (unresolvedReplyUpdate(updates, request.attemptId)) fail("reply_update_unresolved", "Check the existing update first.");
+    if (proposal.status !== "update_proposed" || !proposal.update) fail("reply_update_not_needed", "The text already matches.");
     return { id: request.requestId, sourceId: request.sourceId, attemptId: request.attemptId, revision: 0,
       status: "reserved", proposal: structuredClone(proposal), observation: null, dispatchedAt: null,
       createdAt: at, updatedAt: at, canExecute: false, canRetryUpdate: false, canReview: false, canSend: false };
@@ -100,9 +104,24 @@ export function transitionReplyUpdate(updates, request, { proposal, dispatch, at
         providerDraftId: request.providerDraftId, providerRevision: request.providerRevision, at } };
   }
   if (prior.revision !== request.expectedRevision) fail("stale_reply_update", "Update status changed. Refresh it.");
+  if (request.action === "reply.update.inspected") {
+    if (!inspection || inspection.updateId !== prior.id || inspection.expectedRevision !== prior.revision
+      || inspection.inspectionVersion !== request.inspectionVersion || inspection.connection.revision !== request.connectionRevision)
+      fail("stale_reply_inspection", "The reply or connection changed. Check it again.");
+    return { ...prior, ...inspectUpdate(prior, request.observation, inspection, request.requestId),
+      revision: prior.revision + 1, review: null, updatedAt: at };
+  }
+  if (request.action === "reply.update.review") {
+    if (!["update_acknowledged", "resolved"].includes(prior.status) || !review?.canReview
+      || review.updateId !== prior.id || review.reviewVersion !== request.reviewVersion)
+      fail("stale_reply_update_review", "Check and review the current mailbox draft.");
+    return { ...prior, status: "resolved", revision: prior.revision + 1, updatedAt: at,
+      resolvedAt: prior.resolvedAt ?? at, review: { version: review.reviewVersion, accountId: review.accountId, authEpoch: review.authEpoch, at } };
+  }
   if (request.action === "reply.update.observed") {
     if (!["update_unconfirmed", "update_acknowledged"].includes(prior.status)) fail("reply_update_not_started", "No update has started.");
     return { ...prior, revision: prior.revision + 1, updatedAt: at,
+      ...(prior.inspection ? { inspection: null, review: null } : {}),
       observation: compareReplyUpdateEnvelope(prior.proposal, request.observation) };
   }
   if (prior.status !== "reserved") fail("reply_update_started", "The update may have started. Check this attempt.");

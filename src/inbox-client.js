@@ -7,12 +7,27 @@ const hash = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 function validReplyReview(value, sourceId, view = "reply-review-v1") {
   if (value.view !== view || value.sourceId !== sourceId) return false;
   if (view !== "reply-review-v1" && (value.attempt === null ? value.comparison !== null
-    : !boundedText(value.comparison?.originalBody, 4000) || ![null, "reserved", "update_unconfirmed", ...(view === "reply-review-v3" ? ["update_acknowledged"] : [])].includes(value.comparison?.updateStatus)
+    : !boundedText(value.comparison?.originalBody, 4000) || ![null, "reserved", "update_unconfirmed",
+      ...(["reply-review-v3", "reply-review-v4"].includes(view) ? ["update_acknowledged"] : []),
+      ...(view === "reply-review-v4" ? ["resolved"] : [])].includes(value.comparison?.updateStatus)
       || Object.keys(value.comparison).some(k => !["originalBody", "updateStatus"].includes(k)))) return false;
-  const a = value.attempt; if (a === null) return true;
+  const a = value.attempt;
+  if (a !== null && !validReplyTarget(a)) return false;
+  if (view === "reply-review-v4") {
+    const u = value.update;
+    if (u === null) return a === null || value.comparison.updateStatus === null;
+    return a !== null && validReplyTarget(u, true) && u.attemptId === a.id && u.status === value.comparison.updateStatus
+      && !a.canReview && !a.review?.current;
+  }
+  return a === null || view === "reply-review-v1" || value.comparison.updateStatus === null || !a.canReview && !a.review?.current;
+}
+function validReplyTarget(a, update = false) {
   if (!id(a?.id) || !revision(a.revision) || ![a.sourceRevision, a.draftRevision].every(n => revision(n) && n > 0)
     || a.canSend !== false || typeof a.canReview !== "boolean"
-    || !["reserved", "creation_unconfirmed", "created_unverified", "awaiting_review", "draft_unavailable", "draft_reviewed"].includes(a.status)) return false;
+    || !(update ? ["reserved", "update_unconfirmed", "update_acknowledged", "resolved"]
+      : ["reserved", "creation_unconfirmed", "created_unverified", "awaiting_review", "draft_unavailable", "draft_reviewed"]).includes(a.status)
+    || update && (!id(a.attemptId) || typeof a.versionMismatch !== "boolean"
+      || a.canReview && !["update_acknowledged", "resolved"].includes(a.status))) return false;
   const o = a.observation, r = a.review;
   if (o !== null && (!hash(o?.version) || ![o.from, o.sender].every(v => boundedText(v, 320)) || !boundedText(o.subject, 4096)
     || !["text", "html"].includes(o.format) || (o.format === "text" ? !boundedText(o.body, 32768) : o.body !== null)
@@ -23,8 +38,7 @@ function validReplyReview(value, sourceId, view = "reply-review-v1") {
   if (r !== null && (!hash(r?.version) || !revision(r.at) || typeof r.current !== "boolean" || r.version !== o?.version)) return false;
   const supported = o?.format === "text" && o.attachmentState === "complete" && o.attachmentCount === 0
     && o.to.length + o.cc.length + o.bcc.length > 0 && !o.differences.some(v => ["draft_state", "thread", "from", "sender", "attachments"].includes(v));
-  return (!a.canReview || supported) && (!r?.current || a.canReview) && (a.status !== "draft_reviewed" || r !== null)
-    && (view === "reply-review-v1" || value.comparison.updateStatus === null || !a.canReview && !r?.current);
+  return (!a.canReview || supported) && (!r?.current || a.canReview) && (a.status !== "draft_reviewed" || r !== null);
 }
 function validSource(source, sourceId, accountId) {
   if (source?.id !== sourceId || !revision(source.revision) || !source.revision) return false;
@@ -126,14 +140,15 @@ export class InboxClient {
   }
   sends(sourceId) { return this.request("/sources/" + encodeURIComponent(sourceId) + "/sends", {}, v => validSends(v, sourceId)); }
   replyReview(sourceId) {
-    return this.request("/sources/" + encodeURIComponent(sourceId) + "/reply-review?view=reply-review-v3", {}, v => validReplyReview(v, sourceId, "reply-review-v3"));
+    return this.request("/sources/" + encodeURIComponent(sourceId) + "/reply-review?view=reply-review-v4", {}, v => validReplyReview(v, sourceId, "reply-review-v4"));
   }
   reviewReply(request) {
     const data = structuredClone(request);
     return this.request("/review", { method: "POST", data }, v => {
       const r = v.receipt;
-      return data.action === "reply.review" && typeof v.duplicate === "boolean" && r?.action === data.action
+      return ["reply.review", "reply.update.review"].includes(data.action) && typeof v.duplicate === "boolean" && r?.action === data.action
         && r.requestId === data.requestId && r.sourceId === data.sourceId && r.attemptId === data.attemptId
+        && (data.action !== "reply.update.review" || r.updateId === data.updateId)
         && r.revision === data.expectedRevision + 1 && r.reviewVersion === data.reviewVersion;
     });
   }

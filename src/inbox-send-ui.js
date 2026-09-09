@@ -194,7 +194,8 @@ export function installInboxReplyReview({ api, ownerKey }) {
   let storage; try { storage = sessionStorage; } catch {}
   let sourceId = null, draft = null, data = null, preview = null, previewLocal = null, previewBasis = null, pending = null;
   let generation = 0, readTurn = 0, modalTurn = 0, busy = false, verified = false, note = "";
-  const validPending = r => r?.action === "reply.review" && [r.requestId, r.sourceId, r.attemptId].every(v => typeof v === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(v))
+  const validPending = r => ["reply.review", "reply.update.review"].includes(r?.action)
+    && [r.requestId, r.sourceId, r.attemptId, ...(r.action === "reply.update.review" ? [r.updateId] : [])].every(v => typeof v === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(v))
     && Number.isSafeInteger(r.expectedRevision) && r.expectedRevision >= 0 && typeof r.reviewVersion === "string" && /^[a-f0-9]{64}$/.test(r.reviewVersion);
   function restore() {
     if (pending) return;
@@ -216,17 +217,20 @@ export function installInboxReplyReview({ api, ownerKey }) {
   const current = a => Boolean(a?.review?.current && clean(a));
   const text = value => typeof value === "string" ? value.replace(/\r\n?/g, "\n") : null;
   const differs = a => a?.observation && text(a.observation.body) !== text(draft?.body);
+  const reviewedLabel = a => a?.attemptId && differs(a) ? "Mailbox reviewed · local draft differs" : "Reviewed · not sent";
   const localBasis = () => JSON.stringify([draft?.body, draft?.base?.revision, draft?.source.revision, draft?.dirty, data?.comparison]);
+  const active = () => data?.update ?? data?.attempt;
   function render() {
-    const a = data?.attempt, ownPending = pending?.sourceId === sourceId, email = draft?.source.adapter === "email";
+    const a = active(), ownPending = pending?.sourceId === sourceId, email = draft?.source.adapter === "email";
     $("inbox-reply-panel").hidden = !ownerKey() || !email || !a && !ownPending;
     $("inbox-reply-open").disabled = busy || Boolean(pending && !ownPending);
     $("inbox-reply-open").textContent = ownPending ? "Check review" : differs(a) ? "Compare reply" : current(a) ? "View reply" : "Review reply";
     const label = a?.status === "creation_unconfirmed" ? "Sample draft unconfirmed" : a?.status === "reserved" ? "Sample draft not created"
-      : a?.status === "draft_unavailable" ? "Sample draft unavailable" : current(a) ? "Reviewed · not sent" : "Sample draft · not sent";
+      : a?.status === "draft_unavailable" ? "Sample draft unavailable" : current(a) ? reviewedLabel(a)
+      : a?.status === "resolved" ? "Reviewed earlier · not sent" : "Sample draft · not sent";
     const updateStatus = data?.comparison?.updateStatus;
     $("inbox-reply-status").textContent = note || (ownPending ? "Review unconfirmed" : updateStatus === "update_unconfirmed" ? "Sample update unconfirmed"
-      : updateStatus === "update_acknowledged" ? "Sample update acknowledged · review pending"
+      : updateStatus === "update_acknowledged" ? a?.canReview ? "Updated draft · review needed" : "Sample update acknowledged · review pending"
       : updateStatus === "reserved" ? "Sample update not started" : label);
     const matches = verified && preview?.id === a?.id && preview?.revision === a?.revision && previewBasis === localBasis();
     $("inbox-reply-confirm").disabled = busy || Boolean(pending) || !matches || !clean(preview) || !preview?.canReview || !a?.canReview;
@@ -242,6 +246,8 @@ export function installInboxReplyReview({ api, ownerKey }) {
       if (gen !== generation || turn !== readTurn || owner !== ownerKey() || id !== sourceId) return false;
       if (data?.attempt && (!value.attempt || value.attempt.id !== data.attempt.id || value.attempt.revision < data.attempt.revision))
         throw new Error("Reply history changed unexpectedly");
+      if (data?.update && value.update?.id === data.update.id && value.update.revision < data.update.revision)
+        throw new Error("Update history changed unexpectedly");
       data = value; verified = true; note = ""; render(); return true;
     } catch {
       if (gen !== generation || turn !== readTurn || owner !== ownerKey() || id !== sourceId) return false;
@@ -267,7 +273,7 @@ export function installInboxReplyReview({ api, ownerKey }) {
     const loaded = await load(id);
     if (turn !== modalTurn || id !== sourceId || owner !== ownerKey() || !$("inbox-reply-dialog").open) return;
     if (!loaded) { $("inbox-reply-dialog-status").textContent = "Couldn’t check this reply. Close and try again."; return; }
-    preview = data.attempt; previewLocal = draft?.body ?? ""; previewBasis = localBasis(); const o = preview?.observation;
+    preview = active(); previewLocal = draft?.body ?? ""; previewBasis = localBasis(); const o = preview?.observation;
     if (!o) { $("inbox-reply-dialog-status").textContent = "No confirmed draft preview. Nothing sent."; return; }
     const rows = [["From", [o.from]], ...(o.sender !== o.from ? [["Sender", [o.sender]]] : []), ["To", o.to], ["CC", o.cc], ["BCC", o.bcc]];
     $("inbox-reply-addresses").replaceChildren(...rows.filter(([, values]) => values.length).map(([label, values]) => {
@@ -289,23 +295,27 @@ export function installInboxReplyReview({ api, ownerKey }) {
       $("inbox-reply-original").hidden = false; $("inbox-reply-original-body").textContent = comparison.originalBody;
     }
     $("inbox-reply-confirm").hidden = current(preview) || !preview.canReview || !clean(preview);
+    $("inbox-reply-confirm").textContent = preview.attemptId && comparing ? "Review checked draft" : "Mark reviewed";
     $("inbox-reply-close").textContent = comparing ? "Keep writing" : "Close";
     $("inbox-reply-close").classList.toggle("primary", $("inbox-reply-confirm").hidden);
     $("inbox-reply-close").classList.toggle("ghost", !$("inbox-reply-confirm").hidden);
     $("inbox-reply-dialog-status").textContent = comparison?.updateStatus === "update_unconfirmed" ? "Update unconfirmed · don’t repeat it"
-      : comparison?.updateStatus === "update_acknowledged" ? "Update acknowledged · review pending"
+      : comparison?.updateStatus === "update_acknowledged" ? preview.canReview
+        ? preview.versionMismatch ? "Different mailbox version · not sent" : "Review only · not sent"
+        : "Update acknowledged · review pending"
       : comparison?.updateStatus === "reserved" ? "Update not started"
-      : current(preview) ? "Reviewed · not sent" : comparing && !clean(preview) ? "Read-only comparison"
+      : current(preview) ? reviewedLabel(preview) : comparing && !clean(preview) ? "Read-only comparison"
       : preview.canReview && clean(preview) ? "Sample only · nothing will be sent" : "This draft needs a current, supported preview. Nothing sent.";
     render();
   }
   async function acknowledge() {
     const id = sourceId, owner = ownerKey(), gen = generation, a = preview;
     if (!owner || busy || pending && pending.sourceId !== id) return;
-    if (!pending && (!verified || !clean(a) || !a?.canReview || !data?.attempt?.canReview
-      || previewBasis !== localBasis() || a.id !== data?.attempt?.id || a.revision !== data?.attempt?.revision)) return;
-    const request = pending ?? { action: "reply.review", requestId: crypto.randomUUID(), sourceId: id,
-      attemptId: a.id, expectedRevision: a.revision, reviewVersion: a.observation.version };
+    if (!pending && (!verified || !clean(a) || !a?.canReview || !active()?.canReview
+      || previewBasis !== localBasis() || a.id !== active()?.id || a.revision !== active()?.revision)) return;
+    const request = pending ?? { action: a.attemptId ? "reply.update.review" : "reply.review", requestId: crypto.randomUUID(), sourceId: id,
+      attemptId: a.attemptId ?? a.id, ...(a.attemptId ? { updateId: a.id } : {}),
+      expectedRevision: a.revision, reviewVersion: a.observation.version };
     const retained = retain(request); busy = true; render();
     try {
       await api.reviewReply(request);

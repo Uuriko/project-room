@@ -292,6 +292,38 @@ export class StoreTestRoom {
       assert.deepEqual(auditRecovery(store), after);
       return Response.json({ acknowledgmentRecovered: true, reviewed: false, canSend: false });
     }
+    if (['/update-inspect', '/update-review', '/update-reviewed-resume'].includes(path)) {
+      const { email } = await request.json(), binding = email.binding, token = email.token;
+      const update = store.inbox.replyUpdates(token, email.sourceId, binding).updates[0], p = update.proposal;
+      const parent = store.inbox.replyAttempts(token, email.sourceId, binding).attempts[0];
+      const view = () => store.inbox.replyReviewContext(token, email.sourceId, binding, { view: 'reply-review-v4' }).update;
+      if (path === '/update-inspect') {
+        const e = p.proposed, address = emailAddress => ({ emailAddress });
+        const message = { ...emailContractFixture().message, id: p.providerDraftId, changeKey: 'worker-write-version',
+          isDraft: true, hasAttachments: false, from: address(e.from), sender: address(e.sender), replyTo: [],
+          toRecipients: e.to.map(address), ccRecipients: e.cc.map(address), bccRecipients: e.bcc.map(address),
+          subject: e.subject, body: { contentType: 'text', content: e.body } };
+        const context = store.inbox.prepareReplyUpdateInspection(token, email.sourceId, update.id, binding);
+        store.inbox.recordReplyUpdateInspection(token, { context, requestId: 'worker-post-write-inspection',
+          response: { status: 200, connection: p.connection, message, options: { idType: 'immutable',
+            attachmentObservation: { messageId: message.id, messageRevision: message.changeKey, complete: true, items: [] } } } }, binding);
+        assert.equal(view().canReview, true); assert.equal(view().revision, 4); assert.equal(view().versionMismatch, false);
+      } else {
+        const current = view(), requestReview = { action: 'reply.update.review', requestId: 'worker-update-reviewed',
+          sourceId: email.sourceId, attemptId: parent.id, updateId: update.id, expectedRevision: 4,
+          reviewVersion: current.observation.version };
+        const before = auditRecovery(store), result = store.inbox.reviewReply(token, requestReview, binding);
+        assert.equal(result.duplicate, path === '/update-reviewed-resume');
+        if (result.duplicate) assert.deepEqual(auditRecovery(store), before);
+        assert.equal(view().status, 'resolved'); assert.equal(view().review.current, true); assert.equal(view().revision, 5);
+        assert.equal(prepareGraphReplyUpdate({ store, token, binding, sourceId: email.sourceId, attemptId: parent.id,
+          expectedRevision: parent.revision, requestId: 'worker-next-body-check' }).status, 'no_update');
+      }
+      assert.deepEqual(store.inbox.replyAttempts(token, email.sourceId, binding).attempts[0], parent);
+      assert.equal(store.inbox.read(token, email.sourceId, binding).draft.body, 'Edited reply after review 🪷');
+      assert.equal(view().canSend, false); auditRecovery(store);
+      return Response.json({ inspectionRecovered: true, reviewed: path !== '/update-inspect', canSend: false });
+    }
     if (path === '/newer-version') {
       store.transaction(() => durableStorage.setVersion(this.db, STORE_SCHEMA_VERSION + 1));
       assert.throws(() => new RoomStore(null, { database: this.db, storagePlatform: durableStorage }), /newer than this service/);

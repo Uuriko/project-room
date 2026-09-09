@@ -82,6 +82,33 @@ async function reviewFixture(t, mobile = false) {
   return { ...f, mail, sourceId, recorded: provider };
 }
 
+async function updateFixture(t, mobile = false) {
+  const f = await reviewFixture(t, mobile), p = f.page, token = f.slot.token, binding = f.session.sessionBinding;
+  await p.locator("#inbox-draft").fill("Friday works. Let’s build one small thing together.");
+  await p.locator("#inbox-save").click(); await p.getByText("Saved · only you", { exact: true }).waitFor();
+  const proposal = prepareGraphReplyUpdate({ store: f.store, token, binding, sourceId: f.sourceId,
+    attemptId: f.recorded.plan.requestId, expectedRevision: 3, requestId: "acknowledged-update" });
+  const apply = request => f.store.inbox.reply(token, { sourceId: f.sourceId, attemptId: proposal.attemptId, ...request }, binding);
+  apply({ action: "reply.update.reserve", requestId: proposal.requestId, expectedRevision: 3, updateVersion: proposal.updateVersion });
+  apply({ action: "reply.update.dispatch", requestId: "acknowledged-dispatch", updateId: proposal.requestId, expectedRevision: 0 });
+  f.store.inbox.recordReplyUpdateAcknowledgment(token, { sourceId: f.sourceId, attemptId: proposal.attemptId, updateId: proposal.requestId,
+    dispatchRequestId: "acknowledged-dispatch", requestId: "write-acknowledgment",
+    response: { status: 200, method: "PATCH", idType: "immutable", connection: proposal.connection,
+      message: { id: proposal.providerDraftId, changeKey: "acknowledged-version" } } }, binding);
+  const inspect = ({ body = proposal.proposed.body, revision = "acknowledged-version", message: patch = {} } = {}) => {
+    const e = proposal.proposed, address = emailAddress => ({ emailAddress });
+    const message = { ...f.mail.raw.message, id: proposal.providerDraftId, changeKey: revision, isDraft: true, hasAttachments: false,
+      from: address(e.from), sender: address(e.sender), replyTo: [], toRecipients: e.to.map(address), ccRecipients: e.cc.map(address),
+      bccRecipients: e.bcc.map(address), subject: e.subject, body: { contentType: "text", content: body }, ...patch };
+    return f.store.inbox.recordReplyUpdateInspection(token, {
+      context: f.store.inbox.prepareReplyUpdateInspection(token, f.sourceId, proposal.requestId, binding), requestId: crypto.randomUUID(),
+      response: { status: 200, connection: proposal.connection, message, options: { idType: "immutable",
+        attachmentObservation: { messageId: message.id, messageRevision: message.changeKey, complete: true, items: [] } } }
+    }, binding);
+  };
+  return { ...f, proposal, inspect };
+}
+
 for (const mobile of [false, true]) test(`reply comparison ${mobile ? "mobile" : "desktop"}: three versions, unsaved writing and no implicit changes`, { timeout: 35000 }, async t => {
   const f = await reviewFixture(t, mobile), p = f.page;
   await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-body").filter({ hasText: f.recorded.plan.expected.body }).waitFor();
@@ -176,18 +203,7 @@ test("reply comparison shows pending update uncertainty without enabling review 
 });
 
 for (const mobile of [false, true]) test(`reply acknowledgment ${mobile ? "mobile" : "desktop"}: recovery does not imply content review or sending`, { timeout: 35000 }, async t => {
-  const f = await reviewFixture(t, mobile), p = f.page, token = f.slot.token, binding = f.session.sessionBinding;
-  await p.locator("#inbox-draft").fill("Friday works. Let’s build one small thing together.");
-  await p.locator("#inbox-save").click(); await p.getByText("Saved · only you", { exact: true }).waitFor();
-  const proposal = prepareGraphReplyUpdate({ store: f.store, token, binding, sourceId: f.sourceId,
-    attemptId: f.recorded.plan.requestId, expectedRevision: 3, requestId: "acknowledged-update" });
-  const apply = request => f.store.inbox.reply(token, { sourceId: f.sourceId, attemptId: proposal.attemptId, ...request }, binding);
-  apply({ action: "reply.update.reserve", requestId: proposal.requestId, expectedRevision: 3, updateVersion: proposal.updateVersion });
-  apply({ action: "reply.update.dispatch", requestId: "acknowledged-dispatch", updateId: proposal.requestId, expectedRevision: 0 });
-  f.store.inbox.recordReplyUpdateAcknowledgment(token, { sourceId: f.sourceId, attemptId: proposal.attemptId, updateId: proposal.requestId,
-    dispatchRequestId: "acknowledged-dispatch", requestId: "write-acknowledgment",
-    response: { status: 200, method: "PATCH", idType: "immutable", connection: proposal.connection,
-      message: { id: proposal.providerDraftId, changeKey: "acknowledged-version" } } }, binding);
+  const f = await updateFixture(t, mobile), p = f.page;
   const before = auditRecovery(f.store);
   await p.locator("#inbox-reply-open").click();
   await p.locator("#inbox-reply-dialog-status").filter({ hasText: "Update acknowledged · review pending" }).waitFor();
@@ -198,6 +214,51 @@ for (const mobile of [false, true]) test(`reply acknowledgment ${mobile ? "mobil
   await p.locator("#inbox-reply-close").click(); await p.reload(); await p.locator("#inbox-reply-open").click();
   await p.locator("#inbox-reply-dialog-status").filter({ hasText: "Update acknowledged · review pending" }).waitFor();
   assert.deepEqual(auditRecovery(f.store), before);
+});
+
+for (const mobile of [false, true]) test(`updated reply review ${mobile ? "mobile" : "desktop"}: inspect, review, reload and unchanged private writing`, { timeout: 35000 }, async t => {
+  const f = await updateFixture(t, mobile), p = f.page, token = f.slot.token, binding = f.session.sessionBinding;
+  const parent = f.store.inbox.replyAttempts(token, f.sourceId, binding).attempts[0], local = f.store.inbox.read(token, f.sourceId, binding).draft;
+  f.inspect(); await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-confirm:not([disabled])").waitFor();
+  assert.equal(await p.locator("#inbox-reply-body").textContent(), local.body);
+  assert.equal(await p.locator("#inbox-reply-original").getAttribute("open"), null);
+  await f.capture("update-review-" + (mobile ? "mobile" : "desktop"));
+  await p.locator("#inbox-reply-confirm").click(); await p.locator("#inbox-reply-status").filter({ hasText: "Reviewed · not sent" }).waitFor();
+  assert.equal(f.store.inbox.replyUpdates(token, f.sourceId, binding).updates[0].status, "resolved");
+  assert.deepEqual(f.store.inbox.replyAttempts(token, f.sourceId, binding).attempts[0], parent);
+  assert.deepEqual(f.store.inbox.read(token, f.sourceId, binding).draft, local);
+  await p.reload(); await p.locator("#inbox-reply-open").click();
+  await p.locator("#inbox-reply-dialog-status").filter({ hasText: "Reviewed · not sent" }).waitFor();
+  assert.equal(await p.locator("#inbox-reply-confirm").isVisible(), false);
+  await f.capture("update-reviewed-" + (mobile ? "mobile" : "desktop")); auditRecovery(f.store);
+});
+
+test("updated reply review preserves a differing local draft and exposes a different mailbox version", { timeout: 35000 }, async t => {
+  const f = await updateFixture(t), p = f.page, token = f.slot.token, binding = f.session.sessionBinding;
+  const local = f.store.inbox.read(token, f.sourceId, binding).draft;
+  f.inspect({ body: "Monday works instead. Let’s keep it small.", revision: "different-mailbox-version",
+    message: { ccRecipients: [{ emailAddress: { name: "Sam", address: "sam@example.test" } }] } });
+  await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-confirm:not([disabled])").waitFor();
+  await p.locator("#inbox-reply-dialog-status").filter({ hasText: "Different mailbox version" }).waitFor();
+  assert.match(await p.locator("#inbox-reply-addresses").textContent(), /sam@example.test/);
+  assert.equal(await p.locator("#inbox-reply-confirm").textContent(), "Review checked draft");
+  await f.capture("update-review-different");
+  await p.locator("#inbox-reply-confirm").click();
+  await p.locator("#inbox-reply-status").filter({ hasText: "Mailbox reviewed · local draft differs" }).waitFor();
+  assert.deepEqual(f.store.inbox.read(token, f.sourceId, binding).draft, local); auditRecovery(f.store);
+});
+
+test("updated reply review recovers a lost acknowledgment without another review or storing mail text", { timeout: 35000 }, async t => {
+  const f = await updateFixture(t), p = f.page; f.inspect();
+  await p.locator("#inbox-reply-open").click(); await p.locator("#inbox-reply-confirm:not([disabled])").waitFor();
+  await p.route("**/api/inbox/review", async route => { await route.fetch(); await route.abort("failed"); }, { times: 1 });
+  await p.locator("#inbox-reply-confirm").click(); await p.locator("#inbox-reply-open").filter({ hasText: "Check review" }).waitFor();
+  const pending = await p.evaluate(() => sessionStorage.getItem("project-room:pending-reply-review:v1"));
+  assert.match(pending, /reply.update.review/); assert.doesNotMatch(pending, /Friday works|example.test/);
+  await p.reload(); await p.locator("#inbox-reply-open").filter({ hasText: "Check review" }).waitFor(); await p.locator("#inbox-reply-open").click();
+  await p.locator("#inbox-reply-status").filter({ hasText: "Reviewed · not sent" }).waitFor();
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM private_inbox_commands WHERE json_extract(request_json,'$.action')='reply.update.review'").get().n, 1);
+  auditRecovery(f.store);
 });
 
 test("reply comparison refresh revokes a captured review without changing the parent version", { timeout: 35000 }, async t => {
@@ -282,7 +343,7 @@ test("provider preview cannot repopulate private content after another tab chang
   const f = await reviewFixture(t), p = f.page;
   let release, reached; const held = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { reached = resolve; });
   t.after(() => release());
-  await p.route("**/reply-review?view=reply-review-v3", async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); });
+  await p.route("**/reply-review?view=reply-review-v4", async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); });
   await p.locator("#inbox-reply-open").click(); await started;
   const other = await p.context().newPage(); await other.goto(f.origin + "/?room=commons");
   await other.locator("#main").waitFor(); await other.locator("#signout-button").click(); await other.locator("#auth-panel").waitFor();
@@ -294,14 +355,15 @@ test("provider preview cannot repopulate private content after another tab chang
   for (const id of ["inbox-reply-original-body", "inbox-reply-local-body"]) assert.equal(await p.locator("#" + id).textContent(), "");
   assert.equal(await p.evaluate(() => sessionStorage.getItem("project-room:pending-reply-review:v1")), null);
 });
-test("two browser tabs reviewing the same version record one acknowledgment", { timeout: 35000 }, async t => {
-  const f = await reviewFixture(t), p = f.page, other = await p.context().newPage();
+for (const updated of [false, true]) test(`two browser tabs reviewing the same ${updated ? "updated" : "original"} version record one acknowledgment`, { timeout: 35000 }, async t => {
+  const f = await (updated ? updateFixture(t) : reviewFixture(t)), p = f.page, other = await p.context().newPage();
+  if (updated) f.inspect();
   await other.goto(f.origin + "/?account=1#pr-view/inbox");
   await other.locator(`[data-source-id="${f.sourceId}"]`).click(); await other.locator("#inbox-reply-open").waitFor();
   for (const page of [p, other]) { await page.locator("#inbox-reply-open").click(); await page.locator("#inbox-reply-confirm:not([disabled])").waitFor(); }
   await p.locator("#inbox-reply-confirm").click(); await p.locator("#inbox-reply-dialog").waitFor({ state: "hidden" });
   await other.locator("#inbox-reply-confirm").click(); await other.locator("#inbox-reply-dialog").waitFor({ state: "hidden" });
-  assert.equal(f.store.db.prepare("SELECT count(*) n FROM private_inbox_commands WHERE json_extract(request_json,'$.action')='reply.review'").get().n, 1);
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM private_inbox_commands WHERE json_extract(request_json,'$.action')=?").get(updated ? "reply.update.review" : "reply.review").n, 1);
   await other.locator("#inbox-reply-open").click(); await other.locator("#inbox-reply-dialog-status").filter({ hasText: "Reviewed · not sent" }).waitFor();
   assert.equal(await other.locator("#inbox-reply-confirm").isVisible(), false);
 });
