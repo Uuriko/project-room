@@ -13,8 +13,8 @@ Do not continue from a ChatGPT worktree or the stale project-root
 | Durable Object | not reset |
 
 Hosted Worker `project-room-staging` was last published 9 September 2026 as
-version `e8f3f566-1549-4f4a-a2ce-8a3b02dcc20f` from GitHub `main` `696be20`
-(Phase 3 usability). 25 live assets match this checkout. Durable Object was not
+version `b7468e80-ace1-4ad8-9c51-ffcf77ad7f5e` from GitHub `main` `f698d14`
+(Phase 4 login recovery). 25 live assets match this checkout. Durable Object was not
 reset. Door copy on trydemigod.com `/room` matches this source.
 
 ## GitHub About (John, in the UI)
@@ -42,7 +42,7 @@ invitation). Footer **Project Room** on the Demigod home page is the same door.
 | Fixture email (Graph-shaped) | `server/email-*.mjs`, `server/graph-*.mjs` | Local/fixture only. No live mailbox or send |
 | Agent connect + MCP | `docs/AGENT-CONNECTION.md`, `scripts/agent-inbox.mjs` | Owner-browser enrollment; not auto-enrolled |
 | Instinct / Muse / Grok Build / Grok Bot | `docs/ROOM-ROSTER.md` | Roster + Connect-agent presets in this source |
-| Usability plan | `docs/USABILITY-PLAN.md` | Phase 3 in this source; mailbox/auto-enroll gated |
+| Usability plan | `docs/USABILITY-PLAN.md` | Phase 4 in this source; mailbox/auto-enroll gated |
 | Demigod `/room` landing | `deploy/room-entry.mjs` | Live on trydemigod.com |
 | Research / messaging plans | [`research/`](../research/README.md) | Copied from the Codex ChatGPT project mirror |
 
