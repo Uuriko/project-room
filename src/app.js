@@ -12,6 +12,7 @@ import { installPortableWork, installResultCopy } from "./portable-work.js";
 import { replyDraftKey, replyDraftData, validReplyDraft, confirmsReplyCommand, REPLY_CANCELLED } from "./reply-requests.js";
 import { workHelpContext, validateHelpData } from "./work-help.js";
 import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
+import { installInbox } from "./inbox-ui.js";
 
 const $ = selector => document.querySelector(selector);
 $("#skip-link").addEventListener("click", event => {
@@ -41,6 +42,7 @@ let resultCopyUI = null;
 let remindersUI = null;
 let agentConnectionsUI = null;
 let instructionsUI = null;
+let inboxUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
 let workDraftId = null, replyToId = null, busy = false;
 let workFormEpoch = 0, workRetryLocked = false;
@@ -102,6 +104,7 @@ const client = new RoomClient({
     instructionsUI?.sync();
     resultCopyUI?.sync();
     portableWorkUI?.sync();
+    inboxUI?.sync();
     if (firstSnapshot) {
       const saved = recovery.read(draftScope(identity), state);
       if (saved) {
@@ -137,6 +140,7 @@ const client = new RoomClient({
     remindersUI?.reset();
     agentConnectionsUI?.reset();
     instructionsUI?.reset();
+    inboxUI?.reset({ preservePending: leavingPage });
     workDraftId = null; replyToId = null; workFormEpoch++; setWorkRetry(false);
     $("#work-reuse-hint").hidden = true;
     currentThreadId = null; conversation = null; drafts = new ConversationDrafts();
@@ -206,6 +210,10 @@ portableWorkUI = installPortableWork({ client, getState: () => state, onSaved: m
   notice(visible ? "Draft posted. Work status is unchanged." : "Draft posted. Refresh to view it. Work status is unchanged.");
 } });
 resultCopyUI = installResultCopy({ client, getState: () => state });
+inboxUI = installInbox({ account: accountClient, room: client, getRoom: () => state, onShared: async receipt => {
+  try { await client.refresh(); if (state) revealMessage(receipt.messageId); }
+  catch { notice("Shared. Refresh the room to view it.", true); }
+} });
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 const humanize = value => String(value).replaceAll("_", " ").replaceAll(".", " ");
 const memberLabel = id => id == null ? "Unassigned" : state.members[id] ? `${state.members[id].displayName} (${id})` : `Unknown member (${id})`;
@@ -1266,7 +1274,7 @@ $("#auth-form").addEventListener("submit", async e => {
 $("#signout-button").addEventListener("click", async () => {
   if (busy || signoutLoading || !state || !session || invitationIsCommitting()) return;
   saveComposer();
-  if (drafts.hasText() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction) {
+  if (drafts.hasText() || inboxUI?.hasPending() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction) {
     if (!window.confirm((pendingAction?.uncertain || instructionsUI?.hasUnknown()) ? "Sign out and clear drafts and the pending retry? The action may already be saved." : "Sign out and clear unsent drafts and private setup on this device?")) return;
   }
   const operationId = ++signoutOperationId;

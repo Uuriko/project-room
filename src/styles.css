@@ -578,3 +578,51 @@ summary { overflow-wrap: anywhere; }
 #room-instructions-dialog textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: 1rem; resize: vertical; }
 .instructions-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .75rem; }
 #room-instructions-latest { border-left: 2px solid currentColor; padding-left: .75rem; margin: 1rem 0; }
+
+/* Inbox and Rooms share the shell; private source content stays in its own view. */
+.workspace-nav { display: flex; gap: 1.5rem; padding: 0 1rem; border-bottom: 1px solid var(--line); }
+.workspace-nav button { background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; color: var(--muted); padding: .9rem .2rem; font: inherit; cursor: pointer; }
+.workspace-nav button[aria-current="page"] { color: var(--text); border-bottom-color: currentColor; }
+.inbox-panel { display: grid; grid-template-columns: minmax(14rem, 19rem) minmax(0, 1fr); min-height: 65vh; }
+.inbox-sidebar { padding: 1.25rem 1rem; border-right: 1px solid var(--line); }
+.inbox-sidebar header, .inbox-source-heading, .inbox-draft-actions { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.inbox-sidebar h1 { font-size: 1.25rem; margin: 0; }
+.inbox-row { display: grid; gap: .4rem; width: 100%; padding: 1rem .75rem; border: 0; border-radius: .5rem; background: none; color: inherit; text-align: left; cursor: pointer; font: inherit; }
+.inbox-row span { font-size: .8rem; color: var(--muted); }
+.inbox-row strong { font-weight: 550; }
+.inbox-row[aria-current="true"] { background: rgba(128, 160, 160, .12); }
+.inbox-row:hover { background: rgba(128, 160, 160, .08); }
+.inbox-reader { padding: clamp(1.2rem, 4vw, 3rem); max-height: calc(100vh - 12rem); overflow-y: auto; }
+.inbox-reader > * { max-width: 46rem; margin-left: auto; margin-right: auto; }
+.inbox-source-heading { align-items: flex-start; }
+.inbox-source-heading h2 { font-size: clamp(1.4rem, 3vw, 1.85rem); line-height: 1.2; margin: .55rem 0 .75rem; }
+.inbox-source-body { margin-top: 2rem; margin-bottom: 2.5rem; line-height: 1.65; }
+.inbox-source-body p { white-space: pre-wrap; }
+.inbox-reader, .inbox-row, .inbox-share-dialog { overflow-wrap: anywhere; }
+.inbox-draft-form { display: grid; gap: .8rem; }
+.inbox-draft-form label { font-weight: 550; }
+.inbox-draft-form textarea { width: 100%; box-sizing: border-box; font: inherit; line-height: 1.5; padding: 1rem; resize: vertical; }
+.inbox-draft-actions { flex-wrap: wrap; justify-content: flex-end; }
+.inbox-draft-actions [role="status"] { margin-right: auto; color: var(--muted); font-size: .85rem; }
+.inbox-conflict { border-left: 2px solid currentColor; padding-left: 1rem; margin-top: 2rem; }
+.inbox-conflict h3 { font-size: 1rem; }
+.inbox-conflict pre { white-space: pre-wrap; font: inherit; }
+.inbox-conflict > div { display: flex; flex-wrap: wrap; gap: .5rem; }
+.inbox-share-dialog { width: min(38rem, calc(100vw - 2rem)); box-sizing: border-box; max-height: 90vh; overflow: auto; }
+#inbox-share-paragraphs label { display: flex; align-items: flex-start; gap: .75rem; padding: 1rem 0; line-height: 1.5; }
+#inbox-share-paragraphs input { flex: 0 0 auto; width: 1.1rem; height: 1.1rem; min-height: 1.1rem; margin-top: .3rem; }
+#inbox-share-paragraphs span { white-space: pre-wrap; }
+.inbox-back { display: none; }
+.app-shell:has(#inbox-panel:not([hidden])) .connection-bar,
+.app-shell:has(#inbox-panel:not([hidden])) #invite-people-button,
+.app-shell:has(#inbox-panel:not([hidden])) #refresh-button { display: none; }
+#inbox-share-paragraphs label { color: var(--text); font-weight: 400; letter-spacing: normal; }
+#inbox-share-audience { max-height: 8rem; overflow-y: auto; }
+@media (max-width: 720px) {
+  .inbox-panel { grid-template-columns: minmax(0, 1fr); }
+  .inbox-sidebar { border-right: 0; }
+  .inbox-panel:not(.reading) .inbox-reader, .inbox-panel.reading .inbox-sidebar { display: none; }
+  .inbox-reader { max-height: none; padding: 1.25rem; }
+  .inbox-panel.reading .inbox-back { display: block; margin: 1rem 1.25rem 0; text-align: left; }
+  .inbox-source-heading { flex-wrap: wrap; }
+}

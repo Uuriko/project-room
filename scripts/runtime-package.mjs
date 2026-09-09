@@ -12,8 +12,9 @@ const v9Assets = [...v8Assets, "src/agent-connections.js"];
 const v11Assets = [...v9Assets, "src/room-charter.js", "src/room-instructions.js"];
 const v12Assets = [...v11Assets, "src/reply-requests.js"];
 const v13Assets = [...v12Assets, "src/work-help.js"];
-export const publicAssets = [...v13Assets, "src/help-offers.js"];
-const assetsFor = schema => schema === 8 ? v8Assets : schema <= 10 ? v9Assets : schema === 11 ? v11Assets : schema === 12 ? v12Assets : schema === 13 ? v13Assets : publicAssets;
+const v14Assets = [...v13Assets, "src/help-offers.js"];
+export const publicAssets = [...v14Assets, "src/inbox-client.js", "src/inbox-ui.js"];
+const assetsFor = (schema, inbox) => schema === 8 ? v8Assets : schema <= 10 ? v9Assets : schema === 11 ? v11Assets : schema === 12 ? v12Assets : schema === 13 ? v13Assets : inbox && schema >= 15 ? publicAssets : v14Assets;
 const required = [...v8Assets, "server.mjs", "package.json", "package-lock.json",
   ...["backup", "bootstrap", "claim-scopes", "deployment", "http", "invitation-evidence", "invitation-journal", "reminders",
     "return-brief", "return-selectors", "share-links", "store", "work-context", "writer-fence"].map(name => `server/${name}.mjs`),
@@ -31,6 +32,7 @@ optional.push("src/work-help.js", "server/work-help.mjs");
 optional.push("src/help-offers.js");
 optional.push("client/help-actions.mjs");
 optional.push("server/inbox.mjs");
+optional.push("src/inbox-client.js", "src/inbox-ui.js");
 const allowed = new Set([...required, ...optional]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 const check = condition => { if (!condition) throw new Error("Runtime package does not match its exact allowlisted contract"); };
@@ -66,7 +68,7 @@ export function createRuntimePackage({ repository, commit, destination }) {
     mkdirSync(dirname(join(output, path)), { recursive: true, mode: 0o700 });
     writeFileSync(join(output, path), bytes, { mode: 0o600, flag: "wx" });
   }
-  const manifest = { format: 1, sourceCommit: commit, sourceTree: tree, runtime, publicAssets: assetsFor(runtime.schemaVersion),
+  const manifest = { format: 1, sourceCommit: commit, sourceTree: tree, runtime, publicAssets: assetsFor(runtime.schemaVersion, files.has("src/inbox-ui.js")),
     files: [...files].map(([path, bytes]) => ({ path, bytes: bytes.length, sha256: sha256(bytes) })),
     limitation: "Content consistency only; not trusted provenance, recovery freshness, hosted readiness or publication approval." };
   // Last write is the completion marker. A partial directory is not a package.
@@ -90,7 +92,8 @@ export function verifyRuntimePackage(directory, { expectedCommit } = {}) {
   check(actual.includes(manifestName));
   const raw = readFileSync(join(root, manifestName)), manifest = JSON.parse(raw);
   check(manifest.format === 1 && hashPattern.test(manifest.sourceCommit) && hashPattern.test(manifest.sourceTree)
-    && (!expectedCommit || manifest.sourceCommit === expectedCommit) && same(manifest.publicAssets, assetsFor(manifest.runtime?.schemaVersion)) && Array.isArray(manifest.files));
+    && (!expectedCommit || manifest.sourceCommit === expectedCommit) && Array.isArray(manifest.files)
+    && same(manifest.publicAssets, assetsFor(manifest.runtime?.schemaVersion, manifest.files.some(f => f.path === "src/inbox-ui.js"))));
   const listed = manifest.files.map(entry => entry.path);
   check(new Set(listed).size === listed.length && same([...listed].sort(), listed) && required.every(path => listed.includes(path))
     && same(actual.sort(), [...listed, manifestName].sort()));

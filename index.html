@@ -43,6 +43,39 @@
         </details>
       </section>
 
+      <nav id="workspace-nav" class="workspace-nav" aria-label="Workspace" hidden>
+        <button id="nav-inbox" type="button" aria-current="false">Inbox</button>
+        <button id="nav-rooms" type="button" aria-current="page">Rooms</button>
+      </nav>
+      <section id="inbox-panel" class="inbox-panel" aria-label="Your inbox" hidden>
+        <aside class="inbox-sidebar">
+          <header><h1>Inbox</h1><button id="inbox-refresh" class="button ghost icon-button" type="button" aria-label="Refresh inbox">↻</button></header>
+          <p id="inbox-status" role="status"></p>
+          <div id="inbox-list" aria-label="Messages"></div>
+          <p id="inbox-empty" class="form-hint">Sample inbox. Mail connections are not available yet.</p>
+        </aside>
+        <button id="inbox-back" class="text-button inbox-back" type="button">← Inbox</button>
+        <article id="inbox-reader" class="inbox-reader" hidden>
+          <header class="inbox-source-heading"><div><span class="form-hint">Sample message · only you</span><h2 id="inbox-subject"></h2></div><button id="inbox-ask" class="button secondary" type="button">Ask room</button></header>
+          <p id="inbox-addresses" class="form-hint"></p>
+          <div id="inbox-source-body" class="inbox-source-body"></div>
+          <form id="inbox-draft-form" class="inbox-draft-form">
+            <label for="inbox-draft">Private reply draft</label>
+            <textarea id="inbox-draft" rows="5" maxlength="4000" placeholder="Write a reply…"></textarea>
+            <div class="inbox-draft-actions"><span id="inbox-draft-status" role="status"></span><button id="inbox-review" class="button ghost" type="button" hidden>Review changes</button><button id="inbox-save" class="button primary" type="submit" disabled>Save draft</button></div>
+          </form>
+          <section id="inbox-conflict" class="inbox-conflict" aria-label="Draft changes" hidden>
+            <h3>Saved draft</h3><pre id="inbox-remote-draft"></pre>
+            <div><button id="inbox-use-saved" class="button secondary" type="button">Use saved</button><button id="inbox-use-mine" class="button secondary" type="button">Keep mine</button></div>
+          </section>
+        </article>
+      </section>
+      <dialog id="inbox-share-dialog" class="inbox-share-dialog" aria-labelledby="inbox-share-title">
+        <h2 id="inbox-share-title">Share with room</h2><p id="inbox-share-audience"></p>
+        <p class="form-hint">Selected text becomes room history, including for future members.</p>
+        <div id="inbox-share-paragraphs"></div><p id="inbox-share-status" role="status"></p>
+        <div class="inbox-draft-actions"><button id="inbox-share-close" class="button ghost" type="button">Close</button><button id="inbox-share-confirm" class="button primary" type="button" disabled>Share</button></div>
+      </dialog>
       <main id="main" class="community-shell" hidden>
         <section class="room-stage" aria-labelledby="room-title">
           <header class="room-heading">
