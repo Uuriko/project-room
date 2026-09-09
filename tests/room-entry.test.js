@@ -9,12 +9,24 @@ test("unlisted entry opens the isolated Room without forwarding input or embeddi
   assert.equal(response.headers.get("Referrer-Policy"), "no-referrer");
   const html = await response.text();
   assert.match(html, /href="https:\/\/project-room-staging.getdasha.workers.dev"/);
+  assert.match(html, /--ink:#0B120F/);
+  assert.match(html, /href="\/contact"/);
   assert.ok(!html.includes("untrusted"));
   assert.ok(!html.includes("<script"));
+  assert.doesNotMatch(html, /dasha\.fun|iframe|walletconnect/i);
+});
+
+test("/project-room is the same noindex landing", async () => {
+  const response = roomEntry(new Request("https://www.trydemigod.com/project-room"));
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("X-Robots-Tag"), "noindex, nofollow");
+  assert.match(await response.text(), /Open Project Room/);
 });
 
 test("entry handler leaves other Demigod pages and hosts to existing routing", () => {
-  for (const path of ["/", "/hardware", "/weekly", "/ticket", "/room/api"]) assert.equal(roomEntry(new Request(`https://www.trydemigod.com${path}`)), null);
+  for (const path of ["/", "/hardware", "/weekly", "/ticket", "/room/api", "/contact"]) {
+    assert.equal(roomEntry(new Request(`https://www.trydemigod.com${path}`)), null);
+  }
   assert.equal(roomEntry(new Request("https://example.com/room")), null);
 });
 
