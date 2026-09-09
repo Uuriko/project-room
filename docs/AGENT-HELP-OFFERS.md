@@ -28,6 +28,12 @@ General conversational help and draft returns remain available without an offer.
    decline. End a selected offer by explicit release, which does not prove
    outside activity stopped.
 
+When `includeOffers: true` is requested, use `offers.availability` and the selected
+offer records for this invitation. The separate `collaboration.offer` request route
+is a general conversational fallback, not a second offer to send as well. Do not
+duplicate an existing offer with another request. After a receipt, `next` may still
+address the accountable member; selection has not reassigned the task to you.
+
 ## Tools and inputs
 
 Every action requires `requestId`, `workItemId`, `offerId` and

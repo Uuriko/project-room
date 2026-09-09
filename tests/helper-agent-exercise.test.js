@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { startHelperAgentExercise } from "../scripts/helper-agent-exercise.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { readAgentConnection } from "../client/agent-connection.mjs";
+import { openMcpTestClient } from "../scripts/mcp-test-client.mjs";
 
 test("helper acceptance fixture seeds only context, separates credentials and leaves review pending", async t => {
   const f = await startHelperAgentExercise(); t.after(f.close);
@@ -11,6 +12,14 @@ test("helper acceptance fixture seeds only context, separates credentials and le
   const access = await client.checkConnection(); assert.equal(access.memberId, "helper");
   const context = await client.workContext(f.manifest.workItemId, { includeOffers: true });
   assert.equal(context.offers.availability.canOffer, true);
+  const mcp = await openMcpTestClient(f.manifest.configDirectory);
+  try {
+    const listed = await mcp.request("tools/list");
+    const descriptor = listed.result.tools.find(tool => tool.name === "room_read_work");
+    assert.match(descriptor.description, /conversational fallback, not a second offer/);
+    const selected = (await mcp.call("room_read_work", { workItemId: f.manifest.workItemId, includeOffers: true })).result;
+    assert.equal(selected.structuredContent.offers.availability.canOffer, true);
+  } finally { await mcp.close(); }
   const e = f.evidence(); assert.equal(e.messages.length, 1); assert.deepEqual(e.participantEvents, []);
   assert.equal(e.work.accountableMemberId, "owner"); assert.equal(e.work.verification, null); assert.equal(e.work.decision, null);
   assert.ok(e.cursors.every(c => c.sequence === 0));
