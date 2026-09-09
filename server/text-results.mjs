@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { nativeTextEvidence, validResultBody, proposalContext } from "../src/work-packet.js";
+import { nativeTextEvidence, validResultBody, proposalContext, reportedProducer } from "../src/work-packet.js";
 import { nextWorkStep } from "../src/workflow.js";
 import { WORK_REVISION_TYPES } from "../src/events.js";
 
@@ -75,7 +75,7 @@ export function auditTextResults(db, state, history) {
       const { nativeText, text } = verifyTextCompletion(db, state, { ...work, receipt: parent ? { eventId: parent } : null }, data);
       const receipt = [...work.receiptHistory, work.receipt].find(receipt => receipt?.eventId === event.id);
       check(text.postSequence < row.sequence && isDeepStrictEqual(receipt, {
-        reportedById: event.actorId, producerId: data.producerId, producerAttribution: data.producerId === null ? "unknown" : "reported",
+        reportedById: event.actorId, ...reportedProducer(data),
         summary: data.summary, evidenceUrl: null, nativeText, evidenceVersion: data.evidenceVersion,
         checksClaimed: data.checksClaimed || [], nextAction: data.nextAction, eventId: event.id
       }));

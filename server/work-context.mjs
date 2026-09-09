@@ -10,7 +10,7 @@ const pick = (value, fields) => value == null ? null
 export function currentWorkRecord(item) {
   const work = pick(item, "id title definitionOfDone revision state mode sourceMessageId proposedById accountableMemberId verifierMemberId humanDecisionMakerId independentVerificationRequired ownerDecisionRequired supersededBy createdAt updatedAt");
   work.claim = pick(item.claim, "holderId repository ref paths acquiredAt expiresAt status releasedAt");
-  work.receipt = pick(item.receipt, "reportedById producerId producerAttribution summary evidenceUrl evidenceVersion checksClaimed nextAction eventId nativeText");
+  work.receipt = pick(item.receipt, "reportedById producerId producerAttribution externalProducer summary evidenceUrl evidenceVersion checksClaimed nextAction eventId nativeText");
   work.verification = pick(item.verification, "verifierId result completionEventId evidenceVersion summary independenceConfirmed eventId");
   work.decision = pick(item.decision, "actorId decision completionEventId evidenceVersion reason eventId");
   work.blocker = pick(item.blocker, "reason nextAction eventId");

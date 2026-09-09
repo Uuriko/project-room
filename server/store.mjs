@@ -182,7 +182,7 @@ const shapes = {
   [T.WORK_STARTED]: `${work} resolvedBlocker`,
   [T.WORK_BLOCKED]: `${work} reason nextAction`,
   [T.WORK_BLOCKER_RESOLVED]: `${work} resolution`,
-  [T.WORK_COMPLETED]: `${work} summary evidenceUrl evidenceVersion nextAction checksClaimed producerId evidenceKind evidenceMessageId evidenceMessageEventId previousCompletionEventId`,
+  [T.WORK_COMPLETED]: `${work} summary evidenceUrl evidenceVersion nextAction checksClaimed producerId externalProducer evidenceKind evidenceMessageId evidenceMessageEventId previousCompletionEventId`,
   [T.WORK_SUPERSEDED]: `${work} supersededByWorkItemId reason`,
   [T.CLAIM_ACQUIRED]: `${work} repository ref paths expiresAt`,
   [T.CLAIM_RELEASED]: work,
@@ -226,7 +226,7 @@ export class RoomStore {
     this.inbox = new Inbox(this);
     this.email = new EmailImport(this);
     const version = this.storagePlatform.version(this.db);
-    const supported = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, STORE_SCHEMA_VERSION]);
+    const supported = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, STORE_SCHEMA_VERSION]);
     const hasSchema = version === 0 && this.storagePlatform.hasSchema(this.db);
     if (!supported.has(version) || hasSchema) {
       this.db.close();
@@ -286,6 +286,11 @@ export class RoomStore {
       ${invitationSchema}`);
       this.storagePlatform.setVersion(this.db, 4);
     }
+    if (version > 0 && version < 26 && (
+      this.db.prepare("SELECT 1 FROM events WHERE json_extract(body,'$.type')='work.completed' AND json_type(body,'$.data.externalProducer') IS NOT NULL LIMIT 1").get()
+      || this.db.prepare("SELECT 1 FROM rooms,json_tree(rooms.projection) WHERE json_tree.key='externalProducer' LIMIT 1").get()
+      || version >= 2 && this.db.prepare("SELECT 1 FROM projection_checkpoints,json_tree(projection_checkpoints.projection) WHERE json_tree.key='externalProducer' LIMIT 1").get()))
+      throw new Error("Pre-v26 outside credit history requires operator reconciliation");
     this.repairProjectionProvenance({ upgradeV1: version === 1 });
     if (version === 1 || version === 2) this.migrateIdentityV3(version);
     if (version === 1 || version === 2 || version === 3) this.migrateInvitationsV4();

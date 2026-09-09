@@ -7,6 +7,16 @@ const referenceFields = ["version", "roomId", "workItemId", "packetId", "basisRe
 const invalid = message => { throw new Error(message); };
 export const validResultBody = body => typeof body === "string" && body.length <= 4096 && body.trim().length > 0 && body.isWellFormed();
 
+// Credit is an assertion about this result, never enrollment or identity proof.
+export function reportedProducer(data) {
+  const producerId = data.producerId ?? null, external = Object.hasOwn(data, "externalProducer");
+  if (producerId !== null && !id(producerId)) invalid("Choose a valid producer");
+  if (external && (producerId !== null || typeof data.externalProducer !== "string" || !data.externalProducer.trim()
+    || data.externalProducer.length > 160 || !data.externalProducer.isWellFormed())) invalid("Choose a room producer or an outside credit of 1–160 characters, not both");
+  return { producerId, producerAttribution: external ? "external-reported" : producerId === null ? "unknown" : "reported",
+    ...(external ? { externalProducer: data.externalProducer } : {}) };
+}
+
 // Text is never normalized here: the immutable stored message is the artifact.
 export function nativeTextEvidence(state, work, data) {
   if (data.evidenceKind !== "room_text" || Object.hasOwn(data, "evidenceUrl")
@@ -41,7 +51,7 @@ export async function verifyWorkResult(value, { roomId, workItemId, completionEv
     const receipt = result.receipt;
     check(id(receipt?.eventId) && receipt.eventId === (completionEventId ?? current.completionEventId)
       && id(receipt.reportedById) && (receipt.producerId === null || id(receipt.producerId))
-      && receipt.producerAttribution === (receipt.producerId === null ? "unknown" : "reported")
+      && receipt.producerAttribution === reportedProducer(receipt).producerAttribution
       && [receipt.summary, receipt.evidenceVersion, receipt.nextAction].every(text => typeof text === "string" && text.trim())
       && Array.isArray(receipt.checksClaimed) && receipt.checksClaimed.every(text => typeof text === "string"));
     if (result.kind === "external") {

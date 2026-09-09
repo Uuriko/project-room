@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { EVENT_TYPES as T, validId } from "../src/events.js";
 import { replyPostMode, REPLY_POLICY_VERSION } from "../src/reply-requests.js";
+import { reportedProducer } from "../src/work-packet.js";
 
 const id = { type: "string", minLength: 1, maxLength: 128, pattern: "^(?!(?:constructor|prototype|__proto__)$)[A-Za-z0-9][A-Za-z0-9_.:-]*$" };
 const text = { type: "string", minLength: 1, maxLength: 4096, pattern: "\\S" };
@@ -10,11 +11,13 @@ const object = (properties, required = Object.keys(properties)) => ({ type: "obj
 const common = { requestId: { ...id, description: "Stable business operation ID. Keep this ID and ALL input unchanged after an uncertain result, cancellation or reconnect." },
   workItemId: id, expectedRevision: { ...revision, description: "The exact work revision you inspected. Never automatically replace it on retry." } };
 const retry = " Preserve the exact input across retries. A saved receipt confirms this operation, not current ownership or approval; read the task again for its current next step.";
+const externalProducer = { ...text, maxLength: 160, description: "Optional reported outside person, team or AI credit. Use only with producerId=null (or omitted for external evidence). Does not create membership, verify identity or establish reviewer independence." };
 const definitions = [
   ["submit_text_result", "Save room text as result", T.WORK_COMPLETED, "Submit one immutable work-linked Room message as your assigned result. Preview it with room_read_result first. Pins its post event, exact UTF-8 SHA-256 and previous completion (explicit null for first). Same completion/claim gates as external evidence. Posting, producer attribution, review and human approval remain separate.", {
     summary: text, nextAction: text, evidenceMessageId: id, evidenceMessageEventId: id,
     evidenceVersion: { type: "string", pattern: "^sha256:[0-9a-f]{64}$" },
     previousCompletionEventId: { ...id, type: ["string", "null"] }, producerId: { ...id, type: ["string", "null"] },
+    externalProducer,
     checksClaimed: { type: "array", maxItems: 64, items: { ...text, maxLength: 512 } }
   }, ["summary", "nextAction", "evidenceMessageId", "evidenceMessageEventId", "evidenceVersion", "previousCompletionEventId", "producerId"]],
   ["propose_work", "Propose work", T.WORK_PROPOSED, "Propose a new assigned task. Requires steer permission; ordinary enrolled agents do not receive it. This neither accepts nor starts work.", {
@@ -28,6 +31,7 @@ const definitions = [
   ["record_completion", "Submit result", T.WORK_COMPLETED, "Record your assigned task's result and evidence reference. Requires complete_work; write mode also requires current write authority and your active claim. Producer attribution is an explicit assertion, never inferred. Evidence is not fetched. This is not verification or human approval.", {
     summary: text, evidenceUrl: { ...text, description: "HTTPS reference without embedded credentials; not fetched or independently verified by Room." }, evidenceVersion: text, nextAction: text,
     producerId: { ...id, type: ["string", "null"], description: "Explicit reported producer. Omit or use null when unknown; do not guess." },
+    externalProducer,
     checksClaimed: { type: "array", maxItems: 64, items: { ...text, maxLength: 512 } }
   }, ["summary", "evidenceUrl", "evidenceVersion", "nextAction"]],
   ["record_verification", "Record evidence review", T.VERIFICATION_RECORDED, "Record your own check of the exact completion event and evidence version inspected. Requires designated verify authority; independent review cannot be by its producer. Historical findings do not approve newer evidence. Never substitute the latest receipt automatically.", {
@@ -63,7 +67,11 @@ export function conforms(value, shape) {
   return typeof value === "string" && (!shape.enum || shape.enum.includes(value)) && value.length >= (shape.minLength ?? 0)
     && value.length <= (shape.maxLength ?? Infinity) && (!shape.pattern || new RegExp(shape.pattern).test(value));
 }
-export function validWorkArguments(name, args) { return actions.has(name) && conforms(args, actions.get(name).tool.inputSchema); }
+export function validWorkArguments(name, args) {
+  if (!actions.has(name) || !conforms(args, actions.get(name).tool.inputSchema)) return false;
+  try { if (actions.get(name).type === T.WORK_COMPLETED) reportedProducer(args); } catch { return false; }
+  return true;
+}
 export function buildWorkCommand(name, args) {
   if (!validWorkArguments(name, args)) throw Object.assign(new Error("Invalid work action input"), { code: "invalid_work_action" });
   const { requestId, ...data } = structuredClone(args), command = { id: requestId, type: actions.get(name).type, data };

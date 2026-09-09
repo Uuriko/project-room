@@ -7,7 +7,7 @@ import { chromium } from "playwright";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { parseWorkReturn } from "../src/work-packet.js";
 
-export async function runManualOwnerExercise({ ownerPath, stage, answerPath, output, mobile = false }) {
+export async function runManualOwnerExercise({ ownerPath, stage, answerPath, output, mobile = false, externalProducer, loseCompletionResponse = false }) {
   assert.ok(["export", "return"].includes(stage));
   const config = JSON.parse(readFileSync(ownerPath)), origin = new URL(config.origin);
   assert.equal(config.fixture, "room-helper-exercise-v1"); assert.equal(origin.origin, config.origin);
@@ -64,17 +64,45 @@ export async function runManualOwnerExercise({ ownerPath, stage, answerPath, out
       await page.locator('[data-message-action="result"][data-message-id="' + message.id + '"]').click();
       await page.waitForFunction(body => document.querySelector("#action-text-body").textContent === body, message.body);
       assert.equal(await page.locator('[name="producerId"]').inputValue(), "");
-      await page.locator('[name="producerId"]').selectOption("__unknown__");
+      await page.locator('[name="producerId"]').selectOption(externalProducer === undefined ? "__unknown__" : "__external__");
+      if (externalProducer !== undefined) {
+        await page.locator('[name="externalProducer"]').fill(externalProducer);
+        await page.locator('[name="producerId"]').selectOption("__unknown__");
+        assert.equal(await page.locator("#external-producer-field").isVisible(), false);
+        assert.equal(await page.locator('[name="externalProducer"]').isDisabled(), true);
+        await page.locator('[name="producerId"]').selectOption("__external__");
+        assert.equal(await page.locator('[name="externalProducer"]').inputValue(), externalProducer);
+      }
       await page.locator('#action-fields [name="summary"]').fill("Copied AI proposal, returned by the owner. Author not verified.");
       await page.locator('#action-fields [name="nextAction"]').fill("Establish producer attribution before independent review; owner decision remains pending.");
       await page.screenshot({ path: join(directory, "adopt.png") });
-      await page.locator("#action-form button[type=submit]").click(); await page.locator("#action-dialog").waitFor({ state: "hidden" });
+      if (loseCompletionResponse) {
+        let dropped = false;
+        await page.route("**/api/rooms/commons/commands", async route => {
+          if (!dropped && route.request().postDataJSON().type === "work.completed") { dropped = true; await route.fetch(); return route.abort("failed"); }
+          return route.continue();
+        });
+      }
+      await page.locator("#action-form button[type=submit]").click();
+      if (loseCompletionResponse) {
+        await page.getByText("Save not confirmed. Retry the original before making changes.", { exact: true }).waitFor();
+        assert.equal(await page.locator('[name="producerId"]').isDisabled(), true);
+        if (externalProducer !== undefined) assert.equal(await page.locator('[name="externalProducer"]').isDisabled(), true);
+        const attempted = commands.at(-1);
+        await page.locator("#cancel-action").click(); await page.locator("#resume-action").click();
+        await page.locator("#action-form button[type=submit]").click();
+        await page.locator("#action-dialog").waitFor({ state: "hidden" });
+        assert.deepEqual(commands.at(-1), attempted);
+      }
+      await page.locator("#action-dialog").waitFor({ state: "hidden" });
       const current = (await client.snapshot()).state.workItems[config.workItemId];
       assert.equal(current.receipt.nativeText.messageId, message.id);
       assert.equal(current.receipt.producerId, null); assert.equal(current.receipt.reportedById, "owner");
       assert.equal(current.verification, null); assert.equal(current.decision, null);
       selectedResult = await client.workResult(config.workItemId, { completionEventId: current.receipt.eventId });
-      assert.equal(selectedResult.result.text.body, parsed.body); assert.equal(selectedResult.result.receipt.producerAttribution, "unknown");
+      assert.equal(selectedResult.result.text.body, parsed.body);
+      assert.equal(selectedResult.result.receipt.producerAttribution, externalProducer === undefined ? "unknown" : "external-reported");
+      assert.equal(selectedResult.result.receipt.externalProducer, externalProducer);
       assert.equal(selectedResult.current.next.action, "establish_provenance");
       assert.equal(selectedResult.current.next.memberId, work.accountableMemberId);
       assert.equal(selectedResult.current.next.completionEventId, current.receipt.eventId);
@@ -82,7 +110,7 @@ export async function runManualOwnerExercise({ ownerPath, stage, answerPath, out
       await page.waitForFunction(body => document.querySelector("#result-body").textContent === body, parsed.body);
       await page.screenshot({ path: join(directory, "result.png") });
       await page.locator("#close-result").click();
-      assert.deepEqual(commands.map(command => command.type), ["message.posted", "work.completed"]);
+      assert.deepEqual(commands.map(command => command.type), ["message.posted", "work.completed", ...(loseCompletionResponse ? ["work.completed"] : [])]);
     }
     assert.equal(await page.locator("#message-input").inputValue(), composer);
     assert.deepEqual(errors, []); assert.deepEqual(external, []);

@@ -1128,7 +1128,8 @@ function receiptCard(i) {
   const reporter = receipt.reportedById ? memberLabel(receipt.reportedById) : "Unknown reporter";
   const producer = receipt.producerAttribution === "reported" && receipt.producerId
     ? memberLabel(receipt.producerId)
-    : "Unknown — no producer was reported";
+    : receipt.producerAttribution === "external-reported" ? `${receipt.externalProducer} · outside room, reported`
+      : "Unknown — no producer was reported";
   let verification = "<p>No verification recorded.</p>";
   if (i.verification) {
     const confirmed = i.verification.independenceConfirmed === true;
@@ -1836,7 +1837,7 @@ function producerField() {
   const self = members.find(member => member.id === session.member.id);
   const selfOption = self ? `<option value="${esc(self.id)}">I produced this — ${esc(memberLabel(self.id))}</option>` : "";
   const otherOptions = members.filter(member => member.id !== session.member.id).map(member => `<option value="${esc(member.id)}">${esc(memberLabel(member.id))} · ${esc(member.kind)}${member.active === false ? " · access revoked" : ""}</option>`).join("");
-  return `<label>Produced by<select name="producerId" required aria-describedby="producer-attribution-help"><option value="">Choose producer</option>${selfOption}<option value="__unknown__">Unknown / not reported</option>${otherOptions}</select></label><p id="producer-attribution-help" class="form-hint">You submit this result. Credit its producer, or choose Unknown.</p>`;
+  return `<label>Produced by<select name="producerId" required aria-describedby="producer-attribution-help"><option value="">Choose producer</option>${selfOption}<option value="__external__">Outside person or AI</option><option value="__unknown__">Unknown / not reported</option>${otherOptions}</select></label><label id="external-producer-field" hidden>Credit<input name="externalProducer" maxlength="160" disabled autocomplete="off" placeholder="Person, team or AI"></label><p id="producer-attribution-help" class="form-hint">You submit this result. Credit its producer, or choose Unknown.</p>`;
 }
 const actionSpecs = {
   "offer-help": [T.HELP_OFFER_OPENED, "Offer help", ""],
@@ -2001,7 +2002,7 @@ function renderActionContext(item, action) {
   else evidence.setAttribute("href", evidenceUrl);
   $("#action-fields").querySelector("#verification-boundary")?.remove();
   const unknown = action === "verify" && item.independentVerificationRequired && !hasReportedProducer(item);
-  if (unknown) $("#action-fields").insertAdjacentHTML("afterbegin", '<p id="verification-boundary" class="form-hint"><strong>Producer identity is unknown.</strong> This check cannot satisfy independent verification or unlock approval.</p>');
+  if (unknown) $("#action-fields").insertAdjacentHTML("afterbegin", `<p id="verification-boundary" class="form-hint"><strong>${item.receipt.producerAttribution === "external-reported" ? "Outside credit is reported, not verified." : "Producer identity is unknown."}</strong> This check cannot satisfy independent verification or unlock approval.</p>`);
   $("#action-dialog").setAttribute("aria-describedby", unknown ? "action-context verification-boundary" : "action-context");
   const result = $("#action-fields select[name='result']");
   if (unknown) result?.setAttribute("aria-describedby", "verification-boundary");
@@ -2062,6 +2063,12 @@ function syncActionForm() {
   const entry = pendingAction, item = state.workItems[entry.workId], changed = actionChanged(entry);
   const available = actionAvailable(entry), save = $("#action-form button[type='submit']");
   for (const field of $("#action-fields").querySelectorAll("input,textarea,select")) field.disabled = entry.uncertain;
+  if (entry.action === "complete") {
+    const external = $("#action-fields [name=producerId]").value === "__external__", input = $("#action-fields [name=externalProducer]");
+    $("#action-fields").querySelector("#external-producer-field").hidden = !external; input.required = external; input.disabled = entry.uncertain || !external;
+    $("#action-fields").querySelector("#producer-attribution-help").textContent = external ? "Reported credit only. No access or verified identity."
+      : "You submit this result. Credit its producer, or choose Unknown.";
+  }
   save.textContent = entry.uncertain ? "Retry original save" : offerLabels[entry.action] ?? (entry.action === "help" ? "Publish request" : entry.action === "end-help" ? "End request" : "Save record");
   save.disabled = !entry.uncertain && (changed || entry.needsReview || !available || entry.textRequired && !entry.text);
   $("#cancel-action").textContent = entry.uncertain ? "Close" : "Cancel";
@@ -2079,6 +2086,7 @@ function resumeAction() {
   syncActionForm(); $("#action-form button[type='submit']").focus();
 }
 $("#resume-action").addEventListener("click", resumeAction);
+$("#action-fields").addEventListener("change", event => { if (event.target.name === "producerId") syncActionForm(); });
 $("#refresh-action").addEventListener("click", () => {
   const entry = pendingAction;
   if (!entry || !state || busy || entry.uncertain) return;
@@ -2176,7 +2184,7 @@ $("#action-form").addEventListener("submit", e => {
       }
       try { validateHelpData(data); } catch { entry.error = "Add a short scope and choose an end time."; syncActionForm(); return; }
     }
-    if (entry.action === "complete") data.producerId = fields.producerId === "__unknown__" ? null : fields.producerId;
+    if (entry.action === "complete") data.producerId = ["__unknown__", "__external__"].includes(fields.producerId) ? null : fields.producerId;
     if (entry.draftMessageId) Object.assign(data, { evidenceKind: "room_text", evidenceMessageId: entry.text.messageId,
       evidenceMessageEventId: entry.text.messageEventId, evidenceVersion: entry.text.evidenceVersion, previousCompletionEventId: entry.receipt?.completionEventId ?? null });
     if (entry.action === "claim") data.paths = fields.paths.split("\n").map(p => p.trim()).filter(Boolean);
@@ -2248,7 +2256,8 @@ function describeBriefEvent({ sequence, event }) {
   else if (event.type === T.OWNER_DECISION_RECORDED) detail = esc(humanize(event.data.decision));
   else if (event.type === T.WORK_COMPLETED) {
     const title = state.workItems[event.data.workItemId]?.title ?? event.data.workItemId ?? "";
-    const producer = event.data.producerId ? memberLabel(event.data.producerId) : "unknown — not reported";
+    const producer = event.data.producerId ? memberLabel(event.data.producerId)
+      : event.data.externalProducer ? `${event.data.externalProducer} · outside room, reported` : "unknown — not reported";
     detail = esc(`${title} · producer ${producer}`);
   }
   else if (event.type?.startsWith("work.")) detail = esc(state.workItems[event.data.workItemId]?.title ?? event.data.workItemId ?? "");

@@ -11,7 +11,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 
-export async function startHelperAgentExercise() {
+export async function startHelperAgentExercise({ humanReviewer = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "room-helper-exercise-"));
   let store, server, closing;
   const close = () => closing ??= (async () => {
@@ -27,8 +27,8 @@ export async function startHelperAgentExercise() {
     seed[1].data.displayName = "Simulated owner (not John)"; store.initialize(seed);
     const owner = store.issueAccessKey("commons", "owner");
     const send = (type, data) => store.command(owner, "commons", { id: randomUUID(), type, data });
-    send("member.added", { memberId: "reviewer", displayName: "Reviewer — not connected", kind: "agent",
-      accountableHumanId: "owner", permissions: ["verify"] });
+    send("member.added", { memberId: "reviewer", displayName: humanReviewer ? "Simulated reviewer" : "Reviewer — not connected",
+      kind: humanReviewer ? "human" : "agent", ...(humanReviewer ? {} : { accountableHumanId: "owner" }), permissions: ["verify"] });
     const slot = store.createSession(owner), token = randomBytes(32).toString("base64url");
     store.agentConnections.apply(slot.token, "commons", { action: "create", requestId: randomUUID(), memberId: "helper",
       displayName: "Acceptance helper", access: "chat", keyHash: createHash("sha256").update(token).digest("hex"),

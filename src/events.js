@@ -1,5 +1,5 @@
 import { REACTIONS } from "./conversation.js";
-import { proposalContext, nativeTextEvidence } from "./work-packet.js";
+import { proposalContext, nativeTextEvidence, reportedProducer } from "./work-packet.js";
 import { CHARTER_TYPE, charterFromEvent } from "./room-charter.js";
 import { REPLY_CANCELLED, prepareReplyPost, recordReplyPost, cancelReplyRequest } from "./reply-requests.js";
 import { WORK_HELP_UPDATED, helpFromEvent } from "./work-help.js";
@@ -439,7 +439,7 @@ function completeWork(state, incoming) {
       if (url.protocol !== "https:" || url.username || url.password) throw new Error();
     } catch { throw new Error("Evidence must be an HTTPS URL without credentials"); }
   }
-  const producerId = incoming.data.producerId ?? null;
+  const attribution = reportedProducer(incoming.data), { producerId } = attribution;
   if (producerId !== null) knownMember(state, producerId);
   if (item.receipt) item.receiptHistory.push(item.receipt);
   if (item.verification) item.verificationHistory.push(item.verification);
@@ -450,8 +450,7 @@ function completeWork(state, incoming) {
     // the reporter. This also lets verification enforce independence when a producer is
     // actually known.
     reportedById: incoming.actorId,
-    producerId,
-    producerAttribution: producerId === null ? "unknown" : "reported",
+    ...attribution,
     summary: incoming.data.summary,
     evidenceUrl: nativeText ? null : incoming.data.evidenceUrl,
     ...(nativeText ? { nativeText } : {}),
