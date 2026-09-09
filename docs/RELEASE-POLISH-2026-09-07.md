@@ -195,6 +195,11 @@ unattended agent runner is claimed.
 
 ## Publication and rollback procedure
 
+**Historical, pre-v8 procedure.** The later local private-reminder candidate
+changes the schema to v8 and is not deployed. Do not use the older Worker versions
+below after a v8 migration: they cannot open its data. A v8-compatible fallback
+or roll-forward artifact and tested recovery procedure are separate release gates.
+
 Push the reviewed commit only to `codex/unified-local-20260907` on
 `Uuriko/project-room` / existing PR #23. Require fresh contract, browser and
 Cloudflare CI results for that candidate before publishing. Do not merge main

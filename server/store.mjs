@@ -11,6 +11,19 @@ import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./inv
 import { STORE_SCHEMA_VERSION, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
 import { ShareLinks, shareLinkSchema } from "./share-links.mjs";
 import { conflictingClaim } from "./claim-scopes.mjs";
+import { Reminders, reminderSchema } from "./reminders.mjs";
+import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
+import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
+import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
+import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
+import { charterContext, charterFromEvent } from "../src/room-charter.js";
+import { REPLY_FIELDS, REPLY_POLICY_VERSION, replyPostMode } from "../src/reply-requests.js";
+import { ReplyRequests } from "./reply-requests.mjs";
+import { validateHelpData } from "../src/work-help.js";
+import { auditWorkHelp } from "./work-help.mjs";
+import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, validateHelpOfferData } from "../src/help-offers.js";
+import { Inbox, inboxSchema } from "./inbox.mjs";
+import { EmailImport, emailImportSchema } from "./email-import.mjs";
 
 export class ServiceError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -128,6 +141,7 @@ const invitationSchema = `
 const compact = state => ({ ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} });
 // Platform differences stay at the database boundary; identity, invitation and
 // command rules below are shared by every runtime. The default remains Node.
+const nodeReadTransactions = new WeakSet();
 const nodeStorage = {
   version: db => db.prepare("PRAGMA user_version").get().user_version,
   setVersion: (db, version) => db.exec(`PRAGMA user_version=${version}`),
@@ -138,24 +152,37 @@ const nodeStorage = {
   },
   registerWriter, installWriterFence, verifyWriterFence,
   transaction(db, fn, readOnly) {
-    if (db.isTransaction) return fn();
+    if (db.isTransaction) {
+      if (!readOnly && nodeReadTransactions.has(db)) throw new Error("Cannot write inside a read-only transaction");
+      return fn();
+    }
+    const queryOnly = readOnly ? db.prepare("PRAGMA query_only").get().query_only : null;
     db.exec(readOnly ? "BEGIN" : "BEGIN IMMEDIATE");
-    try { const result = fn(); db.exec("COMMIT"); return result; }
+    try {
+      if (readOnly) { db.exec("PRAGMA query_only=ON"); nodeReadTransactions.add(db); }
+      const result = fn(); db.exec("COMMIT"); return result;
+    }
     catch (error) { db.exec("ROLLBACK"); throw error; }
+    finally { if (readOnly) { nodeReadTransactions.delete(db); db.exec(`PRAGMA query_only=${queryOnly}`); } }
   }
 };
 const work = "workItemId expectedRevision";
 const shapes = {
+  [T.ROOM_CHARTER_UPDATED]: "expectedRevision purpose outputs boundaries escalation",
   [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId",
   [T.MEMBER_ACCESS_CHANGED]: "memberId expectedMemberRevision permissions active",
-  [T.MESSAGE_POSTED]: "messageId body workItemId replyToId toMemberId",
+  [T.MESSAGE_POSTED]: `messageId body workItemId replyToId toMemberId packetId basisRevision allowOlderBasis ${REPLY_FIELDS.join(" ")}`,
+  [T.REPLY_REQUEST_CANCELLED]: "requestMessageId expectedRequestRevision reason",
   [T.MESSAGE_REACTION_SET]: "messageId reaction active",
   [T.WORK_PROPOSED]: "workItemId title definitionOfDone accountableMemberId verifierMemberId independentVerificationRequired ownerDecisionRequired humanDecisionMakerId mode sourceMessageId",
   [T.WORK_ACCEPTED]: work,
+  [T.WORK_HELP_UPDATED]: `${work} expectedHelpRevision status scope expiresAt`,
+  [HELP_OFFER_OPENED]: `${work} offerId expectedHelpRevision helpEventId plan`,
+  [HELP_OFFER_UPDATED]: `${work} offerId expectedOfferRevision status reason expectedHelpRevision helpEventId externalActivityUnverified`,
   [T.WORK_STARTED]: `${work} resolvedBlocker`,
   [T.WORK_BLOCKED]: `${work} reason nextAction`,
   [T.WORK_BLOCKER_RESOLVED]: `${work} resolution`,
-  [T.WORK_COMPLETED]: `${work} summary evidenceUrl evidenceVersion nextAction checksClaimed producerId`,
+  [T.WORK_COMPLETED]: `${work} summary evidenceUrl evidenceVersion nextAction checksClaimed producerId externalProducer evidenceKind evidenceMessageId evidenceMessageEventId previousCompletionEventId`,
   [T.WORK_SUPERSEDED]: `${work} supersededByWorkItemId reason`,
   [T.CLAIM_ACQUIRED]: `${work} repository ref paths expiresAt`,
   [T.CLAIM_RELEASED]: work,
@@ -172,10 +199,19 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed"].includes(name) ? "array" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed"].includes(name) ? "array" : "string";
     if (type === "array" ? !Array.isArray(value) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (Buffer.byteLength(JSON.stringify(command)) > 16384) fail(413, "too_large", "Command is too large");
+  if (command.type === T.MESSAGE_POSTED) {
+    try { replyPostMode(command.data); } catch (error) { fail(422, "invalid_command", error.message); }
+  }
+  if (command.type === T.WORK_HELP_UPDATED) {
+    try { validateHelpData(command.data); } catch (error) { fail(422, "invalid_command", error.message); }
+  }
+  if ([HELP_OFFER_OPENED, HELP_OFFER_UPDATED].includes(command.type)) {
+    try { validateHelpOfferData(command.type, command.data); } catch (error) { fail(422, "invalid_command", error.message); }
+  }
 }
 
 export class RoomStore {
@@ -184,8 +220,13 @@ export class RoomStore {
     this.db = database ?? new DatabaseSync(filename, { readOnly });
     this.storagePlatform = storagePlatform;
     this.shareLinks = new ShareLinks(this);
+    this.reminders = new Reminders(this);
+    this.agentConnections = new AgentConnections(this);
+    this.replyRequests = new ReplyRequests(this);
+    this.inbox = new Inbox(this);
+    this.email = new EmailImport(this);
     const version = this.storagePlatform.version(this.db);
-    const supported = new Set([0, 1, 2, 3, 4, 5, 6, STORE_SCHEMA_VERSION]);
+    const supported = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, STORE_SCHEMA_VERSION]);
     const hasSchema = version === 0 && this.storagePlatform.hasSchema(this.db);
     if (!supported.has(version) || hasSchema) {
       this.db.close();
@@ -193,11 +234,16 @@ export class RoomStore {
     }
     if (readOnly) {
       try {
-        if (version !== STORE_SCHEMA_VERSION) throw new Error("Read-only invitation audit requires schema v7; migrate a backed-up database through the service first");
+        if (version !== STORE_SCHEMA_VERSION) throw new Error(`Read-only invitation audit requires schema v${STORE_SCHEMA_VERSION}; migrate a backed-up database through the service first`);
         this.storagePlatform.configure(this.db, true);
         this.storagePlatform.verifyWriterFence(this.db);
         this.verifyInvitationAudit();
         this.shareLinks.verify();
+        this.reminders.verifySchema();
+        this.agentConnections.verify();
+        this.verifyHelpHistory();
+        this.inbox.verify();
+        this.email.verify();
         return;
       } catch (error) { this.db.close(); throw error; }
     }
@@ -206,7 +252,25 @@ export class RoomStore {
     try { this.transaction(() => {
     // Reread under the write lock: another startup may have upgraded while we waited.
     if (this.storagePlatform.version(this.db) !== version) throw new Error("Database changed during startup; retry with the current service");
-    if (version === STORE_SCHEMA_VERSION) this.storagePlatform.verifyWriterFence(this.db);
+    if (version >= 6) this.storagePlatform.verifyWriterFence(this.db, version);
+    if (version > 0 && version < 12) {
+      // Legacy fixture import allowed ignored scalar fields. Never reinterpret a
+      // previously stored policy marker, even when it is null or behind a checkpoint.
+      const collision = this.db.prepare("SELECT 1 FROM events WHERE json_extract(body,'$.type')='message.posted' AND json_type(body,'$.data.requestPolicyVersion') IS NOT NULL LIMIT 1").get()
+        || this.db.prepare("SELECT 1 FROM rooms WHERE json_type(projection,'$.replyRequests') IS NOT NULL LIMIT 1").get();
+      const checkpointCollision = version >= 2 && this.db.prepare("SELECT 1 FROM projection_checkpoints WHERE json_type(projection,'$.replyRequests') IS NOT NULL LIMIT 1").get();
+      if (collision || checkpointCollision) throw new Error("Legacy reply request marker requires operator reconciliation");
+    }
+    if (version > 0 && version < 13) {
+      const collision = table => this.db.prepare(`SELECT 1 FROM ${table}, json_each(projection,'$.workItems') AS item WHERE json_type(item.value,'$.helpWanted') IS NOT NULL LIMIT 1`).get();
+      if (collision("rooms") || version >= 2 && collision("projection_checkpoints")
+        || this.db.prepare("SELECT 1 FROM events WHERE json_extract(body,'$.type')='work.help_updated' LIMIT 1").get()) throw new Error("Legacy help invitation field requires operator reconciliation");
+    }
+    if (version > 0 && version < 14) {
+      const collision = table => this.db.prepare(`SELECT 1 FROM ${table} WHERE json_type(projection,'$.helpOffers') IS NOT NULL LIMIT 1`).get();
+      if (collision("rooms") || version >= 2 && collision("projection_checkpoints")
+        || this.db.prepare("SELECT 1 FROM events WHERE json_extract(body,'$.type') IN ('work.help_offer_opened','work.help_offer_updated') LIMIT 1").get()) throw new Error("Legacy help offer field requires operator reconciliation");
+    }
     if (version === 0) { this.db.exec(`
       CREATE TABLE rooms (id TEXT PRIMARY KEY, sequence INTEGER NOT NULL, projection TEXT NOT NULL);
       CREATE TABLE events (room_id TEXT NOT NULL REFERENCES rooms(id), sequence INTEGER NOT NULL, id TEXT NOT NULL UNIQUE, body TEXT NOT NULL, PRIMARY KEY(room_id, sequence));
@@ -222,15 +286,50 @@ export class RoomStore {
       ${invitationSchema}`);
       this.storagePlatform.setVersion(this.db, 4);
     }
+    if (version > 0 && version < 26 && (
+      this.db.prepare("SELECT 1 FROM events WHERE json_extract(body,'$.type')='work.completed' AND json_type(body,'$.data.externalProducer') IS NOT NULL LIMIT 1").get()
+      || this.db.prepare("SELECT 1 FROM rooms,json_tree(rooms.projection) WHERE json_tree.key='externalProducer' LIMIT 1").get()
+      || version >= 2 && this.db.prepare("SELECT 1 FROM projection_checkpoints,json_tree(projection_checkpoints.projection) WHERE json_tree.key='externalProducer' LIMIT 1").get()))
+      throw new Error("Pre-v26 outside credit history requires operator reconciliation");
     this.repairProjectionProvenance({ upgradeV1: version === 1 });
     if (version === 1 || version === 2) this.migrateIdentityV3(version);
     if (version === 1 || version === 2 || version === 3) this.migrateInvitationsV4();
       if (version < 5) this.migrateInvitationJournalV5();
       if (version < 7) this.db.exec(shareLinkSchema);
+      if (version < 8) this.db.exec(reminderSchema);
+      if (version < 9) this.db.exec(agentConnectionSchema);
+      if (version < 15) this.db.exec(inboxSchema);
+      if (version < 18) this.db.exec(emailImportSchema);
+      if (version < 21 && this.db.prepare("SELECT 1 FROM private_inbox_commands WHERE json_extract(request_json,'$.action') LIKE 'reply.%' OR json_type(receipt_json,'$.attempt') IS NOT NULL LIMIT 1").get())
+        throw new Error("Pre-v21 reply history requires operator reconciliation");
+      if (version < 22 && this.db.prepare("SELECT 1 FROM private_inbox_commands WHERE json_extract(request_json,'$.action') IN ('reply.observed','reply.review') OR json_type(receipt_json,'$.attempt.observation') IS NOT NULL OR json_type(receipt_json,'$.attempt.review') IS NOT NULL LIMIT 1").get())
+        throw new Error("Pre-v22 reply review history requires operator reconciliation");
+      if (version < 23 && this.db.prepare("SELECT 1 FROM private_inbox_commands WHERE json_extract(request_json,'$.action') LIKE 'reply.update.%' OR json_type(receipt_json,'$.update') IS NOT NULL LIMIT 1").get())
+        throw new Error("Pre-v23 reply update history requires operator reconciliation");
+      if (version < 24 && this.db.prepare("SELECT 1 FROM private_inbox_commands WHERE json_extract(request_json,'$.action')='reply.update.acknowledged' OR json_type(receipt_json,'$.update.acknowledgment') IS NOT NULL OR json_extract(receipt_json,'$.update.status')='update_acknowledged' LIMIT 1").get())
+        throw new Error("Pre-v24 reply acknowledgment history requires operator reconciliation");
+      if (version < 25 && this.db.prepare("SELECT 1 FROM private_inbox_commands WHERE json_extract(request_json,'$.action') IN ('reply.update.inspected','reply.update.review') OR json_type(receipt_json,'$.update.inspection') IS NOT NULL OR json_type(receipt_json,'$.update.review') IS NOT NULL OR json_type(receipt_json,'$.update.resolvedAt') IS NOT NULL OR json_extract(receipt_json,'$.update.status')='resolved' LIMIT 1").get())
+        throw new Error("Pre-v25 reply resolution history requires operator reconciliation");
       if (version < STORE_SCHEMA_VERSION) this.storagePlatform.installWriterFence(this.db);
+      this.storagePlatform.verifyWriterFence(this.db);
       this.verifyInvitationAudit();
       this.shareLinks.verify();
+      this.reminders.verifySchema();
+      this.agentConnections.verify();
+      this.verifyHelpHistory();
+      this.inbox.verify();
+      this.email.verify();
     }); } catch (error) { this.db.close(); throw error; }
+  }
+
+  verifyHelpHistory() {
+    return this.readTransaction(() => {
+      for (const row of this.db.prepare("SELECT id,projection FROM rooms ORDER BY id").all()) {
+        const history = this.db.prepare("SELECT sequence,body FROM events WHERE room_id=? ORDER BY sequence").all(row.id);
+        const checkpoint = this.db.prepare("SELECT sequence,projection FROM projection_checkpoints WHERE room_id=?").get(row.id);
+        auditWorkHelp(JSON.parse(row.projection), history, checkpoint);
+      }
+    });
   }
 
   // v2 had only Room-local member identities. Give each historical human membership its
@@ -305,7 +404,8 @@ export class RoomStore {
       if (stored.status === "accepted") {
         const linked = this.db.prepare("SELECT id,sequence,body,room_id FROM events WHERE id=?").get(stored.joined_event_id);
         const binding = this.db.prepare("SELECT account_id,origin FROM member_accounts WHERE room_id=? AND member_id=?").get(stored.room_id, stored.intended_member_id);
-        assertInvitationMembershipEvidence(stored, linked, binding, this.room(stored.room_id));
+        const { sequence, members } = this.roomAuthority(stored.room_id);
+        assertInvitationMembershipEvidence(stored, linked, binding, { sequence, state: { members } });
       }
       return replayed;
     } catch { fail(503, "invitation_integrity_error", "Invitation record requires operator reconciliation"); }
@@ -483,18 +583,29 @@ export class RoomStore {
     if (!row) fail(404, "room_not_found", "Room not found");
     return { sequence: row.sequence, state: JSON.parse(row.projection) };
   }
-  rebuildProjection(roomId) {
+  roomAuthority(roomId) {
+    // Fresh storage read, not an authorization cache. Keep membership provenance
+    // intact without decoding conversation, work history or the Room brief in JS.
+    const row = this.db.prepare("SELECT sequence,json_extract(projection,'$.room.ownerId','$.members') AS authority FROM rooms WHERE id=?").get(roomId);
+    if (!row) fail(404, "room_not_found", "Room not found");
+    const [ownerId, members] = JSON.parse(row.authority);
+    return { sequence: row.sequence, ownerId, members };
+  }
+  rebuildProjection(roomId, through = null) {
     const room = this.room(roomId);
+    through ??= room.sequence;
+    if (!Number.isSafeInteger(through) || through < 0 || through > room.sequence) throw new Error("Invalid historical room boundary");
     const checkpoint = this.db.prepare("SELECT sequence,projection FROM projection_checkpoints WHERE room_id=?").get(roomId);
     let state = checkpoint ? JSON.parse(checkpoint.projection) : emptyRoomState();
     let sequence = checkpoint?.sequence ?? 0;
-    const rows = this.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND sequence>? ORDER BY sequence").all(roomId, sequence);
+    if (sequence > through) throw new Error("Historical room boundary predates the retained checkpoint");
+    const rows = this.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence").all(roomId, sequence, through);
     for (const row of rows) {
       if (row.sequence !== sequence + 1) throw new Error("Event sequence is not contiguous");
       state = applyEvent(state, JSON.parse(row.body));
       sequence = row.sequence;
     }
-    if (sequence !== room.sequence) throw new Error("Event sequence does not reach the room projection");
+    if (sequence !== through) throw new Error("Event sequence does not reach the room projection");
     return { sequence, state: compact(state) };
   }
   // Administrative bootstrap, never exposed over HTTP. Historical demo events are test fixtures only.
@@ -641,10 +752,29 @@ export class RoomStore {
     if (!validId(roomId)) fail(422, "invalid_room", "Invalid Room id");
     const binding = this.db.prepare("SELECT member_id FROM member_accounts WHERE room_id=? AND account_id=?").get(roomId, auth.account.id);
     if (!binding) fail(403, "access_denied", "This account has no membership in that Room");
-    const member = this.room(roomId).state.members[binding.member_id];
+    const member = this.roomAuthority(roomId).members[binding.member_id];
     if (!member || member.kind !== "human" || member.active === false) fail(403, "access_denied", "Active human Room membership required");
     this.verifyInvitedMembership(roomId, member);
     return { ...auth, member, roomId };
+  }
+  accountRooms(token, binding, { after = null } = {}) {
+    if (after !== null && !validId(after)) fail(422, "invalid_room", "Invalid room continuation");
+    return this.transaction(() => {
+      const auth = this.authenticateAccountSession(token, null, binding);
+      const rows = this.db.prepare("SELECT room_id FROM member_accounts WHERE account_id=? AND room_id>? ORDER BY room_id LIMIT 51")
+        .all(auth.account.id, after ?? "");
+      const rooms = [];
+      for (const row of rows.slice(0, 50)) {
+        try {
+          const access = this.authenticateAccountSession(token, row.room_id, binding);
+          const room = this.db.prepare("SELECT json_extract(projection,'$.room.title') AS title FROM rooms WHERE id=?").get(row.room_id);
+          rooms.push({ id: row.room_id, title: room.title, memberId: access.member.id });
+        } catch (error) { if (error.status !== 403) throw error; }
+      }
+      return { contractVersion: 1, viewer: { accountId: auth.account.id, authEpoch: auth.account.authEpoch,
+        sessionRevision: auth.sessionRevision, sessionBinding: auth.sessionBinding },
+        rooms, nextCursor: rows.length > 50 ? rows[49].room_id : null };
+    });
   }
   ensureHumanAccountBinding(roomId, memberId, requestedAccountId = null, origin = "local-provisioning") {
     const members = this.room(roomId).state.members;
@@ -864,9 +994,11 @@ export class RoomStore {
       const revision = row.revision + 1, authEpoch = row.auth_epoch + 1, at = this.now();
       this.db.prepare("UPDATE accounts SET active=?,revision=?,auth_epoch=? WHERE id=?").run(active ? 1 : 0, revision, authEpoch, accountId);
       this.db.prepare("UPDATE credentials SET revoked=1 WHERE account_id=?").run(accountId);
+      this.agentConnections.revokeAccount(accountId);
       this.db.prepare("UPDATE account_credentials SET revoked=1 WHERE account_id=?").run(accountId);
       this.db.prepare("UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?").run(accountId);
       this.db.prepare("INSERT INTO account_access_events(account_id,revision,active,auth_epoch,reason,at) VALUES(?,?,?,?,?,?)").run(accountId, revision, active ? 1 : 0, authEpoch, reason.trim(), at);
+      if (!active) this.reminders.retireAccount(accountId);
       return this.account(accountId);
     });
   }
@@ -885,6 +1017,7 @@ export class RoomStore {
     });
   }
   insertCredential(roomId, memberId, kind, parent, expiresAt) {
+    if (this.agentConnections.row(roomId, memberId)) fail(409, "managed_agent", "Replace this agent's key through its room connection");
     const count = this.db.prepare("SELECT count(*) AS n FROM credentials WHERE room_id=?").get(roomId).n;
     if (count >= 5000) fail(409, "pilot_limit", "Credential retention limit reached; administrator maintenance required");
     const member = this.room(roomId).state.members[memberId];
@@ -908,7 +1041,7 @@ export class RoomStore {
     }
     if (row.revoked || row.expires_at <= this.now() || (row.parent_hash && (row.parent_revoked !== 0 || row.parent_expiry <= this.now()))) fail(401, "unauthenticated", "Session or key expired or revoked");
     if (roomId && row.room_id !== roomId) fail(403, "access_denied", "This credential does not grant access to that room");
-    const members = this.room(row.room_id).state.members;
+    const members = this.roomAuthority(row.room_id).members;
     const member = Object.hasOwn(members, row.member_id) && members[row.member_id];
     if (!member || member.active === false) fail(403, "access_denied", "Room membership is inactive");
     this.verifyInvitedMembership(row.room_id, member);
@@ -920,6 +1053,7 @@ export class RoomStore {
       if (invalidAccount) fail(401, "unauthenticated", "Session or key expired, revoked, or account access ended");
       account = { id: row.account_id, active: true, revision: row.account_revision, authEpoch: row.current_account_auth_epoch };
     } else if (row.account_id !== null || row.account_auth_epoch !== null) fail(401, "unauthenticated", "Agent credential has an invalid human account binding");
+    if (member.kind === "agent") this.agentConnections.assertCredential(row);
     const auth = {
       account, member, roomId: row.room_id, credentialHash: row.hash, credentialScope: "room", kind: row.kind, expiresAt: row.expires_at,
       csrf: row.kind === "session" ? hash(`csrf:${token}`) : null,
@@ -937,14 +1071,87 @@ export class RoomStore {
     });
   }
   revoke(token) { this.db.prepare("UPDATE credentials SET revoked=1 WHERE hash=?").run(hash(token)); }
-  snapshot(token, roomId, expectedSessionBinding = null) {
+  snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false, offerContext = false) {
     // One read transaction keeps sequence, projection, and audit tail at the same commit.
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      if (!["full", "work"].includes(view)) fail(422, "invalid_snapshot_view", "Choose a supported snapshot view");
+      if (typeof helpContext !== "boolean" || helpContext && view !== "work") fail(422, "invalid_help_context", "Help discovery requires the current work view");
+      if (typeof offerContext !== "boolean" || offerContext && view !== "full") fail(422, "invalid_offer_context", "Browser offers require the full room view");
       const room = this.room(roomId);
+      if (view === "work") return { snapshotView: "work", snapshotVersion: 1, roomId, sequence: room.sequence,
+        ...(helpContext ? { helpContextVersion: 1, evaluatedAt: new Date(this.now()).toISOString() } : {}),
+        state: { room: room.state.room, members: room.state.members,
+          workItems: Object.fromEntries(Object.entries(room.state.workItems).map(([id, item]) => [id, currentWorkRecord(item)])) },
+        charter: charterContext(room.state.room), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
+        viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
       const rows = this.db.prepare("SELECT body FROM events WHERE room_id=? ORDER BY sequence DESC LIMIT 100").all(roomId);
       const cursor = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
-      return { ...room, roomId, state: { ...room.state, eventLog: rows.reverse().map(r => JSON.parse(r.body)) }, cursor, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+      return { ...room, roomId, ...(offerContext ? { offerContextVersion: 1 } : {}), charter: charterContext(room.state.room), replyRequestContractVersion: REPLY_POLICY_VERSION, state: { ...room.state, eventLog: rows.reverse().map(r => JSON.parse(r.body)) }, cursor, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+    });
+  }
+  charter(token, roomId, { revision, expectedSessionBinding = null } = {}) {
+    return this.readTransaction(() => {
+      const auth = this.authenticate(token, roomId, expectedSessionBinding), room = this.room(roomId);
+      if (revision !== undefined && (!Number.isSafeInteger(revision) || revision < 0)) fail(422, "invalid_charter_revision", "Choose an instructions version");
+      const current = charterContext(room.state.room);
+      const selected = revision ?? current.revision;
+      if (selected > current.revision) fail(404, "charter_not_found", "That instructions version is unavailable");
+      let charter = selected === current.revision ? current.charter : null;
+      if (selected > 0 && selected !== current.revision) {
+        // Return one bounded event, not all discussion bodies or every version.
+        // Full retained-history/checkpoint validation belongs to the recovery audit.
+        const rows = this.db.prepare("SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.type')=? AND json_extract(body,'$.data.expectedRevision')=? LIMIT 2").all(roomId, T.ROOM_CHARTER_UPDATED, selected - 1);
+        if (rows.length !== 1) fail(404, "charter_not_found", "That instructions version is unavailable");
+        const event = JSON.parse(rows[0].body);
+        if (event.roomId !== roomId || event.actorId !== room.state.room.ownerId) fail(409, "charter_integrity_error", "Instructions history requires reconciliation");
+        charter = charterFromEvent(event, { revision: selected - 1 });
+      }
+      return { contractVersion: 1, roomId, evaluatedThrough: room.sequence, currentRevision: current.revision, currentEventId: current.eventId,
+        ...charterContext({ charter }), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
+        viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+    });
+  }
+  workContext(token, roomId, workItemId, { includeSource = false, includeOffers = false, expectedSessionBinding = null } = {}) {
+    return this.readTransaction(() => {
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      if (!validId(workItemId) || typeof includeSource !== "boolean" || typeof includeOffers !== "boolean") fail(422, "invalid_work_context", "Choose one work ID and boolean context options");
+      const room = this.room(roomId), now = this.now();
+      if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
+      return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers }),
+        viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
+        viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+    });
+  }
+  workDiscussion(token, roomId, workItemId, { cursor = null, since, limit, expectedSessionBinding = null } = {}) {
+    return this.readTransaction(() => {
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      if (!validId(workItemId)) fail(422, "invalid_discussion", "Choose one work item");
+      const room = this.room(roomId);
+      if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
+      const window = discussionWindow({ sequence: room.sequence, roomId, workItemId, viewerId: auth.member.id, cursor, since, limit });
+      const anchorId = this.db.prepare("SELECT id FROM events WHERE room_id=? AND sequence=?").get(roomId, window.horizon)?.id;
+      if (!anchorId || (window.anchorId !== null && window.anchorId !== anchorId)) fail(409, "discussion_history_changed", "Discussion history changed; restart after recovery");
+      const metadata = this.db.prepare("SELECT sequence,id,json_extract(body,'$.data.messageId') AS message_id FROM events WHERE room_id=? AND sequence<=? AND json_extract(body,'$.type')=? ORDER BY sequence").all(roomId, window.horizon, T.MESSAGE_POSTED);
+      return { ...selectedWorkDiscussion({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence,
+        now: this.now(), metadata, window, anchorId, cursor }),
+        viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
+        viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+    });
+  }
+  workResult(token, roomId, workItemId, { completionEventId = null, draftMessageId = null, expectedSessionBinding = null } = {}) {
+    return this.readTransaction(() => {
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      if (!validId(workItemId) || [completionEventId, draftMessageId].some(id => id !== null && !validId(id))
+        || completionEventId !== null && draftMessageId !== null) fail(422, "invalid_result_selection", "Choose current result, one completion, or one draft");
+      const room = this.room(roomId);
+      if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
+      let value;
+      try { value = selectedWorkResult({ db: this.db, state: room.state, workItemId, sequence: room.sequence, now: this.now(), completionEventId, draftMessageId }); }
+      catch { fail(422, "result_unavailable", "Exact text evidence is unavailable; no other result was substituted"); }
+      if (!value) fail(404, "result_not_found", "Completion not found on this work; no other result was substituted");
+      return { ...value, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
+        viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
   }
   eventsAfter(token, roomId, after = 0, limit = 100, expectedSessionBinding = null) {
@@ -992,16 +1199,38 @@ export class RoomStore {
       }
       if (command.causationId && !this.db.prepare("SELECT 1 FROM events WHERE room_id=? AND id=?").get(roomId, command.causationId)) fail(422, "invalid_cause", "Causation event must exist in this room");
       const room = this.room(roomId);
-      if (room.sequence >= 10000 || (command.type === T.MEMBER_ADDED && Object.keys(room.state.members).length >= 100) || (command.type === T.WORK_PROPOSED && Object.keys(room.state.workItems).length >= 500)) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
+      const target = room.state.members[command.data.memberId];
+      const endingAccess = command.type === T.MEMBER_ACCESS_CHANGED && target?.active === true && command.data.active === false
+        && canonical(target.permissions) === canonical(command.data.permissions);
+      const requestMode = command.type === T.MESSAGE_POSTED && replyPostMode(command.data);
+      const endingRequest = (requestMode === "respond" || command.type === T.REPLY_REQUEST_CANCELLED)
+        && room.state.replyRequests?.[command.data.responseToRequestId ?? command.data.requestMessageId]?.status === "open";
+      const endingHelp = command.type === T.WORK_HELP_UPDATED && command.data.status === "withdrawn"
+        && room.state.workItems[command.data.workItemId]?.helpWanted?.status === "open";
+      const priorOffer = room.state.helpOffers?.[command.data.offerId];
+      const endingOffer = command.type === HELP_OFFER_UPDATED &&
+        (priorOffer?.status === "offered" && ["declined", "withdrawn"].includes(command.data.status)
+          || priorOffer?.status === "selected" && command.data.status === "released");
+      const cleanup = endingAccess || endingRequest || endingHelp || endingOffer;
+      // At capacity, each remaining membership/request/invitation can still be ended once.
+      if ((room.sequence >= 10000 && !cleanup) || (command.type === T.MEMBER_ADDED && Object.keys(room.state.members).length >= 100) || (command.type === T.WORK_PROPOSED && Object.keys(room.state.workItems).length >= 500)) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       const memberAuthorityEvent = [T.MEMBER_ADDED, T.MEMBER_ACCESS_CHANGED].includes(command.type);
       const incoming = event({
         type: command.type, roomId, actorId: auth.member.id, at: new Date(this.now()).toISOString(),
         idempotencyKey: hash(`${auth.member.id}:${command.id}`), causationId: command.causationId,
-        data: memberAuthorityEvent ? { ...command.data, authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION } : command.data
+        data: memberAuthorityEvent ? { ...command.data, authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION }
+          : requestMode ? { ...command.data, requestPolicyVersion: REPLY_POLICY_VERSION } : command.data
       });
       let state;
-      try { state = compact(applyEvent(room.state, incoming)); }
-      catch (error) { fail(/Stale|already exists|Invalid transition/.test(error.message) ? 409 : 422, "command_rejected", error.message); }
+      try {
+        if (requestMode === "respond") {
+          const basis = this.db.prepare("SELECT id,body FROM events WHERE room_id=? AND sequence=?").get(roomId, command.data.contextSequence);
+          if (basis?.id !== command.data.contextEventId || JSON.parse(basis.body).type !== T.MESSAGE_POSTED) throw new Error("Stale reply request context sequence");
+        }
+        state = compact(applyEvent(room.state, incoming));
+        if (incoming.type === T.WORK_COMPLETED && incoming.data.evidenceKind === "room_text") verifyTextCompletion(this.db, room.state, room.state.workItems[incoming.data.workItemId], incoming.data);
+      }
+      catch (error) { fail(/Stale|already exists|Invalid transition|capacity reached|already_offered|helper_selected|history_full|offer_limit|Offer transition unavailable/.test(error.message) ? 409 : 422, "command_rejected", error.message); }
       if (incoming.type === T.CLAIM_ACQUIRED) {
         // Same transaction as actor/revision validation and persistence. Keeping
         // this live-only preserves replay of previously accepted reservations.
@@ -1009,12 +1238,17 @@ export class RoomStore {
         if (conflict) fail(409, "claim_conflict", `Scope is reserved by work ${conflict.id}. Coordinate or release that reservation first; no new claim was saved.`);
       }
       const projection = JSON.stringify(state);
-      if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
+      if (Buffer.byteLength(projection) > 4 * 1024 * 1024 && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
       const sequence = room.sequence + 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("INSERT INTO commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, command.id, fingerprint, sequence);
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
-      if (command.type === T.MEMBER_ACCESS_CHANGED && command.data.active === false) this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, command.data.memberId);
+      if (command.data.workItemId) this.reminders.resolveWork(roomId, state.workItems[command.data.workItemId]);
+      if (command.type === T.MEMBER_ACCESS_CHANGED) this.agentConnections.revokeMember(roomId, command.data.memberId);
+      if (command.type === T.MEMBER_ACCESS_CHANGED && command.data.active === false) {
+        this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, command.data.memberId);
+        this.reminders.retireMember(roomId, command.data.memberId);
+      }
       return { sequence, event: incoming, duplicate: false };
     });
   }

@@ -1,11 +1,24 @@
 import { EVENT_TYPES as T, WORK_STATES as S } from "./events.js";
-import { AccountClient, RoomClient, draftCommand } from "./client.js";
+import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief } from "./return-brief.js";
+import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
 import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter } from "./conversation.js";
-import { nextWorkStep, workStatus, workActions, activeClaim, producerKnown as hasReportedProducer } from "./workflow.js";
+import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer } from "./workflow.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation } from "./share-links.js";
+import { installAgentConnections } from "./agent-connections.js";
+import { installRoomInstructions } from "./room-instructions.js";
+import { installReminders } from "./reminders.js";
+import { installPortableWork, installResultCopy } from "./portable-work.js";
+import { replyDraftKey, replyDraftData, validReplyDraft, creditQuestion, confirmsReplyCommand, REPLY_CANCELLED } from "./reply-requests.js";
+import { workHelpContext, validateHelpData } from "./work-help.js";
+import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
+import { installInbox } from "./inbox-ui.js";
 
 const $ = selector => document.querySelector(selector);
+$("#skip-link").addEventListener("click", event => {
+  event.preventDefault();
+  $($("#auth-panel").hidden ? "#connection-status" : "#auth-title").focus();
+});
 const setText = (selector, text) => { const node = $(selector); if (node.textContent !== text) node.textContent = text; };
 const invitationTokenPattern = /^[A-Za-z0-9_-]{43}$/;
 const roomIdPattern = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
@@ -21,20 +34,38 @@ function selectedRoomFromLocation() {
   const values = new URLSearchParams(location.search).getAll("room");
   return values.length === 1 && roomIdPattern.test(values[0]) ? values[0] : null;
 }
+function accountHomeFromLocation() {
+  const values = new URLSearchParams(location.search).getAll("account");
+  return values.length === 1 && values[0] === "1";
+}
 const initialJoinFragment = consumeJoinFragment();
 const initialInvitationFragment = consumeInvitationFragment();
 let shareLinksUI = null;
+let portableWorkUI = null;
+let resultCopyUI = null;
+let remindersUI = null;
+let agentConnectionsUI = null;
+let instructionsUI = null;
+let inboxUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
 let workDraftId = null, replyToId = null, busy = false;
+let workFormEpoch = 0, workRetryLocked = false;
+let actionEpoch = 0;
+let offerContextVersion = null;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
+let requestMode = null, requestReading = false, requestEpoch = 0;
+const composerKey = () => replyDraftKey(requestMode, currentThreadId);
 const viewPositions = new Map(), pendingReactions = new Map(), locallyOwnedMessageIds = new Set();
 let newVisibleMessages = 0;
+let roomCursor = 0, roomGeneration = -1, showAllAttention = false, returnClock = null;
 let signoutOperationId = 0, signoutLoading = false;
 let refreshOperationId = 0, submitOperationId = 0;
 let submitControls = null, noticeTimer = null, noticeVersion = 0, workFormOpener = null;
 let accessEndContext = null;
 let lastComposerSelection = null;
 let lastInvitationOpener = null;
+let roomActionsContext = null;
+let selectedWorkView = "work";
 const invitation = {
   phase: "idle", version: 0, secret: null, preview: null, redemptionId: null,
   opener: null, openerSelection: null
@@ -60,26 +91,37 @@ const client = new RoomClient({
   onSnapshot(snapshot, identity) {
     const firstSnapshot = !state;
     state = snapshot.state; session = identity;
+    offerContextVersion = snapshot.offerContextVersion === 1 ? 1 : null;
+    roomCursor = snapshot.cursor;
+    roomGeneration = client.generation;
     const roomId = state.room?.id ?? identity.roomId;
     $("#room-title").textContent = state.room?.title ?? roomId;
     $(".room-purpose").textContent = state.room?.purpose ?? "";
     $("#conversation-title").textContent = `# ${roomId}`;
     $("#main").hidden = false; $("#auth-panel").hidden = true; $("#auth-panel").setAttribute("aria-busy", "false");
+    $("#account-rooms-panel").hidden = true;
+    $(".connection-bar").hidden = false;
     $("#signout-button").hidden = false; $("#signout-button").disabled = signoutLoading;
     $("#identity-label").textContent = displayName(session.member.id);
     $("#identity-label").title = `${memberLabel(session.member.id)} · ${session.member.kind}`;
     $("#cursor-label").textContent = `Your caught-up marker: ${snapshot.cursor} · room event ${snapshot.sequence}`;
     render();
     shareLinksUI?.sync();
+    remindersUI?.sync();
+    agentConnectionsUI?.sync();
+    instructionsUI?.sync();
+    resultCopyUI?.sync();
+    portableWorkUI?.sync();
+    inboxUI?.sync();
     if (firstSnapshot) {
       const saved = recovery.read(draftScope(identity), state);
       if (saved) {
         drafts = saved.drafts; currentThreadId = saved.threadId;
-        const draft = drafts.get(currentThreadId);
-        $("#message-input").value = draft.body; $("#message-to-select").value = draft.toMemberId;
-        replyToId = draft.replyToId; pendingMessage = draft.pending;
+        const draft = drafts.get(saved.activeKey);
+        requestMode = draft.mode ?? null;
+        restoreComposer(draft);
         $("#remember-drafts").checked = true;
-        updateReply(); renderMessages();
+        updateReply(); renderMessages(); syncRequestComposer(); renderComposerError();
         $("#draft-recovery-status").textContent = "Recovered drafts for this room. Review before sending.";
       }
     }
@@ -88,16 +130,34 @@ const client = new RoomClient({
   },
   onStatus(text) { setConnectionStatus(text); },
   onAccessEnded() {
+    closeRoomActions(false);
     const endedContext = accessEndContext;
     accessEndContext = null;
     const pendingSignout = signoutLoading;
+    const keepAccount = !leavingPage && !pendingSignout && endedContext !== "account-switch" && accountClient.session?.authenticated;
     if (!leavingPage) recovery.clear();
     releaseSubmission(submitControls);
     submitOperationId += 1; busy = false;
-    state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null;
+    state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
+    $("#resume-action").hidden = true; $("#refresh-action").hidden = true;
+    $("#action-evidence").hidden = true; $("#action-evidence").removeAttribute("href");
+    $("#action-text").hidden = true; $("#action-text-body").textContent = ""; $("#action-text-origin").textContent = "";
+    closeResult(false);
+    selectWorkView("work");
+    renderContent("#room-results-list", "");
+    roomCursor = 0; roomGeneration = -1; showAllAttention = false; clearTimeout(returnClock); returnClock = null;
     shareLinksUI?.resetManagement();
-    workDraftId = null; replyToId = null;
+    portableWorkUI?.reset();
+    resultCopyUI?.reset();
+    remindersUI?.reset();
+    agentConnectionsUI?.reset();
+    instructionsUI?.reset();
+    if (!keepAccount) clearPrivateWorkspace({ preservePending: leavingPage });
+    else inboxUI?.detachRoom();
+    workDraftId = null; replyToId = null; workFormEpoch++; setWorkRetry(false);
+    $("#work-reuse-hint").hidden = true;
     currentThreadId = null; conversation = null; drafts = new ConversationDrafts();
+    requestMode = null; requestReading = false; requestEpoch++; syncRequestComposer();
     renderComposerError();
     viewPositions.clear(); pendingReactions.clear(); locallyOwnedMessageIds.clear(); newVisibleMessages = 0; briefView.reset();
     if (!pendingSignout) signoutOperationId += 1;
@@ -112,12 +172,17 @@ const client = new RoomClient({
       const node = $(`#${id}`); node.replaceChildren(); delete node._content;
     }
     for (const id of ["message-to-select", "assignee-select", "verifier-select"]) { $(`#${id}`).replaceChildren(); delete $(`#${id}`).dataset.signature; }
-    for (const form of document.querySelectorAll("form")) form.reset();
+    for (const form of document.querySelectorAll("form")) {
+      if (!keepAccount || !form.closest("#inbox-panel")) form.reset();
+    }
     $("#work-dialog").close();
     for (const id of ["people-panel", "composer-options", "work-options", "room-about", "connection-details", "rb-history-section", "rb-involving-section"]) $(`#${id}`).open = false;
     for (const control of document.querySelectorAll("#auth-form input, #auth-form button")) control.disabled = pendingSignout;
     setFormStatus($("#new-work-status"), ""); setFormStatus($("#action-error"), ""); setFormStatus($("#composer-status"), "");
     $("#action-dialog").close(); $("#new-work-form").hidden = true; $("#reply-bar").hidden = true;
+    for (const id of ["review-criteria", "review-summary", "review-next", "decision-review-label", "decision-review-by", "decision-review-text", "decision-review-version"]) setText(`#${id}`, "");
+    $("#review-brief").hidden = true; $("#review-notes").open = false;
+    $("#decision-review").hidden = true; $("#decision-review").open = false;
     $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = "";
     $("#thread-title").textContent = ""; $("#thread-context").textContent = "";
     $("#thread-bar").hidden = true; $("#search-results").hidden = true; $("#new-messages-button").hidden = true;
@@ -126,12 +191,17 @@ const client = new RoomClient({
     $("#rb-current-boundary").textContent = ""; $("#rb-history-boundary").textContent = "";
     $("#rb-ack-button").textContent = "Mark caught up"; $("#return-brief-panel").open = false;
     renderReturnBrief();
+    if (keepAccount) {
+      showAccountWorkspace();
+      if (!["accepted-room-switch", "invited-room-switch"].includes(endedContext)) confirmAccount();
+      return;
+    }
     const openingAcceptedRoom = endedContext === "accepted-room-switch";
     const openingInvitedRoom = endedContext === "invited-room-switch";
     const switchedAccount = endedContext === "account-switch";
     setFormStatus($("#auth-error"), openingAcceptedRoom || openingInvitedRoom || $("#invitation-dialog").open ? ""
       : switchedAccount ? "The browser account changed; private Room state and drafts were cleared."
-        : "Sign in with an active key. Session ended; private drafts were cleared.", true);
+        : "Session ended; private drafts were cleared.", true);
     setConnectionStatus(openingAcceptedRoom || openingInvitedRoom ? "Opening Room…" : "Not connected");
     if ($("#invitation-dialog").open && invitation.preview) {
       if (!accountClient.session?.authenticated && ["ready", "wrong-account", "changed-account"].includes(invitation.phase)) invitation.phase = "needs-account";
@@ -151,6 +221,111 @@ const briefView = new ReturnBrief(client, {
     if (state) notice("Your caught-up position was saved, but the latest room view could not be refreshed. Refresh before relying on this brief.", true);
   }
 });
+remindersUI = installReminders({ client, getState: () => state, onSaved: text => notice(text) });
+agentConnectionsUI = installAgentConnections({ client, getState: () => state });
+instructionsUI = installRoomInstructions({ client, getState: () => state, onSaved: text => notice(text) });
+portableWorkUI = installPortableWork({ client, getState: () => state, onSaved: messageId => {
+  const visible = conversation?.byId.has(messageId);
+  if (visible) revealMessage(messageId);
+  notice(visible ? "Draft posted. Work status is unchanged." : "Draft posted. Refresh to view it. Work status is unchanged.");
+} });
+resultCopyUI = installResultCopy({ client, getState: () => state });
+inboxUI = installInbox({ account: accountClient, room: client, getRoom: () => state, onOpenWork: id => revealWork(id),
+  onAccountEnded: endAccountAccess, onRooms: () => loadAccountRooms(),
+  onNavigate: () => { if (!$("#status").classList.contains("error")) clearNotice(); },
+  onShared: async (receipt, isCurrent) => {
+  try { await client.refresh(); if (state && isCurrent()) revealMessage(receipt.messageId); }
+  catch { if (isCurrent()) notice("Shared. Refresh the room to view it.", true); }
+} });
+let accountCheckFlight = null, roomListVersion = 0, roomListCursor = null;
+function clearPrivateWorkspace(options) {
+  inboxUI?.reset(options); roomListVersion++;
+  $("#account-rooms-list").replaceChildren(); $("#account-rooms-status").textContent = "";
+  $("#account-status").textContent = ""; $("#account-status").hidden = true;
+}
+function endAccountAccess() {
+  const current = accountClient.session;
+  if (current) accountClient.invalidate(accountClient.generation, current);
+  $(".connection-bar").hidden = false;
+  accessEndContext = "account-switch"; client.endAccess();
+  configureAuthPanel();
+}
+function showAccountWorkspace() {
+  if (!accountClient.session?.authenticated) return;
+  $("#auth-panel").hidden = true; $("#signout-button").hidden = false; $("#signout-button").disabled = signoutLoading;
+  if (!state) {
+    $("#identity-label").textContent = "Personal account";
+    $("#identity-label").title = accountClient.session.account.id;
+    setConnectionStatus("Room not open");
+    $(".connection-bar").hidden = true;
+  }
+  inboxUI.sync();
+  if (!state) {
+    if (location.hash === "#pr-view/rooms") inboxUI.showRoomList();
+    else inboxUI.open();
+  }
+}
+async function confirmAccount() {
+  if (accountCheckFlight || !accountClient.session?.authenticated || signoutLoading || invitationIsCommitting() || leavingPage) return accountCheckFlight;
+  const owned = accountClient.session;
+  accountCheckFlight = (async () => {
+    try {
+      const confirmed = await accountClient.confirm();
+      if (confirmed === false && accountClient.session === null) endAccountAccess();
+      else if (confirmed && $("#account-status").textContent === "Couldn’t confirm account. Refresh to retry.") {
+        $("#account-status").textContent = ""; $("#account-status").hidden = true;
+      }
+      return confirmed;
+    } catch {
+      if (accountClient.session === owned) { $("#account-status").textContent = "Couldn’t confirm account. Refresh to retry."; $("#account-status").hidden = false; }
+      return null;
+    }
+  })().finally(() => { accountCheckFlight = null; });
+  return accountCheckFlight;
+}
+async function loadAccountRooms(more = false) {
+  const version = ++roomListVersion, owned = accountClient.session;
+  if (!owned?.authenticated) return;
+  if (!more) { roomListCursor = null; $("#account-rooms-list").replaceChildren(); }
+  $("#account-rooms-more").hidden = true; $("#account-rooms-status").textContent = "Loading…";
+  try {
+    const value = await accountClient.rooms(more ? roomListCursor : null);
+    if (version !== roomListVersion || accountClient.session !== owned || !value) return;
+    for (const room of value.rooms) {
+      const button = document.createElement("button"); button.type = "button"; button.className = "inbox-row";
+      button.textContent = room.title; button.dataset.accountRoom = room.id;
+      button.addEventListener("click", () => openAccountRoom(room.id)); $("#account-rooms-list").append(button);
+    }
+    roomListCursor = value.nextCursor; $("#account-rooms-more").hidden = !roomListCursor;
+    $("#account-rooms-status").textContent = $("#account-rooms-list").children.length ? "" : roomListCursor ? "No available rooms on this page." : "No rooms yet.";
+  } catch (error) {
+    if (version !== roomListVersion || (accountClient.session && accountClient.session !== owned)) return;
+    if ([401, 403].includes(error.status) || !accountClient.session) endAccountAccess();
+    else $("#account-rooms-status").textContent = "Couldn’t load rooms. Choose Rooms to retry.";
+  }
+}
+async function openAccountRoom(roomId) {
+  if (invitationIsCommitting() || signoutLoading) return;
+  if (state) saveComposer();
+  if (state && (drafts.hasText() || pendingAction || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending()
+      || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden)
+      && !window.confirm("Switch rooms and clear unsent room drafts and pending retries? Saved work stays.")) return;
+  const owned = accountClient.session;
+  if (await confirmAccount() !== true || accountClient.session !== owned) return;
+  accessEndContext = "accepted-room-switch"; client.endAccess();
+  history.replaceState(null, "", "?room=" + encodeURIComponent(roomId) + "#pr-view/rooms");
+  try { await client.restore(roomId); }
+  catch {
+    if (accountClient.session !== owned) return;
+    showAccountWorkspace(); inboxUI.showRoomList();
+    $("#account-rooms-status").textContent = "Couldn’t open that room. Refresh rooms to retry.";
+  }
+}
+$("#choose-room").addEventListener("click", () => inboxUI.showRoomList());
+$("#account-rooms-more").addEventListener("click", () => loadAccountRooms(true));
+window.addEventListener("focus", () => confirmAccount());
+document.addEventListener("visibilitychange", () => { if (!document.hidden) confirmAccount(); });
+setInterval(() => { if (!document.hidden) confirmAccount(); }, 5000);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 const humanize = value => String(value).replaceAll("_", " ").replaceAll(".", " ");
 const memberLabel = id => id == null ? "Unassigned" : state.members[id] ? `${state.members[id].displayName} (${id})` : `Unknown member (${id})`;
@@ -163,7 +338,7 @@ const displayName = id => {
     && other.displayName.trim().toLocaleLowerCase() === member.displayName.trim().toLocaleLowerCase());
   return duplicate ? memberLabel(id) : member.displayName;
 };
-const name = id => memberLabel(id);
+const name = displayName; // Ordinary summaries use the same duplicate-aware attribution as authors.
 const can = capability => state?.members[session?.member.id]?.permissions.includes(capability);
 const sameSession = (generation, roomId, memberId) => generation === client.generation && state
   && session?.roomId === roomId && session?.member.id === memberId;
@@ -184,24 +359,27 @@ function setConnectionStatus(text) {
   const status = $("#connection-status");
   const connected = normalized === "Connected to room service · no peer read or processing receipt";
   const visible = connected ? "Connected" : normalized;
-  status.dataset.state = connected ? "connected" : "other";
+  status.dataset.state = connected ? "connected"
+    : /^Not connected · (account )?sign.in required$/.test(normalized) ? "signed-out" : "other";
   if (status.textContent !== visible) status.textContent = visible;
   $("#connection-explanation").textContent = normalized;
 }
 function setFormStatus(status, text, error = false) {
+  if (status.textContent === text && status.classList.contains("visible") === Boolean(text)
+    && status.classList.contains("error") === (Boolean(text) && error)) return;
   status.textContent = text;
   status.classList.toggle("visible", Boolean(text));
   status.classList.toggle("error", Boolean(text) && error);
 }
 function renderComposerError() {
-  const text = drafts.get(currentThreadId).error;
+  const text = drafts.get(composerKey()).error;
   const status = $("#composer-status");
   if (status.textContent !== text) status.textContent = text;
   status.classList.toggle("visible", Boolean(text));
   status.classList.toggle("error", Boolean(text));
 }
 function setComposerError(text) {
-  drafts.save(currentThreadId, { error: text });
+  drafts.save(composerKey(), { error: text });
   renderComposerError();
 }
 function clearNotice() {
@@ -265,15 +443,16 @@ function setInvitationFeedback(text, error = false) {
   }
 }
 function configureAuthPanel(roomId = selectedRoomFromLocation()) {
-  const accountMode = Boolean(roomId);
+  const accountMode = Boolean(roomId) || accountHomeFromLocation();
+  $("#auth-title").textContent = roomId ? `#${roomId}` : "Welcome.";
   $("#access-key-label").textContent = accountMode ? "Account key" : "Member key";
   $("#auth-description").textContent = accountMode
-    ? `Sign in to #${roomId}. Membership required.`
-    : "Open an invite link, or use your member key.";
+    ? roomId ? "Use an account key with membership in this room." : "Use your account key. No room membership is needed."
+    : "Ask the room owner for an invite link or member key.";
   $("#auth-hint").textContent = accountMode
-    ? "An account key does not grant membership. Keep it private."
-    : "Need a link? Ask the room owner. Keep your key private.";
-  $("#auth-form button[type='submit']").textContent = accountMode ? "Open room" : "Enter room";
+    ? roomId ? "Need membership? Ask the room owner. Keep your key private." : "Keep your key private."
+    : "Keep your key private. Lost guest access? Ask for a new invite.";
+  $("#auth-form button[type='submit']").textContent = roomId ? "Open room" : accountMode ? "Sign in" : "Enter room";
 }
 function renderInvitation() {
   const preview = invitation.preview;
@@ -288,21 +467,21 @@ function renderInvitation() {
   $("#invitation-details").hidden = !preview;
   if (preview) {
     $("#invitation-room").textContent = preview.roomTitle || preview.roomId;
-    $("#invitation-purpose").textContent = preview.roomPurpose || "No Room purpose was provided.";
+    $("#invitation-purpose").textContent = preview.roomPurpose || "Not provided";
     $("#invitation-display-name").textContent = preview.displayName;
     $("#invitation-member-id").textContent = preview.memberId;
     $("#invitation-role").textContent = humanize(preview.role);
     $("#invitation-permissions").textContent = preview.permissions.length
       ? preview.permissions.map(humanize).join(", ")
-      : "Conversation access only; no additional capabilities";
+      : "Conversation only";
     $("#invitation-issuer").textContent = preview.invitedByDisplayName || "Room administrator";
     const expiry = new Date(preview.expiresAt);
     $("#invitation-expires").dateTime = expiry.toISOString();
     $("#invitation-expires").textContent = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(expiry);
   }
-  let summary = phase === "terminal" ? "This invitation is unavailable." : "Loading the invitation’s exact Room and membership scope…";
+  let summary = phase === "terminal" ? "This invitation is unavailable." : "Checking invitation…";
   if (preview && phase !== "terminal") summary = pending
-    ? `${preview.displayName} is invited to join ${preview.roomTitle || preview.roomId} as ${humanize(preview.role)}.`
+    ? ""
     : accepted ? "This invitation has already been accepted. Sign in with an authorized account to open the Room."
       : preview.status === "expired" ? "This invitation has expired. Ask a current Room administrator for a new one."
         : preview.status === "revoked" ? "This invitation was revoked. Ask a current Room administrator if you still need access."
@@ -314,8 +493,8 @@ function renderInvitation() {
   $("#invitation-account-form").hidden = !mayAuthenticate || (authenticated && !switchingAccount) || phase === "accepting" || phase === "opening";
   for (const control of $("#invitation-account-form").querySelectorAll("input, button")) control.disabled = loading;
   $("#invitation-account-hint").textContent = accepted
-    ? "This invitation was already accepted. Sign in with an account that has membership to open the Room."
-    : "The invitation offers Room membership; your separately provisioned account key identifies the account that would accept it.";
+    ? "Use an account key with membership in this room."
+    : "Use your own account key to accept this membership.";
   $("#invitation-account-form button").textContent = accepted ? "Sign in to open room" : "Sign in to review acceptance";
   $("#invitation-account-warning").hidden = !state;
   const action = $("#invitation-accept");
@@ -453,6 +632,7 @@ async function openAcceptedRoom(roomId, message, { acceptanceConfirmed = true } 
   try {
     const restored = await client.restore(roomId);
     if (!restored) throw new Error("The browser account changed before the Room could open");
+    inboxUI.showRooms();
     Object.assign(invitation, { phase: "idle", preview: null, redemptionId: null, opener: null, openerSelection: null });
     notice(message);
     queueMicrotask(() => $("#conversation-title").focus({ preventScroll: true }));
@@ -478,13 +658,18 @@ function selectOptions(selector, members, blank) {
 }
 function syncWorkForm() {
   if (!state || busy) return;
+  setWorkRetry(workRetryLocked);
+  if (workRetryLocked) {
+    if ($("#work-dialog").open && [document.body, $("#new-work-form button[type='submit']")].includes(document.activeElement)) $("#retry-work-button").focus();
+    return;
+  }
   const active = Object.values(state.members).filter(member => member.active !== false);
   const writing = $("#work-mode-select").value === "write";
   const reviewing = $("#require-verification").checked;
   selectOptions("#assignee-select", active.filter(member => ["accept_work", "complete_work", ...(writing ? ["write_external"] : [])]
-    .every(permission => member.permissions.includes(permission))), "Choose accountable member");
+    .every(permission => member.permissions.includes(permission))), "Choose owner");
   const reviewers = active.filter(member => member.permissions.includes("verify") && member.id !== $("#assignee-select").value);
-  selectOptions("#verifier-select", reviewers, "Choose independent verifier");
+  selectOptions("#verifier-select", reviewers, "Choose reviewer");
   $("#reviewer-unavailable").hidden = !reviewing || !$("#assignee-select").value || reviewers.length > 0;
   $("#verifier-field").hidden = !reviewing;
   $("#verifier-select").disabled = !reviewing;
@@ -534,6 +719,7 @@ function render() {
   const members = Object.values(state.members), active = members.filter(m => m.active !== false);
   selectOptions("#message-to-select", active, "Everyone");
   syncWorkForm();
+  syncActionForm();
   setText("#presence-count", `${active.length} ${active.length === 1 ? "member" : "members"}`);
   renderContent("#member-stack", active.slice(0, 4).map(m => `<div class="member-avatar ${m.kind}" title="${esc(memberLabel(m.id))}" aria-hidden="true"><span>${initials(m.displayName)}</span></div>`).join(""));
   renderContent("#presence-list", members.map(m => `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span></div><div><strong>${esc(memberLabel(m.id))}</strong><span>${esc(m.kind)} · ${m.active === false ? "access revoked" : "presence unknown"}</span><details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p></details></div></div>`).join(""));
@@ -546,11 +732,10 @@ function render() {
   setText("#room-work-count", openWork.length ? `(${openWork.length})` : "");
   setText("#room-attention-count", waiting ? `(${waiting} need you)` : "");
   renderMessages();
-  renderSearch();
-  renderContent("#work-list", items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(workCard).join("") || `<p class="empty-note">${can("steer") ? "Turn a message into work, or start something new." : "Suggest work in the conversation. The owner can create it."}</p>`);
+  syncRequestComposer();
   $("#event-count").textContent = `${client.sequence}`;
   renderReturnBrief();
-  renderContent("#event-list", [...state.eventLog].reverse().map(e => `<li id="${recordDomId("event", e.id)}" tabindex="-1" data-event-record-id="${esc(e.id)}" data-focus-key="event:${esc(e.id)}"><span>${esc(humanize(e.type))}</span><strong>${esc(name(e.actorId))}</strong><time datetime="${esc(e.at)}">${esc(time(e.at))}</time><code>${esc(e.id)}</code></li>`).join(""));
+  renderContent("#event-list", [...state.eventLog].reverse().map(e => `<li id="${recordDomId("event", e.id)}" tabindex="-1" data-event-record-id="${esc(e.id)}" data-focus-key="event:${esc(e.id)}"><span>${esc(humanize(e.type))}</span><strong>${esc(memberLabel(e.actorId))}</strong><time datetime="${esc(e.at)}">${esc(time(e.at))}</time><code>${esc(e.id)}</code></li>`).join(""));
 }
 function renderMessages() {
   const list = $("#message-list"), view = currentThreadId ? `thread:${currentThreadId}` : "room";
@@ -563,6 +748,7 @@ function renderMessages() {
   const focused = list.contains(document.activeElement) ? document.activeElement : null;
   const focusKey = focused?.closest("[data-key]")?.dataset.key;
   const focusAction = focused?.dataset.messageAction, focusReaction = focused?.dataset.reaction;
+  const focusedFeedback = focused?.closest(".draft-feedback");
   const focusedMessage = focused?.matches(".message");
   const newMessages = sameView ? messages.filter(m => !previous.has(m.id)) : [];
   const newCount = newMessages.length;
@@ -591,9 +777,25 @@ function renderMessages() {
       else {
         const next = document.createElement("div"); next.innerHTML = html;
         // Reply counts/reactions change independently; the selected message text stays put.
-        for (const selector of [".message-avatar", ".message-meta", ".message-context", ".reactions", ".message-links"]) {
+        for (const selector of [".message-avatar", ".message-meta", ".message-context", ".reactions", ".message-links", ".draft-feedback"]) {
           const before = node.querySelector(selector), after = next.querySelector(selector);
-          if (before.innerHTML !== after.innerHTML) before.innerHTML = after.innerHTML;
+          if (before.innerHTML !== after.innerHTML) {
+            if (selector === ".draft-feedback") {
+              // Feedback changes without replacing the selected text or its controls.
+              const label = before.querySelector(".draft-state"), nextLabel = after.querySelector(".draft-state");
+              if (label && nextLabel) {
+                if (label.textContent !== nextLabel.textContent) label.textContent = nextLabel.textContent;
+                const detail = before.querySelector("details"), nextDetail = after.querySelector("details");
+                if (detail && nextDetail) {
+                  if (detail.querySelector("p").textContent !== nextDetail.querySelector("p").textContent)
+                    detail.querySelector("p").textContent = nextDetail.querySelector("p").textContent;
+                } else if (detail) detail.remove();
+                else if (nextDetail) before.append(nextDetail);
+                continue;
+              }
+            }
+            before.innerHTML = after.innerHTML;
+          }
         }
       }
       node._content = html;
@@ -610,12 +812,19 @@ function renderMessages() {
   }
   if (focused && !focused.isConnected) {
     const row = [...list.children].find(e => e.dataset.key === focusKey);
-    const replacement = focusedMessage ? row : [...(row?.querySelectorAll("[data-message-action]") || [])].find(e => e.dataset.messageAction === focusAction && e.dataset.reaction === focusReaction);
+    const replacement = focusedMessage ? row : focusedFeedback ? row?.querySelector(".draft-state")
+      : [...(row?.querySelectorAll("[data-message-action]") || [])].find(e => e.dataset.messageAction === focusAction && e.dataset.reaction === focusReaction);
     replacement?.focus({ preventScroll: true });
   }
   $("#new-messages-button").hidden = newVisibleMessages === 0;
   $("#new-messages-button").textContent = `${newVisibleMessages} new ${newVisibleMessages === 1 ? "message" : "messages"} · jump to latest`;
   if (announceCount) $("#conversation-announcement").textContent = `${announceCount} new ${announceCount === 1 ? "message" : "messages"} in ${currentThreadId ? "this thread" : "the room"}. Room event ${client.sequence}.`;
+}
+function draftFeedbackHTML(message) {
+  if (!message.proposal) return "";
+  const feedback = draftFeedback(state.workItems[message.workItemId], message);
+  const label = feedback?.label ?? "Draft";
+return `<p class="form-hint"><a class="source-link draft-state" href="${esc(workHref(message.workItemId))}" data-open-work="${esc(message.workItemId)}">${esc(label)}</a> · based on revision ${esc(message.proposal.basisRevision)}${message.proposal.basisRevision < message.proposal.submittedAtRevision ? " · older work" : ""} · authorship unverified · <button type="button" class="message-to-work" data-portable-work="${esc(message.workItemId)}" data-portable-mode="draft" data-portable-original="${esc(message.id)}" data-focus-key="refine:${esc(message.id)}">Refine draft</button></p>${feedback?.reason ? `<details><summary>Feedback</summary><p>${esc(feedback.reason)}</p></details>` : ""}`;
 }
 function messageContent(m) {
   const author = state.members[m.authorId];
@@ -631,34 +840,145 @@ function messageContent(m) {
     const label = `${pending && !pending.busy ? "Retry " : ""}${reaction}`;
     return `<button type="button" class="reaction" aria-pressed="${selected}" aria-label="${esc(label)} reaction, ${members.length}" title="${esc(members.map(name).join(", ") || `React with ${reaction}`)}" data-message-action="react" data-message-id="${esc(m.id)}" data-reaction="${reaction}"${pending?.busy ? " disabled" : ""}><span aria-hidden="true">${symbol}</span><span>${members.length || ""}</span>${pending && !pending.busy ? " Retry" : ""}</button>`;
   }).join("");
-  return `<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong><span>${esc(author.kind)}</span><a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · room-visible</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${esc(parent.body.slice(0,90))}</a>` : ""}</div><p>${esc(m.body)}</p><details class="reactions"><summary data-message-action="reaction-menu" data-message-id="${esc(m.id)}" aria-label="Reactions to message by ${esc(authorLabel)}">${esc(reactionSummary)}</summary><div class="reaction-options">${reactionButtons}</div></details><div class="message-links">${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>`).join("")}<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>${!currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : ""}${can("steer") ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : ""}</div></div>`;
+  return `<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong><span>${esc(author.kind)}</span><a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · room-visible</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${esc(parent.body.slice(0,90))}</a>` : ""}</div><p>${esc(m.body)}</p><div class="draft-feedback">${draftFeedbackHTML(m)}</div><details class="reactions"><summary data-message-action="reaction-menu" data-message-id="${esc(m.id)}" aria-label="Reactions to message by ${esc(authorLabel)}">${esc(reactionSummary)}</summary><div class="reaction-options">${reactionButtons}</div></details><div class="message-links">${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>`).join("")}${m.workItemId && workActions(state.workItems[m.workItemId], state.members[session.member.id]).some(([action]) => action === "complete") ? `<button class="message-to-work" type="button" data-message-action="result" data-message-id="${esc(m.id)}">Save as result</button>` : ""}<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>${!currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : ""}${can("steer") && !(m.proposal && m.workItemId) ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : ""}</div></div>`;
 }
-function renderSearch() {
+function renderSearch(now = Date.now()) {
   const query = $("#message-search").value;
   $("#clear-search").hidden = !query;
   $("#search-results").hidden = !query.trim();
   if (!query.trim()) { $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = ""; return; }
-  const result = searchMessages(state, query);
-  setText("#search-count", `${result.total} ${result.total === 1 ? "match" : "matches"}${result.total > result.messages.length ? ` · latest ${result.messages.length} shown` : ""} in this room`);
-  const list = $("#search-list"), focused = list.contains(document.activeElement) ? document.activeElement.dataset.openMessage : null;
-  const html = result.messages.map(m => `<li><a href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}"><strong>${esc(name(m.authorId))}</strong><span>${esc(m.body.slice(0, 240))}</span><small>${m.replyToId ? "Open thread at this reply" : "Open in room"}</small></a></li>`).join("") || '<li class="empty-note">No matches. Try a name or another phrase.</li>';
+  const result = searchMessages(state, query), work = searchWork(state, query);
+  const total = result.total + work.total, shown = result.messages.length + work.work.length;
+  setText("#search-count", `${total} ${total === 1 ? "match" : "matches"}${total > shown ? ` · ${shown} shown` : ""} in this room`);
+  const list = $("#search-list"), focused = list.contains(document.activeElement) ? document.activeElement.dataset.searchKey : null;
+  const html = work.work.map(({ item, excerpt }) => `<li><a href="${esc(workHref(item.id))}" data-open-work="${esc(item.id)}" data-search-key="work:${esc(item.id)}"><strong>${esc(item.title)}</strong><span>${esc(excerpt)}</span><small>Work · ${esc(workStatus(item, now).label)}</small></a></li>`).join("")
+    + result.messages.map(m => `<li><a href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" data-search-key="message:${esc(m.id)}"><strong>${esc(name(m.authorId))}</strong><span>${esc(m.body.slice(0, 240))}</span><small>${m.replyToId ? "Open thread at this reply" : "Open in room"}</small></a></li>`).join("") || '<li class="empty-note">No matches. Try a name or another phrase.</li>';
   if (list._content !== html) { list.innerHTML = html; list._content = html; }
-  if (focused) [...list.querySelectorAll("[data-open-message]")].find(e => e.dataset.openMessage === focused)?.focus({ preventScroll: true });
+  if (focused) ([...list.querySelectorAll("[data-search-key]")].find(e => e.dataset.searchKey === focused) || $("#message-search")).focus({ preventScroll: true });
 }
 function saveComposer() {
-  drafts.save(currentThreadId, { body: $("#message-input").value, toMemberId: $("#message-to-select").value, replyToId, pending: pendingMessage });
+  drafts.save(composerKey(), { body: $("#message-input").value, toMemberId: $("#message-to-select").value, replyToId, pending: pendingMessage,
+    ...(requestMode ? { mode: requestMode, threadId: currentThreadId } : {}) });
   persistDrafts();
 }
+function restoreComposer(draft) {
+  $("#message-input").value = draft.body;
+  const select = $("#message-to-select");
+  if (draft.toMemberId && ![...select.options].some(option => option.value === draft.toMemberId)) {
+    select.add(new Option("Previous recipient unavailable", draft.toMemberId));
+    select.options[select.options.length - 1].disabled = true;
+  }
+  select.value = draft.toMemberId; replyToId = draft.replyToId; pendingMessage = draft.pending;
+}
+function requestControls(message) {
+  const request = state.replyRequests?.[message.id];
+  if (!request) return "";
+  const own = session.member.id, open = request.status === "open";
+  const status = open ? state.members[request.recipientId]?.active === false ? "Recipient unavailable" : "Reply requested"
+    : ({ answered: "Answered", declined: "Declined", cancelled: "Cancelled" })[request.status];
+  const actions = [];
+  if (open && own === request.recipientId) actions.push(["answered", "Answer"], ["declined", "Decline"]);
+  if (open && (own === request.requesterId || own === state.room.ownerId && session.member.kind === "human")) actions.push(["cancelled", "Cancel request"]);
+  return `<span class="request-state">${esc(status)}</span>${actions.map(([kind, label]) =>
+    `<button type="button" class="message-to-work" data-message-id="${esc(message.id)}" data-message-action="request-${kind}">${label}</button>`).join("")}`;
+}
+function syncRequestComposer() {
+  const mode = requestMode, active = Boolean(mode) || requestReading;
+  $("#request-mode-bar").hidden = !active;
+  $("#request-reply").hidden = !state || active;
+  const request = mode?.requestMessageId && state?.replyRequests?.[mode.requestMessageId];
+  const changed = request && (request.revision !== mode.expectedRequestRevision || request.contextEventId !== mode.contextEventId);
+  const label = mode?.resultEventId ? "Ask about credit" : mode ? ({ request: "Request a reply", answered: "Answer", declined: "Decline", cancelled: "Cancel request" })[mode.kind] : "";
+  const work = mode?.resultEventId && state?.workItems[mode.workItemId];
+  const subject = work ? work.title + (work.receipt?.eventId !== mode.resultEventId ? " · Earlier result" : "")
+    : request ? conversation?.byId.get(request.id)?.body.slice(0, 80) : "";
+  setText("#request-mode-label", requestReading ? "Reading request…" : [label, subject, pendingMessage ? "Retry original" : changed ? "Context changed" : ""].filter(Boolean).join(" · "));
+  $("#request-refresh").hidden = !request || Boolean(pendingMessage) || requestReading || request.status !== "open";
+  $("#request-exit").disabled = busy;
+  const input = $("#message-input"), select = $("#message-to-select"), send = $("#message-form button[type=submit]");
+  input.readOnly = Boolean(mode && pendingMessage);
+  input.disabled = busy || requestReading;
+  select.disabled = busy || requestReading || Boolean(mode && (mode.kind !== "request" || pendingMessage));
+  select.required = mode?.kind === "request";
+  select.setCustomValidity(mode?.kind === "request" && (!select.value || select.value === session?.member.id) ? "Choose another participant." : "");
+  send.disabled = busy || requestReading || Boolean(request && request.status !== "open" && !pendingMessage);
+  const action = pendingMessage && mode ? "Retry original" : mode ? mode.kind === "request" ? "Send request" : label : "Send";
+  send.setAttribute("aria-label", action); send.title = action;
+  input.placeholder = mode?.kind === "request" ? "What do you need?" : mode?.kind === "cancelled" ? "Reason…" : mode ? "Your reply…" : "Message…";
+  if (active) $("#reply-bar").hidden = true;
+}
+function setRequestMode(mode, initial = {}) {
+  saveComposer(); requestMode = mode;
+  const key = composerKey();
+  if (!drafts.entries.has(key)) drafts.save(key, { body: "", toMemberId: mode.requesterId ?? "", replyToId: mode.requestMessageId ?? currentThreadId, ...initial, pending: null, mode, threadId: currentThreadId });
+  else drafts.save(key, { mode });
+  restoreComposer(drafts.get(key));
+  syncRequestComposer(); renderComposerError(); persistDrafts();
+  $("#message-input").focus();
+}
+async function openRequestMode(kind, id) {
+  if (!state || busy || requestReading || requestMode?.requestMessageId === id && pendingMessage) return;
+  const generation = client.generation, identity = session, epoch = ++requestEpoch;
+  const current = () => generation === client.generation && session === identity && epoch === requestEpoch && state;
+  requestReading = true; syncRequestComposer();
+  try {
+    const selected = await client.replyContext(id);
+    if (!current()) return;
+    await client.refresh();
+    if (!current()) return;
+    const request = state.replyRequests?.[id], basis = selected.current;
+    if (!request || request.status !== "open" || selected.request.revision !== request.revision
+      || selected.request.contextEventId !== request.contextEventId) throw new Error("Request changed. Open it again");
+    if (kind === "cancelled" ? !basis?.actions?.cancel : !basis?.answerBasis || !basis.actions[kind === "answered" ? "answer" : "decline"])
+      throw new Error("This action is unavailable");
+    if (basis.contextEventId !== request.contextEventId || kind !== "cancelled" &&
+      (basis.answerBasis.expectedRequestRevision !== request.revision || basis.answerBasis.contextEventId !== basis.contextEventId
+        || basis.answerBasis.contextSequence !== basis.contextSequence)) throw new Error("Request context could not be confirmed");
+    const mode = { kind, requestMessageId: id, expectedRequestRevision: request.revision,
+      requesterId: request.requesterId, workItemId: request.workItemId,
+      contextEventId: basis.contextEventId, contextSequence: basis.contextSequence };
+    if (!validReplyDraft(mode, state)) throw new Error("Request context could not be confirmed");
+    requestReading = false;
+    if (currentThreadId !== conversation.rootById.get(id)) switchThread(conversation.rootById.get(id));
+    setRequestMode(mode);
+  } catch (error) {
+    if (current()) { client.handleFailure(error); if (state) setComposerError(`${error.message}. Draft kept.`); }
+  } finally {
+    if (epoch === requestEpoch) { requestReading = false; syncRequestComposer(); }
+  }
+}
+$("#request-reply").addEventListener("click", () => { if (!state || busy || requestReading) return; setRequestMode({ kind: "request" }); });
+document.addEventListener("click", event => {
+  const resume = event.target.closest("[data-resume-credit]");
+  if (resume && state && !busy && !requestReading) {
+    const saved = drafts.entries.get(resume.dataset.resumeCredit);
+    if (!saved?.mode?.resultEventId || !validReplyDraft(saved.mode, state)) return;
+    inboxUI?.showRooms(); switchThread(saved.threadId); setRequestMode(saved.mode);
+    $("#message-input").scrollIntoView({ block: "nearest", behavior: "instant" }); return;
+  }
+  const button = event.target.closest("[data-ask-credit]");
+  if (!button || !state || busy || requestReading) return;
+  const question = creditQuestion(state, button.dataset.askCredit, session.member.id, button.dataset.resultEvent);
+  if (!question) { notice("Result changed. Open it again."); return; }
+  inboxUI?.showRooms();
+  switchThread(question.replyToId ? conversation.rootById.get(question.replyToId) : null);
+  setRequestMode(question.mode, question);
+  $("#message-input").scrollIntoView({ block: "nearest", behavior: "instant" });
+});
+$("#request-exit").addEventListener("click", () => switchThread(currentThreadId, true));
+$("#request-refresh").addEventListener("click", () => { if (requestMode?.requestMessageId) openRequestMode(requestMode.kind, requestMode.requestMessageId); });
 function persistDrafts() {
   if (!session || !$("#remember-drafts").checked) return;
-  const saved = recovery.write(draftScope(session), drafts, currentThreadId);
+  const saved = recovery.write(draftScope(session), drafts, currentThreadId, composerKey());
   setText("#draft-recovery-status", saved ? "Draft recovery enabled in this tab for 12 hours. Sign-out clears it." : "Draft recovery unavailable. Keep this page open to retain unsent text.");
 }
 function switchThread(threadId, focusComposer = false) {
   if (!state || busy || (threadId && !conversation.threads.has(threadId))) return;
-  if (threadId !== currentThreadId) {
+  const leavingResultQuestion = Boolean(requestMode?.resultEventId);
+  requestEpoch++; requestReading = false;
+  if (threadId !== currentThreadId || requestMode) {
     saveComposer(); viewPositions.set(currentThreadId ? `thread:${currentThreadId}` : "room", $("#message-list").scrollTop);
-    currentThreadId = threadId;
+    currentThreadId = threadId; requestMode = null;
     const draft = drafts.get(threadId);
     $("#message-input").value = draft.body;
     const select = $("#message-to-select");
@@ -668,20 +988,28 @@ function switchThread(threadId, focusComposer = false) {
     }
     select.value = draft.toMemberId; replyToId = draft.replyToId; pendingMessage = draft.pending;
   }
-  updateReply(); renderMessages(); renderComposerError();
+  updateReply(); renderMessages(); renderComposerError(); syncRequestComposer();
+  if (leavingResultQuestion) renderReturnBrief();
   if (focusComposer) $("#message-input").focus();
   else (currentThreadId ? $("#thread-title") : $("#conversation-title")).focus({ preventScroll: true });
 }
 function revealMessage(id) {
   if (!state || busy || !conversation.byId.has(id)) return;
+  inboxUI?.showRooms();
   const message = conversation.byId.get(id);
   switchThread(message.replyToId ? conversation.rootById.get(id) : null);
   const row = [...$("#message-list").querySelectorAll("[data-message-record-id]")]
     .find(node => node.dataset.messageRecordId === id);
   row?.focus({ preventScroll: true }); row?.scrollIntoView({ block: "nearest", behavior: "instant" });
+  // Nearest can leave a tall message clipped at its bottom. Align its beginning
+  // inside the conversation without moving the surrounding page unnecessarily.
+  const list = $("#message-list");
+  if (row && row.offsetHeight > list.clientHeight) list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top;
 }
 function focusRecord(node) {
   if (!node) return;
+  if (node.closest("#work-list")) selectWorkView("work");
+  inboxUI?.showRooms();
   node.focus({ preventScroll: true });
   node.scrollIntoView({ block: "nearest", behavior: "instant" });
 }
@@ -691,9 +1019,21 @@ function workRecord(id) {
 }
 function revealWork(id) {
   if (!state?.workItems[id] || busy) return;
+  selectWorkView("work");
   const card = workRecord(id);
   if (card) card.querySelector(".work-details").open = true;
   focusRecord(card);
+}
+function revealDrafts(id) {
+  if (!state?.workItems[id] || busy) return;
+  selectWorkView("work");
+  const choices = workRecord(id)?.querySelector('.work-drafts');
+  if (!choices) { revealWork(id); return; }
+  inboxUI?.showRooms();
+  choices.open = true;
+  const summary = choices.querySelector('summary');
+  summary.focus({ preventScroll: true });
+  summary.scrollIntoView({ block: 'start', behavior: 'instant' });
 }
 function revealMember(id) {
   if (!state?.members[id] || busy) return;
@@ -714,6 +1054,8 @@ function decodeFragment(value) {
 function revealLocationHash() {
   if (!state || !location.hash) return;
   const hash = location.hash;
+  if (hash === "#pr-view/inbox") { inboxUI?.open(); return; }
+  if (hash === "#pr-view/rooms") { inboxUI?.showRooms(); return; }
   const current = /^#pr-record\/(message|work|member|event|room)\/(.+)$/.exec(hash);
   if (current) {
     const id = decodeFragment(current[2]);
@@ -739,11 +1081,69 @@ function revealLocationHash() {
 }
 function readyForDecision(i) { return nextWorkStep(i).action === "decide"; }
 function hasIndependentProducer(i) { return hasReportedProducer(i) && i.receipt.producerId !== i.verifierMemberId; }
-function actions(i, scopeOnly = false) {
-  return workActions(i, state.members[session.member.id]).filter(([action]) => (action === "release") === scopeOnly).map(([action, label]) => `<button type="button" class="button secondary" data-action="${action}" data-work-id="${esc(i.id)}" data-focus-key="work-action:${esc(i.id)}:${action}"${busy ? " disabled" : ""}>${label}</button>`).join("");
+function actions(i, scopeOnly = false, now = Date.now()) {
+  return workActions(i, state.members[session.member.id], now).filter(([action]) => (action === "release") === scopeOnly).map(([action, label]) => `<button type="button" class="button secondary" data-action="${action}" data-work-id="${esc(i.id)}" data-focus-key="work-action:${esc(i.id)}:${action}"${busy ? " disabled" : ""}>${label}</button>`).join("");
 }
-function claimStateLabel(i) {
-  if (activeClaim(i)) return "not expired";
+function helpView(item, now = Date.now()) {
+  try { return workHelpContext(state, item.id, session.member.id, new Date(now).toISOString()); }
+  catch { return null; } // Invalid or unavailable context never advertises consent.
+}
+const isHelpAction = action => ["help", "end-help"].includes(action);
+const offerStatuses = { "select-offer": "selected", "decline-offer": "declined", "withdraw-offer": "withdrawn", "release-offer": "released" };
+const offerLabels = { "offer-help": "Offer help", "select-offer": "Select helper", "decline-offer": "Decline", "withdraw-offer": "Withdraw", "release-offer": "Release" };
+const isOfferAction = action => Object.hasOwn(offerLabels, action);
+function offersView(item, now = Date.now()) {
+  if (offerContextVersion !== 1) return null;
+  try { return workOffersContext(state, item.id, session.member.id, new Date(now).toISOString()); }
+  catch { return null; }
+}
+function offerChoice(entry) {
+  return offersView(state?.workItems[entry.workId] ?? {})?.offers.find(row => row.offer.id === entry.offerId) ?? null;
+}
+function pinOffer(entry, item, offerId = entry.offerId) {
+  entry.offerId = offerId ?? crypto.randomUUID();
+  entry.helpRevision = item.helpWanted?.revision ?? 0;
+  entry.helpEventId = item.helpWanted?.eventId ?? null;
+  entry.offerRevision = state.helpOffers?.[entry.offerId]?.revision ?? null;
+  entry.viewerRevision = state.members[session.member.id]?.revision;
+  entry.offererRevision = state.members[state.helpOffers?.[entry.offerId]?.offererId]?.revision ?? null;
+}
+const currentHelp = () => $("#action-fields").querySelector("#help-current");
+const offerField = name => $("#action-fields").querySelector('[id="offer-' + name + '"]');
+function helpButton(item, action, label, offerId = null) {
+  return `<button type="button" class="button ghost" data-action="${action}" data-work-id="${esc(item.id)}"${offerId ? ` data-offer-id="${esc(offerId)}"` : ""} data-focus-key="work-action:${esc(item.id)}:${action}${offerId ? ":" + esc(offerId) : ""}"${busy ? " disabled" : ""}>${label}</button>`;
+}
+function helpCard(item, help) {
+  const context = offersView(item), rows = context?.offers ?? [];
+  const invitation = help?.help?.status === "open" && (help.status === "open" || help.canWithdraw);
+  const retained = state.helpOffers && !Array.isArray(state.helpOffers) && Object.values(state.helpOffers).some(offer => offer?.workItemId === item.id);
+  if (!invitation && !rows.length && !retained) return "";
+  const live = rows.filter(row => ["offered", "selected"].includes(row.offer.status));
+  const past = rows.filter(row => !["offered", "selected"].includes(row.offer.status));
+  const selected = live.find(row => row.offer.status === "selected");
+  const label = selected ? selected.status === "selection_needs_review" ? "Helper · review needed" : "Helper selected"
+    : help?.status === "open" ? "Help wanted" : "Help ended";
+  const rowHTML = row => {
+    const offer = row.offer, label = { offered: "Offered", selected: "Selected", unavailable: "Request changed", selection_needs_review: "Review needed",
+      withdrawn: "Withdrawn", declined: "Declined", released: "Released" }[row.status];
+    const buttons = [["canSelect", "select-offer"], ["canDecline", "decline-offer"], ["canWithdraw", "withdraw-offer"], ["canRelease", "release-offer"]]
+      .filter(([key]) => row[key]).map(([, action]) => helpButton(item, action, offerLabels[action], offer.id)).join("");
+    const contribute = row.status === "selected" && offer.offererId === session.member.id ? shareDraftButton(item, offer.id) : "";
+    return `<li class="help-offer" data-offer-record-id="${esc(offer.id)}"><div class="help-offer-heading"><strong>${esc(memberLabel(offer.offererId))}</strong><span class="form-hint">${label}</span></div><p>${esc(offer.plan)}</p>${offer.reason ? `<p class="form-hint">${esc(offer.reason)}</p>` : ""}${buttons || contribute ? `<div class="portable-actions">${contribute}${buttons}</div>` : ""}</li>`;
+  };
+  const capacity = context?.availability.reason;
+  const capacityText = { work_offer_limit: "This request has enough offers for now.", member_offer_limit: "Finish an existing offer before adding another.", history_full: "Offer history is full." }[capacity];
+  return `<details class="work-help"><summary data-focus-key="work-help:${esc(item.id)}">${label}${live.length && !selected ? ` <span class="form-hint">· ${live.length}</span>` : ""}</summary>
+    ${invitation ? `<p class="definition">${esc(help.help.scope)}</p><p class="form-hint">Ends ${esc(new Date(help.help.expiresAt).toLocaleString())}</p>` : ""}
+    ${selected ? '<p class="form-hint">Coordination only. Work and permissions stay unchanged.</p>' : ""}
+    <div class="portable-actions">${context?.availability.canOffer ? helpButton(item, "offer-help", "Offer help") : ""}${help?.canPublish && invitation ? helpButton(item, "help", "Edit") : ""}${help?.canWithdraw ? helpButton(item, "end-help", "End request") : ""}</div>
+    ${capacityText ? `<p class="form-hint">${capacityText}</p>` : ""}
+    ${!context ? '<p class="form-hint">Offers unavailable.</p>' : ""}
+    ${live.length ? `<ul class="help-offers">${[...live].sort((a, b) => Number(b.offer.status === "selected") - Number(a.offer.status === "selected")).map(rowHTML).join("")}</ul>` : ""}
+    ${past.length ? `<details class="offer-history"><summary data-focus-key="offer-history:${esc(item.id)}">Past offers (${past.length})</summary><ul class="help-offers">${past.map(rowHTML).join("")}</ul></details>` : ""}</details>`;
+}
+function claimStateLabel(i, now = Date.now()) {
+  if (activeClaim(i, now)) return "not expired";
   if (i.claim?.status === "superseded") return "superseded";
   if (i.claim?.status === "released") return "released";
   return "expired";
@@ -751,10 +1151,15 @@ function claimStateLabel(i) {
 function receiptCard(i) {
   if (!i.receipt) return "";
   const receipt = i.receipt;
+  const earlier = [...drafts.entries].filter(([, draft]) => draft.mode?.resultEventId && draft.mode.workItemId === i.id
+    && draft.mode.resultEventId !== receipt.eventId && (draft.body.trim() || draft.pending) && validReplyDraft(draft.mode, state));
+  const resume = earlier.map(([key], index) => `<button type="button" class="button ghost" data-resume-credit="${esc(key)}"
+    data-focus-key="resume-credit:${esc(key)}"${busy ? " disabled" : ""}>Continue earlier question${earlier.length > 1 ? " " + (index + 1) : ""}</button>`).join("");
   const reporter = receipt.reportedById ? memberLabel(receipt.reportedById) : "Unknown reporter";
   const producer = receipt.producerAttribution === "reported" && receipt.producerId
     ? memberLabel(receipt.producerId)
-    : "Unknown — no producer was reported";
+    : receipt.producerAttribution === "external-reported" ? `${receipt.externalProducer} · outside room, reported`
+      : "Unknown — no producer was reported";
   let verification = "<p>No verification recorded.</p>";
   if (i.verification) {
     const confirmed = i.verification.independenceConfirmed === true;
@@ -765,19 +1170,27 @@ function receiptCard(i) {
       : "";
     verification = `<p><strong>${esc(resultLabel)}</strong> reported by ${esc(memberLabel(i.verification.verifierId))}${independence}: ${esc(i.verification.summary)}</p>`;
   }
-  return `<div class="receipt"><p class="receipt-label">REPORTED COMPLETION · NOT AUTOMATIC VERIFICATION</p><dl class="receipt-attribution"><div><dt>Completion reporter</dt><dd>${esc(reporter)}</dd></div><div><dt>Producer</dt><dd>${esc(producer)}</dd></div></dl><p>${esc(receipt.summary)}</p><a href="${safeUrl(receipt.evidenceUrl)}" target="_blank" rel="noreferrer" data-focus-key="work-evidence:${esc(i.id)}">Open submitted evidence ↗</a><code>${esc(receipt.evidenceVersion)}</code><p>${esc(receipt.nextAction)}</p>${verification}</div>`;
+  return `<div class="receipt"><p class="receipt-label">REPORTED COMPLETION · NOT AUTOMATIC VERIFICATION</p><dl class="receipt-attribution"><div><dt>Completion reporter</dt><dd>${esc(reporter)}</dd></div><div><dt>Producer</dt><dd>${esc(producer)}</dd></div></dl><p>${esc(receipt.summary)}</p>${receipt.nativeText ? "" : `<a href="${safeUrl(receipt.evidenceUrl)}" target="_blank" rel="noreferrer" data-focus-key="work-evidence:${esc(i.id)}">Open submitted evidence ↗</a>`}<code>${esc(receipt.evidenceVersion)}</code><p>${esc(receipt.nextAction)}</p>${verification}${receipt.producerAttribution !== "reported" ? `<button type="button" class="button ghost" data-ask-credit="${esc(i.id)}" data-result-event="${esc(receipt.eventId)}" data-focus-key="ask-credit:${esc(i.id)}"${busy ? " disabled" : ""}>Ask about credit</button>` : ""}${resume}</div>`;
 }
-function workCard(i) {
-  const next = nextWorkStep(i), status = workStatus(i);
-  const nextActor = next.memberId ? `${memberLabel(next.memberId)} — ` : "";
+function shareDraftButton(item, key = "task") {
+  return `<button type="button" class="button secondary" data-portable-work="${esc(item.id)}" data-portable-mode="draft" data-focus-key="share-draft:${esc(item.id)}:${esc(key)}">Share draft</button>`;
+}
+function workCard(i, now, drafts) {
+  const next = nextWorkStep(i, now), status = workStatus(i, now), help = helpView(i, now);
+  const nextActor = next.memberId ? `${name(next.memberId)} — ` : "";
   const nextLine = `<p class="work-next-step" data-next-step="${esc(next.action)}"><strong>Next:</strong> ${esc(nextActor + status.next)}</p>`;
   const source = i.sourceMessageId ? `<a class="source-link" href="${esc(recordHref("message", i.sourceMessageId))}" data-open-message="${esc(i.sourceMessageId)}" data-focus-key="work-source:${esc(i.id)}">From this conversation</a>` : "";
   const blocker = i.blocker ? `<div class="blocker"><strong>Blocked</strong><p>${esc(i.blocker.reason)}</p><p>${esc(i.blocker.nextAction)}</p></div>` : "";
   const decision = i.decision ? `<div class="decision"><strong>${esc(humanize(i.decision.decision))}</strong><p>${esc(i.decision.reason)}</p></div>` : "";
-  const claim = i.claim ? `<details class="claim"><summary data-focus-key="work-claim:${esc(i.id)}">Recorded scope · ${esc(claimStateLabel(i))}</summary><p>${esc(memberLabel(i.claim.holderId))}</p><p>${esc(i.claim.repository)}:${esc(i.claim.ref)}</p><p>${esc(i.claim.paths.join(", "))}</p><p>Expires ${esc(i.claim.expiresAt)}. External activity is not measured.</p>${actions(i, true)}</details>` : "";
+  const claim = i.claim ? `<details class="claim"><summary data-focus-key="work-claim:${esc(i.id)}">Recorded scope · ${esc(claimStateLabel(i, now))}</summary><p>${esc(memberLabel(i.claim.holderId))}</p><p>${esc(i.claim.repository)}:${esc(i.claim.ref)}</p><p>${esc(i.claim.paths.join(", "))}</p><p>Expires ${esc(i.claim.expiresAt)}. External activity is not measured.</p>${actions(i, true, now)}</details>` : "";
   const checks = `<div><dt>Verifier</dt><dd>${i.independentVerificationRequired ? esc(memberLabel(i.verifierMemberId)) : "Not required"}</dd></div><div><dt>Decision</dt><dd>${i.ownerDecisionRequired ? esc(memberLabel(i.humanDecisionMakerId)) : "Not required"}</dd></div>`;
   const updated = `<p class="form-hint">Last recorded update: ${esc(new Date(i.updatedAt).toLocaleString())}. Live execution is not measured.</p>`;
-  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span></div><h3>${esc(i.title)}</h3>${nextLine}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span>${source}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${receiptCard(i)}${blocker}${decision}${claim}</details><div class="work-actions">${actions(i)}</div></article>`;
+  const reuse = can("steer") ? `<button type="button" class="button ghost" data-reuse-work="${esc(i.id)}" data-focus-key="work-reuse:${esc(i.id)}">Use again</button>` : "";
+  const latestDraft = drafts[0];
+  const alternatives = drafts.length > 1 ? `<details class="work-drafts"><summary data-focus-key="work-drafts:${esc(i.id)}">Drafts (${drafts.length})</summary>${drafts.map(draft =>
+`<p><a class="source-link" href="${esc(recordHref("message", draft.id))}" data-open-message="${esc(draft.id)}" data-focus-key="work-draft-message:${esc(draft.id)}">${esc(memberLabel(draft.authorId))} · ${esc(draftFeedback(i, draft)?.label ?? "Draft")}<br><span class="form-hint">${esc([...draft.body].slice(0, 100).join(""))}${[...draft.body].length > 100 ? "…" : ""}</span></a></p>`).join("")}</details>` : "";
+  const draftLink = i.receipt?.nativeText ? `<button class="source-link" type="button" data-read-result="${esc(i.id)}" data-focus-key="work-native-result:${esc(i.id)}">View result</button>` + alternatives : alternatives || (latestDraft ? `<a class="source-link" href="${esc(recordHref("message", latestDraft.id))}" data-open-message="${esc(latestDraft.id)}" data-focus-key="work-draft:${esc(i.id)}">View latest draft</a>` : "");
+  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span></div><h3>${esc(i.title)}</h3>${nextLine}${draftLink}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span>${source}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${receiptCard(i)}${blocker}${decision}${claim}<div class="portable-actions">${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-portable-work="${esc(i.id)}" data-portable-mode="result" data-focus-key="work-result:${esc(i.id)}">Paste AI draft</button></div></details><div class="work-actions">${actions(i, false, now)}</div></article>`;
 }
 // Quiet Focus A4: a failed send reports beside the composer that holds the draft,
 // not only in the page-level status area; the Send button is the retry and the
@@ -834,15 +1247,15 @@ async function submit(form, fn, { failureHint } = {}) {
 }
 $("#invitation-dismiss").addEventListener("click", () => closeInvitation());
 $("#invitation-retry").addEventListener("click", () => { if (invitation.phase === "preview-failed") previewCurrentInvitation(); });
-$("#invitation-dialog").addEventListener("keydown", e => {
+for (const id of ["invitation-dialog", "work-dialog", "action-dialog", "result-dialog", "room-actions-dialog"]) $(`#${id}`).addEventListener("keydown", e => {
   if (e.key !== "Tab") return;
-  const controls = [...e.currentTarget.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex='-1'])")]
+  const controls = [...e.currentTarget.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, a[href], [tabindex]:not([tabindex='-1'])")]
     .filter(element => element.getClientRects().length > 0);
   const first = controls[0], last = controls.at(-1), active = document.activeElement;
   if (!first || !controls.includes(active) || (e.shiftKey ? active === first : active === last)) {
     e.preventDefault();
     (e.shiftKey ? last : first)?.focus();
-    if (!first) $("#invitation-title").focus();
+    if (!first) (id === "invitation-dialog" ? $("#invitation-title") : e.currentTarget).focus();
   }
 });
 $("#invitation-dialog").addEventListener("cancel", e => {
@@ -854,11 +1267,13 @@ $("#invitation-account-form").addEventListener("submit", async e => {
   if (!invitation.secret || !invitation.preview || invitationIsCommitting() || invitation.phase === "terminal") return;
   const version = invitation.version, secret = invitation.secret;
   const accessKey = $("#invitation-account-key").value.trim();
-  const roomBefore = state && session ? session : null;
-  if (roomBefore) {
-    saveComposer();
-    if ((drafts.hasText() || !$("#new-work-form").hidden || $("#action-dialog").open)
-      && !window.confirm("Signing in with a different account clears this Room’s unsent drafts and forms before acceptance. Continue with this account key?")) return;
+  const roomBefore = state && session ? session : null, accountBefore = accountClient.session;
+  const privateDraft = inboxUI?.hasPending();
+  if (roomBefore || privateDraft) {
+    if (roomBefore) saveComposer();
+    if ((privateDraft || drafts.hasText() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction)
+      && !window.confirm(privateDraft ? "Switching accounts clears unsent private drafts and local retries. Unconfirmed actions may already be saved. Continue?"
+        : (pendingAction?.uncertain || instructionsUI?.hasUnknown()) ? "Switch accounts and clear drafts and the pending retry? The action may already be saved." : "Signing in with a different account clears this Room’s unsent drafts, private setup and forms before acceptance. Continue with this account key?")) return;
   }
   if (roomBefore) { saveComposer(); client.disconnect(); }
   invitation.phase = "authenticating";
@@ -872,6 +1287,7 @@ $("#invitation-account-form").addEventListener("submit", async e => {
     if (!loggedIn?.authenticated || !loggedIn.account) {
       accessEndContext = "account-switch";
       if (state) client.endAccess();
+      else { clearPrivateWorkspace(); if (accountClient.session?.authenticated) showAccountWorkspace(); }
       invitation.phase = "changed-account";
       setInvitationFeedback("The browser account changed before sign-in could be confirmed. Sign in again to continue safely.", true);
       renderInvitation();
@@ -879,6 +1295,7 @@ $("#invitation-account-form").addEventListener("submit", async e => {
     }
     $("#invitation-account-key").value = "";
     await moveCurrentRoomToAccount(loggedIn);
+    if (!roomBefore) { clearPrivateWorkspace(); showAccountWorkspace(); }
     if (!currentInvitation(version, secret)) return;
     invitation.phase = "ready";
     setInvitationFeedback(invitation.preview.status === "accepted"
@@ -888,6 +1305,10 @@ $("#invitation-account-form").addEventListener("submit", async e => {
     $("#invitation-accept").focus({ preventScroll: true });
   } catch (error) {
     if (!currentInvitation(version, secret)) return;
+    if (!roomBefore && accountClient.session !== accountBefore) {
+      clearPrivateWorkspace();
+      if (accountClient.session?.authenticated) showAccountWorkspace();
+    }
     if (Number.isSafeInteger(error.status) && roomBefore && client.session === roomBefore) client.connect();
     else if (roomBefore && state) {
       accessEndContext = "account-switch";
@@ -999,22 +1420,44 @@ $("#auth-form").addEventListener("submit", async e => {
   const requestedRoom = selectedRoomFromLocation();
   await submit(e.currentTarget, async current => {
     let identity;
-    if (requestedRoom) {
+    if (requestedRoom || accountHomeFromLocation()) {
       await ensureAccountSession();
       const account = await accountClient.login(accessKey);
       if (!account) return;
+      if (!requestedRoom) { $("#access-key").value = ""; showAccountWorkspace(); return; }
       identity = await client.restore(requestedRoom);
     } else identity = await client.login(accessKey);
     if (!current() || !identity || !state || session?.member.id !== identity.member.id || session?.roomId !== identity.roomId) return;
-    $("#access-key").value = ""; $("#message-input").focus(); notice("Signed in. Welcome to your room.");
+    $("#access-key").value = ""; $("#message-input").focus();
   }, { failureHint: requestedRoom ? "Check the account key and Room membership, then try again." : "Check the access key and try again." });
   if (state) revealLocationHash();
 });
 $("#signout-button").addEventListener("click", async () => {
+  if (!state && accountClient.session?.authenticated) {
+    if (signoutLoading || busy || invitationIsCommitting()) return;
+    if (inboxUI.hasPending() && !window.confirm("Sign out and clear unsent drafts? Saved replies stay.")) return;
+    const operation = ++signoutOperationId;
+    signoutLoading = true; $("#signout-button").disabled = true;
+    try {
+      const ended = await accountClient.logout();
+      if (operation !== signoutOperationId) return;
+      if (ended || !accountClient.session) endAccountAccess();
+    } catch {
+      if (operation !== signoutOperationId) return;
+      if (!accountClient.session) {
+        endAccountAccess(); setFormStatus($("#auth-error"), "Sign-out unconfirmed. Sign in to check your account.", true);
+      } else { $("#account-status").textContent = "Couldn’t sign out. Try again."; $("#account-status").hidden = false; }
+    } finally {
+      if (operation === signoutOperationId) { signoutLoading = false; $("#signout-button").disabled = false;
+        for (const control of document.querySelectorAll("#auth-form input, #auth-form button")) control.disabled = false;
+        $("#auth-panel").setAttribute("aria-busy", "false"); }
+    }
+    return;
+  }
   if (busy || signoutLoading || !state || !session || invitationIsCommitting()) return;
   saveComposer();
-  if (drafts.hasText() || !$("#new-work-form").hidden || $("#action-dialog").open) {
-    if (!window.confirm("Sign out and clear unsent drafts on this device?")) return;
+  if (drafts.hasText() || inboxUI?.hasPending() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction) {
+    if (!window.confirm((pendingAction?.uncertain || instructionsUI?.hasUnknown()) ? "Sign out and clear drafts and the pending retry? The action may already be saved." : "Sign out and clear unsent drafts and private setup on this device?")) return;
   }
   const operationId = ++signoutOperationId;
   const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
@@ -1033,7 +1476,7 @@ $("#signout-button").addEventListener("click", async () => {
       if (state) $("#signout-button").disabled = false;
       else {
         configureAuthPanel();
-        const ended = "Sign in with an active key. Session ended; private drafts were cleared.";
+        const ended = "Session ended; private drafts were cleared.";
         if ($("#auth-error").textContent !== ended) setFormStatus($("#auth-error"), ended, true);
         if (!$("#invitation-dialog").open) queueMicrotask(() => $("#access-key").focus({ preventScroll: true }));
       }
@@ -1041,6 +1484,10 @@ $("#signout-button").addEventListener("click", async () => {
   }
 });
 $("#refresh-button").addEventListener("click", async () => {
+  if (!state && accountClient.session?.authenticated) {
+    if (await confirmAccount()) { showAccountWorkspace(); if (!$("#account-rooms-panel").hidden) loadAccountRooms(); }
+    return;
+  }
   const operationId = ++refreshOperationId;
   const generation = client.generation, roomId = session?.roomId, memberId = session?.member.id;
   try {
@@ -1064,16 +1511,16 @@ $("#refresh-button").addEventListener("click", async () => {
     if (!roomId && client.session) return;
     if (!roomId) {
       const signedOut = [401, 403].includes(error.status);
-      setFormStatus($("#auth-error"), signedOut ? "Use a provisioned human room key to enter. No demo identity is selected for you." : "Room service unavailable. Check the service and retry; no connection is claimed.", true);
+      setFormStatus($("#auth-error"), signedOut ? "" : "Can’t reach the room. Try refreshing.", true);
       setConnectionStatus(signedOut ? "Not connected · sign in required" : "Room service unavailable · not connected");
       return;
     }
     handleFailureNotice(error);
   }
 });
-$("#caught-up-button").addEventListener("click", () => briefView.acknowledge(client.sequence));
 $("#message-form").addEventListener("submit", e => {
-  e.preventDefault(); if (!state) return;
+  e.preventDefault(); if (!state || busy || requestReading) return;
+  if (requestMode) { submitRequest(e.currentTarget); return; }
   const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId };
   if (!content.body) return;
   const previous = pendingMessage?.command?.data;
@@ -1094,10 +1541,51 @@ $("#message-form").addEventListener("submit", e => {
     notice(`Message saved${threadId ? " in this thread" : " to the room"}.`);
   }, { failureHint: "Draft kept. Send again to retry." });
 });
+function submitRequest(form) {
+  if (!state || busy || requestReading) return;
+  const mode = requestMode, key = composerKey(), identity = session, generation = client.generation;
+  if (!$("#message-input").value.trim()) return;
+  const hadPending = Boolean(pendingMessage);
+  try {
+    if (!pendingMessage) {
+      const data = replyDraftData(mode, { body: $("#message-input").value.trim(),
+        toMemberId: $("#message-to-select").value || null, replyToId, messageId: crypto.randomUUID() });
+      pendingMessage = draftCommand(null, mode.kind === "cancelled" ? REPLY_CANCELLED : T.MESSAGE_POSTED, data);
+    }
+  } catch (error) { setComposerError(error.message); return; }
+  saveComposer();
+  const command = pendingMessage.command;
+  submit(form, async () => {
+    try {
+      if (command.data.messageId) locallyOwnedMessageIds.add(command.data.messageId);
+      const receipt = await client.send(command);
+      if (generation !== client.generation || session !== identity || !state) return;
+      if (!await confirmsReplyCommand(receipt, command, identity.roomId, identity.member.id)) throw new Error("Save not confirmed");
+      if (generation !== client.generation || session !== identity || !state) return;
+      drafts.clear(key); requestMode = null; requestEpoch++;
+      restoreComposer(drafts.get(currentThreadId)); updateReply(); persistDrafts();
+      if (mode.resultEventId) renderReturnBrief();
+      notice(mode.kind === "request" ? "Request saved." : mode.kind === "cancelled" ? "Request cancelled." : "Reply saved.");
+    } catch (error) {
+      if (generation !== client.generation || session !== identity || !state) return;
+      // command_rejected is issued after exact-operation lookup. Transport and
+      // pre-ledger size/rate errors cannot unlock an earlier uncertain operation.
+      if ((!hadPending && [400, 404, 409, 413, 422].includes(error.status))
+        || error.code === "command_rejected" && [409, 422].includes(error.status)) pendingMessage = null;
+      saveComposer();
+      throw error;
+    }
+  }, { failureHint: "Draft kept. Retry the original, or refresh context after a refusal." });
+}
 $("#message-list").addEventListener("click", e => {
   const button = e.target.closest("[data-message-id]"); if (!button || !state || busy) return;
   const id = button.dataset.messageId;
-  if (button.dataset.messageAction === "work") openWork(id);
+  if (button.dataset.messageAction?.startsWith("request-")) openRequestMode(button.dataset.messageAction.slice(8), id);
+  else if (button.dataset.messageAction === "work") openWork(id);
+  else if (button.dataset.messageAction === "result") {
+    const message = conversation.byId.get(id), item = state.workItems[message?.workItemId];
+    if (item && workActions(item, state.members[session.member.id]).some(([action]) => action === "complete")) openWorkAction(item, "complete", id);
+  }
   else if (button.dataset.messageAction === "react") setReaction(id, button.dataset.reaction);
   else if (["reply", "thread"].includes(button.dataset.messageAction)) {
     switchThread(conversation.rootById.get(id), button.dataset.messageAction === "reply");
@@ -1106,7 +1594,7 @@ $("#message-list").addEventListener("click", e => {
 });
 function updateReply() {
   const target = conversation?.byId.get(replyToId);
-  $("#reply-bar").hidden = !target || replyToId === currentThreadId;
+  $("#reply-bar").hidden = Boolean(requestMode) || !target || replyToId === currentThreadId;
   $("#reply-context").textContent = target ? `Replying to ${name(target.authorId)}: ${target.body.slice(0, 100)}` : "";
 }
 function clearReply() { replyToId = currentThreadId; updateReply(); }
@@ -1126,7 +1614,7 @@ $("#message-input").addEventListener("select", () => rememberComposerSelection()
 document.addEventListener("selectionchange", () => { if (document.activeElement === $("#message-input")) rememberComposerSelection(); });
 for (const type of ["keyup", "mouseup", "touchend"]) $("#message-input").addEventListener(type, () => rememberComposerSelection({ clearCollapsed: true }));
 $("#message-input").addEventListener("input", () => { lastComposerSelection = null; saveComposer(); });
-$("#message-to-select").addEventListener("change", saveComposer);
+$("#message-to-select").addEventListener("change", () => { saveComposer(); syncRequestComposer(); });
 const touchKeyboard = matchMedia("(hover: none) and (pointer: coarse)");
 function syncComposerHint() {
   $("#draft-hint").textContent = touchKeyboard.matches ? "Return for a new line · ↑ to send" : "Enter to send · Shift + Enter for a new line";
@@ -1145,6 +1633,93 @@ $("#message-input").addEventListener("keydown", e => {
 $("#search-form").addEventListener("submit", e => { e.preventDefault(); if (state) renderSearch(); });
 $("#message-search").addEventListener("input", () => { if (state) renderSearch(); });
 $("#clear-search").addEventListener("click", () => { $("#message-search").value = ""; renderSearch(); $("#message-search").focus(); });
+
+// Navigation only: all consequential actions stay in their existing forms.
+// Resolve the current target again on selection; an open menu is not authority.
+function ownsRoomActions(context = roomActionsContext) {
+  return Boolean(state && session && client.session === session && client.generation === roomGeneration
+    && client.ownsAccountSession() && !$("#main").hidden && $("#inbox-panel").hidden
+    && (!context || context.session === session && context.generation === client.generation));
+}
+function roomActionEntries() {
+  return [
+    { id: "write", label: requestMode ? "Open composer" : $("#message-input").value ? "Continue writing" : "Write a message", words: "compose chat draft reply", target: "#message-input" },
+    { id: "search", label: "Search room", words: "find messages work", target: "#message-search" },
+    { id: "catch-up", label: "Catch me up", words: "updates attention needs me reminders", target: "#return-brief-panel > summary", reveal: "#return-brief-panel" },
+    { id: "work", label: "View work", words: "tasks projects", target: "#work-view-work", activate: true },
+    { id: "results", label: "View results", words: "completed approved finished artifacts", target: "#work-view-results", activate: true },
+    { id: "people", label: "People & agents", words: "members collaborators team", target: "#people-panel > summary", reveal: "#people-panel" },
+    { id: "new-work", label: "New work", words: "create task request", target: "#new-work-button", activate: true },
+    { id: "invite", label: "Invite people", words: "share join link", target: "#invite-people-button", activate: true },
+    { id: "agent", label: "Connect agent", words: "ai assistant mcp tools", target: "#connect-agent-button", reveal: "#people-panel", activate: true },
+    { id: "instructions", label: "Room instructions", words: "guidance brief charter", target: "#room-instructions-open", reveal: "#room-about", activate: true }
+  ].filter(entry => { const target = $(entry.target); return target && !target.disabled && !target.closest("[hidden]"); });
+}
+function closeRoomActions(restore = true) {
+  const context = roomActionsContext; roomActionsContext = null;
+  $("#room-actions-dialog").close(); $("#room-actions-list").replaceChildren(); $("#room-actions-query").value = "";
+  $("#room-actions-empty").hidden = true;
+  if (restore && context && ownsRoomActions(context) && context.opener?.isConnected && context.opener.getClientRects().length) {
+    context.opener.focus({ preventScroll: true });
+    if (context.selection && context.opener.value === context.value) context.opener.setSelectionRange(...context.selection);
+  }
+}
+function renderRoomActions() {
+  if (!roomActionsContext || !ownsRoomActions()) { closeRoomActions(false); return; }
+  const terms = $("#room-actions-query").value.toLowerCase().trim().split(/\s+/).filter(Boolean);
+  const entries = roomActionEntries().filter(entry => terms.every(term => `${entry.label} ${entry.words}`.toLowerCase().includes(term)));
+  $("#room-actions-list").replaceChildren(...entries.map(entry => {
+    const button = document.createElement("button"); button.type = "button"; button.dataset.roomAction = entry.id;
+    button.textContent = entry.label; return button;
+  }));
+  $("#room-actions-empty").hidden = entries.length > 0;
+}
+function openRoomActions() {
+  if (!ownsRoomActions(null) || document.querySelector("dialog[open]")) return;
+  const opener = document.activeElement;
+  roomActionsContext = { session, generation: client.generation, opener, value: opener?.value,
+    selection: typeof opener?.selectionStart === "number" ? [opener.selectionStart, opener.selectionEnd, opener.selectionDirection] : null };
+  $("#room-actions-query").value = ""; renderRoomActions();
+  $("#room-actions-dialog").showModal(); $("#room-actions-query").focus();
+}
+function chooseRoomAction(id) {
+  if (!roomActionsContext || !ownsRoomActions()) { closeRoomActions(false); return; }
+  const entry = roomActionEntries().find(value => value.id === id);
+  if (!entry) { renderRoomActions(); $("#room-actions-query").focus(); return; }
+  closeRoomActions(false);
+  if (entry.reveal) $(entry.reveal).open = true;
+  const target = $(entry.target); target.scrollIntoView({ block: "nearest" }); target.focus({ preventScroll: true });
+  if (entry.activate) target.click();
+}
+$("#room-actions-open kbd").textContent = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘ K" : "Ctrl K";
+$("#room-actions-open").addEventListener("click", openRoomActions);
+$("#room-actions-close").addEventListener("click", () => closeRoomActions());
+$("#room-actions-dialog").addEventListener("cancel", event => { event.preventDefault(); closeRoomActions(); });
+$("#room-actions-query").addEventListener("input", renderRoomActions);
+$("#room-actions-list").addEventListener("click", event => { const id = event.target.closest("[data-room-action]")?.dataset.roomAction; if (id) chooseRoomAction(id); });
+$("#room-actions-dialog").addEventListener("keydown", event => {
+  if (event.isComposing || event.keyCode === 229) { if (event.key === "Enter") event.preventDefault(); return; }
+  if (event.altKey || event.ctrlKey || event.metaKey) return;
+  if (event.key === "Enter" && event.repeat) { event.preventDefault(); return; }
+  const buttons = [...$("#room-actions-list").querySelectorAll("button")], index = buttons.indexOf(document.activeElement);
+  if (["ArrowDown", "ArrowUp"].includes(event.key)) {
+    event.preventDefault();
+    const next = event.key === "ArrowDown" ? index + 1 : index < 0 ? buttons.length - 1 : index - 1;
+    (buttons[next] || $("#room-actions-query")).focus();
+  } else if (event.key === "Enter" && document.activeElement === $("#room-actions-query")) {
+    event.preventDefault(); if (!event.repeat && buttons[0]) chooseRoomAction(buttons[0].dataset.roomAction);
+  }
+});
+document.addEventListener("keydown", event => {
+  if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== "k"
+    || event.isComposing || event.keyCode === 229 || event.repeat || !ownsRoomActions(null)) return;
+  if (document.querySelector("dialog[open]") && !$("#room-actions-dialog").open) return;
+  event.preventDefault(); if ($("#room-actions-dialog").open) closeRoomActions(); else openRoomActions();
+});
+new MutationObserver(() => { if (roomActionsContext && !ownsRoomActions()) closeRoomActions(false); })
+  .observe($("#main"), { attributes: true, attributeFilter: ["hidden"] });
+new MutationObserver(() => { if (resultView && $("#main").hidden) closeResult(false); })
+  .observe($("#main"), { attributes: true, attributeFilter: ["hidden"] });
 $("#main").addEventListener("click", e => {
   const link = e.target.closest("[data-open-message], [data-open-work], [data-open-member], [data-open-event], [data-open-room]");
   if (!link || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -1155,7 +1730,8 @@ $("#main").addEventListener("click", e => {
     revealMessage(link.dataset.openMessage);
   } else if (link.dataset.openWork) {
     history.replaceState(null, "", recordHref("work", link.dataset.openWork));
-    revealWork(link.dataset.openWork);
+    if (link.hasAttribute('data-view-drafts')) revealDrafts(link.dataset.openWork);
+    else revealWork(link.dataset.openWork);
   } else if (link.dataset.openMember) {
     history.replaceState(null, "", recordHref("member", link.dataset.openMember));
     revealMember(link.dataset.openMember);
@@ -1197,30 +1773,57 @@ async function setReaction(messageId, reaction) {
     if (generation === client.generation && state) { pending.busy = false; notice(`${error.message}. Retry keeps the same reaction choice.`, true); }
   } finally { if (state && generation === client.generation) renderMessages(); }
 }
-function openWork(sourceId = null) {
+function openWork(sourceId = null, reuseId = null) {
   if (!can("steer") || busy) return;
-  if (!$("#new-work-form").hidden) { $("#work-title-input").focus(); return; }
-  workFormOpener = document.activeElement;
+  if (!$("#new-work-form").hidden) { $(workRetryLocked ? "#retry-work-button" : "#work-title-input").focus(); return; }
+  let definition;
+  if (reuseId) {
+    try { definition = reusableWorkDefinition(state.workItems[reuseId]); }
+    catch (error) { notice(error.message, true); return; }
+  }
+  workFormOpener = { node: document.activeElement, key: document.activeElement?.dataset.focusKey };
+  workFormEpoch++; setWorkRetry(false);
+  $("#new-work-form").reset();
   $("#new-work-form").hidden = false; workDraftId = `work-${crypto.randomUUID()}`;
   $("#work-options").open = false;
   $("#work-dialog").showModal();
   $("#source-message-id").value = sourceId || "";
   if (sourceId) $("#work-title-input").value = (state.messages.find(m => m.id === sourceId)?.body || "").trim().replace(/\s+/g, " ").slice(0, 100).replace(/[\uD800-\uDBFF]$/, "");
+  if (definition) {
+    $("#work-title-input").value = definition.title;
+    $("#work-done-input").value = definition.definitionOfDone;
+  }
+  $("#work-reuse-hint").hidden = !definition;
   $("#source-context").textContent = sourceId ? `Source: ${state.messages.find(m => m.id === sourceId)?.body || ""}` : "";
   $("#source-context").hidden = !sourceId; $("#work-title-input").focus();
   syncWorkForm();
 }
 function closeWorkForm({ returnFocus = true } = {}) {
+  const unconfirmed = workRetryLocked;
   $("#work-dialog").close();
   $("#new-work-form").hidden = true; $("#new-work-form").reset();
+  setWorkRetry(false); $("#work-reuse-hint").hidden = true;
   setFormStatus($("#new-work-status"), "");
   pendingWork = null; workDraftId = null;
   const opener = workFormOpener; workFormOpener = null;
+  const epoch = ++workFormEpoch, generation = client.generation, roomId = session?.roomId, memberId = session?.member?.id;
+  const focusAtClose = document.activeElement;
+  if (unconfirmed) notice("Creation may already be saved. Check the work list before creating another.");
   if (returnFocus) setTimeout(() => {
+    if (epoch !== workFormEpoch || !sameSession(generation, roomId, memberId) || !$("#new-work-form").hidden || document.activeElement !== focusAtClose) return;
     const usable = node => node?.isConnected && !node.disabled && !node.hidden && node.getClientRects().length > 0;
-    const target = [opener, $("#new-work-button"), $("#composer-work-button")].find(usable) || $("#work-title");
+    const replacement = opener?.key ? [...document.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === opener.key) : null;
+    const target = [opener?.node, replacement, $("#new-work-button"), $("#composer-work-button")].find(usable) || $("#work-title");
     target.focus({ preventScroll: true });
   }, 0);
+}
+function setWorkRetry(locked) {
+  workRetryLocked = locked;
+  for (const control of document.querySelectorAll("#new-work-form input, #new-work-form textarea, #new-work-form select")) control.disabled = locked;
+  $("#new-work-form button[type='submit']").hidden = locked;
+  $("#retry-work-button").hidden = !locked;
+  $("#work-retry-hint").hidden = !locked;
+  $("#cancel-work-button").textContent = locked ? "Close" : "Cancel";
 }
 $("#new-work-button").addEventListener("click", () => openWork());
 $("#composer-work-button").addEventListener("click", () => openWork());
@@ -1231,18 +1834,33 @@ $("#review-settings-button").addEventListener("click", () => {
 $("#cancel-work-button").addEventListener("click", () => closeWorkForm());
 $("#work-dialog").addEventListener("cancel", event => { event.preventDefault(); if (!busy) closeWorkForm(); });
 $("#new-work-form").addEventListener("change", syncWorkForm);
-$("#new-work-form").addEventListener("submit", e => {
-  e.preventDefault(); if (!state || busy) return;
-  const independentVerificationRequired = $("#require-verification").checked, ownerDecisionRequired = $("#require-decision").checked;
-  const data = { workItemId: workDraftId, title: $("#work-title-input").value.trim(), definitionOfDone: $("#work-done-input").value.trim(), accountableMemberId: $("#assignee-select").value, verifierMemberId: independentVerificationRequired ? $("#verifier-select").value : null, independentVerificationRequired, ownerDecisionRequired, humanDecisionMakerId: ownerDecisionRequired ? state.room.ownerId : null, mode: $("#work-mode-select").value, sourceMessageId: $("#source-message-id").value || null };
-  pendingWork = draftCommand(pendingWork, T.WORK_PROPOSED, data);
-  const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
-  submit(e.currentTarget, async current => {
-    await client.send(pendingWork.command);
-    if (!current() || !sameSession(generation, roomId, memberId)) return;
-    closeWorkForm(); notice("Work proposed. The accountable member must accept it; no external action was authorized.");
-  }, { failureHint: "Your work proposal was kept; try again." });
+$("#new-work-form").addEventListener("submit", e => { e.preventDefault(); sendWorkProposal(); });
+$("#retry-work-button").addEventListener("click", () => { if (workRetryLocked) sendWorkProposal(); });
+$("#work-list").addEventListener("click", e => {
+  const button = e.target.closest("[data-reuse-work]");
+  if (button) openWork(null, button.dataset.reuseWork);
 });
+function sendWorkProposal() {
+  if (!state || busy || !workDraftId) return;
+  const independentVerificationRequired = $("#require-verification").checked, ownerDecisionRequired = $("#require-decision").checked;
+  const data = { workItemId: workDraftId, title: $("#work-title-input").value, definitionOfDone: $("#work-done-input").value, accountableMemberId: $("#assignee-select").value, verifierMemberId: independentVerificationRequired ? $("#verifier-select").value : null, independentVerificationRequired, ownerDecisionRequired, humanDecisionMakerId: ownerDecisionRequired ? state.room.ownerId : null, mode: $("#work-mode-select").value, sourceMessageId: $("#source-message-id").value || null };
+  if (!workRetryLocked) pendingWork = draftCommand(pendingWork, T.WORK_PROPOSED, data);
+  const entry = pendingWork;
+  const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
+  submit($("#new-work-form"), async current => {
+    try {
+      const receipt = await client.send(entry.command);
+      if (!current() || !sameSession(generation, roomId, memberId)) return;
+      if (!confirmsWorkProposal(receipt, entry.command, roomId, memberId)) throw new Error("The creation receipt could not be confirmed");
+    } catch (error) {
+      if (!current() || !sameSession(generation, roomId, memberId)) return;
+      setWorkRetry(retryUnconfirmed(error, workRetryLocked));
+      throw error;
+    }
+    setWorkRetry(false);
+    closeWorkForm(); selectWorkView("work"); notice("Work proposed. The accountable member must accept it; no external action was authorized.");
+  }, { failureHint: "Your work proposal was kept; try again." });
+}
 const field = (name, label, type = "text") => `<label>${esc(label)}<input name="${name}" type="${type}" required maxlength="2000"></label>`;
 const area = (name, label) => `<label>${esc(label)}<textarea name="${name}" required rows="3" maxlength="4000"></textarea></label>`;
 function producerField() {
@@ -1250,9 +1868,13 @@ function producerField() {
   const self = members.find(member => member.id === session.member.id);
   const selfOption = self ? `<option value="${esc(self.id)}">I produced this — ${esc(memberLabel(self.id))}</option>` : "";
   const otherOptions = members.filter(member => member.id !== session.member.id).map(member => `<option value="${esc(member.id)}">${esc(memberLabel(member.id))} · ${esc(member.kind)}${member.active === false ? " · access revoked" : ""}</option>`).join("");
-  return `<label>Primary producer of this result<select name="producerId" required aria-describedby="producer-attribution-help"><option value="">Choose producer attribution</option>${selfOption}<option value="__unknown__">Unknown / not reported</option>${otherOptions}</select></label><p id="producer-attribution-help" class="form-hint">The signed-in member remains the completion reporter. Choose the member who produced the result, or explicitly record that the producer is unknown.</p>`;
+  return `<label>Produced by<select name="producerId" required aria-describedby="producer-attribution-help"><option value="">Choose producer</option>${selfOption}<option value="__external__">Outside person or AI</option><option value="__unknown__">Unknown / not reported</option>${otherOptions}</select></label><label id="external-producer-field" hidden>Credit<input name="externalProducer" maxlength="160" disabled autocomplete="off" placeholder="Person, team or AI"></label><p id="producer-attribution-help" class="form-hint">You submit this result. Credit its producer, or choose Unknown.</p>`;
 }
 const actionSpecs = {
+  "offer-help": [T.HELP_OFFER_OPENED, "Offer help", ""],
+  ...Object.fromEntries(Object.keys(offerStatuses).map(action => [action, [T.HELP_OFFER_UPDATED, offerLabels[action], ""]])),
+  help: [T.WORK_HELP_UPDATED, "Ask for help", ""],
+  "end-help": [T.WORK_HELP_UPDATED, "End this help request?", "<p>People and agents will no longer find this request. This does not stop work already underway.</p>"],
   accept: [T.WORK_ACCEPTED, "Accept this work?", "<p>Accept responsibility for the stated outcome. This does not run any tools.</p>"],
   start: [T.WORK_STARTED, "Record work starting", "<p>Record that you are starting this outcome. A record is not proof of external execution.</p>"],
   block: [T.WORK_BLOCKED, "Report a blocker", area("reason", "What is blocked?") + area("nextAction", "What is needed next?")],
@@ -1263,39 +1885,303 @@ const actionSpecs = {
   verify: [T.VERIFICATION_RECORDED, "Record an evidence check", '<label>Result<select name="result" required><option value="">Choose after checking</option><option value="pass">Pass</option><option value="fail">Finding / fail</option></select></label>' + area("summary", "What did you check at this exact version?")],
   decide: [T.OWNER_DECISION_RECORDED, "Record your decision", '<label>Decision<select name="decision" required><option value="">Choose</option><option value="approved">Approve</option><option value="changes_requested">Request changes</option><option value="rejected">Reject</option></select></label>' + area("reason", "Reason") + "<p>Approval does not merge, deploy, or spend money.</p>" ]
 };
-$("#work-list").addEventListener("click", e => {
+let resultView = null;
+function selectWorkView(view) {
+  selectedWorkView = view;
+  $("#work-list").hidden = view !== "work"; $("#room-results-list").hidden = view !== "results";
+  $("#new-work-button").textContent = view === "results" ? "New work" : "New";
+  for (const name of ["work", "results"]) $("#work-view-" + name).setAttribute("aria-pressed", String(view === name));
+}
+for (const name of ["work", "results"]) $("#work-view-" + name).addEventListener("click", () => {
+  if (ownsRoomActions(null)) selectWorkView(name);
+});
+function resultRow(item) {
+  const result = currentResult(item), title = esc(item.title);
+  const open = result.kind === "room_text"
+    ? `<button type="button" data-read-result="${esc(item.id)}" data-focus-key="result:${esc(item.id)}">${title}</button>`
+    : `<a href="${safeUrl(item.receipt.evidenceUrl)}" target="_blank" rel="noreferrer" data-focus-key="result:${esc(item.id)}">${title} ↗</a>`;
+  return `<article class="result-row" data-result-work-id="${esc(item.id)}">${open}<p>${esc([...item.receipt.summary].slice(0, 200).join(""))}${[...item.receipt.summary].length > 200 ? "…" : ""}</p><div class="result-meta"><span>${result.status === "approved" ? "Approved" : "Completed"}${result.kind === "external" ? " · External evidence" : ""}</span><button type="button" class="text-button" data-result-work="${esc(item.id)}">Work details</button></div></article>`;
+}
+function resultStatus() {
+  const view = resultView;
+  if (!view || !sameSession(view.generation, view.roomId, view.memberId)) return;
+  const item = state.workItems[view.workItemId];
+  const earlier = !matchesReceipt(view.receipt, item?.receipt) || (view.fromResults && !currentResult(item));
+  $("#result-status").textContent = (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Close and try again."
+    : view.loaded ? `Submitted by ${memberLabel(view.reportedById)} · exact stored text` : "Loading exact text…");
+}
+function closeResult(restore = true) {
+  const view = resultView;
+  resultView = null; $("#result-dialog").close(); $("#result-title").textContent = "Result";
+  $("#result-status").textContent = ""; $("#result-body").textContent = "";
+  $("#result-original").hidden = true;
+  if (restore && view && sameSession(view.generation, view.roomId, view.memberId)) {
+    if (view.fromResults && selectedWorkView === "results") {
+      const row = [...$("#room-results-list").querySelectorAll("[data-result-work-id]")].find(node => node.dataset.resultWorkId === view.workItemId);
+      (row?.querySelector("[data-read-result]") || $("#work-view-results")).focus({ preventScroll: true });
+      return;
+    }
+    const card = workRecord(view.workItemId); focusRecord(card?.querySelector("[data-read-result]") || card);
+  }
+}
+$("#close-result").addEventListener("click", () => closeResult());
+$("#result-original").addEventListener("click", () => {
+  const view = resultView;
+  if (!view?.loaded || busy || !sameSession(view.generation, view.roomId, view.memberId)
+    || !state.messages.some(message => message.id === view.originalId && message.workItemId === view.workItemId)) return;
+  closeResult(false);
+  history.replaceState(null, "", recordHref("message", view.originalId)); revealMessage(view.originalId);
+});
+$("#result-dialog").addEventListener("cancel", event => { event.preventDefault(); closeResult(); });
+function readResult(e) {
+  const read = e.target.closest("[data-read-result]");
+  if (read && state && !busy) {
+    const item = state.workItems[read.dataset.readResult], receipt = item?.receipt;
+    if (!receipt?.nativeText) return;
+    const fromResults = Boolean(read.closest("#room-results-list"));
+    if (fromResults && !currentResult(item)) return;
+    const view = { generation: client.generation, roomId: session.roomId, memberId: session.member.id, workItemId: item.id,
+      fromResults, receipt: { completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion }, reportedById: receipt.reportedById }; resultView = view;
+    $("#result-title").textContent = item.title; $("#result-status").textContent = "Loading exact text…"; $("#result-body").textContent = "";
+    $("#result-original").hidden = true;
+    $("#result-dialog").showModal();
+    const owns = () => resultView === view && sameSession(view.generation, view.roomId, view.memberId);
+    client.workResult(item.id, { completionEventId: receipt.eventId }).then(value => {
+      if (!owns() || !value) return;
+      if (value.result.receipt?.evidenceVersion !== receipt.evidenceVersion) throw new Error("Pinned version changed");
+      $("#result-body").textContent = value.result.text.body;
+      const message = state.messages.find(message => message.id === value.result.text.messageId && message.workItemId === item.id
+        && message.body === value.result.text.body);
+      const original = state.messages.find(original => original.id === message?.replyToId && original.workItemId === item.id && original.proposal);
+      view.originalId = original?.id; $("#result-original").hidden = !original;
+      view.loaded = true; resultStatus();
+    }).catch(() => { if (owns()) { view.error = true; resultStatus(); } });
+    return;
+  }
   const button = e.target.closest("[data-action]"); if (!button || busy) return;
-  const item = state.workItems[button.dataset.workId], action = button.dataset.action;
-  const [type, defaultTitle, fields] = actionSpecs[action];
-  const title = action === "block" && item.state === S.COMPLETED ? "Reopen for rework"
-    : action === "verify" && item.independentVerificationRequired && hasIndependentProducer(item) ? "Record an independent check" : defaultTitle;
-  pendingAction = { type, action, workId: item.id, revision: item.revision, receipt: item.receipt ? { completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion } : null, retry: null };
-  $("#action-title").textContent = title;
-  setFormStatus($("#action-error"), "");
-  $("#action-context").textContent = `${item.title} · revision ${item.revision}${item.receipt ? ` · evidence ${item.receipt.evidenceVersion}` : ""}`;
-  const verificationBoundary = action === "verify" && item.independentVerificationRequired && !hasReportedProducer(item)
-    ? '<p id="verification-boundary" class="form-hint"><strong>Producer identity is unknown.</strong> This records an evidence check only. It cannot satisfy required independent verification or unlock approval.</p>'
-    : "";
-  $("#action-fields").innerHTML = action === "complete" ? producerField() + fields : verificationBoundary + fields;
-  $("#action-dialog").setAttribute("aria-describedby", verificationBoundary ? "action-context verification-boundary" : "action-context");
-  if (verificationBoundary) $("#action-fields select[name='result']")?.setAttribute("aria-describedby", "verification-boundary");
+  openWorkAction(state.workItems[button.dataset.workId], button.dataset.action, null, button.dataset.offerId);
+}
+$("#work-list").addEventListener("click", readResult);
+$("#room-results-list").addEventListener("click", e => {
+  readResult(e);
+  const work = e.target.closest("[data-result-work]");
+  if (work) revealWork(work.dataset.resultWork);
+});
+function openWorkAction(item, action, draftMessageId = null, offerId = null) {
+  if (pendingAction?.uncertain) { resumeAction(); return; }
+  if (!item || !Object.hasOwn(actionSpecs, action)) return;
+  const [type, , fields] = actionSpecs[action];
+  actionEpoch++;
+  pendingAction = { type, action, workId: item.id, revision: item.revision, draftMessageId, receipt: item.receipt ? { completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion } : null, retry: null, uncertain: false, error: "" };
+  if (isHelpAction(action)) {
+    pendingAction.helpRevision = item.helpWanted?.revision ?? 0;
+    pendingAction.accountableRevision = state.members[item.accountableMemberId]?.revision;
+  }
+  if (isOfferAction(action)) pinOffer(pendingAction, item, offerId);
+  $("#action-fields").innerHTML = action === "complete" ? producerField() + (draftMessageId ? area("summary", "Summary") + area("nextAction", "Next step") : fields) : fields;
+  if (action === "help") {
+    const keep = item.helpWanted?.status === "open" && Date.parse(item.helpWanted.expiresAt) > Date.now();
+    $("#action-fields").innerHTML = '<label>What would help?<textarea name="scope" required rows="3" maxlength="600"></textarea></label><label>Available for<select name="duration" required>'
+      + (keep ? '<option value="keep">Keep current end time</option>' : "")
+      + '<option value="3600000">1 hour</option><option value="86400000"' + (keep ? "" : " selected") + '>1 day</option><option value="604800000">7 days</option></select></label><p class="form-hint">Visible to this room. You stay accountable; no work starts automatically.</p><p id="help-current" class="form-hint" hidden></p>';
+    $("#action-fields [name=scope]").value = item.helpWanted?.scope ?? "";
+    pendingAction.helpExpiresAt = keep ? item.helpWanted.expiresAt : null;
+  }
+  if (action === "end-help") $("#action-fields").insertAdjacentHTML("afterbegin", '<p id="help-current" class="definition"></p>');
+  if (isOfferAction(action)) {
+    $("#action-fields").innerHTML = '<p id="offer-current" class="definition"></p>'
+      + (action === "offer-help" ? '<label>How can you help?<textarea name="plan" required rows="3" maxlength="600"></textarea></label>'
+        : '<p id="offer-plan" class="definition"></p><label>Note<textarea name="reason" required rows="2" maxlength="600"></textarea></label>')
+      + (action === "release-offer" ? '<label class="checkbox-label"><input name="externalActivityUnverified" type="checkbox" required> Outside work may still be running.</label>'
+        : '<p class="form-hint">Coordination only. No work starts or permissions change.</p>');
+  }
+  renderActionContext(item, action);
   $("#action-dialog").showModal();
+  syncActionForm();
+}
+// Only opening or explicitly reviewing current work changes the pinned context.
+// A background update must never silently retarget a review or approval.
+function renderActionContext(item, action) {
+  if (action === "end-help") currentHelp().textContent = item.helpWanted?.scope ?? "";
+  if (isOfferAction(action)) {
+    offerField("current").textContent = item.helpWanted?.scope ?? "";
+    const offer = state.helpOffers?.[pendingAction.offerId];
+    if (offerField("plan")) offerField("plan").textContent = offer ? `${memberLabel(offer.offererId)} · ${offer.plan}` : "Offer unavailable";
+  }
+  $("#review-brief").hidden = !["verify", "decide"].includes(action);
+  setText("#review-criteria", $("#review-brief").hidden ? "" : item.definitionOfDone);
+  setText("#review-summary", $("#review-brief").hidden ? "" : item.receipt?.summary ?? "");
+  setText("#review-next", $("#review-brief").hidden ? "" : item.receipt?.nextAction ?? "");
+  $("#review-notes").open = false;
+  const review = action === "decide" && matchesReceipt(item.verification, item.receipt) ? item.verification : null;
+  $("#decision-review").hidden = !review; $("#decision-review").open = false;
+  setText("#decision-review-label", review ? `${review.independenceConfirmed ? "Independent check" : "Evidence check"} · ${review.result === "pass" ? "Pass" : "Finding"}` : "");
+  setText("#decision-review-by", review ? memberLabel(review.verifierId) : "");
+  setText("#decision-review-text", review?.summary ?? "");
+  setText("#decision-review-version", review ? `Evidence ${review.evidenceVersion}` : "");
+  $("#action-title").textContent = action === "block" && item.state === S.COMPLETED ? "Reopen for rework"
+    : action === "verify" && item.independentVerificationRequired && hasIndependentProducer(item) ? "Record an independent check" : actionSpecs[action][1];
+  $("#action-context").textContent = isOfferAction(action) ? item.title : `${item.title} · revision ${item.revision}${item.receipt ? item.receipt.nativeText ? " · stored text" : ` · evidence ${item.receipt.evidenceVersion}` : ""}`;
+  const evidence = $("#action-evidence");
+  let evidenceUrl = null;
+  try {
+    const url = new URL(item.receipt?.evidenceUrl);
+    if (url.protocol === "https:" && !url.username && !url.password) evidenceUrl = url.href;
+  } catch { /* Historical or malformed evidence stays non-interactive. */ }
+  evidence.hidden = !(["verify", "decide"].includes(action) && evidenceUrl);
+  if (evidence.hidden) evidence.removeAttribute("href");
+  else evidence.setAttribute("href", evidenceUrl);
+  $("#action-fields").querySelector("#verification-boundary")?.remove();
+  const unknown = action === "verify" && item.independentVerificationRequired && !hasReportedProducer(item);
+  if (unknown) $("#action-fields").insertAdjacentHTML("afterbegin", `<p id="verification-boundary" class="form-hint"><strong>${item.receipt.producerAttribution === "external-reported" ? "Outside credit is reported, not verified." : "Producer identity is unknown."}</strong> This check cannot satisfy independent verification or unlock approval.</p>`);
+  $("#action-dialog").setAttribute("aria-describedby", unknown ? "action-context verification-boundary" : "action-context");
+  const result = $("#action-fields select[name='result']");
+  if (unknown) result?.setAttribute("aria-describedby", "verification-boundary");
+  else result?.removeAttribute("aria-describedby");
+  loadActionText(item, action);
+}
+function loadActionText(item, action) {
+  const entry = pendingAction, epoch = actionEpoch, generation = client.generation, roomId = session.roomId, memberId = session.member.id;
+  const request = (entry.textRequest ?? 0) + 1; entry.textRequest = request;
+  entry.text = null; entry.textRequired = Boolean(entry.draftMessageId || ["verify", "decide"].includes(action) && item.receipt?.nativeText);
+  $("#action-text").hidden = !entry.textRequired; $("#action-text-body").textContent = ""; $("#action-text-origin").textContent = "";
+  if (!entry.textRequired) return;
+  $("#action-text-origin").textContent = "Loading exact text…";
+  if (entry.draftMessageId) $("#action-title").textContent = "Save as result";
+  const owns = () => pendingAction === entry && actionEpoch === epoch && entry.textRequest === request && sameSession(generation, roomId, memberId);
+  client.workResult(item.id, entry.draftMessageId ? { draftMessageId: entry.draftMessageId } : { completionEventId: entry.receipt.completionEventId }).then(value => {
+    if (!owns() || !value) return;
+    if (!entry.draftMessageId && (value.result.receipt?.eventId !== entry.receipt.completionEventId || value.result.receipt?.evidenceVersion !== entry.receipt.evidenceVersion)) throw new Error("Pinned evidence changed");
+    entry.text = value.result.text;
+    $("#action-text-body").textContent = entry.text.body;
+    const proposal = entry.text.proposal;
+    $("#action-text-origin").textContent = `Posted by ${memberLabel(entry.text.postedById)}${proposal ? ` · draft based on revision ${proposal.basisRevision} · authorship unverified` : ""}`;
+    if (value.current.workRevision !== entry.revision) { entry.needsReview = true; entry.error = "Work changed. Review current work before saving."; }
+    syncActionForm();
+  }).catch(() => {
+    if (!owns()) return;
+    entry.needsReview = true; entry.error = "Exact text unavailable. Review current work to try again.";
+    $("#action-text-origin").textContent = "Text unavailable"; syncActionForm();
+  });
+}
+function actionAvailable(entry) {
+  const item = state?.workItems[entry.workId];
+  if (item && isOfferAction(entry.action)) {
+    if (entry.action === "offer-help") return offersView(item)?.availability.canOffer === true;
+    const key = { "select-offer": "canSelect", "decline-offer": "canDecline", "withdraw-offer": "canWithdraw", "release-offer": "canRelease" }[entry.action];
+    return offerChoice(entry)?.[key] === true;
+  }
+  if (item && isHelpAction(entry.action)) {
+    const help = helpView(item);
+    return entry.action === "help" ? help?.canPublish === true : help?.canWithdraw === true;
+  }
+  return Boolean(item && workActions(item, state.members[session.member.id]).some(([action]) => action === entry.action));
+}
+function actionChanged(entry) {
+  const item = state?.workItems[entry.workId];
+  if (isOfferAction(entry.action)) return item?.revision !== entry.revision
+    || (item?.helpWanted?.revision ?? 0) !== entry.helpRevision || (item?.helpWanted?.eventId ?? null) !== entry.helpEventId
+    || (state?.helpOffers?.[entry.offerId]?.revision ?? null) !== entry.offerRevision
+    || state?.members[session.member.id]?.revision !== entry.viewerRevision
+    || (state?.members[state?.helpOffers?.[entry.offerId]?.offererId]?.revision ?? null) !== entry.offererRevision;
+  return item?.revision !== entry.revision || isHelpAction(entry.action) && (
+    (item?.helpWanted?.revision ?? 0) !== entry.helpRevision
+    || state?.members[item?.accountableMemberId]?.revision !== entry.accountableRevision);
+}
+function syncActionForm() {
+  $("#resume-action").hidden = !pendingAction?.uncertain;
+  if (!pendingAction || !state || busy) return;
+  const entry = pendingAction, item = state.workItems[entry.workId], changed = actionChanged(entry);
+  const available = actionAvailable(entry), save = $("#action-form button[type='submit']");
+  for (const field of $("#action-fields").querySelectorAll("input,textarea,select")) field.disabled = entry.uncertain;
+  if (entry.action === "complete") {
+    const external = $("#action-fields [name=producerId]").value === "__external__", input = $("#action-fields [name=externalProducer]");
+    $("#action-fields").querySelector("#external-producer-field").hidden = !external; input.required = external; input.disabled = entry.uncertain || !external;
+    $("#action-fields").querySelector("#producer-attribution-help").textContent = external ? "Reported credit only. No access or verified identity."
+      : "You submit this result. Credit its producer, or choose Unknown.";
+  }
+  save.textContent = entry.uncertain ? "Retry original save" : offerLabels[entry.action] ?? (entry.action === "help" ? "Publish request" : entry.action === "end-help" ? "End request" : "Save record");
+  save.disabled = !entry.uncertain && (changed || entry.needsReview || !available || entry.textRequired && !entry.text);
+  $("#cancel-action").textContent = entry.uncertain ? "Close" : "Cancel";
+  $("#refresh-action").hidden = entry.uncertain || !(changed || entry.needsReview || !available);
+  $("#refresh-action").disabled = false;
+  const text = entry.uncertain ? "Save not confirmed. Retry the original before making changes."
+    : !available ? "This action is no longer available. Your entries are kept."
+      : changed || entry.needsReview ? entry.error || "Work changed. Review current work before saving." : entry.error;
+  setFormStatus($("#action-error"), text, Boolean(text));
+}
+function resumeAction() {
+  if (!pendingAction || busy) return;
+  actionEpoch++;
+  if (!$("#action-dialog").open) $("#action-dialog").showModal();
+  syncActionForm(); $("#action-form button[type='submit']").focus();
+}
+$("#resume-action").addEventListener("click", resumeAction);
+$("#action-fields").addEventListener("change", event => { if (event.target.name === "producerId") syncActionForm(); });
+$("#refresh-action").addEventListener("click", () => {
+  const entry = pendingAction;
+  if (!entry || !state || busy || entry.uncertain) return;
+  const epoch = actionEpoch, generation = client.generation, roomId = session.roomId, memberId = session.member.id;
+  const owns = () => pendingAction === entry && actionEpoch === epoch && sameSession(generation, roomId, memberId);
+  submit($("#action-form"), async current => {
+    try { await client.refresh(); }
+    catch (error) {
+      if (current() && owns()) {
+        client.handleFailure(error);
+        if (owns()) { clearNotice(); entry.error = "Could not load current work. Try again."; entry.needsReview = true; }
+      }
+      return;
+    }
+    if (!current() || !owns()) return;
+    const item = state.workItems[entry.workId];
+    if (!actionAvailable(entry)) return;
+    const receipt = item.receipt ? { completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion } : null;
+    const changedResult = JSON.stringify(receipt) !== JSON.stringify(entry.receipt);
+    const changedHelp = isHelpAction(entry.action) && actionChanged(entry);
+    entry.revision = item.revision; entry.receipt = receipt; entry.retry = null; entry.needsReview = false;
+    entry.error = changedResult ? "Result changed. Notes kept; inspect this version and choose again." : "";
+    if (isOfferAction(entry.action)) {
+      pinOffer(entry, item);
+      entry.error = "Current request loaded. Review it alongside your note before saving.";
+      const acknowledgement = $("#action-fields [name=externalActivityUnverified]");
+      if (acknowledgement) acknowledgement.checked = false;
+    }
+    if (isHelpAction(entry.action)) {
+      entry.helpRevision = item.helpWanted?.revision ?? 0;
+      entry.accountableRevision = state.members[item.accountableMemberId]?.revision;
+      if (changedHelp && entry.action === "help") {
+        entry.error = "Request changed. Your draft is kept; compare it with the latest request.";
+        currentHelp().hidden = false;
+        currentHelp().textContent = item.helpWanted ? `Latest: ${item.helpWanted.scope} · ${helpView(item).status} · ends ${new Date(item.helpWanted.expiresAt).toLocaleString()}` : "No current request.";
+        const keep = $("#action-fields option[value=keep]");
+        if (keep) { keep.disabled = true; $("#action-fields [name=duration]").value = ""; }
+        entry.helpExpiresAt = null;
+      }
+    }
+    if (changedResult) for (const field of $("#action-fields").querySelectorAll("select[name='result'],select[name='decision']")) field.value = "";
+    renderActionContext(item, entry.action);
+  }).then(() => {
+    if (owns() && $("#action-dialog").open && document.activeElement === document.body) $("#action-fields input:not([disabled]),#action-fields textarea:not([disabled]),#action-fields select:not([disabled]),#cancel-action")?.focus();
+  });
 });
 function restoreActionFocus(entry) {
   if (!entry) return;
-  const generation = client.generation, roomId = session?.roomId, memberId = session?.member?.id;
+  const generation = client.generation, roomId = session?.roomId, memberId = session?.member?.id, epoch = actionEpoch;
   setTimeout(() => {
-    if (!state || !sameSession(generation, roomId, memberId)) return;
+    if (!state || epoch !== actionEpoch || !sameSession(generation, roomId, memberId)) return;
     const card = workRecord(entry.workId);
-    const key = `work-action:${entry.workId}:${entry.action}`;
+    const key = `work-action:${entry.workId}:${entry.action}${isOfferAction(entry.action) && entry.action !== "offer-help" ? ":" + entry.offerId : ""}`;
     const action = card ? [...card.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === key) : null;
     focusRecord(action || card);
   }, 0);
 }
-function closeActionDialog({ returnFocus = true } = {}) {
+function closeActionDialog({ returnFocus = true, confirmed = false } = {}) {
   const entry = pendingAction;
+  if (busy && !confirmed) return;
+  actionEpoch++;
   if ($("#action-dialog").open) $("#action-dialog").close();
-  pendingAction = null;
+  if (confirmed || !entry?.uncertain) pendingAction = null;
+  $("#resume-action").hidden = !pendingAction?.uncertain;
   if (returnFocus) restoreActionFocus(entry);
 }
 $("#cancel-action").addEventListener("click", () => closeActionDialog());
@@ -1304,24 +2190,66 @@ $("#action-dialog").addEventListener("cancel", e => {
   if (!busy) closeActionDialog();
 });
 $("#action-form").addEventListener("submit", e => {
-  e.preventDefault(); if (!pendingAction || !state) return;
+  e.preventDefault(); if (!pendingAction || !state || busy) return;
   const entry = pendingAction, fields = Object.fromEntries(new FormData(e.currentTarget));
-  const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
-  const data = { workItemId: entry.workId, expectedRevision: entry.revision, ...fields };
-  if (entry.action === "complete") data.producerId = fields.producerId === "__unknown__" ? null : fields.producerId;
-  if (entry.action === "claim") data.paths = fields.paths.split("\n").map(p => p.trim()).filter(Boolean);
-  if (["verify", "decide"].includes(entry.action)) Object.assign(data, entry.receipt);
-  entry.retry = draftCommand(entry.retry, entry.type, data);
+  const generation = client.generation, roomId = session.roomId, memberId = session.member.id, epoch = actionEpoch, focus = document.activeElement;
+  if (!entry.uncertain && (entry.needsReview || entry.textRequired && !entry.text || actionChanged(entry) || !actionAvailable(entry))) { syncActionForm(); return; }
+  if (!entry.uncertain) {
+    const data = { workItemId: entry.workId, expectedRevision: entry.revision, ...fields };
+    if (isOfferAction(entry.action)) {
+      data.offerId = entry.offerId;
+      if (entry.action === "offer-help" || entry.action === "select-offer") Object.assign(data, { expectedHelpRevision: entry.helpRevision, helpEventId: entry.helpEventId });
+      if (entry.action !== "offer-help") Object.assign(data, { expectedOfferRevision: entry.offerRevision, status: offerStatuses[entry.action] });
+      if (entry.action === "release-offer") data.externalActivityUnverified = fields.externalActivityUnverified === "on";
+      try { validateHelpOfferData(entry.type, data); } catch { entry.error = "Add a short note and review the required choice."; syncActionForm(); return; }
+    }
+    if (isHelpAction(entry.action)) {
+      data.expectedHelpRevision = entry.helpRevision;
+      data.status = entry.action === "help" ? "open" : "withdrawn";
+      if (entry.action === "help") {
+        const duration = Number(fields.duration);
+        if (fields.duration !== "keep" && ![3600000, 86400000, 604800000].includes(duration)) return;
+        data.expiresAt = fields.duration === "keep" ? entry.helpExpiresAt : new Date(Date.now() + duration).toISOString();
+        delete data.duration;
+        if (Date.parse(data.expiresAt) <= Date.now()) { entry.error = "End time passed. Choose a new duration."; syncActionForm(); return; }
+      }
+      try { validateHelpData(data); } catch { entry.error = "Add a short scope and choose an end time."; syncActionForm(); return; }
+    }
+    if (entry.action === "complete") data.producerId = ["__unknown__", "__external__"].includes(fields.producerId) ? null : fields.producerId;
+    if (entry.draftMessageId) Object.assign(data, { evidenceKind: "room_text", evidenceMessageId: entry.text.messageId,
+      evidenceMessageEventId: entry.text.messageEventId, evidenceVersion: entry.text.evidenceVersion, previousCompletionEventId: entry.receipt?.completionEventId ?? null });
+    if (entry.action === "claim") data.paths = fields.paths.split("\n").map(p => p.trim()).filter(Boolean);
+    if (["verify", "decide"].includes(entry.action)) Object.assign(data, entry.receipt);
+    entry.retry = draftCommand(entry.retry, entry.type, data);
+  }
   submit(e.currentTarget, async current => {
-    await client.send(entry.retry.command);
-    if (!current() || !sameSession(generation, roomId, memberId)) return;
-    closeActionDialog({ returnFocus: false }); notice("Record saved. External execution and independent verification are separate facts.");
-    setTimeout(() => { if (sameSession(generation, roomId, memberId)) revealWork(entry.workId); }, 0);
-  }, { failureHint: "Your entries were kept; try again." });
+    const owns = () => current() && pendingAction === entry && actionEpoch === epoch && sameSession(generation, roomId, memberId);
+    try {
+      const receipt = await client.send(entry.retry.command);
+      if (!owns()) return;
+      if (!await confirmsWorkAction(receipt, entry.retry.command, roomId, memberId)) throw new Error("Save receipt could not be confirmed");
+      if (!owns()) return;
+    } catch (error) {
+      if (!owns()) return;
+      clearNotice();
+      entry.uncertain = retryUnconfirmed(error, entry.uncertain);
+      entry.needsReview = !entry.uncertain && error.code === "command_rejected" && error.status === 409;
+      entry.error = error.message; return;
+    }
+    closeActionDialog({ returnFocus: false, confirmed: true }); notice(isHelpAction(entry.action) ? "Help request saved." : isOfferAction(entry.action) ? "Offer updated." : "Record saved.");
+    const settledEpoch = actionEpoch;
+    setTimeout(() => { if (actionEpoch === settledEpoch && sameSession(generation, roomId, memberId)) revealWork(entry.workId); }, 0);
+  }, { failureHint: "Your entries were kept; try again." }).then(() => {
+    if (pendingAction !== entry || actionEpoch !== epoch || !sameSession(generation, roomId, memberId) || !$("#action-dialog").open
+      || document.activeElement !== document.body) return;
+    const target = entry.uncertain ? $("#action-form button[type='submit']")
+      : focus?.isConnected && !focus.disabled ? focus : $("#refresh-action:not([hidden]),#cancel-action");
+    target?.focus();
+  });
 });
 window.addEventListener("beforeunload", e => {
   if (state) saveComposer();
-  if ((state && (drafts.hasText() || !$("#new-work-form").hidden || $("#action-dialog").open))
+  if ((state && (drafts.hasText() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction))
     || invitationIsCommitting() || invitation.phase === "unknown") { e.preventDefault(); e.returnValue = ""; }
 });
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden" && state) saveComposer(); });
@@ -1332,10 +2260,11 @@ window.addEventListener("pagehide", () => {
 });
 window.addEventListener("pageshow", e => {
   if (!e.persisted) return;
+  if (accountHomeFromLocation()) { ensureAccountSession().then(showAccountWorkspace).catch(handleFailureNotice); return; }
   const roomId = selectedRoomFromLocation();
   (roomId ? ensureAccountSession().then(account => account.authenticated ? client.restore(roomId) : null) : client.restore()).catch(handleFailureNotice);
 });
-// Return brief (disposition 5557850637): compact expandable rail entry. Fetch on return and
+// Return brief: one compact entry before conversation. Fetch on return and
 // on open; history stays fixed through the frozen horizon H, the action sections are live
 // through N, and only the explicit button acknowledges - exactly H, never the latest event.
 function loadReturnBrief() { return briefView.refresh(); }
@@ -1358,7 +2287,8 @@ function describeBriefEvent({ sequence, event }) {
   else if (event.type === T.OWNER_DECISION_RECORDED) detail = esc(humanize(event.data.decision));
   else if (event.type === T.WORK_COMPLETED) {
     const title = state.workItems[event.data.workItemId]?.title ?? event.data.workItemId ?? "";
-    const producer = event.data.producerId ? memberLabel(event.data.producerId) : "unknown — not reported";
+    const producer = event.data.producerId ? memberLabel(event.data.producerId)
+      : event.data.externalProducer ? `${event.data.externalProducer} · outside room, reported` : "unknown — not reported";
     detail = esc(`${title} · producer ${producer}`);
   }
   else if (event.type?.startsWith("work.")) detail = esc(state.workItems[event.data.workItemId]?.title ?? event.data.workItemId ?? "");
@@ -1373,55 +2303,155 @@ function renderBriefList(selector, html) {
   const focusedKey = list.contains(document.activeElement)
     ? document.activeElement.closest("[data-brief-key]")?.dataset.briefKey
     : null;
+  const previousKeys = focusedKey ? [...list.querySelectorAll("[data-brief-key]")].map(node => node.dataset.briefKey) : [];
   const changed = list._content !== html;
   if (changed) {
     list.innerHTML = html;
     list._content = html;
   }
   if (focusedKey && changed) {
-    const exact = [...list.querySelectorAll("[data-brief-key]")]
-      .find(node => node.dataset.briefKey === focusedKey);
-    const first = list.querySelector("[data-brief-key]");
+    const remaining = new Map([...list.querySelectorAll("[data-brief-key]")].map(node => [node.dataset.briefKey, node]));
+    const index = previousKeys.indexOf(focusedKey);
+    // Keep the current item, then its next surviving neighbor, then the previous
+    // one. A resolved request should not restart a long queue at the first row.
+    const destination = [focusedKey, ...previousKeys.slice(index + 1), ...previousKeys.slice(0, index).reverse()]
+      .map(key => remaining.get(key)).find(Boolean) ?? remaining.values().next().value;
     const acknowledgement = $("#rb-ack-button");
     const fallback = !acknowledgement.disabled && !acknowledgement.hidden
       ? acknowledgement
       : $("#return-brief-panel > summary");
-    (exact || first || fallback).focus({ preventScroll: true });
+    (destination || fallback).focus({ preventScroll: true });
   }
 }
+function renderContribution(steps, owned) {
+  const panel = $("#contribution-next"), button = $("#contribution-open"), more = $("#contribution-more");
+  const focused = panel.contains(document.activeElement);
+  const selected = (focused && steps.find(step => step.key === button.dataset.step)) || steps[0];
+  const contributed = owned && (state.messages.some(message => message.authorId === session.member.id)
+    || state.eventLog.some(event => event.actorId === session.member.id && /^(work|verification|owner_decision)\./.test(event.type)));
+  // An empty conversation already points at its composer. Do not push it below
+  // the first mobile viewport with a second introduction prompt.
+  const newcomer = owned && !contributed && state.messages.length > 0;
+  const visible = Boolean(selected || newcomer);
+  const key = selected?.key ?? "hello";
+  if (focused && (!visible || key !== button.dataset.step)) $("#return-brief-panel > summary").focus({ preventScroll: true });
+  panel.hidden = !visible;
+  setText("#contribution-label", selected?.label ?? (newcomer ? "Start here" : ""));
+  setText("#contribution-title", selected?.title ?? (newcomer ? "What would you like to help with?" : ""));
+  setText("#contribution-open", selected?.button ?? (newcomer ? "Say hello" : ""));
+  button.dataset.step = key;
+  button.disabled = !owned || busy || requestReading;
+  more.hidden = steps.length < 2;
+  setText("#contribution-more", steps.length > 1 ? `${steps.length - 1} more` : "");
+}
+$("#contribution-more").addEventListener("click", () => {
+  if (!state) return;
+  $("#return-brief-panel").open = true;
+  $("#return-brief-panel > summary").focus();
+});
+$("#contribution-open").addEventListener("click", () => {
+  if (!state || busy || requestReading || client.session !== session || !client.ownsAccountSession()) return;
+  const key = $("#contribution-open").dataset.step;
+  if (key === "hello") { switchThread(null, true); return; }
+  const step = contributionSteps(state, session.member.id).find(candidate => candidate.key === key);
+  if (!step) { renderReturnBrief(); return; }
+  if (step.kind === "request") { revealMessage(step.id); return; }
+  if (step.draftCount > 1) { revealDrafts(step.id); return; }
+  if (step.draftMessageId) { revealMessage(step.draftMessageId); return; }
+  // Only review/decision shortcuts open a form. Starting work still requires
+  // inspecting its existing card and explicitly choosing the relevant action.
+  if (["verify", "decide"].includes(step.action)) openWorkAction(state.workItems[step.id], step.action);
+  else revealWork(step.id);
+});
 function renderReturnBrief() {
+  clearTimeout(returnClock); returnClock = null;
+  const now = Date.now();
+  const owned = state && session && client.session === session && client.generation === roomGeneration && client.ownsAccountSession();
   const returnBrief = briefView.owns(briefView.chain) ? briefView.brief : null;
-  const newer = returnBrief && client.sequence > Math.min(returnBrief.current.evaluatedThrough, returnBrief.history.evaluatedThrough);
-  setText("#rb-status", state ? briefView.message || (newer ? "New changes available. Refresh catch-up." : "") : "");
-  $("#rb-refresh-button").disabled = !state || briefView.busy;
-  $("#caught-up-button").disabled = !state || briefView.busy;
+  const current = owned ? { evaluatedThrough: client.sequence,
+    needsAttention: needsAttention({ workItems: state.workItems, memberId: session.member.id, now }),
+    workInvolvingMe: workInvolvingMe({ workItems: state.workItems, memberId: session.member.id }) } : null;
+  const unread = state ? Math.max(0, client.sequence - roomCursor) : 0;
+  const contributions = owned ? contributionSteps(state, session.member.id, now) : [];
+  renderContribution(contributions, owned);
+  setText("#catchup-count", current ? briefView.message === "Updating room…" ? "Updating…" : [contributions.length ? `${contributions.length} need${contributions.length === 1 ? "s" : ""} you` : "",
+    unread ? `${unread} update${unread === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ") || "No new updates" : "");
+  if (owned) {
+    // Work destinations and catch-up use the same clock, even without new events.
+    renderSearch(now);
+    const items = Object.values(state.workItems);
+    const draftsByWork = new Map();
+    for (let index = state.messages.length - 1; index >= 0; index--) {
+      const message = state.messages[index];
+      if (!message.workItemId || !message.proposal) continue;
+      if (!draftsByWork.has(message.workItemId)) draftsByWork.set(message.workItemId, []);
+      draftsByWork.get(message.workItemId).push(message);
+    }
+    renderContent("#work-list", items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(i => workCard(i, now, draftsByWork.get(i.id) ?? [])).join("") || `<p class="empty-note">${can("steer") ? "Turn a message into work, or start something new." : "Suggest work in the conversation. The owner can create it."}</p>`);
+    const resultFocus = $("#room-results-list").contains(document.activeElement) ? document.activeElement : null;
+    renderContent("#room-results-list", completedResults(state).map(resultRow).join("") || '<p class="empty-note">Completed results appear here.</p>');
+    if (resultFocus && !resultFocus.isConnected && document.activeElement === document.body) $("#work-view-results").focus({ preventScroll: true });
+    resultStatus();
+    syncActionForm();
+    const expiry = items.flatMap(item => [item.claim?.status === "active" ? Date.parse(item.claim.expiresAt) : NaN,
+      ...(item.helpWanted?.status === "open" ? [Date.parse(item.helpWanted.openedAt), Date.parse(item.helpWanted.expiresAt)] : [])]).filter(at => at > now).sort((a, b) => a - b)[0];
+    if (expiry && document.visibilityState !== "hidden") returnClock = setTimeout(renderReturnBrief, Math.max(100, Math.min(60000, expiry - now)));
+  }
+  const newer = returnBrief && client.sequence > returnBrief.history.evaluatedThrough;
+  setText("#rb-status", owned ? briefView.message || (newer ? "New changes available. Refresh catch-up." : "") : "");
+  $("#rb-refresh-button").disabled = !owned || briefView.busy;
   $("#return-brief-panel").setAttribute("aria-busy", briefView.busy ? "true" : "false");
   $("#rb-more-button").disabled = briefView.busy;
   $("#rb-ack-button").disabled = true;
+  delete $("#rb-ack-button").dataset.horizon;
   $("#rb-more-button").hidden = true;
-  if (!returnBrief || !state) {
-    for (const id of ["summary-grid", "rb-current-boundary", "rb-history-boundary", "rb-attention-list", "rb-involving-list", "rb-history-list"]) $(`#${id}`).replaceChildren();
-    for (const id of ["rb-attention-list", "rb-involving-list", "rb-history-list"]) delete $(`#${id}`)._content;
+  const attention = current?.needsAttention ?? [];
+  const byWork = new Map(contributions.filter(step => step.kind === "work").map(step => [step.id, step]));
+  // Preserve the established catch-up order while the single next-step suggestion
+  // prioritizes handoffs. Updating work must not move it out of the first page.
+  const attentionIds = new Set(attention.map(item => item.workItemId));
+  const attentionSteps = [...attention.map(item => byWork.get(item.workItemId)).filter(Boolean),
+    ...contributions.filter(step => step.kind === "request" || !attentionIds.has(step.id))];
+  const allButton = $("#rb-show-all"), allFocused = document.activeElement === allButton;
+  if (contributions.length <= 5) showAllAttention = false;
+  allButton.hidden = contributions.length <= 5;
+  allButton.textContent = showAllAttention ? "Show less" : `Show all (${contributions.length})`;
+  allButton.setAttribute("aria-expanded", String(showAllAttention));
+  if (allFocused && allButton.hidden) $("#return-brief-panel > summary").focus({ preventScroll: true });
+  renderBriefList("#rb-attention-list", (showAllAttention ? attentionSteps : attentionSteps.slice(0, 5)).map(i => {
+    const messageId = i.draftCount > 1 ? null : i.draftMessageId ?? (i.kind === "request" ? i.id : null);
+    const href = messageId ? recordHref("message", messageId) : workHref(i.id);
+    const target = messageId ? `data-open-message="${esc(messageId)}"` : `data-open-work="${esc(i.id)}"${i.draftCount > 1 ? ' data-view-drafts' : ''}`;
+    const label = messageId || i.draftCount > 1 ? i.label : nextWorkStep(state.workItems[i.id], now).label;
+    return `<li class="rb-event"><a class="work-link" href="${esc(href)}" ${target} data-brief-key="${esc(i.kind === "work" ? `attention:${i.id}` : i.key)}">${esc(i.title)}</a> <span class="rb-detail">${esc(label)}</span></li>`;
+  }).join("")
+    || (current ? '<li class="rb-empty">Nothing waiting for you.</li>' : ""));
+  for (const workId of byWork.keys()) attentionIds.add(workId);
+  renderBriefList("#rb-involving-list", (current?.workInvolvingMe ?? []).filter(i => !attentionIds.has(i.workItemId)).map(i =>
+    `<li class="rb-event"><a class="work-link" href="${esc(workHref(i.workItemId))}" data-open-work="${esc(i.workItemId)}" data-brief-key="involving:${esc(i.workItemId)}">${esc(i.action ?? i.workItemId)}</a> <span class="rb-detail">${esc(i.roles.map(roleLabel).join(", "))} · ${esc(i.state)}</span></li>`).join("")
+    || (current ? '<li class="rb-empty">No other open work.</li>' : ""));
+  setText("#rb-current-boundary", current ? `Current work as of event ${current.evaluatedThrough}` : "");
+  if (!returnBrief || !owned) {
+    setText("#rb-ack-note", "");
+    for (const id of ["summary-grid", "rb-history-boundary", "rb-history-count", "rb-history-list"]) $(`#${id}`).replaceChildren();
+    delete $("#rb-history-list")._content;
     $("#rb-ack-button").textContent = briefView.reconciliationRequired ? "Refresh brief before acknowledging" : "Mark caught up";
     return;
   }
-  const { history, current } = returnBrief;
+  const { history } = returnBrief;
   const changes = history.evaluatedThrough - history.cursor;
-  setText("#summary-grid", `${changes} ${changes === 1 ? "change" : "changes"} since your marker · ${current.needsAttention.length} to act on`);
-  $("#rb-current-boundary").textContent = `as of event ${current.evaluatedThrough}`;
+  setText("#rb-ack-note", changes ? `Marks all ${changes} update${changes === 1 ? "" : "s"} read. Work stays open.` : "Work stays open.");
+  setText("#summary-grid", `${changes} ${changes === 1 ? "change" : "changes"} since your marker · ${contributions.length} to act on`);
+  setText("#rb-history-count", changes ? `(${changes})` : "");
   $("#rb-history-boundary").textContent = history.evaluatedThrough === history.cursor
     ? "· nothing new since your marker"
     : `${history.items.length} of ${changes} events · through ${history.evaluatedThrough}`;
-  renderBriefList("#rb-attention-list", current.needsAttention.map(i =>
-    `<li class="rb-event"><a class="work-link" href="${esc(workHref(i.workItemId))}" data-open-work="${esc(i.workItemId)}" data-brief-key="attention:${esc(i.workItemId)}:${esc(i.step)}">${esc(i.action ?? i.workItemId)}</a> <span class="rb-detail">your step: ${esc(humanize(i.step))}</span></li>`).join("")
-    || '<li class="rb-empty">Nothing waiting for you.</li>');
-  renderBriefList("#rb-involving-list", current.workInvolvingMe.map(i =>
-    `<li class="rb-event"><a class="work-link" href="${esc(workHref(i.workItemId))}" data-open-work="${esc(i.workItemId)}" data-brief-key="involving:${esc(i.workItemId)}">${esc(i.action ?? i.workItemId)}</a> <span class="rb-detail">${esc(i.roles.map(roleLabel).join(", "))} · ${esc(i.state)}</span></li>`).join("")
-    || '<li class="rb-empty">No open work involves you.</li>');
   renderBriefList("#rb-history-list", history.items.map(describeBriefEvent).join("")
     || '<li class="rb-empty">Nothing new since your marker.</li>');
   $("#rb-more-button").hidden = !history.hasMore;
-  $("#rb-ack-button").textContent = history.evaluatedThrough === history.cursor ? "Already caught up" : `Mark caught up through event ${history.evaluatedThrough}`;
+  $("#rb-ack-button").textContent = history.evaluatedThrough === history.cursor ? "Already caught up" : "Mark caught up";
+  $("#rb-ack-button").dataset.horizon = String(history.evaluatedThrough);
+  $("#rb-ack-button").setAttribute("aria-describedby", "rb-ack-note rb-history-boundary");
   $("#rb-ack-button").disabled = briefView.busy || history.evaluatedThrough === history.cursor;
 }
 $("#return-brief-panel").addEventListener("toggle", e => {
@@ -1449,6 +2479,8 @@ $("#rb-more-button").addEventListener("click", async () => {
   }
 });
 $("#rb-ack-button").addEventListener("click", () => briefView.acknowledge());
+$("#rb-show-all").addEventListener("click", () => { showAllAttention = !showAllAttention; renderReturnBrief(); });
+document.addEventListener("visibilitychange", renderReturnBrief);
 shareLinksUI = installShareLinks({ client, accountClient, getState: () => state, getSession: () => session, setConnectionStatus,
   async openRoom(roomId, roomMode, joinedSession) {
     if (state && session?.roomId === roomId && session.member.id === joinedSession?.member?.id
@@ -1463,6 +2495,7 @@ shareLinksUI = installShareLinks({ client, accountClient, getState: () => state,
     configureAuthPanel(roomMode ? null : roomId);
     const restored = await client.restore(roomMode ? null : roomId);
     if (!restored) throw new Error("Browser identity changed. Reopen the invitation.");
+    inboxUI.showRooms();
   }
 });
 configureAuthPanel();
@@ -1476,27 +2509,31 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
     await shareLinksUI.open(initialJoinFragment); return;
   }
   const requestedRoom = selectedRoomFromLocation();
-  if (requestedRoom) {
+  if (requestedRoom || accountHomeFromLocation()) {
     const account = await ensureAccountSession();
     if (!account?.authenticated) {
       $("#identity-label").textContent = "Not signed in";
-      setFormStatus($("#auth-error"), `Sign in with a canonical account that has membership in #${requestedRoom}.`, true);
+      setFormStatus($("#auth-error"), "");
       setConnectionStatus("Not connected · account sign-in required");
       $("#auth-panel").hidden = false;
       if (!$("#invitation-dialog").open) queueMicrotask(() => $("#access-key").focus({ preventScroll: true }));
       return;
     }
-    await client.restore(requestedRoom);
+    if (!requestedRoom) showAccountWorkspace();
+    else await client.restore(requestedRoom);
     return;
   }
   await client.restore();
 })().catch(error => {
+  if (accountClient.session?.authenticated && [401, 403].includes(error.status)) {
+    showAccountWorkspace(); confirmAccount(); return;
+  }
   const signedOut = [401, 403].includes(error.status);
   if (signedOut) recovery.clear();
   const requestedRoom = selectedRoomFromLocation();
   setFormStatus($("#auth-error"), signedOut
     ? requestedRoom ? `This account cannot open #${requestedRoom}. Use an account with active membership there.` : ""
-    : "Room service unavailable. Check the service and retry; no connection is claimed.", true);
+    : "Can’t reach the room. Try refreshing.", true);
   setConnectionStatus(signedOut ? "Not connected · sign in required" : "Room service unavailable · not connected");
   $("#identity-label").textContent = signedOut ? "Not signed in" : "Session unavailable";
   $("#auth-panel").hidden = false;

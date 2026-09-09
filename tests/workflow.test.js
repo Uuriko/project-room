@@ -3,6 +3,23 @@ import assert from "node:assert/strict";
 import { EVENT_TYPES as T, applyEvent, event, replay, matchesReceipt as domainMatches } from "../src/events.js";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { matchesReceipt, nextWorkStep, terminalWork, workStatus, workActions } from "../src/workflow.js";
+import { needsAttention, workInvolvingMe } from "../src/work-selectors.js";
+import * as serviceSelectors from "../server/return-selectors.mjs";
+
+test("browser and service share selectors and one explicit expiry clock across work presentation", () => {
+  assert.equal(serviceSelectors.needsAttention, needsAttention);
+  assert.equal(serviceSelectors.workInvolvingMe, workInvolvingMe);
+  const item = { id: "clock-work", state: "working", mode: "write", accountableMemberId: "owner",
+    claim: { status: "active", holderId: "owner", expiresAt: new Date(2000).toISOString() } };
+  const owner = { id: "owner", permissions: ["accept_work", "complete_work", "write_external"] };
+  for (const now of [1999, 2000]) {
+    const waiting = now === 2000;
+    assert.equal(needsAttention({ workItems: { work: item }, memberId: "owner", now }).length, waiting ? 1 : 0);
+    assert.equal(workStatus(item, now).label, waiting ? "Scope needed" : "Working · reported");
+    assert.equal(workActions(item, owner, now).some(([action]) => action === "claim"), waiting);
+    assert.equal(workActions(item, owner, now).some(([action]) => action === "complete"), !waiting);
+  }
+});
 
 function room(independentVerificationRequired, ownerDecisionRequired) {
   let state = replay(initialRoom());

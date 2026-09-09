@@ -2,19 +2,21 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, writeFile, mkdir, symlink, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { assetPaths, buildAssets } from '../cloudflare/build-assets.mjs';
+import { RoomStore } from '../server/store.mjs';
+import { createRoomServer } from '../server/http.mjs';
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'room-assets-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   return pathToFileURL(directory + '/');
 }
-test('asset build produces and refreshes exactly the current ten application files', async t => {
+test('asset build produces and refreshes exactly the allowlisted application files', async t => {
   const output = await fixture(t);
-  assert.equal(await buildAssets(output), 10);
+  assert.equal(await buildAssets(output), assetPaths.length);
   await writeFile(new URL('src/app.js', output), 'stale generated asset');
   await buildAssets(output);
   assert.deepEqual((await readdir(output)).sort(), ['index.html', 'src']);
@@ -22,6 +24,26 @@ test('asset build produces and refreshes exactly the current ten application fil
   for (const file of assetPaths) assert.deepEqual(await readFile(new URL(file, output)), await readFile(new URL('../' + file, import.meta.url)));
   const config = JSON.parse(await readFile(new URL('../cloudflare/wrangler.jsonc', import.meta.url), 'utf8'));
   assert.equal(config.build.command, 'node build-assets.mjs', 'deploy always builds this exact source');
+});
+test('every local browser import is included in the deployment allowlist', async () => {
+  for (const file of assetPaths.filter(path => path.endsWith('.js'))) {
+    const source = await readFile(new URL('../' + file, import.meta.url), 'utf8');
+    for (const match of source.matchAll(/(?:from\s*|import\s*)["'](\.[^"']+)["']/g)) {
+      const dependency = posix.normalize(posix.join(posix.dirname(file), match[1]));
+      assert.ok(assetPaths.includes(dependency), `${file} imports an unpackaged asset: ${dependency}`);
+    }
+  }
+});
+test('the HTTP allowlist serves every packaged browser asset with exact bytes', async t => {
+  const store = new RoomStore(':memory:'), server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  for (const path of assetPaths) {
+    const response = await fetch(origin + '/' + path);
+    assert.equal(response.status, 200, path);
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), await readFile(new URL('../' + path, import.meta.url)), path);
+  }
 });
 test('asset build rejects unknown files without uploading or deleting them', async t => {
   const output = await fixture(t);

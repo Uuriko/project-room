@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { ServiceError } from "./store.mjs";
 import { clientAddress } from "./deployment.mjs";
+import { validId } from "../src/events.js";
+import { SyntheticInboxTransport } from "./inbox-transport.mjs";
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -10,10 +12,17 @@ const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 const bindingPattern = /^[a-f0-9]{64}$/;
 const assets = new Map([
   ["/", ["index.html", "text/html"]], ["/index.html", ["index.html", "text/html"]],
-  ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js", "return-brief.js", "work-status.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
+  ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js", "agent-connections.js", "return-brief.js", "work-selectors.js", "work-status.js", "work-packet.js", "portable-work.js", "reminders.js", "reminder-time.js", "room-charter.js", "room-instructions.js", "reply-requests.js", "work-help.js", "help-offers.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
+  ...["inbox-client.js", "inbox-ui.js", "inbox-send-ui.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
   ["/src/styles.css", ["src/styles.css", "text/css"]]
 ]);
 const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
+const pathId = encoded => {
+  let id;
+  try { id = decodeURIComponent(encoded); } catch { reject(404, "not_found", "Not found"); }
+  if (!validId(id)) reject(404, "not_found", "Not found");
+  return id;
+};
 const accountView = auth => ({
   authenticated: Boolean(auth.account),
   account: auth.account ? { id: auth.account.id, revision: auth.account.revision, authEpoch: auth.account.authEpoch } : null,
@@ -38,16 +47,23 @@ const rateHash = value => createHash("sha256").update(String(value)).digest("hex
 
 export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = 1000, trustedLocalProxy = false,
   loadAsset = path => readFile(new URL(path, assetRoot)), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
-  resolveRequestSignal = () => null,
+  resolveRequestSignal = () => null, syntheticInboxTransport = null, cookieNamespace = "",
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot" }) {
   if (trustedLocalProxy && !origin?.startsWith("https://")) throw new Error("The deployment proxy requires a fixed HTTPS origin");
+  if (typeof cookieNamespace !== "string" || !/^[A-Za-z0-9_-]{0,64}$/.test(cookieNamespace))
+    throw new Error("Cookie namespace must contain at most 64 letters, digits, underscores or hyphens");
+  if (syntheticInboxTransport && (!(syntheticInboxTransport instanceof SyntheticInboxTransport)
+    || syntheticInboxTransport.inbox !== store.inbox || trustedLocalProxy
+    || origin && !["localhost", "127.0.0.1", "[::1]"].includes(new URL(origin).hostname)))
+    throw new Error("Synthetic inbox transport requires its own loopback test service");
   if (origin) {
     const url = new URL(origin);
     if (url.origin !== origin || !["http:", "https:"].includes(url.protocol)) throw new Error("Origin must be a fixed HTTP(S) origin without a path");
     if (url.protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) throw new Error("Non-loopback origins require HTTPS");
   }
   const expectedOrigin = () => origin || `http://127.0.0.1:${server.address().port}`;
-  const scopedCookieName = name => expectedOrigin().startsWith("https:") ? `__Host-${name}` : name;
+  // Avoid local-instance sign-in collisions; namespacing is not host isolation.
+  const scopedCookieName = name => `${expectedOrigin().startsWith("https:") ? "__Host-" : ""}${cookieNamespace ? cookieNamespace + "_" : ""}${name}`;
   const streams = new Set();
   const rates = new Map();
   function rate(id, maximum) {
@@ -187,6 +203,63 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.writeHead(200, { "Content-Type": `${type}; charset=utf-8` });
         return res.end(req.method === "HEAD" ? undefined : data);
       }
+      if (url.pathname === "/api/inbox" || url.pathname.startsWith("/api/inbox/")) {
+        // Inbox authority is an account session, never a Room/agent bearer key.
+        if (req.headers.authorization) reject(401, "account_session_required", "Use your current account session.");
+        const token = cookie(req, accountCookieName), binding = accountBinding(req);
+        const auth = store.authenticateAccountSession(token, null, binding);
+        const view = url.searchParams.get("view");
+        const replySource = /^\/api\/inbox\/sources\/([^/]{1,384})\/reply-review$/.exec(url.pathname);
+        if (replySource && req.method === "GET") {
+          if (!["reply-review-v1", "reply-review-v2", "reply-review-v3", "reply-review-v4"].includes(view) || [...url.searchParams.keys()].length !== 1) reject(422, "unsupported_inbox_view", "Choose the supported reply review.");
+          return json(res, 200, store.inbox.replyReviewContext(token, pathId(replySource[1]), binding, { view }));
+        }
+        if (url.pathname === "/api/inbox/review" && req.method === "POST") {
+          protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
+          const result = store.inbox.reviewReply(token, await body(req), binding);
+          return json(res, result.duplicate ? 200 : 201, result);
+        }
+        if (view !== null && (!["email-text-v1", "email-excerpt-v1"].includes(view) || url.searchParams.getAll("view").length !== 1))
+          reject(422, "unsupported_inbox_view", "This inbox view is not supported.");
+        if (url.pathname === "/api/inbox" && req.method === "GET") return json(res, 200, store.inbox.list(token, binding, { includeEmail: view !== null }));
+        const source = /^\/api\/inbox\/sources\/([^/]{1,384})(?:\/(share-context|room-results|send-context|sends))?$/.exec(url.pathname);
+        if (source && req.method === "GET") {
+          const id = pathId(source[1]);
+          if (source[2] === "send-context") return json(res, 200, { ...store.inbox.sendContext(token, id, binding), simulationAvailable: Boolean(syntheticInboxTransport) });
+          if (source[2] === "sends") return json(res, 200, { ...store.inbox.sends(token, id, binding), simulationAvailable: Boolean(syntheticInboxTransport) });
+          if (source[2]) {
+            const roomId = url.searchParams.get("roomId");
+            if (!roomId || url.searchParams.getAll("roomId").length !== 1) reject(422, "invalid_room", "Choose a room.");
+            if (source[2] === "room-results") {
+              if (url.searchParams.getAll("workItemId").length > 1) reject(422, "invalid_inbox_result", "Choose a result.");
+              return json(res, 200, store.inbox.results(token, id, roomId, binding, url.searchParams.get("workItemId")));
+            }
+            return json(res, 200, store.inbox.shareContext(token, id, roomId, binding));
+          }
+          return json(res, 200, store.inbox.read(token, id, binding, { emailView: view !== null, excerptView: view === "email-excerpt-v1" }));
+        }
+        if (url.pathname === "/api/inbox/commands" && req.method === "POST") {
+          protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
+          const result = store.inbox.apply(token, await body(req), binding);
+          return json(res, result.duplicate ? 200 : 201, result);
+        }
+        if (url.pathname === "/api/inbox/simulation" && req.method === "POST") {
+          protectWrite(req, auth, false); rate(`inbox-simulation:${auth.account.id}`, 60);
+          if (!["127.0.0.1", "::1"].includes(remoteAddress)) reject(403, "inbox_simulation_local_only", "Sample sending is local only.");
+          if (!syntheticInboxTransport) reject(409, "inbox_simulation_unavailable", "Sample sending is unavailable here.");
+          const data = await body(req);
+          if (!data || !exact(data, ["action", "sourceId", "sendId"]) || !["dispatch", "reconcile"].includes(data.action)
+            || !validId(data.sourceId) || !validId(data.sendId)) reject(422, "invalid_inbox_send", "Choose the existing sample reply.");
+          const send = await syntheticInboxTransport[data.action](token, data.sourceId, data.sendId, binding);
+          return json(res, 200, { ...store.inbox.sends(token, data.sourceId, binding), simulationAvailable: true, send });
+        }
+        reject(404, "not_found", "Inbox route not found.");
+      }
+      if (url.pathname === "/api/account-rooms" && req.method === "GET") {
+        const token = cookie(req, accountCookieName), binding = accountBinding(req);
+        if (url.searchParams.getAll("after").length > 1) reject(422, "invalid_room", "Invalid room continuation");
+        return json(res, 200, store.accountRooms(token, binding, { after: url.searchParams.get("after") }));
+      }
       if (url.pathname === "/api/account-session") {
         const slotToken = cookie(req, accountCookieName);
         if (req.method === "GET") {
@@ -297,10 +370,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         reject(405, "method_not_allowed", "Method not allowed");
       }
-      const revokeMatch = /^\/api\/rooms\/([a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127})\/invitations\/([a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127})\/revoke$/.exec(url.pathname);
-      const match = /^\/api\/rooms\/([a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127})(?:\/(commands|events|stream|cursor|return-brief|invitations|share-links|share-links-cancel))?$/.exec(url.pathname);
+      const revokeMatch = /^\/api\/rooms\/([^/]{1,384})\/invitations\/([^/]{1,384})\/revoke$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections))?$/.exec(url.pathname);
       if (!match && !revokeMatch) reject(404, "not_found", "Not found");
-      const roomId = (match ?? revokeMatch)[1];
+      const roomId = pathId((match ?? revokeMatch)[1]);
+      const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
       const route = match ? (match[2] ?? "") : "invitation-revoke";
       const selected = roomCredentials(req, url);
       const fence = selected.mode === "account" ? accountBinding(req, route === "stream" ? url : null) : expectedBinding(req);
@@ -310,7 +384,74 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
       rate(`read:${auth.credentialHash}`, 600);
       if (!["GET", "HEAD"].includes(req.method)) { protectWrite(req, auth, selected.bearer); rate(`write:${auth.credentialHash}`, 60); }
-      if (!route && req.method === "GET") return json(res, 200, store.snapshot(selected.token, roomId, fence));
+      if (!route && req.method === "GET") {
+        const params = url.searchParams;
+        if (params.has("view") && (params.getAll("view").length !== 1 || params.get("view") !== "work"
+          || [...params.keys()].some(key => !["view", "auth"].includes(key) || params.getAll(key).length !== 1))) {
+          reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
+        }
+        const helpContext = req.headers["x-project-room-help-context"];
+        if (helpContext !== undefined && (helpContext !== "1" || !params.has("view"))) reject(422, "invalid_help_context", "Choose version 1 with the current work view");
+        const offerContext = req.headers["x-project-room-offer-context"];
+        if (offerContext !== undefined && (offerContext !== "1" || params.has("view"))) reject(422, "invalid_offer_context", "Choose version 1 with the full room view");
+        return json(res, 200, store.snapshot(selected.token, roomId, fence, params.has("view") ? "work" : "full", helpContext === "1", offerContext === "1"));
+      }
+      if (["reply-requests", "reply-context", "reply-history"].includes(route) && req.method === "GET") {
+        const params = url.searchParams, names = route === "reply-requests" ? ["direction", "status"]
+          : route === "reply-context" ? ["requestMessageId", "cursor", "limit"] : ["direction", "cursor", "checkpoint", "limit"];
+        if ([...params.keys()].some(key => ![...names, "auth"].includes(key) || params.getAll(key).length !== 1)
+          || params.has("limit") && !/^[1-9]\d*$/.test(params.get("limit"))) reject(422, "invalid_reply_selection", "Invalid request selection");
+        const options = Object.fromEntries(names.filter(key => key !== "requestMessageId" && params.has(key)).map(key => [key, key === "limit" ? Number(params.get(key)) : params.get(key)]));
+        options.expectedSessionBinding = fence;
+        const value = route === "reply-requests" ? store.replyRequests.list(selected.token, roomId, options)
+          : route === "reply-context" ? store.replyRequests.selected(selected.token, roomId, params.get("requestMessageId"), options)
+          : store.replyRequests.history(selected.token, roomId, options);
+        return json(res, 200, value);
+      }
+      if (route === "charter" && req.method === "GET") {
+        const params = url.searchParams;
+        if ([...params.keys()].some(key => !["revision", "auth"].includes(key) || params.getAll(key).length !== 1)
+          || params.has("revision") && !/^(0|[1-9]\d*)$/.test(params.get("revision"))) reject(422, "invalid_charter_revision", "Choose an instructions version");
+        return json(res, 200, store.charter(selected.token, roomId, { ...(params.has("revision") ? { revision: Number(params.get("revision")) } : {}), expectedSessionBinding: fence }));
+      }
+      if (route === "work-context" && req.method === "GET") {
+        const params = url.searchParams;
+        const offerContext = req.headers["x-project-room-offer-context"];
+        if (offerContext !== undefined && offerContext !== "1") reject(422, "invalid_offer_context", "Choose offer context version 1");
+        if ([...params.keys()].some(key => !["workItemId", "includeSource", "auth"].includes(key) || params.getAll(key).length !== 1)
+          || (params.has("includeSource") && !["true", "false"].includes(params.get("includeSource")))) {
+          reject(422, "invalid_work_context", "Choose one work ID and an optional source inclusion flag");
+        }
+        return json(res, 200, store.workContext(selected.token, roomId, params.get("workItemId"), {
+          includeSource: params.get("includeSource") === "true", includeOffers: offerContext === "1", expectedSessionBinding: fence
+        }));
+      }
+      if (route === "work-result" && req.method === "GET") {
+        const params = url.searchParams;
+        if ([...params.keys()].some(key => !["workItemId", "completionEventId", "draftMessageId", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_result_selection", "Invalid result selection");
+        return json(res, 200, store.workResult(selected.token, roomId, params.get("workItemId"), {
+          completionEventId: params.get("completionEventId"), draftMessageId: params.get("draftMessageId"), expectedSessionBinding: fence
+        }));
+      }
+      if (route === "work-discussion" && req.method === "GET") {
+        const params = url.searchParams;
+        if ([...params.keys()].some(key => !["workItemId", "cursor", "since", "limit", "auth"].includes(key) || params.getAll(key).length !== 1)
+          || ["since", "limit"].some(key => params.has(key) && !/^(0|[1-9]\d*)$/.test(params.get(key)))) reject(422, "invalid_discussion", "Invalid discussion selection");
+        return json(res, 200, store.workDiscussion(selected.token, roomId, params.get("workItemId"), {
+          cursor: params.get("cursor"), ...(params.has("since") ? { since: Number(params.get("since")) } : {}),
+          ...(params.has("limit") ? { limit: Number(params.get("limit")) } : {}), expectedSessionBinding: fence
+        }));
+      }
+      if (route === "reminders" && req.method === "GET") return json(res, 200, store.reminders.list(selected.token, roomId, fence));
+      if (route === "agent-connections" && req.method === "GET") return json(res, 200, store.agentConnections.list(selected.token, roomId, fence));
+      if (route === "agent-connections" && req.method === "POST") {
+        const result = store.agentConnections.apply(selected.token, roomId, await body(req), fence);
+        return json(res, result.duplicate ? 200 : 201, result);
+      }
+      if (route === "reminders" && req.method === "POST") {
+        const result = store.reminders.mutate(selected.token, roomId, await body(req), fence);
+        return json(res, result.duplicate ? 200 : 201, result);
+      }
       if (route === "share-links" && req.method === "GET") return json(res, 200, store.shareLinks.list(selected.token, roomId, fence));
       if (route === "share-links" && req.method === "POST") {
         const data = await body(req);
@@ -350,7 +491,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (selected.mode !== "account" || selected.bearer) reject(403, "account_session_required", "Invitation administration requires an account browser session");
         const data = await body(req);
         if (!exact(data, ["expectedRevision", "reason"])) reject(422, "invalid_invitation_change", "Invitation revision and reason required");
-        return json(res, 200, store.revokeInvitation(selected.token, revokeMatch[2], { expectedRevision: data.expectedRevision, reason: data.reason, expectedSessionBinding: auth.sessionBinding, expectedRoomId: roomId }));
+        return json(res, 200, store.revokeInvitation(selected.token, invitationId, { expectedRevision: data.expectedRevision, reason: data.reason, expectedSessionBinding: auth.sessionBinding, expectedRoomId: roomId }));
       }
       reject(405, "method_not_allowed", "Method not allowed");
     } catch (error) {

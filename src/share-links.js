@@ -9,6 +9,11 @@ export function consumeJoinFragment() {
 const newToken = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 const date = value => new Date(value).toLocaleString();
 
+export function formatShareInvitation(note, url) {
+  if (typeof note !== "string" || note.length > 600 || !url) return "";
+  return note.trim() ? `${note.trim()}\n\n${url}` : url;
+}
+
 export function setShareLinkStatus(element, text) {
   element.textContent = text;
   element.classList.toggle("visible", Boolean(text));
@@ -44,6 +49,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   setConnectionStatus = text => { $("#connection-status").textContent = text; } }) {
   let managementVersion = 0, listVersion = 0, joinVersion = 0, joinSecret = null, redemptionId = null, joining = false, pendingCreate = null;
   let joined = null, previewRoomId = null;
+  let managementSession = null, managementGeneration = null, currentLink = null, expiryTimer = null, copyRevision = 0, copying = false;
   const manager = $("#share-link-dialog"), joinDialog = $("#join-link-dialog");
   const status = text => setShareLinkStatus($("#share-link-status"), text);
   const listStatus = text => setShareLinkStatus($("#share-management-status"), text);
@@ -52,7 +58,37 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     joining = value;
     for (const control of joinDialog.querySelectorAll("button,input")) control.disabled = value;
   }
-  const managementCurrent = (version, generation) => version === managementVersion && generation === client.generation && manager.open;
+  const member = () => getState()?.members[getSession()?.member.id];
+  const canManage = () => member()?.kind === "human" && member()?.active !== false && member()?.permissions.includes("manage_members");
+  const ownsManagement = () => managementSession && managementSession === getSession()
+    && managementGeneration === client.generation && managementSession === client.session && client.ownsAccountSession() && canManage();
+  const managementCurrent = (version, generation) => version === managementVersion && generation === client.generation && manager.open && ownsManagement();
+  function updateCopyControls() {
+    $("#share-link-copy").disabled = copying || !currentLink;
+    $("#share-note-copy").disabled = copying || !currentLink || !$("#share-note-text").value.trim()
+      || !$("#share-note-preview").value;
+  }
+  function clearResult(message = "") {
+    const heldFocus = $("#share-link-result").contains(document.activeElement);
+    copyRevision++; currentLink = null; clearTimeout(expiryTimer); expiryTimer = null;
+    $("#share-link-url").value = ""; delete $("#share-link-url").dataset.linkId;
+    $("#share-note-text").value = ""; $("#share-note-preview").value = "";
+    $("#share-note").open = false; $("#share-note-result").hidden = true;
+    $("#share-link-result").hidden = true; $("#share-link-form").hidden = false;
+    status(message); updateCopyControls();
+    if (heldFocus && manager.open && ownsManagement()) $("#share-link-create").focus();
+  }
+  function checkResult() {
+    if (currentLink && (currentLink.expiresAt <= Date.now() || currentLink.memberRevision !== member()?.revision)) {
+      clearResult("This link is no longer active. Create a new link.");
+    }
+    return currentLink;
+  }
+  function managementError(error) {
+    if ([401, 403].includes(error?.status) || ["session_binding_changed", "session_binding_required", "invalid_session_binding"].includes(error?.code)) {
+      resetManagement(); setConnectionStatus("Invitation access changed. Reopen the room before inviting.");
+    }
+  }
   function updateLimits() {
     const hours = Number($("#share-link-expiry").value), limit = Number($("#share-link-limit").value);
     const duration = hours === 168 ? "7 days" : `${hours} ${hours === 1 ? "hour" : "hours"}`;
@@ -66,16 +102,14 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     $("#join-switch-warning").hidden = !previewRoomId || !(currentRoom ? currentRoom !== previewRoomId : accountClient.session?.authenticated);
   }
   function sync() {
-    const member = getState()?.members[getSession()?.member.id];
-    $("#invite-people-button").hidden = !(member?.kind === "human" && member?.active !== false && member?.permissions.includes("manage_members"));
-    if ($("#invite-people-button").hidden && manager.open) manager.close();
+    $("#invite-people-button").hidden = !canManage();
+    if (manager.open && !ownsManagement()) resetManagement();
+    else checkResult();
     if (joinDialog.open) updateSwitchWarning();
   }
   function resetManagement() {
     managementVersion++; listVersion++; pendingCreate = null;
-    $("#share-link-url").value = ""; $("#share-link-result").hidden = true;
-    delete $("#share-link-url").dataset.linkId;
-    $("#share-link-form").hidden = false;
+    managementSession = null; managementGeneration = null; clearResult();
     $("#share-settings").open = false; $("#share-management").open = false;
     $("#share-link-list").replaceChildren(); status(""); listStatus("");
     creationBusy(false); updateLimits();
@@ -87,7 +121,11 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     listStatus(confirmed || "Loading links…");
     try {
     const result = await client.request(client.path("/share-links"));
-    if (!managementCurrent(version, generation) || sequence !== listVersion) return;
+    if (!managementCurrent(version, generation)) { sync(); return; }
+    if (sequence !== listVersion) return;
+    if (currentLink && result.links.some(link => link.id === currentLink.id && link.status !== "active")) {
+      clearResult("This link is no longer active. Create a new link.");
+    }
     const items = result.links.map(link => {
       const li = document.createElement("li"), text = document.createElement("p");
       li.dataset.linkId = link.id;
@@ -101,16 +139,17 @@ export function installShareLinks({ client, accountClient, getState, getSession,
           if (!managementCurrent(version, generation)) return;
           const heldFocus = document.activeElement === cancel;
           let cancelled = false;
+          listVersion++; // A pre-cancellation read cannot restore an active row.
+          if (currentLink?.id === link.id) clearResult();
           cancel.disabled = true;
           try {
             await client.request(client.path("/share-links-cancel"), { method: "POST", data: { linkId: link.id } });
-            if (!managementCurrent(version, generation)) return;
+            if (!managementCurrent(version, generation)) { sync(); return; }
             cancelled = true;
-            if ($("#share-link-url").dataset.linkId === link.id) { $("#share-link-url").value = ""; $("#share-link-result").hidden = true; $("#share-link-form").hidden = false; status(""); }
             cancel.textContent = "Cancelled";
             text.textContent = description("cancelled");
             await list(version, generation, "Link cancelled. Existing members keep their access.");
-          } catch (error) { if (managementCurrent(version, generation) && !cancelled) { listStatus(invitationManagementFailureMessage(error, "cancel")); cancel.disabled = false; } }
+          } catch (error) { if (managementCurrent(version, generation) && !cancelled) { managementError(error); listStatus(invitationManagementFailureMessage(error, "cancel")); cancel.disabled = false; } else sync(); }
           finally {
             if (cancelled && heldFocus && managementCurrent(version, generation)
               && [document.body, cancel].includes(document.activeElement)) $("#share-management-summary").focus();
@@ -124,12 +163,15 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     if (!items.length) $("#share-link-list").textContent = "No invitation links yet.";
     listStatus(confirmed);
     } catch (error) {
-      if (managementCurrent(version, generation) && sequence === listVersion) listStatus(`${confirmed ? confirmed + " " : ""}${invitationManagementFailureMessage(error, "list")}`);
+      if (managementCurrent(version, generation) && sequence === listVersion) { managementError(error); listStatus(`${confirmed ? confirmed + " " : ""}${invitationManagementFailureMessage(error, "list")}`); }
+      else sync();
       throw error;
     }
   }
   $("#invite-people-button").addEventListener("click", async () => {
     resetManagement(); const version = ++managementVersion, generation = client.generation;
+    managementSession = getSession(); managementGeneration = generation;
+    if (!ownsManagement()) return;
     $("#share-local-note").hidden = !["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
     manager.showModal(); $("#share-link-create").focus();
     // Link-list feedback never owns the newer creation/clipboard status.
@@ -138,9 +180,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   $("#share-link-close").addEventListener("click", () => manager.close());
   manager.addEventListener("close", () => { resetManagement(); if (!$("#invite-people-button").hidden) $("#invite-people-button").focus(); });
   $("#share-link-another").addEventListener("click", () => {
-    $("#share-link-url").value = ""; delete $("#share-link-url").dataset.linkId;
-    $("#share-link-result").hidden = true; $("#share-link-form").hidden = false;
-    status(""); $("#share-link-create").focus();
+    clearResult(); $("#share-link-create").focus();
   });
   $("#share-link-form").addEventListener("input", () => { pendingCreate = null; updateLimits(); });
   $("#share-link-form").addEventListener("invalid", event => {
@@ -155,26 +195,54 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     creationBusy(true); status("Creating link…");
     try {
       const result = await client.request(client.path("/share-links"), { method: "POST", data: request });
-      if (!managementCurrent(version, generation)) return;
-      if (result.link.status !== "active") throw new Error("This link is no longer active. Change the settings to create another.");
+      if (!managementCurrent(version, generation)) { sync(); return; }
+      pendingCreate = null; // The owned response confirms this request's outcome.
+      if (result.link.status !== "active") throw new Error("This link is no longer active. Create a new link.");
+      clearResult();
+      currentLink = { id: result.link.id, expiresAt: result.link.expiresAt, memberRevision: request.expectedMemberRevision };
+      if (!checkResult()) return;
       $("#share-link-url").value = `${location.origin}/#join/${request.linkToken}`;
       $("#share-link-url").dataset.linkId = result.link.id;
-      $("#share-link-result").hidden = false; pendingCreate = null;
+      $("#share-link-result").hidden = false;
       $("#share-link-form").hidden = true;
+      expiryTimer = setTimeout(checkResult, Math.max(0, currentLink.expiresAt - Date.now()));
+      expiryTimer.unref?.();
+      updateCopyControls();
       status("Link ready.");
       $("#share-link-copy").focus();
       list(version, generation).catch(() => {});
-    } catch (error) { if (managementCurrent(version, generation)) status(invitationManagementFailureMessage(error, "create")); }
+    } catch (error) { if (managementCurrent(version, generation)) { managementError(error); status(invitationManagementFailureMessage(error, "create")); } else sync(); }
     finally { if (managementCurrent(version, generation)) creationBusy(false); }
   });
-  $("#share-link-copy").addEventListener("click", async () => {
-    const field = $("#share-link-url"), version = managementVersion, generation = client.generation, value = field.value, linkId = field.dataset.linkId;
-    const currentResult = () => managementCurrent(version, generation) && !$("#share-link-result").hidden
-      && field.value === value && field.dataset.linkId === linkId;
-    if (!value) return;
-    try { await navigator.clipboard.writeText(value); if (currentResult()) status("Link copied."); }
-    catch { if (currentResult()) { field.focus(); field.select(); status("Select and copy the link above."); } }
+  $("#share-note-text").addEventListener("input", () => {
+    copyRevision++; status("");
+    const note = $("#share-note-text").value;
+    $("#share-note-preview").value = note.trim() ? formatShareInvitation(note, $("#share-link-url").value) : "";
+    $("#share-note-result").hidden = !$("#share-note-preview").value;
+    updateCopyControls();
   });
+  $("#share-note").addEventListener("toggle", () => { copyRevision++; if (currentLink) status(""); });
+  async function copy(withNote) {
+    sync();
+    const version = managementVersion, generation = client.generation;
+    if (copying || !managementCurrent(version, generation) || !checkResult()) return;
+    const field = $(withNote ? "#share-note-preview" : "#share-link-url"), value = field.value;
+    if (!value || (withNote && (!$("#share-note").open || !$("#share-note-text").value.trim()))) return;
+    const revision = ++copyRevision, link = currentLink, focus = document.activeElement;
+    const currentResult = () => managementCurrent(version, generation) && checkResult() === link && revision === copyRevision
+      && field.value === value && (!withNote || ($("#share-note").open && !$("#share-note-result").hidden));
+    copying = true; updateCopyControls();
+    status(withNote ? "Copying invitation…" : "Copying link…");
+    try { await navigator.clipboard.writeText(value); if (currentResult()) status(withNote ? "Invitation copied." : "Link copied."); }
+    catch {
+      if (currentResult()) {
+        if ([document.body, focus].includes(document.activeElement)) { field.focus(); field.select(); }
+        status(withNote ? "Select and copy the preview above." : "Select and copy the link above.");
+      }
+    } finally { copying = false; sync(); updateCopyControls(); }
+  }
+  $("#share-link-copy").addEventListener("click", () => copy(false));
+  $("#share-note-copy").addEventListener("click", () => copy(true));
   async function open(fragment) {
     if (joining) { joinStatus("Finish the current join before opening another invitation."); return; }
     const retryHadFocus = document.activeElement === $("#join-link-retry");

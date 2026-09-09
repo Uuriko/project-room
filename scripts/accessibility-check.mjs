@@ -54,10 +54,10 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
     if (command.type === T.WORK_COMPLETED) completionCommands.push(command);
   });
 
-  // The skip target exists in both signed-out and signed-in states and receives focus.
+  // Login skips to its heading, not the redundant signed-out connection strip.
   await page.locator("#skip-link").focus();
   await page.keyboard.press("Enter");
-  assert.equal(await page.evaluate(() => document.activeElement.id), "connection-status");
+  assert.equal(await page.evaluate(() => document.activeElement.id), "auth-title");
 
   // Authentication errors have one local announcement owner, not a duplicate toast.
   await page.locator("#access-key").fill("invalid-access-key");
@@ -102,7 +102,7 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   const producerSelect = page.locator('#action-form select[name="producerId"]');
   assert.equal(await producerSelect.inputValue(), "", "producer is never inferred from the completion reporter");
   assert.deepEqual(await producerSelect.locator("option").allTextContents(), [
-    "Choose producer attribution",
+    "Choose producer",
     "I produced this — Room owner (owner)",
     "Unknown / not reported",
     "Maya (maya) · human"
@@ -163,7 +163,7 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   assert.equal(await page.locator('[data-work-record-id="producer-conflict"] [data-action="verify"]').count(), 0, "verifier-as-producer does not expose a misleading independent-check action");
   await page.locator('[data-work-record-id="producer-unknown-choice"] [data-action="verify"]').click();
   assert.equal(await page.locator("#action-title").textContent(), "Record an evidence check");
-  assert.match(await page.locator("#action-fields").textContent(), /Producer identity is unknown.*cannot satisfy required independent verification or unlock approval/s);
+  assert.match(await page.locator("#action-fields").textContent(), /Producer identity is unknown.*cannot satisfy independent verification or unlock approval/s);
   await page.locator("#cancel-action").click();
   await page.waitForFunction(() => document.querySelector("#rb-attention-list")?.textContent.includes("Maya-only return item"));
   releaseHeld();

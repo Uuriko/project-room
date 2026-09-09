@@ -1,13 +1,23 @@
 import { REACTIONS } from "./conversation.js";
+import { proposalContext, nativeTextEvidence, reportedProducer } from "./work-packet.js";
+import { CHARTER_TYPE, charterFromEvent } from "./room-charter.js";
+import { REPLY_CANCELLED, prepareReplyPost, recordReplyPost, cancelReplyRequest } from "./reply-requests.js";
+import { WORK_HELP_UPDATED, helpFromEvent } from "./work-help.js";
+import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, helpOfferFromEvent } from "./help-offers.js";
 
 export const EVENT_TYPES = Object.freeze({
   ROOM_CREATED: "room.created",
+  ROOM_CHARTER_UPDATED: CHARTER_TYPE,
   MEMBER_ADDED: "member.added",
   MEMBER_JOINED_VIA_INVITATION: "member.joined_via_invitation",
   MEMBER_ACCESS_CHANGED: "member.access_changed",
   MESSAGE_POSTED: "message.posted",
+  REPLY_REQUEST_CANCELLED: REPLY_CANCELLED,
   MESSAGE_REACTION_SET: "message.reaction_set",
   WORK_PROPOSED: "work.proposed",
+  WORK_HELP_UPDATED,
+  HELP_OFFER_OPENED,
+  HELP_OFFER_UPDATED,
   WORK_ACCEPTED: "work.accepted",
   WORK_STARTED: "work.started",
   WORK_BLOCKED: "work.blocked",
@@ -21,6 +31,14 @@ export const EVENT_TYPES = Object.freeze({
 });
 
 export const PERMISSIONS = Object.freeze(["steer", "decide", "manage_members", "manage_claims", "accept_work", "complete_work", "verify", "write_external"]);
+
+// A command may check a work revision without advancing it (for example help).
+// Historical evidence readers must not infer a mutation from a field name alone.
+export const WORK_REVISION_TYPES = Object.freeze([
+  EVENT_TYPES.WORK_ACCEPTED, EVENT_TYPES.WORK_STARTED, EVENT_TYPES.WORK_BLOCKED, EVENT_TYPES.WORK_BLOCKER_RESOLVED,
+  EVENT_TYPES.WORK_COMPLETED, EVENT_TYPES.WORK_SUPERSEDED, EVENT_TYPES.CLAIM_ACQUIRED, EVENT_TYPES.CLAIM_RELEASED,
+  EVENT_TYPES.VERIFICATION_RECORDED, EVENT_TYPES.OWNER_DECISION_RECORDED
+]);
 
 // Roles are human-readable presets. The stored permission snapshot remains the
 // authority so a later role-policy change cannot silently widen an invitation.
@@ -102,13 +120,21 @@ export function applyEvent(current, incoming) {
 
   const handlers = {
     [EVENT_TYPES.ROOM_CREATED]: createRoom,
+    [EVENT_TYPES.ROOM_CHARTER_UPDATED]: updateCharter,
     [EVENT_TYPES.MEMBER_ADDED]: addMember,
     [EVENT_TYPES.MEMBER_JOINED_VIA_INVITATION]: joinMemberViaInvitation,
     [EVENT_TYPES.MEMBER_ACCESS_CHANGED]: changeMemberAccess,
     [EVENT_TYPES.MESSAGE_POSTED]: postMessage,
+    [EVENT_TYPES.REPLY_REQUEST_CANCELLED]: cancelReplyRequest,
     [EVENT_TYPES.MESSAGE_REACTION_SET]: setMessageReaction,
     [EVENT_TYPES.WORK_PROPOSED]: proposeWork,
+    [EVENT_TYPES.WORK_HELP_UPDATED]: (state, incoming) => {
+      const help = helpFromEvent(state, incoming);
+      state.workItems[help.workItemId].helpWanted = help;
+    },
     [EVENT_TYPES.WORK_ACCEPTED]: acceptWork,
+    [HELP_OFFER_OPENED]: recordHelpOffer,
+    [HELP_OFFER_UPDATED]: recordHelpOffer,
     [EVENT_TYPES.WORK_STARTED]: startWork,
     [EVENT_TYPES.WORK_BLOCKED]: blockWork,
     [EVENT_TYPES.WORK_BLOCKER_RESOLVED]: resolveBlocker,
@@ -127,6 +153,11 @@ export function applyEvent(current, incoming) {
   state.seenEvents[incoming.id] = fingerprint;
   state.seenIdempotencyKeys[incoming.idempotencyKey] = incoming.id;
   return state;
+}
+
+function recordHelpOffer(state, incoming) {
+  const offer = helpOfferFromEvent(state, incoming);
+  (state.helpOffers ??= {})[offer.id] = offer;
 }
 
 function validateEnvelope(incoming) {
@@ -155,6 +186,12 @@ function createRoom(state, incoming) {
   if (incoming.roomId !== incoming.data.roomId) throw new Error("Room event id mismatch");
   if (incoming.actorId !== incoming.data.ownerId) throw new Error("Room must be created by its owner");
   state.room = { id: incoming.data.roomId, ...incoming.data, createdAt: incoming.at };
+}
+
+function updateCharter(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.kind !== "human" || actor.id !== state.room.ownerId) throw new Error("Only the Room owner may change room instructions");
+  state.room.charter = charterFromEvent(incoming, state.room.charter ?? null);
 }
 
 function addMember(state, incoming) {
@@ -251,9 +288,11 @@ function requireScopedMemberAdministration(state, actorId, targetId, currentTarg
 function postMessage(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
   requireFields(incoming.data, ["body"]);
-  if (incoming.data.toMemberId) requireMember(state, incoming.data.toMemberId);
+  const requestMode = prepareReplyPost(state, incoming);
+  if (incoming.data.toMemberId) (requestMode === "respond" ? knownMember : requireMember)(state, incoming.data.toMemberId);
   if (typeof incoming.data.body !== "string") throw new Error("Message body must be text");
   if (incoming.data.workItemId) requireWorkItem(state, incoming.data.workItemId);
+  const proposal = proposalContext(incoming.data, state.workItems[incoming.data.workItemId]);
   if (incoming.data.replyToId && !state.messages.some(m => m.id === incoming.data.replyToId)) throw new Error("Reply must reference a message in this Room");
   if (state.messages.some(m => m.id === (incoming.data.messageId || incoming.id))) throw new Error("Message already exists");
   state.messages.push({
@@ -263,8 +302,10 @@ function postMessage(state, incoming) {
     workItemId: incoming.data.workItemId || null,
     replyToId: incoming.data.replyToId || null,
     toMemberId: incoming.data.toMemberId || null,
-    createdAt: incoming.at
+    createdAt: incoming.at,
+    ...(proposal ? { proposal } : {})
   });
+  recordReplyPost(state, incoming, requestMode);
 }
 
 function setMessageReaction(state, incoming) {
@@ -385,12 +426,20 @@ function completeWork(state, incoming) {
     requirePermission(state, incoming.actorId, "write_external");
     if (!item.claim || !claimIsActive(item.claim, incoming.at) || item.claim.holderId !== incoming.actorId) throw new Error("Completion requires a current exact-scope claim");
   }
-  requireFields(incoming.data, ["summary", "evidenceUrl", "evidenceVersion", "nextAction"]);
-  try {
-    const url = new URL(incoming.data.evidenceUrl);
-    if (url.protocol !== "https:" || url.username || url.password) throw new Error();
-  } catch { throw new Error("Evidence must be an HTTPS URL without credentials"); }
-  const producerId = incoming.data.producerId ?? null;
+  let nativeText = null;
+  if (incoming.data.evidenceKind === "room_text") {
+    requireFields(incoming.data, ["summary", "evidenceVersion", "nextAction"]);
+    nativeText = nativeTextEvidence(state, item, incoming.data);
+  }
+  else {
+    if (["evidenceKind", "evidenceMessageId", "evidenceMessageEventId", "previousCompletionEventId"].some(key => Object.hasOwn(incoming.data, key))) throw new Error("Choose one evidence format");
+    requireFields(incoming.data, ["summary", "evidenceUrl", "evidenceVersion", "nextAction"]);
+    try {
+      const url = new URL(incoming.data.evidenceUrl);
+      if (url.protocol !== "https:" || url.username || url.password) throw new Error();
+    } catch { throw new Error("Evidence must be an HTTPS URL without credentials"); }
+  }
+  const attribution = reportedProducer(incoming.data), { producerId } = attribution;
   if (producerId !== null) knownMember(state, producerId);
   if (item.receipt) item.receiptHistory.push(item.receipt);
   if (item.verification) item.verificationHistory.push(item.verification);
@@ -401,10 +450,10 @@ function completeWork(state, incoming) {
     // the reporter. This also lets verification enforce independence when a producer is
     // actually known.
     reportedById: incoming.actorId,
-    producerId,
-    producerAttribution: producerId === null ? "unknown" : "reported",
+    ...attribution,
     summary: incoming.data.summary,
-    evidenceUrl: incoming.data.evidenceUrl,
+    evidenceUrl: nativeText ? null : incoming.data.evidenceUrl,
+    ...(nativeText ? { nativeText } : {}),
     evidenceVersion: incoming.data.evidenceVersion,
     checksClaimed: incoming.data.checksClaimed || [],
     nextAction: incoming.data.nextAction,

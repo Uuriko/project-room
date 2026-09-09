@@ -25,6 +25,34 @@ test('shared RoomStore: guests, retries, messages, journal rollback, cancellatio
     const resumed = await mf.dispatchFetch('http://localhost/resume', { method: 'POST', body: JSON.stringify(receipt) });
     assert.equal(resumed.status, 200, await resumed.clone().text());
     assert.deepEqual(await resumed.json(), { recovered: true, guests: 2, sequence: receipt.sequence });
+    await mf.dispose(); mf = new Miniflare(config);
+    const review = await mf.dispatchFetch('http://localhost/review-resume', { method: 'POST', body: JSON.stringify(receipt) });
+    assert.equal(review.status, 200, await review.clone().text());
+    assert.deepEqual(await review.json(), { reviewRecovered: true, invalidated: true, canSend: false });
+    for (const path of ['/update-resume', '/update-evidence-resume']) {
+      await mf.dispose(); mf = new Miniflare(config);
+      const update = await mf.dispatchFetch('http://localhost' + path, { method: 'POST', body: JSON.stringify(receipt) });
+      assert.equal(update.status, 200, await update.clone().text());
+      assert.deepEqual(await update.json(), { updateRecovered: true, outcome: 'unproven', canSend: false });
+    }
+    for (const path of ['/update-ack', '/update-ack-resume']) {
+      await mf.dispose(); mf = new Miniflare(config);
+      const update = await mf.dispatchFetch('http://localhost' + path, { method: 'POST', body: JSON.stringify(receipt) });
+      assert.equal(update.status, 200, await update.clone().text());
+      assert.deepEqual(await update.json(), { acknowledgmentRecovered: true, reviewed: false, canSend: false });
+    }
+    for (const path of ['/update-inspect', '/update-review', '/update-reviewed-resume']) {
+      await mf.dispose(); mf = new Miniflare(config);
+      const update = await mf.dispatchFetch('http://localhost' + path, { method: 'POST', body: JSON.stringify(receipt) });
+      assert.equal(update.status, 200, await update.clone().text());
+      assert.deepEqual(await update.json(), { inspectionRecovered: true, reviewed: path !== '/update-inspect', canSend: false });
+    }
+    for (const path of ['/update-read-unavailable', '/update-unavailable-resume']) {
+      await mf.dispose(); mf = new Miniflare(config);
+      const update = await mf.dispatchFetch('http://localhost' + path, { method: 'POST', body: JSON.stringify(receipt) });
+      assert.equal(update.status, 200, await update.clone().text());
+      assert.deepEqual(await update.json(), { latestUnavailable: true, preservedLocal: true });
+    }
     const guard = await mf.dispatchFetch('http://localhost/newer-version');
     assert.equal(guard.status, 200, await guard.clone().text());
     assert.deepEqual(await guard.json(), { rejected: true });

@@ -123,6 +123,19 @@ test("a pending invitation grants its account no Room read authority", t => {
   assert.equal(f.store.accountForMember("commons", "target-member"), null);
 });
 
+test("invitation acceptance at the projection cap fails cleanly without creating membership", t => {
+  const f = fixture(t), issued = invitation(f), room = f.store.room.bind(f.store);
+  // Isolate the capacity policy without constructing thousands of unrelated events.
+  f.store.room = id => { const result = room(id); result.state.capacityFixture = "x".repeat(4 * 1024 * 1024); return result; };
+  assert.throws(() => f.store.acceptInvitation(f.target.token, issued.rawToken, {
+    redemptionId: redemption(), expectedRevision: 0, expectedSessionBinding: f.target.session.sessionBinding
+  }), { code: "pilot_limit", status: 409 });
+  f.store.room = room;
+  assert.equal(f.store.previewInvitation(issued.rawToken).status, "pending");
+  assert.equal(f.store.accountForMember("commons", "target-member"), null);
+  assert.equal(f.store.room("commons").state.members["target-member"], undefined);
+});
+
 test("a replaced account-session slot cannot accept from its stale browser generation", t => {
   const f = fixture(t);
   const issued = invitation(f, { requestId: "stale-slot" });
@@ -430,11 +443,11 @@ test("v3 to v4 is additive and a failed migration leaves the v3 database untouch
     accounts: store.db.prepare("SELECT * FROM accounts ORDER BY id").all().map(row => ({ ...row })),
     bindings: store.db.prepare("SELECT * FROM member_accounts ORDER BY room_id,member_id").all().map(row => ({ ...row }))
   };
-  store.db.exec("DROP TABLE membership_invitation_journal; DROP TABLE membership_invitation_events; DROP TABLE membership_invitations; DROP TABLE account_session_slots; DROP TABLE account_credentials; PRAGMA user_version=3");
+  store.db.exec("DROP TABLE private_email_folders; DROP TABLE private_email_commands; DROP TABLE private_email_connections; DROP TABLE private_inbox_drafts; DROP TABLE private_inbox_versions; DROP TABLE private_inbox_sources; DROP TABLE private_inbox_commands; DROP TABLE agent_connection_operations; DROP TABLE agent_connections; DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE membership_invitation_journal; DROP TABLE membership_invitation_events; DROP TABLE membership_invitations; DROP TABLE account_session_slots; DROP TABLE account_credentials; PRAGMA user_version=3");
   store.close();
 
   store = new RoomStore(filename);
-  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 7);
+  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 26);
   assert.deepEqual({
     rooms: store.db.prepare("SELECT * FROM rooms ORDER BY id").all().map(row => ({ ...row })),
     events: store.db.prepare("SELECT * FROM events ORDER BY room_id,sequence").all().map(row => ({ ...row })),
@@ -447,7 +460,7 @@ test("v3 to v4 is additive and a failed migration leaves the v3 database untouch
   const broken = join(directory, "broken.sqlite");
   store = new RoomStore(broken);
   store.initialize(initialRoom("broken", "owner"));
-  store.db.exec("DROP TABLE membership_invitation_journal; DROP TABLE membership_invitation_events; DROP TABLE membership_invitations; DROP TABLE account_session_slots; DROP TABLE account_credentials; PRAGMA user_version=3");
+  store.db.exec("DROP TABLE private_email_folders; DROP TABLE private_email_commands; DROP TABLE private_email_connections; DROP TABLE private_inbox_drafts; DROP TABLE private_inbox_versions; DROP TABLE private_inbox_sources; DROP TABLE private_inbox_commands; DROP TABLE agent_connection_operations; DROP TABLE agent_connections; DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE membership_invitation_journal; DROP TABLE membership_invitation_events; DROP TABLE membership_invitations; DROP TABLE account_session_slots; DROP TABLE account_credentials; PRAGMA user_version=3");
   store.close();
   const raw = new DatabaseSync(broken);
   raw.exec("CREATE TABLE membership_invitations(dummy TEXT)");

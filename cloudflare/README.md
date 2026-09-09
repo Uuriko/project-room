@@ -1,6 +1,18 @@
 # Cloudflare staging candidate
 
-Status: **deployed to isolated staging on September 7, 2026** at
+**Local candidate update:** private reminders now require schema v8. They and the
+portable-work checkpoint are not published or deployed. See the
+[reminder plan](../docs/PRIVATE-REMINDERS-PLAN-2026-09-07.md). A migrated v8 database
+cannot run the older v7 application. A compatible v8 package and disposable local
+switch/recovery drill are now implemented; see the [recovery runbook](../docs/V8-RECOVERY-RUNBOOK.md).
+Provider PITR, current authority reconciliation and hosted approval remain gates.
+Frozen 7075 does not support the new pause flag. All historical Worker rollback
+versions below refer to the still-live **pre-v8** release.
+
+The following hosted status and health results are historical acceptance records,
+not reverified in the local v8 recovery checkpoint.
+
+Recorded status: **deployed to isolated staging on September 7, 2026** at
 [Project Room](https://project-room-staging.getdasha.workers.dev).
 Current accepted app `fb90a70`, Worker `901be347-7a39-4b56-8777-f4052bf81b38`;
 [latest checkpoint evidence](../docs/ASSISTED-WORK-CHECKPOINT-2026-09-07.md).
@@ -11,7 +23,7 @@ All three CI jobs passed; all ten live assets match the reviewed source.
 Health and readiness pass;
 two real HTTPS browsers completed owner login, invite creation, guest joining,
 mobile Send, desktop Enter and bidirectional live updates. The Node service remains
-the fallback. A new Worker and SQLite Durable Object were created; existing site
+a separately testable runtime, not a storage failover for the Durable Object. A new Worker and SQLite Durable Object were created; existing site
 Workers, DNS and routes were not changed. This is the same Room implementation with explicit database, asset,
 and visitor-address adapters, not a second product.
 
@@ -38,7 +50,7 @@ and visitor-address adapters, not a second product.
   trusted edge header; they do not prove the live edge path.
 - Asset packaging is an allowlist of the existing HTML, JS and CSS. Databases,
   operator files, tests and source directories are not static assets.
-  Wrangler rebuilds the ten files from the current checkout before both dry-run
+  Wrangler rebuilds the manifest’s allowlisted assets from the current checkout before both dry-run
   and deployment. Unknown files/directories or symlinks in the output cause a
   failure; the packager does not silently upload or delete them.
 - `*.test-fixture.mjs` exposes synthetic setup for local tests ONLY. Never use
@@ -61,7 +73,7 @@ Wrangler 4.116.0 and Miniflare 4.20260730.0 use the same stable workerd generati
 Cloudflare dependencies are isolated; the original Node test job does not need
 to install or run them. `--ignore-scripts` avoids dependency lifecycle scripts.
 The CI workflow now has separate contract, browser and Cloudflare jobs. The
-Cloudflare job runs all six local scenarios and the exact deployment dry-run;
+Cloudflare job runs the listed local scenarios and the exact deployment dry-run;
 it never gets operator credentials or calls the hosted acceptance script.
 
 Verified locally on September 7, 2026:

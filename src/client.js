@@ -1,3 +1,6 @@
+import { verifyWorkResult } from "./work-packet.js";
+import { validateCharterRead } from "./room-charter.js";
+
 const accountSessionError = message => {
   const error = new Error(message);
   error.status = 401;
@@ -80,6 +83,36 @@ export class AccountClient {
       }
       throw error;
     }
+  }
+  async confirm() {
+    const session = this.currentSession("confirming access", { authenticated: true }), generation = this.generation;
+    const value = await this.request("/api/account-session");
+    if (!this.owns(generation, session)) return null;
+    if (!value?.authenticated || !sameAccountSession(value, session)) { this.invalidate(generation, session); return false; }
+    return true; // Keep object identity and generation: Room and Inbox own these.
+  }
+  async rooms(after = null) {
+    const session = this.currentSession("listing rooms", { authenticated: true }), generation = this.generation;
+    let value;
+    try { value = await this.request("/api/account-rooms" + (after === null ? "" : "?after=" + encodeURIComponent(after)), { session }); }
+    catch (error) {
+      if (!this.owns(generation, session)) return null;
+      if (error.status === 401 || ["session_binding_changed", "account_session_required"].includes(error.code)) this.invalidate(generation, session);
+      throw error;
+    }
+    if (!this.owns(generation, session)) return null;
+    const v = value?.viewer;
+    if (value?.contractVersion !== 1 || v?.accountId !== session.account.id || v.authEpoch !== session.account.authEpoch
+      || v.sessionRevision !== session.sessionRevision || v.sessionBinding !== session.sessionBinding) {
+      this.invalidate(generation, session); throw accountSessionError("Account changed");
+    }
+    const id = value => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value);
+    if (!Array.isArray(value.rooms) || value.rooms.length > 50 || !value.rooms.every(r => id(r?.id) && id(r.memberId) && typeof r.title === "string")
+      || (value.nextCursor !== null && !id(value.nextCursor))) throw new Error("Room list could not be confirmed");
+    let previous = after ?? "";
+    for (const room of value.rooms) { if (room.id <= previous) throw new Error("Room list order could not be confirmed"); previous = room.id; }
+    if (value.nextCursor !== null && (value.nextCursor <= (after ?? "") || value.nextCursor < previous)) throw new Error("Room continuation could not be confirmed");
+    return value;
   }
   async logout() {
     const session = this.currentSession("signing out");
@@ -180,12 +213,13 @@ export class RoomClient {
     if (hadSession) this.onAccessEnded();
     return this;
   }
-  async request(path, { method = "GET", data, authMode = this.session?.authMode, authSession = this.session } = {}) {
+  async request(path, { method = "GET", data, authMode = this.session?.authMode, authSession = this.session, offerContext = false } = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10000);
     try {
       const response = await this.fetcher(path, { method, credentials: "same-origin", signal: controller.signal,
         headers: { ...(data === undefined ? {} : { "Content-Type": "application/json" }), ...(authSession?.csrf ? { "X-CSRF-Token": authSession.csrf } : {}),
+          ...(offerContext ? { "X-Project-Room-Offer-Context": "1" } : {}),
           ...(authMode === "account" ? { "X-Project-Room-Auth": "account", ...(authSession?.sessionBinding ? { "X-Session-Binding": authSession.sessionBinding } : {}) } : {}) },
         ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
       const body = await response.json();
@@ -289,7 +323,7 @@ export class RoomClient {
       try {
         do {
           flight.again = false;
-          const snapshot = await this.request(this.path());
+          const snapshot = await this.request(this.path(), { offerContext: true });
           if (generation !== this.generation || !this.session) return;
           if (!this.ownsResponse(snapshot)) { this.endAccess(); return; }
           if (snapshot.sequence >= this.sequence) { this.sequence = snapshot.sequence; this.onSnapshot(snapshot, this.session); }
@@ -323,6 +357,42 @@ export class RoomClient {
       throw error;
     }
   }
+  async replyContext(requestMessageId) {
+    const session = this.session, generation = this.generation;
+    if (!session || !this.ownsAccountSession()) throw new Error("Sign in again to read this request");
+    const current = () => generation === this.generation && this.session === session && this.ownsAccountSession();
+    let cursor = null, horizon = null, last = 0;
+    const seen = new Set();
+    for (let pageIndex = 0; pageIndex < 200; pageIndex++) {
+      const query = new URLSearchParams({ requestMessageId, limit: "50", ...(cursor ? { cursor } : {}) });
+      const result = await this.request(this.path(`/reply-context?${query}`));
+      if (!current()) throw new Error("Room identity changed");
+      if (!this.ownsResponse(result, session)) { this.endAccess(); throw new Error("Room identity changed"); }
+      const page = result?.page;
+      const anchor = JSON.stringify([page?.horizonSequence, page?.horizonEventId]);
+      if (result.contractVersion !== 1 || result.selection?.requestMessageId !== requestMessageId
+        || result.request?.id !== requestMessageId || !page || !Array.isArray(page.items)
+        || page.items.length > 50 || typeof page.hasMore !== "boolean"
+        || !Number.isSafeInteger(page.horizonSequence) || page.horizonSequence < 1
+        || page.cursor !== cursor || page.afterSequence !== last || horizon !== null && anchor !== horizon
+        || page.items.some(item => item.requestMessageId !== requestMessageId
+          || !Number.isSafeInteger(item.sequence) || item.sequence <= last || item.sequence > page.horizonSequence))
+        throw new Error("Request context could not be confirmed. Refresh context");
+      horizon = anchor;
+      for (const item of page.items) {
+        if (item.sequence <= last) throw new Error("Request context is out of order");
+        last = item.sequence;
+      }
+      if (!page.hasMore) {
+        if (page.nextCursor !== null) throw new Error("Request context is incomplete");
+        return result;
+      }
+      if (!page.items.length || typeof page.nextCursor !== "string" || !page.nextCursor || seen.has(page.nextCursor))
+        throw new Error("Request context did not advance");
+      seen.add(page.nextCursor); cursor = page.nextCursor;
+    }
+    throw new Error("Request context is too large. Open a new request");
+  }
   async caughtUp(sequence = this.sequence) {
     if (this.session?.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); return null; }
     const generation = this.generation, session = this.session;
@@ -330,6 +400,60 @@ export class RoomClient {
     if (generation !== this.generation || this.session !== session) return null;
     if (!this.ownsAccountSession()) { this.endAccess(); return null; }
     return result;
+  }
+  async reminders(request = null) {
+    if (!this.session) return null;
+    if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+    const generation = this.generation, session = this.session;
+    try {
+      const result = await this.request(this.path("/reminders"), request ? { method: "POST", data: request } : {});
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsResponse(result, session)) { this.endAccess(); return null; }
+      return result;
+    } catch (error) {
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+      if ([401, 403].includes(error.status) || error.code === "session_binding_changed") this.handleFailure(error);
+      throw error;
+    }
+  }
+  async charter(revision) {
+    if (!this.session) return null;
+    if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+    const generation = this.generation, session = this.session;
+    try {
+      const value = await this.request(this.path(`/charter${revision === undefined ? "" : `?revision=${revision}`}`));
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsResponse(value, session)) { this.endAccess(); return null; }
+      validateCharterRead(value, session.roomId, revision);
+      return value;
+    } catch (error) {
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+      if ([401, 403].includes(error.status) || error.code === "session_binding_changed") this.handleFailure(error);
+      throw error;
+    }
+  }
+  async workResult(workItemId, { completionEventId = null, draftMessageId = null } = {}) {
+    if (!this.session) return null;
+    if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+    const generation = this.generation, session = this.session, params = new URLSearchParams({ workItemId });
+    if (completionEventId !== null) params.set("completionEventId", completionEventId);
+    if (draftMessageId !== null) params.set("draftMessageId", draftMessageId);
+    try {
+      const value = await this.request(this.path(`/work-result?${params}`));
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsResponse(value, session)) { this.endAccess(); return null; }
+      await verifyWorkResult(value, { roomId: session.roomId, workItemId, completionEventId, draftMessageId });
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+      return value;
+    } catch (error) {
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+      if ([401, 403].includes(error.status) || error.code === "session_binding_changed") this.handleFailure(error);
+      throw error;
+    }
   }
   // Return brief: history fixed through H (frozen on the first page, continuations carry it),
   // current live through N. Fetching never acknowledges; only caughtUp() does, explicitly.
@@ -399,6 +523,18 @@ export class RoomClient {
 export { RoomClient as RoomSessionClient };
 
 // Retain the ID for an unchanged retry, never blindly replay a changed revision or payload.
+// Unknown commits stay locked across pre-ledger refusals (including rate/size
+// limits). Only a rejection after exact retry lookup resolves an unknown original.
+export function retryUnconfirmed(error, wasUnconfirmed = false) {
+  const scopeRejected = (error.status === 409 && error.code === "claim_conflict")
+    || (error.status === 422 && error.code === "invalid_claim_scope");
+  const rejected = error.status >= 400 && error.status < 500
+    && ["command_rejected", "invalid_command", "invalid_cause", "pilot_limit", "too_large"].includes(error.code);
+  const originalRejected = ([409, 422].includes(error.status) && error.code === "command_rejected")
+    || (error.status === 422 && error.code === "invalid_cause") || (error.status === 409 && error.code === "pilot_limit");
+  return !(scopeRejected || (wasUnconfirmed ? originalRejected : rejected));
+}
+
 export function draftCommand(previous, type, data, causationId = null) {
   const contents = JSON.stringify({ type, data, causationId });
   return previous?.contents === contents ? previous : { contents, command: { id: crypto.randomUUID(), type, data, ...(causationId ? { causationId } : {}) } };

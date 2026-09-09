@@ -1,0 +1,96 @@
+// Simulated people in isolated rooms, including real browser failure recovery.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync, mkdirSync } from "node:fs";
+import { chromium } from "playwright";
+import { startHelperAgentExercise } from "./helper-agent-exercise.mjs";
+import { textVersion } from "../server/text-results.mjs";
+
+for (const mobile of [false, true]) test(`refine draft ${mobile ? "mobile" : "desktop"}: separate edits, source link, exact retry and result`, { timeout: 60000 }, async t => {
+  const f = await startHelperAgentExercise(); let browser;
+  t.after(async () => { await browser?.close(); await f.close(); });
+  const config = JSON.parse(readFileSync(f.manifest.ownerPath)), workId = f.manifest.workItemId;
+  const send = (type, data) => f.store.command(config.token, "commons", { id: crypto.randomUUID(), type, data });
+  const state = () => f.store.snapshot(config.token, "commons").state;
+  const original = "Come share an idea.\n\nChecks: no external tests.\nPending: independent review.";
+  for (const [messageId, body] of [["source-a", original], ["source-b", "A different draft.\nChecks: none."]]) send("message.posted", {
+    messageId, body, workItemId: workId, packetId: messageId, basisRevision: 1
+  });
+  browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 }, isMobile: mobile, hasTouch: mobile, reducedMotion: "reduce" });
+  page.setDefaultTimeout(10000);
+  const errors = [], external = [], commands = [];
+  page.on("pageerror", e => errors.push(e.message));
+  page.on("request", r => { if (r.method() === "POST" && r.url().endsWith("/commands")) commands.push(r.postDataJSON()); });
+  await page.route("**/*", route => { if (new URL(route.request().url()).origin === config.origin) return route.continue(); external.push(route.request().url()); return route.abort(); });
+  const login = async () => { await page.locator("#access-key").fill(config.token); await page.getByRole("button", { name: "Enter room", exact: true }).click(); await page.locator("#main").waitFor(); };
+  await page.goto(config.origin); await login();
+  const open = async id => { await page.locator('[data-portable-original="' + id + '"]').click(); await page.locator("#portable-dialog").waitFor(); };
+  const close = () => page.locator("#portable-close").click();
+  const ordinary = async () => {
+    const details = page.locator('[data-work-record-id="' + workId + '"] .work-details');
+    if (!await details.evaluate(node => node.open)) await details.locator(":scope > summary").click();
+    await details.getByRole("button", { name: "Share draft", exact: true }).click();
+  };
+  const capture = async name => { mkdirSync("test-results/refine-draft", { recursive: true }); await page.screenshot({ path: `test-results/refine-draft/${mobile ? "mobile" : "desktop"}-${name}.png` }); };
+  await page.locator("#message-input").fill("Keep my conversation draft.");
+  await ordinary(); await page.locator("#portable-result").fill("Keep my unrelated work draft."); await close();
+  await open("source-a");
+  assert.equal(await page.locator("#portable-title").textContent(), "Refine draft");
+  assert.equal(await page.locator("#portable-result").inputValue(), original, "no automatic stripping");
+  assert.equal(await page.locator("#portable-original").evaluate(node => node.open), false);
+  await page.locator("#portable-original > summary").click();
+  assert.equal(await page.locator("#portable-original-body").textContent(), original);
+  const artifact = "Come share an idea.";
+  await page.locator("#portable-result").fill(artifact); await capture("editor"); await close();
+  await open("source-b"); await page.locator("#portable-result").fill("Keep my other refinement."); await close();
+  await open("source-a"); assert.equal(await page.locator("#portable-result").inputValue(), artifact);
+  assert.equal(await page.locator("#portable-original").evaluate(node => node.open), false);
+  send("work.started", { workItemId: workId, expectedRevision: 1 });
+  await page.locator("#portable-older-label").waitFor();
+  assert.equal(await page.locator("#portable-submit").isDisabled(), true);
+  await page.locator("#portable-older").check();
+  const prior = structuredClone(state().workItems[workId]);
+  let lost = false;
+  await page.route("**/api/rooms/commons/commands", async route => {
+    if (!lost && route.request().postDataJSON().type === "message.posted") { lost = true; await route.fetch(); return route.abort("failed"); }
+    return route.continue();
+  });
+  await page.locator("#portable-submit").click();
+  await page.getByText("Save not confirmed. Retry the same draft.", { exact: true }).waitFor();
+  const first = commands.at(-1);
+  assert.equal(first.data.replyToId, "source-a"); assert.equal(first.data.basisRevision, 1);
+  await close(); await open("source-b"); assert.equal(await page.locator("#portable-result").inputValue(), "Keep my other refinement."); await close();
+  await open("source-a"); assert.equal(await page.locator("#portable-result").getAttribute("readonly"), "");
+  await page.locator("#portable-submit").click(); await page.locator("#portable-dialog").waitFor({ state: "hidden" });
+  assert.deepEqual(commands.at(-1), first);
+  const refinements = state().messages.filter(message => message.replyToId === "source-a");
+  assert.equal(refinements.length, 1); const refined = refinements[0];
+  assert.equal(refined.body, artifact); assert.equal(refined.proposal.attribution, "manual-unverified");
+  assert.deepEqual(state().workItems[workId], prior);
+  assert.equal(state().messages.find(message => message.id === "source-a").body, original);
+  await page.locator('[data-message-action="result"][data-message-id="' + refined.id + '"]').click();
+  await page.waitForFunction(body => document.querySelector("#action-text-body").textContent === body, artifact);
+  await page.locator('[name="producerId"]').selectOption("__unknown__");
+  await page.locator('#action-fields [name="summary"]').fill("Welcome artifact, notes retained in the original.");
+  await page.locator('#action-fields [name="nextAction"]').fill("Identify producer, then review this exact revision.");
+  await page.locator("#action-form button[type=submit]").click(); await page.locator("#action-dialog").waitFor({ state: "hidden" });
+  assert.equal(state().workItems[workId].receipt.evidenceVersion, textVersion(artifact));
+  assert.equal(state().workItems[workId].verification, null); assert.equal(state().workItems[workId].decision, null);
+  await page.locator('[data-read-result="' + workId + '"]').click();
+  await page.waitForFunction(body => document.querySelector("#result-body").textContent === body, artifact);
+  await capture("result"); await page.locator("#result-original").click();
+  await page.locator("#result-dialog").waitFor({ state: "hidden" });
+  await page.locator('[data-portable-original="source-a"]').waitFor();
+  assert.ok((await page.locator("#message-list").textContent()).includes(original));
+  await ordinary(); assert.equal(await page.locator("#portable-result").inputValue(), "Keep my unrelated work draft."); await close();
+  if (await page.locator("#thread-back").isVisible()) await page.locator("#thread-back").click();
+  assert.equal(await page.locator("#message-input").inputValue(), "Keep my conversation draft.");
+  assert.ok(f.evidence().cursors.every(c => c.sequence === 0));
+  page.on("dialog", dialog => dialog.accept());
+  await page.locator("#signout-button").click(); await page.locator("#auth-panel").waitFor();
+  assert.equal(await page.locator("#portable-original-body").textContent(), "");
+  await login(); await open("source-b");
+  assert.equal(await page.locator("#portable-result").inputValue(), "A different draft.\nChecks: none.");
+  assert.deepEqual(errors, []); assert.deepEqual(external, []);
+});

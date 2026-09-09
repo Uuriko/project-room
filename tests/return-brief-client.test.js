@@ -83,7 +83,7 @@ test("reading never acknowledges; explicit acknowledgement uses frozen H and coa
   const first = view.refresh(); pending[0].resolve(page([1, 2], { horizon: 2 })); await first;
   assert.deepEqual(acknowledgments, []);
   let saved; client.caughtUp = sequence => { acknowledgments.push(sequence); return new Promise(resolve => saved = resolve); };
-  const ack = view.acknowledge(); await view.acknowledge();
+  const ack = view.acknowledge(999); await view.acknowledge();
   assert.deepEqual(acknowledgments, [2]); saved();
   // The response to the post-ack refresh contains the new event H+1.
   await new Promise(resolve => setImmediate(resolve));
@@ -99,6 +99,34 @@ test("old acknowledgement failures cannot clear or report into a new view", asyn
   const fresh = view.refresh(); pending[1].resolve(page([1], { horizon: 1 })); await fresh;
   fail(Object.assign(new Error("expired"), { status: 401 })); await ack;
   assert.equal(view.brief.history.items.length, 1); assert.deepEqual(errors, []); assert.equal(view.busy, false);
+});
+
+test("an ahead-of-snapshot brief reconciles record links before exposing its frozen history", async () => {
+  const { view, client, pending } = fixture();
+  client.sequence = 1;
+  let release, refreshed = 0;
+  client.refresh = () => { refreshed++; return new Promise(resolve => release = resolve); };
+  const flight = view.refresh(); pending[0].resolve(page([2], { horizon: 2 }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(view.brief, null); assert.equal(view.message, "Updating room…");
+  assert.equal(refreshed, 1);
+  client.sequence = 3; release(); await flight;
+  assert.equal(view.brief.history.evaluatedThrough, 2, "refresh never expands the frozen history");
+});
+
+test("an ahead-of-snapshot reconciliation cannot expose a different session or an unavailable record", async () => {
+  for (const outcome of ["stale", "behind", "error"]) {
+    const { view, client, pending } = fixture();
+    client.sequence = 1;
+    let release, reject;
+    client.refresh = () => new Promise((done, fail) => { release = done; reject = fail; });
+    const flight = view.refresh(); pending[0].resolve(page([2], { horizon: 2 }));
+    await new Promise(resolve => setImmediate(resolve));
+    if (outcome === "stale") { client.generation++; view.reset(); client.sequence = 2; }
+    if (outcome === "error") reject(new Error("offline")); else release();
+    await flight;
+    assert.equal(view.brief, null); assert.equal(view.busy, false);
+  }
 });
 
 test("a moved marker restarts once; an out-of-order page never appends", async () => {

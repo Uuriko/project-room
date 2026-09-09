@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { Miniflare } from 'miniflare';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
-import { writerFenceDefinitions, WRITER_FUNCTION } from '../server/writer-fence.mjs';
+import { writerFenceDefinitions, WRITER_FUNCTION, STORE_SCHEMA_VERSION } from '../server/writer-fence.mjs';
 
 const script = await readFile(new URL('./compatibility-worker.mjs', import.meta.url), 'utf8');
 const store = new RoomStore(':memory:');
@@ -33,7 +33,7 @@ store.close();
 const options = {
   modules: true, script, compatibilityDate: '2026-07-30',
   durableObjects: { ROOM: { className: 'CompatibilityRoom', useSQLite: true } },
-  bindings: { SCHEMA: JSON.stringify(schema), FIXTURE: JSON.stringify(fixture) },
+  bindings: { SCHEMA: JSON.stringify(schema), FIXTURE: JSON.stringify(fixture), SCHEMA_VERSION: STORE_SCHEMA_VERSION },
 };
 async function request(mf, path) {
   const response = await mf.dispatchFetch(`http://localhost${path}`);

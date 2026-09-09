@@ -1,0 +1,138 @@
+import { nextWorkStep } from "../src/workflow.js";
+import { validId, EVENT_TYPES } from "../src/events.js";
+import { WatchError, MAX_ATTENTION, attentionCapacity, attentionFilter } from "./watch-journal.mjs";
+import { charterContext, validateCharterContext } from "../src/room-charter.js";
+import { requestNotices, hasRequestSupport } from "./request-notices.mjs";
+
+export function attentionNotices(snapshot, now = Date.now()) {
+  const notices = new Map();
+  const items = snapshot.state.workItems;
+  if (!items || typeof items !== "object" || Array.isArray(items)) throw new WatchError("invalid_snapshot");
+  for (const [id, item] of Object.entries(items)) {
+    if (!item || !validId(item.id) || id !== item.id || !Number.isSafeInteger(item.revision) || item.revision < 0 || typeof item.title !== "string") throw new WatchError("invalid_snapshot");
+    const next = nextWorkStep(item, now);
+    if (!next.needsAttention || next.memberId !== snapshot.viewerId) continue;
+    const signature = JSON.stringify([next.action, next.memberId, next.completionEventId, next.evidenceVersion,
+      item.blocker?.eventId ?? null, item.decision?.eventId ?? null,
+      next.action === "claim" ? [item.claim?.holderId, item.claim?.acquiredAt, item.claim?.expiresAt, item.claim?.status] : null]);
+    notices.set(item.id, { signature, payload: { roomId: snapshot.roomId, memberId: snapshot.viewerId, workItemId: item.id,
+      title: item.title, next, notifyOnly: true, message: "Needs your attention. Check current scope before acting." } });
+    if (notices.size > MAX_ATTENTION) throw new WatchError("attention_capacity");
+  }
+  return notices;
+}
+
+// Explicitly selected current-context mode. No prose inference or event archive:
+// one room instruction condition, plus the same meaningful work conditions as v1.
+export function contextNotices(snapshot, now = Date.now()) {
+  let charter;
+  try {
+    charter = validateCharterContext(snapshot.charter);
+    if (JSON.stringify(charter) !== JSON.stringify(charterContext(snapshot.state.room))
+        || charter.revision > snapshot.sequence) throw new Error();
+  } catch { throw new WatchError("invalid_charter_context"); }
+  const notices = new Map();
+  for (const [id, entry] of attentionNotices(snapshot, now)) {
+    notices.set(JSON.stringify(["work", id]), {
+      signature: JSON.stringify(["work", ...JSON.parse(entry.signature)]),
+      payload: { ...entry.payload, subject: "work", charter: { revision: charter.revision, eventId: charter.eventId },
+        nextRead: { tool: "room_read_work", arguments: { workItemId: id, includeSource: false } } }
+    });
+  }
+  if (charter.revision > 0) notices.set(JSON.stringify(["instructions"]), {
+    signature: JSON.stringify(["instructions", charter.revision, charter.eventId]),
+    payload: { subject: "instructions", roomId: snapshot.roomId, memberId: snapshot.viewerId,
+      title: "Room instructions", charter: { revision: charter.revision, eventId: charter.eventId },
+      notifyOnly: true, message: "Read the current instructions before new work. Guidance does not grant permission.",
+      nextRead: { tool: "room_list_work", arguments: {} } }
+  });
+  if (notices.size > MAX_ATTENTION) throw new WatchError("attention_capacity");
+  return notices;
+}
+
+export function requestContextNotices(snapshot, now = Date.now()) {
+  if (!hasRequestSupport(snapshot)) throw new WatchError("request_context_unavailable");
+  const notices = contextNotices(snapshot, now);
+  try { for (const [key, entry] of requestNotices(snapshot)) notices.set(key, entry); }
+  catch { throw new WatchError("invalid_request_context"); }
+  if (notices.size > attentionCapacity(3)) throw new WatchError("attention_capacity");
+  return notices;
+}
+
+// Snapshot observer, not an event replay or a work executor. State is authoritative
+// as of each snapshot; intermediate changes between polls may intentionally be quiet.
+export class AssignmentWatcher {
+  #running = null;
+  constructor({ client, journal, origin, roomId, emit, signal, now = Date.now, context = false, requests = false }) {
+    Object.assign(this, { client, journal, origin, roomId, emit, signal, now, context, requests });
+  }
+  #active() {
+    if (this.signal?.aborted || this.journal.shouldStop()) throw new WatchError("stopped");
+  }
+  async #anchor(sequence) {
+    const page = await this.client.changes(sequence - 1, 1, { signal: this.signal });
+    this.#active();
+    const row = page?.events?.[0];
+    if (page?.events?.length !== 1 || page.next !== sequence || row.sequence !== sequence
+        || !validId(row.event?.id) || row.event.roomId !== this.roomId) throw new WatchError("history_changed");
+    return row.event;
+  }
+  async reconcile(initialSnapshot) {
+    this.#active();
+    // Reuse only validated rows within this observation. Equal prior/current
+    // checkpoints need one anchor read, but both comparisons still apply.
+    // A new reconcile (including the pre-delivery pass) always reads afresh.
+    const anchors = new Map();
+    const anchor = async sequence => {
+      this.#active();
+      if (!anchors.has(sequence)) anchors.set(sequence, await this.#anchor(sequence));
+      return anchors.get(sequence);
+    };
+    const snapshot = initialSnapshot ?? await this.client.snapshot({ signal: this.signal });
+    this.#active();
+    const member = snapshot?.state?.members?.[snapshot.viewerId];
+    if (snapshot?.roomId !== this.roomId || !Number.isSafeInteger(snapshot.sequence) || snapshot.sequence < 1
+        || !validId(snapshot.viewerId) || member?.id !== snapshot.viewerId || member.active === false
+        || (snapshot.viewerAccountId !== null && !validId(snapshot.viewerAccountId))
+        || (snapshot.viewerAccountId === null ? snapshot.viewerAuthEpoch !== null
+          : !Number.isSafeInteger(snapshot.viewerAuthEpoch) || snapshot.viewerAuthEpoch < 0)
+        || !snapshot.state.workItems || !Array.isArray(snapshot.state.eventLog)) throw new WatchError("invalid_snapshot");
+    const lastEvent = snapshot.state.eventLog.at(-1);
+    if (!validId(lastEvent?.id) || lastEvent.roomId !== this.roomId) throw new WatchError("invalid_snapshot");
+    const created = await anchor(1);
+    if (created.type !== EVENT_TYPES.ROOM_CREATED) throw new WatchError("history_changed");
+    const version = this.requests ? 3 : this.context ? 2 : 1;
+    const binding = { version, filter: attentionFilter(version), origin: this.origin, roomId: this.roomId,
+      memberId: snapshot.viewerId, accountId: snapshot.viewerAccountId ?? null,
+      authEpoch: snapshot.viewerAuthEpoch ?? null, createdEventId: created.id };
+    const previous = this.journal.state();
+    if (previous) {
+      if (JSON.stringify(binding) !== JSON.stringify(previous.binding)) throw new WatchError("identity_changed");
+      if (snapshot.sequence < previous.sequence || (await anchor(previous.sequence)).id !== previous.eventId) throw new WatchError("history_changed");
+    }
+    // Tie the snapshot's last event to its claimed sequence, including first use.
+    if ((await anchor(snapshot.sequence)).id !== lastEvent.id) throw new WatchError("history_changed");
+    this.#active();
+    const now = this.now();
+    this.journal.reconcile(binding, { sequence: snapshot.sequence, eventId: lastEvent.id },
+      this.requests ? requestContextNotices(snapshot, now) : this.context ? contextNotices(snapshot, now) : attentionNotices(snapshot, now), now);
+  }
+  tick() {
+    if (!this.#running) this.#running = this.#tick().finally(() => { this.#running = null; });
+    return this.#running;
+  }
+  async #tick() {
+    await this.reconcile();
+    if (!this.journal.pending(1).length) return 0;
+    // Re-authenticate and suppress obsolete queued work before each bounded drain.
+    await this.reconcile();
+    let written = 0;
+    for (const notice of this.journal.pending(20)) {
+      this.#active();
+      await this.emit(notice, this.signal);
+      this.#active();
+      this.journal.ack(notice.id); written++;
+    }
+    return written;
+  }
+}
