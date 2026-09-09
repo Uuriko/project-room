@@ -97,6 +97,12 @@ handoff, original results and exact-version cross-review. It preserved the owner
 decision gate. Both participants shared one OS user and were coordinator-staged;
 this is not isolated execution or native vendor-host acceptance.
 
+September9 [helper acceptance](ACTUAL-HELPER-ACCEPTANCE-2026-09-09.md) exercised the
+current coordinator AI through direct client and fresh local protocol processes:
+offer, exact retry, original draft, simulated-owner browser adoption, exact result
+read and explicit release. Independent review stayed pending. This strengthens
+the contribution-path evidence, not the native-host compatibility claims above.
+
 Protocol support is explicitly **MCP 2025-11-25, tools-only stdio**. July 2026 is a
 different protocol: it replaces initialization with discovery and per-request
 metadata. This adapter returns method-not-found for `server/discover`, allowing a

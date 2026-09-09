@@ -15,9 +15,9 @@ The exercise ran at `8eb3ddf3ae14038a697134b4ee58eaab12788a36`, extending clean 
 3. A fresh local MCP process retried the exact original offer input. It returned the original sequence9/event, with `duplicate:true`, while a separate current read showed selection. The old receipt was not mistaken for current state.
 4. The coordinator authored and posted this 21-word draft at sequence11: “Bring a question, an idea, or something you’re making. Talk it through together, or share a small draft when you’re ready.” Another fresh process recovered the same draft receipt and fetched its exact text. No duplicated reply request or copied answer was added to the conversation.
 5. The simulated owner inspected the visible text, explicitly chose the reported producer, and saved it as a result at sequence12. It preserved the owner's unrelated composer draft. The interface showed Awaiting verification, not approval.
-6. The coordinator fetched that exact completion and independently recomputed its byte hash, then explicitly released the stale selected offer at sequence13. Release changed coordination only. No independent review or human decision was fabricated.
+6. The coordinator fetched that exact completion and locally recomputed its byte hash, then explicitly released the stale selected offer at sequence13. Release changed coordination only. No independent review or human decision was fabricated.
 
-The original text is126 UTF-8 bytes. Evidence version: `sha256:ef863ea2d65915c7f29f74817020ee0b14b38e7fda42504bfc5cfb22fd399500`. Draft event: `9d7cb51a-9b60-4bc2-9dd5-9ee0749f6b71`. Completion event: `cb5070ca-81ae-4c7e-a8a0-b8772d98d505`.
+The original text is 126 UTF-8 bytes. Evidence version: `sha256:ef863ea2d65915c7f29f74817020ee0b14b38e7fda42504bfc5cfb22fd399500`. Draft event: `9d7cb51a-9b60-4bc2-9dd5-9ee0749f6b71`. Completion event: `cb5070ca-81ae-4c7e-a8a0-b8772d98d505`.
 
 Final state: work completed/revision2 (a reported result), verification null, owner decision null, offer released, all three read markers0. The selected next actor remained the reviewer. The service records authenticated membership attribution, not cryptographic proof of model authorship; the portable draft's existing `manual-unverified` provenance was intentionally preserved, and the owner-reported producer remains a report.
 
@@ -25,7 +25,7 @@ Final state: work completed/revision2 (a reported result), verification null, ow
 
 The selected response exposes invitation-specific `offers` alongside older conversational `collaboration.offer` guidance. Both are valid routes, but an unfamiliar agent could interpret them as two required steps. The tool description and help-offer guide now explicitly prioritize requested offer context and explain that the conversational request is a fallback, not a second offer. No read payload, validator, permission, tool registration, schema or business transition changed. A protocol listing regression checks that cue and still exercises the selected offer read.
 
-The owner screens kept the conversation central and deeper controls inside the existing help/result flows. Five screenshots were captured across selection and adoption; four were inspected closely. The result form still has substantial metadata, and selecting a producer deliberately is important. Future simplification should not erase the difference between poster, reported producer, reviewer and owner decision. This exercise does not establish human delight or retention.
+The owner screens kept the conversation central and deeper controls inside the existing help/result flows. Five screenshots were captured and inspected across selection and adoption. The result form still has substantial metadata, and selecting a producer deliberately is important. Future simplification should not erase the difference between poster, reported producer, reviewer and owner decision. This exercise does not establish human delight or retention.
 
 ## Reusable local exercise and evidence
 
@@ -40,3 +40,9 @@ The fixture process exited normally and removed only its generated temporary roo
 ## Next
 
 Qualify independent native-host review when current usage approval is available, with the complete scoped inspection tool set. Separately test the manual packet return through the same result/review path and record its different identity/tracking limitations. Continue source/connection rebasing and recovery limits before real mailbox editing; do not let those dependencies block native conversation or agent collaboration progress.
+
+## Committed regression checkpoint
+
+The guidance improvement and fixture regression at `a7b9a1620c4b6edc6d30fcf9e3bf81cd03563c4c` passed **918 core** and **24 relevant offer/native-draft/native-result browser** checks, zero failures, both processes completed. The actual coordinator exercise ran at the earlier 8eb3ddf fixture commit, before the wording improvement; do not describe it as a native-host rerun of that wording. Two focused protocol/fixture checks also passed. The broader Inbox browser suite and Workers suite were not rerun in this tool-description/fixture-only checkpoint.
+
+Offline package `/private/tmp/project-room-helper-runtime-vg3nFF/runtime` verifies a7b9a16, schema25, 82 files and 24 public assets. Manifest SHA-256: `d1473536f39edc759e17d6c2008baa0407bbc85f4a8720a60029264027358b47`. Final suite logs and manifest are retained with the actual exercise evidence. Only documentation changes follow this runtime checkpoint. No deployment or universal-host compatibility is claimed.
