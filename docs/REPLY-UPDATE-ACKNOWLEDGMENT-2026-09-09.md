@@ -47,3 +47,13 @@ Screenshots use fictional mail. Simulated human journeys cannot establish real-u
 Finish post-write inspection with a child-bound review basis, including observations before/after a late acknowledgment and opaque version mismatches. Add explicit reconciliation and terminal resolution without treating equality as causation, without silently replacing local writing, and without making uncertain updates repeatable. Qualify the full interaction in the existing comparison sheet before exposing an update control.
 
 Then qualify an authorized dedicated mailbox and an actual transport under explicit scope. Provider concurrency, permissions, recovery, credential handling, delivery and operational release checks remain necessary. This checkpoint does not enable provider calls, external sending, paid models, money, publishing or deployment, and does not change Desk, Dasha or Demigod.
+
+## Exact committed checkpoint
+
+Runtime `07a13aaaa5b820f579586615b93312a084ce4061` passed **906 core**, **66 account/Inbox/collaboration browser**, and **25 local Workers** checks, zero failures: 997 total, not 997 newly added tests. All three processes completed successfully. The browser cases include direct replies, room-assisted returns, desktop/mobile acknowledgment, current-account changes, uncertainty, and the captured-comparison refresh regression.
+
+The offline package at `/private/tmp/project-room-ack-runtime-mlgwCE/runtime` verified the exact runtime commit, schema24, 81 files and 24 public assets. Manifest SHA-256: `7f0c5fb160d1b0b0d725ecb2542fca6939dc2e947c9968eb45a06271b98034b1`. This is content consistency, not publication approval or proof of hosted readiness.
+
+`test-results/reply-update-acknowledgment-20260909/` retains all three committed logs, the initial focused localhost-listener failure, passing focused logs, the package manifest, and inspected desktop/mobile screenshots with “Last checked draft” and “Update acknowledged · review pending.” The earlier logout-fixture failure is in the tool transcript; no separate persisted log was created for that first command.
+
+Only documentation changes follow the runtime commit. No live mailbox, provider transport, write or send was enabled. The child-bound post-write inspection/review/resolution milestone remains unfinished, as does the broad goal.
