@@ -33,3 +33,11 @@ The first visual pass showed a disabled blue review button competing with a read
 The first focused comparison run passed six of eight checks and failed immediate post-close clearing in both layouts. The corrected focused run passed all eight. Subsequent broader checks passed 896 core, 62 affected browser checks and 24 local Workers checks before the final extra visible-sign-out and rapid-reopen tests were added. Final committed results are recorded below after verification.
 
 No actual-human preference, provider interoperability, retention or deployment readiness is inferred from these results. Provider write acknowledgment/resolution remains a separate unfinished milestone; this turn researched its distinction from readback but did not implement or persist a write receipt.
+
+## Exact checkpoint
+
+Committed runtime `0713606fe68bd639b8176998113c54865953b56d` passed **896 core**, **63 account/Inbox/collaboration browser**, and **24 local Workers** checks, zero failures. The Workers HTTP test covers both negotiated v1 and v2. The browser run includes all six dedicated comparison cases plus existing direct and room-assisted reply, uncertainty and recovery flows. The final focused six-case comparison run also passed.
+
+Evidence: `test-results/reply-comparison-20260909/` contains committed logs, the initial failing focused log, and inspected `desktop.png`, `mobile.png`, `mobile-original.png`, and `update-unconfirmed.png`. The screenshots use fictional mail and show the actual new read-only interaction, not live provider writes. Subsequent edits to this document are documentation only.
+
+Next: qualify operation-bound provider write acknowledgment, post-write readback and child-specific review/resolution without treating content equality as causation. Preserve the new comparison as the presentation layer; do not add a second messaging dashboard. Separately authorized dedicated-mailbox testing remains required before advertising live editing or sending. The broad goal remains active and incomplete.
