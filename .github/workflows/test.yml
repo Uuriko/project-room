@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # The v2-journal and runtime-package gates read retained ancestor commits.
       - uses: actions/setup-node@v4
         with:
           node-version: 24
