@@ -405,6 +405,41 @@ test("an exact-scope write claim can be released at event and projection capacit
   // Deliberately synthetic capacity state is not claimed to be a recoverable history.
 });
 
+test("open work can be completed, unblocked, and superseded at event and projection capacity", t => {
+  const { store, owner } = fixture(t);
+  store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "cap-complete", title: "Finish at capacity", definitionOfDone: "Completion lands", accountableMemberId: "owner" }));
+  store.command(owner, "commons", command(T.WORK_ACCEPTED, { workItemId: "cap-complete", expectedRevision: 0 }));
+  store.command(owner, "commons", command(T.WORK_STARTED, { workItemId: "cap-complete", expectedRevision: 1 }));
+  store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "cap-blocked", title: "Recover at capacity", definitionOfDone: "Blocker clears", accountableMemberId: "owner" }));
+  store.command(owner, "commons", command(T.WORK_ACCEPTED, { workItemId: "cap-blocked", expectedRevision: 0 }));
+  store.command(owner, "commons", command(T.WORK_BLOCKED, { workItemId: "cap-blocked", expectedRevision: 1, reason: "Waiting on review", nextAction: "Owner reviews" }));
+  store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "cap-old", title: "Retired at capacity", definitionOfDone: "Replaced", accountableMemberId: "owner" }));
+  store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "cap-new", title: "Replacement", definitionOfDone: "Carries the goal", accountableMemberId: "owner" }));
+  const state = store.room("commons").state;
+  state.messages.push({ body: "x".repeat(4 * 1024 * 1024) });
+  store.db.prepare("UPDATE rooms SET sequence=10000,projection=? WHERE id='commons'").run(JSON.stringify(state));
+  // Acquisition and ordinary progress remain capped.
+  assert.throws(() => store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "cap-extra", title: "New work", definitionOfDone: "Not at capacity", accountableMemberId: "owner" })), { code: "pilot_limit" });
+  assert.throws(() => store.command(owner, "commons", command(T.WORK_STARTED, { workItemId: "cap-blocked", expectedRevision: 2, resolvedBlocker: "skip" })), { code: "pilot_limit" });
+  assert.throws(() => store.command(owner, "commons", command(T.MESSAGE_POSTED, { body: "still capped" })), { code: "pilot_limit" });
+  // Completion is a terminal action and stays available exactly once per open item.
+  const completion = command(T.WORK_COMPLETED, { workItemId: "cap-complete", expectedRevision: 2, summary: "Done", evidenceUrl: "https://example.com/evidence", evidenceVersion: "v1", nextAction: "Verify" });
+  assert.equal(store.command(owner, "commons", completion).sequence, 10001);
+  assert.equal(store.command(owner, "commons", completion).duplicate, true);
+  assert.equal(store.room("commons").state.workItems["cap-complete"].state, "completed");
+  assert.throws(() => store.command(owner, "commons", command(T.WORK_COMPLETED, { workItemId: "cap-complete", expectedRevision: 3, summary: "Again", evidenceUrl: "https://example.com/again", evidenceVersion: "v2", nextAction: "Verify" })), { code: "pilot_limit" });
+  // A blocked item can still be recovered to accepted.
+  const resolved = store.command(owner, "commons", command(T.WORK_BLOCKER_RESOLVED, { workItemId: "cap-blocked", expectedRevision: 2, resolution: "Review landed" }));
+  assert.equal(resolved.duplicate, false);
+  assert.equal(store.room("commons").state.workItems["cap-blocked"].state, "accepted");
+  // An open item can still be ended by supersession.
+  store.command(owner, "commons", command(T.WORK_SUPERSEDED, { workItemId: "cap-old", expectedRevision: 0, supersededByWorkItemId: "cap-new", reason: "Replaced at capacity" }));
+  assert.equal(store.room("commons").state.workItems["cap-old"].state, "superseded");
+  // Review verdicts are not recovery actions and remain capped.
+  assert.throws(() => store.command(owner, "commons", command(T.VERIFICATION_RECORDED, { workItemId: "cap-complete", expectedRevision: 3, result: "pass", completionEventId: "none", evidenceVersion: "v1", summary: "capped" })), { code: "pilot_limit" });
+  // Deliberately synthetic capacity state is not claimed to be a recoverable history.
+});
+
 test("new work mutations recheck capability changes and preserve the original work record", t => {
   const { store, owner, human } = fixture(t);
   store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "grant", title: "Permission-bound work", definitionOfDone: "A current grant is needed", accountableMemberId: "human" }));
