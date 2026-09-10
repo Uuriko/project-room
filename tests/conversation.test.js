@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T, replay } from "../src/events.js";
-import { conversationIndex, searchMessages, ConversationDrafts, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS, kindLabel, memberStatus, addressMember, shouldAddressPresenceClick, messageMentionsMember } from "../src/conversation.js";
+import { conversationIndex, searchMessages, ConversationDrafts, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS, kindLabel, memberStatus, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress } from "../src/conversation.js";
 import { draftCommand } from "../src/client.js";
 
 function room(t) {
@@ -164,6 +164,10 @@ test("composer @ query picks people and agents and mention HTML stays escaped", 
   assert.equal(messageMentionsMember("Ask @Mayafoo", members[1]), false);
   assert.equal(messageMentionsMember("@Maya", members[1]), true);
   assert.equal(messageMentionsMember("Ask @Instinct", members[1]), false);
+  assert.equal(replyAuthorToAddress("maya", members[0])?.id, "instinct");
+  assert.equal(replyAuthorToAddress("instinct", members[0]), null);
+  assert.equal(replyAuthorToAddress("maya", members[2]), null);
+  assert.equal(replyAuthorToAddress("potter", members[1])?.kind, "human");
   assert.equal(kindLabel("agent"), "Agent");
   assert.equal(kindLabel("human"), "Person");
   assert.equal(kindLabel("agent") === kindLabel("human"), false);

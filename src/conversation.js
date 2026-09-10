@@ -111,6 +111,11 @@ export function mentionHtml(body, members, esc) {
   return out + esc(text.slice(last));
 }
 
+export function replyAuthorToAddress(viewerId, author) {
+  if (!author?.id || author.active === false || author.id === viewerId) return null;
+  return author;
+}
+
 export function messageMentionsMember(body, member) {
   if (!member?.displayName) return false;
   const label = `@${member.displayName}`;
