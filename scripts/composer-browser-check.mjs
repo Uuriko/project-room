@@ -41,9 +41,14 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
       await page.waitForFunction(() => !document.querySelector("#access-key").disabled);
     };
     await login(owner);
+    const input = page.locator("#message-input"), status = page.locator("#composer-status");
+    assert.match(await input.getAttribute("placeholder"), /Write to the room/);
+    await page.locator('[data-message-record-id="topic"] [data-message-action="thread"]').click();
+    assert.match(await input.getAttribute("placeholder"), /Reply in this thread/);
+    await page.locator("#thread-back").click();
+    assert.match(await input.getAttribute("placeholder"), /Write to the room/);
     await page.locator("#composer-options > summary").click();
     await page.locator("#remember-drafts").check();
-    const input = page.locator("#message-input"), status = page.locator("#composer-status");
     const waitForFailure = () => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#composer-status").classList.contains("error"));
     const waitForSaved = () => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#message-input").value === "");
 
