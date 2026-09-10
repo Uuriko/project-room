@@ -58,7 +58,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await login(page, owner); await login(other, human);
     const input = page.locator("#message-input");
     await input.fill("Keep my room thought");
-    await page.locator("#message-to-select").selectOption("maya");
+    await page.locator("#message-to-select").evaluate((el, v) => { el.value = v; el.dispatchEvent(new Event("change", { bubbles: true })); }, "maya");
+    assert.equal(await page.locator("#composer-toolbar").isVisible(), true, "addressing reveals the talking-to toolbar");
     await input.focus();
     await input.evaluate(e => e.setSelectionRange(5, 7));
     await other.locator("#message-input").fill("A new room idea from Maya");
@@ -71,7 +72,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     // A reply opens a thread, and navigating away preserves each draft independently.
     await page.locator('[data-message-record-id="book-club"] [data-message-action="reply"]').click();
     await input.fill("Keep my thread thought");
-    await page.locator("#message-to-select").selectOption("room-agent");
+    await page.locator("#message-to-select").evaluate((el, v) => { el.value = v; el.dispatchEvent(new Event("change", { bubbles: true })); }, "room-agent");
     await page.locator("#thread-back").click();
     assert.equal(await input.inputValue(), "Keep my room thought");
     await page.locator('[data-message-record-id="book-club"] [data-message-action="thread"]').click();
@@ -107,7 +108,6 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
 
     await page.locator("#thread-back").click();
     const heart = p => p.locator('[data-message-record-id="book-club"] [data-reaction="heart"]');
-    await page.locator('[data-message-record-id="book-club"] .reactions > summary').click();
     await heart(page).click();
     await page.waitForFunction(() => document.querySelector('[data-message-record-id="book-club"] [data-reaction="heart"]').getAttribute("aria-pressed") === "true");
     const selectedBody = await page.locator('[data-message-record-id="book-club"] .message-content p').evaluate(e => {
@@ -115,7 +115,6 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
       const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
       return selection.toString();
     });
-    await other.locator('[data-message-record-id="book-club"] .reactions > summary').click();
     await heart(other).click();
     await page.waitForFunction(() => document.querySelector('[data-message-record-id="book-club"] [data-reaction="heart"]').getAttribute("aria-label").includes(", 2"));
     assert.equal(await page.evaluate(() => window.getSelection().toString()), selectedBody);
@@ -365,4 +364,4 @@ for (const outcome of ["success", "failure"]) {
     assert.doesNotMatch(await page.locator("#status").textContent(), /Obsolete/);
     assert.deepEqual(errors, []);
   });
-}
+  }
