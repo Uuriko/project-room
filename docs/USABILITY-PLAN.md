@@ -141,6 +141,11 @@ See [CHAT-FIRST.md](CHAT-FIRST.md) Slice B. Discord member rail:
 - Button, dialog, and Actions: **Add agent** / How to add an agent.
 - Do not auto-open People or Add agent.
 
+### Growth slice — this change
+
+See [GROWTH-PLAN.md](GROWTH-PLAN.md). Message grouping, date/unread marks,
+`@` addressing, People/Agents groups, empty-chat Invite.
+
 ### Later, still in-tree (not this PR)
 
 - Door copy on `/room` if chat-first language should match (wait until overlay

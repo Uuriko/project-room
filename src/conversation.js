@@ -9,6 +9,73 @@ export function sendsOnEnter(event, touchKeyboard = false) {
     && Boolean(!touchKeyboard || event.ctrlKey || event.metaKey);
 }
 
+export const GROUP_WINDOW_MS = 7 * 60 * 1000;
+
+export function dayKey(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+export function dayLabel(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric" }).format(d);
+}
+
+export function messageCluster(messages, index) {
+  const m = messages[index], prev = index > 0 ? messages[index - 1] : null;
+  const dayStart = !prev || dayKey(prev.createdAt) !== dayKey(m.createdAt);
+  const grouped = Boolean(!dayStart && prev && prev.authorId === m.authorId
+    && Math.abs(Date.parse(m.createdAt) - Date.parse(prev.createdAt)) <= GROUP_WINDOW_MS);
+  return { grouped, dayStart, dayLabel: dayStart ? dayLabel(m.createdAt) : "" };
+}
+
+export function mentionQuery(text, caret) {
+  const value = String(text ?? "");
+  const pos = Number.isInteger(caret) ? Math.min(Math.max(caret, 0), value.length) : value.length;
+  const before = value.slice(0, pos);
+  const match = /(^|[\s])@([^\s@]{0,80})$/.exec(before);
+  if (!match) return null;
+  return { start: before.length - match[2].length - 1, query: match[2] };
+}
+
+export function mentionMatches(members, query) {
+  const q = String(query ?? "").trim().toLocaleLowerCase();
+  return (members || []).filter(m => m && m.active !== false && m.displayName
+    && (!q || m.displayName.toLocaleLowerCase().includes(q) || String(m.id).toLocaleLowerCase().includes(q)))
+    .slice(0, 8);
+}
+
+export function insertMention(text, caret, start, member) {
+  const value = String(text ?? "");
+  const pos = Number.isInteger(caret) ? caret : value.length;
+  const at = Number.isInteger(start) ? start : 0;
+  const label = `@${member.displayName}`;
+  const after = value.slice(pos);
+  const body = `${value.slice(0, at)}${label}${after.startsWith(" ") ? after : ` ${after}`}`;
+  return { body, caret: at + label.length + (after.startsWith(" ") ? 0 : 1), toMemberId: member.id };
+}
+
+const mentionRegExpSpecial = new Set(".*+?^${}()|[]\\");
+const escapeMentionName = value => [...String(value)].map(ch => mentionRegExpSpecial.has(ch) ? `\\${ch}` : ch).join("");
+
+export function mentionHtml(body, members, esc) {
+  const text = String(body ?? "");
+  const names = [...(members || [])].filter(m => m?.displayName).sort((a, b) => b.displayName.length - a.displayName.length);
+  if (!names.length) return esc(text);
+  const pattern = new RegExp(`@(?:${names.map(m => escapeMentionName(m.displayName)).join("|")})(?=\\s|$)`, "g");
+  let out = "", last = 0, match;
+  while ((match = pattern.exec(text))) {
+    out += esc(text.slice(last, match.index));
+    const label = match[0].slice(1);
+    const member = names.find(m => m.displayName === label);
+    out += `<span class="mention${member?.kind === "agent" ? " agent" : ""}">${esc(match[0])}</span>`;
+    last = match.index + match[0].length;
+  }
+  return out + esc(text.slice(last));
+}
+
 export function conversationIndex(messages) {
   const byId = new Map(messages.map(message => [message.id, message]));
   const rootById = new Map(), threads = new Map(), roots = [];

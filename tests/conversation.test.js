@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T, replay } from "../src/events.js";
-import { conversationIndex, searchMessages, ConversationDrafts } from "../src/conversation.js";
+import { conversationIndex, searchMessages, ConversationDrafts, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS } from "../src/conversation.js";
 import { draftCommand } from "../src/client.js";
 
 function room(t) {
@@ -119,4 +119,44 @@ test("navigation preserves independent reply targets and retry IDs; a new sessio
   const nextSession = new ConversationDrafts();
   assert.equal(nextSession.hasText(), false);
   assert.equal(nextSession.get(null).error, "");
+});
+
+test("consecutive same-author messages cluster until a new day or a different person", () => {
+  const t0 = "2026-09-09T18:00:00.000Z";
+  const t1 = new Date(Date.parse(t0) + GROUP_WINDOW_MS / 2).toISOString();
+  const tLate = new Date(Date.parse(t0) + GROUP_WINDOW_MS + 1000).toISOString();
+  const tNextDay = "2026-09-10T18:00:00.000Z";
+  const messages = [
+    { id: "a", authorId: "maya", createdAt: t0 },
+    { id: "b", authorId: "maya", createdAt: t1 },
+    { id: "c", authorId: "jordan", createdAt: t1 },
+    { id: "d", authorId: "maya", createdAt: tLate },
+    { id: "e", authorId: "maya", createdAt: tNextDay }
+  ];
+  assert.equal(messageCluster(messages, 0).grouped, false);
+  assert.equal(messageCluster(messages, 0).dayStart, true);
+  assert.equal(messageCluster(messages, 1).grouped, true);
+  assert.equal(messageCluster(messages, 2).grouped, false);
+  assert.equal(messageCluster(messages, 3).grouped, false);
+  assert.equal(messageCluster(messages, 4).dayStart, true);
+  assert.equal(messageCluster(messages, 4).grouped, false);
+});
+
+test("composer @ query picks people and agents and mention HTML stays escaped", () => {
+  assert.equal(mentionQuery("hello", 5), null);
+  assert.deepEqual(mentionQuery("hi @In", 6), { start: 3, query: "In" });
+  const members = [
+    { id: "instinct", displayName: "Instinct", kind: "agent", active: true },
+    { id: "maya", displayName: "Maya", kind: "human", active: true },
+    { id: "gone", displayName: "Gone", kind: "human", active: false }
+  ];
+  assert.deepEqual(mentionMatches(members, "in").map(m => m.id), ["instinct"]);
+  assert.equal(mentionMatches(members, "").length, 2);
+  const inserted = insertMention("hi @In", 6, 3, members[0]);
+  assert.equal(inserted.body, "hi @Instinct ");
+  assert.equal(inserted.toMemberId, "instinct");
+  const esc = value => String(value).replaceAll("<", "&lt;");
+  assert.match(mentionHtml("Ask @Instinct tomorrow", members, esc), /mention agent/);
+  assert.equal(mentionHtml("Ask <script> @Maya", members, esc).includes("<script>"), false);
+  assert.match(mentionHtml("Ask <script> @Maya", members, esc), /mention"/);
 });

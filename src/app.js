@@ -2,7 +2,7 @@ import { EVENT_TYPES as T, WORK_STATES as S } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief } from "./return-brief.js";
 import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
-import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter } from "./conversation.js";
+import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml } from "./conversation.js";
 import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer } from "./workflow.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation } from "./share-links.js";
 import { installAgentConnections } from "./agent-connections.js";
@@ -68,7 +68,7 @@ let currentThreadId = null, conversation = null, drafts = new ConversationDrafts
 let requestMode = null, requestReading = false, requestEpoch = 0;
 const composerKey = () => replyDraftKey(requestMode, currentThreadId);
 const viewPositions = new Map(), pendingReactions = new Map(), locallyOwnedMessageIds = new Set();
-let newVisibleMessages = 0;
+let newVisibleMessages = 0, unreadAnchorId = null, mentionIndex = 0;
 let roomCursor = 0, roomGeneration = -1, showAllAttention = false, returnClock = null;
 let signoutOperationId = 0, signoutLoading = false;
 let refreshOperationId = 0, submitOperationId = 0;
@@ -785,7 +785,11 @@ function render() {
   syncActionForm();
   setText("#presence-count", `${active.length} ${active.length === 1 ? "member" : "members"}`);
   renderContent("#member-stack", active.slice(0, 4).map(m => `<div class="member-avatar ${m.kind}" title="${esc(memberLabel(m.id))}" aria-hidden="true"><span>${initials(m.displayName)}</span></div>`).join(""));
-  renderContent("#presence-list", members.map(m => `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span></div><div><strong>${esc(memberLabel(m.id))}</strong><span>${esc(memberStatus(m))}</span><details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p></details></div></div>`).join(""));
+  const presenceRow = m => `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span></div><div><strong>${esc(memberLabel(m.id))}</strong><span>${esc(memberStatus(m))}</span><details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p></details></div></div>`;
+  const byPresence = (a, b) => (a.active === false) - (b.active === false) || a.displayName.localeCompare(b.displayName);
+  const people = members.filter(m => m.kind !== "agent").sort(byPresence);
+  const agents = members.filter(m => m.kind === "agent").sort(byPresence);
+  renderContent("#presence-list", `${people.length ? `<p class="presence-heading">People</p>${people.map(presenceRow).join("")}` : ""}${agents.length ? `<p class="presence-heading">Agents</p>${agents.map(presenceRow).join("")}` : ""}`);
   for (const id of ["new-work-button", "composer-work-button"]) {
     $("#" + id).hidden = !can("steer"); $("#" + id).disabled = !can("steer");
   }
@@ -815,6 +819,8 @@ function renderMessages() {
   const focusedMessage = focused?.matches(".message");
   const newMessages = sameView ? messages.filter(m => !previous.has(m.id)) : [];
   const newCount = newMessages.length;
+  if (!sameView || nearBottom) unreadAnchorId = null;
+  else if (!unreadAnchorId && newMessages[0]) unreadAnchorId = newMessages[0].id;
   const pendingOutgoingId = pendingMessage?.command?.data?.messageId || pendingMessage?.command?.id;
   const announceCount = newMessages.filter(message => message.id !== pendingOutgoingId && !locallyOwnedMessageIds.has(message.id)).length;
   newMessages.forEach(message => locallyOwnedMessageIds.delete(message.id));
@@ -832,16 +838,20 @@ function renderMessages() {
   for (const [id, node] of previous) if (!keep.has(id)) node.remove();
   messages.forEach((message, index) => {
     const node = previous.get(message.id) || document.createElement("li");
+    const cluster = messageCluster(messages, index);
     node.id = recordDomId("message", message.id); node.dataset.key = message.id; node.dataset.messageRecordId = message.id;
-    node.className = "message"; node.tabIndex = -1;
-    const html = messageContent(message);
+    node.className = `message${cluster.grouped ? " grouped" : ""}`; node.tabIndex = -1;
+    const html = messageContent(message, cluster, message.id === unreadAnchorId);
     if (node._content !== html) {
-      if (!node._content) node.innerHTML = html;
+      if (!node._content || !node.querySelector(".message-body")) node.innerHTML = html;
       else {
         const next = document.createElement("div"); next.innerHTML = html;
         // Reply counts/reactions change independently; the selected message text stays put.
-        for (const selector of [".message-avatar", ".message-meta", ".message-context", ".reactions", ".message-links", ".draft-feedback"]) {
+        for (const selector of [".chat-divider", ".message-avatar", ".message-meta", ".message-body", ".message-context", ".reactions", ".message-links", ".draft-feedback"]) {
           const before = node.querySelector(selector), after = next.querySelector(selector);
+          if (!before && !after) continue;
+          if (!before) { node.insertBefore(after, node.firstChild); continue; }
+          if (!after) { before.remove(); continue; }
           if (before.innerHTML !== after.innerHTML) {
             if (selector === ".draft-feedback") {
               // Feedback changes without replacing the selected text or its controls.
@@ -865,7 +875,7 @@ function renderMessages() {
     }
     if (list.children[index] !== node) list.insertBefore(node, list.children[index] || null);
   });
-  if (!messages.length) list.innerHTML = '<li class="empty-note">No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button></li>';
+  if (!messages.length) list.innerHTML = `<li class="empty-note">No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button>${can("manage_members") ? ' · <button type="button" class="text-button" data-empty-invite>Invite someone</button>' : ""}</li>`;
   list.dataset.view = view;
   if (!sameView) { list.scrollTop = viewPositions.get(view) ?? list.scrollHeight; newVisibleMessages = 0; }
   else if (nearBottom && !focused) { list.scrollTop = list.scrollHeight; newVisibleMessages = 0; }
@@ -889,9 +899,12 @@ function draftFeedbackHTML(message) {
   const label = feedback?.label ?? "Draft";
 return `<p class="form-hint"><a class="source-link draft-state" href="${esc(workHref(message.workItemId))}" data-open-work="${esc(message.workItemId)}">${esc(label)}</a> · based on revision ${esc(message.proposal.basisRevision)}${message.proposal.basisRevision < message.proposal.submittedAtRevision ? " · older work" : ""} · authorship unverified · <button type="button" class="message-to-work" data-portable-work="${esc(message.workItemId)}" data-portable-mode="draft" data-portable-original="${esc(message.id)}" data-focus-key="refine:${esc(message.id)}">Refine draft</button></p>${feedback?.reason ? `<details><summary>Feedback</summary><p>${esc(feedback.reason)}</p></details>` : ""}`;
 }
-function messageContent(m) {
+function messageContent(m, cluster = {}, unreadStart = false) {
   const author = state.members[m.authorId];
   const authorLabel = displayName(m.authorId);
+  const divider = unreadStart || cluster.dayStart
+    ? `<div class="chat-divider${unreadStart ? " unread" : ""}" role="separator">${esc([unreadStart ? "New messages" : "", cluster.dayStart ? cluster.dayLabel : ""].filter(Boolean).join(" · "))}</div>`
+    : "";
   const linked = Object.values(state.workItems).filter(i => i.sourceMessageId === m.id || i.id === m.workItemId);
   const parent = conversation.byId.get(m.replyToId);
   const count = (conversation.threads.get(m.id)?.length || 1) - 1;
@@ -903,7 +916,7 @@ function messageContent(m) {
     const label = `${pending && !pending.busy ? "Retry " : ""}${reaction}`;
     return `<button type="button" class="reaction" aria-pressed="${selected}" aria-label="${esc(label)} reaction, ${members.length}" title="${esc(members.map(name).join(", ") || `React with ${reaction}`)}" data-message-action="react" data-message-id="${esc(m.id)}" data-reaction="${reaction}"${pending?.busy ? " disabled" : ""}><span aria-hidden="true">${symbol}</span><span>${members.length || ""}</span>${pending && !pending.busy ? " Retry" : ""}</button>`;
   }).join("");
-  return `<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${author.kind === "agent" ? `<span>${esc(kindLabel(author.kind))}</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · room-visible</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${esc(parent.body.slice(0,90))}</a>` : ""}</div><p>${esc(m.body)}</p><div class="draft-feedback">${draftFeedbackHTML(m)}</div><details class="reactions"><summary data-message-action="reaction-menu" data-message-id="${esc(m.id)}" aria-label="Reactions to message by ${esc(authorLabel)}">${esc(reactionSummary)}</summary><div class="reaction-options">${reactionButtons}</div></details><div class="message-links">${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>`).join("")}${m.workItemId && workActions(state.workItems[m.workItemId], state.members[session.member.id]).some(([action]) => action === "complete") ? `<button class="message-to-work" type="button" data-message-action="result" data-message-id="${esc(m.id)}">Save as result</button>` : ""}<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>${!currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : ""}${can("steer") && !(m.proposal && m.workItemId) ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : ""}</div></div>`;
+  return `${divider}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${author.kind === "agent" ? `<span>${esc(kindLabel(author.kind))}</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · room-visible</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${esc(parent.body.slice(0,90))}</a>` : ""}</div><p class="message-body">${mentionHtml(m.body, Object.values(state.members), esc)}</p><div class="draft-feedback">${draftFeedbackHTML(m)}</div><details class="reactions"><summary data-message-action="reaction-menu" data-message-id="${esc(m.id)}" aria-label="Reactions to message by ${esc(authorLabel)}">${esc(reactionSummary)}</summary><div class="reaction-options">${reactionButtons}</div></details><div class="message-links">${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>`).join("")}${m.workItemId && workActions(state.workItems[m.workItemId], state.members[session.member.id]).some(([action]) => action === "complete") ? `<button class="message-to-work" type="button" data-message-action="result" data-message-id="${esc(m.id)}">Save as result</button>` : ""}<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>${!currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : ""}${can("steer") && !(m.proposal && m.workItemId) ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : ""}</div></div>`;
 }
 function renderSearch(now = Date.now()) {
   const query = $("#message-search").value;
@@ -1610,7 +1623,7 @@ $("#refresh-button").addEventListener("click", async () => {
   }
 });
 $("#message-form").addEventListener("submit", e => {
-  e.preventDefault(); if (!state || busy || requestReading) return;
+  e.preventDefault(); hideMentions(); if (!state || busy || requestReading) return;
   if (requestMode) { submitRequest(e.currentTarget); return; }
   const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId };
   if (!content.body) return;
@@ -1670,6 +1683,7 @@ function submitRequest(form) {
 }
 $("#message-list").addEventListener("click", e => {
   if (e.target.closest("[data-empty-write]")) { $("#message-input").focus(); return; }
+  if (e.target.closest("[data-empty-invite]")) { $("#invite-people-button")?.click(); return; }
   const button = e.target.closest("[data-message-id]"); if (!button || !state || busy) return;
   const id = button.dataset.messageId;
   if (button.dataset.messageAction?.startsWith("request-")) openRequestMode(button.dataset.messageAction.slice(8), id);
@@ -1705,7 +1719,36 @@ function rememberComposerSelection({ clearCollapsed = false } = {}) {
 $("#message-input").addEventListener("select", () => rememberComposerSelection());
 document.addEventListener("selectionchange", () => { if (document.activeElement === $("#message-input")) rememberComposerSelection(); });
 for (const type of ["keyup", "mouseup", "touchend"]) $("#message-input").addEventListener(type, () => rememberComposerSelection({ clearCollapsed: true }));
-$("#message-input").addEventListener("input", () => { lastComposerSelection = null; saveComposer(); });
+function hideMentions() {
+  const list = $("#mention-list");
+  if (!list) return;
+  list.hidden = true; list.replaceChildren(); mentionIndex = 0;
+}
+function mentionChoices() {
+  const input = $("#message-input"), found = mentionQuery(input.value, input.selectionStart);
+  if (!found || !state) return [];
+  return mentionMatches(Object.values(state.members), found.query);
+}
+function renderMentions() {
+  const list = $("#mention-list");
+  if (!list) return;
+  const matches = mentionChoices();
+  if (!matches.length) { hideMentions(); return; }
+  mentionIndex = Math.min(Math.max(mentionIndex, 0), matches.length - 1);
+  list.hidden = false;
+  list.innerHTML = matches.map((m, i) => `<li><button type="button" class="mention-option${i === mentionIndex ? " active" : ""}" data-mention-id="${esc(m.id)}" aria-selected="${i === mentionIndex}">${esc(m.displayName)} <span>${esc(kindLabel(m.kind))}</span></button></li>`).join("");
+}
+function applyMentionMember(member) {
+  const input = $("#message-input"), found = mentionQuery(input.value, input.selectionStart);
+  if (!found || !member) return;
+  const next = insertMention(input.value, input.selectionStart, found.start, member);
+  input.value = next.body;
+  const select = $("#message-to-select");
+  if ([...select.options].some(option => option.value === next.toMemberId)) select.value = next.toMemberId;
+  hideMentions(); saveComposer();
+  input.focus(); input.setSelectionRange(next.caret, next.caret);
+}
+$("#message-input").addEventListener("input", () => { lastComposerSelection = null; saveComposer(); renderMentions(); });
 $("#message-to-select").addEventListener("change", () => { saveComposer(); syncRequestComposer(); });
 const touchKeyboard = matchMedia("(hover: none) and (pointer: coarse)");
 function syncComposerHint() {
@@ -1715,12 +1758,30 @@ function syncComposerHint() {
 touchKeyboard.addEventListener("change", syncComposerHint);
 syncComposerHint();
 $("#message-input").addEventListener("keydown", e => {
+  const list = $("#mention-list"), open = list && !list.hidden;
+  const matches = open ? mentionChoices() : [];
+  if (open && matches.length) {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      mentionIndex = (mentionIndex + (e.key === "ArrowDown" ? 1 : matches.length - 1)) % matches.length;
+      renderMentions();
+      return;
+    }
+    if (e.key === "Escape") { e.preventDefault(); hideMentions(); return; }
+    if (e.key === "Tab" || e.key === "Enter") { e.preventDefault(); applyMentionMember(matches[mentionIndex]); return; }
+  }
   // Some IME confirmation keys arrive after compositionend; keyCode 229 is the
   // legacy UI Events signal. Neither confirmation nor key repeat sends a message.
   if (sendsOnEnter(e, touchKeyboard.matches)) {
     e.preventDefault();
     if (!busy && $("#message-input").value.trim()) $("#message-form").requestSubmit();
   }
+});
+$("#mention-list")?.addEventListener("mousedown", e => {
+  const button = e.target.closest("[data-mention-id]");
+  if (!button) return;
+  e.preventDefault();
+  applyMentionMember(state.members[button.dataset.mentionId]);
 });
 $("#search-form").addEventListener("submit", e => { e.preventDefault(); if (state) renderSearch(); });
 $("#message-search").addEventListener("input", () => { if (state) renderSearch(); });
@@ -1867,7 +1928,7 @@ window.addEventListener("hashchange", () => {
   else revealLocationHash();
 });
 $("#new-messages-button").addEventListener("click", () => {
-  const list = $("#message-list"); list.scrollTop = list.scrollHeight; newVisibleMessages = 0;
+  const list = $("#message-list"); list.scrollTop = list.scrollHeight; newVisibleMessages = 0; unreadAnchorId = null;
   $("#new-messages-button").hidden = true; list.focus({ preventScroll: true });
 });
 async function setReaction(messageId, reaction) {
