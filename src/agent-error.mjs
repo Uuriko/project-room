@@ -61,6 +61,144 @@ function publicHint(value, fallback) {
 }
 
 export function agentErrorAx({ httpStatus = 0, code = "request_failed", message = "", roomId, workItemId } = {}) {
+export const AGENT_ERRORS = "code/message + status/reason/hint/next";
+
+const tool = (name, args) => args ? { tool: name, arguments: args } : { tool: name };
+const path = value => ({ path: value });
+const command = value => ({ command: value });
+
+function stale(code, message) {
+  return /^stale_/.test(code) || /stale/i.test(String(message || ""));
+}
+
+function inputRefused(httpStatus, code, message) {
+  if (["invalid_work_action", "work_action_too_large", "invalid_work_context", "invalid_focus",
+    "invalid_query", "invalid_command", "invalid_json", "json_required", "too_large"].includes(code)) return true;
+  return httpStatus === 422 && code !== "command_rejected" && !stale(code, message);
+}
+
+function publicCode(code) {
+  return typeof code === "string" && /^[a-z][a-z0-9_]{0,64}$/.test(code) ? code : "request_failed";
+}
+
+function publicHint(value, fallback) {
+  return typeof value === "string" && value.trim() && value.length < 160 ? value : fallback;
+}
+
+export function agentErrorAx({ httpStatus = 0, code = "request_failed", message = "", roomId, workItemId } = {}) {
+  const reasonCode = publicCode(code);
+  const listPath = roomId ? `/api/rooms/${roomId}?view=work` : "/api/session";
+  const workPath = roomId ? `/api/rooms/${roomId}/work-context` : "/api/session";
+  const readWork = workItemId ? tool("room_read_work", { workItemId }) : tool("room_read_work");
+
+  if (reasonCode === "member_required") {
+    return {
+      status: "action_required", reason: "member_required",
+      hint: "Set the expected agent member, then room_check_access.",
+      next: [tool("room_check_access")]
+    };
+  }
+  if (httpStatus === 401 || reasonCode === "unauthenticated") {
+    return {
+      status: "action_required", reason: "unauthenticated",
+      hint: "Ask the owner to mint a guest-agent credential or Add agent. Then room_check_access.",
+      next: [tool("room_check_access"), path("/api/session"), command("Ask the owner to mint a guest-agent credential or Add agent")]
+    };
+  }
+  if (reasonCode === "wrong_link_kind") {
+    return {
+      status: "action_required", reason: "wrong_link_kind",
+      hint: "That is a human #join/ link. Ask the owner for a ga1. guest-agent token or Add agent.",
+      next: [path("/api/guest-agent-links"), command("Ask the owner to mint a guest-agent credential or Add agent")]
+    };
+  }
+  if (reasonCode === "link_unavailable" || reasonCode === "guest_agent_link_not_implemented") {
+    return {
+      status: "action_required",
+      reason: reasonCode,
+      hint: "This guest-agent link is not live. Ask the owner to mint a new one or Add agent.",
+      next: [path("/api/guest-agent-links"), command("Ask the owner to mint a guest-agent credential or Add agent")]
+    };
+  }
+  if (httpStatus === 403 || ["access_denied", "owner_required", "host_denied", "origin_denied", "proxy_denied", "csrf_denied"].includes(reasonCode)) {
+    return {
+      status: "action_required",
+      reason: reasonCode === "owner_required" ? "owner_required" : "access_denied",
+      hint: reasonCode === "owner_required"
+        ? "Only the room owner can mint a guest-agent credential or Add agent."
+        : "This credential cannot do that. Check access; ask the owner if needed.",
+      next: [tool("room_check_access"), path("/api/session"), command("Ask the owner to mint a guest-agent credential or Add agent")]
+    };
+  }
+  if (stale(reasonCode, message)) {
+    return {
+      status: "action_required", reason: "stale_revision",
+      hint: "Re-read workContext. Use the current revision. Do not silently rebase.",
+      next: [readWork, path(workPath), command("Re-read workContext; send a new command with current expectedRevision")]
+    };
+  }
+  if (reasonCode === "work_not_found") {
+    return {
+      status: "action_required", reason: "work_not_found",
+      hint: "List work, then read a current workItemId.",
+      next: [tool("room_list_work"), path(listPath)]
+    };
+  }
+  if (inputRefused(httpStatus, reasonCode, message) || reasonCode === "work_input_refused") {
+    return {
+      status: "action_required", reason: "input_refused",
+      hint: "Fix the refused fields. Keep any earlier uncertain requestId.",
+      next: [readWork, command("Correct input; keep any earlier uncertain requestId")]
+    };
+  }
+  if (reasonCode === "command_rejected") {
+    return {
+      status: "action_required", reason: "command_rejected",
+      hint: "Read current work. Do not silently rebase.",
+      next: [readWork, command("Read current work before another action")]
+    };
+  }
+  if (reasonCode === "idempotency_conflict") {
+    return {
+      status: "action_required", reason: "idempotency_conflict",
+      hint: "This requestId belongs to different input. Recover the original.",
+      next: [readWork, command("Recover the original requestId; do not replace it")]
+    };
+  }
+  if (httpStatus === 429 || reasonCode === "rate_limited") {
+    return {
+      status: "action_required", reason: "rate_limited",
+      hint: "Wait, then retry the same request.",
+      next: [command("Retry after Retry-After")]
+    };
+  }
+  if (httpStatus >= 500 || ["internal_error", "maintenance"].includes(reasonCode)) {
+    return {
+export const AGENT_ERRORS = "code/message + status/reason/hint/next";
+
+const tool = (name, args) => args ? { tool: name, arguments: args } : { tool: name };
+const path = value => ({ path: value });
+const command = value => ({ command: value });
+
+function stale(code, message) {
+  return /^stale_/.test(code) || /stale/i.test(String(message || ""));
+}
+
+function inputRefused(httpStatus, code, message) {
+  if (["invalid_work_action", "work_action_too_large", "invalid_work_context", "invalid_focus",
+    "invalid_query", "invalid_command", "invalid_json", "json_required", "too_large"].includes(code)) return true;
+  return httpStatus === 422 && code !== "command_rejected" && !stale(code, message);
+}
+
+function publicCode(code) {
+  return typeof code === "string" && /^[a-z][a-z0-9_]{0,64}$/.test(code) ? code : "request_failed";
+}
+
+function publicHint(value, fallback) {
+  return typeof value === "string" && value.trim() && value.length < 160 ? value : fallback;
+}
+
+export function agentErrorAx({ httpStatus = 0, code = "request_failed", message = "", roomId, workItemId } = {}) {
   const reasonCode = publicCode(code);
   const listPath = roomId ? `/api/rooms/${roomId}?view=work` : "/api/session";
   const workPath = roomId ? `/api/rooms/${roomId}/work-context` : "/api/session";
