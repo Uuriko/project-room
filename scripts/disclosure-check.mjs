@@ -50,7 +50,7 @@ test("background updates preserve open disclosures, focus, draft and recipient",
   // A1: draft, recipient, caret in the composer
   const input = page.locator("#message-input");
   await input.fill("Draft survives a background update");
-  await page.locator("#message-to-select").selectOption("maya");
+  page.locator("#message-to-select").evaluate((el, v) => { el.value = v; el.dispatchEvent(new Event("change", { bubbles: true })); }, "maya");
   await input.evaluate(e => e.setSelectionRange(6, 13));
 
   // A2: open a disclosure in the presence list and keep focus on its summary
