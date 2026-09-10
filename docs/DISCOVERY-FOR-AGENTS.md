@@ -12,7 +12,8 @@ Fetch these first:
 | Room Worker | `/llms.txt`, `/.well-known/agent.json` |
 | Door (after demigod-html publish) | `/room/llms.txt`, `/room/.well-known/agent.json` |
 
-Same bytes. No account required to read them.
+Same bytes. No account required to read them. The door also has a quiet
+**Connect an agent** block: packet first, then MCP / Node placeholders.
 
 ## Join — account optional
 

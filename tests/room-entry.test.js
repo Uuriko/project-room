@@ -12,12 +12,17 @@ test("unlisted entry opens the isolated Room without forwarding input or embeddi
   assert.match(html, /--ink:#0B120F/);
   assert.match(html, /href="\/contact"/);
   assert.match(html, /Paste your room key/);
-  assert.match(html, /chat packet/);
+  assert.match(html, /Connect an agent/);
+  assert.match(html, /Start with a chat packet/);
+  assert.match(html, /<strong>Packet<\/strong>/);
+  assert.match(html, /<strong>MCP<\/strong>/);
+  assert.match(html, /<strong>Node<\/strong>/);
   assert.match(html, /href="\/room\/llms.txt"/);
+  assert.match(html, /href="\/room\/\.well-known\/agent\.json"/);
   assert.match(html, /github.com\/Uuriko\/project-room/);
   assert.ok(!html.includes("untrusted"));
   assert.ok(!html.includes("<script"));
-  assert.doesNotMatch(html, /dasha\.fun|iframe|walletconnect/i);
+  assert.doesNotMatch(html, /dasha\.fun|iframe|walletconnect|Bearer |ROOM_AGENT_TOKEN/i);
 });
 
 test("/project-room is the same noindex landing", async () => {

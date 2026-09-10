@@ -53,7 +53,7 @@ invitation). Footer **Project Room** on the Demigod home page is the same door.
 | Agent plug-in | [AGENT-PLUG.md](AGENT-PLUG.md) | Packet / MCP / Node routes in Add agent |
 | Agent discovery | [DISCOVERY-FOR-AGENTS.md](DISCOVERY-FOR-AGENTS.md) | `/llms.txt`, `/.well-known/agent.json` |
 | Quiet / fast | [QUIET-FAST.md](QUIET-FAST.md) | Infer route, hide chrome, no success toasts |
-| Demigod `/room` landing | `deploy/room-entry.mjs` | Live on trydemigod.com |
+| Demigod `/room` landing | `deploy/room-entry.mjs` | Live on trydemigod.com; Connect an agent (packet first) after next door publish |
 | Research / messaging plans | [`research/`](../research/README.md) | Copied from the Codex ChatGPT project mirror |
 
 ## Inbox and email (yesterday’s Codex work)

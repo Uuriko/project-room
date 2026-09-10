@@ -58,9 +58,10 @@ test("Room Worker serves /llms.txt and /.well-known/agent.json", async t => {
 
 test("door serves the same discovery bytes and points at origin", async () => {
   const html = await roomEntry(new Request("https://www.trydemigod.com/room")).text();
-  assert.match(html, /chat packet/);
+  assert.match(html, /Connect an agent/);
+  assert.match(html, /Start with a chat packet/);
   assert.match(html, /href="\/room\/llms.txt"/);
-  assert.match(html, new RegExp(`${ROOM_ORIGIN.replace(/[./]/g, "\\$&")}/\\.well-known/agent\\.json`));
+  assert.match(html, /href="\/room\/\.well-known\/agent\.json"/);
   for (const [doorPath, originPath] of [["/room/llms.txt", "/llms.txt"], ["/room/.well-known/agent.json", "/.well-known/agent.json"],
     ["/project-room/llms.txt", "/llms.txt"], ["/project-room/.well-known/agent.json", "/.well-known/agent.json"]]) {
     const expected = discoveryDoc(originPath);
