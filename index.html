@@ -236,11 +236,11 @@
             <div id="reply-bar" class="reply-bar" hidden><span id="reply-context"></span><span class="reply-bar-actions"><button id="reply-mention" type="button" class="button ghost" hidden aria-pressed="false">Also @</button><button id="cancel-reply" type="button" class="button ghost">Cancel reply</button></span></div>
             <form id="message-form" class="composer">
               <label id="composer-label" class="sr-only" for="message-input">Message the room</label>
-              <div class="composer-toolbar">
+              <div class="composer-toolbar" hidden>
                 <label class="sr-only" for="message-to-select">Talking to</label>
                 <select id="message-to-select" aria-label="Who this message addresses"></select>
-                <span class="audience-note">Room-visible</span>
-                <button id="composer-work-button" class="text-button" type="button">New work</button>
+                <span class="audience-note" hidden>Room-visible</span>
+                <button id="composer-work-button" class="text-button" type="button" hidden>New work</button>
               </div>
               <div id="request-mode-bar" class="reply-bar" hidden>
                 <span id="request-mode-label"></span>
@@ -468,45 +468,44 @@
           <button type="button" class="button ghost" data-roster="grok-bot">Grok Bot</button>
         </div>
         <p id="agent-roster-hint" class="form-hint"></p>
-        <label>How they connect<select id="agent-connect-route" aria-describedby="agent-route-hint">
-          <option value="packet">Chat packet — no Room key</option>
-          <option value="mcp" selected>MCP on this Mac</option>
-          <option value="direct">Node client on its computer</option>
-        </select></label>
-        <p id="agent-route-hint" class="form-hint">Import locally, then merge MCP config. First tool is room_check_access. Addressing still does not start a model.</p>
-        <p id="agent-access-hint" class="form-hint">Can read this room’s history and post messages.</p>
+        <p id="agent-packet-today" class="form-hint" hidden>Use my AI, then paste the draft. No key in chat.</p>
         <ul id="agent-capabilities" class="form-hint agent-capabilities"></ul>
-        <p id="agent-packet-today" class="form-hint" hidden>No key in chat. Open a work item → <strong>Use my AI</strong> → send the reviewed packet in that assistant’s existing thread → <strong>Paste AI draft</strong>. Create access below is optional, for later MCP or Node if the host can store a secret.</p>
-        <details><summary>Access & expiry</summary><div class="share-settings">
-          <label>Access<select id="agent-connect-access"><option value="chat">Read & chat</option><option value="contribute">Contribute work</option><option value="review">Review work</option></select></label>
-          <label>Expires in<select id="agent-connect-expiry"><option value="1">1 day</option><option value="7" selected>7 days</option><option value="30">30 days</option></select></label>
-        </div><p class="form-hint">No member administration, human approvals or external execution.</p></details>
+        <details id="agent-connect-more"><summary>More</summary>
+          <label>How they connect<select id="agent-connect-route" aria-describedby="agent-route-hint">
+            <option value="packet">Chat packet — no Room key</option>
+            <option value="mcp" selected>MCP on this Mac</option>
+            <option value="direct">Node client on its computer</option>
+          </select></label>
+          <p id="agent-route-hint" class="form-hint"></p>
+          <p id="agent-access-hint" class="form-hint"></p>
+          <div class="share-settings">
+            <label>Access<select id="agent-connect-access"><option value="chat">Read & chat</option><option value="contribute">Contribute work</option><option value="review">Review work</option></select></label>
+            <label>Expires in<select id="agent-connect-expiry"><option value="1">1 day</option><option value="7" selected>7 days</option><option value="30">30 days</option></select></label>
+          </div>
+        </details>
         <p id="agent-create-note" class="form-hint">Issues a private key. The browser sends only a digest.</p>
         <button id="agent-create" type="submit" class="button primary">Create access</button>
+        <details id="agent-key-later" hidden><summary>Need a Room key later</summary>
+          <p class="form-hint">Only if this host can store a secret outside chat. Do not paste a key into iMessage, WhatsApp, or Muse.</p>
+          <button type="button" id="agent-create-later" class="button ghost">Create access</button>
+        </details>
       </form>
-      <details id="agent-host-snippets"><summary>Advanced hosts (Claude, Cursor, Codex)</summary>
-        <p class="form-hint">Same Room identity. Merge into the host config yourself. Paths are placeholders. Never put the key in a prompt or repo.</p>
-        <p>Grok Build / Codex TOML</p>
+      <details id="agent-host-snippets" hidden><summary>MCP hosts</summary>
+        <p class="form-hint">Merge yourself. Paths are placeholders. No key in this text.</p>
         <pre><code id="agent-mcp-toml"></code></pre>
-        <p>Claude Desktop / Cursor <code>mcp.json</code></p>
         <pre><code id="agent-mcp-json"></code></pre>
-        <p class="form-hint">Claude Code: <code>claude mcp add --transport stdio --scope user</code> with the same Node command, adapter path, and <code>ROOM_AGENT_CONFIG</code>. Remote MCP/OAuth is not offered here.</p>
+        <pre><code id="agent-mcp-cli"></code></pre>
       </details>
       <section id="agent-setup" hidden>
         <ol id="agent-import-checklist"></ol>
         <p id="agent-import-route" class="form-hint"></p>
+        <button id="agent-copy-checklist" type="button" class="button ghost">Copy plug-in steps</button>
         <details id="agent-private-details"><summary>Reveal private setup</summary>
           <p class="form-hint">Keep this out of chats, shared files and repositories.</p>
           <label for="agent-private-config">Private connection</label><textarea id="agent-private-config" rows="4" readonly autocomplete="off" spellcheck="false"></textarea>
           <button id="agent-private-copy" type="button" class="button secondary">Copy private setup</button>
         </details>
-        <details><summary>Set up on your Mac</summary>
-          <p>Copy the private setup, then import it from your clipboard in the Project Room folder. Use a new private directory outside any repository:</p>
-          <pre><code>pbpaste | node scripts/agent-inbox.mjs import /absolute/new/private-directory</code></pre>
-          <p>Then set <code>ROOM_AGENT_CONFIG</code> to that directory and run <code>node scripts/agent-inbox.mjs check</code>. Clear your clipboard afterward.</p>
-          <p class="form-hint">A local preview works only on this computer. Cloud agents need a reachable hosted Room. See docs/AGENT-HOSTS.md for the right connection route.</p>
-        </details>
-        <button id="agent-connect-done" type="button" class="button ghost">Done · forget setup</button>
+        <button id="agent-connect-done" type="button" class="button ghost">Done</button>
       </section>
       <p id="agent-connect-status" role="status" aria-live="polite"></p>
       <button id="agent-retry" type="button" class="button primary" hidden>Retry original</button>

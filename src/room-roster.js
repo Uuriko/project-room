@@ -182,6 +182,40 @@ export function routeHint(route) {
   return "Import locally, then merge MCP config. First tool is room_check_access. Addressing still does not start a model.";
 }
 
+export function routeFromDisplayName(name) {
+  const needle = String(name ?? "").trim().toLocaleLowerCase();
+  if (!needle) return "mcp";
+  const row = ROOM_ROSTER.find(r => r.connectName.toLocaleLowerCase() === needle || r.displayName.toLocaleLowerCase() === needle);
+  return row?.route || "mcp";
+}
+
+export function claudeMcpAddCommand(paths = placeholderSnippetPaths()) {
+  grokBuildToml(paths);
+  return [
+    "claude mcp add --transport stdio --scope user",
+    `--env ROOM_AGENT_CONFIG=${shellSingle(paths.configDir)}`,
+    "project-room --",
+    shellSingle(paths.nodePath),
+    shellSingle(paths.adapterPath)
+  ].join(" ");
+}
+
+export function reconnectCopy({ displayName, route, configDir } = {}) {
+  const name = String(displayName ?? "").trim() || "this agent";
+  const resolved = ROUTES.has(route) ? route : routeFromDisplayName(name);
+  const row = ROOM_ROSTER.find(r => r.connectName === name || r.displayName === name);
+  const dir = configDir || (row ? suggestedConfigDir(row.id) : "/absolute/private/room-agent");
+  const lines = [
+    `Plug-in steps for ${name} (${resolved}). No private key in this text.`,
+    ...setupChecklist({ route: resolved, configDir: dir })
+  ];
+  if (resolved === "mcp") {
+    const paths = placeholderSnippetPaths(dir);
+    lines.push("", "Grok Build / Codex TOML:", grokBuildToml(paths).trim(), "", "Claude Desktop / Cursor mcp.json:", mcpJson(paths).trim(), "", "Claude Code:", claudeMcpAddCommand(paths));
+  }
+  return lines.join("\n");
+}
+
 export function roomRosterMain(argv, options = {}) {
   const args = [...argv];
   if (args.includes("--help") || args.includes("-h")) return helpText();

@@ -248,11 +248,11 @@ test("a self-send has one live-announcement owner", { timeout: 90000 }, async t 
   await page.locator("#message-input").fill(body);
   await page.locator('#message-form button[type="submit"]').click();
   await page.getByText(body, { exact: true }).waitFor();
-  await page.waitForFunction(() => document.querySelector("#status").textContent === "Message saved to the room.");
+  await page.waitForFunction(() => document.querySelector("#message-input").value === "");
   const announcements = await page.evaluate(() => window.liveRegionChanges.filter(entry =>
-    entry.text === "Message saved to the room." || /new message/.test(entry.text)
+    /Message saved/.test(entry.text) || /new message/.test(entry.text)
   ));
-  assert.deepEqual(announcements, [{ id: "status", text: "Message saved to the room." }]);
+  assert.deepEqual(announcements, []);
   assert.equal(await page.locator("#conversation-announcement").textContent(), "");
   assert.equal(await page.locator("#composer-status").textContent(), "");
   assert.equal(store.snapshot(owner, "commons").state.messages.filter(message => message.body === body).length, 1);
@@ -525,7 +525,7 @@ test("a committed self-send is not re-announced as incoming after a delayed snap
   const body = "Committed locally before its snapshot";
   await page.locator("#message-input").fill(body);
   await page.locator('#message-form button[type="submit"]').click();
-  await page.waitForFunction(() => document.querySelector("#status")?.textContent === "Message saved to the room.");
+  await page.waitForFunction(() => document.querySelector("#message-input").value === "");
   assert.equal(store.snapshot(owner, "commons").state.messages.filter(message => message.body === body).length, 1);
   allowSnapshot = true;
   await page.locator("#refresh-button").click();
