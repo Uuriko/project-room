@@ -13,10 +13,10 @@ Do not continue from a ChatGPT worktree or the stale project-root
 | Durable Object | not reset |
 
 Hosted Worker `project-room-staging` was last published 9 September 2026 as
-version `d0187738-3122-4338-9212-e26c5a8a4543` from GitHub `main` `55c7c46`
-(click a Person/Agent to address them in chat). 25 live assets match this
-checkout. Durable Object was not reset. Door HTML source is
-`deploy/room-entry.mjs`; live `/room` updates with the next demigod-html publish.
+version `7a5d463e-3dd5-441a-ab45-b918449d06fe` from GitHub `main` `cff7576`
+(People-row click addresses in chat). 25 live assets match this checkout.
+Durable Object was not reset. Door HTML source is `deploy/room-entry.mjs`;
+live `/room` updates with the next demigod-html publish.
 
 ## GitHub About (John, in the UI)
 
