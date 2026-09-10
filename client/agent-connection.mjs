@@ -1,6 +1,7 @@
 import { constants, openSync, closeSync, fstatSync, lstatSync, readSync, writeFileSync, fsyncSync, mkdirSync, realpathSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { RoomAgentClient, RoomClientError } from "./room-agent.mjs";
+import { agentErrorAx } from "../src/agent-error.mjs";
 
 const fields = ["version", "origin", "roomId", "memberId", "token"];
 const variables = ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"];
@@ -118,6 +119,11 @@ export function connectionDiagnostic(error) {
       : error.status === 404 ? "unavailable_route" : ["member_required", "identity_mismatch", "expiry_unconfirmed", "invalid_response", "help_context_unavailable", "offer_context_unavailable"].includes(error.code) ? error.code : code;
   } else if (error?.name === "TimeoutError") code = "request_timeout";
   else if (error?.name === "AbortError") code = "cancelled";
+  const httpStatus = error instanceof RoomClientError ? error.status : 0;
+  const mapped = code === "access_ended" ? "unauthenticated" : code === "rate_limited" ? "rate_limited"
+    : code === "member_required" ? "member_required" : code;
+  const ax = agentErrorAx({ httpStatus, code: mapped, message: "" });
   return { type: "agent_connection_error", code, message: messages[code],
+    status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next,
     ...(code === "rate_limited" && Number.isSafeInteger(error.retryAfterMs) && error.retryAfterMs >= 0 && error.retryAfterMs <= 300000 ? { retryAfterMs: error.retryAfterMs } : {}) };
 }

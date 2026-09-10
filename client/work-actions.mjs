@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import { EVENT_TYPES as T, validId } from "../src/events.js";
 import { replyPostMode, REPLY_POLICY_VERSION } from "../src/reply-requests.js";
 import { reportedProducer } from "../src/work-packet.js";
+import { agentErrorAx } from "../src/agent-error.mjs";
 
 const id = { type: "string", minLength: 1, maxLength: 128, pattern: "^(?!(?:constructor|prototype|__proto__)$)[A-Za-z0-9][A-Za-z0-9_.:-]*$" };
 const text = { type: "string", minLength: 1, maxLength: 4096, pattern: "\\S" };
@@ -114,8 +115,11 @@ const refusals = {
   pilot_limit: "Room capacity was reached. Ask the owner to review capacity; do not replace the original operation blindly."
 };
 export function workActionRefusal(cause) {
+  const ax = agentErrorAx({ httpStatus: cause?.status ?? 0, code: cause?.code, message: cause?.message });
   if (["invalid_work_action", "work_action_too_large"].includes(cause?.code)) return { type: "work_input_refused", code: cause.code,
-    outcome: "this_attempt_not_sent", message: "Input was not sent. Use the listed fields and reduce text/checks to fit the command limit. If this ID had an earlier uncertain attempt, reconcile its original input before changing it." };
+    outcome: "this_attempt_not_sent", message: "Input was not sent. Use the listed fields and reduce text/checks to fit the command limit. If this ID had an earlier uncertain attempt, reconcile its original input before changing it.",
+    status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next };
   if (![409, 422].includes(cause?.status) || !Object.hasOwn(refusals, cause.code)) return null;
-  return { type: "work_refused", code: cause.code, outcome: "this_attempt_refused", message: refusals[cause.code] };
+  return { type: "work_refused", code: cause.code, outcome: "this_attempt_refused", message: refusals[cause.code],
+    status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next };
 }

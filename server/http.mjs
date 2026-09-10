@@ -6,6 +6,7 @@ import { clientAddress } from "./deployment.mjs";
 import { validId } from "../src/events.js";
 import { SyntheticInboxTransport } from "./inbox-transport.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
+import { agentErrorBody } from "../src/agent-error.mjs";
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -504,7 +505,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     } catch (error) {
       if (res.headersSent) { res.end(); return; }
       if (error.status === 429) res.setHeader("Retry-After", "60");
-      json(res, error.status || 500, { error: { code: error.code || "internal_error", message: error.status ? error.message : "Service could not complete the request; no success is claimed" } });
+      let roomId, workItemId;
+      try {
+        const parsed = new URL(req.url, expectedOrigin());
+        const match = /^\/api\/rooms\/([^/]+)/.exec(parsed.pathname);
+        if (match) {
+          try { const id = decodeURIComponent(match[1]); if (validId(id)) roomId = id; } catch { /* ignore */ }
+        }
+        const selected = parsed.searchParams.get("workItemId");
+        if (selected && validId(selected)) workItemId = selected;
+      } catch { /* ignore */ }
+      const httpStatus = error.status || 500;
+      const code = error.code || "internal_error";
+      const message = error.status ? error.message : "Service could not complete the request; no success is claimed";
+      json(res, httpStatus, agentErrorBody({ httpStatus, code, message, roomId, workItemId }));
     }
   });
   server.requestTimeout = 15000;

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { validId } from "../src/events.js";
 import { replyPostMode } from "../src/reply-requests.js";
 import { conforms, confirmsAgentCommand } from "./work-actions.mjs";
+import { agentErrorAx } from "../src/agent-error.mjs";
 
 const id = { type: "string", minLength: 1, maxLength: 128, pattern: "^(?!(?:constructor|prototype|__proto__)$)[A-Za-z0-9][A-Za-z0-9_.:-]*$" };
 const text = { type: "string", minLength: 1, maxLength: 4096, pattern: "\\S" };
@@ -64,9 +65,11 @@ export async function submitReplyAction(client, identity, name, args, { signal }
 export function replyRefusal(cause) {
   const allowed = ["invalid_reply_action", "reply_action_too_large", "invalid_reply_selection", "invalid_reply_cursor", "reply_request_not_found",
     "reply_cursor_identity_changed", "reply_history_changed", "reply_entry_too_large", "reply_list_too_large", "command_rejected", "idempotency_conflict", "invalid_command"];
+  const ax = agentErrorAx({ httpStatus: cause?.status ?? 0, code: allowed.includes(cause?.code) ? cause.code : "not_confirmed", message: cause?.message });
   return { type: "reply_refused", code: allowed.includes(cause?.code) ? cause.code : "not_confirmed",
     outcome: ["invalid_reply_action", "reply_action_too_large"].includes(cause?.code) ? "this_attempt_not_sent" : [409, 422].includes(cause?.status) ? "this_attempt_refused" : "not_confirmed",
-    message: "Preserve unknown write input and its requestId exactly. For a stale context, reread the request and explicitly review changes before a new attempt. Changed history or identity requires reconciliation; never silently reset the checkpoint." };
+    message: "Preserve unknown write input and its requestId exactly. For a stale context, reread the request and explicitly review changes before a new attempt. Changed history or identity requires reconciliation; never silently reset the checkpoint.",
+    status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next };
 }
 
 const integer = value => Number.isSafeInteger(value) && value >= 0;

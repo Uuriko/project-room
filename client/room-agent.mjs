@@ -9,9 +9,21 @@ import { replyRoute, validReplyArguments, validateReplyRead, submitReplyAction }
 import { charterContext, validateCharterContext, validateCharterRead } from "../src/room-charter.js";
 import { workHelpContext } from "../src/work-help.js";
 import { workOffersContext, MAX_HELP_OFFERS, MAX_PENDING_HELP_OFFERS } from "../src/help-offers.js";
+import { AGENT_ERRORS, resolveAgentErrorAx } from "../src/agent-error.mjs";
 
+export { AGENT_ERRORS };
 export class RoomClientError extends Error {
-  constructor(status, code, message, retryAfterMs = null) { super(message); this.status = status; this.code = code; this.retryAfterMs = retryAfterMs; }
+  constructor(status, code, message, retryAfterMs = null, extras = null) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.retryAfterMs = retryAfterMs;
+    const ax = resolveAgentErrorAx(status, code, message, extras);
+    this.reason = ax.reason;
+    this.hint = ax.hint;
+    this.next = ax.next;
+    this.errorStatus = ax.status;
+  }
 }
 export const validWorkSearchQuery = query => typeof query === "string" && query.length <= 200 && query.trim().length > 0;
 function checkedCharter(value, horizon) {
@@ -143,7 +155,9 @@ export class RoomAgentClient {
     if (!response.ok) {
       const retry = response.headers?.get("retry-after");
       const parsed = retry == null ? NaN : /^\d+$/.test(retry) ? Number(retry) * 1000 : Date.parse(retry) - Date.now();
-      throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room request failed", Number.isFinite(parsed) ? Math.max(0, parsed) : null);
+      throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room request failed", Number.isFinite(parsed) ? Math.max(0, parsed) : null, {
+        status: value?.status, reason: value?.reason, hint: value?.hint, next: value?.next
+      });
     }
     return value;
   }
@@ -396,6 +410,7 @@ export class RoomAgentClient {
       });
       return { contractVersion: 1, roomId: snapshot.roomId, evaluatedThrough: snapshot.sequence,
         evaluatedAt: new Date(now).toISOString(), clockSource: focus === "help_wanted" ? "service" : "client", focus, charter, member,
+        errors: AGENT_ERRORS,
         scope: { kind: "room", permissions: member.permissions, externalExecution: false },
         selection: matches ? { totalWork: items.length, eligibleWork: candidates.length, query: query.trim(),
           matches: matches.total, shown: work.length, limit: 25, hasMore: matches.total > work.length,
@@ -412,6 +427,7 @@ export class RoomAgentClient {
     return {
       contractVersion: 1, roomId: snapshot.roomId, evaluatedThrough: snapshot.sequence,
       charter,
+      errors: AGENT_ERRORS,
       member, scope: { kind: "room", permissions: member.permissions, externalExecution: false },
       work: items.map(item => ({
         id: item.id, title: item.title, definitionOfDone: item.definitionOfDone, sourceMessageId: item.sourceMessageId,
