@@ -150,7 +150,7 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /id="agent-connect-title">Add agent</);
   assert.match(app, /Agents join this chat as named people/);
   assert.match(app, /escapeChatAction, messageCluster/);
-  assert.match(app, /kindLabel, memberStatus, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress/);
+  assert.match(app, /kindLabel, memberStatus, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention/);
   assert.match(app, /replyAuthorToAddress/);
   assert.match(app, /shouldAddressPresenceClick\(e\.target\)/);
   assert.match(app, /grouped-time/);
@@ -160,6 +160,11 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /author\.kind === "agent"/);
   assert.match(app, /Address \$\{m\.displayName\} in chat/);
   assert.doesNotMatch(app, /maybeOpenCatchUp/);
+  assert.doesNotMatch(app, /"Message…"/);
+  assert.match(app, /composerPlaceholder/);
+  assert.match(app, /removeMention/);
+  assert.match(html, /id="reply-mention"/);
+  assert.match(html, /Also @/);
   assert.match(html, /id="people-panel"/);
   assert.match(html, /id="connect-agent-button"/);
   assert.match(html, /id="message-input"/);

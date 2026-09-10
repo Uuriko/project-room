@@ -119,6 +119,38 @@ export function mentionHtml(body, members, esc) {
   return out + esc(text.slice(last));
 }
 
+export function composerPlaceholder({ workKind = null, inThread = false } = {}) {
+  if (workKind === "request") return "What do you need?";
+  if (workKind === "cancelled") return "Reason…";
+  if (workKind) return "Your reply…";
+  return inThread
+    ? "Reply in this thread… @ to address someone"
+    : "Write to the room… @ to address someone";
+}
+
+export function removeMention(text, member) {
+  if (!member?.displayName) return String(text ?? "");
+  const label = `@${member.displayName}`;
+  const value = String(text ?? "");
+  let from = 0;
+  while (from <= value.length) {
+    const i = value.indexOf(label, from);
+    if (i === -1) return value;
+    const after = value[i + label.length];
+    if (after == null || /\s/.test(after)) {
+      let start = i, end = i + label.length;
+      const spaceBefore = start > 0 && /\s/.test(value[start - 1]);
+      const spaceAfter = end < value.length && /\s/.test(value[end]);
+      if (spaceBefore && spaceAfter) end += 1;
+      else if (spaceBefore) start -= 1;
+      else if (spaceAfter) end += 1;
+      return `${value.slice(0, start)}${value.slice(end)}`;
+    }
+    from = i + 1;
+  }
+  return value;
+}
+
 export function replyAuthorToAddress(viewerId, author) {
   if (!author?.id || author.active === false || author.id === viewerId) return null;
   return author;

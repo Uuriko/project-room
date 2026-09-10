@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T, replay } from "../src/events.js";
-import { conversationIndex, searchMessages, ConversationDrafts, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS, kindLabel, memberStatus, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, escapeChatAction } from "../src/conversation.js";
+import { conversationIndex, searchMessages, ConversationDrafts, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS, kindLabel, memberStatus, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, escapeChatAction, composerPlaceholder, removeMention } from "../src/conversation.js";
 import { draftCommand } from "../src/client.js";
 
 function room(t) {
@@ -211,6 +211,27 @@ function presenceTree() {
   innerSummary.parentNode = inner;
   return { panel, panelSummary, name, innerSummary };
 }
+
+test("composer placeholder names the room, the thread, or the work mode", () => {
+  assert.equal(composerPlaceholder({}), "Write to the room… @ to address someone");
+  assert.equal(composerPlaceholder({ inThread: true }), "Reply in this thread… @ to address someone");
+  assert.equal(composerPlaceholder({ workKind: "request", inThread: true }), "What do you need?");
+  assert.equal(composerPlaceholder({ workKind: "cancelled" }), "Reason…");
+  assert.equal(composerPlaceholder({ workKind: "answered", inThread: true }), "Your reply…");
+  assert.equal(composerPlaceholder({ workKind: null, inThread: false }).includes("Message…"), false);
+});
+
+test("removeMention strips one @Name token without eating longer names", () => {
+  const maya = { id: "maya", displayName: "Maya" };
+  assert.equal(removeMention("Ask @Maya tomorrow", maya), "Ask tomorrow");
+  assert.equal(removeMention("@Maya hello", maya), "hello");
+  assert.equal(removeMention("hi @Maya", maya), "hi");
+  assert.equal(removeMention("@Maya", maya), "");
+  assert.equal(removeMention("Ask @Mayafoo", maya), "Ask @Mayafoo");
+  assert.equal(removeMention("Ask @Maya @Maya", maya), "Ask @Maya");
+  assert.equal(removeMention("hello", null), "hello");
+  assert.equal(removeMention("Ask @Maya tomorrow", {}), "Ask @Maya tomorrow");
+});
 
 test("Escape peels mention picker, then reply quote, then thread, and never implies clearing a draft", () => {
   assert.equal(escapeChatAction({ dialogOpen: true, mentionOpen: true, replyOpen: true, inThread: true }), null);

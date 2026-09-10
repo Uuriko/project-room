@@ -299,6 +299,9 @@ button.source-link { background: none; border: 0; padding: .25rem 0; text-align:
 #room-guide-dismiss { width: auto; }
 #people-hint:empty { display: none; }
 .reply-bar, .cursor-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .65rem 1rem; border-top: 1px solid var(--line-soft); font-size: .875rem; color: var(--muted); }
+.reply-bar-actions { display: flex; align-items: center; gap: .5rem; flex-shrink: 0; }
+#reply-mention[aria-pressed="true"] { color: var(--text); }
+#reply-mention[hidden] { display: none; }
 #request-mode-bar { flex-wrap: wrap; }
 #request-mode-label { flex: 1 1 auto; overflow-wrap: anywhere; }
 .contribution-next { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .25rem 1rem .9rem; }

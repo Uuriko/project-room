@@ -2,7 +2,7 @@ import { EVENT_TYPES as T, WORK_STATES as S } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief } from "./return-brief.js";
 import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
-import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress } from "./conversation.js";
+import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention } from "./conversation.js";
 import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer } from "./workflow.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation } from "./share-links.js";
 import { installAgentConnections } from "./agent-connections.js";
@@ -981,7 +981,7 @@ function syncRequestComposer() {
   send.disabled = busy || requestReading || Boolean(request && request.status !== "open" && !pendingMessage);
   const action = pendingMessage && mode ? "Retry original" : mode ? mode.kind === "request" ? "Send request" : label : "Send";
   send.setAttribute("aria-label", action); send.title = action;
-  input.placeholder = mode?.kind === "request" ? "What do you need?" : mode?.kind === "cancelled" ? "Reason…" : mode ? "Your reply…" : "Message…";
+  input.placeholder = composerPlaceholder({ workKind: mode?.kind ?? null, inThread: Boolean(currentThreadId) });
   if (active) $("#reply-bar").hidden = true;
 }
 function setRequestMode(mode, initial = {}) {
@@ -1714,12 +1714,32 @@ function updateReply() {
   const target = conversation?.byId.get(replyToId);
   $("#reply-bar").hidden = Boolean(requestMode) || !target || replyToId === currentThreadId;
   const author = target ? replyAuthorToAddress(session?.member?.id, state.members[target.authorId]) : null;
+  const addressing = Boolean(author && messageMentionsMember($("#message-input").value, author));
   $("#reply-context").textContent = target
-    ? `Replying to ${name(target.authorId)}${author ? ` · addressing ${author.displayName}` : ""}: ${target.body.slice(0, 100)}`
+    ? `Replying to ${name(target.authorId)}${addressing ? ` · addressing ${author.displayName}` : ""}: ${target.body.slice(0, 100)}`
     : "";
+  const mention = $("#reply-mention");
+  mention.hidden = !author;
+  mention.disabled = busy;
+  mention.setAttribute("aria-pressed", addressing ? "true" : "false");
+  mention.textContent = author ? `Also @ ${author.displayName}` : "Also @";
 }
 function clearReply() { replyToId = currentThreadId; updateReply(); }
 $("#cancel-reply").addEventListener("click", () => { clearReply(); $("#message-input").focus({ preventScroll: true }); });
+$("#reply-mention").addEventListener("click", () => {
+  const target = conversation?.byId.get(replyToId);
+  const author = target ? replyAuthorToAddress(session?.member?.id, state.members[target.authorId]) : null;
+  if (!author) return;
+  const input = $("#message-input");
+  if (messageMentionsMember(input.value, author)) {
+    input.value = removeMention(input.value, author);
+    const select = $("#message-to-select");
+    if (select.value === author.id) select.value = "";
+    saveComposer();
+    input.focus({ preventScroll: true });
+  } else applyMentionMember(author);
+  updateReply();
+});
 $("#thread-back").addEventListener("click", () => switchThread(null));
  $("#remember-drafts").addEventListener("change", () => {
   if ($("#remember-drafts").checked) saveComposer();
@@ -1763,7 +1783,7 @@ function applyMentionMember(member) {
   hideMentions(); saveComposer();
   input.focus(); input.setSelectionRange(next.caret, next.caret);
 }
-$("#message-input").addEventListener("input", () => { lastComposerSelection = null; saveComposer(); renderMentions(); });
+$("#message-input").addEventListener("input", () => { lastComposerSelection = null; saveComposer(); renderMentions(); updateReply(); });
 $("#message-to-select").addEventListener("change", () => { saveComposer(); syncRequestComposer(); });
 const touchKeyboard = matchMedia("(hover: none) and (pointer: coarse)");
 function syncComposerHint() {
