@@ -9,6 +9,7 @@ import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { agentErrorBody } from "../src/agent-error.mjs";
 import { discoveryDoc } from "../deploy/agent-discovery.mjs";
 import { guestAgentLinkContract } from "./guest-agent-links.mjs";
+import { isSessionStatus, workItemSessionContract } from "../src/work-item-session.js";
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -16,7 +17,7 @@ const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 const bindingPattern = /^[a-f0-9]{64}$/;
 const assets = new Map([
   ["/", ["index.html", "text/html"]], ["/index.html", ["index.html", "text/html"]],
-  ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js", "agent-connections.js", "return-brief.js", "work-selectors.js", "work-status.js", "work-packet.js", "portable-work.js", "reminders.js", "reminder-time.js", "room-charter.js", "room-instructions.js", "reply-requests.js", "work-help.js", "help-offers.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
+  ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js", "agent-connections.js", "return-brief.js", "work-selectors.js", "work-status.js", "work-packet.js", "portable-work.js", "reminders.js", "reminder-time.js", "room-charter.js", "room-instructions.js", "reply-requests.js", "work-help.js", "help-offers.js", "work-item-session.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
   ...["inbox-client.js", "inbox-ui.js", "inbox-send-ui.js", "room-roster.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
   ["/src/styles.css", ["src/styles.css", "text/css"]]
 ]);
@@ -325,6 +326,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/guest-agent-links" && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, guestAgentLinkContract(), req.method === "HEAD");
       }
+      if (url.pathname === "/api/work-item-sessions" && ["GET", "HEAD"].includes(req.method)) {
+        return json(res, 200, workItemSessionContract(), req.method === "HEAD");
+      }
       if (url.pathname === "/api/guest-agent-links" && req.method === "POST") {
         checkOrigin(req, true);
         rate(`guest-agent-mint:${remoteAddress}`, 30);
@@ -422,7 +426,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         reject(405, "method_not_allowed", "Method not allowed");
       }
       const revokeMatch = /^\/api\/rooms\/([^/]{1,384})\/invitations\/([^/]{1,384})\/revoke$/.exec(url.pathname);
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|work-sessions|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links))?$/.exec(url.pathname);
       if (!match && !revokeMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((match ?? revokeMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
@@ -483,6 +487,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, store.workResult(selected.token, roomId, params.get("workItemId"), {
           completionEventId: params.get("completionEventId"), draftMessageId: params.get("draftMessageId"), expectedSessionBinding: fence
         }));
+      }
+      if (route === "work-sessions" && req.method === "GET") {
+        const params = url.searchParams;
+        if ([...params.keys()].some(key => !["status", "auth"].includes(key) || params.getAll(key).length !== 1)
+          || (params.has("status") && !isSessionStatus(params.get("status")))) {
+          reject(422, "invalid_session_status", "Choose one session status");
+        }
+        return json(res, 200, store.workSessions(selected.token, roomId, {
+          status: params.get("status"), expectedSessionBinding: fence
+        }));
+      }
+      if (route === "work-sessions" && req.method === "POST") {
+        const result = store.mutateWorkSession(selected.token, roomId, await body(req), fence);
+        return json(res, result.duplicate ? 200 : 201, result);
       }
       if (route === "work-discussion" && req.method === "GET") {
         const params = url.searchParams;

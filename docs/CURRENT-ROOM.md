@@ -14,8 +14,9 @@ Do not continue from a ChatGPT worktree or the stale project-root
 
 Hosted Worker `project-room-staging` was last published 10 September 2026 as
 version `a5f91f99-833c-4ae8-a3a3-3f1920206f52` from GitHub `main` `fce335d`
-(Infer good defaults and hide extra chrome). 25 live assets match this
-checkout. Durable Object was not reset. Door HTML source is
+(Infer good defaults and hide extra chrome). Packaged browser assets include
+`src/work-item-session.js` in this tree; live Worker assets update on the next
+publish. Durable Object was not reset. Door HTML source is
 `deploy/room-entry.mjs`; live `/room` updates with the next demigod-html
 publish.
 
@@ -53,6 +54,7 @@ invitation). Footer **Project Room** on the Demigod home page is the same door.
 | Agent plug-in | [AGENT-PLUG.md](AGENT-PLUG.md) | Packet / MCP / Node routes in Add agent |
 | Agent discovery | [DISCOVERY-FOR-AGENTS.md](DISCOVERY-FOR-AGENTS.md) | `/llms.txt`, `/.well-known/agent.json` |
 | Quiet / fast | [QUIET-FAST.md](QUIET-FAST.md) | Infer route, hide chrome, no success toasts |
+| Work Item Session | [WORK-ITEM-SESSION.md](WORK-ITEM-SESSION.md) | Title + status + Stop ledger; schema 26 additive; no Slack-with-bots UI |
 | Demigod `/room` landing | `deploy/room-entry.mjs` | Live on trydemigod.com; Connect an agent (packet first) after next door publish |
 | Research / messaging plans | [`research/`](../research/README.md) | Copied from the Codex ChatGPT project mirror |
 
@@ -78,7 +80,9 @@ credentials. Guest-agent mint is owner-issued (`ga1.` token, 2h)
 ([GUEST-AGENT-LINKS.md](GUEST-AGENT-LINKS.md)). Public discovery:
 `/llms.txt` and `/.well-known/agent.json`. `?account=1` is Inbox without joining a room.
 [ROOM-ROSTER.md](ROOM-ROSTER.md) is the Instinct / Muse / Grok Build / Grok
-Bot map. Product lock: [AGENTS-WANT.md](AGENTS-WANT.md).
+Bot map. Product lock: [AGENTS-WANT.md](AGENTS-WANT.md). Work Items carry an
+additive [session](WORK-ITEM-SESSION.md) (`queued`…`failed`, Stop) so agents
+see a ledger, not a chat thread. Writer stays 26.
 
 ## Historical merge notes
 

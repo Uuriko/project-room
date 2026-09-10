@@ -2,6 +2,7 @@ import { nextWorkStep, workActions, workCollaboration } from "../src/workflow.js
 import { charterContext } from "../src/room-charter.js";
 import { validateHelp, workHelpContext } from "../src/work-help.js";
 import { workOffersContext } from "../src/help-offers.js";
+import { sessionRecord } from "../src/work-item-session.js";
 
 const pick = (value, fields) => value == null ? null
   : Object.fromEntries(fields.split(" ").filter(key => Object.hasOwn(value, key)).map(key => [key, structuredClone(value[key])]));
@@ -9,6 +10,10 @@ const pick = (value, fields) => value == null ? null
 // Shared current record; no prior receipts/checks, conversation text or event log.
 export function currentWorkRecord(item) {
   const work = pick(item, "id title definitionOfDone revision state mode sourceMessageId proposedById accountableMemberId verifierMemberId humanDecisionMakerId independentVerificationRequired ownerDecisionRequired supersededBy createdAt updatedAt");
+  const session = sessionRecord(item);
+  work.status = session.status;
+  work.stop_requested_at = session.stop_requested_at;
+  work.heartbeat_at = session.heartbeat_at;
   work.claim = pick(item.claim, "holderId repository ref paths acquiredAt expiresAt status releasedAt");
   work.receipt = pick(item.receipt, "reportedById producerId producerAttribution externalProducer summary evidenceUrl evidenceVersion checksClaimed nextAction eventId nativeText");
   work.verification = pick(item.verification, "verifierId result completionEventId evidenceVersion summary independenceConfirmed eventId");
