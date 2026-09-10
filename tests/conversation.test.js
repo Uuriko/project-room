@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T, replay } from "../src/events.js";
-import { conversationIndex, searchMessages, ConversationDrafts, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS, kindLabel, memberStatus, addressMember } from "../src/conversation.js";
+import { conversationIndex, searchMessages, ConversationDrafts, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS, kindLabel, memberStatus, addressMember, shouldAddressPresenceClick } from "../src/conversation.js";
 import { draftCommand } from "../src/client.js";
 
 function room(t) {
@@ -171,4 +171,41 @@ test("composer @ query picks people and agents and mention HTML stays escaped", 
   const fromAt = addressMember("hi @In", 6, members[0]);
   assert.equal(fromAt.body, "hi @Instinct ");
   assert.equal(fromAt.toMemberId, insertMention("hi @In", 6, 3, members[0]).toMemberId);
+});
+
+function presenceTree() {
+  const matches = (node, selector) => selector.split(",").map(part => part.trim()).some(part => {
+    if (part.startsWith(".")) return (node.className || "").split(/\s+/).includes(part.slice(1));
+    if (part.startsWith("#")) return node.id === part.slice(1);
+    return node.tagName === part.toUpperCase();
+  });
+  const make = (tag, attrs = {}) => {
+    const node = {
+      tagName: tag.toUpperCase(), className: attrs.className || "", id: attrs.id || "", parentNode: null,
+      closest(selector) { let n = this; while (n) { if (matches(n, selector)) return n; n = n.parentNode; } return null; },
+      contains(other) { let n = other; while (n) { if (n === this) return true; n = n.parentNode; } return false; }
+    };
+    return node;
+  };
+  const panel = make("details", { id: "people-panel" });
+  const panelSummary = make("summary", { id: "presence-title" });
+  const list = make("div", { id: "presence-list" });
+  const row = make("div", { className: "presence-member" });
+  const name = make("strong");
+  const inner = make("details");
+  const innerSummary = make("summary");
+  panelSummary.parentNode = panel;
+  list.parentNode = panel;
+  row.parentNode = list;
+  name.parentNode = row;
+  inner.parentNode = row;
+  innerSummary.parentNode = inner;
+  return { panel, panelSummary, name, innerSummary };
+}
+
+test("People-panel wrapping details does not swallow a name click; inner capabilities summary does", () => {
+  const { name, innerSummary, panelSummary } = presenceTree();
+  assert.equal(shouldAddressPresenceClick(name), true);
+  assert.equal(shouldAddressPresenceClick(innerSummary), false);
+  assert.equal(shouldAddressPresenceClick(panelSummary), false);
 });

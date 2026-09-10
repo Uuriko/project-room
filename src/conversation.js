@@ -51,6 +51,15 @@ export function kindLabel(kind) {
   return kind === "agent" ? "Agent" : "Person";
 }
 
+// A People-row click addresses that member. The panel itself is a <details>;
+// only disclosures *inside* the row (Room capabilities) should swallow the click.
+export function shouldAddressPresenceClick(target) {
+  const row = target?.closest?.(".presence-member");
+  if (!row) return false;
+  const block = target.closest("details, summary, button, a");
+  return !(block && row.contains(block));
+}
+
 export function memberStatus(member) {
   if (!member || member.active === false) return "access revoked";
   return kindLabel(member.kind);
