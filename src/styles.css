@@ -66,9 +66,14 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 
 .message-list { height: min(48vh, 34rem); margin: 0; padding: .3rem 1rem; overflow-y: auto; list-style: none; }
 .message { display: grid; grid-template-columns: 2rem 1fr; gap: .7rem; padding: .85rem 0; }
-.message.grouped { padding-top: .12rem; padding-bottom: .35rem; }
+.message.grouped { position: relative; padding-top: .12rem; padding-bottom: .35rem; }
 .message.grouped .message-avatar { visibility: hidden; }
 .message.grouped .message-meta { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.grouped-time { display: none; }
+.message.grouped:hover .grouped-time, .message.grouped:focus-within .grouped-time {
+  display: block; position: absolute; left: 0; top: .15rem; width: 2rem; color: #738092; font-size: .55rem; line-height: 1.2; text-align: right;
+}
+.message.mentioned { border-radius: .4rem; background: rgb(173 140 255 / 10%); }
 .chat-divider { grid-column: 1 / -1; margin: .55rem 0 .2rem; color: #8b97a8; font-size: .68rem; font-weight: 700; letter-spacing: .06em; text-align: center; text-transform: uppercase; }
 .chat-divider.unread { color: var(--amber); }
 .message-avatar { display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: 50%; background: #27334a; color: white; font-size: .65rem; font-weight: 800; }
@@ -79,8 +84,9 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .message-meta strong { font-size: .84rem; }
 .message-meta span { padding: .08rem .34rem; border: 1px solid var(--line); border-radius: 99px; color: var(--muted); font-size: .62rem; text-transform: uppercase; }
 .message-meta time { margin-left: auto; color: #738092; font-size: .7rem; }
-.mention { color: var(--violet); font-weight: 650; }
+.mention { padding: 0; border: 0; background: transparent; color: var(--violet); font: inherit; font-weight: 650; cursor: pointer; }
 .mention.agent { color: #d4c4ff; }
+.mention:hover { text-decoration: underline; }
 .work-link { color: var(--muted); font-size: .72rem; text-decoration: none; }
 .work-link:hover { color: var(--blue); }
 .composer { position: relative; padding: 1rem; background: #0d1117; }

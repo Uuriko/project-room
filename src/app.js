@@ -2,7 +2,7 @@ import { EVENT_TYPES as T, WORK_STATES as S } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief } from "./return-brief.js";
 import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
-import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, addressMember, shouldAddressPresenceClick } from "./conversation.js";
+import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, addressMember, shouldAddressPresenceClick, messageMentionsMember } from "./conversation.js";
 import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer } from "./workflow.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation } from "./share-links.js";
 import { installAgentConnections } from "./agent-connections.js";
@@ -838,14 +838,14 @@ function renderMessages() {
     const node = previous.get(message.id) || document.createElement("li");
     const cluster = messageCluster(messages, index);
     node.id = recordDomId("message", message.id); node.dataset.key = message.id; node.dataset.messageRecordId = message.id;
-    node.className = `message${cluster.grouped ? " grouped" : ""}`; node.tabIndex = -1;
+    node.className = `message${cluster.grouped ? " grouped" : ""}${session && messageMentionsMember(message.body, session.member) ? " mentioned" : ""}`; node.tabIndex = -1;
     const html = messageContent(message, cluster, message.id === unreadAnchorId);
     if (node._content !== html) {
       if (!node._content || !node.querySelector(".message-body")) node.innerHTML = html;
       else {
         const next = document.createElement("div"); next.innerHTML = html;
         // Reply counts/reactions change independently; the selected message text stays put.
-        for (const selector of [".chat-divider", ".message-avatar", ".message-meta", ".message-body", ".message-context", ".reactions", ".message-links", ".draft-feedback"]) {
+        for (const selector of [".chat-divider", ".grouped-time", ".message-avatar", ".message-meta", ".message-body", ".message-context", ".reactions", ".message-links", ".draft-feedback"]) {
           const before = node.querySelector(selector), after = next.querySelector(selector);
           if (!before && !after) continue;
           if (!before) { node.insertBefore(after, node.firstChild); continue; }
@@ -914,7 +914,10 @@ function messageContent(m, cluster = {}, unreadStart = false) {
     const label = `${pending && !pending.busy ? "Retry " : ""}${reaction}`;
     return `<button type="button" class="reaction" aria-pressed="${selected}" aria-label="${esc(label)} reaction, ${members.length}" title="${esc(members.map(name).join(", ") || `React with ${reaction}`)}" data-message-action="react" data-message-id="${esc(m.id)}" data-reaction="${reaction}"${pending?.busy ? " disabled" : ""}><span aria-hidden="true">${symbol}</span><span>${members.length || ""}</span>${pending && !pending.busy ? " Retry" : ""}</button>`;
   }).join("");
-  return `${divider}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${author.kind === "agent" ? `<span>${esc(kindLabel(author.kind))}</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · room-visible</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${esc(parent.body.slice(0,90))}</a>` : ""}</div><p class="message-body">${mentionHtml(m.body, Object.values(state.members), esc)}</p><div class="draft-feedback">${draftFeedbackHTML(m)}</div><details class="reactions"><summary data-message-action="reaction-menu" data-message-id="${esc(m.id)}" aria-label="Reactions to message by ${esc(authorLabel)}">${esc(reactionSummary)}</summary><div class="reaction-options">${reactionButtons}</div></details><div class="message-links">${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>`).join("")}${m.workItemId && workActions(state.workItems[m.workItemId], state.members[session.member.id]).some(([action]) => action === "complete") ? `<button class="message-to-work" type="button" data-message-action="result" data-message-id="${esc(m.id)}">Save as result</button>` : ""}<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>${!currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : ""}${can("steer") && !(m.proposal && m.workItemId) ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : ""}</div></div>`;
+  const groupedTime = cluster.grouped
+    ? `<time class="grouped-time" datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time>`
+    : "";
+  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${author.kind === "agent" ? `<span>${esc(kindLabel(author.kind))}</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · room-visible</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${esc(parent.body.slice(0,90))}</a>` : ""}</div><p class="message-body">${mentionHtml(m.body, Object.values(state.members), esc)}</p><div class="draft-feedback">${draftFeedbackHTML(m)}</div><details class="reactions"><summary data-message-action="reaction-menu" data-message-id="${esc(m.id)}" aria-label="Reactions to message by ${esc(authorLabel)}">${esc(reactionSummary)}</summary><div class="reaction-options">${reactionButtons}</div></details><div class="message-links">${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>`).join("")}${m.workItemId && workActions(state.workItems[m.workItemId], state.members[session.member.id]).some(([action]) => action === "complete") ? `<button class="message-to-work" type="button" data-message-action="result" data-message-id="${esc(m.id)}">Save as result</button>` : ""}<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>${!currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : ""}${can("steer") && !(m.proposal && m.workItemId) ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : ""}</div></div>`;
 }
 function renderSearch(now = Date.now()) {
   const query = $("#message-search").value;
@@ -1682,6 +1685,8 @@ function submitRequest(form) {
 $("#message-list").addEventListener("click", e => {
   if (e.target.closest("[data-empty-write]")) { $("#message-input").focus(); return; }
   if (e.target.closest("[data-empty-invite]")) { $("#invite-people-button")?.click(); return; }
+  const chip = e.target.closest("[data-mention-id]");
+  if (chip && state) { applyMentionMember(state.members[chip.dataset.mentionId]); return; }
   const button = e.target.closest("[data-message-id]"); if (!button || !state || busy) return;
   const id = button.dataset.messageId;
   if (button.dataset.messageAction?.startsWith("request-")) openRequestMode(button.dataset.messageAction.slice(8), id);

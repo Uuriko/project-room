@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T, replay } from "../src/events.js";
-import { conversationIndex, searchMessages, ConversationDrafts, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS, kindLabel, memberStatus, addressMember, shouldAddressPresenceClick } from "../src/conversation.js";
+import { conversationIndex, searchMessages, ConversationDrafts, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS, kindLabel, memberStatus, addressMember, shouldAddressPresenceClick, messageMentionsMember } from "../src/conversation.js";
 import { draftCommand } from "../src/client.js";
 
 function room(t) {
@@ -157,8 +157,13 @@ test("composer @ query picks people and agents and mention HTML stays escaped", 
   assert.equal(inserted.toMemberId, "instinct");
   const esc = value => String(value).replaceAll("<", "&lt;");
   assert.match(mentionHtml("Ask @Instinct tomorrow", members, esc), /mention agent/);
+  assert.match(mentionHtml("Ask @Instinct tomorrow", members, esc), /data-mention-id="instinct"/);
   assert.equal(mentionHtml("Ask <script> @Maya", members, esc).includes("<script>"), false);
   assert.match(mentionHtml("Ask <script> @Maya", members, esc), /mention"/);
+  assert.equal(messageMentionsMember("Ask @Maya tomorrow", members[1]), true);
+  assert.equal(messageMentionsMember("Ask @Mayafoo", members[1]), false);
+  assert.equal(messageMentionsMember("@Maya", members[1]), true);
+  assert.equal(messageMentionsMember("Ask @Instinct", members[1]), false);
   assert.equal(kindLabel("agent"), "Agent");
   assert.equal(kindLabel("human"), "Person");
   assert.equal(kindLabel("agent") === kindLabel("human"), false);
