@@ -149,9 +149,14 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /mentionHtml/);
   assert.match(html, /id="agent-connect-title">Add agent</);
   assert.match(app, /Agents join this chat as named people/);
-  assert.match(app, /kindLabel/);
-  assert.match(app, /memberStatus/);
+  assert.match(app, /kindLabel, memberStatus, addressMember/);
   assert.match(app, /author\.kind === "agent"/);
+  assert.match(app, /Address \$\{m\.displayName\} in chat/);
+  assert.doesNotMatch(app, /maybeOpenCatchUp/);
+  assert.match(html, /id="people-panel"/);
+  assert.match(html, /id="connect-agent-button"/);
+  assert.match(html, /id="message-input"/);
+  assert.match(html, /id="message-list"/);
   const source = readFileSync(join(checkout, "src/agent-connections.js"), "utf8");
   assert.match(source, /rosterSelection/);
   assert.match(source, /rosterNameTaken/);
