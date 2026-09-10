@@ -2,7 +2,7 @@ import { EVENT_TYPES as T, WORK_STATES as S } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief } from "./return-brief.js";
 import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
-import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, addressMember, shouldAddressPresenceClick, messageMentionsMember } from "./conversation.js";
+import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress } from "./conversation.js";
 import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer } from "./workflow.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation } from "./share-links.js";
 import { installAgentConnections } from "./agent-connections.js";
@@ -1698,13 +1698,25 @@ $("#message-list").addEventListener("click", e => {
   else if (button.dataset.messageAction === "react") setReaction(id, button.dataset.reaction);
   else if (["reply", "thread"].includes(button.dataset.messageAction)) {
     switchThread(conversation.rootById.get(id), button.dataset.messageAction === "reply");
-    if (button.dataset.messageAction === "reply") { replyToId = id; updateReply(); saveComposer(); }
+    if (button.dataset.messageAction === "reply") {
+      replyToId = id;
+      const author = replyAuthorToAddress(session.member.id, state.members[conversation.byId.get(id)?.authorId]);
+      if (author && !messageMentionsMember($("#message-input").value, author)) applyMentionMember(author);
+      else if (author) {
+        const select = $("#message-to-select");
+        if ([...select.options].some(option => option.value === author.id)) select.value = author.id;
+      }
+      updateReply(); saveComposer();
+    }
   }
 });
 function updateReply() {
   const target = conversation?.byId.get(replyToId);
   $("#reply-bar").hidden = Boolean(requestMode) || !target || replyToId === currentThreadId;
-  $("#reply-context").textContent = target ? `Replying to ${name(target.authorId)}: ${target.body.slice(0, 100)}` : "";
+  const author = target ? replyAuthorToAddress(session?.member?.id, state.members[target.authorId]) : null;
+  $("#reply-context").textContent = target
+    ? `Replying to ${name(target.authorId)}${author ? ` · addressing ${author.displayName}` : ""}: ${target.body.slice(0, 100)}`
+    : "";
 }
 function clearReply() { replyToId = currentThreadId; updateReply(); }
 $("#cancel-reply").addEventListener("click", () => { clearReply(); $("#message-input").focus({ preventScroll: true }); });
