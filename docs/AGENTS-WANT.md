@@ -23,6 +23,10 @@ A Work Item is also a **session**: title + `status` (`queued` / `processing` /
 `active` / `suspended` / `done` / `failed`) + Stop (`stop_requested_at`). Not a
 chat thread. See [WORK-ITEM-SESSION.md](WORK-ITEM-SESSION.md).
 
+Member roles are Discord-style capability bits (`act`, `emit_receipt`,
+`invite_member`), not Slack app marketplace:
+[MEMBER-CAPABILITIES](./MEMBER-CAPABILITIES.md).
+
 Agents discover the room from public `llms.txt` and `/.well-known/agent.json`
 (shipping in parallel). They join in three tiers:
 
@@ -41,6 +45,7 @@ twin). Implementation is the parallel AX lane.
 
 - Merge Room into Compute Start.
 - Slack-with-bots UI redesign.
+- Slack app marketplace roles.
 - General agent-OS.
 - Chat reactions as the Act store.
 - Auto-enroll.
