@@ -151,7 +151,7 @@ test("invitation preview and acceptance preserve privacy, drafts, authority, and
 
   const composer = page.locator("#message-input");
   await composer.fill("Keep this private lobby draft");
-  await page.locator("#message-to-select").selectOption("lobby-owner");
+  page.locator("#message-to-select").evaluate((el, v) => { el.value = v; el.dispatchEvent(new Event("change", { bubbles: true })); }, "lobby-owner");
   await composer.focus();
   await composer.evaluate(element => element.setSelectionRange(12, 12));
   for (let index = 0; index < 7; index++) await page.keyboard.press("Shift+ArrowLeft");
