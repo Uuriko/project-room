@@ -387,6 +387,24 @@ test("simultaneous HTTP work requests admit one winner without a partial audit e
   assert.equal(store.snapshot(owner, "commons").sequence, before + 1);
 });
 
+test("an exact-scope write claim can be released at event and projection capacity", t => {
+  const { store, owner } = fixture(t);
+  store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "capacity-claim", title: "Bounded write", definitionOfDone: "Release scope safely", accountableMemberId: "owner", mode: "write" }));
+  store.command(owner, "commons", command(T.WORK_ACCEPTED, { workItemId: "capacity-claim", expectedRevision: 0 }));
+  store.command(owner, "commons", command(T.CLAIM_ACQUIRED, { workItemId: "capacity-claim", expectedRevision: 1,
+    repository: "Uuriko/project-room", ref: "main", paths: ["src/**"], expiresAt: "2099-01-01T00:00:00.000Z" }));
+  const state = store.room("commons").state;
+  state.messages.push({ body: "x".repeat(4 * 1024 * 1024) });
+  store.db.prepare("UPDATE rooms SET sequence=10000,projection=? WHERE id='commons'").run(JSON.stringify(state));
+  assert.throws(() => store.command(owner, "commons", command(T.WORK_STARTED, { workItemId: "capacity-claim", expectedRevision: 2 })), { code: "pilot_limit" });
+  const release = command(T.CLAIM_RELEASED, { workItemId: "capacity-claim", expectedRevision: 2 });
+  assert.equal(store.command(owner, "commons", release).sequence, 10001);
+  assert.equal(store.command(owner, "commons", release).duplicate, true);
+  assert.equal(store.room("commons").state.workItems["capacity-claim"].claim.status, "released");
+  assert.throws(() => store.command(owner, "commons", command(T.CLAIM_RELEASED, { workItemId: "capacity-claim", expectedRevision: 3 })), { code: "pilot_limit" });
+  // Deliberately synthetic capacity state is not claimed to be a recoverable history.
+});
+
 test("new work mutations recheck capability changes and preserve the original work record", t => {
   const { store, owner, human } = fixture(t);
   store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "grant", title: "Permission-bound work", definitionOfDone: "A current grant is needed", accountableMemberId: "human" }));
