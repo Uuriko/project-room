@@ -236,10 +236,10 @@
             <div id="reply-bar" class="reply-bar" hidden><span id="reply-context"></span><span class="reply-bar-actions"><button id="reply-mention" type="button" class="button ghost" hidden aria-pressed="false">Also @</button><button id="cancel-reply" type="button" class="button ghost">Cancel reply</button></span></div>
             <form id="message-form" class="composer">
               <label id="composer-label" class="sr-only" for="message-input">Message the room</label>
-              <div class="composer-toolbar" hidden>
+              <div class="composer-toolbar" id="composer-toolbar" hidden>
                 <label class="sr-only" for="message-to-select">Talking to</label>
                 <select id="message-to-select" aria-label="Who this message addresses"></select>
-                <span class="audience-note" hidden>Room-visible</span>
+                <span class="audience-note" id="audience-note" hidden>Room-visible</span>
                 <button id="composer-work-button" class="text-button" type="button" hidden>New work</button>
               </div>
               <div id="request-mode-bar" class="reply-bar" hidden>
@@ -564,4 +564,4 @@
       <button id="join-link-signout" class="button ghost" type="button" hidden>Sign out of expired guest session</button>
     </dialog>
   </body>
-</html>
+                                                                        </html>
