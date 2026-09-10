@@ -90,7 +90,7 @@ for (const mobile of [false, true]) {
 
     await page.locator("#message-input").fill("A draft to keep while catching up.");
     await page.locator("#composer-options > summary").click();
-    await page.locator("#message-to-select").selectOption("guest");
+    page.locator("#message-to-select").evaluate((el, v) => { el.value = v; el.dispatchEvent(new Event("change", { bubbles: true })); }, "guest");
     await page.locator("#message-input").evaluate(node => node.setSelectionRange(2, 9));
     await attention("return-1").click();
     assert.equal(await card("return-1").locator(".work-details").evaluate(node => node.open), true);
