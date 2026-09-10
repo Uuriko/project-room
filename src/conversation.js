@@ -9,6 +9,14 @@ export function sendsOnEnter(event, touchKeyboard = false) {
     && Boolean(!touchKeyboard || event.ctrlKey || event.metaKey);
 }
 
+export function escapeChatAction({ dialogOpen = false, mentionOpen = false, replyOpen = false, inThread = false } = {}) {
+  if (dialogOpen) return null;
+  if (mentionOpen) return "hide-mentions";
+  if (replyOpen) return "clear-reply";
+  if (inThread) return "leave-thread";
+  return null;
+}
+
 export const GROUP_WINDOW_MS = 7 * 60 * 1000;
 
 export function dayKey(iso) {

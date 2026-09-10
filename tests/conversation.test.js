@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T, replay } from "../src/events.js";
-import { conversationIndex, searchMessages, ConversationDrafts, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS, kindLabel, memberStatus, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress } from "../src/conversation.js";
+import { conversationIndex, searchMessages, ConversationDrafts, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS, kindLabel, memberStatus, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, escapeChatAction } from "../src/conversation.js";
 import { draftCommand } from "../src/client.js";
 
 function room(t) {
@@ -211,6 +211,15 @@ function presenceTree() {
   innerSummary.parentNode = inner;
   return { panel, panelSummary, name, innerSummary };
 }
+
+test("Escape peels mention picker, then reply quote, then thread, and never implies clearing a draft", () => {
+  assert.equal(escapeChatAction({ dialogOpen: true, mentionOpen: true, replyOpen: true, inThread: true }), null);
+  assert.equal(escapeChatAction({ mentionOpen: true, replyOpen: true, inThread: true }), "hide-mentions");
+  assert.equal(escapeChatAction({ replyOpen: true, inThread: true }), "clear-reply");
+  assert.equal(escapeChatAction({ inThread: true }), "leave-thread");
+  assert.equal(escapeChatAction({}), null);
+  assert.equal(escapeChatAction({ mentionOpen: true, replyOpen: true }).includes("draft"), false);
+});
 
 test("People-panel wrapping details does not swallow a name click; inner capabilities summary does", () => {
   const { name, innerSummary, panelSummary } = presenceTree();
