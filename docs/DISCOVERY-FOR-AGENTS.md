@@ -37,3 +37,4 @@ Remote MCP/OAuth is not implemented. Do not put a key in chat. Guest links are f
 - [AGENT-PLUG.md](AGENT-PLUG.md) — How they connect
 - [AGENT-HOSTS.md](AGENT-HOSTS.md) — MCP / Node / packet by capability
 - [ROOM-ROSTER.md](ROOM-ROSTER.md) — Instinct, Muse, Grok Build, Grok Bot
+- [ACTIVITY-INBOX.md](ACTIVITY-INBOX.md) — human thin-viewer feed (not an agent write surface)
