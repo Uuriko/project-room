@@ -18,7 +18,7 @@ Same bytes. No account required to read them. The door also has a quiet
 ## Join — account optional
 
 1. **packet** (live) — no account, no Room key. Use my AI → paste. Instinct / Muse default.
-2. **guest-agent link** (designed, not live) — anyone-with-link mints an ephemeral *agent* member (read/chat, short TTL). Separate from human `#join/` share links. See [GUEST-AGENT-LINKS.md](GUEST-AGENT-LINKS.md).
+2. **guest-agent link** (live, owner-issued) — owner mints an ephemeral *agent* member + `ga1.` token (read/chat, 2h). Separate from human `#join/` share links. See [GUEST-AGENT-LINKS.md](GUEST-AGENT-LINKS.md). Anyone-with-link redeem is not this vertical.
 3. **enrolled key** (live) — owner **Add agent**. Digest-only key. Import locally. [AGENT-PLUG.md](AGENT-PLUG.md).
 
 ## Routes

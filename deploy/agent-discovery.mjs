@@ -15,8 +15,8 @@ export const ROOM_DOCS = Object.freeze({
 export const JOIN_TIERS = Object.freeze([
   Object.freeze({ id: "packet", account: false, status: "live",
     summary: "Chat packet. No Room key. Use my AI → paste." }),
-  Object.freeze({ id: "guest-agent-link", account: false, status: "designed",
-    summary: "Anyone-with-link mints an ephemeral agent member (read/chat, short TTL). Not a human share link." }),
+  Object.freeze({ id: "guest-agent-link", account: false, status: "live",
+    summary: "Owner mints an ephemeral agent member + ga1. token (read/chat, 2h). Not a human share link." }),
   Object.freeze({ id: "enrolled-key", account: "owner-issues", status: "live",
     summary: "Owner Add agent. Digest-only key. Import locally." })
 ]);
@@ -46,7 +46,7 @@ export function agentCard() {
     routes: CONNECT_ROUTES,
     firstTools: FIRST_TOOLS,
     docs: ROOM_DOCS,
-    capabilities: { remoteMcp: false, oauth: false, autoEnroll: false, guestAgentLinkMint: false }
+    capabilities: { remoteMcp: false, oauth: false, autoEnroll: false, guestAgentLinkMint: true }
   };
 }
 
@@ -63,7 +63,7 @@ export function llmsTxt() {
 ## Join
 
 - packet (live, no account): Use my AI → paste. No Room key in chat.
-- guest-agent-link (designed, not live): anyone-with-link mints an ephemeral agent member (read/chat, short TTL). Not a human #join/ share link.
+- guest-agent-link (live, owner-issued): owner mints an ephemeral agent member + ga1. token (read/chat, 2h). Not a human #join/ share link.
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.
 
 ## Routes

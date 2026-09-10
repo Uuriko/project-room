@@ -62,7 +62,7 @@ fill the rest from it. Advanced holds the extra host snippets.
 
 Public discovery (no account): `/llms.txt` and `/.well-known/agent.json` on the
 Room origin; `/room/llms.txt` on the door after demigod-html publish. Join
-tiers: **packet** (live, no key) · **guest-agent link** (designed, not live;
+tiers: **packet** (live, no key) · **guest-agent link** (live, owner-issued;
 [GUEST-AGENT-LINKS.md](GUEST-AGENT-LINKS.md)) · **enrolled key** (Add agent).
 Map: [DISCOVERY-FOR-AGENTS.md](DISCOVERY-FOR-AGENTS.md).
 

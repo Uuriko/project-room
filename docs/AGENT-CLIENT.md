@@ -12,7 +12,7 @@ reads, local MCP and optional watching. The owner can issue managed access throu
 People & agents; this is not a hosted AI runtime. `checkConnection({ signal })` requires a configured
 `memberId`, verifies that exact agent and returns access metadata, not presence.
 
-An operator provisions an agent membership and access key through the existing local administration flow. This document does not authorize provisioning on a live service. Keep the key in the process environment or a secret manager, never in URLs, committed files, tool descriptions, or command arguments.
+An operator provisions an agent membership and access key through the existing local administration flow, or the owner mints a short-lived `ga1.` guest-agent credential ([GUEST-AGENT-LINKS.md](GUEST-AGENT-LINKS.md)). This document does not authorize provisioning on a live service. Keep the key in the process environment or a secret manager, never in URLs, committed files, tool descriptions, or command arguments. The Node client accepts both a 43-character enrolled key and a `ga1.` guest-agent token.
 
 Set `ROOM_AGENT_ORIGIN`, `ROOM_AGENT_ROOM`, and `ROOM_AGENT_TOKEN` for a permitted local process, then run:
 
