@@ -3,6 +3,7 @@ import { applyEvent, validId, INVITATION_ROLE_POLICY_VERSION } from "../src/even
 import { invitationJoinedEvent } from "./invitation-evidence.mjs";
 import { canonicalInvitationData } from "./invitation-journal.mjs";
 import { ServiceError } from "./store.mjs";
+import { classifyJoinToken } from "./guest-agent-links.mjs";
 
 const hash = value => createHash("sha256").update(value).digest("hex");
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
@@ -61,6 +62,7 @@ export class ShareLinks {
       expiresAt: row.expires_at, maxJoins: row.max_joins, joins, remainingJoins: Math.max(0, row.max_joins - joins), status };
   }
   find(token) {
+    if (classifyJoinToken(token) === "guest-agent") fail(422, "wrong_link_kind", "Guest-agent links are not human invitation links.");
     if (typeof token !== "string" || !tokenPattern.test(token)) unavailable();
     const row = this.db.prepare("SELECT * FROM share_links WHERE token_hash=?").get(hash(token));
     if (!row) unavailable();

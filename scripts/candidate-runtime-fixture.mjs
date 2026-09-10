@@ -24,6 +24,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('src/inbox-client.js'); paths.add('src/inbox-ui.js');
   paths.add('src/inbox-send-ui.js');
   paths.add('src/room-roster.js');
+  paths.add('deploy/agent-discovery.mjs');
+  paths.add('server/guest-agent-links.mjs');
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
   // No private state, credentials, docs or real checkout Git metadata.
   for (const path of paths) {

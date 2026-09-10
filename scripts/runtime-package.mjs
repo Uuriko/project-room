@@ -43,6 +43,7 @@ optional.push("server/graph-reply-update-review.mjs");
 optional.push("src/inbox-client.js", "src/inbox-ui.js");
 optional.push("src/inbox-send-ui.js");
 optional.push("src/room-roster.js");
+optional.push("deploy/agent-discovery.mjs", "server/guest-agent-links.mjs");
 const allowed = new Set([...required, ...optional]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 const check = condition => { if (!condition) throw new Error("Runtime package does not match its exact allowlisted contract"); };
