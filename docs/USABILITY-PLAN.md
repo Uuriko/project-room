@@ -1,6 +1,6 @@
 # Project Room usability plan
 
-9 September 2026 · live Worker `7d48391d` · schema 26 · Durable Object not reset
+9 September 2026 · live Worker `8be85d2b` · schema 26 · Durable Object not reset
 
 This is the working plan for making the hosted Room easier to use, nicer to
 look at, and more capable **without** a mailbox, auto-enrollment, Durable Object
@@ -123,7 +123,7 @@ Decisions for this slice:
 Files: `src/app.js`, `src/styles.css`, `tests/room-roster.test.js`,
 `scripts/room-results-browser-check.mjs`, `docs/HOW-TO-TEST.md`.
 
-### Phase 6 — this slice (chat-first)
+### Phase 6 — shipped (PR #46)
 
 See [CHAT-FIRST.md](CHAT-FIRST.md). Slack/Discord: the channel is home.
 Agents are members in that channel. Catch-up is a badge, not the landing
