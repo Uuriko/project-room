@@ -149,7 +149,9 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /mentionHtml/);
   assert.match(html, /id="agent-connect-title">Add agent</);
   assert.match(app, /Agents join this chat as named people/);
-  assert.match(app, /kindLabel, memberStatus, addressMember/);
+  assert.match(app, /kindLabel, memberStatus, addressMember, shouldAddressPresenceClick/);
+  assert.match(app, /shouldAddressPresenceClick\(e\.target\)/);
+  assert.doesNotMatch(app, /\$\("#presence-list"\)\.addEventListener\("click", e => \{\s*if \(e\.target\.closest\("details, summary, button, a"\)\) return;/);
   assert.match(app, /author\.kind === "agent"/);
   assert.match(app, /Address \$\{m\.displayName\} in chat/);
   assert.doesNotMatch(app, /maybeOpenCatchUp/);

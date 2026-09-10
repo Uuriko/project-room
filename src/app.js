@@ -2,7 +2,7 @@ import { EVENT_TYPES as T, WORK_STATES as S } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief } from "./return-brief.js";
 import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
-import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, addressMember } from "./conversation.js";
+import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, addressMember, shouldAddressPresenceClick } from "./conversation.js";
 import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer } from "./workflow.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation } from "./share-links.js";
 import { installAgentConnections } from "./agent-connections.js";
@@ -1782,7 +1782,7 @@ $("#mention-list")?.addEventListener("mousedown", e => {
   applyMentionMember(state.members[button.dataset.mentionId]);
 });
 $("#presence-list").addEventListener("click", e => {
-  if (e.target.closest("details, summary, button, a")) return;
+  if (!shouldAddressPresenceClick(e.target)) return;
   const row = e.target.closest(".presence-member");
   const member = state?.members[row?.dataset.memberRecordId];
   if (!member || member.active === false) return;
