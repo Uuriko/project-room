@@ -50,6 +50,7 @@ invitation). Footer **Project Room** on the Demigod home page is the same door.
 | Thread composer | [THREAD-COMPOSER.md](THREAD-COMPOSER.md) | In-thread placeholder; Also-@ on Reply |
 | Mentions search | [MENTIONS-SEARCH.md](MENTIONS-SEARCH.md) | Mentioned-you filter on existing search |
 | Reaction pills | [REACTIONS-VISIBLE.md](REACTIONS-VISIBLE.md) | 👍 ❤️ 🎉 🤔 under every message |
+| Agent plug-in | [AGENT-PLUG.md](AGENT-PLUG.md) | Packet / MCP / Node routes in Add agent |
 | Demigod `/room` landing | `deploy/room-entry.mjs` | Live on trydemigod.com |
 | Research / messaging plans | [`research/`](../research/README.md) | Copied from the Codex ChatGPT project mirror |
 

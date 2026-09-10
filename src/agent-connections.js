@@ -1,5 +1,5 @@
 import { validId } from "./events.js";
-import { rosterSelection, rosterNameTaken, rosterById } from "./room-roster.js";
+import { rosterSelection, rosterNameTaken, rosterById, suggestedConfigDir, capabilitySummary, setupChecklist, routeHint, placeholderSnippetPaths, grokBuildToml, mcpJson } from "./room-roster.js";
 
 const $ = selector => document.querySelector(selector);
 const newToken = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
@@ -31,18 +31,58 @@ export function installAgentConnections({ client, getState }) {
     contribute: "Can read this room, post messages, and contribute work.",
     review: "Can read this room, post messages, and review work."
   };
+  function currentRoute() {
+    const value = $("#agent-connect-route")?.value;
+    return value === "packet" || value === "direct" ? value : "mcp";
+  }
+  function currentConfigDir() {
+    return suggestedConfigDir(rosterId) || "/absolute/private/room-agent";
+  }
+  function fillList(node, items) {
+    if (!node) return;
+    node.replaceChildren(...items.map(text => {
+      const li = document.createElement("li");
+      li.textContent = text;
+      return li;
+    }));
+  }
   function describeAccess() {
     if ($("#agent-access-hint")) $("#agent-access-hint").textContent = ACCESS_HINT[$("#agent-connect-access").value] ?? ACCESS_HINT.chat;
+    fillList($("#agent-capabilities"), capabilitySummary($("#agent-connect-access").value));
   }
   function describeImport() {
     const hint = $("#agent-import-route");
     if (!hint) return;
     const row = rosterId ? rosterById(rosterId) : null;
+    const route = currentRoute();
     hint.textContent = row
       ? row.route === "mcp"
         ? `${row.today} After import, merge the printed MCP snippet into ~/.grok/config.toml. Do not put the key in a prompt.`
         : row.today
-      : "Copy, import into a new private directory, then check access. Do not put the key in a prompt.";
+      : route === "packet"
+        ? "Keep using Use my AI. Import this key only if the host can store a secret outside chat."
+        : route === "direct"
+          ? "Copy, import on that computer, then check access. Do not put the key in a prompt."
+        : "Copy, import into a new private directory, then check access. Merge MCP under Advanced hosts. Do not put the key in a prompt.";
+  }
+  function describeRoute() {
+    const route = currentRoute();
+    if ($("#agent-route-hint")) $("#agent-route-hint").textContent = routeHint(route);
+    if ($("#agent-packet-today")) $("#agent-packet-today").hidden = route !== "packet";
+    if ($("#agent-create-note")) $("#agent-create-note").textContent = route === "packet"
+      ? "Optional. Issues a Room identity if this host can later import a private connection. Do not paste the key into chat."
+      : "Issues a private key. The browser sends only a digest.";
+    fillList($("#agent-import-checklist"), setupChecklist({ route, configDir: currentConfigDir() }));
+    try {
+      const paths = placeholderSnippetPaths(currentConfigDir());
+      if ($("#agent-mcp-toml")) $("#agent-mcp-toml").textContent = grokBuildToml(paths);
+      if ($("#agent-mcp-json")) $("#agent-mcp-json").textContent = mcpJson(paths);
+    } catch {
+      if ($("#agent-mcp-toml")) $("#agent-mcp-toml").textContent = "";
+      if ($("#agent-mcp-json")) $("#agent-mcp-json").textContent = "";
+    }
+    describeAccess();
+    describeImport();
   }
   function render() {
     form.hidden = Boolean(setup); $("#agent-setup").hidden = !setup;
@@ -175,7 +215,7 @@ export function installAgentConnections({ client, getState }) {
     if (!allowed()) return;
     if (!owner) { owner = client.session; generation = client.generation; ownerRevision = member().revision; }
     if (!owns()) { reset(); return; }
-    checkExpiry(); conceal(); describeAccess(); render(); dialog.showModal(); void load();
+    checkExpiry(); conceal(); describeRoute(); render(); dialog.showModal(); void load();
     if (pending) status("Change not confirmed. Retry the original.");
     if (!setup && !pending) $("#agent-connect-name").focus();
   });
@@ -183,13 +223,14 @@ export function installAgentConnections({ client, getState }) {
   dialog.addEventListener("close", conceal);
   form.addEventListener("submit", event => { event.preventDefault(); if (pending) void submit(); else void prepare("create"); });
   $("#agent-connect-access")?.addEventListener("change", describeAccess);
+  $("#agent-connect-route")?.addEventListener("change", describeRoute);
   $("#agent-retry").addEventListener("click", () => { void submit(); });
   $("#agent-connect-done").addEventListener("click", () => {
     if (!busy && !copying) {
       forget(); form.reset(); rosterId = null;
       if ($("#agent-roster-hint")) $("#agent-roster-hint").textContent = "";
       if ($("#agent-import-route")) $("#agent-import-route").textContent = "";
-      describeAccess(); status(""); render();
+      describeRoute(); status(""); render();
     }
   });
   for (const button of $("#agent-roster")?.querySelectorAll("[data-roster]") ?? []) {
@@ -199,8 +240,9 @@ export function installAgentConnections({ client, getState }) {
       if (!row) return;
       $("#agent-connect-name").value = row.name;
       $("#agent-connect-access").value = row.access;
+      if ($("#agent-connect-route")) $("#agent-connect-route").value = row.route;
       rosterId = button.dataset.roster;
-      describeAccess();
+      describeRoute();
       if ($("#agent-roster-hint")) {
         $("#agent-roster-hint").textContent = rosterNameTaken(getState()?.members, row.name)
           ? `${row.hint} A member with this name already exists. Create access only if you want a second identity.`

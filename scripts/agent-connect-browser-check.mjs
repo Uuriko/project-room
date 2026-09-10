@@ -79,14 +79,23 @@ test("named roster fills Muse and Grok Build; Grok Build shows import checklist"
   await f.page.locator('[data-roster="muse"]').click();
   assert.equal(await f.page.locator("#agent-connect-name").inputValue(), "Muse");
   assert.equal(await f.page.locator("#agent-connect-access").inputValue(), "chat");
+  assert.equal(await f.page.locator("#agent-connect-route").inputValue(), "packet");
+  assert.equal(await f.page.locator("#agent-packet-today").isVisible(), true);
   assert.match(await f.page.locator("#agent-roster-hint").innerText(), /has not contributed/);
   await f.page.locator('[data-roster="grok-build"]').click();
   assert.equal(await f.page.locator("#agent-connect-name").inputValue(), "Grok Build");
   assert.equal(await f.page.locator("#agent-connect-access").inputValue(), "contribute");
+  assert.equal(await f.page.locator("#agent-connect-route").inputValue(), "mcp");
+  assert.equal(await f.page.locator("#agent-packet-today").isHidden(), true);
+  assert.match(await f.page.locator("#agent-capabilities").innerText(), /work drafts/);
   assert.equal(f.store.db.prepare("SELECT count(*) n FROM agent_connections").get().n, 0);
   await f.page.locator("#agent-create").click();
   await f.page.locator("#agent-setup").waitFor({ state: "visible" });
   assert.match(await f.page.locator("#agent-import-route").innerText(), /merge the printed MCP snippet/);
+  assert.match(await f.page.locator("#agent-import-checklist").innerText(), /room_check_access/);
+  await f.page.locator("#agent-host-snippets > summary").click();
+  assert.match(await f.page.locator("#agent-mcp-json").innerText(), /mcpServers/);
+  assert.equal((await f.page.locator("#agent-mcp-json").innerText()).includes("TOKEN"), false);
   assert.equal(f.store.db.prepare("SELECT count(*) n FROM agent_connections").get().n, 1);
 });
 

@@ -626,6 +626,9 @@ summary { overflow-wrap: anywhere; }
 #agent-connect-dialog textarea { max-width: 100%; overflow-wrap: anywhere; }
 .agent-roster { display: flex; flex-wrap: wrap; gap: .45rem; margin: .45rem 0 .2rem; }
 .agent-roster .button { width: auto; min-height: 44px; padding: 0 .7rem; }
+.agent-capabilities { margin: .2rem 0 .6rem; padding-left: 1.1rem; }
+.agent-capabilities li { margin: .15rem 0; }
+#agent-host-snippets pre { overflow-x: auto; font-size: .78rem; }
 .pending-save { margin: 0 1rem 1rem; max-width: calc(100% - 2rem); }
 #room-instructions-dialog { width: min(38rem, calc(100vw - 2rem)); box-sizing: border-box; }
 #room-instructions-dialog p { overflow-wrap: anywhere; }

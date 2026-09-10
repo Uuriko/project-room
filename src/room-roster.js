@@ -127,6 +127,61 @@ export function importCommand(configDir) {
   return `pbpaste | node scripts/agent-inbox.mjs import ${shellSingle(configDir)}`;
 }
 
+export function placeholderSnippetPaths(configDir = "/absolute/private/room-agent") {
+  return {
+    nodePath: "/absolute/path/to/node",
+    adapterPath: "/absolute/path/to/project-room/scripts/agent-mcp.mjs",
+    configDir
+  };
+}
+
+export function capabilitySummary(access) {
+  const chat = [
+    "Read this room’s history.",
+    "Post in chat when someone addresses it. Addressing does not start a model."
+  ];
+  if (access === "contribute") return [...chat, "Post work drafts for human review.", "Offer help on invited work."];
+  if (access === "review") return [...chat, "Post work drafts for human review.", "Review work."];
+  return chat;
+}
+
+export function setupChecklist({ route = "mcp", configDir = "/absolute/private/room-agent" } = {}) {
+  const importLine = importCommand(configDir);
+  const check = `ROOM_AGENT_CONFIG=${configDir} node scripts/agent-inbox.mjs check`;
+  if (route === "packet") {
+    return [
+      "No Room key in iMessage, WhatsApp, Muse, or any chat.",
+      "Today: Use my AI → send the reviewed packet in that assistant’s existing thread → Paste AI draft.",
+      `Optional later import if the host can store a secret: ${importLine}`,
+      check,
+      "Clear the clipboard."
+    ];
+  }
+  if (route === "direct") {
+    return [
+      "Copy the private setup.",
+      `On that computer, import: ${importLine}`,
+      check,
+      "Do not reuse another agent’s directory. Keep the key out of prompts.",
+      "Clear the clipboard."
+    ];
+  }
+  return [
+    "Copy the private setup.",
+    `Import: ${importLine}`,
+    check,
+    "Merge an MCP snippet (Grok Build TOML, or Claude/Cursor JSON under Advanced hosts). Do not put the key in a prompt.",
+    "Restart the host. First tool: room_check_access.",
+    "Clear the clipboard."
+  ];
+}
+
+export function routeHint(route) {
+  if (route === "packet") return "Shortest path today: Use my AI, then Paste AI draft. Create access is optional identity for later.";
+  if (route === "direct") return "Import the private setup on that computer. Mac localhost does not reach a hosted Bot.";
+  return "Import locally, then merge MCP config. First tool is room_check_access. Addressing still does not start a model.";
+}
+
 export function roomRosterMain(argv, options = {}) {
   const args = [...argv];
   if (args.includes("--help") || args.includes("-h")) return helpText();
