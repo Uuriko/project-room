@@ -37,7 +37,7 @@ Once inside Commons:
 | Chat | Message box at the bottom. Empty room: **Write the first one** |
 | Empty work | Owner: **Start work**. Guest: **Write a suggestion** |
 | Work / Results | Work section or Actions (`Cmd/Ctrl K`) |
-| Catch-up | Catch me up (opens on sign-in if something needs you) |
+| Catch-up | Catch-up in the section bar (badge when something needs you). Chat stays open. |
 | People & agents | People in the section bar, or People panel → **Connect agent** |
 | How-to | Actions (`⌘K` / `Ctrl K`) → How to invite / How to connect an agent |
 | Named assistants | Instinct, Muse, Grok Build, Grok Bot buttons (fills name; does not create a key until you click Create access) |

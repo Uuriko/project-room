@@ -122,7 +122,7 @@ const client = new RoomClient({
     remindersUI?.sync();
     agentConnectionsUI?.sync();
     updatePeopleHint();
-    if (firstSnapshot) { showRoomGuide(); maybeOpenCatchUp(); }
+    if (firstSnapshot) showRoomGuide();
     instructionsUI?.sync();
     resultCopyUI?.sync();
     portableWorkUI?.sync();
@@ -500,21 +500,14 @@ function updatePeopleHint() {
   const hint = $("#people-hint");
   if (!hint) return;
   hint.textContent = $("#connect-agent-button")?.hidden
-    ? "The owner connects Instinct, Muse, Grok Build, or Grok Bot from here."
-    : "Connect an assistant. Roster buttons fill the name; Create access issues the key.";
+    ? "Agents join this chat as named people. The owner plugs them in from here."
+    : "Agents join this chat as named people. Roster fills the name; Create access issues the key.";
 }
 function showRoomGuide() {
   const guide = $("#room-guide");
   if (!guide) return;
   try { if (sessionStorage.getItem("pr-guide-dismissed") === "1") { guide.hidden = true; return; } } catch {}
   guide.hidden = false;
-}
-function maybeOpenCatchUp() {
-  const waiting = $("#room-attention-count")?.textContent?.trim();
-  const catchup = $("#catchup-count")?.textContent?.trim() ?? "";
-  if (!waiting && !/\bneed/.test(catchup)) return;
-  const panel = $("#return-brief-panel");
-  if (panel) panel.open = true;
 }
 function inviteSecretFromText(value) {
   const text = String(value ?? "").trim();
