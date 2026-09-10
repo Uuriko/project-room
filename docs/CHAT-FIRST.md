@@ -55,7 +55,8 @@ Object, or invent a third login.
 
 See [GROWTH-PLAN.md](GROWTH-PLAN.md). Chat density, @ addressing, People/Agents
 groups, empty-chat invite. Thread composer copy and Also-@ live in
-[THREAD-COMPOSER.md](THREAD-COMPOSER.md). Door copy still waits on overlay idle.
+[THREAD-COMPOSER.md](THREAD-COMPOSER.md). Mentioned-you search lives in
+[MENTIONS-SEARCH.md](MENTIONS-SEARCH.md). Door copy still waits on overlay idle.
 
 ### Gated
 

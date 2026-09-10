@@ -184,14 +184,34 @@ export function conversationIndex(messages) {
   return { byId, rootById, threads, roots };
 }
 
+export function parseSearchQuery(query) {
+  const raw = String(query ?? "").trim().slice(0, 200);
+  const match = /^(?:mentions:me|to:me|@me)(?:\s+(.*))?$/i.exec(raw);
+  if (!match) return { term: raw, mentionsOnly: false };
+  return { term: (match[1] || "").trim(), mentionsOnly: true };
+}
+
+export function messageAddressesMember(message, member) {
+  if (!member?.id) return false;
+  if (message?.toMemberId === member.id) return true;
+  return messageMentionsMember(message?.body, member);
+}
+
 // The input is the current authenticated room snapshot, never a cross-room index.
-export function searchMessages(state, query, limit = 50) {
-  const term = String(query).trim().slice(0, 200).toLocaleLowerCase();
-  if (!term) return { messages: [], total: 0 };
-  const matches = state.messages.filter(message =>
+export function searchMessages(state, query, limit = 50, { viewer = null, mentionsOnly = false } = {}) {
+  const parsed = parseSearchQuery(query);
+  const term = parsed.term.toLocaleLowerCase();
+  const only = Boolean(mentionsOnly || parsed.mentionsOnly);
+  let pool = state.messages || [];
+  if (only) {
+    if (!viewer?.id) return { messages: [], total: 0, mentionsOnly: true };
+    pool = pool.filter(message => messageAddressesMember(message, viewer));
+  }
+  if (!term && !only) return { messages: [], total: 0, mentionsOnly: false };
+  const matches = !term ? pool : pool.filter(message =>
     message.body.toLocaleLowerCase().includes(term) ||
     (state.members[message.authorId]?.displayName || "").toLocaleLowerCase().includes(term));
-  return { messages: matches.slice(-limit).reverse(), total: matches.length };
+  return { messages: matches.slice(-limit).reverse(), total: matches.length, mentionsOnly: only };
 }
 
 // In-memory only: every thread has its own text, recipient, reply target, retry ID,

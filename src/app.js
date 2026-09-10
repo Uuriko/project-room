@@ -2,7 +2,7 @@ import { EVENT_TYPES as T, WORK_STATES as S } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief } from "./return-brief.js";
 import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
-import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention } from "./conversation.js";
+import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery } from "./conversation.js";
 import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer } from "./workflow.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation } from "./share-links.js";
 import { installAgentConnections } from "./agent-connections.js";
@@ -202,6 +202,7 @@ const client = new RoomClient({
     $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = "";
     $("#thread-title").textContent = ""; $("#thread-context").textContent = "";
     $("#thread-bar").hidden = true; $("#search-results").hidden = true; $("#new-messages-button").hidden = true;
+    $("#search-mentions")?.setAttribute("aria-pressed", "false"); $("#message-search").value = ""; $("#clear-search").hidden = true;
     $("#conversation-announcement").textContent = ""; delete $("#message-list").dataset.view;
     for (const id of ["rb-attention-list", "rb-involving-list", "rb-history-list"]) delete $(`#${id}`)._content;
     $("#rb-current-boundary").textContent = ""; $("#rb-history-boundary").textContent = "";
@@ -919,17 +920,25 @@ function messageContent(m, cluster = {}, unreadStart = false) {
     : "";
   return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${author.kind === "agent" ? `<span>${esc(kindLabel(author.kind))}</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · room-visible</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${esc(parent.body.slice(0,90))}</a>` : ""}</div><p class="message-body">${mentionHtml(m.body, Object.values(state.members), esc)}</p><div class="draft-feedback">${draftFeedbackHTML(m)}</div><details class="reactions"><summary data-message-action="reaction-menu" data-message-id="${esc(m.id)}" aria-label="Reactions to message by ${esc(authorLabel)}">${esc(reactionSummary)}</summary><div class="reaction-options">${reactionButtons}</div></details><div class="message-links">${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>`).join("")}${m.workItemId && workActions(state.workItems[m.workItemId], state.members[session.member.id]).some(([action]) => action === "complete") ? `<button class="message-to-work" type="button" data-message-action="result" data-message-id="${esc(m.id)}">Save as result</button>` : ""}<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>${!currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : ""}${can("steer") && !(m.proposal && m.workItemId) ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : ""}</div></div>`;
 }
+function mentionsFilterOn() {
+  return $("#search-mentions")?.getAttribute("aria-pressed") === "true";
+}
 function renderSearch(now = Date.now()) {
   const query = $("#message-search").value;
-  $("#clear-search").hidden = !query;
-  $("#search-results").hidden = !query.trim();
-  if (!query.trim()) { $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = ""; return; }
-  const result = searchMessages(state, query), work = searchWork(state, query);
+  const parsed = parseSearchQuery(query);
+  const only = mentionsFilterOn() || parsed.mentionsOnly;
+  $("#clear-search").hidden = !query && !mentionsFilterOn();
+  $("#search-results").hidden = !query.trim() && !only;
+  if (!query.trim() && !only) { $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = ""; return; }
+  const result = searchMessages(state, query, 50, { viewer: session?.member, mentionsOnly: mentionsFilterOn() });
+  const work = only ? { work: [], total: 0 } : searchWork(state, parsed.term || query);
   const total = result.total + work.total, shown = result.messages.length + work.work.length;
-  setText("#search-count", `${total} ${total === 1 ? "match" : "matches"}${total > shown ? ` · ${shown} shown` : ""} in this room`);
+  const noun = only && !parsed.term ? (total === 1 ? "mention" : "mentions") : (total === 1 ? "match" : "matches");
+  setText("#search-count", `${total} ${noun}${total > shown ? ` · ${shown} shown` : ""} in this room`);
   const list = $("#search-list"), focused = list.contains(document.activeElement) ? document.activeElement.dataset.searchKey : null;
+  const empty = only && !parsed.term ? "No one has @-mentioned you yet." : "No matches. Try a name or another phrase.";
   const html = work.work.map(({ item, excerpt }) => `<li><a href="${esc(workHref(item.id))}" data-open-work="${esc(item.id)}" data-search-key="work:${esc(item.id)}"><strong>${esc(item.title)}</strong><span>${esc(excerpt)}</span><small>Work · ${esc(workStatus(item, now).label)}</small></a></li>`).join("")
-    + result.messages.map(m => `<li><a href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" data-search-key="message:${esc(m.id)}"><strong>${esc(name(m.authorId))}</strong><span>${esc(m.body.slice(0, 240))}</span><small>${m.replyToId ? "Open thread at this reply" : "Open in room"}</small></a></li>`).join("") || '<li class="empty-note">No matches. Try a name or another phrase.</li>';
+    + result.messages.map(m => `<li><a href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" data-search-key="message:${esc(m.id)}"><strong>${esc(name(m.authorId))}</strong><span>${esc(m.body.slice(0, 240))}</span><small>${m.replyToId ? "Open thread at this reply" : "Open in room"}</small></a></li>`).join("") || `<li class="empty-note">${empty}</li>`;
   if (list._content !== html) { list.innerHTML = html; list._content = html; }
   if (focused) ([...list.querySelectorAll("[data-search-key]")].find(e => e.dataset.searchKey === focused) || $("#message-search")).focus({ preventScroll: true });
 }
@@ -1848,7 +1857,16 @@ document.addEventListener("keydown", event => {
 });
 $("#search-form").addEventListener("submit", e => { e.preventDefault(); if (state) renderSearch(); });
 $("#message-search").addEventListener("input", () => { if (state) renderSearch(); });
-$("#clear-search").addEventListener("click", () => { $("#message-search").value = ""; renderSearch(); $("#message-search").focus(); });
+$("#search-mentions").addEventListener("click", () => {
+  const on = mentionsFilterOn();
+  $("#search-mentions").setAttribute("aria-pressed", on ? "false" : "true");
+  if (state) renderSearch();
+});
+$("#clear-search").addEventListener("click", () => {
+  $("#message-search").value = "";
+  $("#search-mentions").setAttribute("aria-pressed", "false");
+  renderSearch(); $("#message-search").focus();
+});
 
 // Navigation only: all consequential actions stay in their existing forms.
 // Resolve the current target again on selection; an open menu is not authority.
@@ -1861,6 +1879,7 @@ function roomActionEntries() {
   return [
     { id: "write", label: requestMode ? "Open composer" : $("#message-input").value ? "Continue writing" : "Write a message", words: "compose chat draft reply", target: "#message-input" },
     { id: "search", label: "Search room", words: "find messages work", target: "#message-search" },
+    { id: "mentions", label: "Mentioned you", words: "mentions addressed @me to:me", target: "#search-mentions", activate: true },
     { id: "catch-up", label: "Catch me up", words: "updates attention needs me reminders", target: "#return-brief-panel > summary", reveal: "#return-brief-panel" },
     { id: "work", label: "View work", words: "tasks projects", target: "#work-view-work", activate: true },
     { id: "results", label: "View results", words: "completed approved finished artifacts", target: "#work-view-results", activate: true },
