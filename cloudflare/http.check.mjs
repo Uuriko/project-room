@@ -31,6 +31,10 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
   try {
     const { ownerKey, accountKey, sourceId } = await json(await call('/__test-provision'));
     assert.equal((await json(await call('/api/health'))).mode, 'cloudflare-staging');
+    const version = await json(await call('/api/version'));
+    assert.deepEqual(version, { status: 'ok', mode: 'cloudflare-staging', sourceRevision: 'unstamped', buildId: 'unstamped' });
+    const versionHead = await call('/api/version', { method: 'HEAD' });
+    assert.equal(versionHead.status, 200); assert.equal(await versionHead.text(), '');
     const healthHead = await call('/api/health', { method: 'HEAD' });
     assert.equal(healthHead.status, 200);
     assert.equal(await healthHead.text(), '');
