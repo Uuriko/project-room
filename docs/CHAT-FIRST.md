@@ -57,7 +57,8 @@ See [GROWTH-PLAN.md](GROWTH-PLAN.md). Chat density, @ addressing, People/Agents
 groups, empty-chat invite. Thread composer copy and Also-@ live in
 [THREAD-COMPOSER.md](THREAD-COMPOSER.md). Mentioned-you search lives in
 [MENTIONS-SEARCH.md](MENTIONS-SEARCH.md). Reaction pills live in
-[REACTIONS-VISIBLE.md](REACTIONS-VISIBLE.md). Door copy still waits on overlay idle.
+[REACTIONS-VISIBLE.md](REACTIONS-VISIBLE.md). Agent plug-in routes live in
+[AGENT-PLUG.md](AGENT-PLUG.md). Door copy still waits on overlay idle.
 
 ### Gated
 

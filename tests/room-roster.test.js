@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import {
   ROOM_ROSTER, rosterById, rosterSelection, suggestedConfigDir, rosterNameTaken,
-  grokBuildToml, mcpJson, importCommand, roomRosterMain
+  grokBuildToml, mcpJson, importCommand, roomRosterMain, capabilitySummary,
+  setupChecklist, routeHint, placeholderSnippetPaths
 } from "../src/room-roster.js";
 
 const checkout = fileURLToPath(new URL("..", import.meta.url));
@@ -48,12 +49,23 @@ test("MCP snippets require absolute private paths and never mention tokens", () 
     configDir
   })).mcpServers["project-room"].env.ROOM_AGENT_CONFIG, configDir);
   assert.throws(() => grokBuildToml({ nodePath: "node", adapterPath: "/a", configDir }), /absolute/);
+});
+
+test("connect recipes name packet, MCP and Node routes without tokens", () => {
+  assert.match(capabilitySummary("chat")[1], /does not start a model/);
+  assert.equal(capabilitySummary("contribute").some(line => /work drafts/.test(line)), true);
+  assert.equal(capabilitySummary("review").some(line => /Review work/.test(line)), true);
+  assert.match(setupChecklist({ route: "mcp" }).join("\n"), /room_check_access/);
+  assert.match(setupChecklist({ route: "packet" }).join("\n"), /Use my AI/);
+  assert.match(setupChecklist({ route: "direct" }).join("\n"), /On that computer/);
+  assert.match(routeHint("packet"), /optional identity/i);
+  const paths = placeholderSnippetPaths("/absolute/private/room-agent-grok-build");
+  assert.equal(JSON.parse(mcpJson(paths)).mcpServers["project-room"].env.ROOM_AGENT_CONFIG, paths.configDir);
+  assert.equal(mcpJson(paths).includes("TOKEN"), false);
+  assert.equal(grokBuildToml(paths).includes("TOKEN"), false);
   assert.throws(() => grokBuildToml({ nodePath: "/n", adapterPath: "/a", configDir: "/Users/x/.grok/config.toml" }), /Grok config/);
   assert.throws(() => grokBuildToml({ nodePath: "/n", adapterPath: "/a", configDir: "/tmp/token-secret" }), /secrets/);
-  assert.doesNotThrow(() => grokBuildToml({
-    nodePath: "/opt/secret-bin/node", adapterPath: "/opt/adapter/agent-mcp.mjs", configDir
-  }));
-  assert.match(importCommand(configDir), /pbpaste \| node scripts\/agent-inbox.mjs import '\/absolute\/private\/room-agent-grok-build'/);
+  assert.match(importCommand(paths.configDir), /pbpaste \| node scripts\/agent-inbox.mjs import '\/absolute\/private\/room-agent-grok-build'/);
 });
 
 test("CLI prints Muse packet route and refuses to write host config", () => {
@@ -130,6 +142,10 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /Send this link to a person/);
   assert.match(html, /data-room-section="people"/);
   assert.match(html, /id="agent-import-checklist"/);
+  assert.match(html, /id="agent-connect-route"/);
+  assert.match(html, /id="agent-host-snippets"/);
+  assert.match(html, /id="agent-capabilities"/);
+  assert.match(html, /Chat packet — no Room key/);
   assert.match(html, /pbpaste \| node scripts\/agent-inbox\.mjs import/);
   const app = readFileSync(join(checkout, "src/app.js"), "utf8");
   assert.match(app, /How to invite someone/);
@@ -182,6 +198,8 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(source, /from "\.\/room-roster\.js"/);
   assert.match(source, /\$\{label\} for \$\{row\.displayName\}/);
   assert.match(source, /function describeImport/);
+  assert.match(source, /function describeRoute/);
+  assert.match(source, /setupChecklist/);
   assert.match(app, /aria-label.*Open /);
   const css = readFileSync(join(checkout, "src/styles.css"), "utf8");
   assert.match(css, /\.agent-roster \.button \{ width: auto; min-height: 44px;/);
