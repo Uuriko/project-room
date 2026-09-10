@@ -16,4 +16,11 @@ for (const [path, status] of [['/api/health', 200], ['/api/ready', 200], ['/api/
   assert.match(response.headers.get('x-robots-tag') ?? '', /noindex/);
   await response.arrayBuffer();
 }
-console.log(`PASS: ${assetPaths.length} exact live assets; health/readiness, signed-out denial and no-index headers. No room records changed.`);
+const versionResponse = await fetch(origin + '/api/version', { signal: AbortSignal.timeout(20000) });
+assert.equal(versionResponse.status, 200);
+assert.match(versionResponse.headers.get('x-robots-tag') ?? '', /noindex/);
+const version = await versionResponse.json();
+assert.equal(version.status, 'ok'); assert.equal(version.mode, 'cloudflare-staging');
+assert.match(version.sourceRevision, /^[0-9a-f]{40}$/); assert.notEqual(version.sourceRevision, '0'.repeat(40));
+assert.ok(Number.isFinite(Date.parse(version.buildId)), 'deployed build id is a UTC timestamp');
+console.log(`PASS: ${assetPaths.length} exact live assets; revision ${version.sourceRevision} built ${version.buildId}; health/readiness, signed-out denial and no-index headers. No room records changed.`);
