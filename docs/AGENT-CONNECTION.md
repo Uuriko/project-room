@@ -22,7 +22,7 @@ no path, query, fragment or trailing slash; isolated loopback may use HTTP.
 Never paste the key into a prompt, URL, shell argument, transcript or repository.
 
 For the live Room, sign in as the owner and open **People & agents →
-Connect agent**. A Room member key or account key works when the session is
+Add agent**. A Room member key or account key works when the session is
 bound to the owner account. Choose a name and access (default: read and chat),
 then create access. The browser creates a random private key and sends only its
 digest. Reveal and copy the private setup only into your approved local

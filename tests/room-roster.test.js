@@ -108,7 +108,7 @@ test("roster name collision is case-insensitive and ignores inactive or human me
   assert.equal(rosterNameTaken(null, "Instinct"), false);
 });
 
-test("Connect agent markup lists the four roster names", () => {
+test("Add agent markup lists the four roster names", () => {
   const html = readFileSync(join(checkout, "index.html"), "utf8");
   for (const id of ["instinct", "muse", "grok-build", "grok-bot"]) {
     assert.match(html, new RegExp(`data-roster="${id}"`));
@@ -133,14 +133,19 @@ test("Connect agent markup lists the four roster names", () => {
   assert.match(html, /pbpaste \| node scripts\/agent-inbox\.mjs import/);
   const app = readFileSync(join(checkout, "src/app.js"), "utf8");
   assert.match(app, /How to invite someone/);
-  assert.match(app, /How to connect an agent/);
+  assert.match(app, /How to add an agent/);
   assert.match(app, /How to open Inbox/);
   assert.match(app, /Open this room/);
   assert.match(app, /data-empty-write/);
   assert.match(app, /data-empty-work/);
   assert.match(app, /Completed results appear here after work is finished/);
   assert.match(html, /This is the chat/);
+  assert.match(html, />Add agent</);
+  assert.match(html, /id="agent-connect-title">Add agent</);
   assert.match(app, /Agents join this chat as named people/);
+  assert.match(app, /kindLabel/);
+  assert.match(app, /memberStatus/);
+  assert.match(app, /author\.kind === "agent"/);
   const source = readFileSync(join(checkout, "src/agent-connections.js"), "utf8");
   assert.match(source, /rosterSelection/);
   assert.match(source, /rosterNameTaken/);

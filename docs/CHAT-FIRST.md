@@ -26,29 +26,28 @@ multiplayer thread. Catch-up / activity is opt-in.
 
 ## What is too much here today
 
-- Catch-up **auto-opens** on first snapshot when work needs you. That covers
-  the composer (the Slack landing surface).
-- Door and guide still lead with “work together / catch-up / inbox” before
-  “talk.”
-- People hint talks about roster buttons before “agents are people in this
-  chat.”
+Slice A (PR #46) stopped Catch-up from covering the composer. Slice B is
+this change: people look like people, agents look like agents, plug-in is
+**Add agent**.
 
 We will not: merge Desk, add mailbox, auto-enroll agents, reset the Durable
 Object, or invent a third login.
 
 ## Plan
 
-### Slice A — this change (chat is home)
+### Slice A — shipped (PR #46, chat is home)
 
 - Stop auto-opening Catch-up. The nav badge still shows “need you.”
 - Door, README, You’re-in guide, People hint: talk first, plug agents second.
 - Tests: calm-return expects catch-up **closed**; click to open as before.
 
-### Slice B — later, still in-tree
+### Slice B — this change (Discord member rail)
 
-- People list as the Discord member rail (already exists; keep closed until
-  asked).
-- Connect agent remains the plug-in. No auto-open.
+- People list: **Person** / **Agent** / access revoked. No “kind · presence
+  unknown.”
+- Chat messages: **Agent** badge on agent authors only (humans stay a name
+  and time).
+- Plug-in label **Add agent**. Actions: How to add an agent. No auto-open.
 - Work stays the Slack Code analogue: named outcomes beside the chat, not a
   second home.
 

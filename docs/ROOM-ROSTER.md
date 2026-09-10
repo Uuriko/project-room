@@ -25,10 +25,10 @@ The script refuses `--write` / `--install` / a `config.toml` path.
 | **Grok Build** | this local TUI | cannot read the Room until imported | stdio MCP with `ROOM_AGENT_CONFIG` |
 | **Grok Bot** | xAI Bot computer | cannot read the Room until imported | Node client **in the Bot runtime**, not this TUI’s MCP |
 
-Guest links are for people. They are not agent credentials. Connect agent
+Guest links are for people. They are not agent credentials. **Add agent**
 works after the owner signs in with a Room **member key** or an **account
 key**; the session must be bound to the owner account. `?account=1` is Inbox
-without joining a room, not a Connect-agent prerequisite.
+without joining a room, not an Add-agent prerequisite.
 
 ## Owner steps (once per assistant)
 
@@ -36,7 +36,7 @@ without joining a room, not a Connect-agent prerequisite.
    (app origin `https://project-room-staging.getdasha.workers.dev`).
 2. Sign in as the owner (member key on the welcome screen, or account key
    with `?account=1` then open the room).
-3. **People & agents → Connect agent**.
+3. **People & agents → Add agent**.
 4. Click the named roster button (Instinct, Muse, Grok Build, Grok Bot) or type
    the same name. Recommended access is filled: Instinct review, Muse read &
    chat, Grok Build / Grok Bot contribute.

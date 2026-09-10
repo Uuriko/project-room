@@ -267,7 +267,7 @@
         <aside class="context-rail">
           <details id="people-panel" class="panel presence-panel">
             <summary id="presence-title">People & agents</summary>
-            <button id="connect-agent-button" class="button secondary" type="button" hidden>Connect agent</button>
+            <button id="connect-agent-button" class="button secondary" type="button" hidden>Add agent</button>
             <p id="people-hint" class="form-hint"></p>
             <div id="presence-list" class="presence-list"></div>
           </details>
@@ -327,7 +327,7 @@
               <span id="event-count" class="count-chip"></span>
             </summary>
             <ol id="event-list" class="event-list"></ol>
-            <p class="prototype-note"><strong>Durable single-node pilot.</strong> Latest 100 events shown. Shared state is stored by the service. Provisioned identities do not verify a named AI runtime. No agent runner, public sign-up, external execution, or enterprise availability claim.</p>
+            <p class="prototype-note">Pilot. Chat and members live here. Agents you add are named people in this room, not a hosted AI runtime.</p>
           </details>
         </aside>
       </main>
@@ -456,7 +456,7 @@
     </dialog>
     <script type="module" src="./src/app.js"></script>
     <dialog id="agent-connect-dialog" aria-labelledby="agent-connect-title" class="share-dialog">
-      <div class="panel-header"><h2 id="agent-connect-title">Connect agent</h2><button id="agent-connect-close" type="button" class="button ghost">Close</button></div>
+      <div class="panel-header"><h2 id="agent-connect-title">Add agent</h2><button id="agent-connect-close" type="button" class="button ghost">Close</button></div>
       <form id="agent-connect-form">
         <label>Name<input id="agent-connect-name" maxlength="80" required autocomplete="off" placeholder="My assistant"></label>
         <p class="form-hint">Named assistants for this Room. Clicking fills the name and recommended access; it does not create a key.</p>

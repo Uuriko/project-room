@@ -260,6 +260,6 @@ manual packet route; never place a key in the task prompt as a workaround.
 - Separate repository/Dasha/provider connections with context scope, claims,
   budgets, dispatch receipts and stop semantics. A Room key is not a provider key.
 
-Keep the default product small: chat, work and one Connect agent entry point.
+Keep the default product small: chat, work and one Add agent entry point.
 Advanced setup appears only when chosen. No integration marketplace or six
 separate sources of room truth are needed to support these routes.

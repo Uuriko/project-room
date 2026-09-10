@@ -38,13 +38,13 @@ Once inside Commons:
 | Empty work | Owner: **Start work**. Guest: **Write a suggestion** |
 | Work / Results | Work section or Actions (`Cmd/Ctrl K`) |
 | Catch-up | Catch-up in the section bar (badge when something needs you). Chat stays open. |
-| People & agents | People in the section bar, or People panel → **Connect agent** |
-| How-to | Actions (`⌘K` / `Ctrl K`) → How to invite / How to connect an agent |
+| People & agents | People in the section bar, or People panel → **Add agent** |
+| How-to | Actions (`⌘K` / `Ctrl K`) → How to invite / How to add an agent |
 | Named assistants | Instinct, Muse, Grok Build, Grok Bot buttons (fills name; does not create a key until you click Create access) |
 | Invite someone | **Invite** in the header |
 | Inbox | **Account key**, then **Inbox**. From a room-key login: Actions → How to open Inbox. Sample mail only; real mailbox is off |
 | Rooms list | Account key → **Rooms**. Each titled room shows **Open** |
-| After Create access | Connect agent shows a copy → import → check → clear-clipboard list |
+| After Create access | Add agent shows a copy → import → check → clear-clipboard list |
 
 Muse and Instinct can also use **Use my AI** on a work item, then **Paste AI
 draft**. No Room key in iMessage or WhatsApp.

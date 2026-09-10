@@ -132,11 +132,20 @@ screen. Desk (`src/desk-chat`) stays a different product.
 - Do not auto-open Catch-up.
 - Door, README, You’re-in, People hint: talk first, plug agents second.
 
+### Slice B — this change (Add agent)
+
+See [CHAT-FIRST.md](CHAT-FIRST.md) Slice B. Discord member rail:
+
+- People list says Person / Agent, not `kind · presence unknown`.
+- Chat shows an **Agent** badge on agent authors only.
+- Button, dialog, and Actions: **Add agent** / How to add an agent.
+- Do not auto-open People or Add agent.
+
 ### Later, still in-tree (not this PR)
 
-- Door copy on `/room` if empty-state language should match.
+- Door copy on `/room` if chat-first language should match (wait until overlay
+  `foot-latest.js` is idle).
 - GitHub About paste (John, Settings UI).
-- Remaining `#auth-form button` locators in lesser-run scripts if any.
 
 ### Gated (do not start here)
 
@@ -150,7 +159,7 @@ screen. Desk (`src/desk-chat`) stays a different product.
 
 - Keep `?room=` as account-mode **default** so existing account tests and
   return URLs stay valid. Room key is one tap.
-- Do not auto-open Connect agent. Show a guide and a People hint instead.
+- Do not auto-open Add agent. Show a guide and a People hint instead.
 - Do not add a third login mode. Invite paste is already on the welcome screen.
 
 ## PR plan
@@ -161,4 +170,4 @@ screen. Desk (`src/desk-chat`) stays a different product.
 | B | Phase 2 catch-up / Actions / guest copy | `src/app.js`, `index.html`, share-link copy, room-actions | A |
 | C | Account home titles + GitHub About notes | account rooms UI, CURRENT-ROOM | A |
 
-Phases 1–5 shipped. This change is Phase 6 chat-first (see CHAT-FIRST.md).
+Phases 1–6 shipped. This change is chat-first Slice B (Add agent).

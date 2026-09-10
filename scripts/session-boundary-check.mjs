@@ -734,8 +734,8 @@ test("record identities and fragments remain collision-safe and legacy work link
 
   for (const selector of ["#message-to-select", "#assignee-select", "#verifier-select"]) {
     const choices = await page.locator(`${selector} option`).allTextContents();
-    assert.ok(choices.includes("Alex (duplicate-a) · human"));
-    assert.ok(choices.includes("Alex (duplicate-b) · human"));
+    assert.ok(choices.includes("Alex (duplicate-a) · Person"));
+    assert.ok(choices.includes("Alex (duplicate-b) · Person"));
   }
   const duplicateWork = await page.locator('[data-work-record-id="duplicate-members"]').textContent();
   assert.match(duplicateWork, /AccountableAlex \(duplicate-a\)/);
@@ -796,5 +796,5 @@ test("record identities and fragments remain collision-safe and legacy work link
   await page.locator("#signout-button").click();
   await enterRoom(page, duplicateA, "Alex (duplicate-a)");
   assert.equal(await page.locator("#identity-label").textContent(), "Alex (duplicate-a)");
-  assert.equal(await page.locator("#identity-label").getAttribute("title"), "Alex (duplicate-a) · human");
+  assert.equal(await page.locator("#identity-label").getAttribute("title"), "Alex (duplicate-a) · Person");
 });

@@ -106,7 +106,7 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
     "I produced this — Room owner (owner)",
     "Outside person or AI",
     "Unknown / not reported",
-    "Maya (maya) · human"
+    "Maya (maya) · Person"
   ]);
   await producerSelect.selectOption("owner");
   await page.locator('#action-form textarea[name="summary"]').fill("Reporter submitted the result");

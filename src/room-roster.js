@@ -196,7 +196,7 @@ function formatRow(row, options, includeSnippet) {
     lines.push("    Keep the key out of prompts. Do not reuse Grok Build’s directory.");
   }
   if (includeSnippet && row.route === "packet") {
-    lines.push("  Packet route: no key required. Connect agent is optional attribution until the host can import.");
+    lines.push("  Packet route: no key required. Add agent is optional attribution until the host can import.");
   }
   return lines.join("\n") + "\n";
 }
@@ -227,7 +227,7 @@ function takeFlag(args, flag) {
 function helpText() {
   return `Named Project Room assistants: Instinct, Muse, Grok Build, Grok Bot.
 
-Prints Connect-agent names, recommended access, and the host route.
+Prints Add-agent names, recommended access, and the host route.
 Does not enroll agents, issue keys, or write ~/.grok/config.toml.
 
   node scripts/room-roster.mjs
@@ -235,7 +235,7 @@ Does not enroll agents, issue keys, or write ~/.grok/config.toml.
   node scripts/room-roster.mjs grok-build --snippet
 
 Owner signs in as the room owner in the browser (member key or account key),
-then People & agents → Connect agent. The owner session must be bound to
+then People & agents → Add agent. The owner session must be bound to
 the owner account. Guest links are not agent credentials. Inbox without
 joining a room uses ?account=1.
 `;
