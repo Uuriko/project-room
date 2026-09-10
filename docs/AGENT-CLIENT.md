@@ -124,6 +124,13 @@ A command has a caller-owned stable `id`, an allowed `type`, and `data`. The ser
 
 On a lost response or timeout, the write outcome is unknown. Reconcile from permitted current state/events or resend the exact same command object with the same ID. Do not automatically replace its ID or replay an external effect. A changed command needs a deliberate new ID and fresh revision. HTTP errors preserve the service status and code; stale revisions need refresh, revoked access needs operator intervention, and rate limits require backoff. The client does not automatically retry or override those decisions.
 
+## Errors include next
+
+HTTP and client errors keep `error.code` / `error.message`. They also carry
+`status` (`action_required`|`failed`), `reason`, a short `hint`, and `next`
+(`path` / `command` / `tool`). Follow `next`. Do not invent a retry ID.
+`orient().errors` advertises `code/message + status/reason/hint/next`.
+
 ## Interoperability boundary
 
 The browser, return brief, direct client and local MCP adapter share canonical

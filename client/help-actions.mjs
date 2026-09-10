@@ -1,6 +1,7 @@
 import { validId } from "../src/events.js";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, validateHelpOfferData } from "../src/help-offers.js";
 import { conforms, confirmsAgentCommand } from "./work-actions.mjs";
+import { agentErrorAx } from "../src/agent-error.mjs";
 
 const id = { type: "string", minLength: 1, maxLength: 128, pattern: "^(?!(?:constructor|prototype|__proto__)$)[A-Za-z0-9][A-Za-z0-9_.:-]*$" };
 const revision = { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER - 1 };
@@ -55,8 +56,10 @@ export async function submitHelpAction(client, identity, name, args, { signal } 
     message: "The original coordination operation was recorded. Read current offers before another action; no execution or payment was authorized." };
 }
 export function helpActionRefusal(cause) {
+  const ax = agentErrorAx({ httpStatus: cause?.status ?? 0, code: cause?.code, message: cause?.message });
   const common = { type: "help_offer_refused", outcome: "not_confirmed",
-    message: "Outcome not confirmed. Keep the exact original input and requestId; a lost response does not prove the operation was not saved." };
+    message: "Outcome not confirmed. Keep the exact original input and requestId; a lost response does not prove the operation was not saved.",
+    status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next };
   if (cause?.code === "invalid_help_action") return { ...common, code: cause.code, outcome: "this_attempt_not_sent",
     message: "Use the listed fields and a short plan or reason. If an earlier attempt was uncertain, reconcile that exact input before changing it." };
   if ([409, 422].includes(cause?.status) && ["command_rejected", "idempotency_conflict", "pilot_limit"].includes(cause.code)) return {

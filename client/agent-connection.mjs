@@ -118,6 +118,10 @@ export function connectionDiagnostic(error) {
       : error.status === 404 ? "unavailable_route" : ["member_required", "identity_mismatch", "expiry_unconfirmed", "invalid_response", "help_context_unavailable", "offer_context_unavailable"].includes(error.code) ? error.code : code;
   } else if (error?.name === "TimeoutError") code = "request_timeout";
   else if (error?.name === "AbortError") code = "cancelled";
+  const ax = error instanceof RoomClientError
+    ? { status: error.errorStatus, reason: error.reason, hint: error.hint, next: error.next }
+    : { status: "action_required", reason: code, hint: messages[code], next: [{ tool: "room_check_access" }] };
   return { type: "agent_connection_error", code, message: messages[code],
+    status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next,
     ...(code === "rate_limited" && Number.isSafeInteger(error.retryAfterMs) && error.retryAfterMs >= 0 && error.retryAfterMs <= 300000 ? { retryAfterMs: error.retryAfterMs } : {}) };
 }
