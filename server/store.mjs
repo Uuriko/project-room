@@ -1258,4 +1258,4 @@ export class RoomStore {
       return { sequence, event: incoming, duplicate: false };
     });
   }
-      }
+}
