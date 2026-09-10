@@ -34,7 +34,7 @@ Once inside Commons:
 
 | Try | Where |
 | --- | --- |
-| Chat | Message box at the bottom. Empty room: **Write the first one**. Owner also sees **Invite someone**. Type `@`, click a name in People, or click an `@Name` chip in a message to address someone. **Reply** to someone else’s line also addresses them (not yourself); **Also @** on the quote bar turns that off without cancelling the quote. Open a thread: the box says **Reply in this thread**. **Esc** closes the @ picker, then the reply quote, then the thread — it does not delete the draft. Consecutive messages collapse; hover for the time. A row is tinted if it @-mentions you. **Mentioned you** in search lists those rows (or type `mentions:me`). |
+| Chat | Message box at the bottom. Empty room: **Write the first one**. Owner also sees **Invite someone**. Type `@`, click a name in People, or click an `@Name` chip in a message to address someone. **Reply** to someone else’s line also addresses them (not yourself); **Also @** on the quote bar turns that off without cancelling the quote. Open a thread: the box says **Reply in this thread**. **Esc** closes the @ picker, then the reply quote, then the thread — it does not delete the draft. Consecutive messages collapse; hover for the time. A row is tinted if it @-mentions you. **Mentioned you** in search lists those rows (or type `mentions:me`). 👍 ❤️ 🎉 🤔 sit under every message — no **React** disclosure. |
 | Empty work | Owner: **Start work**. Guest: **Write a suggestion** |
 | Work / Results | Work section or Actions (`Cmd/Ctrl K`) |
 | Catch-up | Catch-up in the section bar (badge when something needs you). Chat stays open. |

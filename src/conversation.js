@@ -2,6 +2,13 @@ import { replyDraftKey, validReplyDraft, replyDraftData } from "./reply-requests
 // Conversation structure is derived from immutable reply links, including older logs.
 export const REACTIONS = Object.freeze({ like: "👍", heart: "❤️", celebrate: "🎉", thinking: "🤔" });
 
+export function reactionPills(reactions = {}) {
+  return Object.entries(REACTIONS).map(([key, symbol]) => {
+    const memberIds = [...(reactions?.[key] || [])];
+    return { key, symbol, memberIds, count: memberIds.length, used: memberIds.length > 0 };
+  });
+}
+
 // Composition, key repeat, and touch Return must never accidentally submit.
 export function sendsOnEnter(event, touchKeyboard = false) {
   return event.key === "Enter" && !event.shiftKey && !event.altKey

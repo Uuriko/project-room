@@ -44,6 +44,10 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await login(owner);
     const input = page.locator("#message-input"), status = page.locator("#composer-status");
     assert.match(await input.getAttribute("placeholder"), /Write to the room/);
+    const like = page.locator('[data-message-record-id="topic"] button[data-reaction="like"]');
+    assert.equal(await like.isVisible(), true);
+    await like.click();
+    await page.waitForFunction(() => document.querySelector('[data-message-record-id="topic"] button[data-reaction="like"][aria-pressed="true"]'));
     await page.locator("#search-mentions").click();
     assert.equal(await page.locator("#search-mentions").getAttribute("aria-pressed"), "true");
     assert.match(await page.locator("#search-results").textContent(), /Ping @Room owner/);

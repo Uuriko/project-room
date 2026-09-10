@@ -402,10 +402,9 @@ button, .button, .message-to-work { min-height: 44px; }
 .message-to-work, .thread-link { font-size: .875rem; }
 .thread-link { padding: .4rem .65rem; border: 1px solid #374b68; border-radius: .45rem; background: #172335; color: #bcd5ff; }
 .reply-preview { display: block; padding: .3rem 0; }
-.reactions { display: inline-block; margin-right: .75rem; vertical-align: top; }
-.reactions > summary { cursor: pointer; width: fit-content; min-height: 44px; padding-block: .7rem; color: var(--muted); font-size: .875rem; }
-.reaction-options { display: flex; flex-wrap: wrap; gap: .35rem; padding-bottom: .5rem; }
-.reaction { display: inline-flex; align-items: center; justify-content: center; gap: .3rem; min-width: 44px; padding: .25rem .5rem; border: 1px solid var(--line); border-radius: 99px; background: transparent; color: var(--muted); font-size: .875rem; }
+.reactions { display: flex; flex-wrap: wrap; gap: .35rem; margin: .4rem 0 .15rem; }
+.reaction { display: inline-flex; align-items: center; justify-content: center; gap: .3rem; min-width: 44px; min-height: 44px; padding: .25rem .5rem; border: 1px solid var(--line); border-radius: 99px; background: transparent; color: var(--muted); font-size: .875rem; }
+.reaction.used { color: var(--text); background: #1a2940; }
 .reaction[aria-pressed="true"] { color: #d5e4ff; background: #21385c; border-color: var(--blue); }
 .reaction:hover { border-color: var(--blue); }
 button:disabled { cursor: wait; opacity: .6; }
@@ -550,7 +549,7 @@ button:disabled { cursor: wait; opacity: .6; }
 .message-list { min-height: 16rem; height: clamp(16rem, 43dvh, 38rem); padding-inline: 1.25rem; }
 .message-meta span { border: 0; padding: 0; text-transform: none; font-size: .75rem; }
 .message-links { display: inline-flex; flex-wrap: wrap; gap: .75rem; vertical-align: top; }
-.reaction { border-color: transparent; }
+.reaction { border-color: var(--line-soft); }
 .reaction:hover { background: var(--panel-raised); }
 .composer { border-top: 1px solid var(--line-soft); background: transparent; }
 .composer-toolbar { flex-wrap: wrap; }

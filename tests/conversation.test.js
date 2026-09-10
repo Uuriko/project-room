@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T, replay } from "../src/events.js";
-import { conversationIndex, searchMessages, ConversationDrafts, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS, kindLabel, memberStatus, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, escapeChatAction, composerPlaceholder, removeMention, parseSearchQuery, messageAddressesMember } from "../src/conversation.js";
+import { conversationIndex, searchMessages, ConversationDrafts, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS, kindLabel, memberStatus, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, escapeChatAction, composerPlaceholder, removeMention, parseSearchQuery, messageAddressesMember, reactionPills, REACTIONS } from "../src/conversation.js";
 import { draftCommand } from "../src/client.js";
 
 function room(t) {
@@ -263,6 +263,17 @@ test("removeMention strips one @Name token without eating longer names", () => {
   assert.equal(removeMention("Ask @Maya @Maya", maya), "Ask @Maya");
   assert.equal(removeMention("hello", null), "hello");
   assert.equal(removeMention("Ask @Maya tomorrow", {}), "Ask @Maya tomorrow");
+});
+
+test("reaction pills always list the four types and mark used ones", () => {
+  const empty = reactionPills();
+  assert.deepEqual(empty.map(p => p.key), Object.keys(REACTIONS));
+  assert.equal(empty.every(p => !p.used && p.count === 0), true);
+  const used = reactionPills({ like: ["maya"], heart: ["maya", "instinct"] });
+  assert.equal(used.find(p => p.key === "like").used, true);
+  assert.equal(used.find(p => p.key === "heart").count, 2);
+  assert.equal(used.find(p => p.key === "thinking").used, false);
+  assert.equal(used.find(p => p.key === "celebrate").symbol, "🎉");
 });
 
 test("Escape peels mention picker, then reply quote, then thread, and never implies clearing a draft", () => {
