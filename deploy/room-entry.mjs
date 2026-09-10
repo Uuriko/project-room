@@ -1,8 +1,34 @@
+import { discoveryDoc, ROOM_ORIGIN } from "./agent-discovery.mjs";
+
+const DOOR_PAGES = new Set(["/room", "/room/", "/project-room", "/project-room/"]);
+const DOOR_DISCOVERY = new Map([
+  ["/room/llms.txt", "/llms.txt"],
+  ["/room/.well-known/agent.json", "/.well-known/agent.json"],
+  ["/project-room/llms.txt", "/llms.txt"],
+  ["/project-room/.well-known/agent.json", "/.well-known/agent.json"]
+]);
+
+function discoveryHeaders(type) {
+  return {
+    "Content-Type": type, "Cache-Control": "no-store",
+    "X-Robots-Tag": "all", "Referrer-Policy": "no-referrer",
+    "Content-Security-Policy": "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+  };
+}
+
 // Import in the existing Demigod edge Worker, before its generic page routing.
 // Returns null for every unrelated host/path so existing routes stay owned there.
 export function roomEntry(request) {
   const url = new URL(request.url);
-  if (url.hostname !== "www.trydemigod.com" || !["/room", "/room/", "/project-room", "/project-room/"].includes(url.pathname)) return null;
+  if (url.hostname !== "www.trydemigod.com") return null;
+  const mapped = DOOR_DISCOVERY.get(url.pathname);
+  if (mapped) {
+    const doc = discoveryDoc(mapped);
+    const headers = discoveryHeaders(doc.type);
+    if (!["GET", "HEAD"].includes(request.method)) return new Response("Method not allowed", { status: 405, headers: { ...headers, Allow: "GET, HEAD" } });
+    return new Response(request.method === "HEAD" ? null : doc.body, { headers });
+  }
+  if (!DOOR_PAGES.has(url.pathname)) return null;
   const headers = {
     "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store",
     "X-Robots-Tag": "noindex, nofollow", "Referrer-Policy": "no-referrer",
@@ -34,9 +60,10 @@ a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
   <div class="brand"><a href="/" style="color:inherit;text-decoration:none">Demigod</a></div>
   <h1>Project Room</h1>
   <p>Talk with people here. Plug AI agents into the same conversation.</p>
-  <a class="open" href="https://project-room-staging.getdasha.workers.dev">Open Project Room</a>
+  <a class="open" href="${ROOM_ORIGIN}">Open Project Room</a>
   <p class="help">Paste your room key on the next screen, or open an invitation. Same browser as last time? You come back automatically.</p>
-  <p class="help">Agents join from People after you enter. Inbox uses Account key. Source: github.com/Uuriko/project-room</p>
+  <p class="help">Agents: start with a chat packet — no account. MCP and Node need an owner-issued key. Guest-agent links are designed, not live.</p>
+  <p class="help">Agent discovery: <a href="/room/llms.txt">/room/llms.txt</a> · origin <a href="${ROOM_ORIGIN}/.well-known/agent.json">/.well-known/agent.json</a>. Inbox uses Account key. Source: github.com/Uuriko/project-room</p>
 </main>
 <footer>© 2026 Demigod · <a href="/">Home</a> · <a href="/contact">Contact</a> · <a href="/legal">Privacy</a></footer>
 </body></html>`;

@@ -7,6 +7,8 @@ import { validId } from "../src/events.js";
 import { SyntheticInboxTransport } from "./inbox-transport.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { agentErrorBody } from "../src/agent-error.mjs";
+import { discoveryDoc } from "../deploy/agent-discovery.mjs";
+import { guestAgentLinkContract, previewGuestAgentLink, joinGuestAgentLink, mintGuestAgentLink } from "./guest-agent-links.mjs";
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -205,6 +207,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return json(res, 200, { status: "ready" }, req.method === "HEAD");
         } catch { return json(res, 503, { status: "unavailable" }, req.method === "HEAD"); }
       }
+      const discovery = discoveryDoc(url.pathname);
+      if (discovery && ["GET", "HEAD"].includes(req.method)) {
+        res.setHeader("X-Robots-Tag", "all");
+        const bytes = Buffer.from(discovery.body);
+        res.writeHead(200, { "Content-Type": discovery.type, "Content-Length": bytes.length });
+        return res.end(req.method === "HEAD" ? undefined : bytes);
+      }
+      if (discovery) reject(405, "method_not_allowed", "Method not allowed");
       if (assets.has(url.pathname) && ["GET", "HEAD"].includes(req.method)) {
         const [path, type] = assets.get(url.pathname);
         const data = await loadAsset(path);
@@ -311,6 +321,28 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return json(res, 200, accountView(store.logoutAccountSession(slotToken, data.expectedSessionRevision)));
         }
         reject(405, "method_not_allowed", "Method not allowed");
+      }
+      if (url.pathname === "/api/guest-agent-links" && ["GET", "HEAD"].includes(req.method)) {
+        return json(res, 200, guestAgentLinkContract(), req.method === "HEAD");
+      }
+      if (url.pathname === "/api/guest-agent-links" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`guest-agent-mint:${remoteAddress}`, 10);
+        mintGuestAgentLink();
+      }
+      if (url.pathname === "/api/guest-agent-links/preview" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`guest-agent-preview:${remoteAddress}`, 30);
+        const data = await body(req);
+        if (!exact(data, ["linkToken"])) reject(422, "invalid_link", "Guest-agent link required");
+        return json(res, 200, previewGuestAgentLink(data.linkToken));
+      }
+      if (url.pathname === "/api/guest-agent-links/join" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`guest-agent-join:${remoteAddress}`, 20);
+        const data = await body(req);
+        if (!exact(data, ["linkToken"])) reject(422, "invalid_link", "Guest-agent link required");
+        return json(res, 200, joinGuestAgentLink(data.linkToken));
       }
       if (url.pathname === "/api/share-links/preview" && req.method === "POST") {
         checkOrigin(req, true);

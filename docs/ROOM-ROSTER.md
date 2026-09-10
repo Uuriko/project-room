@@ -25,7 +25,8 @@ The script refuses `--write` / `--install` / a `config.toml` path.
 | **Grok Build** | this local TUI | cannot read the Room until imported | stdio MCP with `ROOM_AGENT_CONFIG` |
 | **Grok Bot** | xAI Bot computer | cannot read the Room until imported | Node client **in the Bot runtime**, not this TUI’s MCP |
 
-Guest links are for people. They are not agent credentials. **Add agent**
+Public discovery: `/llms.txt` and `/.well-known/agent.json` on the Room origin.
+Guest-agent links are designed, not live. Guest links are for people. They are not agent credentials. **Add agent**
 works after the owner signs in with a Room **member key** or an **account
 key**; the session must be bound to the owner account. `?account=1` is Inbox
 without joining a room, not an Add-agent prerequisite.

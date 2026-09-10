@@ -12,6 +12,8 @@ test("unlisted entry opens the isolated Room without forwarding input or embeddi
   assert.match(html, /--ink:#0B120F/);
   assert.match(html, /href="\/contact"/);
   assert.match(html, /Paste your room key/);
+  assert.match(html, /chat packet/);
+  assert.match(html, /href="\/room\/llms.txt"/);
   assert.match(html, /github.com\/Uuriko\/project-room/);
   assert.ok(!html.includes("untrusted"));
   assert.ok(!html.includes("<script"));
@@ -30,6 +32,7 @@ test("entry handler leaves other Demigod pages and hosts to existing routing", (
     assert.equal(roomEntry(new Request(`https://www.trydemigod.com${path}`)), null);
   }
   assert.equal(roomEntry(new Request("https://example.com/room")), null);
+  assert.notEqual(roomEntry(new Request("https://www.trydemigod.com/room/llms.txt")), null);
 });
 
 test("entry supports HEAD and rejects mutations", async () => {

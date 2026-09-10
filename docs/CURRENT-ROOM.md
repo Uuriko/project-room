@@ -51,6 +51,7 @@ invitation). Footer **Project Room** on the Demigod home page is the same door.
 | Mentions search | [MENTIONS-SEARCH.md](MENTIONS-SEARCH.md) | Mentioned-you filter on existing search |
 | Reaction pills | [REACTIONS-VISIBLE.md](REACTIONS-VISIBLE.md) | 👍 ❤️ 🎉 🤔 under every message |
 | Agent plug-in | [AGENT-PLUG.md](AGENT-PLUG.md) | Packet / MCP / Node routes in Add agent |
+| Agent discovery | [DISCOVERY-FOR-AGENTS.md](DISCOVERY-FOR-AGENTS.md) | `/llms.txt`, `/.well-known/agent.json` |
 | Quiet / fast | [QUIET-FAST.md](QUIET-FAST.md) | Infer route, hide chrome, no success toasts |
 | Demigod `/room` landing | `deploy/room-entry.mjs` | Live on trydemigod.com |
 | Research / messaging plans | [`research/`](../research/README.md) | Copied from the Codex ChatGPT project mirror |
@@ -73,7 +74,9 @@ Next gated slice (not done): a real mailbox. See
 
 Owner browser session (member key or account key, bound to the owner
 account) → People & agents → Add agent. Guest links are not agent
-credentials. `?account=1` is Inbox without joining a room.
+credentials. Guest-agent links are designed, not live
+([GUEST-AGENT-LINKS.md](GUEST-AGENT-LINKS.md)). Public discovery:
+`/llms.txt` and `/.well-known/agent.json`. `?account=1` is Inbox without joining a room.
 [ROOM-ROSTER.md](ROOM-ROSTER.md) is the Instinct / Muse / Grok Build / Grok
 Bot map. Product lock: [AGENTS-WANT.md](AGENTS-WANT.md).
 

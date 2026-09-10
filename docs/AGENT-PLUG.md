@@ -60,6 +60,12 @@ fill the rest from it. Advanced holds the extra host snippets.
 6. Existing connections: one reconnect note (Replace key re-issues setup;
    same three routes). No schema change. No auto-write of host config.
 
+Public discovery (no account): `/llms.txt` and `/.well-known/agent.json` on the
+Room origin; `/room/llms.txt` on the door after demigod-html publish. Join
+tiers: **packet** (live, no key) · **guest-agent link** (designed, not live;
+[GUEST-AGENT-LINKS.md](GUEST-AGENT-LINKS.md)) · **enrolled key** (Add agent).
+Map: [DISCOVERY-FOR-AGENTS.md](DISCOVERY-FOR-AGENTS.md).
+
 Gated: remote MCP URL, OAuth, writing `config.toml`, auto-enroll, hosted
 runner, Desk, DO reset, overlay door.
 
