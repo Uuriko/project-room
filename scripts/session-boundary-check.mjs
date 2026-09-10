@@ -793,6 +793,8 @@ test("record identities and fragments remain collision-safe and legacy work link
   await page.waitForFunction(() => document.activeElement?.id === "room-title");
   assert.equal(await page.evaluate(() => location.hash), "#pr-record/room/commons");
 
+  // Reply addressing (#57) leaves an @-mention draft; accept the draft-guard confirm so sign-out proceeds.
+  page.once("dialog", dialog => dialog.accept());
   await page.locator("#signout-button").click();
   await enterRoom(page, duplicateA, "Alex (duplicate-a)");
   assert.equal(await page.locator("#identity-label").textContent(), "Alex (duplicate-a)");
