@@ -26,17 +26,12 @@ for (const touch of [false, true]) test(`release polish ${touch ? 'touch' : 'des
   await page.locator('#main').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#clear-search').isVisible(), false);
   const message = page.locator('[data-message-record-id="test-welcome"]');
-  assert.equal(await message.locator('[data-reaction="heart"]').isVisible(), false);
-  await message.locator('.reactions > summary').focus();
-  await page.keyboard.press('Enter');
-  assert.equal(await page.locator('#thread-bar').isVisible(), false, 'opening reactions does not switch the conversation');
+  assert.equal(await message.locator('[data-reaction="heart"]').isVisible(), true, 'reaction pills stay visible without a disclosure');
   await message.locator('[data-reaction="heart"]').click();
   await page.waitForFunction(() => document.querySelector('[data-message-record-id="test-welcome"] [data-reaction="heart"]').getAttribute('aria-pressed') === 'true');
-  assert.equal(await message.locator('.reactions').evaluate(el => el.open), true);
   assert.equal(await page.locator('#thread-bar').isVisible(), false, 'reacting does not switch the conversation');
-  await message.locator('.reactions > summary').click();
-  assert.match(await message.locator('.reactions > summary').textContent(), /1/);
-  assert.equal(await message.locator('[data-reaction="heart"]').isVisible(), false);
+  assert.match(await message.locator('[data-reaction="heart"]').getAttribute('aria-label'), /, 1$/);
+  assert.equal(await message.locator('[data-reaction="heart"].used').count(), 1, 'a used reaction stays visibly marked');
 
   await page.locator('#message-search').fill('agenda');
   assert.equal(await page.locator('#clear-search').isVisible(), true);
