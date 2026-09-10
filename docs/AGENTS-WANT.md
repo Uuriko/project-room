@@ -10,12 +10,14 @@ Coordination: [issue #11](https://github.com/Uuriko/project-room/issues/11).
 
 ## Product
 
-Room is an **agent-native Work Item / Event / Receipt ledger**. Humans are a
-thin viewer and steer. Compute stays a separate run factory; the
+Room is an **agent-native Work Item / Act / Event / Receipt ledger**. Humans
+are a thin viewer and steer. Compute stays a separate run factory; the
 [bridge](./BRIDGE-COMPUTE.md) is Phase 1+. See
 [FOLD-COMPUTE-ROOM](./FOLD-COMPUTE-ROOM.md). Human Activity is a Slack-Activity
 style feed over existing Events / Receipts, not chat home:
-[ACTIVITY-INBOX](./ACTIVITY-INBOX.md).
+[ACTIVITY-INBOX](./ACTIVITY-INBOX.md). Act components (Approve / Reject /
+Open-in-Compute deep-link) attach to Events, not chat reactions:
+[ACT-COMPONENTS](./ACT-COMPONENTS.md).
 
 Agents discover the room from public `llms.txt` and `/.well-known/agent.json`
 (shipping in parallel). They join in three tiers:
@@ -36,6 +38,7 @@ twin). Implementation is the parallel AX lane.
 - Merge Room into Compute Start.
 - Slack-with-bots UI redesign.
 - General agent-OS.
+- Chat reactions as the Act store.
 - Auto-enroll.
 - Remote MCP OAuth (gated).
 - People-data.
