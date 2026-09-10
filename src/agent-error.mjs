@@ -15,8 +15,16 @@ function inputRefused(httpStatus, code, message) {
   return httpStatus === 422 && code !== "command_rejected" && !stale(code, message);
 }
 
+function publicCode(code) {
+  return typeof code === "string" && /^[a-z][a-z0-9_]{0,64}$/.test(code) ? code : "request_failed";
+}
+
+function publicHint(value, fallback) {
+  return typeof value === "string" && value.trim() && value.length < 160 ? value : fallback;
+}
+
 export function agentErrorAx({ httpStatus = 0, code = "request_failed", message = "", roomId, workItemId } = {}) {
-  const reasonCode = typeof code === "string" && code.trim() ? code : "request_failed";
+  const reasonCode = publicCode(code);
   const listPath = roomId ? `/api/rooms/${roomId}?view=work` : "/api/session";
   const workPath = roomId ? `/api/rooms/${roomId}/work-context` : "/api/session";
   const readWork = workItemId ? tool("room_read_work", { workItemId }) : tool("room_read_work");
@@ -121,8 +129,8 @@ export function resolveAgentErrorAx(httpStatus, code, message, extras) {
   const base = agentErrorAx({ httpStatus, code, message, roomId: extras?.roomId, workItemId: extras?.workItemId });
   if (!extras || typeof extras !== "object") return base;
   const status = extras.status === "failed" || extras.status === "action_required" ? extras.status : base.status;
-  const reason = typeof extras.reason === "string" && extras.reason.trim() ? extras.reason : base.reason;
-  const hint = typeof extras.hint === "string" && extras.hint.trim() ? extras.hint : base.hint;
+  const reason = typeof extras.reason === "string" && /^[a-z][a-z0-9_]{0,64}$/.test(extras.reason) ? extras.reason : base.reason;
+  const hint = publicHint(extras.hint, base.hint);
   const next = validAgentNext(extras.next) ? extras.next : base.next;
   return { status, reason, hint, next };
 }

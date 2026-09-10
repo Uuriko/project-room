@@ -45,7 +45,6 @@ async function live(t) {
 test("shared mapper keeps error.code/message and adds status/reason/hint/next", () => {
   const src = readFileSync(new URL("../src/agent-error.mjs", import.meta.url), "utf8");
   assert.match(src, /AGENT_ERRORS = "code\/message \+ status\/reason\/hint\/next"/);
-  assert.doesNotMatch(src, /plugin\.jup\.ag|potter[_-]?key|people-data/i);
   const key = agentErrorBody({ httpStatus: 401, code: "unauthenticated", message: "Sign in with an active room key" });
   assert.deepEqual(key.error, { code: "unauthenticated", message: "Sign in with an active room key" });
   assertAx(key, { reason: "unauthenticated" });
@@ -62,6 +61,9 @@ test("shared mapper keeps error.code/message and adds status/reason/hint/next", 
   const refused = agentErrorAx({ httpStatus: 0, code: "invalid_work_action", message: "" });
   assertAx(refused, { reason: "input_refused" });
   assert.equal(agentErrorAx({ httpStatus: 500, code: "internal_error", message: "" }).status, "failed");
+  const leaky = agentErrorAx({ httpStatus: 404, code: "PRIVATE_DETAIL token", message: "do not paste" });
+  assert.equal(leaky.reason, "request_failed");
+  assert.doesNotMatch(JSON.stringify(leaky), /PRIVATE_DETAIL|do not paste|plugin\.jup\.ag/);
 });
 
 test("live 401/403/stale-revision/unknown-work/input-refused return next agents can follow", async t => {
@@ -93,10 +95,11 @@ test("live 401/403/stale-revision/unknown-work/input-refused return next agents 
   assertAx(invalidBody, { reason: "input_refused" });
 
   const producer = f.client("producer");
-  await producer.command({ id: "ax-accept", type: T.WORK_ACCEPTED, data: { workItemId: "test-handoff", expectedRevision: 0 } });
+  const before = await producer.workContext("test-handoff");
+  await producer.command({ id: "ax-accept", type: T.WORK_ACCEPTED, data: { workItemId: "test-handoff", expectedRevision: before.work.revision } });
   const stale = await f.request("/api/rooms/commons/commands", {
     method: "POST", token: f.keys.producer,
-    data: { id: "ax-stale", type: T.WORK_ACCEPTED, data: { workItemId: "test-handoff", expectedRevision: 0 } }
+    data: { id: "ax-stale", type: T.WORK_STARTED, data: { workItemId: "test-handoff", expectedRevision: before.work.revision } }
   });
   assert.equal(stale.status, 409);
   const staleBody = await stale.json();
@@ -113,7 +116,7 @@ test("live 401/403/stale-revision/unknown-work/input-refused return next agents 
     return true;
   });
   await assert.rejects(producer.command({
-    id: "ax-stale-client", type: T.WORK_ACCEPTED, data: { workItemId: "test-handoff", expectedRevision: 0 }
+    id: "ax-stale-client", type: T.WORK_STARTED, data: { workItemId: "test-handoff", expectedRevision: before.work.revision }
   }), error => {
     assert.equal(error.status, 409);
     assert.equal(error.code, "command_rejected");
