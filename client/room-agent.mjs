@@ -134,7 +134,7 @@ export class RoomAgentClient {
     const url = new URL(origin);
     const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
     if (url.origin !== origin || url.username || url.password || (url.protocol !== "https:" && !(local && url.protocol === "http:"))) throw new Error("Use a fixed HTTPS origin or an isolated loopback development origin");
-    if (!validId(roomId) || typeof token !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(token)) throw new Error("A valid Room and access key are required");
+    if (!validId(roomId) || typeof token !== "string" || !/^(?:[A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43})$/.test(token)) throw new Error("A valid Room and access key are required");
     if (memberId !== undefined && !validId(memberId)) throw new Error("Choose a valid expected agent member");
     this.#origin = origin; this.#roomId = roomId; this.#token = token; this.#fetch = fetchImpl;
     this.#memberId = memberId;

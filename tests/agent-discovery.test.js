@@ -25,13 +25,13 @@ test("discovery documents name origin, door, three join tiers and first tools wi
   assert.equal(card.door, ROOM_DOOR);
   assert.deepEqual(card.join.map(row => row.id), ["packet", "guest-agent-link", "enrolled-key"]);
   assert.equal(card.join.find(row => row.id === "packet").status, "live");
-  assert.equal(card.join.find(row => row.id === "guest-agent-link").status, "designed");
+  assert.equal(card.join.find(row => row.id === "guest-agent-link").status, "live");
   assert.equal(card.join.find(row => row.id === "enrolled-key").status, "live");
   assert.deepEqual(card.firstTools.map(row => row.name), ["room_check_access", "orient"]);
   assert.equal(card.capabilities.remoteMcp, false);
-  assert.equal(card.capabilities.guestAgentLinkMint, false);
+  assert.equal(card.capabilities.guestAgentLinkMint, true);
   assert.match(text, /packet \(live, no account\)/);
-  assert.match(text, /guest-agent-link \(designed, not live\)/);
+  assert.match(text, /guest-agent-link \(live, owner-issued\)/);
   assert.match(text, /room_check_access/);
   assert.match(text, /orient/);
   assert.match(text, new RegExp(ROOM_DOCS.client.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));

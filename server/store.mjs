@@ -15,6 +15,7 @@ import { Reminders, reminderSchema } from "./reminders.mjs";
 import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
+import { GuestAgentLinks, isRoomAccessToken } from "./guest-agent-links.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
 import { charterContext, charterFromEvent } from "../src/room-charter.js";
 import { REPLY_FIELDS, REPLY_POLICY_VERSION, replyPostMode } from "../src/reply-requests.js";
@@ -222,6 +223,7 @@ export class RoomStore {
     this.shareLinks = new ShareLinks(this);
     this.reminders = new Reminders(this);
     this.agentConnections = new AgentConnections(this);
+    this.guestAgentLinks = new GuestAgentLinks(this);
     this.replyRequests = new ReplyRequests(this);
     this.inbox = new Inbox(this);
     this.email = new EmailImport(this);
@@ -1029,7 +1031,7 @@ export class RoomStore {
     return token;
   }
   authenticate(token, roomId, expectedSessionBinding = null, { allowAccountSession = true } = {}) {
-    if (typeof token !== "string" || !tokenPattern.test(token)) fail(401, "unauthenticated", "Sign in with an active room key");
+    if (typeof token !== "string" || !isRoomAccessToken(token)) fail(401, "unauthenticated", "Sign in with an active room key");
     const row = this.db.prepare(`SELECT c.*, p.revoked AS parent_revoked, p.expires_at AS parent_expiry, p.account_id AS parent_account_id, p.account_auth_epoch AS parent_account_auth_epoch,
       m.account_id AS bound_account_id, a.active AS account_active, a.revision AS account_revision, a.auth_epoch AS current_account_auth_epoch
       FROM credentials c LEFT JOIN credentials p ON p.hash=c.parent_hash

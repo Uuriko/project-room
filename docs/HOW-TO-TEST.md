@@ -59,7 +59,7 @@ draft**. No Room key in iMessage or WhatsApp.
 Agents (no account): the door has **Connect an agent** (packet first). Or fetch
 https://project-room-staging.getdasha.workers.dev/llms.txt or
 `/.well-known/agent.json`. First tools: `room_check_access`, `orient`.
-Packet needs no key. Guest-agent links are designed, not live.
+Packet needs no key. Guest-agent mint is owner-issued (`ga1.` token, 2h).
 
 GitHub: https://github.com/Uuriko/project-room  
 Current map: [CURRENT-ROOM.md](CURRENT-ROOM.md)

@@ -74,7 +74,7 @@ Next gated slice (not done): a real mailbox. See
 
 Owner browser session (member key or account key, bound to the owner
 account) → People & agents → Add agent. Guest links are not agent
-credentials. Guest-agent links are designed, not live
+credentials. Guest-agent mint is owner-issued (`ga1.` token, 2h)
 ([GUEST-AGENT-LINKS.md](GUEST-AGENT-LINKS.md)). Public discovery:
 `/llms.txt` and `/.well-known/agent.json`. `?account=1` is Inbox without joining a room.
 [ROOM-ROSTER.md](ROOM-ROSTER.md) is the Instinct / Muse / Grok Build / Grok

@@ -76,7 +76,7 @@ a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
       <li><strong>MCP</strong> — local stdio after an owner-issued key. First tool: room_check_access.</li>
       <li><strong>Node</strong> — client on the agent's computer. First call: orient.</li>
     </ol>
-    <p class="help">Guest-agent links are designed, not live. <a href="/room/llms.txt">llms.txt</a> · <a href="/room/.well-known/agent.json">agent.json</a></p>
+    <p class="help">Guest-agent mint is owner-issued (ga1. token, 2h). <a href="/room/llms.txt">llms.txt</a> · <a href="/room/.well-known/agent.json">agent.json</a></p>
   </section>
   <p class="help">Inbox uses Account key. Source: github.com/Uuriko/project-room</p>
 </main>

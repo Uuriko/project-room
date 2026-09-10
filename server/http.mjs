@@ -8,7 +8,7 @@ import { SyntheticInboxTransport } from "./inbox-transport.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { agentErrorBody } from "../src/agent-error.mjs";
 import { discoveryDoc } from "../deploy/agent-discovery.mjs";
-import { guestAgentLinkContract, previewGuestAgentLink, joinGuestAgentLink, mintGuestAgentLink } from "./guest-agent-links.mjs";
+import { guestAgentLinkContract } from "./guest-agent-links.mjs";
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -87,7 +87,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   }
   function bearer(req) {
     if (!req.headers.authorization) return null;
-    const match = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(req.headers.authorization);
+    const match = /^Bearer ([A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43})$/.exec(req.headers.authorization);
     if (!match) reject(401, "unauthenticated", "Invalid Authorization header");
     return match[1];
   }
@@ -327,22 +327,33 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === "/api/guest-agent-links" && req.method === "POST") {
         checkOrigin(req, true);
-        rate(`guest-agent-mint:${remoteAddress}`, 10);
-        mintGuestAgentLink();
+        rate(`guest-agent-mint:${remoteAddress}`, 30);
+        const selected = roomCredentials(req, url);
+        if (!selected.token) reject(401, "unauthenticated", "Ask the owner to mint a guest-agent credential or Add agent.");
+        const data = await body(req);
+        if (typeof data.roomId !== "string" || !validId(data.roomId)) reject(422, "invalid_link", "Supply the room and guest-agent mint fields");
+        const fence = selected.mode === "account" ? accountBinding(req) : expectedBinding(req);
+        const auth = selected.mode === "account" ? store.authenticateAccountSession(selected.token, data.roomId, fence)
+          : store.authenticate(selected.token, data.roomId, fence, { allowAccountSession: false });
+        if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
+        if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
+        protectWrite(req, auth, selected.bearer);
+        const result = store.guestAgentLinks.mint(selected.token, data.roomId, data, fence);
+        return json(res, result.duplicate ? 200 : 201, result);
       }
       if (url.pathname === "/api/guest-agent-links/preview" && req.method === "POST") {
         checkOrigin(req, true);
         rate(`guest-agent-preview:${remoteAddress}`, 30);
         const data = await body(req);
         if (!exact(data, ["linkToken"])) reject(422, "invalid_link", "Guest-agent link required");
-        return json(res, 200, previewGuestAgentLink(data.linkToken));
+        return json(res, 200, store.guestAgentLinks.preview(data.linkToken));
       }
       if (url.pathname === "/api/guest-agent-links/join" && req.method === "POST") {
         checkOrigin(req, true);
         rate(`guest-agent-join:${remoteAddress}`, 20);
         const data = await body(req);
         if (!exact(data, ["linkToken"])) reject(422, "invalid_link", "Guest-agent link required");
-        return json(res, 200, joinGuestAgentLink(data.linkToken));
+        return json(res, 200, store.guestAgentLinks.join(data.linkToken));
       }
       if (url.pathname === "/api/share-links/preview" && req.method === "POST") {
         checkOrigin(req, true);
@@ -411,7 +422,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         reject(405, "method_not_allowed", "Method not allowed");
       }
       const revokeMatch = /^\/api\/rooms\/([^/]{1,384})\/invitations\/([^/]{1,384})\/revoke$/.exec(url.pathname);
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links))?$/.exec(url.pathname);
       if (!match && !revokeMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((match ?? revokeMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
@@ -486,6 +497,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "agent-connections" && req.method === "GET") return json(res, 200, store.agentConnections.list(selected.token, roomId, fence));
       if (route === "agent-connections" && req.method === "POST") {
         const result = store.agentConnections.apply(selected.token, roomId, await body(req), fence);
+        return json(res, result.duplicate ? 200 : 201, result);
+      }
+      if (route === "guest-agent-links" && req.method === "POST") {
+        rate(`guest-agent-mint:${remoteAddress}`, 30);
+        const result = store.guestAgentLinks.mint(selected.token, roomId, await body(req), fence);
         return json(res, result.duplicate ? 200 : 201, result);
       }
       if (route === "reminders" && req.method === "POST") {
