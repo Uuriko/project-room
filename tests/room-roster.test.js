@@ -150,7 +150,7 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /id="agent-connect-title">Add agent</);
   assert.match(app, /Agents join this chat as named people/);
   assert.match(app, /escapeChatAction, messageCluster/);
-  assert.match(app, /kindLabel, memberStatus, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention/);
+  assert.match(app, /kindLabel, memberStatus, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery/);
   assert.match(app, /replyAuthorToAddress/);
   assert.match(app, /shouldAddressPresenceClick\(e\.target\)/);
   assert.match(app, /grouped-time/);
@@ -165,6 +165,10 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /removeMention/);
   assert.match(html, /id="reply-mention"/);
   assert.match(html, /Also @/);
+  assert.match(html, /id="search-mentions"/);
+  assert.match(html, />Mentioned you</);
+  assert.match(app, /parseSearchQuery/);
+  assert.match(app, /mentionsFilterOn/);
   assert.match(html, /id="people-panel"/);
   assert.match(html, /id="connect-agent-button"/);
   assert.match(html, /id="message-input"/);

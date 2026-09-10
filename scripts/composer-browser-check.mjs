@@ -20,6 +20,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     send(T.MEMBER_ADDED, { memberId: "maya", displayName: "Maya", kind: "human", permissions: [] });
     send(T.MESSAGE_POSTED, { messageId: "topic", body: "Which book should we read?" });
     send(T.MESSAGE_POSTED, { messageId: "reply", body: "A short story collection?", replyToId: "topic" });
+    send(T.MESSAGE_POSTED, { messageId: "ping", body: "Ping @Room owner" });
     const server = createRoomServer({ store, streamInterval: 50 });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const origin = `http://127.0.0.1:${server.address().port}`;
@@ -43,6 +44,12 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await login(owner);
     const input = page.locator("#message-input"), status = page.locator("#composer-status");
     assert.match(await input.getAttribute("placeholder"), /Write to the room/);
+    await page.locator("#search-mentions").click();
+    assert.equal(await page.locator("#search-mentions").getAttribute("aria-pressed"), "true");
+    assert.match(await page.locator("#search-results").textContent(), /Ping @Room owner/);
+    await page.locator("#clear-search").click();
+    assert.equal(await page.locator("#search-results").isHidden(), true);
+    assert.equal(await page.locator("#search-mentions").getAttribute("aria-pressed"), "false");
     await page.locator('[data-message-record-id="topic"] [data-message-action="thread"]').click();
     assert.match(await input.getAttribute("placeholder"), /Reply in this thread/);
     await page.locator("#thread-back").click();

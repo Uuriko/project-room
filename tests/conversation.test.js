@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T, replay } from "../src/events.js";
-import { conversationIndex, searchMessages, ConversationDrafts, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS, kindLabel, memberStatus, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, escapeChatAction, composerPlaceholder, removeMention } from "../src/conversation.js";
+import { conversationIndex, searchMessages, ConversationDrafts, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS, kindLabel, memberStatus, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, escapeChatAction, composerPlaceholder, removeMention, parseSearchQuery, messageAddressesMember } from "../src/conversation.js";
 import { draftCommand } from "../src/client.js";
 
 function room(t) {
@@ -98,6 +98,38 @@ test("search finds older replies outside the audit tail, is literal, bounded, an
   assert.equal(searchMessages(snapshot.state, "update").messages.length, 50);
   assert.equal(searchMessages(snapshot.state, "update").total, 110);
   assert.equal(JSON.stringify(snapshot), before);
+});
+
+test("search can list messages that address you without a new inbox", () => {
+  assert.deepEqual(parseSearchQuery("  "), { term: "", mentionsOnly: false });
+  assert.deepEqual(parseSearchQuery("@me"), { term: "", mentionsOnly: true });
+  assert.deepEqual(parseSearchQuery("mentions:me book"), { term: "book", mentionsOnly: true });
+  assert.deepEqual(parseSearchQuery("to:me"), { term: "", mentionsOnly: true });
+  assert.equal(parseSearchQuery("@meow").mentionsOnly, false);
+  assert.equal(parseSearchQuery("@Maya").mentionsOnly, false);
+  const maya = { id: "human", displayName: "Maya" };
+  const instinct = { id: "agent", displayName: "Instinct" };
+  assert.equal(messageAddressesMember({ body: "hi @Maya", toMemberId: null }, maya), true);
+  assert.equal(messageAddressesMember({ body: "quiet", toMemberId: "human" }, maya), true);
+  assert.equal(messageAddressesMember({ body: "@Mayafoo", toMemberId: null }, maya), false);
+  assert.equal(messageAddressesMember({ body: "hi @Maya" }, instinct), false);
+  const state = {
+    members: { human: maya, agent: instinct },
+    messages: [
+      { id: "ping", body: "hi @Maya", authorId: "agent", toMemberId: null },
+      { id: "to", body: "quiet note", authorId: "agent", toMemberId: "human" },
+      { id: "noise", body: "unrelated", authorId: "agent" },
+      { id: "false", body: "@Mayafoo", authorId: "agent" }
+    ]
+  };
+  const hits = searchMessages(state, "", 50, { viewer: maya, mentionsOnly: true });
+  assert.deepEqual(hits.messages.map(m => m.id), ["to", "ping"]);
+  assert.equal(hits.total, 2);
+  assert.equal(hits.mentionsOnly, true);
+  assert.equal(searchMessages(state, "@me quiet", 50, { viewer: maya }).messages[0].id, "to");
+  assert.equal(searchMessages(state, "unrelated", 50, { viewer: maya }).total, 1);
+  assert.equal(searchMessages(state, "", 50, { viewer: maya }).total, 0);
+  assert.equal(searchMessages(state, "@meow", 50, { viewer: maya }).total, 0);
 });
 
 test("navigation preserves independent reply targets and retry IDs; a new session has no old drafts", () => {

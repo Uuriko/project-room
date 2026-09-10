@@ -47,6 +47,7 @@ invitation). Footer **Project Room** on the Demigod home page is the same door.
 | Chat-first core | [CHAT-FIRST.md](CHAT-FIRST.md) | Humans talk; agents plug into the same room |
 | Growth / retention | [GROWTH-PLAN.md](GROWTH-PLAN.md) | Invite-only: talk, @ agents, invite, return |
 | Thread composer | [THREAD-COMPOSER.md](THREAD-COMPOSER.md) | In-thread placeholder; Also-@ on Reply |
+| Mentions search | [MENTIONS-SEARCH.md](MENTIONS-SEARCH.md) | Mentioned-you filter on existing search |
 | Demigod `/room` landing | `deploy/room-entry.mjs` | Live on trydemigod.com |
 | Research / messaging plans | [`research/`](../research/README.md) | Copied from the Codex ChatGPT project mirror |
 
