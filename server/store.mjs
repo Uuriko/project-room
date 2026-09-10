@@ -1211,8 +1211,10 @@ export class RoomStore {
       const endingOffer = command.type === HELP_OFFER_UPDATED &&
         (priorOffer?.status === "offered" && ["declined", "withdrawn"].includes(command.data.status)
           || priorOffer?.status === "selected" && command.data.status === "released");
-      const cleanup = endingAccess || endingRequest || endingHelp || endingOffer;
-      // At capacity, each remaining membership/request/invitation can still be ended once.
+      const endingClaim = command.type === T.CLAIM_RELEASED
+        && room.state.workItems[command.data.workItemId]?.claim?.status === "active";
+      const cleanup = endingAccess || endingRequest || endingHelp || endingOffer || endingClaim;
+      // At capacity, each remaining membership/request/help/offer/claim can still be ended once.
       if ((room.sequence >= 10000 && !cleanup) || (command.type === T.MEMBER_ADDED && Object.keys(room.state.members).length >= 100) || (command.type === T.WORK_PROPOSED && Object.keys(room.state.workItems).length >= 500)) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       const memberAuthorityEvent = [T.MEMBER_ADDED, T.MEMBER_ACCESS_CHANGED].includes(command.type);
       const incoming = event({
