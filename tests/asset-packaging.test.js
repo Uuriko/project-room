@@ -23,7 +23,7 @@ test('asset build produces and refreshes exactly the allowlisted application fil
   assert.deepEqual((await readdir(new URL('src/', output))).sort(), assetPaths.filter(p => p.startsWith('src/')).map(p => p.slice(4)).sort());
   for (const file of assetPaths) assert.deepEqual(await readFile(new URL(file, output)), await readFile(new URL('../' + file, import.meta.url)));
   const config = JSON.parse(await readFile(new URL('../cloudflare/wrangler.jsonc', import.meta.url), 'utf8'));
-  assert.equal(config.build.command, 'node build-assets.mjs', 'deploy always builds this exact source');
+  assert.equal(config.build.command, 'node ../scripts/stamp-version.mjs && node build-assets.mjs', 'deploy stamps the committed revision before building exact assets');
 });
 test('every local browser import is included in the deployment allowlist', async () => {
   for (const file of assetPaths.filter(path => path.endsWith('.js'))) {
