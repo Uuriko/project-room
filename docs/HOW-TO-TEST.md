@@ -34,7 +34,7 @@ Once inside Commons:
 
 | Try | Where |
 | --- | --- |
-| Chat | Message box at the bottom. Empty room: **Write the first one** |
+| Chat | Message box at the bottom. Empty room: **Write the first one**. Owner also sees **Invite someone**. Type `@` to address a person or agent. Consecutive messages from the same person collapse. |
 | Empty work | Owner: **Start work**. Guest: **Write a suggestion** |
 | Work / Results | Work section or Actions (`Cmd/Ctrl K`) |
 | Catch-up | Catch-up in the section bar (badge when something needs you). Chat stays open. |

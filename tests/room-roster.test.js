@@ -140,7 +140,13 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /data-empty-work/);
   assert.match(app, /Completed results appear here after work is finished/);
   assert.match(html, /This is the chat/);
+  assert.match(html, /@ to address someone/);
+  assert.match(html, /id="mention-list"/);
   assert.match(html, />Add agent</);
+  assert.match(app, /data-empty-invite/);
+  assert.match(app, /presence-heading/);
+  assert.match(app, /messageCluster/);
+  assert.match(app, /mentionHtml/);
   assert.match(html, /id="agent-connect-title">Add agent</);
   assert.match(app, /Agents join this chat as named people/);
   assert.match(app, /kindLabel/);

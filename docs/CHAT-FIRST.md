@@ -51,6 +51,11 @@ Object, or invent a third login.
 - Work stays the Slack Code analogue: named outcomes beside the chat, not a
   second home.
 
+### Growth / refinement
+
+See [GROWTH-PLAN.md](GROWTH-PLAN.md). Chat density, @ addressing, People/Agents
+groups, empty-chat invite. Door copy still waits on overlay idle.
+
 ### Gated
 
 Mailbox, auto-enroll, native Grok Build MCP until import, OpenAI PRs #25/#26,
