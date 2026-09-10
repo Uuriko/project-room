@@ -36,6 +36,43 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [tool("room_check_access")]
     };
   }
+export const AGENT_ERRORS = "code/message + status/reason/hint/next";
+
+const tool = (name, args) => args ? { tool: name, arguments: args } : { tool: name };
+const path = value => ({ path: value });
+const command = value => ({ command: value });
+
+function stale(code, message) {
+  return /^stale_/.test(code) || /stale/i.test(String(message || ""));
+}
+
+function inputRefused(httpStatus, code, message) {
+  if (["invalid_work_action", "work_action_too_large", "invalid_work_context", "invalid_focus",
+    "invalid_query", "invalid_command", "invalid_json", "json_required", "too_large"].includes(code)) return true;
+  return httpStatus === 422 && code !== "command_rejected" && !stale(code, message);
+}
+
+function publicCode(code) {
+  return typeof code === "string" && /^[a-z][a-z0-9_]{0,64}$/.test(code) ? code : "request_failed";
+}
+
+function publicHint(value, fallback) {
+  return typeof value === "string" && value.trim() && value.length < 160 ? value : fallback;
+}
+
+export function agentErrorAx({ httpStatus = 0, code = "request_failed", message = "", roomId, workItemId } = {}) {
+  const reasonCode = publicCode(code);
+  const listPath = roomId ? `/api/rooms/${roomId}?view=work` : "/api/session";
+  const workPath = roomId ? `/api/rooms/${roomId}/work-context` : "/api/session";
+  const readWork = workItemId ? tool("room_read_work", { workItemId }) : tool("room_read_work");
+
+  if (reasonCode === "member_required") {
+    return {
+      status: "action_required", reason: "member_required",
+      hint: "Set the expected agent member, then room_check_access.",
+      next: [tool("room_check_access")]
+    };
+  }
   if (httpStatus === 401 || reasonCode === "unauthenticated") {
     return {
       status: "action_required", reason: "unauthenticated",
@@ -150,4 +187,17 @@ export function resolveAgentErrorAx(httpStatus, code, message, extras) {
   const hint = publicHint(extras.hint, base.hint);
   const next = validAgentNext(extras.next) ? extras.next : base.next;
   return { status, reason, hint, next };
+}
+
+// Coarse, stable error taxonomy for diagnostics and support exports. The
+// specific error.code stays primary; category groups codes for triage.
+export function errorCategory(httpStatus, code) {
+  const value = typeof code === "string" ? code : "";
+  if (httpStatus === 401 || httpStatus === 403) return "access";
+  if (httpStatus === 404 || value === "not_found" || value.endsWith("_not_found")) return "not_found";
+  if (httpStatus === 409 || value === "command_rejected" || value === "idempotency_conflict" || /^stale_/.test(value)) return "conflict";
+  if (httpStatus === 429 || value === "rate_limited") return "rate_limited";
+  if (httpStatus === 503 || value === "maintenance") return "unavailable";
+  if (httpStatus >= 500) return "internal";
+  return "input";
 }
