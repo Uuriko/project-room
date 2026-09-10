@@ -42,7 +42,7 @@ test("browser owner issues digest-only setup; a real external client imports, re
   await f.page.locator("#agent-setup").waitFor({ state: "visible" });
   assert.equal(await f.page.locator("#agent-import-checklist").isVisible(), true);
   assert.match(await f.page.locator("#agent-import-checklist").innerText(), /pbpaste \| node scripts\/agent-inbox\.mjs import/);
-  assert.match(await f.page.locator("#agent-import-route").innerText(), /Copy, import into a new private directory/);
+  assert.match(await f.page.locator("#agent-import-route").innerText(), /room_check_access/);
   await f.capture("desktop-ready"); const config = await f.config();
   assert.equal(JSON.stringify(requests).includes(config.token), false); assert.equal(requests[0].keyHash.length, 64);
   const env = { PATH: process.env.PATH }, directory = join(f.directory, "connection");
@@ -81,21 +81,23 @@ test("named roster fills Muse and Grok Build; Grok Build shows import checklist"
   assert.equal(await f.page.locator("#agent-connect-access").inputValue(), "chat");
   assert.equal(await f.page.locator("#agent-connect-route").inputValue(), "packet");
   assert.equal(await f.page.locator("#agent-packet-today").isVisible(), true);
+  assert.equal(await f.page.locator("#agent-create").isHidden(), true);
+  assert.equal(await f.page.locator("#agent-key-later").isVisible(), true);
   assert.match(await f.page.locator("#agent-roster-hint").innerText(), /has not contributed/);
   await f.page.locator('[data-roster="grok-build"]').click();
   assert.equal(await f.page.locator("#agent-connect-name").inputValue(), "Grok Build");
   assert.equal(await f.page.locator("#agent-connect-access").inputValue(), "contribute");
   assert.equal(await f.page.locator("#agent-connect-route").inputValue(), "mcp");
   assert.equal(await f.page.locator("#agent-packet-today").isHidden(), true);
+  assert.equal(await f.page.locator("#agent-create").isHidden(), false);
   assert.match(await f.page.locator("#agent-capabilities").innerText(), /work drafts/);
   assert.equal(f.store.db.prepare("SELECT count(*) n FROM agent_connections").get().n, 0);
   await f.page.locator("#agent-create").click();
   await f.page.locator("#agent-setup").waitFor({ state: "visible" });
-  assert.match(await f.page.locator("#agent-import-route").innerText(), /merge the printed MCP snippet/);
+  assert.match(await f.page.locator("#agent-import-route").innerText(), /room_check_access/);
   assert.match(await f.page.locator("#agent-import-checklist").innerText(), /room_check_access/);
-  await f.page.locator("#agent-host-snippets > summary").click();
-  assert.match(await f.page.locator("#agent-mcp-json").innerText(), /mcpServers/);
-  assert.equal((await f.page.locator("#agent-mcp-json").innerText()).includes("TOKEN"), false);
+  await f.page.locator("#agent-copy-checklist").click();
+  await f.page.waitForFunction(() => /plug-in steps|Select and copy/.test(document.querySelector("#agent-connect-status")?.textContent || ""));
   assert.equal(f.store.db.prepare("SELECT count(*) n FROM agent_connections").get().n, 1);
 });
 

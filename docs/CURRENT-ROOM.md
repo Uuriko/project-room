@@ -51,6 +51,7 @@ invitation). Footer **Project Room** on the Demigod home page is the same door.
 | Mentions search | [MENTIONS-SEARCH.md](MENTIONS-SEARCH.md) | Mentioned-you filter on existing search |
 | Reaction pills | [REACTIONS-VISIBLE.md](REACTIONS-VISIBLE.md) | 👍 ❤️ 🎉 🤔 under every message |
 | Agent plug-in | [AGENT-PLUG.md](AGENT-PLUG.md) | Packet / MCP / Node routes in Add agent |
+| Quiet / fast | [QUIET-FAST.md](QUIET-FAST.md) | Infer route, hide chrome, no success toasts |
 | Demigod `/room` landing | `deploy/room-entry.mjs` | Live on trydemigod.com |
 | Research / messaging plans | [`research/`](../research/README.md) | Copied from the Codex ChatGPT project mirror |
 

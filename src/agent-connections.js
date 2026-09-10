@@ -1,5 +1,5 @@
 import { validId } from "./events.js";
-import { rosterSelection, rosterNameTaken, rosterById, suggestedConfigDir, capabilitySummary, setupChecklist, routeHint, placeholderSnippetPaths, grokBuildToml, mcpJson } from "./room-roster.js";
+import { rosterSelection, rosterNameTaken, rosterById, suggestedConfigDir, capabilitySummary, setupChecklist, routeHint, placeholderSnippetPaths, grokBuildToml, mcpJson, claudeMcpAddCommand, reconnectCopy, routeFromDisplayName } from "./room-roster.js";
 
 const $ = selector => document.querySelector(selector);
 const newToken = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
@@ -53,36 +53,50 @@ export function installAgentConnections({ client, getState }) {
   function describeImport() {
     const hint = $("#agent-import-route");
     if (!hint) return;
-    const row = rosterId ? rosterById(rosterId) : null;
     const route = currentRoute();
-    hint.textContent = row
-      ? row.route === "mcp"
-        ? `${row.today} After import, merge the printed MCP snippet into ~/.grok/config.toml. Do not put the key in a prompt.`
-        : row.today
-      : route === "packet"
-        ? "Keep using Use my AI. Import this key only if the host can store a secret outside chat."
-        : route === "direct"
-          ? "Copy, import on that computer, then check access. Do not put the key in a prompt."
-        : "Copy, import into a new private directory, then check access. Merge MCP under Advanced hosts. Do not put the key in a prompt.";
+    hint.textContent = route === "packet"
+      ? "Use my AI. Import this key only if the host can keep a secret outside chat."
+      : route === "direct"
+        ? "Import on that computer, then check. No key in a prompt."
+        : "Import, merge MCP from Copy plug-in steps, then room_check_access.";
   }
   function describeRoute() {
     const route = currentRoute();
     if ($("#agent-route-hint")) $("#agent-route-hint").textContent = routeHint(route);
     if ($("#agent-packet-today")) $("#agent-packet-today").hidden = route !== "packet";
-    if ($("#agent-create-note")) $("#agent-create-note").textContent = route === "packet"
-      ? "Optional. Issues a Room identity if this host can later import a private connection. Do not paste the key into chat."
-      : "Issues a private key. The browser sends only a digest.";
+    const packet = route === "packet";
+    if ($("#agent-create")) $("#agent-create").hidden = packet;
+    if ($("#agent-create-note")) {
+      $("#agent-create-note").hidden = packet;
+      $("#agent-create-note").textContent = "The browser sends only a digest.";
+    }
+    if ($("#agent-key-later")) $("#agent-key-later").hidden = !packet;
+    if ($("#agent-host-snippets")) $("#agent-host-snippets").hidden = route !== "mcp";
     fillList($("#agent-import-checklist"), setupChecklist({ route, configDir: currentConfigDir() }));
     try {
       const paths = placeholderSnippetPaths(currentConfigDir());
       if ($("#agent-mcp-toml")) $("#agent-mcp-toml").textContent = grokBuildToml(paths);
       if ($("#agent-mcp-json")) $("#agent-mcp-json").textContent = mcpJson(paths);
+      if ($("#agent-mcp-cli")) $("#agent-mcp-cli").textContent = claudeMcpAddCommand(paths);
     } catch {
       if ($("#agent-mcp-toml")) $("#agent-mcp-toml").textContent = "";
       if ($("#agent-mcp-json")) $("#agent-mcp-json").textContent = "";
+      if ($("#agent-mcp-cli")) $("#agent-mcp-cli").textContent = "";
     }
     describeAccess();
     describeImport();
+  }
+  async function copyPlain(text, ok) {
+    if (!allowed() || !dialog.open || copying || typeof text !== "string" || !text) return;
+    copying = true; render();
+    try {
+      const write = navigator.clipboard?.writeText?.(text);
+      if (!write) throw new Error("clipboard");
+      await Promise.race([write, new Promise((_, reject) => setTimeout(() => reject(new Error("clipboard")), 800))]);
+      if (allowed() && dialog.open) status(ok);
+    } catch {
+      if (allowed() && dialog.open) status("Select and copy the text below. No key in this text.");
+    } finally { copying = false; render(); }
   }
   function render() {
     form.hidden = Boolean(setup); $("#agent-setup").hidden = !setup;
@@ -90,7 +104,9 @@ export function installAgentConnections({ client, getState }) {
     for (const input of form.querySelectorAll("input,select")) input.disabled = busy || Boolean(pending);
     $("#agent-create").disabled = busy;
     $("#agent-create").textContent = pending ? "Retry original" : "Create access";
+    if ($("#agent-create-later")) $("#agent-create-later").disabled = busy;
     $("#agent-private-copy").disabled = copying || !setup || !owns();
+    if ($("#agent-copy-checklist")) $("#agent-copy-checklist").disabled = copying || !setup || !allowed();
     $("#agent-connect-done").disabled = busy || copying;
     $("#agent-retry").hidden = !pending || pending.request.action === "create";
     $("#agent-retry").disabled = busy;
@@ -131,6 +147,17 @@ export function installAgentConnections({ client, getState }) {
         const li = document.createElement("li"), name = document.createElement("strong"), text = document.createElement("p");
         name.textContent = row.displayName; text.textContent = `${statuses[row.status]} · ${new Date(row.expiresAt).toLocaleString()}`;
         li.append(name, text);
+        if (row.status !== "disconnected") {
+          const copySteps = document.createElement("button");
+          copySteps.type = "button"; copySteps.className = "button ghost"; copySteps.textContent = "Copy plug-in steps";
+          copySteps.setAttribute("aria-label", `Copy plug-in steps for ${row.displayName}`);
+          copySteps.addEventListener("click", () => {
+            if (!allowed() || busy) return;
+            void copyPlain(reconnectCopy({ displayName: row.displayName, route: routeFromDisplayName(row.displayName) }),
+              "Copied plug-in steps. No key in this text.");
+          });
+          li.append(copySteps);
+        }
         if (row.status !== "disconnected") for (const [action, label] of [["rotate", "Replace key"], ["disconnect", "Disconnect"]]) {
           const button = document.createElement("button"); button.type = "button"; button.className = "button ghost"; button.textContent = label;
           button.setAttribute("aria-label", `${label} for ${row.displayName}`);
@@ -252,6 +279,15 @@ export function installAgentConnections({ client, getState }) {
   }
   $("#agent-private-details").addEventListener("toggle", () => {
     $("#agent-private-config").value = $("#agent-private-details").open && owns() && checkExpiry() ? JSON.stringify(setup) : "";
+  });
+  $("#agent-create-later")?.addEventListener("click", () => { if (!busy && !pending && !setup) $("#agent-create").click(); });
+  $("#agent-copy-checklist")?.addEventListener("click", () => {
+    if (!setup || !allowed()) return;
+    void copyPlain(reconnectCopy({
+      displayName: $("#agent-connect-name")?.value,
+      route: currentRoute(),
+      configDir: currentConfigDir()
+    }), "Copied plug-in steps. No key in this text.");
   });
   $("#agent-private-copy").addEventListener("click", async () => {
     if (!owns() || !checkExpiry() || copying || !$("#agent-private-details").open) return;

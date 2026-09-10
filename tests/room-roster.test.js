@@ -7,7 +7,8 @@ import { join } from "node:path";
 import {
   ROOM_ROSTER, rosterById, rosterSelection, suggestedConfigDir, rosterNameTaken,
   grokBuildToml, mcpJson, importCommand, roomRosterMain, capabilitySummary,
-  setupChecklist, routeHint, placeholderSnippetPaths
+  setupChecklist, routeHint, placeholderSnippetPaths, routeFromDisplayName,
+  claudeMcpAddCommand, reconnectCopy
 } from "../src/room-roster.js";
 
 const checkout = fileURLToPath(new URL("..", import.meta.url));
@@ -66,6 +67,20 @@ test("connect recipes name packet, MCP and Node routes without tokens", () => {
   assert.throws(() => grokBuildToml({ nodePath: "/n", adapterPath: "/a", configDir: "/Users/x/.grok/config.toml" }), /Grok config/);
   assert.throws(() => grokBuildToml({ nodePath: "/n", adapterPath: "/a", configDir: "/tmp/token-secret" }), /secrets/);
   assert.match(importCommand(paths.configDir), /pbpaste \| node scripts\/agent-inbox.mjs import '\/absolute\/private\/room-agent-grok-build'/);
+});
+
+test("reconnect copy is secret-free and names the host snippets", () => {
+  assert.equal(routeFromDisplayName("Instinct"), "packet");
+  assert.equal(routeFromDisplayName("Grok Build"), "mcp");
+  assert.equal(routeFromDisplayName("Grok Bot"), "direct");
+  assert.equal(routeFromDisplayName("Custom bot"), "mcp");
+  const copy = reconnectCopy({ displayName: "Grok Build" });
+  assert.match(copy, /No private key/);
+  assert.match(copy, /mcpServers/);
+  assert.match(copy, /claude mcp add/);
+  assert.equal(/token/i.test(copy), false);
+  assert.match(claudeMcpAddCommand(placeholderSnippetPaths()), /claude mcp add --transport stdio/);
+  assert.match(reconnectCopy({ displayName: "Muse" }), /Use my AI/);
 });
 
 test("CLI prints Muse packet route and refuses to write host config", () => {
@@ -146,7 +161,11 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /id="agent-host-snippets"/);
   assert.match(html, /id="agent-capabilities"/);
   assert.match(html, /Chat packet — no Room key/);
-  assert.match(html, /pbpaste \| node scripts\/agent-inbox\.mjs import/);
+  assert.match(html, /id="agent-copy-checklist"/);
+  assert.match(html, /id="agent-key-later"/);
+  assert.match(html, /id="agent-connect-more"/);
+  assert.doesNotMatch(html, /id="agent-copy-json"/);
+  assert.match(html, /id="agent-import-checklist"/);
   const app = readFileSync(join(checkout, "src/app.js"), "utf8");
   assert.match(app, /How to invite someone/);
   assert.match(app, /How to add an agent/);
@@ -164,7 +183,8 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /messageCluster/);
   assert.match(app, /mentionHtml/);
   assert.match(html, /id="agent-connect-title">Add agent</);
-  assert.match(app, /Agents join this chat as named people/);
+  assert.match(app, /syncComposerChrome/);
+  assert.match(app, /dismissRoomGuide/);
   assert.match(app, /escapeChatAction, messageCluster/);
   assert.match(app, /kindLabel, memberStatus, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills/);
   assert.match(app, /replyAuthorToAddress/);
@@ -200,6 +220,8 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(source, /function describeImport/);
   assert.match(source, /function describeRoute/);
   assert.match(source, /setupChecklist/);
+  assert.match(source, /reconnectCopy/);
+  assert.match(source, /Copy plug-in steps/);
   assert.match(app, /aria-label.*Open /);
   const css = readFileSync(join(checkout, "src/styles.css"), "utf8");
   assert.match(css, /\.agent-roster \.button \{ width: auto; min-height: 44px;/);

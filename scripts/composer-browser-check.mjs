@@ -66,7 +66,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await input.fill("A separate room draft");
     await page.locator('[data-message-record-id="topic"] [data-message-action="thread"]').click();
     await page.locator('[data-message-record-id="reply"] [data-message-action="reply"]').click();
-    await page.locator("#message-to-select").selectOption("maya");
+    await page.locator("#message-to-select").selectOption("maya", { force: true });
     await input.fill("Keep this thread reply");
     await input.focus();
     await input.evaluate(e => e.setSelectionRange(5, 9, "backward"));

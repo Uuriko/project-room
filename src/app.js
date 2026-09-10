@@ -499,16 +499,27 @@ function setAuthKind(kind) {
 }
 function updatePeopleHint() {
   const hint = $("#people-hint");
-  if (!hint) return;
-  hint.textContent = $("#connect-agent-button")?.hidden
-    ? "Agents join this chat as named people. Click a name to address them. The owner plugs agents in from here."
-    : "Agents join this chat as named people. Click a name to address them. Roster fills the name; Create access issues the key.";
+  if (hint) hint.textContent = "";
+}
+function dismissRoomGuide() {
+  if ($("#room-guide")) $("#room-guide").hidden = true;
+  try { sessionStorage.setItem("pr-guide-dismissed", "1"); } catch {}
 }
 function showRoomGuide() {
   const guide = $("#room-guide");
   if (!guide) return;
   try { if (sessionStorage.getItem("pr-guide-dismissed") === "1") { guide.hidden = true; return; } } catch {}
+  if (state?.messages?.length) { dismissRoomGuide(); return; }
   guide.hidden = false;
+}
+function syncComposerChrome() {
+  const to = $("#message-to-select")?.value;
+  const bar = $("#composer-toolbar");
+  if (bar) bar.hidden = !to && !requestMode;
+  const note = $("#audience-note");
+  if (note) note.hidden = true;
+  const work = $("#composer-work-button");
+  if (work) work.hidden = true;
 }
 function inviteSecretFromText(value) {
   const text = String(value ?? "").trim();
@@ -792,6 +803,7 @@ function render() {
   for (const id of ["new-work-button", "composer-work-button"]) {
     $("#" + id).hidden = !can("steer"); $("#" + id).disabled = !can("steer");
   }
+  syncComposerChrome();
   const items = Object.values(state.workItems);
   const openWork = items.map(item => nextWorkStep(item)).filter(step => !["complete", "superseded"].includes(step.action));
   const waiting = openWork.filter(step => step.needsAttention && step.memberId === session?.member?.id).length;
@@ -953,6 +965,7 @@ function restoreComposer(draft) {
     select.options[select.options.length - 1].disabled = true;
   }
   select.value = draft.toMemberId; replyToId = draft.replyToId; pendingMessage = draft.pending;
+  syncComposerChrome();
 }
 function requestControls(message) {
   const request = state.replyRequests?.[message.id];
@@ -990,6 +1003,7 @@ function syncRequestComposer() {
   send.setAttribute("aria-label", action); send.title = action;
   input.placeholder = composerPlaceholder({ workKind: mode?.kind ?? null, inThread: Boolean(currentThreadId) });
   if (active) $("#reply-bar").hidden = true;
+  syncComposerChrome();
 }
 function setRequestMode(mode, initial = {}) {
   saveComposer(); requestMode = mode;
@@ -1497,10 +1511,7 @@ $("#invitation-accept").addEventListener("click", async () => {
     renderInvitation();
   }
 });
-$("#room-guide-dismiss")?.addEventListener("click", () => {
-  if ($("#room-guide")) $("#room-guide").hidden = true;
-  try { sessionStorage.setItem("pr-guide-dismissed", "1"); } catch {}
-});
+$("#room-guide-dismiss")?.addEventListener("click", () => dismissRoomGuide());
 $("#auth-kind-room")?.addEventListener("click", () => setAuthKind("room"));
 $("#auth-kind-account")?.addEventListener("click", () => setAuthKind("account"));
 $("#access-key-reveal")?.addEventListener("click", () => {
@@ -1650,7 +1661,7 @@ $("#message-form").addEventListener("submit", e => {
     drafts.clear(threadId);
     $("#message-input").value = ""; pendingMessage = null; clearReply();
     persistDrafts();
-    notice(`Message saved${threadId ? " in this thread" : " to the room"}.`);
+    dismissRoomGuide();
   }, { failureHint: "Draft kept. Send again to retry." });
 });
 function submitRequest(form) {
@@ -1787,11 +1798,11 @@ function applyMentionMember(member) {
   input.value = next.body;
   const select = $("#message-to-select");
   if ([...select.options].some(option => option.value === next.toMemberId)) select.value = next.toMemberId;
-  hideMentions(); saveComposer();
+  hideMentions(); saveComposer(); syncComposerChrome();
   input.focus(); input.setSelectionRange(next.caret, next.caret);
 }
 $("#message-input").addEventListener("input", () => { lastComposerSelection = null; saveComposer(); renderMentions(); updateReply(); });
-$("#message-to-select").addEventListener("change", () => { saveComposer(); syncRequestComposer(); });
+$("#message-to-select").addEventListener("change", () => { saveComposer(); syncRequestComposer(); syncComposerChrome(); });
 const touchKeyboard = matchMedia("(hover: none) and (pointer: coarse)");
 function syncComposerHint() {
   $("#draft-hint").textContent = touchKeyboard.matches ? "Return for a new line · ↑ to send" : "Enter to send · Shift + Enter for a new line";
@@ -1938,7 +1949,7 @@ function chooseRoomAction(id) {
     const target = button && !button.hidden ? button : $("#people-panel > summary");
     target.scrollIntoView({ block: "nearest" }); target.focus({ preventScroll: true });
     if (button && !button.hidden) return;
-    notice("The owner connects assistants from People & agents. Instinct and Muse can also Use my AI without a key.");
+    notice("The owner connects assistants from People. Instinct and Muse can Use my AI without a key.");
     return;
   }
   if (id === "how-inbox") {
@@ -2027,7 +2038,7 @@ async function setReaction(messageId, reaction) {
       if (receipt.event.data.active) ids.add(session.member.id); else ids.delete(session.member.id);
       message.reactions ||= {}; message.reactions[reaction] = [...ids].sort();
     }
-    pendingReactions.delete(key); notice("Reaction saved.");
+    pendingReactions.delete(key);
   } catch (error) {
     if (generation === client.generation && state) { pending.busy = false; notice(`${error.message}. Retry keeps the same reaction choice.`, true); }
   } finally { if (state && generation === client.generation) renderMessages(); }
