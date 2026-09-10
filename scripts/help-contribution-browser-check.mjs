@@ -160,7 +160,7 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
   await page.reload(); await page.locator('#main').waitFor({ state: 'visible' });
   await page.screenshot({ path: `${prefix}-return.png` });
   await page.waitForFunction(label => document.querySelector('#contribution-label').textContent === label, multiple ? 'Drafts to inspect' : 'Draft to inspect');
-  await page.locator('#return-brief-panel > summary').click();
+  if (!(await page.locator('#return-brief-panel').evaluate(node => node.open))) await page.locator('#return-brief-panel > summary').click(); // first-visit auto-open (#38) must not be toggled closed
   const draftStep = page.locator(multiple ? `#rb-attention-list [data-open-work="${workItemId}"]` : `#rb-attention-list [data-open-message="${draft.messageId}"]`);
   await draftStep.waitFor({ state: 'visible' });
   assert.equal(await page.locator('#rb-attention-list .rb-event').count(), 1, 'One draft replaces the same work start step');
