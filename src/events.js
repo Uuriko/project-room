@@ -4,6 +4,7 @@ import { CHARTER_TYPE, charterFromEvent } from "./room-charter.js";
 import { REPLY_CANCELLED, prepareReplyPost, recordReplyPost, cancelReplyRequest } from "./reply-requests.js";
 import { WORK_HELP_UPDATED, helpFromEvent } from "./work-help.js";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, helpOfferFromEvent } from "./help-offers.js";
+import { SESSION_EVENT_TYPES, applySessionFields } from "./work-item-session.js";
 
 export const EVENT_TYPES = Object.freeze({
   ROOM_CREATED: "room.created",
@@ -27,7 +28,11 @@ export const EVENT_TYPES = Object.freeze({
   CLAIM_ACQUIRED: "claim.acquired",
   CLAIM_RELEASED: "claim.released",
   VERIFICATION_RECORDED: "verification.recorded",
-  OWNER_DECISION_RECORDED: "owner.decision_recorded"
+  OWNER_DECISION_RECORDED: "owner.decision_recorded",
+  SESSION_STARTED: SESSION_EVENT_TYPES.STARTED,
+  SESSION_STATUS_CHANGED: SESSION_EVENT_TYPES.STATUS_CHANGED,
+  SESSION_STOP_REQUESTED: SESSION_EVENT_TYPES.STOP_REQUESTED,
+  SESSION_STOPPED: SESSION_EVENT_TYPES.STOPPED
 });
 
 export const PERMISSIONS = Object.freeze(["steer", "decide", "manage_members", "manage_claims", "accept_work", "complete_work", "verify", "write_external"]);
@@ -37,7 +42,9 @@ export const PERMISSIONS = Object.freeze(["steer", "decide", "manage_members", "
 export const WORK_REVISION_TYPES = Object.freeze([
   EVENT_TYPES.WORK_ACCEPTED, EVENT_TYPES.WORK_STARTED, EVENT_TYPES.WORK_BLOCKED, EVENT_TYPES.WORK_BLOCKER_RESOLVED,
   EVENT_TYPES.WORK_COMPLETED, EVENT_TYPES.WORK_SUPERSEDED, EVENT_TYPES.CLAIM_ACQUIRED, EVENT_TYPES.CLAIM_RELEASED,
-  EVENT_TYPES.VERIFICATION_RECORDED, EVENT_TYPES.OWNER_DECISION_RECORDED
+  EVENT_TYPES.VERIFICATION_RECORDED, EVENT_TYPES.OWNER_DECISION_RECORDED,
+  EVENT_TYPES.SESSION_STARTED, EVENT_TYPES.SESSION_STATUS_CHANGED, EVENT_TYPES.SESSION_STOP_REQUESTED,
+  EVENT_TYPES.SESSION_STOPPED
 ]);
 
 // Roles are human-readable presets. The stored permission snapshot remains the
@@ -143,7 +150,11 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.CLAIM_ACQUIRED]: acquireClaim,
     [EVENT_TYPES.CLAIM_RELEASED]: releaseClaim,
     [EVENT_TYPES.VERIFICATION_RECORDED]: recordVerification,
-    [EVENT_TYPES.OWNER_DECISION_RECORDED]: recordOwnerDecision
+    [EVENT_TYPES.OWNER_DECISION_RECORDED]: recordOwnerDecision,
+    [EVENT_TYPES.SESSION_STARTED]: applySession,
+    [EVENT_TYPES.SESSION_STATUS_CHANGED]: applySession,
+    [EVENT_TYPES.SESSION_STOP_REQUESTED]: applySession,
+    [EVENT_TYPES.SESSION_STOPPED]: applySession
   };
   const handler = handlers[incoming.type];
   if (!Object.hasOwn(handlers, incoming.type)) throw new Error(`Unsupported event type: ${incoming.type}`);
@@ -564,6 +575,19 @@ function recordVerification(state, incoming) {
       eventId: incoming.id
     };
   }
+  commitMutation(item, incoming);
+}
+
+function applySession(state, incoming) {
+  const item = mutableWorkItem(state, incoming, [
+    WORK_STATES.PROPOSED, WORK_STATES.ACCEPTED, WORK_STATES.WORKING, WORK_STATES.BLOCKED, WORK_STATES.COMPLETED
+  ]);
+  const actor = requireMember(state, incoming.actorId);
+  const accountable = actor.id === item.accountableMemberId && hasPermission(state, actor.id, "accept_work");
+  if (!accountable && !hasPermission(state, actor.id, "steer")) {
+    throw new Error("Only the accountable member or a steerer may change this session");
+  }
+  applySessionFields(item, incoming);
   commitMutation(item, incoming);
 }
 

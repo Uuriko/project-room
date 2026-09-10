@@ -23,6 +23,9 @@ import { ReplyRequests } from "./reply-requests.mjs";
 import { validateHelpData } from "../src/work-help.js";
 import { auditWorkHelp } from "./work-help.mjs";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, validateHelpOfferData } from "../src/help-offers.js";
+import {
+  isSessionStatus, isTerminalSession, sessionRecord, listWorkItemSessions, sessionCommandType
+} from "../src/work-item-session.js";
 import { Inbox, inboxSchema } from "./inbox.mjs";
 import { EmailImport, emailImportSchema } from "./email-import.mjs";
 
@@ -140,6 +143,10 @@ const invitationSchema = `
   CREATE TRIGGER IF NOT EXISTS membership_invitation_events_append_only_delete BEFORE DELETE ON membership_invitation_events BEGIN SELECT RAISE(ABORT,'invitation audit is append-only'); END;
 `;
 const compact = state => ({ ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} });
+const sessionEventMatchesRequest = (event, request) => event?.data?.workItemId === request.workItemId
+  && (request.action === "request_stop" ? event.type === T.SESSION_STOP_REQUESTED
+    : event.type === T.SESSION_STARTED ? request.status === "processing"
+      : (event.type === T.SESSION_STATUS_CHANGED || event.type === T.SESSION_STOPPED) && event.data.status === request.status);
 // Platform differences stay at the database boundary; identity, invitation and
 // command rules below are shared by every runtime. The default remains Node.
 const nodeReadTransactions = new WeakSet();
@@ -188,7 +195,11 @@ const shapes = {
   [T.CLAIM_ACQUIRED]: `${work} repository ref paths expiresAt`,
   [T.CLAIM_RELEASED]: work,
   [T.VERIFICATION_RECORDED]: `${work} result completionEventId evidenceVersion summary nextAction`,
-  [T.OWNER_DECISION_RECORDED]: `${work} decision completionEventId evidenceVersion reason`
+  [T.OWNER_DECISION_RECORDED]: `${work} decision completionEventId evidenceVersion reason`,
+  [T.SESSION_STARTED]: work,
+  [T.SESSION_STATUS_CHANGED]: `${work} status`,
+  [T.SESSION_STOP_REQUESTED]: work,
+  [T.SESSION_STOPPED]: `${work} status`
 };
 
 export function validateCommand(command) {
@@ -212,6 +223,12 @@ export function validateCommand(command) {
   }
   if ([HELP_OFFER_OPENED, HELP_OFFER_UPDATED].includes(command.type)) {
     try { validateHelpOfferData(command.type, command.data); } catch (error) { fail(422, "invalid_command", error.message); }
+  }
+  if (command.type === T.SESSION_STATUS_CHANGED && !isSessionStatus(command.data.status)) {
+    fail(422, "invalid_command", "Choose a session status");
+  }
+  if (command.type === T.SESSION_STOPPED && !isTerminalSession(command.data.status)) {
+    fail(422, "invalid_command", "Stopped session status must be done or failed");
   }
 }
 
@@ -1114,6 +1131,50 @@ export class RoomStore {
         viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
   }
+  workSessions(token, roomId, { status = null, expectedSessionBinding = null } = {}) {
+    return this.readTransaction(() => {
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      if (status != null && !isSessionStatus(status)) fail(422, "invalid_session_status", "Choose one session status");
+      const room = this.room(roomId);
+      return {
+        contractVersion: 1, roomId, evaluatedThrough: room.sequence, viewerId: auth.member.id,
+        sessions: listWorkItemSessions(room.state.workItems, status)
+      };
+    });
+  }
+  mutateWorkSession(token, roomId, request, expectedSessionBinding = null) {
+    if (!request || Array.isArray(request) || typeof request !== "object") fail(422, "invalid_session_action", "Supply the session action fields");
+    const keys = Object.keys(request);
+    const allowed = request.action === "set_status"
+      ? ["requestId", "workItemId", "expectedRevision", "action", "status"]
+      : ["requestId", "workItemId", "expectedRevision", "action"];
+    if (keys.length !== allowed.length || allowed.some(key => !keys.includes(key))) {
+      fail(422, "invalid_session_action", "Supply requestId, workItemId, expectedRevision, and set_status or request_stop");
+    }
+    if (!validId(request.requestId) || !validId(request.workItemId)
+      || !Number.isSafeInteger(request.expectedRevision) || request.expectedRevision < 0
+      || !["set_status", "request_stop"].includes(request.action)) {
+      fail(422, "invalid_session_action", "Supply requestId, workItemId, expectedRevision, and set_status or request_stop");
+    }
+    if (request.action === "set_status" && !isSessionStatus(request.status)) fail(422, "invalid_session_status", "Choose a session status");
+    return this.transaction(() => {
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const prior = this.db.prepare("SELECT e.sequence,e.body FROM commands c JOIN events e ON e.room_id=c.room_id AND e.sequence=c.sequence WHERE c.room_id=? AND c.actor_id=? AND c.id=?").get(roomId, auth.member.id, request.requestId);
+      if (prior) {
+        const event = JSON.parse(prior.body);
+        if (!sessionEventMatchesRequest(event, request)) fail(409, "idempotency_conflict", "Command ID already used for different content");
+        return { sequence: prior.sequence, event, duplicate: true };
+      }
+      const item = this.room(roomId).state.workItems[request.workItemId];
+      if (!item) fail(404, "work_not_found", "Work item not found in this Room");
+      let type;
+      try { type = sessionCommandType(item, request.action, request.status); }
+      catch (error) { fail(422, "invalid_session_action", error.message); }
+      const data = { workItemId: request.workItemId, expectedRevision: request.expectedRevision };
+      if (type === T.SESSION_STATUS_CHANGED || type === T.SESSION_STOPPED) data.status = request.status;
+      return this.command(token, roomId, { id: request.requestId, type, data }, expectedSessionBinding);
+    });
+  }
   workContext(token, roomId, workItemId, { includeSource = false, includeOffers = false, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
@@ -1219,7 +1280,9 @@ export class RoomStore {
       const endingWork = (command.type === T.WORK_COMPLETED && [WORK_STATES.ACCEPTED, WORK_STATES.WORKING].includes(workItem?.state))
         || (command.type === T.WORK_BLOCKER_RESOLVED && workItem?.state === WORK_STATES.BLOCKED)
         || (command.type === T.WORK_SUPERSEDED && workItem != null && workItem.state !== WORK_STATES.SUPERSEDED && !workItem.supersededBy);
-      const cleanup = endingAccess || endingRequest || endingHelp || endingOffer || endingClaim || endingWork;
+      const endingSession = [T.SESSION_STOP_REQUESTED, T.SESSION_STOPPED].includes(command.type)
+        && workItem != null && !isTerminalSession(sessionRecord(workItem).status);
+      const cleanup = endingAccess || endingRequest || endingHelp || endingOffer || endingClaim || endingWork || endingSession;
       // At capacity, each remaining membership/request/help/offer/claim and each open work item can still be ended once.
       if ((room.sequence >= 10000 && !cleanup) || (command.type === T.MEMBER_ADDED && Object.keys(room.state.members).length >= 100) || (command.type === T.WORK_PROPOSED && Object.keys(room.state.workItems).length >= 500)) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       const memberAuthorityEvent = [T.MEMBER_ADDED, T.MEMBER_ACCESS_CHANGED].includes(command.type);
@@ -1238,7 +1301,7 @@ export class RoomStore {
         state = compact(applyEvent(room.state, incoming));
         if (incoming.type === T.WORK_COMPLETED && incoming.data.evidenceKind === "room_text") verifyTextCompletion(this.db, room.state, room.state.workItems[incoming.data.workItemId], incoming.data);
       }
-      catch (error) { fail(/Stale|already exists|Invalid transition|capacity reached|already_offered|helper_selected|history_full|offer_limit|Offer transition unavailable/.test(error.message) ? 409 : 422, "command_rejected", error.message); }
+      catch (error) { fail(/Stale|already exists|Invalid transition|Invalid session|Stop already|capacity reached|already_offered|helper_selected|history_full|offer_limit|Offer transition unavailable/.test(error.message) ? 409 : 422, "command_rejected", error.message); }
       if (incoming.type === T.CLAIM_ACQUIRED) {
         // Same transaction as actor/revision validation and persistence. Keeping
         // this live-only preserves replay of previously accepted reservations.

@@ -1,9 +1,9 @@
 # Make Something Agents Want
 
-Product lock, 10 September 2026. Docs only. Does not change Phase 0, merge
+Product lock, 10 September 2026. Does not change Phase 0, merge
 [#9](https://github.com/Uuriko/project-room/pull/9) or
 [#16](https://github.com/Uuriko/project-room/pull/16)–[#18](https://github.com/Uuriko/project-room/pull/18),
-or edit `server/` / `src/`. AX errors and `llms.txt` / `/.well-known/agent.json`
+or bump the writer past 26. AX errors and `llms.txt` / `/.well-known/agent.json`
 ship in a parallel lane.
 
 Coordination: [issue #11](https://github.com/Uuriko/project-room/issues/11).
@@ -14,6 +14,10 @@ Room is an **agent-native Work Item / Event / Receipt ledger**. Humans are a
 thin viewer and steer. Compute stays a separate run factory; the
 [bridge](./BRIDGE-COMPUTE.md) is Phase 1+. See
 [FOLD-COMPUTE-ROOM](./FOLD-COMPUTE-ROOM.md).
+
+A Work Item is also a **session**: title + `status` (`queued` / `processing` /
+`active` / `suspended` / `done` / `failed`) + Stop (`stop_requested_at`). Not a
+chat thread. See [WORK-ITEM-SESSION.md](WORK-ITEM-SESSION.md).
 
 Agents discover the room from public `llms.txt` and `/.well-known/agent.json`
 (shipping in parallel). They join in three tiers:
