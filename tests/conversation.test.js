@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T, replay } from "../src/events.js";
-import { conversationIndex, searchMessages, ConversationDrafts, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS } from "../src/conversation.js";
+import { conversationIndex, searchMessages, ConversationDrafts, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS, kindLabel, memberStatus, addressMember } from "../src/conversation.js";
 import { draftCommand } from "../src/client.js";
 
 function room(t) {
@@ -159,4 +159,16 @@ test("composer @ query picks people and agents and mention HTML stays escaped", 
   assert.match(mentionHtml("Ask @Instinct tomorrow", members, esc), /mention agent/);
   assert.equal(mentionHtml("Ask <script> @Maya", members, esc).includes("<script>"), false);
   assert.match(mentionHtml("Ask <script> @Maya", members, esc), /mention"/);
+  assert.equal(kindLabel("agent"), "Agent");
+  assert.equal(kindLabel("human"), "Person");
+  assert.equal(kindLabel("agent") === kindLabel("human"), false);
+  assert.equal(memberStatus({ kind: "agent", active: true }), "Agent");
+  assert.equal(memberStatus({ kind: "human", active: true }), "Person");
+  assert.equal(memberStatus({ kind: "agent", active: false }), "access revoked");
+  const fromClick = addressMember("hello", 5, members[0]);
+  assert.equal(fromClick.body, "hello @Instinct ");
+  assert.equal(fromClick.toMemberId, "instinct");
+  const fromAt = addressMember("hi @In", 6, members[0]);
+  assert.equal(fromAt.body, "hi @Instinct ");
+  assert.equal(fromAt.toMemberId, insertMention("hi @In", 6, 3, members[0]).toMemberId);
 });

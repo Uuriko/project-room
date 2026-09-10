@@ -47,6 +47,28 @@ export function mentionMatches(members, query) {
     .slice(0, 8);
 }
 
+export function kindLabel(kind) {
+  return kind === "agent" ? "Agent" : "Person";
+}
+
+export function memberStatus(member) {
+  if (!member || member.active === false) return "access revoked";
+  return kindLabel(member.kind);
+}
+
+export function addressMember(text, caret, member) {
+  if (!member?.displayName) return { body: String(text ?? ""), caret: Number.isInteger(caret) ? caret : String(text ?? "").length, toMemberId: member?.id ?? "" };
+  const found = mentionQuery(text, caret);
+  if (found) return insertMention(text, caret, found.start, member);
+  const value = String(text ?? "");
+  const pos = Number.isInteger(caret) ? Math.min(Math.max(caret, 0), value.length) : value.length;
+  const before = value.slice(0, pos), after = value.slice(pos);
+  const padBefore = before && !/[\s]$/.test(before) ? " " : "";
+  const label = `@${member.displayName}`;
+  const padAfter = after.startsWith(" ") ? "" : " ";
+  return { body: `${before}${padBefore}${label}${padAfter}${after}`, caret: before.length + padBefore.length + label.length + (padAfter ? 1 : 0), toMemberId: member.id };
+}
+
 export function insertMention(text, caret, start, member) {
   const value = String(text ?? "");
   const pos = Number.isInteger(caret) ? caret : value.length;

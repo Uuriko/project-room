@@ -2,7 +2,7 @@ import { EVENT_TYPES as T, WORK_STATES as S } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief } from "./return-brief.js";
 import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
-import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml } from "./conversation.js";
+import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, addressMember } from "./conversation.js";
 import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer } from "./workflow.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation } from "./share-links.js";
 import { installAgentConnections } from "./agent-connections.js";
@@ -353,8 +353,6 @@ setInterval(() => { if (!document.hidden) confirmAccount(); }, 5000);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 const humanize = value => String(value).replaceAll("_", " ").replaceAll(".", " ");
 const memberLabel = id => id == null ? "Unassigned" : state.members[id] ? `${state.members[id].displayName} (${id})` : `Unknown member (${id})`;
-const kindLabel = kind => kind === "agent" ? "Agent" : "Person";
-const memberStatus = m => m.active === false ? "access revoked" : kindLabel(m.kind);
 // Keep ordinary conversation readable; exact IDs remain in details and decision
 // controls. Duplicate names retain the full ID so attribution stays unambiguous.
 const displayName = id => {
@@ -502,8 +500,8 @@ function updatePeopleHint() {
   const hint = $("#people-hint");
   if (!hint) return;
   hint.textContent = $("#connect-agent-button")?.hidden
-    ? "Agents join this chat as named people. The owner plugs them in from here."
-    : "Agents join this chat as named people. Roster fills the name; Create access issues the key.";
+    ? "Agents join this chat as named people. Click a name to address them. The owner plugs agents in from here."
+    : "Agents join this chat as named people. Click a name to address them. Roster fills the name; Create access issues the key.";
 }
 function showRoomGuide() {
   const guide = $("#room-guide");
@@ -785,7 +783,7 @@ function render() {
   syncActionForm();
   setText("#presence-count", `${active.length} ${active.length === 1 ? "member" : "members"}`);
   renderContent("#member-stack", active.slice(0, 4).map(m => `<div class="member-avatar ${m.kind}" title="${esc(memberLabel(m.id))}" aria-hidden="true"><span>${initials(m.displayName)}</span></div>`).join(""));
-  const presenceRow = m => `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span></div><div><strong>${esc(memberLabel(m.id))}</strong><span>${esc(memberStatus(m))}</span><details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p></details></div></div>`;
+  const presenceRow = m => `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}" ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span></div><div><strong>${esc(memberLabel(m.id))}</strong><span>${esc(memberStatus(m))}</span><details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p></details></div></div>`;
   const byPresence = (a, b) => (a.active === false) - (b.active === false) || a.displayName.localeCompare(b.displayName);
   const people = members.filter(m => m.kind !== "agent").sort(byPresence);
   const agents = members.filter(m => m.kind === "agent").sort(byPresence);
@@ -1739,9 +1737,9 @@ function renderMentions() {
   list.innerHTML = matches.map((m, i) => `<li><button type="button" class="mention-option${i === mentionIndex ? " active" : ""}" data-mention-id="${esc(m.id)}" aria-selected="${i === mentionIndex}">${esc(m.displayName)} <span>${esc(kindLabel(m.kind))}</span></button></li>`).join("");
 }
 function applyMentionMember(member) {
-  const input = $("#message-input"), found = mentionQuery(input.value, input.selectionStart);
-  if (!found || !member) return;
-  const next = insertMention(input.value, input.selectionStart, found.start, member);
+  const input = $("#message-input");
+  if (!input || !member) return;
+  const next = addressMember(input.value, input.selectionStart, member);
   input.value = next.body;
   const select = $("#message-to-select");
   if ([...select.options].some(option => option.value === next.toMemberId)) select.value = next.toMemberId;
@@ -1782,6 +1780,13 @@ $("#mention-list")?.addEventListener("mousedown", e => {
   if (!button) return;
   e.preventDefault();
   applyMentionMember(state.members[button.dataset.mentionId]);
+});
+$("#presence-list").addEventListener("click", e => {
+  if (e.target.closest("details, summary, button, a")) return;
+  const row = e.target.closest(".presence-member");
+  const member = state?.members[row?.dataset.memberRecordId];
+  if (!member || member.active === false) return;
+  applyMentionMember(member);
 });
 $("#search-form").addEventListener("submit", e => { e.preventDefault(); if (state) renderSearch(); });
 $("#message-search").addEventListener("input", () => { if (state) renderSearch(); });
