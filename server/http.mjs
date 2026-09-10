@@ -619,4 +619,4 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   server.keepAliveTimeout = 5000;
   server.closeStreams = () => { for (const { res } of streams) res.end(); };
   return server;
-    }
+}
