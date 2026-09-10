@@ -13,7 +13,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('src/work-help.js'); paths.add('server/work-help.mjs');
   paths.add('client/help-actions.mjs');
   paths.add('server/inbox.mjs');
-  paths.add('server/inbox-outbox.mjs'); paths.add('server/inbox-transport.mjs');
+  paths.add('server/inbox-outbox.mjs'); paths.add('server/inbox-transport.mjs'); paths.add('server/version.mjs');
+  paths.add('scripts/stamp-version.mjs');
   paths.add('server/email-envelope.mjs'); paths.add('server/graph-email.mjs'); paths.add('server/email-import.mjs');
   paths.add('server/graph-fixture-sync.mjs');
   paths.add('server/graph-reply-draft.mjs');
