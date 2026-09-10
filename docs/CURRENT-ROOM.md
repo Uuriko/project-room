@@ -13,8 +13,9 @@ Do not continue from a ChatGPT worktree or the stale project-root
 | Durable Object | not reset |
 
 Hosted Worker `project-room-staging` was last published 9 September 2026 as
-version `8be85d2b-187d-44d5-a03a-0d8503f3f45c` from GitHub `main` `0ed6998`
-(chat-first). 25 live assets match this checkout. Durable Object was not
+version `9e046aa8-9c2b-4cb6-ab44-b05673002eb4` from `e613e2e` (Add agent /
+Person-Agent rail). GitHub `main` is still `ff6ef51` until that branch
+squash-merges. 25 live assets match this checkout. Durable Object was not
 reset. Door HTML source is `deploy/room-entry.mjs`; live `/room` updates with the
 next demigod-html publish.
 
@@ -42,8 +43,8 @@ invitation). Footer **Project Room** on the Demigod home page is the same door.
 | Private Inbox / account home | `src/inbox-*.js`, `server/inbox*.mjs` | In source and on the Worker; open `/?account=1` |
 | Fixture email (Graph-shaped) | `server/email-*.mjs`, `server/graph-*.mjs` | Local/fixture only. No live mailbox or send |
 | Agent connect + MCP | `docs/AGENT-CONNECTION.md`, `scripts/agent-inbox.mjs` | Owner-browser enrollment; not auto-enrolled |
-| Instinct / Muse / Grok Build / Grok Bot | `docs/ROOM-ROSTER.md` | Roster + Connect-agent presets in this source |
-| Usability plan | `docs/USABILITY-PLAN.md` | Phase 6 chat-first; mailbox/auto-enroll gated |
+| Instinct / Muse / Grok Build / Grok Bot | `docs/ROOM-ROSTER.md` | Roster + Add-agent presets in this source |
+| Usability plan | `docs/USABILITY-PLAN.md` | Chat-first Slice B; mailbox/auto-enroll gated |
 | Chat-first core | [CHAT-FIRST.md](CHAT-FIRST.md) | Humans talk; agents plug into the same room |
 | Demigod `/room` landing | `deploy/room-entry.mjs` | Live on trydemigod.com |
 | Research / messaging plans | [`research/`](../research/README.md) | Copied from the Codex ChatGPT project mirror |

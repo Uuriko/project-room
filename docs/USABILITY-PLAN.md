@@ -132,7 +132,7 @@ screen. Desk (`src/desk-chat`) stays a different product.
 - Do not auto-open Catch-up.
 - Door, README, You’re-in, People hint: talk first, plug agents second.
 
-### Slice B — this change (Add agent)
+### Slice B — shipped (Add agent)
 
 See [CHAT-FIRST.md](CHAT-FIRST.md) Slice B. Discord member rail:
 

@@ -41,7 +41,7 @@ Object, or invent a third login.
 - Door, README, You’re-in guide, People hint: talk first, plug agents second.
 - Tests: calm-return expects catch-up **closed**; click to open as before.
 
-### Slice B — this change (Discord member rail)
+### Slice B — shipped (Discord member rail)
 
 - People list: **Person** / **Agent** / access revoked. No “kind · presence
   unknown.”
