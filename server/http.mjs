@@ -5,6 +5,7 @@ import { ServiceError } from "./store.mjs";
 import { clientAddress } from "./deployment.mjs";
 import { validId } from "../src/events.js";
 import { SyntheticInboxTransport } from "./inbox-transport.mjs";
+import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -193,6 +194,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const url = new URL(req.url, expectedOrigin());
       if (url.pathname === "/api/health" && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode }, req.method === "HEAD");
+      }
+      if (url.pathname === "/api/version" && ["GET", "HEAD"].includes(req.method)) {
+        return json(res, 200, { status: "ok", mode: serviceMode, sourceRevision: SOURCE_REVISION, buildId: BUILD_ID }, req.method === "HEAD");
       }
       if (url.pathname === "/api/ready" && ["GET", "HEAD"].includes(req.method)) {
         try {
@@ -508,4 +512,4 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   server.keepAliveTimeout = 5000;
   server.closeStreams = () => { for (const { res } of streams) res.end(); };
   return server;
-}
+                    }
