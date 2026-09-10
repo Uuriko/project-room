@@ -101,10 +101,29 @@ export function mentionHtml(body, members, esc) {
     out += esc(text.slice(last, match.index));
     const label = match[0].slice(1);
     const member = names.find(m => m.displayName === label);
-    out += `<span class="mention${member?.kind === "agent" ? " agent" : ""}">${esc(match[0])}</span>`;
+    const kind = member?.kind === "agent" ? " agent" : "";
+    const chip = member?.id
+      ? `<button type="button" class="mention${kind}" data-mention-id="${esc(member.id)}">${esc(match[0])}</button>`
+      : `<span class="mention${kind}">${esc(match[0])}</span>`;
+    out += chip;
     last = match.index + match[0].length;
   }
   return out + esc(text.slice(last));
+}
+
+export function messageMentionsMember(body, member) {
+  if (!member?.displayName) return false;
+  const label = `@${member.displayName}`;
+  const text = String(body ?? "");
+  let from = 0;
+  while (from <= text.length) {
+    const i = text.indexOf(label, from);
+    if (i === -1) return false;
+    const after = text[i + label.length];
+    if (after == null || /\s/.test(after)) return true;
+    from = i + 1;
+  }
+  return false;
 }
 
 export function conversationIndex(messages) {
