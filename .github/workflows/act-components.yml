@@ -1,0 +1,24 @@
+name: act-components
+
+on:
+  pull_request:
+  push:
+    paths:
+      - "act-components/**"
+      - ".github/workflows/act-components.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: act-components
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm test

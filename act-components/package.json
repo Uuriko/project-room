@@ -1,0 +1,16 @@
+{
+  "name": "@project-room/act-components",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Isolated Act-component helper. Approve/Reject/Open-in-Compute on Events; no writer.",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -19,7 +19,9 @@ are Members. Humans are a thin viewer and steer. See
 that need a human, derived from the ledger. It is not chat. It is not Catch-up
 auto-open. It is not the account Inbox (`/?account=1`). [Work Items](./SPEC-v0.md)
 remain the post-first surface — you start work there. Activity is the optional
-thin-viewer list you open when something already happened.
+thin-viewer list you open when something already happened. Buttons on those
+Events (Approve / Reject / Open-in-Compute) are [Act components](./ACT-COMPONENTS.md),
+not this feed.
 
 Steal only this from Slack Activity:
 
