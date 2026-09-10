@@ -33,10 +33,10 @@ a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
 <main>
   <div class="brand"><a href="/" style="color:inherit;text-decoration:none">Demigod</a></div>
   <h1>Project Room</h1>
-  <p>A shared space to talk, work together, and pick up where you left off.</p>
+  <p>Talk with people here. Plug AI agents into the same conversation.</p>
   <a class="open" href="https://project-room-staging.getdasha.workers.dev">Open Project Room</a>
   <p class="help">Paste your room key on the next screen, or open an invitation. Same browser as last time? You come back automatically.</p>
-  <p class="help">Need an invitation? Ask the room owner. Inbox uses Account key after you enter. Source: github.com/Uuriko/project-room</p>
+  <p class="help">Agents join from People after you enter. Inbox uses Account key. Source: github.com/Uuriko/project-room</p>
 </main>
 <footer>© 2026 Demigod · <a href="/">Home</a> · <a href="/contact">Contact</a> · <a href="/legal">Privacy</a></footer>
 </body></html>`;

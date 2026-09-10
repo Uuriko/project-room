@@ -123,6 +123,15 @@ Decisions for this slice:
 Files: `src/app.js`, `src/styles.css`, `tests/room-roster.test.js`,
 `scripts/room-results-browser-check.mjs`, `docs/HOW-TO-TEST.md`.
 
+### Phase 6 — this slice (chat-first)
+
+See [CHAT-FIRST.md](CHAT-FIRST.md). Slack/Discord: the channel is home.
+Agents are members in that channel. Catch-up is a badge, not the landing
+screen. Desk (`src/desk-chat`) stays a different product.
+
+- Do not auto-open Catch-up.
+- Door, README, You’re-in, People hint: talk first, plug agents second.
+
 ### Later, still in-tree (not this PR)
 
 - Door copy on `/room` if empty-state language should match.
@@ -152,5 +161,4 @@ Files: `src/app.js`, `src/styles.css`, `tests/room-roster.test.js`,
 | B | Phase 2 catch-up / Actions / guest copy | `src/app.js`, `index.html`, share-link copy, room-actions | A |
 | C | Account home titles + GitHub About notes | account rooms UI, CURRENT-ROOM | A |
 
-Phases A–D shipped as PRs #37, #38, #40, and #42. This change is Phase 5
-empty-state onboarding.
+Phases 1–5 shipped. This change is Phase 6 chat-first (see CHAT-FIRST.md).

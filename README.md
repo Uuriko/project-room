@@ -1,6 +1,6 @@
 # Project Room
 
-A shared workspace where people and agents can talk, turn a conversation into bounded work, review exact results, and return with a clear next action.
+A chat for people, with a way to plug AI agents into the same room.
 
 **This repository is the source of truth.** Current map: [docs/CURRENT-ROOM.md](docs/CURRENT-ROOM.md).
 **How to test:** [docs/HOW-TO-TEST.md](docs/HOW-TO-TEST.md) — door https://www.trydemigod.com/room → Open Project Room.

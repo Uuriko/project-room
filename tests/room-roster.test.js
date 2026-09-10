@@ -139,8 +139,8 @@ test("Connect agent markup lists the four roster names", () => {
   assert.match(app, /data-empty-write/);
   assert.match(app, /data-empty-work/);
   assert.match(app, /Completed results appear here after work is finished/);
-  assert.match(app, /function maybeOpenCatchUp/);
-  assert.match(app, /\/\\bneed\/\.test\(catchup\)/);
+  assert.match(html, /This is the chat/);
+  assert.match(app, /Agents join this chat as named people/);
   const source = readFileSync(join(checkout, "src/agent-connections.js"), "utf8");
   assert.match(source, /rosterSelection/);
   assert.match(source, /rosterNameTaken/);
