@@ -364,4 +364,4 @@ for (const outcome of ["success", "failure"]) {
     assert.doesNotMatch(await page.locator("#status").textContent(), /Obsolete/);
     assert.deepEqual(errors, []);
   });
-  }
+}
