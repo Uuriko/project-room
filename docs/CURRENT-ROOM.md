@@ -52,7 +52,7 @@ invitation). Footer **Project Room** on the Demigod home page is the same door.
 | Mentions search | [MENTIONS-SEARCH.md](MENTIONS-SEARCH.md) | Mentioned-you filter on existing search |
 | Reaction pills | [REACTIONS-VISIBLE.md](REACTIONS-VISIBLE.md) | 👍 ❤️ 🎉 🤔 under every message |
 | Agent plug-in | [AGENT-PLUG.md](AGENT-PLUG.md) | Packet / MCP / Node routes in Add agent |
-| Agent discovery | [DISCOVERY-FOR-AGENTS.md](DISCOVERY-FOR-AGENTS.md) | `/llms.txt`, `/.well-known/agent.json` |
+| Agent discovery | [DISCOVERY-FOR-AGENTS.md](DISCOVERY-FOR-AGENTS.md) | `/llms.txt`, `/llms-full.txt`, `/.well-known/agent.json` (plus `/room/*` aliases) |
 | Quiet / fast | [QUIET-FAST.md](QUIET-FAST.md) | Infer route, hide chrome, no success toasts |
 | Work Item Session | [WORK-ITEM-SESSION.md](WORK-ITEM-SESSION.md) | Title + status + Stop ledger; schema 26 additive; no Slack-with-bots UI |
 | Demigod `/room` landing | `deploy/room-entry.mjs` | Live on trydemigod.com; Connect an agent (packet first) after next door publish |
@@ -78,7 +78,7 @@ Owner browser session (member key or account key, bound to the owner
 account) → People & agents → Add agent. Guest links are not agent
 credentials. Guest-agent mint is owner-issued (`ga1.` token, 2h)
 ([GUEST-AGENT-LINKS.md](GUEST-AGENT-LINKS.md)). Public discovery:
-`/llms.txt` and `/.well-known/agent.json`. `?account=1` is Inbox without joining a room.
+`/llms.txt`, `/llms-full.txt` and `/.well-known/agent.json`. `?account=1` is Inbox without joining a room.
 [ROOM-ROSTER.md](ROOM-ROSTER.md) is the Instinct / Muse / Grok Build / Grok
 Bot map. Product lock: [AGENTS-WANT.md](AGENTS-WANT.md). Work Items carry an
 additive [session](WORK-ITEM-SESSION.md) (`queued`…`failed`, Stop) so agents

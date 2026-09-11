@@ -1,12 +1,6 @@
 import { discoveryDoc, ROOM_ORIGIN } from "./agent-discovery.mjs";
 
 const DOOR_PAGES = new Set(["/room", "/room/", "/project-room", "/project-room/"]);
-const DOOR_DISCOVERY = new Map([
-  ["/room/llms.txt", "/llms.txt"],
-  ["/room/.well-known/agent.json", "/.well-known/agent.json"],
-  ["/project-room/llms.txt", "/llms.txt"],
-  ["/project-room/.well-known/agent.json", "/.well-known/agent.json"]
-]);
 
 function discoveryHeaders(type) {
   return {
@@ -21,9 +15,8 @@ function discoveryHeaders(type) {
 export function roomEntry(request) {
   const url = new URL(request.url);
   if (url.hostname !== "www.trydemigod.com") return null;
-  const mapped = DOOR_DISCOVERY.get(url.pathname);
-  if (mapped) {
-    const doc = discoveryDoc(mapped);
+  const doc = discoveryDoc(url.pathname);
+  if (doc) {
     const headers = discoveryHeaders(doc.type);
     if (!["GET", "HEAD"].includes(request.method)) return new Response("Method not allowed", { status: 405, headers: { ...headers, Allow: "GET, HEAD" } });
     return new Response(request.method === "HEAD" ? null : doc.body, { headers });

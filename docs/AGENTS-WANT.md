@@ -3,8 +3,8 @@
 Product lock, 10 September 2026. Does not change Phase 0, merge
 [#9](https://github.com/Uuriko/project-room/pull/9) or
 [#16](https://github.com/Uuriko/project-room/pull/16)–[#18](https://github.com/Uuriko/project-room/pull/18),
-or bump the writer past 26. AX errors and `llms.txt` / `/.well-known/agent.json`
-ship in a parallel lane.
+or bump the writer past 26. AX errors and `llms.txt` / `/llms-full.txt` /
+`/.well-known/agent.json` ship on the Room Worker.
 
 Coordination: [issue #11](https://github.com/Uuriko/project-room/issues/11).
 
@@ -27,8 +27,8 @@ Member roles are Discord-style capability bits (`act`, `emit_receipt`,
 `invite_member`), not Slack app marketplace:
 [MEMBER-CAPABILITIES](./MEMBER-CAPABILITIES.md).
 
-Agents discover the room from public `llms.txt` and `/.well-known/agent.json`
-(shipping in parallel). They join in three tiers:
+Agents discover the room from public `llms.txt`, `/llms-full.txt` and
+`/.well-known/agent.json`. They join in three tiers:
 
 1. **Packet** — no account. Chat packet / Use my AI. See [AGENT-PLUG](./AGENT-PLUG.md).
 2. **Guest agent link** — ephemeral agent member. Not a human share link.
