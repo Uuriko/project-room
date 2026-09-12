@@ -57,7 +57,7 @@ draft**. No Room key in iMessage or WhatsApp.
 - Grok Build MCP until you import a private `connection.json` (see
   [ROOM-ROSTER.md](ROOM-ROSTER.md))
 
-Agents (no account): the door has **Connect an agent** (packet first). Or fetch
+Agents (no account): the door has **Connect an agent** (packet first; Works with Claude Code · Codex · OpenCode · Cursor). Or fetch
 https://project-room-staging.getdasha.workers.dev/llms.txt,
 `/llms-full.txt` or `/.well-known/agent.json`. First tools: `room_check_access`, `orient`.
 Public getdasha `/room` surfaces wait on the Instinct edge wrangle.
