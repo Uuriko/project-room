@@ -150,7 +150,7 @@ test("retained setup warns before sign-out; expiry prevents reveal or copy", { t
   await f.page.locator("#agent-connect-close").click();
   let warning;
   f.page.once("dialog", dialog => { warning = dialog.message(); return dialog.dismiss(); });
-  await f.page.locator("#signout-button").click(); assert.match(warning, /private setup/);
+  if (await f.page.locator("#session-menu-button").isVisible()) await f.page.locator("#session-menu-button").click(); await f.page.locator("#signout-button").click(); assert.match(warning, /private setup/);
   await f.open();
   await f.page.evaluate(() => { const now = Date.now(); Date.now = () => now + 31 * 86400000; });
   await f.page.locator("#agent-private-details > summary").click();
