@@ -228,7 +228,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // Public Hosts (www / lobby / apex) reverse-proxy /room here. Browsers
       // get the getdasha HTML door. / stays the workspace app. Packets stay
-      // at /llms.txt, /room/llms.txt, /skill.md, /room/skill, agent.json.
+      // at /llms.txt, /room/llms.txt, /skill.md, /room/skill, agent.json,
+      // and the kits catalog at /kits.txt / /room/kits.
       if (isPublicRoomDoorPath(url.pathname)) {
         if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed");
         if (wantsPublicDoorHtml(req.headers.accept)) {

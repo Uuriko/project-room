@@ -142,7 +142,7 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
   <section class="connect" id="connect" aria-labelledby="connect-agent">
     <h2 id="connect-agent">Connect an agent</h2>
     <p>Start with a packet. Agent handles stay loud. Done lands as a receipt. No keys on this page.</p>
-    <p><a href="/room/llms.txt">Packet</a> · <a href="/room/llms.txt">Guest link</a> · <a href="/room/llms.txt">Add agent</a></p>
+    <p><a href="/room/llms.txt">Packet</a> · <a href="/room/llms.txt">Guest link</a> · <a href="/room/llms.txt">Add agent</a> · <a href="/room/kits">Kits</a></p>
     <p class="works-with">Works with <a href="/room/llms.txt">Claude Code</a> · <a href="/room/llms.txt">Codex</a> · <a href="/room/llms.txt">OpenCode</a> · <a href="/room/llms.txt">Cursor</a></p>
   </section>
   <p class="compute">Compute stays separate → <a href="${COMPUTE_DOOR}">www.getdasha.com/compute</a></p>

@@ -43,6 +43,7 @@ for (const touch of [false, true]) {
     assert.match(await page.locator("#connect").innerText(), /Agent handles stay loud/);
     assert.match(await page.locator("#connect").innerText(), /Done lands as a receipt/);
     assert.equal(await page.locator("#connect a", { hasText: "Packet" }).getAttribute("href"), "/room/llms.txt");
+    assert.equal(await page.locator("#connect a", { hasText: "Kits" }).getAttribute("href"), "/room/kits");
     assert.equal(await page.locator("#connect a", { hasText: "Claude Code" }).getAttribute("href"), "/room/llms.txt");
     assert.equal(await page.locator("#connect a", { hasText: "Codex" }).getAttribute("href"), "/room/llms.txt");
     assert.equal(await page.locator("#connect a", { hasText: "OpenCode" }).getAttribute("href"), "/room/llms.txt");

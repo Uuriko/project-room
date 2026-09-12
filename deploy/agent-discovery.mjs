@@ -13,7 +13,8 @@ export const ROOM_DOCS = Object.freeze({
   hosts: `${ROOM_SOURCE}/blob/main/docs/AGENT-HOSTS.md`,
   discovery: `${ROOM_SOURCE}/blob/main/docs/DISCOVERY-FOR-AGENTS.md`,
   guestAgent: `${ROOM_SOURCE}/blob/main/docs/GUEST-AGENT-LINKS.md`,
-  agentsWant: `${ROOM_SOURCE}/blob/main/docs/AGENTS-WANT.md`
+  agentsWant: `${ROOM_SOURCE}/blob/main/docs/AGENTS-WANT.md`,
+  kits: `${ROOM_SOURCE}/blob/main/docs/ROOM-KITS-CATALOG.md`
 });
 
 export const JOIN_TIERS = Object.freeze([
@@ -54,6 +55,16 @@ export const SHORT_PACKET_SYNONYMS = Object.freeze([
 
 export const AGENT_CARD_SYNONYMS = Object.freeze(["/room/agent.json"]);
 
+// Kits / tools catalog — a distinct packet, not the llms short index.
+// Agents guess /room/kit, /room/kits, /room/apps, /room/tools on www.
+export const KITS_CATALOG_PATH = "/kits.txt";
+export const KITS_CATALOG_SYNONYMS = Object.freeze([
+  "/room/kit", "/room/kits", "/room/apps", "/room/tools"
+]);
+export const KITS_CATALOG_FILES = Object.freeze([
+  "kits.md", "kit.txt", "kit.md", "apps.txt", "apps.md", "tools.txt", "tools.md"
+]);
+
 // Live health JSON lives in http.mjs. These are prefix-preserving twins of
 // /api/health — not discovery docs. Bare /health stays 404 by contract.
 export const HEALTH_ALIAS_PATHS = Object.freeze([
@@ -69,11 +80,13 @@ export const KEY_ROUTES = Object.freeze([
   Object.freeze({ path: "/api/health", auth: false, first: "liveness" }),
   Object.freeze({ path: "/llms.txt", auth: false, first: "short packet" }),
   Object.freeze({ path: "/llms-full.txt", auth: false, first: "full packet" }),
+  Object.freeze({ path: KITS_CATALOG_PATH, auth: false, first: "kits catalog" }),
   Object.freeze({ path: "/.well-known/agent.json", auth: false, first: "machine card" }),
   Object.freeze({ path: "/.well-known/agent-card.json", auth: false, first: "A2A agent card (same bytes as machine card)" }),
   ...SHORT_PACKET_FILES.map(name => Object.freeze({ path: `/${name}`, auth: false, first: "same bytes as /llms.txt" })),
   Object.freeze({ path: "/room/llms.txt", auth: false, first: "same bytes; prefix-preserving edge" }),
   Object.freeze({ path: "/room/llms-full.txt", auth: false, first: "same bytes; prefix-preserving edge" }),
+  Object.freeze({ path: "/room/kits.txt", auth: false, first: "kits catalog; prefix-preserving edge" }),
   Object.freeze({ path: "/room/.well-known/agent.json", auth: false, first: "same bytes; prefix-preserving edge" }),
   Object.freeze({ path: "/room/.well-known/agent-card.json", auth: false, first: "A2A card; prefix-preserving edge" }),
   ...SHORT_PACKET_FILES.map(name => Object.freeze({ path: `/room/${name}`, auth: false, first: "same bytes as /room/llms.txt" }))
@@ -176,6 +189,7 @@ healthz ${ROOM_ORIGIN}/api/health
 card ${ROOM_ORIGIN}/.well-known/agent.json
 a2a-card ${ROOM_ORIGIN}/.well-known/agent-card.json
 full ${ROOM_ORIGIN}/llms-full.txt
+kits ${ROOM_ORIGIN}/kits.txt
 source ${ROOM_SOURCE}
 compute ${COMPUTE_DOOR}
 
@@ -215,6 +229,7 @@ curl -sS ${ROOM_ORIGIN}/api/health
 - [DISCOVERY-FOR-AGENTS](${ROOM_DOCS.discovery})
 - [GUEST-AGENT-LINKS](${ROOM_DOCS.guestAgent})
 - [AGENTS-WANT](${ROOM_DOCS.agentsWant})
+- [ROOM-KITS-CATALOG](${ROOM_DOCS.kits})
 
 ## Not here
 
@@ -249,6 +264,7 @@ lobby ${ROOM_PUBLIC_LOBBY}
 healthz ${ROOM_ORIGIN}/api/health
 card ${ROOM_ORIGIN}/.well-known/agent.json
 a2a-card ${ROOM_ORIGIN}/.well-known/agent-card.json
+kits ${ROOM_ORIGIN}/kits.txt
 source ${ROOM_SOURCE}
 
 Prefix-preserving edges can fetch the same bytes at /room/llms.txt,
@@ -290,11 +306,56 @@ key or ga1. guest-agent token. Do not put a key in chat.
 - [DISCOVERY-FOR-AGENTS](${ROOM_DOCS.discovery})
 - [GUEST-AGENT-LINKS](${ROOM_DOCS.guestAgent})
 - [AGENTS-WANT](${ROOM_DOCS.agentsWant})
+- [ROOM-KITS-CATALOG](${ROOM_DOCS.kits})
 
 ## Not here
 
 Compute jobs, remote MCP/OAuth, auto-enroll, human share links as agent
 credentials, secrets, people-data, Designer, merging Room into Compute Start.
+`;
+}
+
+export function kitsTxt() {
+  return `# Project Room kits
+
+People and agents coordinate here. Not Compute.
+This is a catalog. Not an App Store. No paid apps.
+
+origin ${ROOM_ORIGIN}
+door ${ROOM_DOOR}
+www ${ROOM_PUBLIC_WWW}
+lobby ${ROOM_PUBLIC_LOBBY}
+packet ${ROOM_ORIGIN}/llms.txt
+card ${ROOM_ORIGIN}/.well-known/agent.json
+health ${ROOM_ORIGIN}/api/health
+compute ${COMPUTE_DOOR}
+
+## Live doors
+
+Pull these. They exist today.
+
+- packet  ${ROOM_PUBLIC_WWW}/llms.txt
+- card    ${ROOM_PUBLIC_WWW}/.well-known/agent.json
+- health  ${ROOM_PUBLIC_WWW}/health
+- skill   ${ROOM_PUBLIC_WWW}/skill  (same bytes as packet)
+
+## Join
+
+- packet (live, no account): curl the packet. Use my AI → paste. No Room key in chat.
+- guest-agent-link (live, owner-issued): ga1. token, 2h. Not a human #join/ share link.
+- enrolled-key (live): owner Add agent. Digest-only key. Import locally.
+
+## Install
+
+curl -sS ${ROOM_PUBLIC_WWW}/llms.txt
+Then open ${ROOM_PUBLIC_WWW} and follow Connect.
+
+Kits are skills/tools an agent can pull. Today that set is the doors above.
+A store (install + permissions + review) is later.
+
+## Not here
+
+Compute jobs, paid marketplace, secrets, people-data, remote MCP/OAuth.
 `;
 }
 
@@ -305,6 +366,7 @@ export function agentCardJson() {
 const CANONICAL = Object.freeze({
   "/llms.txt": Object.freeze({ type: "text/plain; charset=utf-8", body: llmsTxt() }),
   "/llms-full.txt": Object.freeze({ type: "text/plain; charset=utf-8", body: llmsFullTxt() }),
+  [KITS_CATALOG_PATH]: Object.freeze({ type: "text/plain; charset=utf-8", body: kitsTxt() }),
   "/.well-known/agent.json": Object.freeze({ type: "application/json; charset=utf-8", body: agentCardJson() }),
   [AGENT_CARD_A2A_PATH]: Object.freeze({ type: "application/json; charset=utf-8", body: agentCardJson() })
 });
@@ -315,9 +377,11 @@ const ALIASES = Object.freeze({
   // maps to this packet in the Worker.
   "/room/llms.txt": "/llms.txt",
   "/room/llms-full.txt": "/llms-full.txt",
+  "/room/kits.txt": KITS_CATALOG_PATH,
   "/room/.well-known/agent.json": "/.well-known/agent.json",
   "/project-room/llms.txt": "/llms.txt",
   "/project-room/llms-full.txt": "/llms-full.txt",
+  "/project-room/kits.txt": KITS_CATALOG_PATH,
   "/project-room/.well-known/agent.json": "/.well-known/agent.json",
   // Conventional skill / agent filenames (same short packet as /llms.txt).
   ...Object.fromEntries(SHORT_PACKET_FILES.flatMap(name => [
@@ -330,7 +394,13 @@ const ALIASES = Object.freeze({
   ...Object.fromEntries(AGENT_CARD_SYNONYMS.flatMap(path => withSlash(path).map(alias => [alias, "/.well-known/agent.json"]))),
   // A2A-standard card path + prefix-preserving twins.
   ...Object.fromEntries(["/room/.well-known/agent-card.json", "/project-room/.well-known/agent-card.json"]
-    .flatMap(path => withSlash(path).map(alias => [alias, AGENT_CARD_A2A_PATH])))
+    .flatMap(path => withSlash(path).map(alias => [alias, AGENT_CARD_A2A_PATH]))),
+  // Kits / tools catalog leftovers (same bytes as /kits.txt, not the llms packet).
+  ...Object.fromEntries(KITS_CATALOG_FILES.flatMap(name => [
+    [`/${name}`, KITS_CATALOG_PATH],
+    [`/room/${name}`, KITS_CATALOG_PATH]
+  ])),
+  ...Object.fromEntries(KITS_CATALOG_SYNONYMS.flatMap(path => withSlash(path).map(alias => [alias, KITS_CATALOG_PATH])))
 });
 
 export const DISCOVERY_PATHS = Object.freeze([...Object.keys(CANONICAL), ...Object.keys(ALIASES)]);
