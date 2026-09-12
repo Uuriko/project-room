@@ -179,3 +179,17 @@ test("failure after membership creation rolls back the entire grant", t => {
   f.store.db.exec("DROP TRIGGER test_fail_grant");
   assert.equal(f.apply(f.request).duplicate, false);
 });
+
+test("connection list surfaces the agent's first action so enrollment closes the loop", t => {
+  const f = fixture(t); f.apply(f.request);
+  const list = () => f.store.agentConnections.list(f.session.token, "commons", f.session.session.sessionBinding).connections;
+  const before = list().find(row => row.memberId === f.request.memberId);
+  assert.equal(before.status, "key_issued");
+  assert.equal(before.firstActionAt, null);
+  f.store.command(f.key.token, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED, data: { body: "First check-in" } });
+  const after = list().find(row => row.memberId === f.request.memberId);
+  assert.equal(after.status, "key_issued");
+  assert.equal(typeof after.firstActionAt, "string");
+  assert.ok(!Number.isNaN(Date.parse(after.firstActionAt)));
+  assert.doesNotThrow(() => f.store.agentConnections.verify());
+});
