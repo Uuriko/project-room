@@ -18,18 +18,38 @@ carry the claim, and the remaining tiers stay visibly open.
       "id": "accounts-invitations-guests",
       "claim": "Canonical accounts, invitations and anyone-with-link conversation-only guests.",
       "evidence": {
-        "unit": ["tests/invitations.test.js", "tests/invitation-http.test.js", "tests/share-links.test.js", "tests/account-rooms.test.js"],
-        "browser": ["scripts/invitation-check.mjs", "scripts/quiet-invites-check.mjs", "scripts/invitation-recovery-check.mjs"],
-        "agent": ["docs/AGENT-ONBOARDING-TESTING-2026-09-07.md"],
-        "hosted": ["cloudflare/README.md"]
+        "unit": [
+          "tests/invitations.test.js",
+          "tests/invitation-http.test.js",
+          "tests/share-links.test.js",
+          "tests/account-rooms.test.js"
+        ],
+        "browser": [
+          "scripts/invitation-check.mjs",
+          "scripts/quiet-invites-check.mjs",
+          "scripts/invitation-recovery-check.mjs"
+        ],
+        "agent": [
+          "docs/AGENT-ONBOARDING-TESTING-2026-09-07.md"
+        ],
+        "hosted": [
+          "cloudflare/README.md"
+        ]
       }
     },
     {
       "id": "conversation-threads-reactions-search",
       "claim": "Human conversation, threads, reactions, search and source-linked work.",
       "evidence": {
-        "unit": ["tests/conversation.test.js", "tests/work-search.test.js", "tests/work-discussion.test.js"],
-        "browser": ["scripts/browser-check.mjs", "scripts/work-search-browser-check.mjs"],
+        "unit": [
+          "tests/conversation.test.js",
+          "tests/work-search.test.js",
+          "tests/work-discussion.test.js"
+        ],
+        "browser": [
+          "scripts/browser-check.mjs",
+          "scripts/work-search-browser-check.mjs"
+        ],
         "agent": [],
         "hosted": []
       }
@@ -38,9 +58,18 @@ carry the claim, and the remaining tiers stay visibly open.
       "id": "work-status-model",
       "claim": "One work-status model shared by the UI, catch-up view and structured agent API.",
       "evidence": {
-        "unit": ["tests/work-snapshot.test.js", "tests/work-continuity.test.js", "tests/agent-handoff.test.js"],
-        "browser": ["scripts/workflow-browser-check.mjs", "scripts/assisted-work-browser-check.mjs"],
-        "agent": ["docs/AGENT-ONBOARDING-TESTING-2026-09-07.md"],
+        "unit": [
+          "tests/work-snapshot.test.js",
+          "tests/work-continuity.test.js",
+          "tests/agent-handoff.test.js"
+        ],
+        "browser": [
+          "scripts/workflow-browser-check.mjs",
+          "scripts/assisted-work-browser-check.mjs"
+        ],
+        "agent": [
+          "docs/AGENT-ONBOARDING-TESTING-2026-09-07.md"
+        ],
         "hosted": []
       }
     },
@@ -48,8 +77,13 @@ carry the claim, and the remaining tiers stay visibly open.
       "id": "exact-version-verification",
       "claim": "Exact-version verification/approval and reopened-work history.",
       "evidence": {
-        "unit": ["tests/version.test.js", "tests/work-actions.test.js"],
-        "browser": ["scripts/room-actions-browser-check.mjs"],
+        "unit": [
+          "tests/version.test.js",
+          "tests/work-actions.test.js"
+        ],
+        "browser": [
+          "scripts/room-actions-browser-check.mjs"
+        ],
         "agent": [],
         "hosted": []
       }
@@ -58,8 +92,14 @@ carry the claim, and the remaining tiers stay visibly open.
       "id": "resumable-catch-up",
       "claim": "Resumable catch-up and truthful saved-but-not-refreshed feedback.",
       "evidence": {
-        "unit": ["tests/return-brief.test.js", "tests/return-brief-client.test.js", "tests/draft-feedback.test.js"],
-        "browser": ["scripts/calm-return-browser-check.mjs"],
+        "unit": [
+          "tests/return-brief.test.js",
+          "tests/return-brief-client.test.js",
+          "tests/draft-feedback.test.js"
+        ],
+        "browser": [
+          "scripts/calm-return-browser-check.mjs"
+        ],
         "agent": [],
         "hosted": []
       }
@@ -68,8 +108,14 @@ carry the claim, and the remaining tiers stay visibly open.
       "id": "tab-draft-recovery",
       "claim": "Optional tab draft recovery tied to account, authorization epoch, room, member and browser-session binding. Off by default; never sends automatically.",
       "evidence": {
-        "unit": ["tests/draft-return.test.js", "tests/recovery.test.js"],
-        "browser": ["scripts/draft-return-browser-check.mjs", "scripts/session-boundary-check.mjs"],
+        "unit": [
+          "tests/draft-return.test.js",
+          "tests/recovery.test.js"
+        ],
+        "browser": [
+          "scripts/draft-return-browser-check.mjs",
+          "scripts/session-boundary-check.mjs"
+        ],
         "agent": [],
         "hosted": []
       }
@@ -78,10 +124,25 @@ carry the claim, and the remaining tiers stay visibly open.
       "id": "combined-verification-entrypoint",
       "claim": "One combined core/API and browser verification entrypoint.",
       "evidence": {
-        "unit": ["tests/release-evidence.test.js"],
-        "browser": ["scripts/unified-journey-check.mjs"],
+        "unit": [
+          "tests/release-evidence.test.js"
+        ],
+        "browser": [
+          "scripts/unified-journey-check.mjs"
+        ],
         "agent": [],
         "hosted": []
+      }
+    },
+    {
+      "id": "agent-presence-status",
+      "claim": "Agents see who is around and set a short status message shown on the presence roster.",
+      "evidence": {
+        "unit": [
+          "tests/member-status.test.js",
+          "tests/presence.test.js"
+        ],
+        "browser": []
       }
     }
   ]

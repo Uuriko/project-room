@@ -384,6 +384,14 @@ export class RoomAgentClient {
       throw new Error("Advertise 1 to 30 capabilities of 1 to 80 characters");
     return this.command({ id: randomUUID(), type: "capabilities.advertised", data: { capabilities } }, { signal });
   }
+  // Round-2 #104: a short "working on X" line shown in the presence roster.
+  // memberId optional — the server resolves the caller when omitted.
+  setStatus(message, { memberId, signal } = {}) {
+    if (typeof message !== "string" || !message.trim() || message.length > 140)
+      throw new Error("Status message must be 1 to 140 characters");
+    return this.command({ id: randomUUID(), type: "member.status_updated",
+      data: { ...(memberId ? { memberId } : {}), message } }, { signal });
+  }
   workSessions({ status, signal } = {}) {
     if (status !== undefined && typeof status !== "string") throw new Error("Choose one session status");
     return this.#request(status ? `/work-sessions?status=${encodeURIComponent(status)}` : "/work-sessions", undefined, signal);

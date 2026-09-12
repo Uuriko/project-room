@@ -12,6 +12,7 @@ export const EVENT_TYPES = Object.freeze({
   MEMBER_ADDED: "member.added",
   MEMBER_JOINED_VIA_INVITATION: "member.joined_via_invitation",
   MEMBER_ACCESS_CHANGED: "member.access_changed",
+  MEMBER_STATUS_UPDATED: "member.status_updated",
   MESSAGE_POSTED: "message.posted",
   REPLY_REQUEST_CANCELLED: REPLY_CANCELLED,
   MESSAGE_REACTION_SET: "message.reaction_set",
@@ -134,6 +135,7 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.MEMBER_ADDED]: addMember,
     [EVENT_TYPES.MEMBER_JOINED_VIA_INVITATION]: joinMemberViaInvitation,
     [EVENT_TYPES.MEMBER_ACCESS_CHANGED]: changeMemberAccess,
+    [EVENT_TYPES.MEMBER_STATUS_UPDATED]: updateMemberStatus,
     [EVENT_TYPES.MESSAGE_POSTED]: postMessage,
     [EVENT_TYPES.REPLY_REQUEST_CANCELLED]: cancelReplyRequest,
     [EVENT_TYPES.MESSAGE_REACTION_SET]: setMessageReaction,
@@ -289,6 +291,23 @@ function changeMemberAccess(state, incoming) {
   if (member.id === state.room.ownerId && (!incoming.data.active || !incoming.data.permissions.includes("manage_members"))) throw new Error("Owner must retain membership administration");
   member.active = incoming.data.active;
   member.permissions = [...incoming.data.permissions];
+  member.revision += 1;
+}
+
+// A member's status message ("working on X"). Members set their own;
+// the owner may set anyone's. If memberId is omitted, the caller is the
+// target. Bounded length, no HTML — rendered as text.
+function updateMemberStatus(state, incoming) {
+  requireFields(incoming.data, ["message"]);
+  const targetId = incoming.data.memberId ?? incoming.actorId;
+  const member = Object.hasOwn(state.members, targetId) && state.members[targetId];
+  if (!member) throw new Error("Unknown member");
+  if (incoming.actorId !== member.id && incoming.actorId !== state.room.ownerId) {
+    throw new Error("Members may only set their own status message");
+  }
+  const message = String(incoming.data.message ?? "");
+  if (message.length > 140) throw new Error("Status message must be 140 characters or fewer");
+  member.statusMessage = message;
   member.revision += 1;
 }
 
