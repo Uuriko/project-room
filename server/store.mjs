@@ -915,6 +915,27 @@ export class RoomStore {
       };
     });
   }
+  // Round-2 #108: invite-link analytics. Aggregate conversion stats for the
+  // room's invitations, restricted to members who can manage memberships.
+  invitationStats(accountSessionToken, roomId, expectedSessionBinding) {
+    return this.readTransaction(() => {
+      const actor = this.authenticateAccountSession(accountSessionToken, roomId, expectedSessionBinding);
+      if (!actor.member.permissions.includes("manage_members")) fail(403, "access_denied", "Membership administration grant required");
+      const rows = this.db.prepare("SELECT status,expires_at,created_at,accepted_at FROM membership_invitations WHERE room_id=?").all(roomId);
+      const now = this.now();
+      const counts = { pending: 0, accepted: 0, revoked: 0, expired: 0 };
+      for (const row of rows) {
+        const status = row.status === "pending" && row.expires_at <= now ? "expired" : row.status;
+        counts[status] = (counts[status] ?? 0) + 1;
+      }
+      const issued = rows.length;
+      const decided = counts.accepted + counts.revoked + counts.expired;
+      return {
+        roomId, issued, ...counts,
+        conversionRate: decided ? Math.round(1000 * counts.accepted / decided) / 10 : null
+      };
+    });
+  }
   revokeInvitation(accountSessionToken, invitationId, { expectedRevision, reason, expectedSessionBinding, expectedRoomId = null } = {}) {
     if (!validId(invitationId) || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || typeof reason !== "string" || !reason.trim() || reason.length > 4096) {
       fail(422, "invalid_invitation_change", "Invitation revocation requires its current revision and a reason");

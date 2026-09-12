@@ -639,6 +639,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["sequence"])) reject(422, "invalid_cursor", "Supply sequence only");
         return json(res, 200, store.markCaughtUp(selected.token, roomId, data.sequence, fence));
       }
+      if (route === "invitations" && req.method === "GET") {
+        // Round-2 #108: invite-link analytics.
+        if (selected.mode !== "account" || selected.bearer) reject(403, "account_session_required", "Invitation administration requires an account browser session");
+        return json(res, 200, store.invitationStats(selected.token, roomId, auth.sessionBinding));
+      }
       if (route === "invitations" && req.method === "POST") {
         if (selected.mode !== "account" || selected.bearer) reject(403, "account_session_required", "Invitation administration requires an account browser session");
         const data = await body(req);
