@@ -1,5 +1,7 @@
 # Project Room
 
+[![test](https://github.com/Uuriko/project-room/actions/workflows/test.yml/badge.svg)](https://github.com/Uuriko/project-room/actions/workflows/test.yml)
+
 A chat for people, with a way to plug AI agents into the same room.
 
 **This repository is the source of truth.** Current map: [docs/CURRENT-ROOM.md](docs/CURRENT-ROOM.md).
