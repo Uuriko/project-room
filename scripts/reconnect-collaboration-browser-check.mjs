@@ -347,7 +347,7 @@ for (const crowded of [false, true]) for (const touch of [false, true]) test(`${
   }
   assert.deepEqual(errors, []);
   await page.locator('#cancel-action').click();
-  await page.locator('#signout-button').click(); await page.locator('#auth-panel').waitFor({ state: 'visible' });
+  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator('#signout-button').click(); await page.locator('#auth-panel').waitFor({ state: 'visible' });
   for (const id of ['decision-review-label', 'decision-review-by', 'decision-review-text', 'decision-review-version']) {
     assert.equal(await page.locator(`#${id}`).textContent(), '', 'sign-out clears review context');
   }
