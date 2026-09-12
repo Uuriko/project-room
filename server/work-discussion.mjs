@@ -2,7 +2,8 @@ import { Buffer } from "node:buffer";
 import { validId } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
 
-export const DISCUSSION_DEFAULT_LIMIT = 20, DISCUSSION_MAX_LIMIT = 50, DISCUSSION_BYTE_LIMIT = 65536;
+const DISCUSSION_DEFAULT_LIMIT = 20;
+export const DISCUSSION_MAX_LIMIT = 50, DISCUSSION_BYTE_LIMIT = 65536;
 export class DiscussionError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
 }
