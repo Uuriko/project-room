@@ -21,7 +21,12 @@
           <span id="identity-label">Checking session…</span>
           <button id="invite-people-button" class="button primary" type="button" hidden>Invite</button>
           <button id="refresh-button" class="button ghost icon-button" type="button" aria-label="Refresh connection" title="Refresh connection"><span aria-hidden="true">↻</span></button>
-          <button id="signout-button" class="button ghost" type="button" hidden>Sign out</button>
+          <div class="session-menu" id="session-menu">
+            <button id="session-menu-button" class="button ghost icon-button" type="button" aria-expanded="false" aria-controls="session-menu-panel" aria-label="Session and account actions"><span aria-hidden="true">⋮</span></button>
+            <div id="session-menu-panel" class="session-menu-panel">
+              <button id="signout-button" class="button ghost" type="button" hidden>Sign out</button>
+            </div>
+          </div>
         </div>
       </header>
 
