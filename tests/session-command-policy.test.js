@@ -163,3 +163,33 @@ test("reused session request IDs reject changed budget, spend, or revision witho
     }
   }
 });
+
+test("cumulative spend cannot decrease through either live entry point", async t => {
+  const f = await fixture(t), id = f.propose();
+  await f.command(id, "session.started", { budget: { maxSpendCents: 100 } });
+  assert.equal((await f.command(id, "session.status_changed", { status: "active", spendCents: 80 })).status, 201);
+  const sequence = f.store.room("policy").sequence;
+  for (const result of [await f.command(id, "session.status_changed", { status: "processing", spendCents: 20 }),
+    await f.mutate(id, { status: "processing", spendCents: 20 }),
+    await f.command(id, "session.stopped", { status: "failed", spendCents: 20 })]) {
+    assert.equal(result.status, 409);
+    assert.equal(result.body.error.code, "invalid_session_spend");
+  }
+  assert.equal(f.store.room("policy").sequence, sequence);
+  assert.equal(f.item(id).spend_cents, 80);
+  assert.equal((await f.mutate(id, { status: "processing", spendCents: 80 })).status, 201);
+  assert.equal((await f.command(id, "session.stopped", { status: "failed" })).status, 201);
+  assert.equal(f.item(id).spend_cents, 80);
+});
+
+test("forced spend stop retains the reported overage in both state and event", async t => {
+  const f = await fixture(t), id = f.propose();
+  await f.command(id, "session.started", { budget: { maxSpendCents: 100 } });
+  const result = await f.mutate(id, { status: "active", spendCents: 101 });
+  assert.equal(result.status, 409);
+  assert.equal(result.body.error.code, "budget_exceeded");
+  assert.equal(f.item(id).status, "failed");
+  assert.equal(f.item(id).spend_cents, 101);
+  const last = f.store.db.prepare("SELECT body FROM events WHERE room_id=? ORDER BY sequence DESC LIMIT 1").get("policy");
+  assert.equal(JSON.parse(last.body).data.spendCents, 101);
+});

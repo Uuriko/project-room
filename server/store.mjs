@@ -146,6 +146,10 @@ const invitationSchema = `
   CREATE TRIGGER IF NOT EXISTS membership_invitation_events_append_only_delete BEFORE DELETE ON membership_invitation_events BEGIN SELECT RAISE(ABORT,'invitation audit is append-only'); END;
 `;
 const compact = state => ({ ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} });
+const validateSpendProgress = (session, spend) => {
+  if (spend !== undefined && session.spend_cents !== null && spend < session.spend_cents)
+    fail(409, "invalid_session_spend", "Cumulative spend cannot decrease");
+};
 const sessionEventMatchesRequest = (event, request) => {
   const data = { workItemId: request.workItemId, expectedRevision: request.expectedRevision };
   if (request.action === "set_status") {
@@ -1253,6 +1257,7 @@ export class RoomStore {
       if (!item) fail(404, "work_not_found", "Work item not found in this Room");
       const session = sessionRecord(item);
       const pendingSpend = request.spendCents ?? session.spend_cents;
+      validateSpendProgress(session, request.spendCents);
       const wire = budgetLimitExceeded(item, this.now())
         || (!isTerminalSession(session.status) && session.budget?.maxSpendCents != null && pendingSpend !== null
           && pendingSpend > session.budget.maxSpendCents ? "maxSpendCents" : null);
@@ -1260,7 +1265,8 @@ export class RoomStore {
         // Propagate authority/storage failures instead of claiming a stop.
         this.#command(token, roomId, { id: `budget-${request.requestId}`, type: T.SESSION_STOPPED,
           data: { workItemId: request.workItemId, expectedRevision: item.revision, status: "failed",
-            budgetEnforced: true, reason: "budget_exceeded", limit: wire } }, expectedSessionBinding, true);
+            budgetEnforced: true, reason: "budget_exceeded", limit: wire,
+            ...(request.spendCents === undefined ? {} : { spendCents: request.spendCents }) } }, expectedSessionBinding, true);
       }
       return { wire };
     });
@@ -1657,6 +1663,7 @@ export class RoomStore {
           fail(409, "session_claimed", "Another member is working on this; coordinate with them or ask a claim manager");
         const session = sessionRecord(workItem);
         const spend = command.data.spendCents ?? session.spend_cents;
+        validateSpendProgress(session, command.data.spendCents);
         const exceeded = budgetLimitExceeded(workItem, this.now())
           || (!isTerminalSession(session.status) && session.budget?.maxSpendCents != null && spend !== null
             && spend > session.budget.maxSpendCents ? "maxSpendCents" : null);
