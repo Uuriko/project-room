@@ -208,7 +208,7 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .member-head { display: flex; align-items: center; gap: .4rem; min-width: 0; }
 .member-handle { overflow: hidden; color: var(--text); font-size: .82rem; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
 .member-handle-agent { color: var(--text); font-weight: 850; letter-spacing: -.02em; }
-.presence-dot { position: absolute; right: -1px; bottom: -1px; width: .55rem; height: .55rem; border: 2px solid var(--panel); border-radius: 50%; }
+.presence-dot { position: absolute; right: -2px; bottom: -2px; width: .62rem; height: .62rem; border: 2px solid var(--panel); border-radius: 50%; }
 .presence-online { background: var(--room-green); }
 .presence-away { background: var(--room-quiet); }
 .presence-offline { background: var(--room-rule); }

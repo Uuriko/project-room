@@ -798,7 +798,7 @@ function render() {
   const railCtx = { workItems: state.workItems, messages: state.messages, now: Date.now() };
   const presenceRow = m => {
     const presence = memberPresence(m, railCtx);
-    const handle = memberHandle(m, memberLabel(m.id));
+    const handle = memberHandle(m, displayName(m.id));
     const done = memberDoneChip(m, railCtx);
     const status = memberStatus(m, railCtx);
     const doneChip = done
