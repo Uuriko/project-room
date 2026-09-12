@@ -188,7 +188,7 @@ export function composerPlaceholder({ workKind = null, inThread = false } = {}) 
   if (workKind) return "Your reply…";
   return inThread
     ? "Reply in this thread… @ to address someone"
-    : "Write to the room… @ to address someone";
+    : "Message the room…";
 }
 
 export function removeMention(text, member) {

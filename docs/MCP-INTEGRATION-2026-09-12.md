@@ -24,7 +24,9 @@ integration run completed:1,178 passed, zero failures/skips,102,068 ms. The firs
 old expected file count (98 vs100); the corrected test now imports both MCP
 modules from the cold package and verifies preview behavior. Final focused cold
 package tests:2 passed, zero failures/skips. The whole run started before that
-test correction, so a final exact-state gate is still required afterward.
+test correction. A subsequent exact-state gate ran against unchanged commit
+`08868ebc3ba281cec3c52daf370f69b8555aedd3`: 1,178 passed, zero failures/skips,
+77,791 ms. HEAD and clean status were checked before and after that run.
 
 This is not production/publication approval or full MCP protocol conformance.
 No self-join, registry listing, hosted route, paid model call or deployment was

@@ -48,6 +48,8 @@ for (const touch of [false, true]) {
     await guest.locator('#join-link-submit').click();
     await guest.locator('#main').waitFor({ state: 'visible' });
     assert.equal(await guest.locator('#identity-label').textContent(), 'Maya');
+    assert.equal(await guest.getByRole('textbox', { name: 'Message the room', exact: true }).count(), 1, 'composer has a persistent accessible name');
+    assert.equal(await guest.locator('#message-input').getAttribute('placeholder'), 'Message the room…');
     assert.equal(await guest.locator('#new-work-button').isVisible(), false);
     assert.equal(await guest.locator('#composer-work-button').isVisible(), false);
     assert.match(await guest.locator('#work-list').textContent(), /Suggest work in the conversation/);

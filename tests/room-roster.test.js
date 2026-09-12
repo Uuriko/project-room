@@ -150,7 +150,8 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /id="room-guide"/);
   assert.match(html, /Inbox uses <strong>Account key<\/strong>/);
   assert.match(html, /id="people-hint"/);
-  assert.match(html, /Write to the room/);
+  assert.match(html, /placeholder="Message the room…"/);
+  assert.match(html, /for="message-input">Message the room<\/label>/);
   assert.match(html, /id="auth-guest-note"/);
   assert.match(html, /eight hours in that browser/);
   assert.match(html, /id="share-link-intro"/);
