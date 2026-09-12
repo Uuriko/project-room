@@ -781,3 +781,7 @@ summary { overflow-wrap: anywhere; }
 .file-download { display: flex; align-items: center; gap: .75rem; max-width: 100%; min-height: 44px; }
 .file-download span { overflow-wrap: anywhere; text-align: left; min-width: 0; }
 .file-download small { flex-shrink: 0; }
+.composer-file { display: flex; gap: .5rem; align-items: center; min-height: 44px; }
+.composer-file > span { overflow-wrap: anywhere; min-width: 0; flex: 1; }
+.composer-file button { min-height: 44px; }
+#composer-files > small { display: block; margin: .25rem 0; }

@@ -308,7 +308,9 @@ export class DraftRecovery {
   write(scope, drafts, threadId, activeKey = threadId) {
     try {
       if (typeof scope !== "string" || !scope) { this.clear(); return false; }
-      const entries = [...drafts.entries].filter(([, d]) => d.body.trim()).slice(-50).map(([id, d]) =>
+      // A text-only recovery must never silently drop selected files or replay an
+      // uncertain file-bearing send without its original upload identities.
+      const entries = [...drafts.entries].filter(([, d]) => d.body.trim() && !d.files?.length && !d.pending?.command?.data?.attachmentIds?.length).slice(-50).map(([id, d]) =>
         [id, { body: d.body, toMemberId: d.toMemberId, replyToId: d.replyToId,
           ...(d.mode ? { mode: d.mode, threadId: d.threadId } : {}),
           pending: d.pending ? { id: d.pending.command.id, messageId: d.pending.command.data.messageId, contents: d.pending.contents } : null }]);

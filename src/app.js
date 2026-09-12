@@ -513,6 +513,7 @@ function showRoomGuide() {
   guide.hidden = false;
 }
 function syncComposerChrome() {
+  renderComposerFiles();
   const to = $("#message-to-select")?.value;
   const bar = $("#composer-toolbar");
   if (bar) bar.hidden = !to && !requestMode;
@@ -521,6 +522,52 @@ function syncComposerChrome() {
   const work = $("#composer-work-button");
   if (work) work.hidden = true;
 }
+function renderComposerFiles() {
+  const host = $('#composer-files'); if (!host) return;
+  const draft = drafts.get(composerKey()), locked = Boolean(pendingMessage?.command?.data?.attachmentIds?.length);
+  const files = draft.files ?? [];
+  $('#attach-file').hidden = Boolean(requestMode);
+  $('#attach-file').disabled = busy || locked || files.length >= 4;
+  $('#message-input').readOnly = locked;
+  host.innerHTML = files.map(item => `<div class="composer-file"><span>${esc(item.file.name)}</span><small>${item.state === 'ready' ? 'Ready' : item.state === 'uploading' ? 'Uploading…' : item.state === 'queued' ? 'Waiting' : 'Not uploaded'}</small>${!locked ? `<button type="button" class="text-button" data-file-control="${item.state === 'uploading' || item.state === 'queued' ? 'cancel' : item.state === 'ready' ? 'remove' : 'retry'}" data-upload-id="${esc(item.id)}">${item.state === 'uploading' || item.state === 'queued' ? 'Cancel' : item.state === 'ready' ? 'Remove' : 'Retry'}</button>${!['ready', 'uploading', 'queued'].includes(item.state) ? `<button type="button" class="text-button" data-file-control="remove" data-upload-id="${esc(item.id)}">Remove</button>` : ''}` : ''}</div>`).join('') + (files.length ? '<small>Reloading clears this draft. Add a message to send.</small>' : '');
+}
+async function uploadComposerFile(item, ownerDrafts) {
+  if (item.state !== 'queued') return;
+  const controller = new AbortController(); item.controller = controller; item.state = 'uploading'; renderComposerFiles();
+  try {
+    item.receipt = await client.uploadAttachment(item.id, item.file, { signal: controller.signal });
+    item.state = 'ready';
+  } catch { item.state = 'failed'; }
+  finally { item.controller = null; if (drafts === ownerDrafts && state) renderComposerFiles(); }
+}
+$('#attach-file').addEventListener('click', () => $('#file-picker').click());
+$('#file-picker').addEventListener('change', async () => {
+  const chosen = [...$('#file-picker').files]; $('#file-picker').value = '';
+  if (!state || busy || requestMode || pendingMessage?.command?.data?.attachmentIds?.length) return;
+  const ownerDrafts = drafts, draft = drafts.get(composerKey()); draft.files ??= [];
+  if (draft.files.length + chosen.length > 4 || chosen.some(file => file.size > 1048576)) {
+    setComposerError('Choose up to 4 files, 1 MiB each.'); return;
+  }
+  const added = chosen.map(file => ({ id: crypto.randomUUID(), file, state: 'queued', controller: null }));
+  draft.files.push(...added); saveComposer(); renderComposerFiles();
+  for (const item of added) { if (drafts !== ownerDrafts || !state) break; await uploadComposerFile(item, ownerDrafts); }
+});
+$('#composer-files').addEventListener('click', async event => {
+  const button = event.target.closest('[data-file-control]');
+  if (!button || !state || busy || pendingMessage?.command?.data?.attachmentIds?.length) return;
+  const draft = drafts.get(composerKey()), item = draft.files?.find(item => item.id === button.dataset.uploadId);
+  if (!item) return;
+  if (button.dataset.fileControl === 'cancel') { if (item.controller) item.controller.abort(); else item.state = 'failed'; }
+  else if (button.dataset.fileControl === 'retry') { item.state = 'queued'; await uploadComposerFile(item, drafts); }
+  else {
+    draft.files = draft.files.filter(entry => entry !== item);
+    const path = client.path(`/attachments/${encodeURIComponent(item.id)}`);
+    // Removal is local immediately. Expiry remains the fallback if cleanup loses
+    // its response; removing a draft never deletes a committed message file.
+    void client.request(path, { method: 'DELETE' }).catch(() => {});
+  }
+  if (state) { saveComposer(); renderComposerFiles(); }
+});
 function inviteSecretFromText(value) {
   const text = String(value ?? "").trim();
   const fromLink = /#invite\/([A-Za-z0-9_-]{43})/.exec(text);
@@ -1685,9 +1732,12 @@ $("#message-form").addEventListener("submit", e => {
   if (requestMode) { submitRequest(e.currentTarget); return; }
   const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId };
   if (!content.body) return;
+  const files = drafts.get(composerKey()).files ?? [];
+  if (files.some(item => item.state !== 'ready')) { setComposerError('Finish or remove uploads before sending.'); return; }
   const previous = pendingMessage?.command?.data;
   const unchanged = previous && previous.body === content.body && previous.toMemberId === content.toMemberId && previous.replyToId === content.replyToId;
-  const data = { messageId: unchanged ? previous.messageId : crypto.randomUUID(), ...content };
+  const data = previous?.attachmentIds?.length ? previous : { messageId: unchanged ? previous.messageId : crypto.randomUUID(), ...content,
+    ...(files.length ? { attachmentIds: files.map(item => item.id) } : {}) };
   pendingMessage = draftCommand(pendingMessage, T.MESSAGE_POSTED, data);
   saveComposer();
   const generation = client.generation, threadId = currentThreadId;
@@ -1698,7 +1748,9 @@ $("#message-form").addEventListener("submit", e => {
     await client.send(pendingMessage.command);
     if (generation !== client.generation || !state) return;
     drafts.clear(threadId);
-    $("#message-input").value = ""; pendingMessage = null; clearReply();
+    if (currentThreadId === threadId && !requestMode) {
+      $("#message-input").value = ""; pendingMessage = null; clearReply();
+    }
     persistDrafts();
     dismissRoomGuide();
   }, { failureHint: "Draft kept. Send again to retry." });

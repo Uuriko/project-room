@@ -52,5 +52,31 @@ for (const mobile of [false, true]) test(`verified file download ${mobile ? 'mob
   unblock();
   await button.waitFor();
   assert.equal(unexpectedDownload, false);
+  await page.unroute('**/attachments/download-file');
+  await page.locator('#file-picker').setInputFiles({ name: 'from-composer.txt', mimeType: 'text/plain', buffer: Buffer.from(bytes) });
+  await page.locator('#composer-files').getByText('Ready', { exact: true }).waitFor();
+  assert.equal(store.room('commons').state.messages.length, 1, 'staging is not sending');
+  await page.locator('#message-input').fill('Uploaded from the composer');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Download from-composer.txt', exact: true }).waitFor();
+  assert.equal(store.room('commons').state.messages.length, 2);
+  assert.equal(await page.locator('#composer-files .composer-file').count(), 0);
+  const posted = store.room('commons').state.messages.at(-1);
+  assert.equal(posted.attachments[0].filename, 'from-composer.txt');
+  assert.deepEqual(store.attachments.readCommitted(token, 'commons', posted.attachments[0].id).bytes, bytes);
+  let loseUploadResponse = true;
+  await page.route('**/attachments/*', async route => {
+    if (route.request().method() === 'PUT' && loseUploadResponse) {
+      loseUploadResponse = false; await route.fetch(); await route.abort();
+    } else await route.continue();
+  });
+  await page.locator('#file-picker').setInputFiles({ name: 'retry.txt', mimeType: 'text/plain', buffer: Buffer.from(bytes) });
+  await page.locator('#composer-files').getByRole('button', { name: 'Retry', exact: true }).click();
+  await page.locator('#composer-files').getByText('Ready', { exact: true }).waitFor();
+  assert.equal(store.db.prepare("SELECT count(*) n FROM room_attachments WHERE filename='retry.txt'").get().n, 1);
+  const removed = page.waitForResponse(response => response.request().method() === 'DELETE' && response.url().includes('/attachments/'));
+  await page.locator('#composer-files').getByRole('button', { name: 'Remove', exact: true }).click();
+  assert.equal((await removed).status(), 200);
+  assert.equal(store.db.prepare("SELECT bytes FROM room_attachments WHERE filename='retry.txt'").get().bytes, null);
   assert.deepEqual(errors, []);
 });
