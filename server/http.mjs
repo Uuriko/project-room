@@ -463,7 +463,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         reject(405, "method_not_allowed", "Method not allowed");
       }
       const revokeMatch = /^\/api\/rooms\/([^/]{1,384})\/invitations\/([^/]{1,384})\/revoke$/.exec(url.pathname);
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics|search))?$/.exec(url.pathname);
+      const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
+      if (threadMatch && req.method === "GET") {
+        // Round-2 #112: threaded replies.
+        const threadRoomId = threadMatch[1], threadMessageId = threadMatch[2];
+        const threadSelected = roomCredentials(req, url);
+        const threadFence = threadSelected.mode === "account" ? accountBinding(req) : expectedBinding(req);
+        return json(res, 200, store.messageThread(threadSelected.token, threadRoomId, threadMessageId, threadFence));
+      }
       if (!match && !revokeMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((match ?? revokeMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
@@ -531,6 +539,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "onboarding-funnel" && req.method === "GET") {
         return json(res, 200, store.onboardingFunnel(selected.token, roomId, fence));
+      }
+      if (route === "search" && req.method === "GET") {
+        // Round-2 #113: full-text search over messages and work items.
+        const q = url.searchParams.get("q");
+        const kind = url.searchParams.get("kind") ?? "all";
+        return json(res, 200, store.search(selected.token, roomId, q, kind, fence));
       }
       if (route === "export" && req.method === "GET") {
         // Round-2 #106: JSONL export of the event log (same visibility as

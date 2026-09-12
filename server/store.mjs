@@ -181,6 +181,8 @@ const shapes = {
   [T.MEMBER_ACCESS_CHANGED]: "memberId expectedMemberRevision permissions active",
   [T.MEMBER_STATUS_UPDATED]: "memberId message",
   [T.MESSAGE_POSTED]: `messageId body workItemId replyToId toMemberId packetId basisRevision allowOlderBasis ${REPLY_FIELDS.join(" ")}`,
+  [T.MESSAGE_EDITED]: "messageId body expectedMessageRevision",
+  [T.MESSAGE_DELETED]: "messageId expectedMessageRevision reason",
   [T.REPLY_REQUEST_CANCELLED]: "requestMessageId expectedRequestRevision reason",
   [T.MESSAGE_REACTION_SET]: "messageId reaction active",
   [T.WORK_PROPOSED]: "workItemId title definitionOfDone accountableMemberId verifierMemberId independentVerificationRequired ownerDecisionRequired humanDecisionMakerId mode sourceMessageId",
@@ -215,7 +217,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities"].includes(name) ? "array" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities"].includes(name) ? "array" : "string";
     if (type === "array" ? !Array.isArray(value) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (Buffer.byteLength(JSON.stringify(command)) > 16384) fail(413, "too_large", "Command is too large");
@@ -1309,6 +1311,58 @@ export class RoomStore {
       events.forEach((e, i) => insert.run(roomId, i + 1, e.id, JSON.stringify(e)));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(events.length, JSON.stringify(state), roomId);
       return { imported: events.length, sequence: events.length };
+    });
+  }
+  // Round-2 #112: threaded replies. Returns the root message plus its
+  // reply tree (messages whose replyToId chains back to the root).
+  messageThread(token, roomId, messageId, expectedSessionBinding = null) {
+    return this.readTransaction(() => {
+      this.authenticate(token, roomId, expectedSessionBinding);
+      const { members } = this.roomAuthority(roomId);
+      const room = this.room(roomId);
+      const root = room.state.messages.find(m => m.id === messageId);
+      if (!root) fail(404, "message_not_found", "Message not found");
+      const byParent = new Map();
+      for (const m of room.state.messages) {
+        if (!m.replyToId) continue;
+        if (!byParent.has(m.replyToId)) byParent.set(m.replyToId, []);
+        byParent.get(m.replyToId).push(m);
+      }
+      const attach = message => ({
+        ...message,
+        author: members[message.authorId]?.displayName ?? message.authorId,
+        replies: (byParent.get(message.id) ?? []).map(attach)
+      });
+      return { roomId, thread: attach(root) };
+    });
+  }
+  // Round-2 #113: full-text search over messages and work items.
+  // Substring match, case-insensitive; deleted messages are excluded.
+  search(token, roomId, query, kind = "all", expectedSessionBinding = null) {
+    if (typeof query !== "string" || !query.trim() || query.length > 80) fail(422, "invalid_search", "Search is 1 to 80 characters");
+    if (!["all", "messages", "work"].includes(kind)) fail(422, "invalid_search", "kind is all, messages, or work");
+    return this.readTransaction(() => {
+      this.authenticate(token, roomId, expectedSessionBinding);
+      const room = this.room(roomId);
+      const needle = query.toLowerCase();
+      const result = { roomId, query: query.trim(), messages: [], workItems: [] };
+      if (kind === "all" || kind === "messages") {
+        for (const m of room.state.messages ?? []) {
+          if (m.body == null) continue; // tombstone
+          if (m.body.toLowerCase().includes(needle)) {
+            result.messages.push({ id: m.id, authorId: m.authorId, body: m.body, createdAt: m.createdAt, workItemId: m.workItemId });
+          }
+        }
+      }
+      if (kind === "all" || kind === "work") {
+        for (const w of Object.values(room.state.workItems ?? {})) {
+          const haystack = `${w.title ?? ""} ${w.description ?? ""} ${w.definitionOfDone ?? ""}`.toLowerCase();
+          if (haystack.includes(needle)) {
+            result.workItems.push({ id: w.id, title: w.title, state: w.state, accountableMemberId: w.accountableMemberId });
+          }
+        }
+      }
+      return result;
     });
   }
   onboardingFunnel(token, roomId, expectedSessionBinding = null) {
