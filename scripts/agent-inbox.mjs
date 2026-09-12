@@ -1,4 +1,4 @@
-import { RoomAgentClient, validWorkSearchQuery } from "../client/room-agent.mjs";
+import { RoomAgentClient, validWorkSearchQuery, createAgentIdentity } from "../client/room-agent.mjs";
 import { packetMarkdown } from "../src/work-packet.js";
 import { validId } from "../src/events.js";
 import { agentConnectionFromEnvironment, readConnectionInput, saveAgentConnection, connectionDiagnostic, ConnectionError } from "../client/agent-connection.mjs";
@@ -98,12 +98,13 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
       || (action === "search" && !validWorkSearchQuery(checkpoint))
       || (["discussion", "result"].includes(action) ? false : action === "work" ? new Set(extra).size !== extra.length || extra.some(flag => !["--include-source", "--include-offers"].includes(flag))
         : action === "search" ? extra.length > 1 || (extra.length === 1 && extra[0] !== "--needs-me")
-        : ["advertise", "session"].includes(action) ? false
+        : ["advertise", "session", "identity-link"].includes(action) ? false
         : extra.length || (["check", "orient", "next", "brief"].includes(action) && checkpoint !== undefined))
       || (action === "changes" && (!/^\d+$/.test(checkpoint ?? "") || !Number.isSafeInteger(Number(checkpoint))))
       || (["identity-create", "identity-unlink"].includes(action) && (checkpoint === undefined || checkpoint.startsWith("--")))
       || (action === "identity-link" && (checkpoint === undefined || extra.length < 1 || extra.length > 3))) throw new ConnectionError("usage_error");
-    const config = action === "import" ? await readConnectionInput() : agentConnectionFromEnvironment(), client = new RoomAgentClient(config);
+    const config = action === "identity-create" ? {} : action === "import" ? await readConnectionInput() : agentConnectionFromEnvironment(),
+      client = action === "identity-create" ? null : new RoomAgentClient(config);
     let result;
     if (["connect", "import", "check"].includes(action)) {
       result = await client.checkConnection();
@@ -131,7 +132,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
       : action === "templates" ? client.roomTemplates()
       : action === "apply-template" ? await client.applyRoomTemplate(checkpoint, { accountableMemberId: extra[0] })
       : action === "heartbeats" ? await client.providerHeartbeats()
-      : action === "identity-create" ? await client.createAgentIdentity(checkpoint)
+      : action === "identity-create" ? await createAgentIdentity(process.env.ROOM_AGENT_ORIGIN, checkpoint)
       : action === "identity-link" ? await client.linkIdentity({ identityId: checkpoint, permissions: (extra[0] ?? "").split(",").map(p => p.trim()).filter(Boolean), ...(extra[1] === undefined ? {} : { memberId: extra[1] }), ...(extra[2] === undefined ? {} : { displayName: extra.slice(2).join(" ") }) })
       : action === "identity-links" ? await client.identityLinks()
       : action === "identity-unlink" ? await client.unlinkIdentity(checkpoint)

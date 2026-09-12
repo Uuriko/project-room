@@ -128,6 +128,38 @@ function checkedWorkSnapshot(value, roomId) {
 
 // Minimal, explicit client for a single configured service and Room. It neither
 // dispatches agents nor follows evidence links. Keep the token in operator memory.
+const assertServiceOrigin = origin => {
+  const url = new URL(origin);
+  const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if (url.origin !== origin || url.username || url.password || (url.protocol !== "https:" && !(local && url.protocol === "http:"))) throw new Error("Use a fixed HTTPS origin or an isolated loopback development origin");
+  return url.origin;
+};
+
+// Minting an agent identity is the unauthenticated first step of plugging in:
+// no credential exists yet, so this sends no Authorization header and needs
+// only the service origin. The secret is returned once; store it like a key.
+export async function createAgentIdentity(origin, displayName, { fetchImpl = globalThis.fetch, signal } = {}) {
+  let service;
+  try { service = assertServiceOrigin(origin); }
+  catch { throw new RoomClientError(0, "invalid_config", "Use a fixed HTTPS origin or an isolated loopback development origin"); }
+  let response;
+  try {
+    response = await fetchImpl(`${service}/api/agent-identities`, {
+      method: "POST", redirect: "error", credentials: "omit",
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ displayName }),
+    });
+  } catch (error) {
+    if (error instanceof RoomClientError) throw error;
+    throw new RoomClientError(0, "service_unavailable", "Could not complete the request. Check the service address and retry.");
+  }
+  let value;
+  try { value = await response.json(); } catch { value = null; }
+  if (!response.ok) throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room request failed");
+  if (typeof value?.identityId !== "string" || typeof value?.secret !== "string") throw new RoomClientError(200, "invalid_response", "Room returned an invalid identity");
+  return value;
+}
 export class RoomAgentClient {
   #origin;
   #roomId;
@@ -135,9 +167,7 @@ export class RoomAgentClient {
   #fetch;
   #memberId;
   constructor({ origin, roomId, token, memberId, fetchImpl = globalThis.fetch }) {
-    const url = new URL(origin);
-    const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-    if (url.origin !== origin || url.username || url.password || (url.protocol !== "https:" && !(local && url.protocol === "http:"))) throw new Error("Use a fixed HTTPS origin or an isolated loopback development origin");
+    assertServiceOrigin(origin);
     if (!validId(roomId) || typeof token !== "string" || !/^(?:[A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43}|pri_[A-Za-z0-9_-]{43,128})$/.test(token)) throw new Error("A valid Room and access key are required");
     if (memberId !== undefined && !validId(memberId)) throw new Error("Choose a valid expected agent member");
     this.#origin = origin; this.#roomId = roomId; this.#token = token; this.#fetch = fetchImpl;
@@ -458,14 +488,28 @@ export class RoomAgentClient {
   // room-independent (POST /api/agent-identities); the link calls act on the
   // configured room with an owner/manager credential.
   async createAgentIdentity(displayName, { signal } = {}) {
-    return this.#fetchPath("/api/agent-identities", { displayName }, signal);
+    return createAgentIdentity(this.#origin, displayName, { signal });
+  }
+  // Owner operations: linking, listing and unlinking identities needs the
+  // room owner's membership-administration grant, so these deliberately skip
+  // #request's agent-pinning preflight (an owner is not an agent member).
+  // The server still enforces manage_members; responses are checked against
+  // the configured room.
+  async #identityAdmin(suffix, body, { signal } = {}) {
+    const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal);
+    if (value?.roomId !== this.#roomId) {
+      throw new RoomClientError(200, "invalid_response", "Room response does not match the configured room");
+    }
+    const wellFormed = body === undefined ? Array.isArray(value?.links) : typeof value?.identityId === "string";
+    if (!wellFormed) throw new RoomClientError(200, "invalid_response", "Room returned an invalid identity response");
+    return value;
   }
   linkIdentity({ identityId, memberId, displayName, permissions }, { signal } = {}) {
-    return this.#request("/identity-links", { identityId, ...(memberId === undefined ? {} : { memberId }),
-      ...(displayName === undefined ? {} : { displayName }), permissions }, signal);
+    return this.#identityAdmin("/identity-links", { identityId, ...(memberId === undefined ? {} : { memberId }),
+      ...(displayName === undefined ? {} : { displayName }), permissions }, { signal });
   }
   identityLinks({ signal } = {}) {
-    return this.#request("/identity-links", undefined, signal);
+    return this.#identityAdmin("/identity-links", undefined, { signal });
   }
   unlinkIdentity(identityId, { signal } = {}) {
     return this.#deletePath(`/api/rooms/${encodeURIComponent(this.#roomId)}/identity-links`, { identityId }, signal);
