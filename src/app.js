@@ -499,7 +499,7 @@ function setAuthKind(kind) {
 }
 function updatePeopleHint() {
   const hint = $("#people-hint");
-  if (hint) hint.textContent = "Agent handles stay loud. Done lands as a receipt.";
+  if (hint) hint.textContent = "";
 }
 function dismissRoomGuide() {
   if ($("#room-guide")) $("#room-guide").hidden = true;
@@ -797,15 +797,14 @@ function render() {
   renderContent("#member-stack", active.slice(0, 4).map(m => `<div class="member-avatar ${m.kind}" title="${esc(memberLabel(m.id))}" aria-hidden="true"><span>${initials(m.displayName)}</span></div>`).join(""));
   const railCtx = { workItems: state.workItems, messages: state.messages, now: Date.now() };
   const presenceRow = m => {
-    const presence = memberPresence(m, railCtx);
     // Agents get loud @handles; humans keep the exact "Name (id)" rail label so attribution stays unambiguous (quiet-attribution gate).
     const handle = m.kind === "agent" ? memberHandle(m, displayName(m.id)) : memberLabel(m.id);
     const done = memberDoneChip(m, railCtx);
     const status = memberStatus(m, railCtx);
     const doneChip = done
-      ? `<span class="done-chip" title="${esc(done.title)}" data-done-work="${esc(done.workItemId)}">${esc(done.label)}</span>`
+      ? `<span class="done-chip${done.label === "Done" ? "" : " result-posted"}" title="${esc(done.title)}" data-done-work="${esc(done.workItemId)}">${esc(done.label)}</span>`
       : "";
-    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}" ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(presenceLabel(presence))}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong>${doneChip}</div><p class="member-status">${esc(status)}</p><details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p></details></div></div>`;
+    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}" ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong>${doneChip}</div><p class="member-status">${esc(status)}</p><details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p></details></div></div>`;
   };
   const byPresence = (a, b) => (a.active === false) - (b.active === false) || a.displayName.localeCompare(b.displayName);
   const people = members.filter(m => m.kind !== "agent").sort(byPresence);

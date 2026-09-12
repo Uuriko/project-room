@@ -1,4 +1,5 @@
 import { replyDraftKey, validReplyDraft, replyDraftData } from "./reply-requests.js";
+import { terminalWork } from "./workflow.js";
 // Conversation structure is derived from immutable reply links, including older logs.
 export const REACTIONS = Object.freeze({ like: "👍", heart: "❤️", celebrate: "🎉", thinking: "🤔" });
 
@@ -152,7 +153,7 @@ export function memberDoneChip(member, { workItems } = {}) {
     .sort(byLatest)[0];
   if (!done) return null;
   const title = String(done.receipt.summary || done.title || "").trim();
-  return { label: "Done", title, workItemId: done.id };
+  return { label: terminalWork(done) ? "Done" : "Result posted", title, workItemId: done.id };
 }
 
 export function addressMember(text, caret, member) {

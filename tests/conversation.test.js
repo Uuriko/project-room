@@ -336,10 +336,14 @@ test("People rail derives presence, one-line status, and Done chips from room wo
   assert.equal(memberStatus(codex, ctx), "Build the first executable Room slice");
   assert.equal(memberStatus(potter, ctx), "Review the Project Room v0 contract");
   assert.equal(memberStatus(instinct, ctx), "Agent");
-  assert.equal(memberDoneChip(codex, ctx)?.label, "Done");
+  assert.equal(memberDoneChip(codex, ctx)?.label, "Result posted");
   assert.equal(memberDoneChip(codex, ctx)?.workItemId, "work-spec-review");
   assert.match(memberDoneChip(codex, ctx)?.title, /consistency corrections/);
   assert.equal(memberDoneChip(instinct, ctx), null);
   assert.equal(memberDoneChip(potter, ctx), null);
   assert.equal(memberDoneChip(revoked, { workItems }), null);
+  workItems.review.ownerDecisionRequired = false;
+  workItems.review.independentVerificationRequired = false;
+  workItems.review.receipt.evidenceVersion = "v1";
+  assert.equal(memberDoneChip(codex, ctx)?.label, "Done");
 });

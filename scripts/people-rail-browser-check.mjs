@@ -1,4 +1,4 @@
-// People-rail: presence dots, one-line status, loud @agent handles, Done chips.
+// People rail: factual work labels, no inferred presence, scoped result chips.
 // Real browser + local HTTP service; identities and keys are disposable fixtures.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -13,7 +13,7 @@ import { EVENT_TYPES as T } from "../src/events.js";
 
 const command = (type, data, id = crypto.randomUUID()) => ({ id, type, data });
 
-test("People rail shows presence, what they're on, loud @handles, and Done chips", { timeout: 90000 }, async t => {
+test("People rail omits inferred presence and distinguishes results awaiting review", { timeout: 90000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-people-rail-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
   store.initialize(initialRoom());
@@ -30,7 +30,7 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   store.command(owner, "commons", command(T.WORK_PROPOSED, {
     workItemId: "work-review", title: "Review the Project Room v0 contract",
     definitionOfDone: "Exact spec revision is checked.",
-    accountableMemberId: "codex", mode: "read"
+    accountableMemberId: "codex", verifierMemberId: "instinct", independentVerificationRequired: true, mode: "read"
   }));
   store.command(agent, "commons", command(T.WORK_ACCEPTED, { workItemId: "work-review", expectedRevision: 0 }));
   store.command(agent, "commons", command(T.WORK_STARTED, { workItemId: "work-review", expectedRevision: 1 }));
@@ -68,21 +68,21 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   await page.locator("#main").waitFor({ state: "visible" });
   await page.locator("#people-panel > summary").click();
   const hint = page.locator("#people-hint");
-  await hint.waitFor();
-  assert.match(await hint.textContent(), /Agent handles stay loud/);
+  assert.equal(await hint.textContent(), "");
   const codex = page.locator('#presence-list .presence-member[data-member-record-id="codex"]');
   const instinct = page.locator('#presence-list .presence-member[data-member-record-id="instinct"]');
   const ownerRow = page.locator('#presence-list .presence-member[data-member-record-id="owner"]');
   await codex.waitFor();
-  assert.equal(await codex.getAttribute("data-presence"), "online");
-  assert.equal(await instinct.getAttribute("data-presence"), "away");
+  assert.equal(await codex.getAttribute("data-presence"), null);
+  assert.equal(await page.locator(".presence-dot").count(), 0);
   assert.equal(await codex.locator(".member-handle-agent").textContent(), "@Codex");
   assert.equal(await instinct.locator(".member-handle-agent").textContent(), "@Instinct");
   assert.doesNotMatch(await ownerRow.locator(".member-handle").textContent(), /^@/);
   assert.equal(await codex.locator(".member-status").textContent(), "Build the first executable Room slice");
-  assert.equal(await instinct.locator(".member-status").textContent(), "Agent");
+  assert.equal(await instinct.locator(".member-status").textContent(), "Review the Project Room v0 contract");
   const chip = codex.locator(".done-chip");
-  assert.equal(await chip.textContent(), "Done");
+  assert.equal(await chip.textContent(), "Result posted");
+  assert.ok((await chip.getAttribute("class")).includes("result-posted"));
   assert.equal(await chip.getAttribute("data-done-work"), "work-review");
   assert.match(await chip.getAttribute("title"), /consistency corrections/);
   assert.equal(await instinct.locator(".done-chip").count(), 0);
