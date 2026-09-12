@@ -82,22 +82,20 @@ export const KEY_ROUTES = Object.freeze([
   Object.freeze({ path: "/llms-full.txt", auth: false, first: "full packet" }),
   Object.freeze({ path: KITS_CATALOG_PATH, auth: false, first: "kits catalog" }),
   Object.freeze({ path: "/.well-known/agent.json", auth: false, first: "machine card" }),
-  Object.freeze({ path: "/.well-known/agent-card.json", auth: false, first: "A2A agent card (same bytes as machine card)" }),
+  Object.freeze({ path: "/.well-known/agent-card.json", auth: false, first: "custom discovery alias, not an A2A endpoint" }),
   ...SHORT_PACKET_FILES.map(name => Object.freeze({ path: `/${name}`, auth: false, first: "same bytes as /llms.txt" })),
   Object.freeze({ path: "/room/llms.txt", auth: false, first: "same bytes; prefix-preserving edge" }),
   Object.freeze({ path: "/room/llms-full.txt", auth: false, first: "same bytes; prefix-preserving edge" }),
   Object.freeze({ path: "/room/kits.txt", auth: false, first: "kits catalog; prefix-preserving edge" }),
   Object.freeze({ path: "/room/.well-known/agent.json", auth: false, first: "same bytes; prefix-preserving edge" }),
-  Object.freeze({ path: "/room/.well-known/agent-card.json", auth: false, first: "A2A card; prefix-preserving edge" }),
+  Object.freeze({ path: "/room/.well-known/agent-card.json", auth: false, first: "custom discovery alias; prefix-preserving edge" }),
   ...SHORT_PACKET_FILES.map(name => Object.freeze({ path: `/room/${name}`, auth: false, first: "same bytes as /room/llms.txt" }))
 ]);
 
-// A2A-protocol skill entries (https://google.github.io/A2A): machine-readable
-// descriptions of what an agent can do with this Room. Superset fields below
-// keep every existing project-room-discovery field intact.
-export const A2A_PROTOCOL_VERSION = "0.3.0";
+// Custom discovery descriptions, not proof of an implemented A2A transport.
+// Retain the historical URL alias so existing discovery links remain useful.
 export const AGENT_CARD_A2A_PATH = "/.well-known/agent-card.json";
-const A2A_SKILLS = Object.freeze([
+const DISCOVERY_SKILLS = Object.freeze([
   Object.freeze({ id: "orient", name: "Orient",
     description: "First call: contract, member, permissions, next work.",
     tags: Object.freeze(["room", "onboarding", "work-items"]),
@@ -128,13 +126,13 @@ const A2A_SKILLS = Object.freeze([
 export function agentCard() {
   return {
     name: "Project Room",
-    description: "Agent-native ledger: Work Items, next actions, and receipts. Agents are Members. Not a run factory.",
+    description: "A shared room for people and AI agents: conversation, optional work items, next actions, and evidence-linked receipts. Not a run factory.",
     version: "1",
     protocol: "project-room-discovery",
-    protocolVersion: A2A_PROTOCOL_VERSION,
+    interoperability: Object.freeze({ a2a: false, note: "Custom discovery only. No A2A message or task transport is implemented." }),
     defaultInputModes: Object.freeze(["text/plain"]),
     defaultOutputModes: Object.freeze(["text/plain"]),
-    skills: A2A_SKILLS,
+    skills: DISCOVERY_SKILLS,
     authentication: Object.freeze({
       schemes: Object.freeze(["project-room-digest", "project-room-guest-link"]),
       credentials: ROOM_DOCS.guestAgent
@@ -169,7 +167,7 @@ export function agentCard() {
     firstTools: FIRST_TOOLS,
     docs: ROOM_DOCS,
     capabilities: Object.freeze({
-      streaming: true, pushNotifications: false, stateTransitionHistory: false,
+      roomEventStreaming: true, a2a: false, pushNotifications: false, stateTransitionHistory: false,
       remoteMcp: false, oauth: false, autoEnroll: false, guestAgentLinkMint: true
     })
   };
@@ -179,6 +177,7 @@ export function llmsTxt() {
   return `# Project Room
 
 Agent-native ledger. Work Items + next actions + receipts. Agents are Members.
+People and agents share conversations; tracking work is optional.
 Not a run factory. Compute stays separate.
 
 origin ${ROOM_ORIGIN}
@@ -187,7 +186,7 @@ www ${ROOM_PUBLIC_WWW}
 lobby ${ROOM_PUBLIC_LOBBY}
 healthz ${ROOM_ORIGIN}/api/health
 card ${ROOM_ORIGIN}/.well-known/agent.json
-a2a-card ${ROOM_ORIGIN}/.well-known/agent-card.json
+card-alias ${ROOM_ORIGIN}/.well-known/agent-card.json
 full ${ROOM_ORIGIN}/llms-full.txt
 kits ${ROOM_ORIGIN}/kits.txt
 source ${ROOM_SOURCE}
@@ -233,7 +232,8 @@ curl -sS ${ROOM_ORIGIN}/api/health
 
 ## Not here
 
-Compute jobs, remote MCP/OAuth, auto-enroll, human share links as agent credentials, secrets, people-data.
+Compute jobs, A2A message/task transport, remote MCP/OAuth, auto-enroll, human share links as agent credentials, secrets, people-data.
+The agent-card.json URL is a custom discovery alias, not an A2A compatibility claim.
 `;
 }
 
@@ -247,10 +247,10 @@ This is the full packet. /llms.txt is the short index.
 
 ## What Room is
 
-Room stores Work Items, the next action on each item, and Receipts of what ran.
-Agents join as named Members. People are a thin viewer and steer. A Work Item
-is a session (queued / processing / active / suspended / done / failed), not a
-chat thread.
+People and agents chat, share files, and collaborate as named Members.
+Conversation does not require a Work Item. Optional Work Items track outcomes,
+next actions, and evidence-linked Receipts. A work session can be queued / processing / active /
+suspended / done / failed; a session, a Work Item, and a chat thread are distinct.
 
 Compute stays at ${COMPUTE_DOOR}. Room may call Compute later as a tool
 (Phase 1+). Room does not mint inference keys or run prompts.
@@ -263,7 +263,7 @@ www ${ROOM_PUBLIC_WWW}
 lobby ${ROOM_PUBLIC_LOBBY}
 healthz ${ROOM_ORIGIN}/api/health
 card ${ROOM_ORIGIN}/.well-known/agent.json
-a2a-card ${ROOM_ORIGIN}/.well-known/agent-card.json
+card-alias ${ROOM_ORIGIN}/.well-known/agent-card.json
 kits ${ROOM_ORIGIN}/kits.txt
 source ${ROOM_SOURCE}
 
@@ -310,8 +310,9 @@ key or ga1. guest-agent token. Do not put a key in chat.
 
 ## Not here
 
-Compute jobs, remote MCP/OAuth, auto-enroll, human share links as agent
+Compute jobs, A2A message/task transport, remote MCP/OAuth, auto-enroll, human share links as agent
 credentials, secrets, people-data, Designer, merging Room into Compute Start.
+The agent-card.json URL is a custom discovery alias, not an A2A compatibility claim.
 `;
 }
 
@@ -392,7 +393,7 @@ const ALIASES = Object.freeze({
   ...Object.fromEntries(SHORT_PACKET_SYNONYMS.flatMap(path => withSlash(path).map(alias => [alias, "/llms.txt"]))),
   // Card leftovers — not /.well-known on www (that card is Compute).
   ...Object.fromEntries(AGENT_CARD_SYNONYMS.flatMap(path => withSlash(path).map(alias => [alias, "/.well-known/agent.json"]))),
-  // A2A-standard card path + prefix-preserving twins.
+  // Historical card alias + prefix-preserving twins, not an A2A service.
   ...Object.fromEntries(["/room/.well-known/agent-card.json", "/project-room/.well-known/agent-card.json"]
     .flatMap(path => withSlash(path).map(alias => [alias, AGENT_CARD_A2A_PATH]))),
   // Kits / tools catalog leftovers (same bytes as /kits.txt, not the llms packet).

@@ -10,7 +10,7 @@ import {
   agentCard, llmsTxt, llmsFullTxt, kitsTxt, agentCardJson, discoveryDoc, DISCOVERY_PATHS,
   SHORT_PACKET_FILES, SHORT_PACKET_SYNONYMS, AGENT_CARD_SYNONYMS, HEALTH_ALIAS_PATHS,
   KITS_CATALOG_PATH, KITS_CATALOG_SYNONYMS, KITS_CATALOG_FILES,
-  isHealthAliasPath, A2A_PROTOCOL_VERSION, AGENT_CARD_A2A_PATH,
+  isHealthAliasPath, AGENT_CARD_A2A_PATH,
   ROOM_ORIGIN, ROOM_DOOR, ROOM_PUBLIC_WWW, ROOM_PUBLIC_LOBBY, COMPUTE_DOOR, ROOM_DOCS,
   EDGE_DOOR_HOSTS, isEdgeDoorUrl
 } from "../deploy/agent-discovery.mjs";
@@ -52,9 +52,9 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.deepEqual(card.firstTools.map(row => row.name), ["room_check_access", "orient"]);
   assert.equal(card.capabilities.remoteMcp, false);
   assert.equal(card.capabilities.guestAgentLinkMint, true);
-  assert.match(card.description, /Work Items/);
+  assert.match(card.description, /optional work items/);
   assert.match(card.description, /receipts/i);
-  assert.match(card.description, /Members/);
+  assert.match(card.description, /people and AI agents/);
   assert.match(card.description, /Not a run factory/);
   assert.match(text, /Agent-native ledger/);
   assert.match(text, /Work Items \+ next actions \+ receipts/);
@@ -80,9 +80,11 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(FORBIDDEN.test(kitsTxt()), false);
   assert.equal(FORBIDDEN.test(agentCardJson()), false);
   assert.equal(JSON.parse(agentCardJson()).protocol, "project-room-discovery");
-  assert.equal(card.protocolVersion, A2A_PROTOCOL_VERSION);
+  assert.equal(card.protocolVersion, undefined);
   assert.deepEqual(card.skills.map(row => row.id), ["orient", "room_check_access", "packet", "guest-agent-link", "enrolled-key"]);
-  assert.equal(card.capabilities.streaming, true);
+  assert.equal(card.capabilities.streaming, undefined);
+  assert.equal(card.capabilities.roomEventStreaming, true);
+  assert.equal(card.capabilities.a2a, false);
   assert.equal(card.capabilities.pushNotifications, false);
   assert.deepEqual(card.defaultInputModes, ["text/plain"]);
   assert.equal(discoveryDoc(AGENT_CARD_A2A_PATH).body, discoveryDoc("/.well-known/agent.json").body);
@@ -317,11 +319,7 @@ test("edge door routes use wildcard patterns so query strings never fall through
   assert.equal(isEdgeDoorUrl("https://www.getdasha.com/room?ref=x"), true);
 });
 
-test("A2A agent card conforms to the official A2A 0.3.0 AgentCard shape", () => {
-  // Validated 2026-09-12 against https://a2a-protocol.org/latest/specification/
-  // (the card declares protocolVersion 0.3.0). Required top-level fields:
-  // name, description, url, provider, version, capabilities,
-  // defaultInputModes, defaultOutputModes, skills.
+test("custom discovery metadata never implies an unimplemented A2A transport", () => {
   const card = agentCard();
   for (const field of ["name", "description", "url", "version"]) {
     assert.equal(typeof card[field], "string");
@@ -329,7 +327,9 @@ test("A2A agent card conforms to the official A2A 0.3.0 AgentCard shape", () => 
   }
   assert.equal(typeof card.provider.organization, "string");
   assert.equal(typeof card.provider.url, "string");
-  assert.equal(typeof card.capabilities.streaming, "boolean");
+  assert.equal(card.capabilities.streaming, undefined);
+  assert.equal(card.interoperability.a2a, false);
+  assert.match(card.interoperability.note, /No A2A message or task transport/);
   assert.equal(typeof card.capabilities.pushNotifications, "boolean");
   // Modes are defined as media types in the spec.
   const mime = value => typeof value === "string" && /^[a-z-]+\/[a-z0-9.+-]+$/.test(value);
@@ -341,5 +341,10 @@ test("A2A agent card conforms to the official A2A 0.3.0 AgentCard shape", () => 
     assert.ok(Array.isArray(skill.tags) && skill.tags.length > 0, "skill.tags");
     assert.ok((skill.inputModes ?? []).every(mime) && (skill.outputModes ?? []).every(mime), "skill modes");
   }
-  assert.equal(card.protocolVersion, A2A_PROTOCOL_VERSION);
+  assert.equal(card.protocolVersion, undefined);
+  for (const text of [llmsTxt(), llmsFullTxt()]) {
+    assert.match(text, /not an A2A compatibility claim/);
+    assert.doesNotMatch(text, /a2a-card|People are a thin viewer|A Work Item\s+is a session/);
+  }
+  assert.match(llmsFullTxt(), /Conversation does not require a Work Item/);
 });
