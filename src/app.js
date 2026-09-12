@@ -524,22 +524,45 @@ function syncComposerChrome() {
 }
 function renderComposerFiles() {
   const host = $('#composer-files'); if (!host) return;
+  const focused = host.contains(document.activeElement) ? document.activeElement.closest('[data-upload-id]') : null;
+  const focusId = focused?.dataset.uploadId, focusAction = focused?.dataset.fileControl;
   const draft = drafts.get(composerKey()), locked = Boolean(pendingMessage?.command?.data?.attachmentIds?.length);
   const files = draft.files ?? [];
+  if (!files.length) $('#file-upload-status').textContent = '';
   $('#message-input').required = Boolean(requestMode) || !files.some(item => item.state === 'ready');
   $('#attach-file').hidden = Boolean(requestMode);
   $('#attach-file').disabled = busy || locked || files.length >= 4;
   $('#message-input').readOnly = locked;
-  host.innerHTML = files.map(item => `<div class="composer-file"><span>${esc(item.file.name)}</span><small>${item.state === 'ready' ? 'Ready' : item.state === 'uploading' ? 'Uploading…' : item.state === 'queued' ? 'Waiting' : 'Not uploaded'}</small>${!locked ? `<button type="button" class="text-button" data-file-control="${item.state === 'uploading' || item.state === 'queued' ? 'cancel' : item.state === 'ready' ? 'remove' : 'retry'}" data-upload-id="${esc(item.id)}">${item.state === 'uploading' || item.state === 'queued' ? 'Cancel' : item.state === 'ready' ? 'Remove' : 'Retry'}</button>${!['ready', 'uploading', 'queued'].includes(item.state) ? `<button type="button" class="text-button" data-file-control="remove" data-upload-id="${esc(item.id)}">Remove</button>` : ''}` : ''}</div>`).join('') + (files.length ? '<small>Reloading clears this draft.</small>' : '');
+  const html = files.map(item => {
+    const action = ['uploading', 'queued'].includes(item.state) ? 'cancel' : item.state === 'ready' ? 'remove' : 'retry';
+    const label = { cancel: 'Cancel', remove: 'Remove', retry: 'Retry' };
+    const control = kind => `<button type="button" class="text-button" data-file-control="${kind}" data-upload-id="${esc(item.id)}" aria-label="${label[kind]} ${esc(item.file.name)}">${label[kind]}</button>`;
+    return `<div class="composer-file"><span>${esc(item.file.name)}</span><small>${esc(item.state === 'ready' ? 'Ready' : item.state === 'uploading' ? 'Uploading…' : item.state === 'queued' ? 'Waiting' : item.error || 'Not uploaded')}</small>${!locked ? control(action) + (action === 'retry' ? control('remove') : '') : ''}</div>`;
+  }).join('') + (files.length ? '<small>Reloading clears this draft.</small>' : '');
+  if (host._content !== html) { host.innerHTML = html; host._content = html; }
+  if (focusId) {
+    const controls = [...host.querySelectorAll('[data-upload-id]')].filter(button => button.dataset.uploadId === focusId);
+    const target = controls.find(button => button.dataset.fileControl === focusAction) || controls[0] || $('#attach-file');
+    if (!target.disabled && !target.hidden) target.focus({ preventScroll: true });
+  }
 }
 async function uploadComposerFile(item, ownerDrafts) {
   if (item.state !== 'queued') return;
-  const controller = new AbortController(); item.controller = controller; item.state = 'uploading'; renderComposerFiles();
+  const controller = new AbortController(); item.controller = controller; item.state = 'uploading'; item.error = ''; renderComposerFiles();
+  if (drafts.get(composerKey()).files?.includes(item)) $('#file-upload-status').textContent = `${item.file.name}: Uploading`;
   try {
     item.receipt = await client.uploadAttachment(item.id, item.file, { signal: controller.signal });
     item.state = 'ready';
-  } catch { item.state = 'failed'; }
-  finally { item.controller = null; if (drafts === ownerDrafts && state) renderComposerFiles(); }
+  } catch (error) {
+    item.state = 'failed'; item.error = error.name === 'AbortError' ? 'Upload cancelled' : error.message || 'Upload failed';
+  }
+  finally {
+    item.controller = null;
+    if (drafts === ownerDrafts && state) {
+      renderComposerFiles();
+      if (drafts.get(composerKey()).files?.includes(item)) $('#file-upload-status').textContent = `${item.file.name}: ${item.state === 'ready' ? 'Ready' : item.error}`;
+    }
+  }
 }
 $('#attach-file').addEventListener('click', () => $('#file-picker').click());
 $('#file-picker').addEventListener('change', async () => {
