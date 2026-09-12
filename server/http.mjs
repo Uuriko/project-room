@@ -470,17 +470,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|provider-heartbeats|identity-links|agent-invites))?$/.exec(url.pathname);
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
-      if (threadMatch && req.method === "GET") {
-        // Round-2 #112: threaded replies.
-        const threadRoomId = threadMatch[1], threadMessageId = threadMatch[2];
-        const threadSelected = roomCredentials(req, url);
-        const threadFence = threadSelected.mode === "account" ? accountBinding(req) : expectedBinding(req);
-        return json(res, 200, store.messageThread(threadSelected.token, threadRoomId, threadMessageId, threadFence));
-      }
-      if (!match && !revokeMatch) reject(404, "not_found", "Not found");
-      const roomId = pathId((match ?? revokeMatch)[1]);
+      if (!match && !revokeMatch && !threadMatch) reject(404, "not_found", "Not found");
+      const roomId = pathId((match ?? revokeMatch ?? threadMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
-      const route = match ? (match[2] ?? "") : "invitation-revoke";
+      const route = match ? (match[2] ?? "") : threadMatch ? "message-thread" : "invitation-revoke";
       const selected = roomCredentials(req, url);
       const fence = selected.mode === "account" ? accountBinding(req, route === "stream" ? url : null) : expectedBinding(req);
       const auth = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
@@ -489,6 +482,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
       rate(`read:${auth.credentialHash}`, 600);
       if (!["GET", "HEAD"].includes(req.method)) { protectWrite(req, auth, selected.bearer); rate(`write:${auth.credentialHash}`, 60); }
+      if (route === "message-thread" && req.method === "GET")
+        return json(res, 200, store.messageThread(selected.token, roomId, pathId(threadMatch[2]), fence));
       if (!route && req.method === "GET") {
         const params = url.searchParams;
         if (params.has("view") && (params.getAll("view").length !== 1 || params.get("view") !== "work"
