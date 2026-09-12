@@ -25,11 +25,15 @@ Fetch these first:
 | Room Worker (conventional filenames; same short packet as `/llms.txt`) | `/skill.md`, `/agents.md`, `/AGENTS.md`, `/CLAUDE.md` |
 | Room Worker (prefix-preserving proxy) | `/room/llms.txt`, `/room/llms-full.txt`, `/room/.well-known/agent.json` |
 | Room Worker (prefix-preserving conventional filenames; same as `/room/llms.txt`) | `/room/skill.md`, `/room/agents.md`, `/room/AGENTS.md`, `/room/CLAUDE.md` |
+| Room Worker (www leftovers; same short packet) | `/room/skill`, `/room/agents`, `/room/llms`, `/room/readme.md`, `/room/gemini.md`, `/room/cursor.md` (+ slash) |
+| Room Worker (www leftover card) | `/room/agent.json` — same bytes as `/.well-known/agent.json` |
+| Room Worker (www leftover health) | `/room/health`, `/room/api/health` — same JSON as `/api/health` |
 | Door (after demigod-html publish) | `/room/llms.txt`, `/room/.well-known/agent.json`, `/room/skill.md`, `/room/agents.md`, `/room/AGENTS.md`, `/room/CLAUDE.md` |
 | HTML door (browsers) | `/room`, `/room/` — text/html; not the packet |
 
 Same bytes on the packet paths. No account required to read them. Health is
-`GET /api/health` (this repo's healthz). The getdasha door has **Open**
+`GET /api/health` (this repo's healthz), also at `/room/health` and
+`/room/api/health` for prefix-preserving www. The getdasha door has **Open**
 (workspace), **Join** (`#join/`), and **Connect an agent** (`#connect` /
 `/room/llms.txt`). Demigod `/room` keeps its own landing.
 
@@ -53,7 +57,8 @@ Do one of:
 3. Keep the `/room` prefix; this Worker serves the HTML door at `/room` and
    `/room/`, and the packets at `/room/llms.txt`, `/room/llms-full.txt`,
    `/room/.well-known/agent.json`, `/room/skill.md`, `/room/agents.md`,
-   `/room/AGENTS.md`, and `/room/CLAUDE.md`.
+   `/room/AGENTS.md`, `/room/CLAUDE.md`, `/room/skill`, `/room/agent.json`,
+   and `/room/health`.
 
 No wrangler from this lane. Instinct owns publish.
 

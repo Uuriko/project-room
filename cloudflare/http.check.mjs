@@ -52,6 +52,14 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     const plainDoor = await call('/room', { headers: { Accept: 'text/plain' } });
     assert.match(plainDoor.headers.get('content-type'), /text\/plain/);
     assert.equal(await plainDoor.text(), await (await call('/llms.txt')).text());
+    const leftoverPacket = await call('/room/skill');
+    assert.equal(leftoverPacket.status, 200);
+    assert.equal(await leftoverPacket.text(), await (await call('/llms.txt')).text());
+    const leftoverCard = await call('/room/agent.json');
+    assert.equal(leftoverCard.status, 200);
+    assert.deepEqual(await leftoverCard.json(), await (await call('/.well-known/agent.json')).json());
+    const leftoverHealth = await json(await call('/room/health'));
+    assert.deepEqual(leftoverHealth, await json(await call('/api/health')));
     const login = await call('/api/session', { data: { accessKey: ownerKey } });
     const cookie = login.headers.get('set-cookie');
     assert.match(cookie, /^__Host-room_session=/);

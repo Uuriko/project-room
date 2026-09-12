@@ -8,7 +8,7 @@ import { SyntheticInboxTransport } from "./inbox-transport.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
 import { DiagnosticsLog } from "./diagnostics.mjs";
-import { discoveryDoc } from "../deploy/agent-discovery.mjs";
+import { discoveryDoc, isHealthAliasPath } from "../deploy/agent-discovery.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
 import { guestAgentLinkContract } from "./guest-agent-links.mjs";
 import { isSessionStatus, workItemSessionContract } from "../src/work-item-session.js";
@@ -214,7 +214,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       catch { reject(403, "proxy_denied", "Invalid proxy configuration"); }
       const url = new URL(req.url, expectedOrigin());
       if (url.pathname.startsWith("/api/")) res.setHeader("X-Operation-Id", operationId);
-      if (url.pathname === "/api/health" && ["GET", "HEAD"].includes(req.method)) {
+      if ((url.pathname === "/api/health" || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode }, req.method === "HEAD");
       }
       if (url.pathname === "/api/version" && ["GET", "HEAD"].includes(req.method)) {
@@ -228,7 +228,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // Public Hosts (www / lobby / apex) reverse-proxy /room here. Browsers
       // get the getdasha HTML door. / stays the workspace app. Packets stay
-      // at /llms.txt, /room/llms.txt, /skill.md, /agents.md, agent.json.
+      // at /llms.txt, /room/llms.txt, /skill.md, /room/skill, agent.json.
       if (isPublicRoomDoorPath(url.pathname)) {
         if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed");
         if (wantsPublicDoorHtml(req.headers.accept)) {

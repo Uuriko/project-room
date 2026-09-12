@@ -8,7 +8,8 @@ import { createRoomServer } from "../server/http.mjs";
 import { roomEntry, publicRoomDoorHtml } from "../deploy/room-entry.mjs";
 import {
   agentCard, llmsTxt, llmsFullTxt, agentCardJson, discoveryDoc, DISCOVERY_PATHS,
-  SHORT_PACKET_FILES,
+  SHORT_PACKET_FILES, SHORT_PACKET_SYNONYMS, AGENT_CARD_SYNONYMS, HEALTH_ALIAS_PATHS,
+  isHealthAliasPath,
   ROOM_ORIGIN, ROOM_DOOR, ROOM_PUBLIC_WWW, ROOM_PUBLIC_LOBBY, COMPUTE_DOOR, ROOM_DOCS,
   EDGE_DOOR_HOSTS, isEdgeDoorUrl
 } from "../deploy/agent-discovery.mjs";
@@ -112,6 +113,63 @@ test("conventional skill/agent filenames serve the same short packet as /llms.tx
   }
 });
 
+test("www leftover synonyms serve the short packet or agent card, not 404", async t => {
+  assert.deepEqual([...SHORT_PACKET_SYNONYMS], [
+    "/room/skill", "/room/agents", "/room/llms",
+    "/room/readme.md", "/room/README.md",
+    "/room/gemini.md", "/room/GEMINI.md",
+    "/room/cursor.md", "/room/CURSOR.md"
+  ]);
+  assert.deepEqual([...AGENT_CARD_SYNONYMS], ["/room/agent.json"]);
+  const origin = await serve(t);
+  const short = discoveryDoc("/llms.txt");
+  const card = discoveryDoc("/.well-known/agent.json");
+  for (const path of [...SHORT_PACKET_SYNONYMS, ...SHORT_PACKET_SYNONYMS.map(p => `${p}/`)]) {
+    assert.equal(discoveryDoc(path).body, short.body, path);
+    assert.equal(discoveryDoc(path).type, short.type, path);
+    const get = await fetch(origin + path);
+    assert.equal(get.status, 200, path);
+    assert.equal(get.headers.get("content-type"), short.type, path);
+    assert.equal(await get.text(), short.body, path);
+  }
+  for (const path of ["/room/agent.json", "/room/agent.json/"]) {
+    assert.equal(discoveryDoc(path).body, card.body, path);
+    const get = await fetch(origin + path);
+    assert.equal(get.status, 200, path);
+    assert.equal(get.headers.get("content-type"), card.type, path);
+    assert.equal(await get.text(), card.body, path);
+  }
+  // Door roots stay out of ALIASES so HTML / Accept: text/plain keep working.
+  assert.equal(discoveryDoc("/room"), null);
+  assert.equal(discoveryDoc("/room/"), null);
+});
+
+test("/room/health aliases return the same JSON as /api/health; bare /health stays 404", async t => {
+  assert.deepEqual([...HEALTH_ALIAS_PATHS], [
+    "/room/health", "/room/health/", "/room/api/health", "/room/api/health/"
+  ]);
+  assert.equal(discoveryDoc("/room/health"), null, "health is API JSON, not a discovery doc");
+  assert.equal(isHealthAliasPath("/api/health"), false);
+  assert.equal(isHealthAliasPath("/health"), false);
+  const origin = await serve(t);
+  const canonical = await fetch(`${origin}/api/health`);
+  assert.equal(canonical.status, 200);
+  const expected = await canonical.json();
+  assert.equal(expected.status, "ok");
+  for (const path of HEALTH_ALIAS_PATHS) {
+    const get = await fetch(origin + path);
+    assert.equal(get.status, 200, path);
+    assert.match(get.headers.get("content-type"), /application\/json/);
+    assert.deepEqual(await get.json(), expected, path);
+    const head = await fetch(origin + path, { method: "HEAD" });
+    assert.equal(head.status, 200, path);
+    assert.equal(await head.text(), "");
+  }
+  const bare = await fetch(`${origin}/health`);
+  assert.equal(bare.status, 404);
+  assert.equal((await bare.json()).error.code, "not_found");
+});
+
 test("door serves the same discovery bytes and points at origin", async () => {
   const html = await roomEntry(new Request("https://www.trydemigod.com/room")).text();
   assert.match(html, /Connect an agent/);
@@ -121,6 +179,8 @@ test("door serves the same discovery bytes and points at origin", async () => {
   for (const doorPath of [
     "/room/llms.txt", "/room/llms-full.txt", "/room/.well-known/agent.json",
     "/room/skill.md", "/room/agents.md", "/room/AGENTS.md", "/room/CLAUDE.md",
+    "/room/skill", "/room/skill/", "/room/agents", "/room/llms",
+    "/room/agent.json", "/room/readme.md", "/room/gemini.md", "/room/cursor.md",
     "/project-room/llms.txt", "/project-room/llms-full.txt", "/project-room/.well-known/agent.json"
   ]) {
     const expected = discoveryDoc(doorPath);
@@ -167,7 +227,7 @@ test("advertised door root serves the HTML door; packets stay at /room/llms.txt"
 test("edge door predicate: getdasha /room only, prefix preserved", () => {
   assert.deepEqual([...EDGE_DOOR_HOSTS], ["getdasha.com", "www.getdasha.com"]);
   for (const host of EDGE_DOOR_HOSTS) {
-    for (const path of ["/room", "/room/", "/room/llms.txt", "/room/llms-full.txt", "/room/.well-known/agent.json", "/room/skill.md"]) {
+    for (const path of ["/room", "/room/", "/room/llms.txt", "/room/llms-full.txt", "/room/.well-known/agent.json", "/room/skill.md", "/room/skill", "/room/agent.json", "/room/health"]) {
       assert.equal(isEdgeDoorUrl(`https://${host}${path}`), true, `${host}${path}`);
     }
   }

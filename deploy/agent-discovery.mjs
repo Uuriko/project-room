@@ -39,6 +39,32 @@ export const FIRST_TOOLS = Object.freeze([
 // Conventional filenames agents probe when they miss /llms.txt.
 export const SHORT_PACKET_FILES = Object.freeze(["skill.md", "agents.md", "AGENTS.md", "CLAUDE.md"]);
 
+// Extensionless + extra doc leftovers that 404 on prefix-preserving www
+// (lobby #212 308s these; www /room* hits this Worker instead).
+function withSlash(path) {
+  return path.endsWith("/") ? [path] : [path, `${path}/`];
+}
+
+export const SHORT_PACKET_SYNONYMS = Object.freeze([
+  "/room/skill", "/room/agents", "/room/llms",
+  "/room/readme.md", "/room/README.md",
+  "/room/gemini.md", "/room/GEMINI.md",
+  "/room/cursor.md", "/room/CURSOR.md"
+]);
+
+export const AGENT_CARD_SYNONYMS = Object.freeze(["/room/agent.json"]);
+
+// Live health JSON lives in http.mjs. These are prefix-preserving twins of
+// /api/health — not discovery docs. Bare /health stays 404 by contract.
+export const HEALTH_ALIAS_PATHS = Object.freeze([
+  ...withSlash("/room/health"),
+  ...withSlash("/room/api/health")
+]);
+
+export function isHealthAliasPath(pathname) {
+  return HEALTH_ALIAS_PATHS.includes(pathname);
+}
+
 export const KEY_ROUTES = Object.freeze([
   Object.freeze({ path: "/api/health", auth: false, first: "liveness" }),
   Object.freeze({ path: "/llms.txt", auth: false, first: "short packet" }),
@@ -247,7 +273,11 @@ const ALIASES = Object.freeze({
   ...Object.fromEntries(SHORT_PACKET_FILES.flatMap(name => [
     [`/${name}`, "/llms.txt"],
     [`/room/${name}`, "/llms.txt"]
-  ]))
+  ])),
+  // Extensionless + extra doc leftovers (same short packet as /llms.txt).
+  ...Object.fromEntries(SHORT_PACKET_SYNONYMS.flatMap(path => withSlash(path).map(alias => [alias, "/llms.txt"]))),
+  // Card leftovers — not /.well-known on www (that card is Compute).
+  ...Object.fromEntries(AGENT_CARD_SYNONYMS.flatMap(path => withSlash(path).map(alias => [alias, "/.well-known/agent.json"])))
 });
 
 export const DISCOVERY_PATHS = Object.freeze([...Object.keys(CANONICAL), ...Object.keys(ALIASES)]);
