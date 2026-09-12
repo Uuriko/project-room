@@ -136,3 +136,20 @@ test("room import round-trips a large (1500-event) export", async t => {
   assert.deepEqual(after.state.members, before.state.members);
   assert.equal(after.sequence, before.sequence);
 });
+
+test("database failures during import surface as clean invalid_import, not raw errors", async t => {
+  const { importNdjson, ownerKey } = await serve(t);
+  const brokenSequence = JSON.stringify({ sequence: 99, event: { id: "x", roomId: "commons", type: "MESSAGE_POSTED", actorId: "a", at: 1 } });
+  let res = await importNdjson(ownerKey, brokenSequence);
+  assert.equal(res.status, 422);
+  assert.equal((await res.json()).error.code, "invalid_import");
+  const malformed = JSON.stringify({ sequence: 1, event: { id: "y", roomId: "commons" } });
+  res = await importNdjson(ownerKey, malformed);
+  assert.equal(res.status, 422);
+  assert.equal((await res.json()).error.code, "invalid_import");
+  // Duplicate ids across lines: clean invalid_import, no partial writes.
+  const dup = [1, 2].map(i => JSON.stringify({ sequence: i, event: { id: "same", roomId: "commons", type: "MESSAGE_POSTED", actorId: "a", at: 1 } })).join("\n");
+  res = await importNdjson(ownerKey, dup);
+  assert.equal(res.status, 422);
+  assert.equal((await res.json()).error.code, "invalid_import");
+});
