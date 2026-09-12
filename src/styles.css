@@ -46,6 +46,9 @@ a { color: var(--blue); }
 .brand strong { font-size: .98rem; letter-spacing: -.01em; }
 .brand span:last-child { color: var(--muted); font-size: .76rem; }
 .topbar-actions { display: flex; align-items: end; gap: .75rem; }
+.session-menu { display: contents; }
+#session-menu-button { display: none; }
+.session-menu-panel { display: contents; }
 label { color: var(--muted); font-size: .76rem; font-weight: 650; letter-spacing: .02em; }
 select, input, textarea { width: 100%; border: 1px solid var(--line); border-radius: .45rem; background: #0b0f14; color: var(--text); outline: none; }
 select, input { min-height: 2.6rem; padding: 0 .75rem; }
@@ -254,6 +257,20 @@ button.source-link { background: none; border: 0; padding: .25rem 0; text-align:
 @media (max-width: 780px) {
   .topbar, .room-heading { align-items: stretch; }
   .topbar { position: static; flex-direction: column; }
+}
+/* C1: short mobile header - session actions fold into an accessible menu so
+   conversation is reachable sooner; identity and connection state stay visible. */
+@media (max-width: 640px) {
+  .topbar { flex-direction: row; align-items: center; min-height: 3.25rem; padding: .5rem .75rem; }
+  .brand-mark { width: 2rem; font-size: .66rem; }
+  .topbar-actions { align-items: center; gap: .5rem; }
+  #identity-label { font-size: .8rem; color: var(--muted); max-width: 9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .session-menu { display: block; position: relative; }
+  #session-menu-button { display: inline-grid; }
+  .session-menu-panel { display: none; position: absolute; right: 0; top: calc(100% + .4rem); z-index: 30; min-width: 10rem; padding: .5rem; border: 1px solid var(--line); border-radius: .6rem; background: var(--panel-raised, #131922); box-shadow: 0 10px 30px rgb(0 0 0 / 45%); }
+  .session-menu.open .session-menu-panel { display: flex; flex-direction: column; gap: .25rem; }
+  .session-menu-panel .button { width: 100%; justify-content: center; }
+}
   .topbar-actions { justify-content: space-between; }
   .room-heading { flex-direction: column; gap: .75rem; }
   .room-presence-summary { justify-items: start; }
