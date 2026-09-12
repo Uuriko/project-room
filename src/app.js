@@ -1970,6 +1970,8 @@ function syncComposerHint() {
 touchKeyboard.addEventListener("change", syncComposerHint);
 syncComposerHint();
 $("#message-input").addEventListener("keydown", e => {
+  // IME candidate selection belongs to text entry, even with mentions open.
+  if (e.isComposing || e.keyCode === 229 || e.repeat) return;
   const list = $("#mention-list"), open = list && !list.hidden;
   const matches = open ? mentionChoices() : [];
   if (open && matches.length) {
@@ -1985,7 +1987,7 @@ $("#message-input").addEventListener("keydown", e => {
   // legacy UI Events signal. Neither confirmation nor key repeat sends a message.
   if (sendsOnEnter(e, touchKeyboard.matches)) {
     e.preventDefault();
-    if (!busy && $("#message-input").value.trim()) $("#message-form").requestSubmit();
+    if (!busy && ($("#message-input").value.trim() || drafts.get(composerKey()).files?.length)) $("#message-form").requestSubmit();
   }
 });
 $("#mention-list")?.addEventListener("mousedown", e => {

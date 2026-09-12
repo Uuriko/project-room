@@ -139,6 +139,21 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await page.unroute("**/api/rooms/commons/commands");
     await page.locator("#clear-search").click();
 
+    // The open mention picker must also leave IME confirmation and repeated keys alone.
+    await input.fill("@Ma");
+    await input.focus();
+    await page.locator("#mention-list").waitFor({ state: "visible" });
+    for (const options of [{ isComposing: true }, { keyCode: 229 }, { repeat: true }]) {
+      const prevented = await input.evaluate((element, options) => {
+        const key = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true, ...options });
+        element.dispatchEvent(key); return key.defaultPrevented;
+      }, options);
+      assert.equal(prevented, false, "mention picker does not consume composition/repeat");
+      assert.equal(await input.inputValue(), "@Ma");
+    }
+    await input.press("Enter");
+    assert.equal(await input.inputValue(), "@Maya ", "deliberate Enter still selects the mention");
+
     // A composition-confirmation key is not a send shortcut, including the legacy IME signal.
     await input.fill("検討中の文章");
     await input.focus();

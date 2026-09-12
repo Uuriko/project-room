@@ -106,7 +106,11 @@ for (const mobile of [false, true]) test(`verified file download ${mobile ? 'mob
   await page.locator('#file-picker').setInputFiles({ name: 'captionless.txt', mimeType: 'text/plain', buffer: Buffer.from(bytes) });
   await page.locator('#composer-files').getByText('Ready', { exact: true }).waitFor();
   assert.equal(await page.locator('#message-input').inputValue(), '');
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  if (mobile) {
+    await page.locator('#message-input').press('Enter');
+    assert.equal(store.room('commons').state.messages.length, 2, 'touch Return does not send a file');
+    await page.getByRole('button', { name: 'Send', exact: true }).click();
+  } else await page.locator('#message-input').press('Enter');
   await page.getByRole('button', { name: 'Download captionless.txt', exact: true }).waitFor();
   assert.equal(store.room('commons').state.messages.at(-1).body, '');
   assert.equal(store.room('commons').state.messages.length, 3);
