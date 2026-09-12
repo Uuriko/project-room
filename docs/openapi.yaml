@@ -187,6 +187,27 @@ paths:
                         firstResultAt: { type: string, format: date-time, nullable: true }
                         minutesToFirstClaim: { type: integer, nullable: true }
                         minutesToFirstResult: { type: integer, nullable: true }
+  /api/rooms/{roomId}/invitations:
+    get:
+      summary: Invite-link analytics
+      description: Aggregate invitation status counts and conversion rate. Requires manage_members permission; account browser session only.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Analytics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  issued: { type: integer }
+                  pending: { type: integer }
+                  accepted: { type: integer }
+                  revoked: { type: integer }
+                  expired: { type: integer }
+                  conversionRate: { type: number, nullable: true }
   /api/rooms/{roomId}/capabilities:
     get:
       summary: Capability registry
