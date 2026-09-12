@@ -1223,13 +1223,20 @@ export class RoomStore {
       })) };
     });
   }
-  capabilities(token, roomId, expectedSessionBinding = null) {
+  capabilities(token, roomId, bindingOrOptions = null, options = {}) {
+    // 3rd arg may be the legacy session binding or an options object.
+    const opts = bindingOrOptions && typeof bindingOrOptions === "object" ? bindingOrOptions : options;
+    const expectedSessionBinding = opts.expectedSessionBinding ?? (typeof bindingOrOptions === "string" || bindingOrOptions === null ? bindingOrOptions : null);
+    const search = opts.search ?? null;
+    if (search !== null && (typeof search !== "string" || !search.trim() || search.length > 80)) fail(422, "invalid_search", "Search is 1 to 80 characters");
     return this.readTransaction(() => {
       this.authenticate(token, roomId, expectedSessionBinding);
       const { members } = this.roomAuthority(roomId);
+      const needle = search?.toLowerCase();
       return { members: Object.values(members)
         .filter(m => m && m.active !== false && Array.isArray(m.capabilities) && m.capabilities.length > 0)
         .map(m => ({ memberId: m.id, displayName: m.displayName, kind: m.kind, capabilities: m.capabilities }))
+        .filter(m => !needle || m.capabilities.some(c => c.toLowerCase().includes(needle)))
         .sort((a, b) => a.memberId < b.memberId ? -1 : 1) };
     });
   }
