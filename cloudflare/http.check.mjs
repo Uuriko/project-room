@@ -58,6 +58,9 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     const leftoverCard = await call('/room/agent.json');
     assert.equal(leftoverCard.status, 200);
     assert.deepEqual(await leftoverCard.json(), await (await call('/.well-known/agent.json')).json());
+    const a2aCard = await call('/.well-known/agent-card.json');
+    assert.equal(a2aCard.status, 200);
+    assert.deepEqual(await a2aCard.json(), await (await call('/.well-known/agent.json')).json());
     const leftoverHealth = await json(await call('/room/health'));
     assert.deepEqual(leftoverHealth, await json(await call('/api/health')));
     const login = await call('/api/session', { data: { accessKey: ownerKey } });
