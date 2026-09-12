@@ -25,6 +25,8 @@ export const EVENT_TYPES = Object.freeze({
   WORK_BLOCKER_RESOLVED: "work.blocker_resolved",
   WORK_COMPLETED: "work.completed",
   WORK_SUPERSEDED: "work.superseded",
+  WORK_HANDOFF_RECORDED: "work.handoff_recorded",
+  WORK_HALT_CLEARED: "work.halt_cleared",
   CLAIM_ACQUIRED: "claim.acquired",
   CLAIM_RELEASED: "claim.released",
   VERIFICATION_RECORDED: "verification.recorded",
@@ -44,7 +46,7 @@ export const WORK_REVISION_TYPES = Object.freeze([
   EVENT_TYPES.WORK_COMPLETED, EVENT_TYPES.WORK_SUPERSEDED, EVENT_TYPES.CLAIM_ACQUIRED, EVENT_TYPES.CLAIM_RELEASED,
   EVENT_TYPES.VERIFICATION_RECORDED, EVENT_TYPES.OWNER_DECISION_RECORDED,
   EVENT_TYPES.SESSION_STARTED, EVENT_TYPES.SESSION_STATUS_CHANGED, EVENT_TYPES.SESSION_STOP_REQUESTED,
-  EVENT_TYPES.SESSION_STOPPED
+  EVENT_TYPES.SESSION_STOPPED, EVENT_TYPES.WORK_HANDOFF_RECORDED
 ]);
 
 // Roles are human-readable presets. The stored permission snapshot remains the
@@ -143,6 +145,8 @@ export function applyEvent(current, incoming) {
     [HELP_OFFER_OPENED]: recordHelpOffer,
     [HELP_OFFER_UPDATED]: recordHelpOffer,
     [EVENT_TYPES.WORK_STARTED]: startWork,
+    [EVENT_TYPES.WORK_HANDOFF_RECORDED]: recordHandoff,
+    [EVENT_TYPES.WORK_HALT_CLEARED]: clearHalt,
     [EVENT_TYPES.WORK_BLOCKED]: blockWork,
     [EVENT_TYPES.WORK_BLOCKER_RESOLVED]: resolveBlocker,
     [EVENT_TYPES.WORK_COMPLETED]: completeWork,
@@ -404,6 +408,7 @@ function startWork(state, incoming) {
   if (item.state === WORK_STATES.BLOCKED) archiveDecision(item);
   item.state = WORK_STATES.WORKING;
   item.blocker = null;
+  if (item.handoff) item.handoff.open = false;
   commitMutation(item, incoming);
 }
 
@@ -415,7 +420,51 @@ function blockWork(state, incoming) {
   if (item.state === WORK_STATES.COMPLETED) retireApproval(item, incoming, "rework");
   item.state = WORK_STATES.BLOCKED;
   item.blocker = { reason: incoming.data.reason, nextAction: incoming.data.nextAction, eventId: incoming.id };
+  if (item.handoff) item.handoff.open = false;
   commitMutation(item, incoming);
+}
+
+
+function recordHandoff(state, incoming) {
+  const item = mutableWorkItem(state, incoming, [WORK_STATES.ACCEPTED, WORK_STATES.WORKING, WORK_STATES.BLOCKED]);
+  if (incoming.actorId !== item.accountableMemberId) throw new Error("Only the accountable member may record a handoff");
+  requirePermission(state, incoming.actorId, "accept_work");
+  requireFields(incoming.data, ["doneSummary", "nextAction", "limitReason"]);
+  if (incoming.data.evidenceUrl !== undefined || incoming.data.evidenceVersion !== undefined) {
+    requireFields(incoming.data, ["evidenceUrl", "evidenceVersion"]);
+    try {
+      const url = new URL(incoming.data.evidenceUrl);
+      if (url.protocol !== "https:" || url.username || url.password) throw new Error();
+    } catch { throw new Error("Evidence must be an HTTPS URL without credentials"); }
+  }
+  // A handoff never advances or closes the state; review and decision gates stay untouched.
+  if (item.handoff) {
+    item.handoffHistory = item.handoffHistory || [];
+    item.handoffHistory.push(item.handoff);
+    if (item.handoffHistory.length > 20) item.handoffHistory.shift();
+  }
+  item.handoff = {
+    open: true, eventId: incoming.id, at: incoming.at, actorId: incoming.actorId,
+    doneSummary: incoming.data.doneSummary,
+    evidenceUrl: incoming.data.evidenceUrl ?? null, evidenceVersion: incoming.data.evidenceVersion ?? null,
+    nextAction: incoming.data.nextAction, limitReason: incoming.data.limitReason,
+    haltAll: incoming.data.haltAll === true
+  };
+  if (incoming.data.haltAll === true) {
+    state.agentHalts = state.agentHalts || {};
+    state.agentHalts[incoming.actorId] = { eventId: incoming.id, at: incoming.at, reason: incoming.data.limitReason, workItemId: item.id };
+  }
+  commitMutation(item, incoming);
+}
+
+function clearHalt(state, incoming) {
+  requireMember(state, incoming.actorId);
+  const permissions = state.members[incoming.actorId]?.permissions || [];
+  if (!permissions.includes("steer") && !permissions.includes("decide")) throw new Error("Clearing a halt requires steer or decide");
+  requireFields(incoming.data, ["memberId", "haltEventId"]);
+  const halt = state.agentHalts?.[incoming.data.memberId];
+  if (!halt || halt.eventId !== incoming.data.haltEventId) throw new Error("Stale or unknown halt");
+  delete state.agentHalts[incoming.data.memberId];
 }
 
 function resolveBlocker(state, incoming) {
@@ -426,6 +475,7 @@ function resolveBlocker(state, incoming) {
   archiveDecision(item);
   item.state = WORK_STATES.ACCEPTED;
   item.blocker = null;
+  if (item.handoff) item.handoff.open = false;
   commitMutation(item, incoming);
 }
 
@@ -474,6 +524,7 @@ function completeWork(state, incoming) {
   item.decision = null;
   item.blocker = null;
   item.state = WORK_STATES.COMPLETED;
+  if (item.handoff) item.handoff.open = false;
   commitMutation(item, incoming);
 }
 
@@ -491,6 +542,7 @@ function supersedeWork(state, incoming) {
   retireApproval(item, incoming, "superseded");
   item.state = WORK_STATES.SUPERSEDED;
   item.supersededBy = incoming.data.supersededByWorkItemId;
+  if (item.handoff) item.handoff.open = false;
   commitMutation(item, incoming);
 }
 
