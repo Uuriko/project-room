@@ -179,6 +179,7 @@ const shapes = {
   [T.ROOM_CHARTER_UPDATED]: "expectedRevision purpose outputs boundaries escalation",
   [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId",
   [T.MEMBER_ACCESS_CHANGED]: "memberId expectedMemberRevision permissions active",
+  [T.MEMBER_STATUS_UPDATED]: "memberId message",
   [T.MESSAGE_POSTED]: `messageId body workItemId replyToId toMemberId packetId basisRevision allowOlderBasis ${REPLY_FIELDS.join(" ")}`,
   [T.REPLY_REQUEST_CANCELLED]: "requestMessageId expectedRequestRevision reason",
   [T.MESSAGE_REACTION_SET]: "messageId reaction active",
@@ -1217,7 +1218,8 @@ export class RoomStore {
       }
       return { members: [...online.entries()].map(([memberId, info]) => ({
         memberId, displayName: members[memberId].displayName, kind: members[memberId].kind,
-        watching: info.watching, workingOn: info.workingOn ?? []
+        watching: info.watching, workingOn: info.workingOn ?? [],
+        statusMessage: members[memberId].statusMessage ?? null
       })) };
     });
   }

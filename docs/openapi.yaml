@@ -105,6 +105,10 @@ paths:
                         memberId: { type: string }
                         displayName: { type: string }
                         live: { type: boolean }
+                        statusMessage:
+                          type: string
+                          nullable: true
+                          description: Member's short status line ("working on X"), max 140 chars. Set via member.status_updated command.
                         workingOn:
                           type: array
                           items:
