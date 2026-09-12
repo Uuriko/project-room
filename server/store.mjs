@@ -1233,6 +1233,7 @@ export class RoomStore {
     // the forced stop must stay in the log even though the caller's
     // mutation below is rejected (a nested savepoint would roll back).
     const tripped = this.transaction(() => {
+      this.authenticate(token, roomId, expectedSessionBinding);
       const roomState = this.room(roomId).state;
       const item = roomState.workItems[request.workItemId];
       if (!item) fail(404, "work_not_found", "Work item not found in this Room");
@@ -1242,14 +1243,10 @@ export class RoomStore {
         || (!isTerminalSession(session.status) && session.budget?.maxSpendCents != null && pendingSpend !== null
           && pendingSpend > session.budget.maxSpendCents ? "maxSpendCents" : null);
       if (wire) {
-        try {
-          this.command(token, roomId, { id: `budget-${request.requestId}`, type: T.SESSION_STOPPED,
-            data: { workItemId: request.workItemId, expectedRevision: item.revision, status: "failed",
-              budgetEnforced: true, reason: "budget_exceeded", limit: wire } }, expectedSessionBinding);
-        } catch {
-          // The 409 below still carries the reason; the worker's next
-          // heartbeat completes the stop.
-        }
+        // Propagate authority/storage failures instead of claiming a stop.
+        this.#command(token, roomId, { id: `budget-${request.requestId}`, type: T.SESSION_STOPPED,
+          data: { workItemId: request.workItemId, expectedRevision: item.revision, status: "failed",
+            budgetEnforced: true, reason: "budget_exceeded", limit: wire } }, expectedSessionBinding, true);
       }
       return wire;
     });
@@ -1265,15 +1262,6 @@ export class RoomStore {
       const roomState = this.room(roomId).state;
       const item = roomState.workItems[request.workItemId];
       if (!item) fail(404, "work_not_found", "Work item not found in this Room");
-      if (request.action === "set_status") {
-        // Structural anti-collision: a live claim belongs to its worker. Anyone
-        // else needs the manage_claims permission; a stale heartbeat means the
-        // worker went away and the item is takeable. request_stop stays open to
-        // all members — it is a polite signal, not a state change.
-        const worker = sessionWorker(item, this.now());
-        if (worker && worker !== auth.member.id && !memberCan(roomState, auth.member.id, "manage_claims"))
-          fail(409, "session_claimed", "Another member is working on this; coordinate with them or ask a claim manager");
-      }
       let type;
       try { type = sessionCommandType(item, request.action, request.status); }
       catch (error) { fail(422, "invalid_session_action", error.message); }
@@ -1282,21 +1270,6 @@ export class RoomStore {
         if (type !== T.SESSION_STARTED) fail(422, "invalid_session_budget", "A budget is declared when the session starts");
         try { budget = validateSessionBudget(request.budget); }
         catch (error) { fail(422, "invalid_session_budget", error.message); }
-      }
-      if (type === T.SESSION_STARTED) {
-        const started = sessionRecord(item);
-        if (budget?.maxAttempts && started.attempt_count + 1 > budget.maxAttempts)
-          fail(409, "budget_exceeded", `Attempt ${started.attempt_count + 1} exceeds the attempt budget of ${budget.maxAttempts}`);
-        // The concurrency bound follows the worker: the new claim's declaration
-        // wins, otherwise the tightest bound the worker already declared on a
-        // live session applies. Undeclared everywhere stays "unknown".
-        const others = Object.values(roomState.workItems ?? {}).filter(other =>
-          other.id !== item.id && !isTerminalSession(sessionRecord(other).status)
-          && sessionRecord(other).worker_member_id === auth.member.id);
-        const declared = others.map(other => sessionRecord(other).budget?.maxConcurrent ?? null).filter(v => v !== null);
-        const cap = budget?.maxConcurrent ?? (declared.length ? Math.min(...declared) : null);
-        if (cap !== null && others.length >= cap)
-          fail(409, "budget_exceeded", `Concurrency budget of ${cap} reached (${others.length} active)`);
       }
       const data = { workItemId: request.workItemId, expectedRevision: request.expectedRevision };
       if (type === T.SESSION_STATUS_CHANGED || type === T.SESSION_STOPPED) data.status = request.status;
@@ -1624,7 +1597,12 @@ export class RoomStore {
     });
   }
   command(token, roomId, command, expectedSessionBinding = null) {
+    return this.#command(token, roomId, command, expectedSessionBinding);
+  }
+  #command(token, roomId, command, expectedSessionBinding = null, budgetEnforcement = false) {
     validateCommand(command);
+    if (!budgetEnforcement && ["budgetEnforced", "reason", "limit"].some(key => Object.hasOwn(command.data, key))
+      && command.type === T.SESSION_STOPPED) fail(422, "invalid_command", "Budget enforcement metadata is reserved for the service");
     return this.transaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const fingerprint = hash(canonical(command));
@@ -1654,6 +1632,40 @@ export class RoomStore {
       if (HALT_GATED.includes(command.type) && room.state.agentHalts?.[auth.member.id])
         fail(409, "halt_active", "This member recorded halt-all; a steer/decide member must clear the exact halt before further work mutations");
       const workItem = room.state.workItems[command.data.workItemId];
+      if ([T.SESSION_STARTED, T.SESSION_STATUS_CHANGED, T.SESSION_STOPPED].includes(command.type)) {
+        if (!workItem) fail(404, "work_not_found", "Work item not found in this Room");
+        const endingFailed = command.type === T.SESSION_STOPPED && command.data.status === "failed";
+        if (!endingFailed && room.state.agentHalts?.[auth.member.id])
+          fail(409, "halt_active", "Clear the recorded halt before continuing session work");
+        const worker = sessionWorker(workItem, this.now());
+        if (worker && worker !== auth.member.id && !memberCan(room.state, auth.member.id, "manage_claims"))
+          fail(409, "session_claimed", "Another member is working on this; coordinate with them or ask a claim manager");
+        const session = sessionRecord(workItem);
+        const spend = command.data.spendCents ?? session.spend_cents;
+        const exceeded = budgetLimitExceeded(workItem, this.now())
+          || (!isTerminalSession(session.status) && session.budget?.maxSpendCents != null && spend !== null
+            && spend > session.budget.maxSpendCents ? "maxSpendCents" : null);
+        if (exceeded && !endingFailed)
+          fail(409, "budget_exceeded", `Session budget exceeded (${exceeded}); continuing work is denied`);
+        let budget = session.budget;
+        if (command.type === T.SESSION_STARTED) {
+          try { budget = validateSessionBudget(command.data.budget); }
+          catch (error) { fail(422, "invalid_session_budget", error.message); }
+          if (budget?.maxAttempts && session.attempt_count + 1 > budget.maxAttempts)
+            fail(409, "budget_exceeded", "Session attempt budget exceeded");
+        }
+        // A takeover acquires an active slot just like a start, including for claim managers.
+        if (command.type === T.SESSION_STARTED || (command.type === T.SESSION_STATUS_CHANGED
+          && session.worker_member_id !== auth.member.id)) {
+          const others = Object.values(room.state.workItems).filter(other => other.id !== workItem.id
+            && !isTerminalSession(sessionRecord(other).status) && sessionRecord(other).worker_member_id === auth.member.id);
+          const caps = [budget?.maxConcurrent, ...others.map(other => sessionRecord(other).budget?.maxConcurrent)]
+            .filter(value => value != null);
+          const cap = caps.length ? Math.min(...caps) : null;
+          if (cap !== null && others.length >= cap)
+            fail(409, "budget_exceeded", `Concurrency budget of ${cap} reached (${others.length} active)`);
+        }
+      }
       const endingWork = (command.type === T.WORK_COMPLETED && [WORK_STATES.ACCEPTED, WORK_STATES.WORKING].includes(workItem?.state))
         || (command.type === T.WORK_BLOCKER_RESOLVED && workItem?.state === WORK_STATES.BLOCKED)
         || (command.type === T.WORK_SUPERSEDED && workItem != null && workItem.state !== WORK_STATES.SUPERSEDED && !workItem.supersededBy);
