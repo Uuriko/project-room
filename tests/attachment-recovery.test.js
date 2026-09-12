@@ -80,3 +80,27 @@ test('late restoration cannot enter a replacement session', async () => {
   c.session = { ...c.session, roomId: 'other' }; resolve(Response.json(receipt));
   await assert.rejects(operation, { name: 'AbortError' });
 });
+test('recovery bounds both success and error response bodies and cancels overflowing streams', async () => {
+  for (const status of [200, 503]) {
+    let cancelled = false;
+    const c = client(receipt);
+    c.fetcher = async () => new Response(new ReadableStream({
+      start(controller) { controller.enqueue(new Uint8Array(4097)); },
+      cancel() { cancelled = true; }
+    }), { status });
+    await assert.rejects(c.restoreAttachment(item()), /too large/);
+    assert.equal(cancelled, true); assert.equal(c.fileTransfers.size, 0);
+  }
+});
+test('ending access aborts the in-flight recovery fetch and releases bookkeeping', async () => {
+  const c = client(receipt); let signal;
+  c.fetcher = async (_path, options) => {
+    signal = options.signal;
+    return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new DOMException('Cancelled', 'AbortError')), { once: true }));
+  };
+  const pending = c.restoreAttachment(item());
+  assert.equal(c.fileTransfers.size, 1);
+  c.endAccess();
+  await assert.rejects(pending, { name: 'AbortError' });
+  assert.equal(signal.aborted, true); assert.equal(c.fileTransfers.size, 0);
+});

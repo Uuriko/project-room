@@ -215,24 +215,49 @@ export class RoomClient {
     if (hadSession) this.onAccessEnded();
     return this;
   }
-  async request(path, { method = "GET", data, authMode = this.session?.authMode, authSession = this.session, offerContext = false } = {}) {
+  async request(path, { method = "GET", data, authMode = this.session?.authMode, authSession = this.session, offerContext = false, maxResponseBytes = null } = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10000);
+    let reader;
+    if (maxResponseBytes !== null) this.fileTransfers.add(controller);
     try {
       const response = await this.fetcher(path, { method, credentials: "same-origin", signal: controller.signal,
         headers: { ...(data === undefined ? {} : { "Content-Type": "application/json" }), ...(authSession?.csrf ? { "X-CSRF-Token": authSession.csrf } : {}),
           ...(offerContext ? { "X-Project-Room-Offer-Context": "1" } : {}),
           ...(authMode === "account" ? { "X-Project-Room-Auth": "account", ...(authSession?.sessionBinding ? { "X-Session-Binding": authSession.sessionBinding } : {}) } : {}) },
         ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
-      const body = await response.json();
+      let body;
+      if (maxResponseBytes === null) body = await response.json();
+      else {
+        if (!response.body?.getReader) throw new Error('File status unavailable');
+        reader = response.body.getReader();
+        const chunks = []; let length = 0;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (controller.signal.aborted) throw new DOMException('Recovery cancelled', 'AbortError');
+          if (done) break;
+          length += value.byteLength;
+          if (length > maxResponseBytes) throw new Error('File status response is too large');
+          chunks.push(value);
+        }
+        const raw = new Uint8Array(length); let offset = 0;
+        for (const chunk of chunks) { raw.set(chunk, offset); offset += chunk.length; }
+        body = JSON.parse(new TextDecoder().decode(raw));
+      }
       if (!response.ok) { const error = new Error(body.error?.message || "Request failed"); error.status = response.status; error.code = body.error?.code; throw error; }
       return body;
-    } finally { clearTimeout(timer); }
+    } finally {
+      clearTimeout(timer);
+      if (maxResponseBytes !== null) {
+        controller.abort(); this.fileTransfers.delete(controller);
+        if (reader) { try { await reader.cancel(); } catch {} reader.releaseLock(); }
+      }
+    }
   }
   async restoreAttachment(item, pendingMessageId = null) {
     const session = this.session, generation = this.generation;
     if (!session || !this.ownsAccountSession()) throw accountSessionError('Reopen the Room before restoring files');
-    const receipt = await this.request(this.path(`/attachments/${encodeURIComponent(item.id)}/status`), { authSession: session });
+    const receipt = await this.request(this.path(`/attachments/${encodeURIComponent(item.id)}/status`), { authSession: session, maxResponseBytes: 4096 });
     if (session !== this.session || generation !== this.generation || !this.ownsAccountSession()) throw new DOMException('Recovery cancelled', 'AbortError');
     if (receipt.id !== item.id || receipt.roomId !== session.roomId || receipt.uploaderId !== session.member.id
       || receipt.filename !== item.file.name || receipt.byteLength !== item.file.size
