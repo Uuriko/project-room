@@ -127,7 +127,7 @@ test('real MCP and CLI search use the shared projection with unchanged tool disc
   saveAgentConnection(directory, { version: 1, ...f.config('producer') });
   const mcp = await openMcpTestClient(directory); t.after(() => mcp.close());
   const before = auditRecovery(f.store).dataSha256, tools = (await mcp.request('tools/list')).result.tools;
-  assert.equal(tools.length, 29);
+  assert.equal(tools.length, 32);
   const tool = tools.find(tool => tool.name === 'room_list_work'); assert.equal(tool.annotations.readOnlyHint, true);
   assert.equal(tool.inputSchema.properties.query.maxLength, 200); assert.deepEqual(tool.inputSchema.required, []);
   const response = await mcp.call('room_list_work', { query: 'agenda', focus: 'needs_me' });
