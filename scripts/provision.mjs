@@ -5,7 +5,11 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
-const { values } = parseArgs({ options: { init: { type: "boolean" }, "account-key": { type: "boolean" }, room: { type: "string", default: "commons" }, member: { type: "string", default: "owner" }, account: { type: "string" }, name: { type: "string" }, kind: { type: "string", default: "human" }, permissions: { type: "string", default: "accept_work,complete_work,verify" }, "print-key": { type: "boolean" }, "key-file": { type: "string" } } });
+const { values } = parseArgs({ allowPositionals: true, options: { help: { type: "boolean" }, init: { type: "boolean" }, "account-key": { type: "boolean" }, room: { type: "string", default: "commons" }, member: { type: "string", default: "owner" }, account: { type: "string" }, name: { type: "string" }, kind: { type: "string", default: "human" }, permissions: { type: "string", default: "accept_work,complete_work,verify" }, "print-key": { type: "boolean" }, "key-file": { type: "string" } } });
+if (values.help) {
+  process.stdout.write(`Usage: node scripts/provision.mjs [--init] [--account-key] [--room <id>] [--member <id>] [--account <id>] [--name <n>] [--kind <human|agent>] [--permissions <csv>] [--print-key] [--key-file <path>]\n`);
+  process.exit(0);
+}
 
 // Keys never go to non-terminal stdout by default: CI logs must not capture
 // them. Interactive terminals print the key; anything else needs --print-key
