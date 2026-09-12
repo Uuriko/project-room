@@ -534,7 +534,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["code", "displayName"]) || typeof data.code !== "string" || typeof data.displayName !== "string") reject(422, "invalid_invite", "Invite code and displayName are required");
         return json(res, 201, store.invites.redeem(data.code, { displayName: data.displayName }));
       }
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|provider-heartbeats|identity-links|agent-invites))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|automations|events|stream|cursor|return-brief|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|provider-heartbeats|identity-links|agent-invites))?$/.exec(url.pathname);
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
       const attachmentMatch = /^\/api\/rooms\/([^/]{1,384})\/attachments\/([^/]{1,384})(\/status)?$/.exec(url.pathname);
       if (!match && !revokeMatch && !threadMatch && !attachmentMatch) reject(404, "not_found", "Not found");
@@ -608,6 +608,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : route === "reply-context" ? store.replyRequests.selected(selected.token, roomId, params.get("requestMessageId"), options)
           : store.replyRequests.history(selected.token, roomId, options);
         return json(res, 200, value);
+      }
+      if (route === "automations" && req.method === "GET") {
+        const params = url.searchParams;
+        if ([...params.keys()].some(key => !["automationId", "auth"].includes(key) || params.getAll(key).length !== 1))
+          reject(422, "invalid_automation_selection", "Choose one automation or the room list");
+        return json(res, 200, store.automationRead(selected.token, roomId, params.get("automationId"), fence));
       }
       if (route === "charter" && req.method === "GET") {
         const params = url.searchParams;

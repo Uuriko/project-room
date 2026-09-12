@@ -67,6 +67,51 @@ export function automationDue(automation, { members, requests = {}, runs = {} },
   return automation.lastSlot !== null && slot <= automation.lastSlot ? null : { slot, kind: "interval" };
 }
 
+// Presentation/preview only. Every subsequent command rechecks committed state.
+export function automationPreview(state, automationId, viewerId, now, includeDefinition = false) {
+  const automation = state.automations?.[automationId];
+  check(automation && active(state.members, viewerId) && timestamp(now), "Unknown automation or participant");
+  const owner = viewerId === automation.ownerId, recipient = viewerId === automation.definition.recipientId;
+  const available = active(state.members, automation.ownerId) && active(state.members, automation.definition.recipientId);
+  const inFlight = automationInFlight(automation, state.replyRequests, state.requestRuns);
+  const due = automationDue(automation, { members: state.members, requests: state.replyRequests, runs: state.requestRuns }, now);
+  const halted = Boolean(state.agentHalts?.[automation.ownerId]);
+  const status = !available ? "unavailable" : !automation.ownerEnabled && !automation.recipientAccepted ? "paused"
+    : !automation.ownerEnabled ? "needs_creator" : !automation.recipientAccepted ? "needs_recipient"
+      : automation.dispatchCount >= automation.definition.maxRuns ? "exhausted" : inFlight ? "in_flight"
+        : halted ? "halted" : due ? "ready" : "waiting";
+  const trigger = automation.definition.trigger;
+  const nextDueAt = trigger.kind === "interval" && ["ready", "waiting"].includes(status)
+    ? new Date(Date.parse(trigger.startAt) + (due?.slot ?? Math.max(0, (automation.lastSlot ?? -1) + 1)) * trigger.intervalMs).toISOString() : null;
+  return { id: automation.id, revision: automation.revision, title: automation.definition.title,
+    ownerId: automation.ownerId, recipientId: automation.definition.recipientId, status,
+    remainingRuns: automation.definition.maxRuns - automation.dispatchCount,
+    nextSlot: status === "ready" ? due.slot : null, nextDueAt, lastRequestId: automation.lastRequestId,
+    ...(includeDefinition ? { definition: structuredClone(automation.definition),
+      consent: { creator: automation.ownerEnabled, recipient: automation.recipientAccepted },
+      actions: { edit: owner && !inFlight, enable: owner && available && !automation.ownerEnabled,
+        accept: recipient && available && !automation.recipientAccepted,
+        pause: (owner || recipient || viewerId === state.room.ownerId && state.members[viewerId].kind === "human")
+          && (automation.ownerEnabled || automation.recipientAccepted), dispatch: owner && status === "ready" },
+      backgroundDispatchEnabled: false } : {}) };
+}
+
+export function validAutomationPreview(value, selected = false) {
+  if (!exact(value, ["id", "revision", "title", "ownerId", "recipientId", "status", "remainingRuns", "nextSlot", "nextDueAt", "lastRequestId",
+    ...(selected ? ["definition", "consent", "actions", "backgroundDispatchEnabled"] : [])])) return false;
+  if (![value.id, value.ownerId, value.recipientId].every(id) || !integer(value.revision) || value.revision < 1 || !text(value.title, 80)
+    || !["unavailable", "paused", "needs_creator", "needs_recipient", "exhausted", "in_flight", "halted", "ready", "waiting"].includes(value.status)
+    || !integer(value.remainingRuns) || value.remainingRuns > 100 || !(value.nextSlot === null || integer(value.nextSlot))
+    || (value.status === "ready") !== (value.nextSlot !== null) || !(value.nextDueAt === null || timestamp(value.nextDueAt))
+    || !(value.lastRequestId === null || id(value.lastRequestId))) return false;
+  if (!selected) return true;
+  try { validateAutomationDefinition(value.definition); } catch { return false; }
+  return value.definition.title === value.title && value.definition.recipientId === value.recipientId
+    && value.remainingRuns <= value.definition.maxRuns && value.backgroundDispatchEnabled === false
+    && exact(value.consent, ["creator", "recipient"]) && Object.values(value.consent).every(v => typeof v === "boolean")
+    && exact(value.actions, ["edit", "enable", "accept", "pause", "dispatch"]) && Object.values(value.actions).every(v => typeof v === "boolean");
+}
+
 export function transitionAutomation({ automation = null, actorId, roomOwnerId, members, automationCount = 0,
   requests = {}, runs = {} }, action, data, now) {
   check(active(members, actorId) && timestamp(now), "Active participant and server time required");

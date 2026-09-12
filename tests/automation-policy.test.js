@@ -1,12 +1,27 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { transitionAutomation, automationDue, automationInFlight } from '../src/automation-policy.js';
+import { transitionAutomation, automationDue, automationInFlight, automationPreview, validAutomationPreview } from '../src/automation-policy.js';
 const now = '2026-09-12T22:00:00.000Z', later = '2026-09-12T22:10:00.000Z';
 const members = { alice: { active: true, kind: 'human' }, bot: { active: true, kind: 'agent' }, peer: { active: true, kind: 'agent' }, owner: { active: true, kind: 'human' } };
 const definition = { title: 'Brief', prompt: 'Summarize the supplied update', recipientId: 'bot', trigger: { kind: 'interval', startAt: now, intervalMs: 60000 }, maxRuns: 2, maxRuntimeMs: 30000, maxOutputBytes: 4096 };
 const change = (automation, actorId, action, data = {}, extra = {}, at = now) => transitionAutomation({ automation, actorId, members, roomOwnerId: 'owner', ...extra }, action, { expectedRevision: automation?.revision ?? 0, ...data }, at);
 const create = (owner = 'alice', patch = {}) => change(null, owner, 'create', { automationId: 'brief', definition: { ...definition, ...patch } }).automation;
 const ready = (owner = 'alice', patch = {}) => { let a = create(owner, patch); a = change(a, owner, 'enable').automation; return change(a, 'bot', 'accept').automation; };
+
+test('preview distinguishes waiting, eligible, halted and unavailable without mutating a schedule', () => {
+  const state = { room: { ownerId: 'owner' }, members: structuredClone(members), automations: { brief: ready('alice', { trigger: { kind: 'interval', startAt: later, intervalMs: 60000 } }) } };
+  const before = structuredClone(state), waiting = automationPreview(state, 'brief', 'alice', now, true);
+  assert.equal(waiting.status, 'waiting'); assert.equal(waiting.nextDueAt, later); assert.equal(waiting.nextSlot, null);
+  assert.equal(validAutomationPreview(waiting, true), true); assert.deepEqual(state, before);
+  const eligible = automationPreview(state, 'brief', 'alice', '2026-09-12T22:13:00.000Z', true);
+  assert.equal(eligible.status, 'ready'); assert.equal(eligible.nextSlot, 3); assert.equal(eligible.nextDueAt, '2026-09-12T22:13:00.000Z');
+  state.agentHalts = { alice: { eventId: 'halt' } };
+  assert.equal(automationPreview(state, 'brief', 'alice', later, true).status, 'halted');
+  assert.equal(automationPreview(state, 'brief', 'alice', later, true).actions.dispatch, false);
+  state.members.bot.active = false;
+  const unavailable = automationPreview(state, 'brief', 'alice', later, true);
+  assert.equal(unavailable.status, 'unavailable'); assert.equal(unavailable.actions.pause, true); assert.equal(unavailable.actions.accept, false);
+});
 
 test('human and agent authors need recipient consent; neither grants outside execution rights', () => {
   for (const owner of ['alice', 'peer']) {

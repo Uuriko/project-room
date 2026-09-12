@@ -4,7 +4,7 @@ import { replyPostMode } from "../src/reply-requests.js";
 import { conforms, confirmsAgentCommand } from "./work-actions.mjs";
 import { agentErrorAx } from "../src/agent-error.mjs";
 import { validRequestRun } from "../src/request-run-policy.js";
-import { validAutomationRequest } from "../src/automation-policy.js";
+import { validAutomationRequest, validAutomationPreview } from "../src/automation-policy.js";
 
 const id = { type: "string", minLength: 1, maxLength: 128, pattern: "^(?!(?:constructor|prototype|__proto__)$)[A-Za-z0-9][A-Za-z0-9_.:-]*$" };
 const text = { type: "string", minLength: 1, maxLength: 4096, pattern: "\\S" };
@@ -15,6 +15,8 @@ const direction = { type: "string", enum: ["incoming", "outgoing", "both"] };
 const retry = " Keep this requestId and all input unchanged on an unknown result, cancellation or reconnect. A receipt confirms only the original operation. It is not current state, work completion or approval.";
 const runTypes = Object.freeze({ room_claim_request_run: "request_run.claimed", room_stop_request_run: "request_run.stop_requested", room_finish_request_run: "request_run.finished" });
 const definitions = [
+  ["room_list_automations", "/automations", "Read bounded room automation summaries without prompts or chat history. Does not consume a run, enable a schedule or execute anything.", {}, []],
+  ["room_preview_automation", "/automations", "Inspect one automation's exact definition, consent, remaining runs and eligible next slot. A preview is not authorization or a reservation; actions must recheck current state. No background scheduler is enabled.", { automationId: id }, ["automationId"]],
   ["room_claim_request_run", null, "Record one bounded run claim for an open request addressed to you. Read room_read_request and pin its current context and instructions revision; expectedRevision is current.run.revision or 0 when run is null. No Work Item required. This records ownership only: it does not launch code or grant machine/provider access. Never launch after a duplicate or unknown claim. The local room-run command claims for itself; do not preclaim for it." + retry,
     { requestId: id, requestMessageId: id, expectedRevision: revision, runId: id, contextEventId: id, instructionsRevision: revision,
       maxRuntimeMs: { type: "integer", minimum: 1, maximum: 300000 }, maxOutputBytes: { type: "integer", minimum: 1, maximum: 1048576 } }],
@@ -106,6 +108,24 @@ function validRequest(request) {
       : validId(request.terminalEventId) && date(request.closedAt));
 }
 export function validateReplyRead(result, { name, args, roomId }) {
+  if (["room_list_automations", "room_preview_automation"].includes(name)) {
+    const selected = name === "room_preview_automation";
+    assert(result?.contractVersion === 1 && result.roomId === roomId && validId(result.viewerId)
+      && nullableId(result.viewerAccountId) && (result.viewerAuthEpoch === null || integer(result.viewerAuthEpoch))
+      && integer(result.evaluatedThrough) && typeof result.evaluatedAt === "string" && Number.isFinite(Date.parse(result.evaluatedAt))
+      && new Date(result.evaluatedAt).toISOString() === result.evaluatedAt
+      && keys(result.selection, ["automationId"]) && result.selection.automationId === (selected ? args.automationId : null)
+      && keys(result.scope, ["membership", "externalExecution", "consumesSlot"]) && result.scope.membership === "room"
+      && result.scope.externalExecution === false && result.scope.consumesSlot === false
+      && Array.isArray(result.automations) && result.automations.length <= 100 && (!selected || result.automations.length === 1));
+    const ids = new Set();
+    for (const item of result.automations) {
+      assert(validAutomationPreview(item, selected) && item.revision <= result.evaluatedThrough && !ids.has(item.id)
+        && (!selected || item.id === args.automationId));
+      ids.add(item.id);
+    }
+    return result;
+  }
   assert(result?.contractVersion === 1 && result.roomId === roomId && validId(result.viewerId)
     && nullableId(result.viewerAccountId) && (result.viewerAuthEpoch === null || integer(result.viewerAuthEpoch))
     && integer(result.evaluatedThrough) && result.scope?.membership === "room" && result.scope.targetedMessages === "room-visible"

@@ -22,7 +22,7 @@ import { RoomAttachments, attachmentSchema } from "./attachments.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
 import { charterContext, charterFromEvent } from "../src/room-charter.js";
 import { REPLY_FIELDS, REPLY_POLICY_VERSION, replyPostMode } from "../src/reply-requests.js";
-import { AUTOMATION_MESSAGE_FIELDS, isAutomationDispatch, validateAutomationDispatch, prepareAutomationDispatch } from "../src/automation-policy.js";
+import { AUTOMATION_MESSAGE_FIELDS, isAutomationDispatch, validateAutomationDispatch, prepareAutomationDispatch, automationPreview } from "../src/automation-policy.js";
 import { ReplyRequests } from "./reply-requests.mjs";
 import { validateHelpData } from "../src/work-help.js";
 import { auditWorkHelp } from "./work-help.mjs";
@@ -1559,6 +1559,20 @@ export class RoomStore {
           };
         }).sort((a, b) => a.memberId < b.memberId ? -1 : 1)
       };
+    });
+  }
+  automationRead(token, roomId, automationId = null, expectedSessionBinding = null) {
+    return this.readTransaction(() => {
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      if (automationId !== null && !validId(automationId)) fail(422, "invalid_automation_selection", "Choose one automation");
+      const room = this.room(roomId), evaluatedAt = new Date(this.now()).toISOString();
+      if (automationId !== null && !Object.hasOwn(room.state.automations ?? {}, automationId)) fail(404, "automation_not_found", "Automation not found in this room");
+      const ids = automationId === null ? Object.keys(room.state.automations ?? {}).sort() : [automationId];
+      return { contractVersion: 1, roomId, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
+        viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null,
+        evaluatedAt, evaluatedThrough: room.sequence, selection: { automationId },
+        automations: ids.map(id => automationPreview(room.state, id, auth.member.id, evaluatedAt, automationId !== null)),
+        scope: { membership: "room", externalExecution: false, consumesSlot: false } };
     });
   }
   workContext(token, roomId, workItemId, { includeSource = false, includeOffers = false, expectedSessionBinding = null } = {}) {
