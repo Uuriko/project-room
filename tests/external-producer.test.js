@@ -56,7 +56,7 @@ test("outside credit survives native result reads, replay, review and exact retr
   const final = f.store.room("commons").state;
   assert.equal(final.workItems[workItemId].decision, null);
   assert.deepEqual(f.store.rebuildProjection("commons").state, final);
-  assert.equal(auditRecovery(f.store).schemaVersion, 26);
+  assert.equal(auditRecovery(f.store).schemaVersion, 27);
 });
 
 const previousCommit = "33c817a911ebb9fb0310592cac77d8e61380541d";
@@ -109,9 +109,9 @@ test("real v25 database upgrades unchanged and retires its already-open writer",
   const f = await previousFixture(t), before = f.old.room("commons");
   const cached = f.old.db.prepare("UPDATE rooms SET sequence=sequence WHERE id=?"); cached.run("commons");
   const current = new RoomStore(f.filename); t.after(() => current.close());
-  assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 26);
+  assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 27);
   assert.deepEqual(current.room("commons"), before);
-  assert.throws(() => cached.run("commons"), /project_room_writer_v26|unsupported database writer/);
+  assert.throws(() => cached.run("commons"), /project_room_writer_v27|unsupported database writer/);
   assert.throws(() => new f.OldStore(f.filename), /schema is newer/);
 });
 test("v25 ignored outside-credit data cannot be reinterpreted during upgrade", async t => {

@@ -49,11 +49,11 @@ function sessionBody(extras = {}) {
   return { requestId: randomUUID(), workItemId: "session-one", expectedRevision: 0, ...extras };
 }
 
-test("session contract stays on writer 26 and off Compute / Slack-with-bots / people-data", () => {
+test("session contract stays on writer 27 and off Compute / Slack-with-bots / people-data", () => {
   const contract = workItemSessionContract();
   assert.equal(contract.status, "live");
   assert.equal(contract.schemaBump, false);
-  assert.equal(contract.writer, 26);
+  assert.equal(contract.writer, 27);
   assert.deepEqual(contract.statuses, ["queued", "processing", "active", "suspended", "done", "failed"]);
   assert.deepEqual(contract.events, [
     SESSION_EVENT_TYPES.STARTED, SESSION_EVENT_TYPES.STATUS_CHANGED,
@@ -187,7 +187,7 @@ test("strangers cannot mutate; commands are idempotent; writer stays 26", async 
     data: { workItemId: "session-one", expectedRevision: 1, status: "active" }
   });
   assert.equal(viaCommand.event.type, T.SESSION_STATUS_CHANGED);
-  assert.equal(store.storagePlatform.version(store.db), 26);
+  assert.equal(store.storagePlatform.version(store.db), 27);
   assert.equal(store.db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'work_item_session%'").all().length, 0);
 });
 

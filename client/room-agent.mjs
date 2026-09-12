@@ -138,7 +138,7 @@ export class RoomAgentClient {
     const url = new URL(origin);
     const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
     if (url.origin !== origin || url.username || url.password || (url.protocol !== "https:" && !(local && url.protocol === "http:"))) throw new Error("Use a fixed HTTPS origin or an isolated loopback development origin");
-    if (!validId(roomId) || typeof token !== "string" || !/^(?:[A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43})$/.test(token)) throw new Error("A valid Room and access key are required");
+    if (!validId(roomId) || typeof token !== "string" || !/^(?:[A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43}|pri_[A-Za-z0-9_-]{43,128})$/.test(token)) throw new Error("A valid Room and access key are required");
     if (memberId !== undefined && !validId(memberId)) throw new Error("Choose a valid expected agent member");
     this.#origin = origin; this.#roomId = roomId; this.#token = token; this.#fetch = fetchImpl;
     this.#memberId = memberId;
@@ -165,6 +165,17 @@ export class RoomAgentClient {
     }
     return value;
   }
+  async #deletePath(path, body, signal) {
+    const response = await this.#fetch(`${this.#origin}${path}`, {
+      method: "DELETE", redirect: "error", credentials: "omit", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
+      headers: { Authorization: `Bearer ${this.#token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    let value;
+    try { value = await response.json(); } catch { value = null; }
+    if (!response.ok) throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room request failed");
+    return value;
+  }
   async #request(suffix = "", body, signal, helpContext = false, offerContext = false) {
     // Saved configurations pin an agent. Recheck before each operation; a check
     // is never a cached grant. The service still authorizes the operation itself.
@@ -185,12 +196,20 @@ export class RoomAgentClient {
   }
   async checkConnection({ signal } = {}) {
     if (!this.#memberId) throw new RoomClientError(0, "member_required", "Configure the expected agent member before checking access");
+    // Round-2 #101: identity secrets are room-scoped at use, so /api/session
+    // (which has no room) cannot resolve them. Check against the room path.
+    if (this.#token.startsWith("pri_")) return this.#checkIdentityConnection({ signal });
     const value = await this.#fetchPath("/api/session", undefined, signal), member = value?.member;
+    // Round-2 #101: identity secrets do not expire (credentialKind "identity",
+    // expiresAt null); room keys still require a real expiry.
+    const identityAuth = value?.credentialKind === "identity";
+    const expiryOk = value != null && (identityAuth ? value.expiresAt === null
+      : Number.isSafeInteger(value.expiresAt) && Number.isFinite(new Date(value.expiresAt).getTime()));
     if (!value || Array.isArray(value) || value.authMode !== "room" || !validId(value.roomId)
       || !member || !validId(member.id) || !["agent", "human"].includes(member.kind) || typeof member.active !== "boolean"
       || !Number.isSafeInteger(member.revision) || member.revision < 0 || !Array.isArray(member.permissions)
       || member.permissions.some(permission => !PERMISSIONS.includes(permission)) || new Set(member.permissions).size !== member.permissions.length
-      || !Number.isSafeInteger(value.expiresAt) || !Number.isFinite(new Date(value.expiresAt).getTime())) {
+      || !expiryOk) {
       throw new RoomClientError(200, "invalid_response", "Room returned incomplete connection metadata");
     }
     if (value.roomId !== this.#roomId || member.id !== this.#memberId || member.kind !== "agent"
@@ -199,10 +218,23 @@ export class RoomAgentClient {
       throw new RoomClientError(200, "identity_mismatch", "Access does not match the configured agent");
     }
     const now = Date.now();
-    if (value.expiresAt <= now) throw new RoomClientError(200, "expiry_unconfirmed", "Check the local clock and agent key expiry");
+    if (!identityAuth && value.expiresAt <= now) throw new RoomClientError(200, "expiry_unconfirmed", "Check the local clock and agent key expiry");
     return { contractVersion: 1, type: "agent_connection_check", status: "credential_accepted", origin: this.#origin,
       roomId: this.#roomId, memberId: this.#memberId, kind: "agent", permissions: [...member.permissions],
       checkedAt: new Date(now).toISOString(), expiresAt: value.expiresAt, scope: "room", externalExecution: false };
+  }
+  async #checkIdentityConnection({ signal } = {}) {
+    const snapshot = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}`, undefined, signal);
+    const member = snapshot?.state?.members?.[this.#memberId];
+    if (!snapshot || Array.isArray(snapshot) || snapshot.roomId !== this.#roomId || snapshot.viewerId !== this.#memberId
+      || !member || member.kind !== "agent" || member.active !== true || !Number.isSafeInteger(member.revision)
+      || !Array.isArray(member.permissions) || member.permissions.some(permission => !PERMISSIONS.includes(permission))
+      || member.permissions.some(permission => ["manage_members", "decide"].includes(permission))) {
+      throw new RoomClientError(200, "identity_mismatch", "Identity is not linked to this room as the configured agent");
+    }
+    return { contractVersion: 1, type: "agent_connection_check", status: "credential_accepted", origin: this.#origin,
+      roomId: this.#roomId, memberId: this.#memberId, kind: "agent", permissions: [...member.permissions],
+      checkedAt: new Date(Date.now()).toISOString(), expiresAt: null, scope: "room", externalExecution: false };
   }
   snapshot({ signal } = {}) { return this.#request("", undefined, signal); }
   async replyRead(name, args = {}, { signal } = {}) {
@@ -421,6 +453,22 @@ export class RoomAgentClient {
   }
   providerHeartbeats({ signal } = {}) {
     return this.#request("/provider-heartbeats", undefined, signal);
+  }
+  // Round-2 #101: multi-room agent identities. createAgentIdentity is
+  // room-independent (POST /api/agent-identities); the link calls act on the
+  // configured room with an owner/manager credential.
+  async createAgentIdentity(displayName, { signal } = {}) {
+    return this.#fetchPath("/api/agent-identities", { displayName }, signal);
+  }
+  linkIdentity({ identityId, memberId, displayName, permissions }, { signal } = {}) {
+    return this.#request("/identity-links", { identityId, ...(memberId === undefined ? {} : { memberId }),
+      ...(displayName === undefined ? {} : { displayName }), permissions }, signal);
+  }
+  identityLinks({ signal } = {}) {
+    return this.#request("/identity-links", undefined, signal);
+  }
+  unlinkIdentity(identityId, { signal } = {}) {
+    return this.#deletePath(`/api/rooms/${encodeURIComponent(this.#roomId)}/identity-links`, { identityId }, signal);
   }
   setNotificationPreferences(preferences, { signal } = {}) {
     if (!preferences || typeof preferences !== "object" || Array.isArray(preferences)) throw new Error("Preferences must be an object");

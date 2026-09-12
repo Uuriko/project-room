@@ -16,6 +16,7 @@ import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, isRoomAccessToken } from "./guest-agent-links.mjs";
+import { AgentIdentities, agentIdentitySchema, isIdentitySecret } from "./agent-identities.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
 import { charterContext, charterFromEvent } from "../src/room-charter.js";
 import { REPLY_FIELDS, REPLY_POLICY_VERSION, replyPostMode } from "../src/reply-requests.js";
@@ -178,7 +179,7 @@ const nodeStorage = {
 const work = "workItemId expectedRevision";
 const shapes = {
   [T.ROOM_CHARTER_UPDATED]: "expectedRevision purpose outputs boundaries escalation",
-  [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId",
+  [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId identityId",
   [T.MEMBER_ACCESS_CHANGED]: "memberId expectedMemberRevision permissions active",
   [T.MEMBER_STATUS_UPDATED]: "memberId message",
   [T.NOTIFICATION_PREFERENCES_SET]: "preferences",
@@ -246,6 +247,7 @@ export class RoomStore {
     this.db = database ?? new DatabaseSync(filename, { readOnly });
     this.storagePlatform = storagePlatform;
     this.shareLinks = new ShareLinks(this);
+    this.identities = new AgentIdentities(this);
     this.reminders = new Reminders(this);
     this.agentConnections = new AgentConnections(this);
     this.guestAgentLinks = new GuestAgentLinks(this);
@@ -310,7 +312,8 @@ export class RoomStore {
       CREATE INDEX credential_account ON credentials(account_id);
       CREATE TABLE cursors (room_id TEXT NOT NULL REFERENCES rooms(id), member_id TEXT NOT NULL, sequence INTEGER NOT NULL, PRIMARY KEY(room_id, member_id));
       CREATE TABLE projection_checkpoints (room_id TEXT PRIMARY KEY REFERENCES rooms(id), sequence INTEGER NOT NULL, projection TEXT NOT NULL);
-      ${invitationSchema}`);
+      ${invitationSchema}
+      ${agentIdentitySchema}`);
       this.storagePlatform.setVersion(this.db, 4);
     }
     if (version > 0 && version < 26 && (
@@ -337,6 +340,7 @@ export class RoomStore {
         throw new Error("Pre-v24 reply acknowledgment history requires operator reconciliation");
       if (version < 25 && this.db.prepare("SELECT 1 FROM private_inbox_commands WHERE json_extract(request_json,'$.action') IN ('reply.update.inspected','reply.update.review') OR json_type(receipt_json,'$.update.inspection') IS NOT NULL OR json_type(receipt_json,'$.update.review') IS NOT NULL OR json_type(receipt_json,'$.update.resolvedAt') IS NOT NULL OR json_extract(receipt_json,'$.update.status')='resolved' LIMIT 1").get())
         throw new Error("Pre-v25 reply resolution history requires operator reconciliation");
+      if (version < 27) this.migrateAgentIdentitiesV27();
       if (version < STORE_SCHEMA_VERSION) this.storagePlatform.installWriterFence(this.db);
       this.storagePlatform.verifyWriterFence(this.db);
       this.verifyInvitationAudit();
@@ -399,6 +403,14 @@ export class RoomStore {
     this.transaction(() => {
       this.db.exec(invitationSchema);
       this.storagePlatform.setVersion(this.db, 4);
+    });
+  }
+  // Round-2 #101: multi-room agent identities. Additive tables only; no
+  // existing data is touched.
+  migrateAgentIdentitiesV27() {
+    this.transaction(() => {
+      this.db.exec(agentIdentitySchema);
+      this.storagePlatform.setVersion(this.db, 27);
     });
   }
   migrateInvitationJournalV5() {
@@ -1079,6 +1091,17 @@ export class RoomStore {
     return token;
   }
   authenticate(token, roomId, expectedSessionBinding = null, { allowAccountSession = true } = {}) {
+    // Round-2 #101: multi-room agent identities. One identity secret works in
+    // every room the identity is linked to; rooms keep sovereignty via link/unlink.
+    if (isIdentitySecret(token)) {
+      const resolved = this.identities.resolveIdentityAuth(token, roomId);
+      if (!resolved) fail(401, "unauthenticated", "Unknown identity or no access to this room");
+      return {
+        account: null, member: resolved.member, roomId, identityId: resolved.identityId,
+        credentialHash: hash(token), credentialScope: "room", kind: "identity",
+        expiresAt: null, csrf: null, sessionBinding: null
+      };
+    }
     if (typeof token !== "string" || !isRoomAccessToken(token)) fail(401, "unauthenticated", "Sign in with an active room key");
     const row = this.db.prepare(`SELECT c.*, p.revoked AS parent_revoked, p.expires_at AS parent_expiry, p.account_id AS parent_account_id, p.account_auth_epoch AS parent_account_auth_epoch,
       m.account_id AS bound_account_id, a.active AS account_active, a.revision AS account_revision, a.auth_epoch AS current_account_auth_epoch

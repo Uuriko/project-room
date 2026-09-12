@@ -47,6 +47,7 @@ const sessionView = auth => ({
   csrf: auth.csrf,
   sessionBinding: auth.sessionBinding,
   sessionRevision: auth.sessionRevision ?? null,
+  credentialKind: auth.kind,
   expiresAt: auth.expiresAt
 });
 const exact = (value, fields) => Object.keys(value).length === fields.length && fields.every(field => Object.hasOwn(value, field));
@@ -105,7 +106,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   }
   function bearer(req) {
     if (!req.headers.authorization) return null;
-    const match = /^Bearer ([A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43})$/.exec(req.headers.authorization);
+    const match = /^Bearer ([A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43}|pri_[A-Za-z0-9_-]{43,128})$/.exec(req.headers.authorization);
     if (!match) reject(401, "unauthenticated", "Invalid Authorization header");
     return match[1];
   }
@@ -463,7 +464,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         reject(405, "method_not_allowed", "Method not allowed");
       }
       const revokeMatch = /^\/api\/rooms\/([^/]{1,384})\/invitations\/([^/]{1,384})\/revoke$/.exec(url.pathname);
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics|search|provider-heartbeats))?$/.exec(url.pathname);
+      // Round-2 #101: creating an agent identity is open (an identity alone
+      // grants nothing); linking it into a room is owner-only per room.
+      if (url.pathname === "/api/agent-identities" && req.method === "POST") {
+        const data = await body(req);
+        if (!exact(data, ["displayName"]) || typeof data.displayName !== "string") reject(422, "invalid_identity", "displayName is required");
+        return json(res, 201, store.identities.create(data.displayName));
+      }
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics|search|provider-heartbeats|identity-links))?$/.exec(url.pathname);
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
       if (threadMatch && req.method === "GET") {
         // Round-2 #112: threaded replies.
@@ -549,6 +557,23 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "provider-heartbeats" && req.method === "GET") {
         // Round-2 #118: provider heartbeat dashboard.
         return json(res, 200, store.providerHeartbeats(selected.token, roomId, fence));
+      }
+      if (route === "identity-links") {
+        // Round-2 #101: multi-room agent identity links.
+        const data = req.method === "GET" ? {} : await body(req);
+        if (req.method === "GET") return json(res, 200, { roomId, links: store.identities.list(selected.token, roomId) });
+        if (req.method === "POST") {
+          const keys = Object.keys(data);
+          if (!keys.includes("identityId") || !keys.includes("permissions")
+            || keys.some(k => !["identityId", "memberId", "displayName", "permissions"].includes(k))
+            || typeof data.identityId !== "string") reject(422, "invalid_identity", "identityId and permissions are required");
+          return json(res, 201, store.identities.link(selected.token, roomId, data));
+        }
+        if (req.method === "DELETE") {
+          if (!exact(data, ["identityId"]) || typeof data.identityId !== "string") reject(422, "invalid_identity", "identityId is required");
+          return json(res, 200, store.identities.unlink(selected.token, roomId, data.identityId));
+        }
+        reject(405, "method_not_allowed", "Method not allowed");
       }
       if (route === "export" && req.method === "GET") {
         // Round-2 #106: JSONL export of the event log (same visibility as

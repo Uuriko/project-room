@@ -238,10 +238,17 @@ function addMember(state, incoming) {
     if (requireMember(state, incoming.data.accountableHumanId).kind !== "human") throw new Error("Accountable sponsor must be a human member");
   }
   if (isBootstrapOwner && (incoming.data.kind !== "human" || !incoming.data.permissions.includes("manage_members"))) throw new Error("Owner must retain membership administration");
+  // Round-2 #101: a member record may be bound to a global agent identity.
+  if (incoming.data.identityId != null
+    && (typeof incoming.data.identityId !== "string" || incoming.data.identityId.length > 64)) throw new Error("identityId must be a short string");
   state.members[memberId] = {
     id: memberId,
     displayName: incoming.data.displayName,
     kind: incoming.data.kind,
+    // Round-2 #101: only present when the member was linked from an agent
+    // identity; kept conditional so stored projections from before this field
+    // rebuild byte-identically.
+    ...(incoming.data.identityId === undefined ? {} : { identityId: incoming.data.identityId }),
     accountableHumanId: incoming.data.accountableHumanId || (incoming.data.kind === "human" ? memberId : state.room.ownerId),
     permissions: [...incoming.data.permissions],
     availability: incoming.data.availability || "unknown",

@@ -40,6 +40,10 @@ if (action === "reply") {
   node scripts/agent-inbox.mjs templates
   node scripts/agent-inbox.mjs apply-template team-standup [ACCOUNTABLE_MEMBER_ID]
   node scripts/agent-inbox.mjs heartbeats
+  node scripts/agent-inbox.mjs identity-create DISPLAY_NAME
+  node scripts/agent-inbox.mjs identity-link IDENTITY_ID PERM1,PERM2 [MEMBER_ID] [DISPLAY_NAME]
+  node scripts/agent-inbox.mjs identity-links
+  node scripts/agent-inbox.mjs identity-unlink IDENTITY_ID
   node scripts/agent-inbox.mjs sessions [STATUS]
   node scripts/agent-inbox.mjs claim WORK_ID
   node scripts/agent-inbox.mjs session WORK_ID STATUS
@@ -83,7 +87,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
         || (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > 50))
         || (cursor !== undefined && (since !== undefined || cursor.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(cursor)))) throw new ConnectionError("usage_error");
     }
-    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "sessions", "claim", "session", "status", "notify", "templates", "apply-template", "heartbeats", "funnel", "export", "import-history", "thread"].includes(action)
+    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "sessions", "claim", "session", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "identity-link", "identity-links", "identity-unlink", "funnel", "export", "import-history", "thread"].includes(action)
       || (["connect", "import"].includes(action) && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
       || (action === "import" && ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"].some(name => process.env[name] !== undefined))
       || (["packet", "work", "discussion", "result", "claim"].includes(action) && !validId(checkpoint))
@@ -96,7 +100,9 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
         : action === "search" ? extra.length > 1 || (extra.length === 1 && extra[0] !== "--needs-me")
         : ["advertise", "session"].includes(action) ? false
         : extra.length || (["check", "orient", "next", "brief"].includes(action) && checkpoint !== undefined))
-      || (action === "changes" && (!/^\d+$/.test(checkpoint ?? "") || !Number.isSafeInteger(Number(checkpoint))))) throw new ConnectionError("usage_error");
+      || (action === "changes" && (!/^\d+$/.test(checkpoint ?? "") || !Number.isSafeInteger(Number(checkpoint))))
+      || (["identity-create", "identity-unlink"].includes(action) && (checkpoint === undefined || checkpoint.startsWith("--")))
+      || (action === "identity-link" && (checkpoint === undefined || extra.length < 1 || extra.length > 3))) throw new ConnectionError("usage_error");
     const config = action === "import" ? await readConnectionInput() : agentConnectionFromEnvironment(), client = new RoomAgentClient(config);
     let result;
     if (["connect", "import", "check"].includes(action)) {
@@ -125,6 +131,10 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
       : action === "templates" ? client.roomTemplates()
       : action === "apply-template" ? await client.applyRoomTemplate(checkpoint, { accountableMemberId: extra[0] })
       : action === "heartbeats" ? await client.providerHeartbeats()
+      : action === "identity-create" ? await client.createAgentIdentity(checkpoint)
+      : action === "identity-link" ? await client.linkIdentity({ identityId: checkpoint, permissions: (extra[0] ?? "").split(",").map(p => p.trim()).filter(Boolean), ...(extra[1] === undefined ? {} : { memberId: extra[1] }), ...(extra[2] === undefined ? {} : { displayName: extra.slice(2).join(" ") }) })
+      : action === "identity-links" ? await client.identityLinks()
+      : action === "identity-unlink" ? await client.unlinkIdentity(checkpoint)
       : action === "sessions" ? await client.workSessions(checkpoint === undefined ? {} : { status: checkpoint })
       : action === "claim" ? await client.claimSession(checkpoint)
       : action === "session" ? await (async () => {

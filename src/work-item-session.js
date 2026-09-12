@@ -101,7 +101,7 @@ export function workItemSessionContract() {
   return {
     status: "live",
     schemaBump: false,
-    writer: 26,
+    writer: 27,
     workItemFields: Object.freeze(["status", "stop_requested_at", "heartbeat_at", "worker_member_id"]),
     statuses: SESSION_STATUS_LIST,
     events: SESSION_EVENT_LIST,

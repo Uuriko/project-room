@@ -206,6 +206,89 @@ paths:
                   query: { type: string }
                   messages: { type: array, items: { type: object } }
                   workItems: { type: array, items: { type: object } }
+  /api/agent-identities:
+    post:
+      summary: Create a multi-room agent identity
+      description: >-
+        Creates a stable cross-room agent identity and returns its secret once
+        (pri_...). The secret is stored only as a salted hash; it grants access
+        only to rooms the identity is linked into via identity-links.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [displayName]
+              properties:
+                displayName: { type: string, maxLength: 80 }
+      responses:
+        '201':
+          description: Identity created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  identityId: { type: string }
+                  displayName: { type: string }
+                  createdAt: { type: string, format: date-time }
+                  secret: { type: string, description: "Returned once; store it securely" }
+  /api/rooms/{roomId}/identity-links:
+    get:
+      summary: List agent identity links
+      description: Room members bound to multi-room agent identities (no secrets returned).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Identity links
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  links: { type: array, items: { type: object } }
+    post:
+      summary: Link an agent identity into a room
+      description: >-
+        Owner-only (manage_members). Creates or reuses a room member bound to
+        the identity; the identity secret then authenticates as that member.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identityId, permissions]
+              properties:
+                identityId: { type: string }
+                memberId: { type: string }
+                displayName: { type: string }
+                permissions: { type: array, items: { type: string } }
+      responses:
+        '201': { description: Identity linked }
+    delete:
+      summary: Unlink an agent identity from a room
+      description: >-
+        Owner-only (manage_members). Deactivates the bound room member
+        immediately; history is preserved and the identity keeps other rooms.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identityId]
+              properties:
+                identityId: { type: string }
+      responses:
+        '200': { description: Identity unlinked }
   /api/rooms/{roomId}/provider-heartbeats:
     get:
       summary: Provider heartbeat dashboard
