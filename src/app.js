@@ -13,6 +13,7 @@ import { replyDraftKey, replyDraftData, validReplyDraft, creditQuestion, confirm
 import { workHelpContext, validateHelpData } from "./work-help.js";
 import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
 import { installInbox } from "./inbox-ui.js";
+import { sessionRunView } from "./work-item-session.js";
 
 const $ = selector => document.querySelector(selector);
 $("#skip-link").addEventListener("click", event => {
@@ -1409,7 +1410,7 @@ function shareDraftButton(item, key = "task") {
 function workCard(i, now, drafts) {
   const next = nextWorkStep(i, now), status = workStatus(i, now), help = helpView(i, now);
   const nextActor = next.memberId ? `${name(next.memberId)} — ` : "";
-  const nextLine = `<p class="work-next-step" data-next-step="${esc(next.action)}"><strong>Next:</strong> ${esc(nextActor + status.next)}</p>`;
+  let nextLine = `<p class="work-next-step" data-next-step="${esc(next.action)}"><strong>Next:</strong> ${esc(nextActor + status.next)}</p>`;
   const source = i.sourceMessageId ? `<a class="source-link" href="${esc(recordHref("message", i.sourceMessageId))}" data-open-message="${esc(i.sourceMessageId)}" data-focus-key="work-source:${esc(i.id)}">From this conversation</a>` : "";
   const blocker = i.blocker ? `<div class="blocker"><strong>Blocked</strong><p>${esc(i.blocker.reason)}</p><p>${esc(i.blocker.nextAction)}</p></div>` : "";
   const decision = i.decision ? `<div class="decision"><strong>${esc(humanize(i.decision.decision))}</strong><p>${esc(i.decision.reason)}</p></div>` : "";
@@ -1418,6 +1419,9 @@ function workCard(i, now, drafts) {
   const updated = `<p class="form-hint">Last recorded update: ${esc(new Date(i.updatedAt).toLocaleString())}. Live execution is not measured.</p>`;
   const reuse = can("steer") ? `<button type="button" class="button ghost" data-reuse-work="${esc(i.id)}" data-focus-key="work-reuse:${esc(i.id)}">Use again</button>` : "";
   const latestDraft = drafts[0];
+  const run = sessionRunView(i, state.members[session.member.id], now);
+  const runLine = run ? `<div class="work-run" data-run-status><strong>${esc(run.label)}</strong><p class="form-hint">${esc(run.detail)}${run.workerMemberId ? ` ${esc(name(run.workerMemberId))}.` : ""}${run.updatedAt ? ` ${esc(time(run.updatedAt))}` : ""}</p>${run.canStop ? `<button type="button" class="button ghost" data-action="stop-run" data-work-id="${esc(i.id)}" data-focus-key="work-action:${esc(i.id)}:stop-run"${busy ? " disabled" : ""}>Request stop</button>` : ""}</div>` : "";
+  nextLine += runLine;
   const alternatives = drafts.length > 1 ? `<details class="work-drafts"><summary data-focus-key="work-drafts:${esc(i.id)}">Drafts (${drafts.length})</summary>${drafts.map(draft =>
 `<p><a class="source-link" href="${esc(recordHref("message", draft.id))}" data-open-message="${esc(draft.id)}" data-focus-key="work-draft-message:${esc(draft.id)}">${esc(memberLabel(draft.authorId))} · ${esc(draftFeedback(i, draft)?.label ?? "Draft")}<br><span class="form-hint">${esc([...draft.body].slice(0, 100).join(""))}${[...draft.body].length > 100 ? "…" : ""}</span></a></p>`).join("")}</details>` : "";
   const draftLink = i.receipt?.nativeText ? `<button class="source-link" type="button" data-read-result="${esc(i.id)}" data-focus-key="work-native-result:${esc(i.id)}">View result</button>` + alternatives : alternatives || (latestDraft ? `<a class="source-link" href="${esc(recordHref("message", latestDraft.id))}" data-open-message="${esc(latestDraft.id)}" data-focus-key="work-draft:${esc(i.id)}">View latest draft</a>` : "");
@@ -2298,6 +2302,7 @@ function producerField() {
   return `<label>Produced by<select name="producerId" required aria-describedby="producer-attribution-help"><option value="">Choose producer</option>${selfOption}<option value="__external__">Outside person or AI</option><option value="__unknown__">Unknown / not reported</option>${otherOptions}</select></label><label id="external-producer-field" hidden>Credit<input name="externalProducer" maxlength="160" disabled autocomplete="off" placeholder="Person, team or AI"></label><p id="producer-attribution-help" class="form-hint">You submit this result. Credit its producer, or choose Unknown.</p>`;
 }
 const actionSpecs = {
+  "stop-run": [T.SESSION_STOP_REQUESTED, "Request run stop?", "<p>Asks the connected runner to stop. It may still be running until it confirms. Work and results stay unchanged.</p>"],
   "offer-help": [T.HELP_OFFER_OPENED, "Offer help", ""],
   ...Object.fromEntries(Object.keys(offerStatuses).map(action => [action, [T.HELP_OFFER_UPDATED, offerLabels[action], ""]])),
   help: [T.WORK_HELP_UPDATED, "Ask for help", ""],
@@ -2493,6 +2498,7 @@ function loadActionText(item, action) {
 }
 function actionAvailable(entry) {
   const item = state?.workItems[entry.workId];
+  if (item && entry.action === "stop-run") return sessionRunView(item, state.members[session.member.id])?.canStop === true;
   if (item && isOfferAction(entry.action)) {
     if (entry.action === "offer-help") return offersView(item)?.availability.canOffer === true;
     const key = { "select-offer": "canSelect", "decline-offer": "canDecline", "withdraw-offer": "canWithdraw", "release-offer": "canRelease" }[entry.action];

@@ -140,6 +140,24 @@ export function sessionCard(item) {
   };
 }
 
+// Compact human-facing session state. A ledger update is not process telemetry.
+export function sessionRunView(item, member, nowMs = Date.now()) {
+  const session = sessionRecord(item);
+  if (session.status === "queued" && !session.stop_requested_at) return null;
+  const terminal = isTerminalSession(session.status);
+  const stale = !terminal && session.status !== "queued" && sessionWorker(item, nowMs) === null;
+  const canStop = !terminal && !session.stop_requested_at && member?.active === true
+    && !item.supersededBy && item.state !== "superseded"
+    && (member.permissions?.includes("steer") || member.id === item.accountableMemberId && member.permissions?.includes("accept_work"));
+  return { label: terminal ? session.status === "done" ? "Run ended" : "Run failed"
+    : session.stop_requested_at ? "Stop requested" : stale ? "Run unconfirmed"
+      : session.status === "suspended" ? "Run suspended" : "Run in progress",
+    detail: terminal ? "Run status only; results are reviewed separately."
+      : session.stop_requested_at ? "Waiting for runner confirmation."
+        : stale ? "No recent update. Execution is unconfirmed." : "Last reported by the runner.",
+    workerMemberId: session.worker_member_id, updatedAt: session.heartbeat_at, canStop: Boolean(canStop) };
+}
+
 export function listWorkItemSessions(workItems, status = null) {
   if (status != null && !isSessionStatus(status)) throw new RangeError("Choose one session status");
   return Object.values(workItems ?? {})
