@@ -62,8 +62,17 @@ export class AgentConnections {
     const credential = this.db.prepare("SELECT revoked FROM credentials WHERE hash=?").get(row.credential_hash);
     const status = row.status === "disconnected" ? "disconnected" : row.expires_at <= this.store.now() ? "expired"
       : !this.authority(row) ? "access_changed" : credential?.revoked !== 0 ? "revoked" : "key_issued";
+    const first = this.db.prepare(`SELECT e.body AS body FROM commands c JOIN events e ON e.room_id=c.room_id AND e.sequence=c.sequence
+      WHERE c.room_id=? AND c.actor_id=? ORDER BY c.sequence LIMIT 1`).get(row.room_id, row.member_id);
+    let firstActionAt = null;
+    if (first) {
+      try {
+        const at = JSON.parse(first.body)?.at;
+        if (typeof at === "string" && !Number.isNaN(Date.parse(at))) firstActionAt = at;
+      } catch { /* retained history stays unreadable here; the list still renders */ }
+    }
     return { roomId: row.room_id, memberId: row.member_id, displayName: member.displayName, generation: row.generation,
-      memberRevision: member.revision, permissions: member.permissions, expiresAt: row.expires_at, status };
+      memberRevision: member.revision, permissions: member.permissions, expiresAt: row.expires_at, status, firstActionAt };
   }
   assertCredential(credential) {
     const row = this.row(credential.room_id, credential.member_id);
