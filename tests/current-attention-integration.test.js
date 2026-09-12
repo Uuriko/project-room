@@ -70,7 +70,7 @@ test("opt-in v3 CLI and MCP share request notices and exact acknowledgement acro
   const wrongVersion = await f.cli(["pull", f.attentionDirectory]);
   assert.equal(wrongVersion.code, 1); assert.match(wrongVersion.stderr, /state_schema_mismatch/);
   const mcp = await f.mcp(true, 3);
-  assert.equal((await mcp.request("tools/list")).result.tools.length, 31);
+  assert.equal((await mcp.request("tools/list")).result.tools.length, 34);
   assert.equal((await mcp.call("room_read_attention", { version: 3 })).error.code, -32602, "agent cannot select an operator inbox/version");
   assert.deepEqual((await mcp.call("room_read_attention")).result.structuredContent.items, initial.items);
   const context = (await mcp.call(request.nextRead.tool, request.nextRead.arguments)).result.structuredContent;
@@ -95,10 +95,10 @@ test("opt-in v3 CLI and MCP share request notices and exact acknowledgement acro
 test("optional real MCP pull/read-pointer/ack shares persisted identity with CLI and remains Room read-only", { timeout: 20000 }, async t => {
   const f = await fixture(t); f.charter("An exact synthetic instruction");
   const disabled = await f.mcp(false);
-  assert.equal((await disabled.request("tools/list")).result.tools.length, 29);
+  assert.equal((await disabled.request("tools/list")).result.tools.length, 32);
   assert.equal((await disabled.call("room_read_attention")).error.code, -32602); await disabled.close();
   let mcp = await f.mcp(); const tools = (await mcp.request("tools/list")).result.tools;
-  assert.equal(tools.length, 31); assert.ok(tools.slice(-2).every(t => t.annotations.readOnlyHint === false));
+  assert.equal(tools.length, 34); assert.ok(tools.slice(-2).every(t => t.annotations.readOnlyHint === false));
   assert.equal((await mcp.call("room_read_attention", { directory: "/not-operator-authorized" })).error.code, -32602);
   assert.equal((await mcp.call("room_acknowledge_attention", { noticeId: 1 })).error.code, -32602);
   const before = f.store.snapshot(f.keys.producer, "commons");
