@@ -5,6 +5,7 @@ import { readAgentConnection } from "./agent-connection.mjs";
 import { RoomAgentClient } from "./room-agent.mjs";
 import { runLocalSession } from "./local-session-runner.mjs";
 import { validId } from "../src/events.js";
+import { localRequestContext } from "./local-request-context.mjs";
 
 function privatePath(directory) {
   const stat = lstatSync(directory);
@@ -27,7 +28,8 @@ function readPrivate(path, limit) {
 const fields = ["version", "connectionDirectory", "workItemId", "runId", "expectedRevision", "command", "args", "cwd", "env", "maxRuntimeMs", "maxOutputBytes"];
 function configAt(directory) {
   const config = JSON.parse(readPrivate(join(directory, "run.json"), 65536));
-  if (!config || Array.isArray(config) || Object.keys(config).length !== fields.length
+  if (!config || Array.isArray(config) || Object.keys(config).length !== fields.length + (Object.hasOwn(config, "answerRequestId") ? 1 : 0)
+    || (Object.hasOwn(config, "answerRequestId") && !validId(config.answerRequestId))
     || fields.some(field => !Object.hasOwn(config, field)) || config.version !== 1
     || ![config.workItemId, config.runId].every(validId) || config.runId.length > 110
     || typeof config.connectionDirectory !== "string" || !isAbsolute(config.connectionDirectory)) throw new Error("invalid_run_config");
@@ -39,8 +41,8 @@ const journalName = runId => {
 };
 const summary = record => ({ runId: record.runId, state: record.state,
   ...(record.result ? { status: record.result.status, reason: record.result.reason, recording: record.result.recording,
-    outputBytes: record.result.outputBytes, workCompleted: false } : {}),
-  message: ["reserved", "unconfirmed"].includes(record.state) ? "Run outcome unknown. Inspect the process and Room session; do not rerun." : undefined });
+    outputBytes: record.result.outputBytes, answerStatus: record.result.answerStatus, workCompleted: false } : {}),
+  message: ["reserved", "unconfirmed", "answer_pending"].includes(record.state) ? "Run outcome unknown. Inspect the process and Room session; do not rerun." : undefined });
 
 export async function executeLocalRun(directory, { signal } = {}) {
   const root = privatePath(directory), config = configAt(root), connection = readAgentConnection(config.connectionDirectory);
@@ -55,16 +57,33 @@ export async function executeLocalRun(directory, { signal } = {}) {
     append({ ...base, state: "reserved", at: new Date().toISOString() });
     const directoryFd = openSync(root, constants.O_RDONLY);
     try { fsyncSync(directoryFd); } finally { closeSync(directoryFd); }
-    const { version, connectionDirectory, ...options } = config;
-    let result;
+    const { version, connectionDirectory, answerRequestId, ...options } = config;
+    const client = new RoomAgentClient(connection);
+    let result, request;
     try {
+      if (answerRequestId) request = await localRequestContext(client, answerRequestId, config.workItemId,
+        { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000) });
       result = await runLocalSession({ ...options, roomId: connection.roomId, memberId: connection.memberId,
-        client: new RoomAgentClient(connection), signal });
+        client, ...(request ? { input: request.input } : {}), signal });
     } catch {
       // Do not echo transport errors, commands or environment secrets.
       const record = { ...base, state: "unconfirmed", at: new Date().toISOString(),
         result: { status: "unknown", reason: "run_not_confirmed", recording: "unconfirmed" } };
       append(record); return summary(record);
+    }
+    if (request) {
+      result.answerStatus = "not_sent";
+      if (result.status === "done" && result.recording === "recorded" && !signal?.aborted
+        && result.stdout?.trim() && result.stdout.length <= 4096) {
+        result.answerInput = { ...request.answer, requestId: `${config.runId}:answer`, body: result.stdout };
+        append({ ...base, state: "answer_pending", at: new Date().toISOString(), result });
+        try {
+          const answer = await client.replyAction("room_respond_to_request", result.answerInput, { signal: AbortSignal.timeout(5000) });
+          result.answerStatus = answer.status; result.answerReceipt = answer;
+        } catch (error) {
+          result.answerStatus = [409, 422].includes(error.status) ? "refused" : "unconfirmed";
+        }
+      }
     }
     const record = { ...base, state: "finished", at: new Date().toISOString(), result };
     append(record); return summary(record);
@@ -72,7 +91,7 @@ export async function executeLocalRun(directory, { signal } = {}) {
 }
 
 export function inspectLocalRun(directory, runId, { includeOutput = false } = {}) {
-  const root = privatePath(directory), source = readPrivate(join(root, journalName(runId)), 8 * 1024 * 1024);
+  const root = privatePath(directory), source = readPrivate(join(root, journalName(runId)), 16 * 1024 * 1024);
   const lines = source.split("\n");
   // A torn final write is not a completed record. Retain the reservation warning.
   if (lines.at(-1) !== "") lines.pop();

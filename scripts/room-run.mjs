@@ -21,7 +21,7 @@ Ctrl-C requests local cancellation. No model, schedule or provider is configured
     else if (["status", "output"].includes(action) && args.length === 3) result = inspectLocalRun(directory, runId, { includeOutput: action === "output" });
     else throw new Error("usage");
     console.log(JSON.stringify(result));
-    if (action === "run" && (result.status !== "done" || result.recording !== "recorded")) process.exitCode = 1;
+    if (action === "run" && (result.status !== "done" || result.recording !== "recorded" || result.answerStatus && result.answerStatus !== "recorded")) process.exitCode = 1;
   } catch (error) {
     console.error(JSON.stringify({ error: error.code === "EEXIST" ? "run_exists" : "run_unavailable",
       message: "No retry was started. Check the private configuration and run record; use --help." }));

@@ -8,7 +8,9 @@ import { promisify } from "node:util";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { saveAgentConnection } from "../client/agent-connection.mjs";
+import { saveAgentConnection, readAgentConnection } from "../client/agent-connection.mjs";
+import { RoomAgentClient } from "../client/room-agent.mjs";
+import { localRequestContext } from "../client/local-request-context.mjs";
 import { executeLocalRun, inspectLocalRun } from "../client/local-run-record.mjs";
 
 async function fixture(t) {
@@ -33,7 +35,7 @@ async function fixture(t) {
     try { return { ...(await promisify(execFile)(process.execPath, ["scripts/room-run.mjs", ...args], { timeout: 10000 })), code: 0 }; }
     catch (error) { return { stdout: error.stdout, stderr: error.stderr, code: error.code }; }
   };
-  return { directory, privateDir, store, token, config, path, journal, cli };
+  return { directory, privateDir, store, owner, token, config, path, journal, cli };
 }
 
 test("CLI records a real run privately; status hides output and repeats cannot execute", async t => {
@@ -92,4 +94,62 @@ test("failed configuration after reservation records uncertainty without leaking
   assert.equal((result.stdout + result.stderr).includes("PRIVATE_BAD_COMMAND"), false);
   assert.equal(readFileSync(f.journal, "utf8").includes("PRIVATE_BAD_COMMAND"), false);
   await assert.rejects(executeLocalRun(f.privateDir), { code: "EEXIST" });
+});
+
+function requestRun(f, { requester = f.owner, args } = {}) {
+  f.store.command(requester, "commons", { id: "question", type: "message.posted", data: {
+    messageId: "question", requestKind: "reply", toMemberId: "agent", workItemId: "task", body: "Summarize this exchange." } });
+  Object.assign(f.config, { answerRequestId: "question", args: args ?? ["-e",
+    "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{const p=JSON.parse(s);console.error('PRIVATE_DIAGNOSTIC');console.log('Read '+p.messages.length+' messages for '+p.requestMessageId);});"] });
+  writeFileSync(f.path, JSON.stringify(f.config), { mode: 0o600 });
+}
+
+test("agent request reaches a real process as data and stdout returns to its exact exchange", async t => {
+  const f = await fixture(t);
+  f.store.command(f.owner, "commons", { id: "peer", type: "member.added", data: { memberId: "peer", displayName: "Peer agent", kind: "agent", permissions: [] } });
+  const peer = f.store.issueAccessKey("commons", "peer");
+  requestRun(f, { requester: peer });
+  for (let n = 0; n < 3; n++) f.store.command(peer, "commons", { id: `clarify-${n}`, type: "message.posted", data: { body: `Context ${n}`, replyToId: "question" } });
+  const client = new RoomAgentClient(readAgentConnection(f.config.connectionDirectory));
+  const packet = await localRequestContext(client, "question", "task", { limit: 1 });
+  assert.equal(JSON.parse(packet.input).messages.length, 4);
+  const result = await f.cli("run", f.privateDir);
+  assert.equal(result.code, 0, result.stderr); assert.equal(JSON.parse(result.stdout).answerStatus, "recorded");
+  const state = f.store.room("commons").state, answer = state.messages.at(-1);
+  assert.equal(answer.body, "Read 4 messages for question\n"); assert.equal(answer.authorId, "agent");
+  assert.equal(answer.toMemberId, "peer"); assert.equal(answer.replyToId, "question");
+  assert.equal(state.replyRequests.question.status, "answered"); assert.equal(state.workItems.task.state, "proposed");
+  assert.equal(state.messages.some(m => m.body.includes("PRIVATE_DIAGNOSTIC")), false);
+  const records = readFileSync(f.journal, "utf8").trim().split("\n").map(JSON.parse);
+  assert.deepEqual(records.map(r => r.state), ["reserved", "answer_pending", "finished"]);
+  assert.deepEqual(records[1].result.answerInput, records[2].result.answerInput);
+});
+
+test("new clarification during execution refuses the old answer without silent refresh", async t => {
+  const f = await fixture(t);
+  requestRun(f, { args: ["-e", "process.stdin.resume();process.stdin.on('end',()=>setTimeout(()=>console.log('Old-context answer'),250));"] });
+  let changed = false;
+  const timer = setInterval(() => {
+    if (changed || f.store.room("commons").state.workItems.task.status !== "processing") return;
+    changed = true;
+    f.store.command(f.owner, "commons", { id: "new-context", type: "message.posted", data: { body: "Changed requirements", replyToId: "question" } });
+  }, 10);
+  t.after(() => clearInterval(timer));
+  const result = await executeLocalRun(f.privateDir);
+  assert.equal(result.answerStatus, "refused");
+  assert.equal(f.store.room("commons").state.replyRequests.question.status, "open");
+  assert.equal(f.store.room("commons").state.messages.some(m => m.body.includes("Old-context answer")), false);
+  await assert.rejects(executeLocalRun(f.privateDir), { code: "EEXIST" });
+});
+
+test("wrong-work context and oversized answers are not posted", async t => {
+  const f = await fixture(t);
+  requestRun(f, { args: ["-e", "process.stdin.resume();process.stdin.on('end',()=>console.log('x'.repeat(4097)));"] });
+  f.config.maxOutputBytes = 8192;
+  writeFileSync(f.path, JSON.stringify(f.config), { mode: 0o600 });
+  const client = new RoomAgentClient(readAgentConnection(f.config.connectionDirectory));
+  await assert.rejects(localRequestContext(client, "question", "other-work"), /not assigned/);
+  const result = await f.cli("run", f.privateDir);
+  assert.equal(result.code, 1); assert.equal(JSON.parse(result.stdout).answerStatus, "not_sent");
+  assert.equal(f.store.room("commons").state.replyRequests.question.status, "open");
 });

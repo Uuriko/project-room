@@ -8,7 +8,7 @@ import { sessionRecord } from "../src/work-item-session.js";
 // This is process supervision, NOT a filesystem/network/credential sandbox.
 export async function runLocalSession({ client, roomId, memberId, workItemId, runId,
   expectedRevision, command, args = [], cwd, env = {}, maxRuntimeMs,
-  maxOutputBytes = 65536, pollMs = 1000, killGraceMs = 1000, signal }) {
+  maxOutputBytes = 65536, pollMs = 1000, killGraceMs = 1000, input = "", signal }) {
   if (process.platform === "win32" || ![roomId, memberId, workItemId, runId].every(validId)
     || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || runId.length > 110
     || typeof command !== "string" || !isAbsolute(command) || typeof cwd !== "string" || !isAbsolute(cwd)
@@ -17,6 +17,7 @@ export async function runLocalSession({ client, roomId, memberId, workItemId, ru
     || !Number.isSafeInteger(maxRuntimeMs) || maxRuntimeMs < 1 || maxRuntimeMs > 300000
     || !Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 1 || maxOutputBytes > 1048576
     || !Number.isSafeInteger(pollMs) || pollMs < 10 || pollMs > 10000
+    || typeof input !== "string" || Buffer.byteLength(input) > 65536
     || !Number.isSafeInteger(killGraceMs) || killGraceMs < 1 || killGraceMs > 5000) throw new Error("Invalid local run configuration");
   const identity = { roomId, memberId };
   const claim = { id: `${runId}:start`, type: "session.started", data: { workItemId, expectedRevision,
@@ -37,7 +38,7 @@ export async function runLocalSession({ client, roomId, memberId, workItemId, ru
   if (!confirmsAgentCommand(receipt, claim, identity) || receipt.duplicate)
     return { status: "not_started", reason: "claim_requires_reconciliation", claim };
   let child, timer, killTimer, monitor, checking = false, finished = false, reason = null, bytes = 0;
-  const chunks = [], started = Date.now();
+  const chunks = [], stdoutChunks = [], started = Date.now();
   const killGroup = sig => {
     if (!child?.pid) return;
     try { process.kill(-child.pid, sig); } catch (error) { if (error.code !== "ESRCH") throw error; }
@@ -58,7 +59,7 @@ export async function runLocalSession({ client, roomId, memberId, workItemId, ru
     else if (!current || current.worker_member_id !== memberId || current.status !== "processing" || current.stop_requested_at)
       stop("session_changed");
     if (!reason) {
-      child = spawn(command, args, { cwd, env, shell: false, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+      child = spawn(command, args, { cwd, env, shell: false, detached: true, stdio: ["pipe", "pipe", "pipe"] });
       const closed = new Promise(resolve => {
         child.once("error", () => { reason ??= "process_start_failed"; });
         child.once("close", (code, sig) => resolve({ code, signal: sig }));
@@ -67,7 +68,10 @@ export async function runLocalSession({ client, roomId, memberId, workItemId, ru
         bytes += chunk.length;
         if (bytes > maxOutputBytes) { stop("output_limit"); return; }
         chunks.push(chunk);
+        if (stream === child.stdout) stdoutChunks.push(chunk);
       });
+      child.stdin.on("error", () => stop("input_unavailable"));
+      child.stdin.end(input);
       signal?.addEventListener("abort", cancelled, { once: true });
       if (signal?.aborted) cancelled();
       timer = setTimeout(() => stop("runtime_limit"), Math.max(1, maxRuntimeMs - (Date.now() - started)));
@@ -103,6 +107,6 @@ export async function runLocalSession({ client, roomId, memberId, workItemId, ru
     }
   } catch { /* Preserve exact final operation for reconciliation; do not retry a process. */ }
   return { status, reason: reason ?? (exit.code === 0 ? "process_exited" : "process_failed"),
-    ...exit, output: Buffer.concat(chunks).toString("utf8"), outputBytes: bytes, recording, terminalCommand,
+    ...exit, output: Buffer.concat(chunks).toString("utf8"), stdout: Buffer.concat(stdoutChunks).toString("utf8"), outputBytes: bytes, recording, terminalCommand,
     workCompleted: false, processSandboxed: false };
 }

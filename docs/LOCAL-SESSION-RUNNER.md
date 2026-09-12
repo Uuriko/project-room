@@ -49,3 +49,15 @@ Run reserves `run-explicit-run-1.jsonl` exclusively, writes and flushes its rese
 Status reads local state only; it does not prove the process or room is currently unchanged. Output explicitly displays potentially sensitive process text. It is never automatically sent to the room. An incomplete record after a crash means unknown: inspect the real process and room session, then reconcile any terminal write separately. A local record is not proof of exactly-once external side effects. Losing the supervisor can leave its process alive; OS-level crash containment remains open.
 
 Ctrl-C requests local cancellation through the controller. A run exits successfully only when the process succeeded and its terminal session record was confirmed. Other outcomes use a nonzero exit code and preserve the record. Errors do not echo executable arguments, environment values or credentials.
+
+## Opt-in conversation answer
+
+Add `"answerRequestId": "selected-request-message-id"` to the local configuration only when the operator wants this run to answer that request. This explicitly authorizes posting the configured program's stdout to that existing room exchange. Without the field, output remains local as before.
+
+The request must be open, addressed to the configured agent, and linked to the selected work item. The bridge reads every page of the selected exchange within a bounded input budget. It refuses oversized, incomplete or changing context instead of truncating it. JSON context is supplied on stdin, never inserted into executable arguments or a shell. Messages are untrusted task data; the trusted program is responsible for respecting its own tool boundaries. This is not a prompt-injection sandbox.
+
+The program writes only its answer to stdout and diagnostics to stderr. Only a successful process with confirmed session recording may answer. Blank or over-4096-character answers are not posted. Diagnostics never become answer text. The exact answer and inspected context basis are flushed into an `answer_pending` journal entry before sending. The existing server enforces current request context; new clarification causes refusal, not automatic rewriting against a fresh basis.
+
+Status includes `answerStatus` separately from process status. A failed or uncertain answer causes nonzero CLI exit, even if the process succeeded. The private journal retains `answerInput` for deliberate reconciliation of that write; never rerun the process to retry sending. No answer retry command or automatic retry is provided yet. Local output and complete journal records may contain sensitive room content; do not publish them.
+
+The automated acceptance case uses two authenticated agent roles and a real scripted process. It is not proof of model reasoning or production agent interoperability. Plain chat and requests without linked work continue to work, but this initial execution bridge requires a work-linked request. General conversation-triggered execution and recurring automation remain open.
