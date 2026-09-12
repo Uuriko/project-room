@@ -1449,9 +1449,10 @@ export class RoomStore {
       const result = { roomId, query: query.trim(), messages: [], workItems: [] };
       if (kind === "all" || kind === "messages") {
         for (const m of room.state.messages ?? []) {
-          if (m.body == null) continue; // tombstone
-          if (m.body.toLowerCase().includes(needle)) {
-            result.messages.push({ id: m.id, authorId: m.authorId, body: m.body, createdAt: m.createdAt, workItemId: m.workItemId });
+          if (m.body == null || m.deletedAt) continue; // tombstone
+          if (m.body.toLowerCase().includes(needle) || m.attachments?.some(file => file.filename.toLowerCase().includes(needle))) {
+            result.messages.push({ id: m.id, authorId: m.authorId, body: m.body, createdAt: m.createdAt, workItemId: m.workItemId,
+              ...(m.attachments?.length ? { attachments: structuredClone(m.attachments) } : {}) });
           }
         }
       }

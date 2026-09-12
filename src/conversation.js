@@ -265,7 +265,7 @@ export function searchMessages(state, query, limit = 50, { viewer = null, mentio
   const parsed = parseSearchQuery(query);
   const term = parsed.term.toLocaleLowerCase();
   const only = Boolean(mentionsOnly || parsed.mentionsOnly);
-  let pool = state.messages || [];
+  let pool = (state.messages || []).filter(message => !message.deletedAt && typeof message.body === 'string');
   if (only) {
     if (!viewer?.id) return { messages: [], total: 0, mentionsOnly: true };
     pool = pool.filter(message => messageAddressesMember(message, viewer));
@@ -273,6 +273,7 @@ export function searchMessages(state, query, limit = 50, { viewer = null, mentio
   if (!term && !only) return { messages: [], total: 0, mentionsOnly: false };
   const matches = !term ? pool : pool.filter(message =>
     message.body.toLocaleLowerCase().includes(term) ||
+    message.attachments?.some(file => file.filename.toLocaleLowerCase().includes(term)) ||
     (state.members[message.authorId]?.displayName || "").toLocaleLowerCase().includes(term));
   return { messages: matches.slice(-limit).reverse(), total: matches.length, mentionsOnly: only };
 }

@@ -104,5 +104,7 @@ for (const mobile of [false, true]) test(`verified file download ${mobile ? 'mob
   await page.getByRole('button', { name: 'Download captionless.txt', exact: true }).waitFor();
   assert.equal(store.room('commons').state.messages.at(-1).body, '');
   assert.equal(store.room('commons').state.messages.length, 3);
+  await page.locator('#message-search').fill('captionless.txt');
+  await page.locator('#search-list').getByText('captionless.txt', { exact: true }).waitFor();
   assert.deepEqual(errors, []);
 });

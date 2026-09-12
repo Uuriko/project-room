@@ -34,7 +34,21 @@ ordinary file-only posts; specialized reply requests still require text.
   envelope and independent reply-history checks were then corrected; the fresh
   run passed. No failed run is represented as evidence of success.
 
-Full regression on this schema30 candidate remains pending. Physical-device
+Exactdb87e06 full regression passed1217/1217,0failed/skip,31591ms. Physical-device
 validation, durable file-draft recovery, specialized request attachment support,
 filename search, larger-file policy and public/agent contract updates remain open.
 No deploy or canonical source edits occurred.
+
+## Filename search follow-up
+
+Browser and service searches now match committed attachment filenames literally,
+case-insensitively, within the authenticated room. File-only browser result rows
+show filenames instead of an empty excerpt. Service results include file metadata,
+not stored bytes. Browser search now explicitly excludes deleted/null-body messages
+instead of trying to search tombstones as text. No file content indexing was added.
+
+16 focused search/conversation tests passed, including staging exclusion,
+cross-room refusal, literal bracket matching, read-only behavior and deleted-file
+exclusion. Two desktop/mobile browser journeys also passed with a visible filename
+search result after sending a file-only message. These later search changes have
+not yet received the complete regression gate.
