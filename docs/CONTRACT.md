@@ -11,7 +11,13 @@ check — it is four gates:
 2. **`scripts/journey-coverage.mjs`** — every documented agent capability
    must have executable evidence: a test or check that actually exercises
    it. Uses exact path membership (substring matching was fixed in #97).
-   Adding a capability without a runnable check fails the build.
+   Adding a capability without a runnable check fails the build. The map
+   lives in `docs/JOURNEY-COVERAGE-MAP.md` as a fenced
+   ` ```json coverage-map ` block: each claim needs an id, claim text, and
+   evidence (`unit` test files, `browser` check files, or `agent`/`hosted`
+   evidence). The checker fails on claims with no evidence, linked files
+   that don't exist, duplicate ids, and browser checks not wired into
+   `npm run test:browser`.
 3. **`scripts/check-no-shadow-imports.mjs`** — no local file may shadow an
    npm package name or a Node builtin. Prevents the "wrong module loaded"
    class of bugs (added in #89).
