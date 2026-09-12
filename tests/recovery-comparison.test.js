@@ -14,6 +14,8 @@ async function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), 'room-capture-comparison-'));
   const f = createRecoveryFixture(join(directory, 'source.sqlite'));
   t.after(() => { f.store.close(); rmSync(directory, { recursive: true, force: true }); });
+  const { identityId } = f.store.identities.create("Comparison agent");
+  f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
   const capture = async () => (await backupRoom(f.filename, directory)).filename;
   return { ...f, directory, older: await capture(), capture };
 }
@@ -29,9 +31,9 @@ const compare = (older, reference) => {
   return result;
 };
 
-test('equal independently captured data is not permission to reopen; all 27 tables are compared', async t => {
+test('equal independently captured data is not permission to reopen; all 29 tables are compared', async t => {
   const f = await fixture(t), reference = await f.capture(), report = compare(f.older, reference);
-  assert.equal(report.status, 'no_stored_differences'); assert.equal(report.tables.length, 27);
+  assert.equal(report.status, 'no_stored_differences'); assert.equal(report.tables.length, 29);
   assert.equal(report.history.equalRooms, 2); assert.equal(report.history.olderHistoryIsPrefix, true);
   assert.equal(report.accessDifferences, false);
   assert.ok(report.tables.every(row => row.added + row.removed + row.changed === 0));
