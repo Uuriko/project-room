@@ -384,13 +384,13 @@ test("composer failures stay discussion-scoped and keyboard sends preserve user 
     { field: "repeat", value: true }
   ]) {
     const observed = await input.evaluate((element, spec) => {
-      const event = new KeyboardEvent("keydown", {
+      const keyEvent = new KeyboardEvent("keydown", {
         key: "Enter", ctrlKey: true, bubbles: true, cancelable: true,
         isComposing: spec.field === "isComposing", repeat: spec.field === "repeat"
       });
-      if (spec.field === "keyCode") Object.defineProperty(event, "keyCode", { configurable: true, value: spec.value });
-      element.dispatchEvent(event);
-      return { defaultPrevented: event.defaultPrevented, observed: event[spec.field] };
+      if (spec.field === "keyCode") Object.defineProperty(keyEvent, "keyCode", { configurable: true, value: spec.value });
+      element.dispatchEvent(keyEvent);
+      return { defaultPrevented: keyEvent.defaultPrevented, observed: keyEvent[spec.field] };
     }, specification);
     assert.equal(observed.observed, specification.value);
     assert.equal(observed.defaultPrevented, false);
@@ -399,9 +399,9 @@ test("composer failures stay discussion-scoped and keyboard sends preserve user 
   assert.equal(commands.length, beforeGuards, "IME and repeated-key events do not issue commands");
   assert.equal(await input.inputValue(), guardedBody);
   const ordinary = await input.evaluate(element => {
-    const event = new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true, cancelable: true });
-    element.dispatchEvent(event);
-    return { defaultPrevented: event.defaultPrevented, repeat: event.repeat, isComposing: event.isComposing, keyCode: event.keyCode };
+    const keyEvent = new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true, cancelable: true });
+    element.dispatchEvent(keyEvent);
+    return { defaultPrevented: keyEvent.defaultPrevented, repeat: keyEvent.repeat, isComposing: keyEvent.isComposing, keyCode: keyEvent.keyCode };
   });
   assert.deepEqual(ordinary, { defaultPrevented: true, repeat: false, isComposing: false, keyCode: 0 });
   await page.waitForFunction(() => document.querySelector("#message-input")?.value === "");

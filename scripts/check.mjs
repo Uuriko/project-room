@@ -11,5 +11,7 @@ for (const path of ["server.mjs", ...["src", "server", "client", "scripts", "tes
 }
 const coverage = spawnSync(process.execPath, ["scripts/journey-coverage.mjs"], { stdio: "inherit" });
 if (coverage.status !== 0) process.exit(coverage.status || 1);
+const shadows = spawnSync(process.execPath, ["scripts/check-no-shadow-imports.mjs"], { stdio: "inherit" });
+if (shadows.status !== 0) process.exit(shadows.status || 1);
 const result = spawnSync(process.execPath, ["--test"], { stdio: "inherit" });
 process.exit(result.status ?? 1);

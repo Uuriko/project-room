@@ -223,8 +223,8 @@ test("resume tokens bind selection, identity and every retained boundary; rotati
     assert.throws(() => f.store.replyRequests.history(f.keys.agent, "commons", { cursor: bad }), { code: "invalid_reply_cursor" });
   assert.throws(() => f.store.replyRequests.history(f.keys.agent, "commons", { cursor, checkpoint: cursor }), { code: "invalid_reply_selection" });
   const old = f.store.db.prepare("SELECT body FROM events WHERE room_id='commons' AND sequence=?").get(original.afterSequence);
-  const event = JSON.parse(old.body); event.id = "replaced-retained-event";
-  f.store.db.prepare("UPDATE events SET id=?,body=? WHERE room_id='commons' AND sequence=?").run(event.id, JSON.stringify(event), original.afterSequence);
+  const parsedEvent = JSON.parse(old.body); parsedEvent.id = "replaced-retained-event";
+  f.store.db.prepare("UPDATE events SET id=?,body=? WHERE room_id='commons' AND sequence=?").run(parsedEvent.id, JSON.stringify(parsedEvent), original.afterSequence);
   assert.throws(() => f.store.replyRequests.history(f.keys.agent, "commons", { cursor }), { code: "reply_history_changed" });
 });
 
