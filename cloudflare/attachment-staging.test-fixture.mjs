@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
-import { RoomAttachments, attachmentSchema } from '../server/attachments.mjs';
+import { RoomAttachments } from '../server/attachments.mjs';
 import { DurableDatabase, durableStorage } from './storage.mjs';
 export class AttachmentStagingExperiment {
   constructor(ctx) {
@@ -11,7 +11,6 @@ export class AttachmentStagingExperiment {
   async fetch() {
     const store = this.store;
     store.initialize(initialRoom('files'));
-    store.transaction(() => store.db.exec(attachmentSchema));
     const token = store.issueAccessKey('files', 'owner'), files = new RoomAttachments(store);
     const whole = new Uint8Array([9, 0, 255, 8]);
     const input = { id: 'sliced', filename: 'notes.txt', mediaType: 'text/plain', bytes: whole.subarray(1, 3) };

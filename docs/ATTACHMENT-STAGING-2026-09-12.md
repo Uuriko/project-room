@@ -1,5 +1,9 @@
 # Attachment staging implementation checkpoint
 
+Historical checkpoint at `b1ec4f0`. Startup/schema integration is continued in
+[Attachment schema integration](ATTACHMENT-SCHEMA-2026-09-12.md); the limits
+below describe the earlier staging-only checkpoint.
+
 Implemented `server/attachments.mjs`: room/uploader-owned staging, immutable
 upload identity, byte digest, expiry, discard tombstones and bounded capacity.
 This module is **not wired into application startup or HTTP**. Its schema is

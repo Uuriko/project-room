@@ -164,7 +164,7 @@ test("HTTP lists by status, sets status, and Stop writes stop_requested_at plus 
   assert.equal((await doneList.json()).sessions[0].status, "done");
 });
 
-test("strangers cannot mutate; commands are idempotent; writer stays 26", async t => {
+test("strangers cannot mutate; commands are idempotent; current schema is retained", async t => {
   const { store, request, ownerKey, agentKey } = await serve(t);
   store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
     data: { memberId: "guest", displayName: "Test guest", kind: "human", permissions: [] } });
@@ -189,7 +189,7 @@ test("strangers cannot mutate; commands are idempotent; writer stays 26", async 
     data: { workItemId: "session-one", expectedRevision: 1, status: "active" }
   });
   assert.equal(viaCommand.event.type, T.SESSION_STATUS_CHANGED);
-  assert.equal(store.storagePlatform.version(store.db), 27);
+  assert.equal(store.storagePlatform.version(store.db), 28);
   assert.equal(store.db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'work_item_session%'").all().length, 0);
 });
 

@@ -1,5 +1,4 @@
-// Staging implementation. Not wired into RoomStore startup or HTTP yet: the
-// versioned migration/recovery contract must land before application use.
+// Room-owned staging. HTTP and committed-message integration remain separate.
 import { createHash } from 'node:crypto';
 import { ServiceError } from './store.mjs';
 import { validId } from '../src/events.js';
@@ -39,6 +38,28 @@ function validate(input) {
 
 export class RoomAttachments {
   constructor(store) { this.store = store; this.db = store.db; }
+  verify() {
+    const expected = attachmentSchema.split(';')[0];
+    if (this.db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='room_attachments'").get()?.sql !== expected)
+      throw new Error('Attachment schema requires operator reconciliation');
+  }
+  audit() {
+    this.verify();
+    const rows = [];
+    // Fetch payloads individually; do not materialize all room bytes at once.
+    for (const key of this.db.prepare('SELECT room_id,id FROM room_attachments ORDER BY room_id,id').all()) {
+      const row = this.db.prepare('SELECT * FROM room_attachments WHERE room_id=? AND id=?').get(key.room_id, key.id);
+      const bytes = row.bytes === null ? null : new Uint8Array(row.bytes);
+      if (!validId(row.id) || !this.store.roomAuthority(row.room_id).members[row.uploader_id]
+        || !Number.isSafeInteger(row.created_at) || row.expires_at !== row.created_at + attachmentLimits.lifetimeMs
+        || !/^[a-f0-9]{64}$/.test(row.sha256)
+        || bytes && (bytes.byteLength !== row.byte_length || digest(bytes) !== row.sha256))
+        throw new Error('Attachment data requires operator reconciliation');
+      validate({ id: row.id, filename: row.filename, mediaType: row.media_type, bytes: bytes ?? new Uint8Array() });
+      rows.push({ ...row, bytes: bytes === null ? null : { byteLength: bytes.byteLength, sha256: digest(bytes) } });
+    }
+    return rows;
+  }
   stage(token, roomId, input, binding = null) {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId, binding);

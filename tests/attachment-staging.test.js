@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
-import { RoomAttachments, attachmentSchema, attachmentLimits } from '../server/attachments.mjs';
+import { attachmentLimits } from '../server/attachments.mjs';
+import { auditRecovery } from '../server/recovery.mjs';
 
 function setup(t) {
   let now = Date.now();
@@ -14,9 +15,7 @@ function setup(t) {
   const owner = store.issueAccessKey('files', 'owner'), other = store.issueAccessKey('other', 'owner');
   store.command(owner, 'files', { id: randomUUID(), type: 'member.added', data: { memberId: 'guest', displayName: 'Guest', kind: 'human', permissions: [] } });
   const guest = store.issueAccessKey('files', 'guest');
-  // Deliberately test-only until versioned migration + recovery integration.
-  store.transaction(() => store.db.exec(attachmentSchema));
-  const files = new RoomAttachments(store);
+  const files = store.attachments;
   const input = (id = randomUUID(), bytes = new Uint8Array([0, 255, 12])) => ({ id, filename: 'notes.txt', mediaType: 'text/plain', bytes });
   return { store, files, owner, guest, other, input, advance: ms => { now += ms; } };
 }
@@ -100,4 +99,21 @@ test('zero-byte uploads cannot bypass the staging count cap', t => {
   for (let n = 0; n < attachmentLimits.stagedPerMember; n++)
     f.files.stage(f.owner, 'files', f.input('empty-' + n, new Uint8Array()));
   assert.throws(() => f.files.stage(f.owner, 'files', f.input('extra', new Uint8Array())), { code: 'attachment_capacity' });
+});
+
+test('recovery includes verified attachment bytes and tombstones without leaking content', t => {
+  const f = setup(t), input = f.input();
+  const before = auditRecovery(f.store);
+  f.files.stage(f.owner, 'files', input);
+  const staged = auditRecovery(f.store);
+  assert.notEqual(staged.dataSha256, before.dataSha256);
+  assert.equal(staged.tables.find(row => row.table === 'room_attachments').rows, 1);
+  assert.deepEqual(auditRecovery(f.store), staged, 'audit does not mutate the database');
+  f.store.transaction(() => f.store.db.prepare('UPDATE room_attachments SET bytes=? WHERE id=?').run(new Uint8Array([1, 2, 3]), input.id));
+  assert.throws(() => auditRecovery(f.store), /Attachment data/);
+  f.store.transaction(() => f.store.db.prepare('UPDATE room_attachments SET bytes=? WHERE id=?').run(input.bytes, input.id));
+  f.files.discard(f.owner, 'files', input.id);
+  const discarded = auditRecovery(f.store);
+  assert.notEqual(discarded.dataSha256, staged.dataSha256);
+  assert.equal(discarded.tables.find(row => row.table === 'room_attachments').rows, 1);
 });

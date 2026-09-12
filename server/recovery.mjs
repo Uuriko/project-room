@@ -101,8 +101,9 @@ export function auditRecovery(store) {
       byWork.delete(key);
     }
     requireState(byWork.size === 0);
+    const attachmentRows = store.attachments.audit();
     const contents = applicationTables.map(table => {
-      const rows = store.db.prepare(`SELECT * FROM ${table}`).all().map(canonical).sort();
+      const rows = (table === 'room_attachments' ? attachmentRows : store.db.prepare(`SELECT * FROM ${table}`).all()).map(canonical).sort();
       return { table, rows: rows.length, sha256: digest(rows) };
     });
     return { contractVersion: 1, schemaVersion: STORE_SCHEMA_VERSION, platform,

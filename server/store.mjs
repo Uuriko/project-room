@@ -18,6 +18,7 @@ import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs
 import { GuestAgentLinks, isRoomAccessToken } from "./guest-agent-links.mjs";
 import { AgentIdentities, agentIdentitySchema, isIdentitySecret } from "./agent-identities.mjs";
 import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
+import { RoomAttachments, attachmentSchema } from "./attachments.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
 import { charterContext, charterFromEvent } from "../src/room-charter.js";
 import { REPLY_FIELDS, REPLY_POLICY_VERSION, replyPostMode } from "../src/reply-requests.js";
@@ -262,6 +263,7 @@ export class RoomStore {
     this.shareLinks = new ShareLinks(this);
     this.identities = new AgentIdentities(this);
     this.invites = new AgentInvites(this);
+    this.attachments = new RoomAttachments(this);
     this.reminders = new Reminders(this);
     this.agentConnections = new AgentConnections(this);
     this.guestAgentLinks = new GuestAgentLinks(this);
@@ -290,6 +292,7 @@ export class RoomStore {
         this.verifyHelpHistory();
         this.inbox.verify();
         this.email.verify();
+        this.attachments.verify();
         return;
       } catch (error) { this.db.close(); throw error; }
     }
@@ -363,6 +366,7 @@ export class RoomStore {
       // impact), so no schema version bump: IF NOT EXISTS is idempotent here
       // and the v0 block above covers fresh databases.
       this.db.exec(agentInviteSchema);
+      if (version < 28) this.db.exec(attachmentSchema);
       if (version < STORE_SCHEMA_VERSION) this.storagePlatform.installWriterFence(this.db);
       this.storagePlatform.verifyWriterFence(this.db);
       this.verifyInvitationAudit();
@@ -372,6 +376,7 @@ export class RoomStore {
       this.verifyHelpHistory();
       this.inbox.verify();
       this.email.verify();
+      this.attachments.verify();
     }); } catch (error) { this.db.close(); throw error; }
   }
 
