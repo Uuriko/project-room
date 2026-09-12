@@ -425,7 +425,7 @@ components:
           description: Client-generated idempotency key (UUID)
         type:
           type: string
-          description: Event type, e.g. message.posted, capabilities.advertised
+          description: Event type, e.g. message.posted, message.edited, message.deleted, notifications.preferences_set, capabilities.advertised
         data:
           type: object
           description: Event payload; validated per event type

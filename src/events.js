@@ -13,6 +13,7 @@ export const EVENT_TYPES = Object.freeze({
   MEMBER_JOINED_VIA_INVITATION: "member.joined_via_invitation",
   MEMBER_ACCESS_CHANGED: "member.access_changed",
   MEMBER_STATUS_UPDATED: "member.status_updated",
+  NOTIFICATION_PREFERENCES_SET: "notifications.preferences_set",
   MESSAGE_POSTED: "message.posted",
   MESSAGE_EDITED: "message.edited",
   MESSAGE_DELETED: "message.deleted",
@@ -138,6 +139,7 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.MEMBER_JOINED_VIA_INVITATION]: joinMemberViaInvitation,
     [EVENT_TYPES.MEMBER_ACCESS_CHANGED]: changeMemberAccess,
     [EVENT_TYPES.MEMBER_STATUS_UPDATED]: updateMemberStatus,
+    [EVENT_TYPES.NOTIFICATION_PREFERENCES_SET]: setNotificationPreferences,
     [EVENT_TYPES.MESSAGE_POSTED]: postMessage,
     [EVENT_TYPES.MESSAGE_EDITED]: editMessage,
     [EVENT_TYPES.MESSAGE_DELETED]: deleteMessage,
@@ -199,7 +201,8 @@ function validateEnvelope(incoming) {
     if (["expectedRevision", "expectedMemberRevision"].includes(key) && (!Number.isSafeInteger(value) || value < 0)) throw new Error(`Invalid ${key}`);
     if (["independentVerificationRequired", "ownerDecisionRequired", "active"].includes(key) && typeof value !== "boolean") throw new Error(`Invalid ${key}`);
     if (["permissions", "paths", "checksClaimed", "capabilities"].includes(key) && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !v.trim() || v.length > 512))) throw new Error(`Invalid ${key}`);
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities"].includes(key)) throw new Error(`Invalid ${key}`);
+    if (key === "preferences" && (Array.isArray(value) || typeof value !== "object" || Object.entries(value).some(([k, v]) => typeof k !== "string" || typeof v !== "string" || k.length > 64 || v.length > 64))) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -313,6 +316,26 @@ function updateMemberStatus(state, incoming) {
   if (message.length > 140) throw new Error("Status message must be 140 characters or fewer");
   member.statusMessage = message;
   member.revision += 1;
+}
+
+const NOTIFICATION_CHANNELS = ["mentions", "replies", "work_updates", "announcements"];
+const NOTIFICATION_LEVELS = ["all", "mentions_only", "none"];
+
+function setNotificationPreferences(state, incoming) {
+  requireFields(incoming.data, ["preferences"]);
+  const member = requireMember(state, incoming.actorId);
+  const prefs = incoming.data.preferences;
+  if (!prefs || Array.isArray(prefs) || typeof prefs !== "object") throw new Error("Preferences must be an object");
+  for (const [channel, level] of Object.entries(prefs)) {
+    if (!NOTIFICATION_CHANNELS.includes(channel)) throw new Error(`Unknown notification channel: ${channel}`);
+    if (!NOTIFICATION_LEVELS.includes(level)) throw new Error(`Unknown notification level: ${level}`);
+  }
+  member.notificationPreferences = { ...(member.notificationPreferences ?? defaultNotificationPreferences()), ...prefs };
+  member.revision += 1;
+}
+
+function defaultNotificationPreferences() {
+  return { mentions: "all", replies: "all", work_updates: "all", announcements: "all" };
 }
 
 function requireScopedMemberAdministration(state, actorId, targetId, currentTarget, nextPermissions) {
