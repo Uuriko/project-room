@@ -45,6 +45,7 @@ optional.push("src/inbox-send-ui.js");
 optional.push("src/room-roster.js");
 optional.push("deploy/agent-discovery.mjs", "deploy/room-entry.mjs", "server/guest-agent-links.mjs");
 optional.push("src/work-item-session.js");
+optional.push("src/board.js");
 optional.push("scripts/release-evidence.mjs");
 const allowed = new Set([...required, ...optional]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
