@@ -1,4 +1,5 @@
 import { workTemplate, WORK_TEMPLATES } from "../src/work-templates.js";
+import { roomTemplate, ROOM_TEMPLATES } from "../src/room-templates.js";
 import { projectBoard } from "../src/board.js";
 import { validId, PERMISSIONS, WORK_STATES } from "../src/events.js";
 import { nextWorkStep, workActions, reusableWorkDefinition, workCollaboration } from "../src/workflow.js";
@@ -380,6 +381,36 @@ export class RoomAgentClient {
   presence({ signal } = {}) { return this.#request("/presence", undefined, signal); }
   workTemplates() { return WORK_TEMPLATES; }
   workTemplate(id) { return workTemplate(id); }
+  roomTemplates() { return ROOM_TEMPLATES; }
+  roomTemplate(id) { return roomTemplate(id); }
+  // Round-2 #115: apply a room template through the normal command path.
+  // Charter needs the Room owner; work items need "steer". Returns a receipt
+  // of what landed and what was skipped (with reasons).
+  async applyRoomTemplate(id, { accountableMemberId, signal } = {}) {
+    const template = roomTemplate(id);
+    if (!template) throw new Error(`Unknown room template: ${id}`);
+    const receipt = { template: id, charter: null, workItems: [] };
+    const charter = await this.charter().catch(() => null);
+    try {
+      await this.command({ id: randomUUID(), type: "room.charter_updated",
+        data: { expectedRevision: charter?.revision ?? 0, ...template.charter } }, { signal });
+      receipt.charter = "updated";
+    } catch (error) {
+      receipt.charter = `skipped: ${error.message}`;
+    }
+    const accountable = accountableMemberId ?? this.#memberId;
+    for (const item of template.workItems) {
+      try {
+        const result = await this.command({ id: randomUUID(), type: "work.proposed",
+          data: { workItemId: randomUUID(), title: item.title, definitionOfDone: item.definitionOfDone,
+            mode: item.mode, ...(accountable ? { accountableMemberId: accountable } : {}) } }, { signal });
+        receipt.workItems.push({ title: item.title, workItemId: result?.event?.data?.workItemId ?? null });
+      } catch (error) {
+        receipt.workItems.push({ title: item.title, skipped: error.message });
+      }
+    }
+    return receipt;
+  }
   search(query, { kind = "all", signal } = {}) {
     const params = new URLSearchParams({ q: query });
     if (kind !== "all") params.set("kind", kind);
