@@ -134,6 +134,7 @@ const assertServiceOrigin = origin => {
   if (url.origin !== origin || url.username || url.password || (url.protocol !== "https:" && !(local && url.protocol === "http:"))) throw new Error("Use a fixed HTTPS origin or an isolated loopback development origin");
   return url.origin;
 };
+export { assertServiceOrigin };
 
 // Minting an agent identity is the unauthenticated first step of plugging in:
 // no credential exists yet, so this sends no Authorization header and needs
