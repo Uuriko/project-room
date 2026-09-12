@@ -1,4 +1,4 @@
-import { mkdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { RoomStore } from "./server/store.mjs";
 import { createRoomServer } from "./server/http.mjs";
@@ -9,7 +9,9 @@ import { maintenanceEnabled, maintenanceReply } from "./server/maintenance.mjs";
 const { host, port, origin, filename, production } = deploymentConfig();
 const paused = maintenanceEnabled(process.env.ROOM_MAINTENANCE);
 process.umask(0o077);
-if (!paused && production && !statSync(filename).isFile()) throw new Error("Provision a persistent pilot database before startup");
+let havePilotDb = false;
+try { havePilotDb = statSync(filename).isFile(); } catch { havePilotDb = false; }
+if (!paused && production && !havePilotDb) throw new Error("Provision a persistent pilot database before startup");
 if (!paused) mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
 const store = paused ? null : new RoomStore(filename);
 if (store && production && !store.db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) { store.close(); throw new Error("Provision a room before deployment"); }
