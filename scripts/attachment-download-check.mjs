@@ -56,9 +56,28 @@ for (const mobile of [false, true]) test(`verified file download ${mobile ? 'mob
   await page.locator('#file-picker').setInputFiles({ name: 'from-composer.txt', mimeType: 'text/plain', buffer: Buffer.from(bytes) });
   await page.locator('#composer-files').getByText('Ready', { exact: true }).waitFor();
   assert.equal(store.room('commons').state.messages.length, 1, 'staging is not sending');
+  let loseMessageResponse = true;
+  const attempts = [];
+  await page.route('**/commands', async route => {
+    const command = route.request().postDataJSON();
+    if (command.type === 'message.posted') {
+      attempts.push(command);
+      if (loseMessageResponse) { loseMessageResponse = false; await route.fetch(); await route.abort(); return; }
+    }
+    await route.continue();
+  });
   await page.locator('#message-input').fill('Uploaded from the composer');
   await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.locator('#composer-status').filter({ hasText: 'Draft kept' }).waitFor();
+  assert.equal(await page.locator('#message-input').evaluate(element => element.readOnly), true);
+  assert.equal(await page.locator('#attach-file').isDisabled(), true);
+  assert.equal(store.room('commons').state.messages.length, 2, 'message committed even though confirmation was lost');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
   await page.getByRole('button', { name: 'Download from-composer.txt', exact: true }).waitFor();
+  await page.waitForFunction(() => document.querySelector('#message-input').value === '');
+  assert.equal(attempts.length, 2);
+  assert.deepEqual(attempts[1], attempts[0], 'retry preserves the exact event and file IDs');
+  await page.unroute('**/commands');
   assert.equal(store.room('commons').state.messages.length, 2);
   assert.equal(await page.locator('#composer-files .composer-file').count(), 0);
   const posted = store.room('commons').state.messages.at(-1);

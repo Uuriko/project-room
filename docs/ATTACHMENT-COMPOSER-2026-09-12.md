@@ -27,7 +27,17 @@ revision-checked message deletion path.
 - Earlier20 focused upload/conversation checks passed. This did not include a
   draft-recovery suite: the initially supplied draft-recovery filename did not
   exist; the25-test follow-up uses actual draft-return/reply-composer suites.
-- No browser runtime errors. Full combined regression remains pending.
+- No browser runtime errors. Exactb7c23ca full combined regression subsequently
+  passed1215/1215,0failed/skip,28205ms.
+
+### Lost message confirmation follow-up
+
+The two desktop/mobile journeys now also commit the captioned attachment message
+and deliberately abort its confirmation response. The browser preserves the draft,
+locks content/file changes and retries the exact same command and attachment IDs.
+The database still contains only one posted message for that send. Both journeys
+passed after this additional assertion. This verifies explicit retry, not automatic
+resolution after reload or every possible stale/expired refusal.
 
 ## Remaining requirements and limits
 
