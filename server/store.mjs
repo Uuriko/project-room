@@ -1126,9 +1126,9 @@ export class RoomStore {
         // Full retained-history/checkpoint validation belongs to the recovery audit.
         const rows = this.db.prepare("SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.type')=? AND json_extract(body,'$.data.expectedRevision')=? LIMIT 2").all(roomId, T.ROOM_CHARTER_UPDATED, selected - 1);
         if (rows.length !== 1) fail(404, "charter_not_found", "That instructions version is unavailable");
-        const event = JSON.parse(rows[0].body);
-        if (event.roomId !== roomId || event.actorId !== room.state.room.ownerId) fail(409, "charter_integrity_error", "Instructions history requires reconciliation");
-        charter = charterFromEvent(event, { revision: selected - 1 });
+        const parsedEvent = JSON.parse(rows[0].body);
+        if (parsedEvent.roomId !== roomId || parsedEvent.actorId !== room.state.room.ownerId) fail(409, "charter_integrity_error", "Instructions history requires reconciliation");
+        charter = charterFromEvent(parsedEvent, { revision: selected - 1 });
       }
       return { contractVersion: 1, roomId, evaluatedThrough: room.sequence, currentRevision: current.revision, currentEventId: current.eventId,
         ...charterContext({ charter }), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
@@ -1165,9 +1165,9 @@ export class RoomStore {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const prior = this.db.prepare("SELECT e.sequence,e.body FROM commands c JOIN events e ON e.room_id=c.room_id AND e.sequence=c.sequence WHERE c.room_id=? AND c.actor_id=? AND c.id=?").get(roomId, auth.member.id, request.requestId);
       if (prior) {
-        const event = JSON.parse(prior.body);
-        if (!sessionEventMatchesRequest(event, request)) fail(409, "idempotency_conflict", "Command ID already used for different content");
-        return { sequence: prior.sequence, event, duplicate: true };
+        const parsedEvent = JSON.parse(prior.body);
+        if (!sessionEventMatchesRequest(parsedEvent, request)) fail(409, "idempotency_conflict", "Command ID already used for different content");
+        return { sequence: prior.sequence, event: parsedEvent, duplicate: true };
       }
       const item = this.room(roomId).state.workItems[request.workItemId];
       if (!item) fail(404, "work_not_found", "Work item not found in this Room");
