@@ -1,12 +1,28 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { transitionRequestRun, requestRunMayExecute } from "../src/request-run-policy.js";
+import { transitionRequestRun, requestRunMayExecute, requestRunView } from "../src/request-run-policy.js";
 
 const now = "2026-09-12T22:00:00.000Z", later = "2026-09-12T22:00:01.000Z", expired = "2026-09-12T22:00:30.000Z";
 const context = () => ({ request: { id: "question", requesterId: "human", recipientId: "agent", status: "open", contextEventId: "context", workItemId: null },
   actor: { id: "agent", kind: "agent", active: true }, ownerId: "owner", instructionsRevision: 0 });
 const claim = (patch = {}) => ({ expectedRevision: 0, runId: "one", contextEventId: "context", instructionsRevision: 0, maxRuntimeMs: 10000, maxOutputBytes: 4096, ...patch });
 const start = c => transitionRequestRun(c, "claim", claim(), now);
+
+test("chat run view separates expiry, stop, completion and participant authority", () => {
+  const c = context(), run = start(c), state = { room: { ownerId: "owner" }, requestRuns: { question: run }, replyRequests: { question: c.request },
+    members: { human: { active: true, kind: "human" }, agent: { active: true, kind: "agent" }, stranger: { active: true, kind: "human" }, owner: { active: true, kind: "human" } } };
+  assert.equal(requestRunView(state, "missing", "human", later), null);
+  for (const viewer of ["human", "agent", "owner"]) assert.equal(requestRunView(state, "question", viewer, later).canStop, true);
+  assert.equal(requestRunView(state, "question", "stranger", later).canStop, false);
+  assert.equal(requestRunView(state, "question", "human", later).label, "Run in progress");
+  assert.deepEqual(requestRunView(state, "question", "human", expired), { label: "Run unconfirmed", canStop: true });
+  run.status = "stop_requested";
+  assert.deepEqual(requestRunView(state, "question", "human", later), { label: "Stop requested", canStop: false });
+  run.status = "succeeded";
+  assert.deepEqual(requestRunView(state, "question", "human", later), { label: "Run finished", canStop: false });
+  state.members.human.active = false; run.status = "running";
+  assert.equal(requestRunView(state, "question", "human", later).canStop, false);
+});
 
 test("work-free human and agent requests share an immutable execution policy", () => {
   for (const kind of ["human", "agent"]) {

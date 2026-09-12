@@ -10,6 +10,7 @@ import { installRoomInstructions } from "./room-instructions.js";
 import { installReminders } from "./reminders.js";
 import { installPortableWork, installResultCopy } from "./portable-work.js";
 import { replyDraftKey, replyDraftData, validReplyDraft, creditQuestion, confirmsReplyCommand, REPLY_CANCELLED } from "./reply-requests.js";
+import { requestRunView } from "./request-run-policy.js";
 import { workHelpContext, validateHelpData } from "./work-help.js";
 import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
 import { installInbox } from "./inbox-ui.js";
@@ -68,7 +69,8 @@ let offerContextVersion = null;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
 let requestMode = null, requestReading = false, requestEpoch = 0;
 const composerKey = () => replyDraftKey(requestMode, currentThreadId);
-const viewPositions = new Map(), pendingReactions = new Map(), locallyOwnedMessageIds = new Set();
+const viewPositions = new Map(), pendingReactions = new Map(), pendingRunStops = new Map(), locallyOwnedMessageIds = new Set();
+let requestRunClock = null;
 let newVisibleMessages = 0, unreadAnchorId = null, mentionIndex = 0;
 let roomCursor = 0, roomGeneration = -1, showAllAttention = false, returnClock = null;
 let signoutOperationId = 0, signoutLoading = false;
@@ -155,6 +157,7 @@ const client = new RoomClient({
     releaseSubmission(submitControls);
     submitOperationId += 1; busy = false;
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
+    pendingRunStops.clear(); clearTimeout(requestRunClock); requestRunClock = null;
     $("#resume-action").hidden = true; $("#refresh-action").hidden = true;
     $("#action-evidence").hidden = true; $("#action-evidence").removeAttribute("href");
     $("#action-text").hidden = true; $("#action-text-body").textContent = ""; $("#action-text-origin").textContent = "";
@@ -921,6 +924,8 @@ function render() {
   renderContent("#event-list", [...state.eventLog].reverse().map(e => `<li id="${recordDomId("event", e.id)}" tabindex="-1" data-event-record-id="${esc(e.id)}" data-focus-key="event:${esc(e.id)}"><span>${esc(humanize(e.type))}</span><strong>${esc(memberLabel(e.actorId))}</strong><time datetime="${esc(e.at)}">${esc(time(e.at))}</time><code>${esc(e.id)}</code></li>`).join(""));
 }
 function renderMessages() {
+  clearTimeout(requestRunClock); requestRunClock = null;
+  for (const [id, pending] of pendingRunStops) if (pending.confirmed && client.sequence >= pending.confirmed) pendingRunStops.delete(id);
   const list = $("#message-list"), view = currentThreadId ? `thread:${currentThreadId}` : "room";
   const sameView = list.dataset.view === view;
   const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots;
@@ -1008,6 +1013,9 @@ function renderMessages() {
   $("#new-messages-button").hidden = newVisibleMessages === 0;
   $("#new-messages-button").textContent = `${newVisibleMessages} new ${newVisibleMessages === 1 ? "message" : "messages"} · jump to latest`;
   if (announceCount) $("#conversation-announcement").textContent = `${announceCount} new ${announceCount === 1 ? "message" : "messages"} in ${currentThreadId ? "this thread" : "the room"}. Room event ${client.sequence}.`;
+  const now = Date.now(), deadlines = messages.map(message => state.requestRuns?.[message.id])
+    .filter(run => run?.status === "running").map(run => Date.parse(run.deadlineAt)).filter(deadline => deadline > now);
+  if (deadlines.length && !document.hidden) requestRunClock = setTimeout(() => { if (state) renderMessages(); }, Math.min(60000, Math.max(10, Math.min(...deadlines) - now)));
 }
 function draftFeedbackHTML(message) {
   if (!message.proposal) return "";
@@ -1110,7 +1118,10 @@ function requestControls(message) {
   const actions = [];
   if (open && own === request.recipientId) actions.push(["answered", "Answer"], ["declined", "Decline"]);
   if (open && (own === request.requesterId || own === state.room.ownerId && session.member.kind === "human")) actions.push(["cancelled", "Cancel request"]);
-  return `<span class="request-state">${esc(status)}</span>${actions.map(([kind, label]) =>
+  const run = requestRunView(state, message.id, own), pending = pendingRunStops.get(message.id);
+  const runControl = run ? `<span class="request-run-state" title="Run status does not confirm an answer or approval">${esc(run.label)}</span>${pending?.confirmed ? `<span>Stop recorded</span>` : pending || run.canStop
+    ? `<button type="button" class="message-to-work" data-message-id="${esc(message.id)}" data-message-action="stop-request-run"${pending?.busy ? " disabled" : ""} title="Request a stop; the process may still be running">${pending?.busy ? "Requesting stop…" : pending ? "Retry stop" : "Stop run"}</button>` : ""}${pending?.error ? `<span role="status">Stop not confirmed. Retry the same request.</span>` : ""}` : "";
+  return `<span class="request-state">${esc(status)}</span>${runControl}${actions.map(([kind, label]) =>
     `<button type="button" class="message-to-work" data-message-id="${esc(message.id)}" data-message-action="request-${kind}">${label}</button>`).join("")}`;
 }
 function syncRequestComposer() {
@@ -1863,9 +1874,10 @@ $("#message-list").addEventListener("click", e => {
   if (e.target.closest("[data-empty-invite]")) { $("#invite-people-button")?.click(); return; }
   const chip = e.target.closest("[data-mention-id]");
   if (chip && state) { applyMentionMember(state.members[chip.dataset.mentionId]); return; }
-  const button = e.target.closest("[data-message-id]"); if (!button || !state || busy) return;
+  const button = e.target.closest("[data-message-id]"); if (!button || !state || busy && button.dataset.messageAction !== "stop-request-run") return;
   const id = button.dataset.messageId;
   if (button.dataset.messageAction === 'file') { void downloadMessageFile(id, button.dataset.fileId); return; }
+  if (button.dataset.messageAction === "stop-request-run") { void stopRequestRun(id); return; }
   if (button.dataset.messageAction?.startsWith("request-")) openRequestMode(button.dataset.messageAction.slice(8), id);
   else if (button.dataset.messageAction === "work") openWork(id);
   else if (button.dataset.messageAction === "result") {
@@ -2183,6 +2195,38 @@ $("#new-messages-button").addEventListener("click", () => {
   const list = $("#message-list"); list.scrollTop = list.scrollHeight; newVisibleMessages = 0; unreadAnchorId = null;
   $("#new-messages-button").hidden = true; list.focus({ preventScroll: true });
 });
+async function stopRequestRun(requestMessageId) {
+  const previous = pendingRunStops.get(requestMessageId);
+  if (!state || !session || previous?.busy || previous?.confirmed) return;
+  if (!previous && !requestRunView(state, requestMessageId, session.member.id)?.canStop) return;
+  const run = state.requestRuns[requestMessageId], identity = session, generation = client.generation;
+  const pending = previous ?? draftCommand(null, T.REQUEST_RUN_STOP_REQUESTED,
+    { requestMessageId, runId: run.runId, expectedRevision: run.revision });
+  const focused = document.activeElement?.dataset.messageAction === "stop-request-run";
+  pending.busy = true; pending.error = false; pendingRunStops.set(requestMessageId, pending); renderMessages();
+  const owns = () => state && session === identity && client.generation === generation && pendingRunStops.get(requestMessageId) === pending;
+  try {
+    const receipt = await client.send(pending.command);
+    if (!owns()) return;
+    if (!await confirmsReplyCommand(receipt, pending.command, identity.roomId, identity.member.id)) throw new Error("Stop not confirmed");
+    if (!owns()) return;
+    pending.busy = false; pending.confirmed = receipt.sequence;
+    notice("Stop requested. The process may still be running.");
+  } catch (error) {
+    if (!owns()) return;
+    if (error.code === "command_rejected" && [409, 422].includes(error.status)) {
+      pendingRunStops.delete(requestMessageId); notice("Run changed. Check its current status.", true);
+    } else { pending.busy = false; pending.error = true; }
+  } finally {
+    if (state && session === identity && client.generation === generation) {
+      renderMessages();
+      if (focused && document.activeElement === document.body) {
+        const row = [...$("#message-list").children].find(node => node.dataset.key === requestMessageId);
+        (row?.querySelector('[data-message-action="stop-request-run"]') ?? row?.querySelector('[data-message-action="reply"]'))?.focus({ preventScroll: true });
+      }
+    }
+  }
+}
 async function setReaction(messageId, reaction) {
   const key = `${messageId}:${reaction}`, previous = pendingReactions.get(key);
   if (previous?.busy || !Object.hasOwn(REACTIONS, reaction)) return;
@@ -2684,7 +2728,7 @@ $("#action-form").addEventListener("submit", e => {
 });
 window.addEventListener("beforeunload", e => {
   if (state) saveComposer();
-  if ((state && (drafts.hasDraft() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction))
+  if ((state && (drafts.hasDraft() || [...pendingRunStops.values()].some(pending => !pending.confirmed) || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction))
     || invitationIsCommitting() || invitation.phase === "unknown") { e.preventDefault(); e.returnValue = ""; }
 });
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden" && state) saveComposer(); });
@@ -2918,7 +2962,7 @@ $("#rb-more-button").addEventListener("click", async () => {
 });
 $("#rb-ack-button").addEventListener("click", () => briefView.acknowledge());
 $("#rb-show-all").addEventListener("click", () => { showAllAttention = !showAllAttention; renderReturnBrief(); });
-document.addEventListener("visibilitychange", renderReturnBrief);
+document.addEventListener("visibilitychange", () => { renderReturnBrief(); if (state) renderMessages(); });
 shareLinksUI = installShareLinks({ client, accountClient, getState: () => state, getSession: () => session, setConnectionStatus,
   async openRoom(roomId, roomMode, joinedSession) {
     if (state && session?.roomId === roomId && session.member.id === joinedSession?.member?.id

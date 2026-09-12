@@ -1,6 +1,8 @@
 # Chat-request execution
 
-Status: policy and atomic claimed/stop-requested/finished commands are implemented with schema-v31 writer fencing. The local runner supports an explicitly selected work-free request. **Dedicated agent tools and chat run controls are not connected yet.** This is not a release claim.
+Status: policy and atomic claimed/stop-requested/finished commands are implemented with schema-v31 writer fencing. The local runner supports an explicitly selected work-free request. Chat shows run status and a scoped Stop control. **Dedicated agent tools and in-app run initiation are not connected yet.** This is not a release claim.
+
+Chat stop controls retain the exact command on uncertain confirmation, including when the snapshot already shows a stop request. A definitive command refusal permits a fresh, explicit action against current state; no silent revision refresh. Pending stops warn before leaving and clear on access reset. They are held in page memory, not restored automatically after reload. A recorded stop is not a stopped process. Deadline expiry refreshes the visible status to unconfirmed without writing an event or enabling takeover. Normal chat composition and request cancellation remain separate controls.
 
 ## Product boundary
 

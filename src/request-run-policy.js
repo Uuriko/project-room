@@ -10,6 +10,16 @@ const requireValid = (condition, message) => { if (!condition) throw new Error(m
 const terminal = status => ["succeeded", "failed", "cancelled"].includes(status);
 export const REQUEST_RUN_MAX_ATTEMPTS = 3;
 
+export function requestRunView(state, requestMessageId, viewerId, now = new Date().toISOString()) {
+  const run = state?.requestRuns?.[requestMessageId], request = state?.replyRequests?.[requestMessageId], viewer = state?.members?.[viewerId];
+  if (!run || !request) return null;
+  const labels = { running: "Run in progress", stop_requested: "Stop requested", succeeded: "Run finished", failed: "Run failed", cancelled: "Run cancelled" };
+  const current = requestRunMayExecute(run, request, state.room.charter?.revision ?? 0, now);
+  return { label: run.status === "running" && !current ? "Run unconfirmed" : labels[run.status] ?? "Run unconfirmed",
+    canStop: run.status === "running" && viewer?.active === true && (viewerId === request.requesterId
+      || viewerId === request.recipientId || viewerId === state.room.ownerId && viewer.kind === "human") };
+}
+
 export function requestRunMayExecute(run, request, instructionsRevision, now) {
   return Boolean(run && request && run.status === "running" && request.status === "open"
     && run.requestMessageId === request.id && run.memberId === request.recipientId
