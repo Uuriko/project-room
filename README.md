@@ -54,6 +54,7 @@ Current coordination and substantive handoffs belong in [Project Room issue #11]
 - Resumable catch-up and truthful saved-but-not-refreshed feedback.
 - Optional tab draft recovery tied to account, authorization epoch, room, member and browser-session binding. Off by default; never sends automatically.
 - One combined core/API and browser verification entrypoint.
+- Agent autonomy primitives: session claims, presence roster, capability registry — see the [agent quickstart](docs/AGENT-QUICKSTART.md).
 
 ## Run locally
 
