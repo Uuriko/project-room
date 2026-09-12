@@ -11,6 +11,7 @@ import { installReminders } from "./reminders.js";
 import { installPortableWork, installResultCopy } from "./portable-work.js";
 import { replyDraftKey, replyDraftData, validReplyDraft, creditQuestion, confirmsReplyCommand, REPLY_CANCELLED } from "./reply-requests.js";
 import { requestRunView } from "./request-run-policy.js";
+import { automationPreview, validateAutomationDefinition, confirmsAutomationCommand } from "./automation-policy.js";
 import { workHelpContext, validateHelpData } from "./work-help.js";
 import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
 import { installInbox } from "./inbox-ui.js";
@@ -71,6 +72,8 @@ let requestMode = null, requestReading = false, requestEpoch = 0;
 const composerKey = () => replyDraftKey(requestMode, currentThreadId);
 const viewPositions = new Map(), pendingReactions = new Map(), pendingRunStops = new Map(), locallyOwnedMessageIds = new Set();
 let requestRunClock = null;
+let automationSelection = null, automationEditing = null, automationPending = null;
+let automationClock = null;
 let newVisibleMessages = 0, unreadAnchorId = null, mentionIndex = 0;
 let roomCursor = 0, roomGeneration = -1, showAllAttention = false, returnClock = null;
 let signoutOperationId = 0, signoutLoading = false;
@@ -158,6 +161,10 @@ const client = new RoomClient({
     submitOperationId += 1; busy = false;
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
     pendingRunStops.clear(); clearTimeout(requestRunClock); requestRunClock = null;
+    automationSelection = null; automationEditing = null; automationPending = null;
+    clearInterval(automationClock); automationClock = null;
+    $("#automations-dialog").close(); $("#automation-form").reset(); $("#automation-form").hidden = true;
+    renderContent('#automation-list', ''); renderContent('#automation-detail', ''); $("#automation-status").textContent = '';
     $("#resume-action").hidden = true; $("#refresh-action").hidden = true;
     $("#action-evidence").hidden = true; $("#action-evidence").removeAttribute("href");
     $("#action-text").hidden = true; $("#action-text-body").textContent = ""; $("#action-text-origin").textContent = "";
@@ -337,7 +344,7 @@ async function loadAccountRooms(more = false) {
 async function openAccountRoom(roomId) {
   if (invitationIsCommitting() || signoutLoading) return;
   if (state) saveComposer();
-  if (state && (drafts.hasDraft() || pendingAction || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending()
+  if (state && (automationPending || !$("#automation-form").hidden || drafts.hasDraft() || pendingAction || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending()
       || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden)
       && !window.confirm("Switch rooms and clear unsent room drafts and pending retries? Saved work stays.")) return;
   const owned = accountClient.session;
@@ -886,6 +893,7 @@ function renderContent(selector, html) {
   restoreDisclosures(container, saved);
 }
 function render() {
+  renderAutomations();
   conversation = conversationIndex(state.messages);
   const members = Object.values(state.members), active = members.filter(m => m.active !== false);
   selectOptions("#message-to-select", active, "Everyone");
@@ -1517,7 +1525,7 @@ $("#invitation-account-form").addEventListener("submit", async e => {
   const privateDraft = inboxUI?.hasPending();
   if (roomBefore || privateDraft) {
     if (roomBefore) saveComposer();
-    if ((privateDraft || drafts.hasDraft() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction)
+    if ((privateDraft || automationPending || !$("#automation-form").hidden || drafts.hasDraft() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction)
       && !window.confirm(privateDraft ? "Switching accounts clears unsent private drafts and local retries. Unconfirmed actions may already be saved. Continue?"
         : (pendingAction?.uncertain || instructionsUI?.hasUnknown()) ? "Switch accounts and clear drafts and the pending retry? The action may already be saved." : "Signing in with a different account clears this Room’s unsent drafts, private setup and forms before acceptance. Continue with this account key?")) return;
   }
@@ -1727,7 +1735,7 @@ $("#signout-button").addEventListener("click", async () => {
   }
   if (busy || signoutLoading || !state || !session || invitationIsCommitting()) return;
   saveComposer();
-  if (drafts.hasDraft() || inboxUI?.hasPending() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction) {
+  if (automationPending || !$("#automation-form").hidden || drafts.hasDraft() || inboxUI?.hasPending() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction) {
     if (!window.confirm((pendingAction?.uncertain || instructionsUI?.hasUnknown()) ? "Sign out and clear drafts and the pending retry? The action may already be saved." : "Sign out and clear unsent drafts and private setup on this device?")) return;
   }
   const operationId = ++signoutOperationId;
@@ -2726,9 +2734,119 @@ $("#action-form").addEventListener("submit", e => {
     target?.focus();
   });
 });
+const automationLabels = { paused: 'Paused', needs_creator: 'Needs creator consent', needs_recipient: 'Needs recipient consent',
+  unavailable: 'Participant unavailable', exhausted: 'Run limit reached', in_flight: 'Request in progress', halted: 'Creator halted', ready: 'Ready', waiting: 'Not due yet' };
+function renderAutomations() {
+  if (!state || !session || !$("#automations-dialog").open) return;
+  const hadFocus = $('#automations-dialog').contains(document.activeElement);
+  if (automationPending?.confirmed && client.sequence >= automationPending.confirmed) {
+    automationSelection = automationPending.command.data.automationId; automationPending = null;
+    $("#automation-form").hidden = true; automationEditing = null;
+  }
+  const items = Object.values(state.automations ?? {});
+  renderContent('#automation-list', items.length ? items.map(a => `<button type="button" class="button ghost" data-automation-id="${esc(a.id)}" aria-pressed="${a.id === automationSelection}">${esc(a.definition.title)}</button>`).join('') : '<p class="form-hint">No automations yet.</p>');
+  const selected = state.automations?.[automationSelection];
+  if (selected) {
+    const p = automationPreview(state, selected.id, session.member.id, new Date().toISOString(), true), d = p.definition;
+    renderContent('#automation-detail', `<h3>${esc(p.title)}</h3><p>${esc(automationLabels[p.status])} · ${p.remainingRuns} runs left</p>
+      <p>To ${esc(memberLabel(p.recipientId))}</p><pre class="automation-prompt">${esc(d.prompt)}</pre>
+      <p class="form-hint">${Math.ceil(d.maxRuntimeMs / 1000)} seconds · ${d.maxOutputBytes} output bytes per run${d.trigger.kind === 'interval' ? ` · Every ${d.trigger.intervalMs / 60000} minutes, manually dispatched` : ''}</p>
+      <p class="form-hint">Creator: ${p.consent.creator ? 'enabled' : 'not enabled'} · Recipient: ${p.consent.recipient ? 'accepted' : 'not accepted'}</p>
+      <div class="automation-actions">${Object.entries({ edit: 'Edit', enable: 'Enable', accept: 'Accept', pause: 'Pause', dispatch: 'Run' }).filter(([key]) => p.actions[key]).map(([key, label]) => `<button type="button" class="button ghost" data-automation-action="${key}">${label}</button>`).join('')}</div>
+      ${p.lastRequestId ? `<button type="button" class="text-button" data-automation-request="${esc(p.lastRequestId)}">Open request</button>` : ''}`);
+  } else renderContent('#automation-detail', '');
+  const locked = Boolean(automationPending);
+  for (const el of $('#automations-dialog').querySelectorAll('input,textarea,select,button')) el.disabled = locked;
+  $('#automation-retry').hidden = !automationPending?.error;
+  $('#automation-retry').disabled = Boolean(automationPending?.busy);
+  $('#automation-new').hidden = !$('#automation-form').hidden;
+  $('#automation-detail').hidden = !$('#automation-form').hidden;
+  if (hadFocus && (!document.activeElement?.isConnected || document.activeElement === document.body || document.activeElement.closest('[hidden]'))) {
+    (automationPending?.error ? $('#automation-retry') : $('#automations-close')).focus();
+  }
+}
+function openAutomationForm(edit = false) {
+  if (!state || !session || automationPending) return;
+  const a = edit ? state.automations?.[automationSelection] : null;
+  if (edit && !automationPreview(state, a.id, session.member.id, new Date().toISOString(), true).actions.edit) return;
+  automationEditing = a ? structuredClone(a) : null;
+  $('#automation-form').reset(); $('#automation-form').hidden = false;
+  $('#automation-recipient').innerHTML = Object.values(state.members).filter(m => m.active && m.id !== session.member.id).map(m => `<option value="${esc(m.id)}">${esc(m.displayName)}${m.kind === 'agent' ? ' · Agent' : ''}</option>`).join('');
+  if (a) {
+    $('#automation-title').value = a.definition.title; $('#automation-prompt').value = a.definition.prompt;
+    $('#automation-recipient').value = a.definition.recipientId; $('#automation-runs').value = a.definition.maxRuns;
+    $('#automation-runtime').value = a.definition.maxRuntimeMs / 1000; $('#automation-output').value = a.definition.maxOutputBytes;
+  }
+  $('#automation-status').textContent = ''; renderAutomations(); $('#automation-title').focus();
+}
+async function sendAutomation(command = null, expected = null) {
+  if (!state || !session || automationPending?.busy || automationPending?.confirmed) return;
+  if (!automationPending) automationPending = { command: structuredClone(command), expected: structuredClone(expected), busy: false };
+  const pending = automationPending, identity = session, generation = client.generation;
+  const owns = () => state && session === identity && client.generation === generation && automationPending === pending;
+  pending.busy = true; pending.error = false; $('#automation-status').textContent = 'Saving…'; renderAutomations();
+  try {
+    const receipt = await client.send(pending.command);
+    if (!owns()) return;
+    if (!await confirmsAutomationCommand(receipt, pending.command, pending.expected, identity.roomId, identity.member.id)) throw new Error('Unconfirmed receipt');
+    if (!owns()) return;
+    pending.confirmed = receipt.sequence; $('#automation-status').textContent = pending.command.type === 'message.posted' ? 'Request posted. No process started.' : 'Saved.';
+  } catch (error) {
+    if (!owns()) return;
+    if (error.code === 'command_rejected' && [409, 422].includes(error.status)) {
+      automationPending = null; $('#automation-status').textContent = 'Changed. Review the current scope before trying again.';
+    } else { pending.error = true; $('#automation-status').textContent = 'Not confirmed. Retry the same action.'; }
+  } finally {
+    if (state && session === identity && client.generation === generation) { pending.busy = false; renderAutomations(); }
+  }
+}
+$('#automations-open').addEventListener('click', () => {
+  if (!state || !session) return;
+  $('#automations-dialog').showModal(); renderAutomations(); $('#automations-close').focus();
+  clearInterval(automationClock); automationClock = setInterval(() => { if (document.visibilityState === 'visible') renderAutomations(); }, 1000);
+});
+function closeAutomations() {
+  if (automationPending) return;
+  clearInterval(automationClock); automationClock = null;
+  $('#automations-dialog').close(); $('#automations-open').focus();
+}
+$('#automations-close').addEventListener('click', closeAutomations);
+$('#automations-dialog').addEventListener('cancel', e => { e.preventDefault(); closeAutomations(); });
+$('#automation-new').addEventListener('click', () => openAutomationForm());
+$('#automation-form-cancel').addEventListener('click', () => { if (!automationPending) { $('#automation-form').hidden = true; automationEditing = null; renderAutomations(); } });
+$('#automation-retry').addEventListener('click', () => sendAutomation());
+$('#automation-list').addEventListener('click', e => {
+  const button = e.target.closest('[data-automation-id]'); if (!button || automationPending) return;
+  automationSelection = button.dataset.automationId; renderAutomations();
+});
+$('#automation-detail').addEventListener('click', e => {
+  if (!state || !session || automationPending) return;
+  const request = e.target.closest('[data-automation-request]');
+  if (request) { closeAutomations(); revealMessage(request.dataset.automationRequest); return; }
+  const action = e.target.closest('[data-automation-action]')?.dataset.automationAction;
+  if (!action) return;
+  if (action === 'edit') return openAutomationForm(true);
+  const p = automationPreview(state, automationSelection, session.member.id, new Date().toISOString(), true);
+  if (!p.actions[action]) return;
+  const types = { enable: 'automation.enabled', accept: 'automation.accepted', pause: 'automation.paused' };
+  const data = action === 'dispatch' ? { messageId: crypto.randomUUID(), automationId: p.id, automationRevision: p.revision, automationSlot: p.nextSlot }
+    : { automationId: p.id, expectedRevision: p.revision };
+  const command = { id: crypto.randomUUID(), type: types[action] ?? 'message.posted', data };
+  const expected = action === 'dispatch' ? { ...data, body: p.definition.prompt, toMemberId: p.recipientId, requestKind: 'reply', workItemId: null, requestPolicyVersion: 1 } : data;
+  sendAutomation(command, expected);
+});
+$('#automation-form').addEventListener('submit', e => {
+  e.preventDefault(); if (!state || !session || automationPending) return;
+  const definition = { title: $('#automation-title').value, prompt: $('#automation-prompt').value, recipientId: $('#automation-recipient').value,
+    trigger: automationEditing?.definition.trigger ?? { kind: 'manual' }, maxRuns: Number($('#automation-runs').value),
+    maxRuntimeMs: Number($('#automation-runtime').value) * 1000, maxOutputBytes: Number($('#automation-output').value) };
+  try { validateAutomationDefinition(definition); } catch { $('#automation-status').textContent = 'Check the prompt and limits.'; return; }
+  const data = { automationId: automationEditing?.id ?? crypto.randomUUID(), expectedRevision: automationEditing?.revision ?? 0, definition };
+  sendAutomation({ id: crypto.randomUUID(), type: automationEditing ? 'automation.updated' : 'automation.created', data }, data);
+});
 window.addEventListener("beforeunload", e => {
   if (state) saveComposer();
-  if ((state && (drafts.hasDraft() || [...pendingRunStops.values()].some(pending => !pending.confirmed) || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction))
+  if ((state && (automationPending || !$("#automation-form").hidden || drafts.hasDraft() || [...pendingRunStops.values()].some(pending => !pending.confirmed) || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction))
     || invitationIsCommitting() || invitation.phase === "unknown") { e.preventDefault(); e.returnValue = ""; }
 });
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden" && state) saveComposer(); });

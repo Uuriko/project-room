@@ -151,7 +151,7 @@
           <header class="room-heading">
             <div>
               <h1 id="room-title" tabindex="-1">Project Room</h1>
-              <details id="room-about" class="room-about"><summary>About</summary><p class="room-purpose"></p><button id="room-instructions-open" class="button ghost" type="button" hidden>Room instructions</button></details>
+              <details id="room-about" class="room-about"><summary>About</summary><p class="room-purpose"></p><button id="room-instructions-open" class="button ghost" type="button" hidden>Room instructions</button><button id="automations-open" class="button ghost" type="button">Automations</button></details>
             </div>
             <div class="room-heading-actions">
               <div class="room-presence-summary">
@@ -566,6 +566,25 @@
       <p id="join-link-status" class="form-status" role="status" aria-live="polite"></p>
       <button id="join-link-retry" class="button primary" type="button" hidden>Retry</button>
       <button id="join-link-signout" class="button ghost" type="button" hidden>Sign out of expired guest session</button>
+    </dialog>
+    <dialog id="automations-dialog" aria-labelledby="automations-title">
+      <header class="automation-heading"><h2 id="automations-title">Automations</h2><button id="automations-close" class="button ghost" type="button">Close</button></header>
+      <p class="form-hint">Shared prompts. Run manually; background scheduling is off.</p>
+      <div class="automation-layout"><nav id="automation-list" aria-label="Saved automations"></nav><section>
+        <div id="automation-detail"></div><button id="automation-new" class="button ghost" type="button">New automation</button>
+        <form id="automation-form" hidden>
+          <label for="automation-title">Name</label><input id="automation-title" required maxlength="80">
+          <label for="automation-recipient">Recipient</label><select id="automation-recipient" required></select>
+          <label for="automation-prompt">Prompt</label><textarea id="automation-prompt" required maxlength="4096" rows="4"></textarea>
+          <details><summary>Limits</summary><div class="automation-limits">
+            <label>Runs<input id="automation-runs" type="number" min="1" max="100" value="10" required></label>
+            <label>Seconds per run<input id="automation-runtime" type="number" min="1" max="300" value="30" required></label>
+            <label>Output bytes<input id="automation-output" type="number" min="1" max="1048576" value="65536" required></label>
+          </div></details>
+          <button class="button primary" type="submit">Save</button><button id="automation-form-cancel" class="button ghost" type="button">Cancel</button>
+        </form>
+      </section></div>
+      <p id="automation-status" class="form-status visible" role="status"></p><button id="automation-retry" class="button primary" type="button" hidden>Retry</button>
     </dialog>
   </body>
 </html>

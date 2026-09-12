@@ -9,6 +9,16 @@ const check = (condition, message) => { if (!condition) throw new Error(message)
 const timestamp = value => typeof value === "string" && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
 const active = (members, memberId) => id(memberId) && members?.[memberId]?.active === true && ["human", "agent"].includes(members[memberId].kind);
 export const AUTOMATION_LIMIT = 100;
+export async function confirmsAutomationCommand(receipt, command, expectedData, roomId, memberId) {
+  const e = receipt?.event;
+  const canonical = value => Array.isArray(value) ? JSON.stringify(value) : value && typeof value === "object"
+    ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}` : JSON.stringify(value);
+  if (!Number.isSafeInteger(receipt?.sequence) || receipt.sequence < 1 || typeof receipt.duplicate !== "boolean"
+    || !id(e?.id) || e.type !== command.type || e.roomId !== roomId || e.actorId !== memberId
+    || e.causationId !== (command.causationId ?? null) || !timestamp(e.at) || canonical(e.data) !== canonical(expectedData)) return false;
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${memberId}:${command.id}`));
+  return e.idempotencyKey === [...new Uint8Array(hash)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
 export const AUTOMATION_MESSAGE_FIELDS = ["automationId", "automationRevision", "automationSlot"];
 export const isAutomationDispatch = data => AUTOMATION_MESSAGE_FIELDS.some(key => Object.hasOwn(data, key));
 export function validAutomationRequest(value) {

@@ -785,3 +785,16 @@ summary { overflow-wrap: anywhere; }
 .composer-file > span { overflow-wrap: anywhere; min-width: 0; flex: 1; }
 .composer-file button { min-height: 44px; }
 #composer-files > small { display: block; margin: .25rem 0; }
+#automations-dialog { width: min(760px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); overflow: auto; }
+.automation-heading, .automation-actions { display: flex; align-items: center; justify-content: space-between; gap: .5rem; flex-wrap: wrap; }
+.automation-layout { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(0, 2fr); gap: 1.25rem; }
+#automation-list { display: flex; flex-direction: column; align-items: stretch; gap: .4rem; }
+#automation-list button { text-align: left; overflow-wrap: anywhere; }
+#automation-list [aria-pressed="true"] { outline: 2px solid currentColor; outline-offset: -2px; }
+.automation-prompt { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; max-height: 200px; overflow: auto; }
+.automation-limits { display: grid; gap: .5rem; }
+#automation-form { margin-top: 1rem; }
+#automation-form input, #automation-form select, #automation-form textarea { box-sizing: border-box; width: 100%; margin: .25rem 0 .75rem; }
+#automations-dialog button { min-height: 44px; }
+#automation-status:empty { display: none; }
+@media (max-width: 600px) { .automation-layout { grid-template-columns: minmax(0, 1fr); } }
