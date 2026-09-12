@@ -8,6 +8,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { roomEntry } from "../deploy/room-entry.mjs";
 import {
   agentCard, llmsTxt, llmsFullTxt, agentCardJson, discoveryDoc, DISCOVERY_PATHS,
+  SHORT_PACKET_FILES,
   ROOM_ORIGIN, ROOM_DOOR, ROOM_PUBLIC_WWW, ROOM_PUBLIC_LOBBY, COMPUTE_DOOR, ROOM_DOCS,
   EDGE_DOOR_HOSTS, isEdgeDoorUrl
 } from "../deploy/agent-discovery.mjs";
@@ -36,7 +37,9 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(card.endpoints.healthz, `${ROOM_ORIGIN}/api/health`);
   assert.deepEqual(card.key_routes.map(row => row.path), [
     "/api/health", "/llms.txt", "/llms-full.txt", "/.well-known/agent.json",
-    "/room/llms.txt", "/room/llms-full.txt", "/room/.well-known/agent.json"
+    ...SHORT_PACKET_FILES.map(name => `/${name}`),
+    "/room/llms.txt", "/room/llms-full.txt", "/room/.well-known/agent.json",
+    ...SHORT_PACKET_FILES.map(name => `/room/${name}`)
   ]);
   assert.deepEqual(card.join.map(row => row.id), ["packet", "guest-agent-link", "enrolled-key"]);
   assert.equal(card.join.find(row => row.id === "packet").status, "live");
@@ -89,6 +92,22 @@ test("Room Worker serves llms.txt, llms-full.txt, agent.json and /room aliases",
   assert.equal(discoveryDoc("/room/.well-known/agent.json").body, discoveryDoc("/.well-known/agent.json").body);
 });
 
+test("conventional skill/agent filenames serve the same short packet as /llms.txt", async t => {
+  assert.deepEqual([...SHORT_PACKET_FILES], ["skill.md", "agents.md", "AGENTS.md", "CLAUDE.md"]);
+  const origin = await serve(t);
+  const short = discoveryDoc("/llms.txt");
+  for (const name of SHORT_PACKET_FILES) {
+    for (const path of [`/${name}`, `/room/${name}`]) {
+      assert.ok(DISCOVERY_PATHS.includes(path), path);
+      assert.equal(discoveryDoc(path).body, short.body, path);
+      assert.equal(discoveryDoc(path).type, short.type, path);
+      const get = await fetch(origin + path);
+      assert.equal(get.status, 200, path);
+      assert.equal(await get.text(), short.body);
+    }
+  }
+});
+
 test("door serves the same discovery bytes and points at origin", async () => {
   const html = await roomEntry(new Request("https://www.trydemigod.com/room")).text();
   assert.match(html, /Connect an agent/);
@@ -97,6 +116,7 @@ test("door serves the same discovery bytes and points at origin", async () => {
   assert.match(html, /href="\/room\/\.well-known\/agent\.json"/);
   for (const doorPath of [
     "/room/llms.txt", "/room/llms-full.txt", "/room/.well-known/agent.json",
+    "/room/skill.md", "/room/agents.md", "/room/AGENTS.md", "/room/CLAUDE.md",
     "/project-room/llms.txt", "/project-room/llms-full.txt", "/project-room/.well-known/agent.json"
   ]) {
     const expected = discoveryDoc(doorPath);
@@ -128,7 +148,7 @@ test("advertised door root serves the llms.txt entry doc, never 404", async (t) 
 test("edge door predicate: getdasha /room only, prefix preserved", () => {
   assert.deepEqual([...EDGE_DOOR_HOSTS], ["getdasha.com", "www.getdasha.com"]);
   for (const host of EDGE_DOOR_HOSTS) {
-    for (const path of ["/room", "/room/", "/room/llms.txt", "/room/llms-full.txt", "/room/.well-known/agent.json"]) {
+    for (const path of ["/room", "/room/", "/room/llms.txt", "/room/llms-full.txt", "/room/.well-known/agent.json", "/room/skill.md"]) {
       assert.equal(isEdgeDoorUrl(`https://${host}${path}`), true, `${host}${path}`);
     }
   }

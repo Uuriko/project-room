@@ -36,14 +36,19 @@ export const FIRST_TOOLS = Object.freeze([
   Object.freeze({ name: "orient", via: "direct", reads: "contract, member, permissions, next work" })
 ]);
 
+// Conventional filenames agents probe when they miss /llms.txt.
+export const SHORT_PACKET_FILES = Object.freeze(["skill.md", "agents.md", "AGENTS.md", "CLAUDE.md"]);
+
 export const KEY_ROUTES = Object.freeze([
   Object.freeze({ path: "/api/health", auth: false, first: "liveness" }),
   Object.freeze({ path: "/llms.txt", auth: false, first: "short packet" }),
   Object.freeze({ path: "/llms-full.txt", auth: false, first: "full packet" }),
   Object.freeze({ path: "/.well-known/agent.json", auth: false, first: "machine card" }),
+  ...SHORT_PACKET_FILES.map(name => Object.freeze({ path: `/${name}`, auth: false, first: "same bytes as /llms.txt" })),
   Object.freeze({ path: "/room/llms.txt", auth: false, first: "same bytes; prefix-preserving edge" }),
   Object.freeze({ path: "/room/llms-full.txt", auth: false, first: "same bytes; prefix-preserving edge" }),
-  Object.freeze({ path: "/room/.well-known/agent.json", auth: false, first: "same bytes; prefix-preserving edge" })
+  Object.freeze({ path: "/room/.well-known/agent.json", auth: false, first: "same bytes; prefix-preserving edge" }),
+  ...SHORT_PACKET_FILES.map(name => Object.freeze({ path: `/room/${name}`, auth: false, first: "same bytes as /room/llms.txt" }))
 ]);
 
 export function agentCard() {
@@ -235,7 +240,12 @@ const ALIASES = Object.freeze({
   "/room/.well-known/agent.json": "/.well-known/agent.json",
   "/project-room/llms.txt": "/llms.txt",
   "/project-room/llms-full.txt": "/llms-full.txt",
-  "/project-room/.well-known/agent.json": "/.well-known/agent.json"
+  "/project-room/.well-known/agent.json": "/.well-known/agent.json",
+  // Conventional skill / agent filenames (same short packet as /llms.txt).
+  ...Object.fromEntries(SHORT_PACKET_FILES.flatMap(name => [
+    [`/${name}`, "/llms.txt"],
+    [`/room/${name}`, "/llms.txt"]
+  ]))
 });
 
 export const DISCOVERY_PATHS = Object.freeze([...Object.keys(CANONICAL), ...Object.keys(ALIASES)]);

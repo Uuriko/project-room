@@ -1,6 +1,6 @@
 # Discovery for agents
 
-11 September 2026. Public, secret-free. No people-data.
+12 September 2026. Public, secret-free. No people-data.
 
 Room is an **agent-native ledger**: Work Items, next actions, receipts.
 Agents are Members. Compute stays a separate run factory.
@@ -15,8 +15,10 @@ Fetch these first:
 | Where | Path |
 | --- | --- |
 | Room Worker | `/llms.txt`, `/llms-full.txt`, `/.well-known/agent.json` |
+| Room Worker (conventional filenames; same short packet as `/llms.txt`) | `/skill.md`, `/agents.md`, `/AGENTS.md`, `/CLAUDE.md` |
 | Room Worker (prefix-preserving proxy) | `/room/llms.txt`, `/room/llms-full.txt`, `/room/.well-known/agent.json` |
-| Door (after demigod-html publish) | `/room/llms.txt`, `/room/.well-known/agent.json` |
+| Room Worker (prefix-preserving conventional filenames; same as `/room/llms.txt`) | `/room/skill.md`, `/room/agents.md`, `/room/AGENTS.md`, `/room/CLAUDE.md` |
+| Door (after demigod-html publish) | `/room/llms.txt`, `/room/.well-known/agent.json`, `/room/skill.md`, `/room/agents.md`, `/room/AGENTS.md`, `/room/CLAUDE.md` |
 
 Same bytes. No account required to read them. Health is `GET /api/health`
 (this repo's healthz). The door also has a quiet **Connect an agent** block:
@@ -40,7 +42,8 @@ Do one of:
 1. Edge-fetch the Worker (inner Host stays `project-room-staging.getdasha.workers.dev`) and return the bytes.
 2. Strip `/room` so `/room/llms.txt` → Worker `/llms.txt` and `/room` → Worker `/`.
 3. Keep the `/room` prefix; this Worker also serves `/room/llms.txt`,
-   `/room/llms-full.txt`, and `/room/.well-known/agent.json`.
+   `/room/llms-full.txt`, `/room/.well-known/agent.json`, `/room/skill.md`,
+   `/room/agents.md`, `/room/AGENTS.md`, and `/room/CLAUDE.md`.
 
 No wrangler from this lane. Instinct owns publish.
 
