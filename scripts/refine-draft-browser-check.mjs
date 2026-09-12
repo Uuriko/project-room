@@ -88,7 +88,7 @@ for (const mobile of [false, true]) test(`refine draft ${mobile ? "mobile" : "de
   assert.equal(await page.locator("#message-input").inputValue(), "Keep my conversation draft.");
   assert.ok(f.evidence().cursors.every(c => c.sequence === 0));
   page.on("dialog", dialog => dialog.accept());
-  await page.locator("#signout-button").click(); await page.locator("#auth-panel").waitFor();
+  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click(); await page.locator("#auth-panel").waitFor();
   assert.equal(await page.locator("#portable-original-body").textContent(), "");
   await login(); await open("source-b");
   assert.equal(await page.locator("#portable-result").inputValue(), "A different draft.\nChecks: none.");
