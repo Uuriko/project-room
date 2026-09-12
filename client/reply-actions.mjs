@@ -3,6 +3,7 @@ import { validId } from "../src/events.js";
 import { replyPostMode } from "../src/reply-requests.js";
 import { conforms, confirmsAgentCommand } from "./work-actions.mjs";
 import { agentErrorAx } from "../src/agent-error.mjs";
+import { validRequestRun } from "../src/request-run-policy.js";
 
 const id = { type: "string", minLength: 1, maxLength: 128, pattern: "^(?!(?:constructor|prototype|__proto__)$)[A-Za-z0-9][A-Za-z0-9_.:-]*$" };
 const text = { type: "string", minLength: 1, maxLength: 4096, pattern: "\\S" };
@@ -11,7 +12,15 @@ const token = { type: "string", minLength: 1, maxLength: 4096, pattern: "^[A-Za-
 const limit = { type: "integer", minimum: 1, maximum: 50 };
 const direction = { type: "string", enum: ["incoming", "outgoing", "both"] };
 const retry = " Keep this requestId and all input unchanged on an unknown result, cancellation or reconnect. A receipt confirms only the original operation. It is not current state, work completion or approval.";
+const runTypes = Object.freeze({ room_claim_request_run: "request_run.claimed", room_stop_request_run: "request_run.stop_requested", room_finish_request_run: "request_run.finished" });
 const definitions = [
+  ["room_claim_request_run", null, "Record one bounded run claim for an open request addressed to you. Read room_read_request and pin its current context and instructions revision; expectedRevision is current.run.revision or 0 when run is null. No Work Item required. This records ownership only: it does not launch code or grant machine/provider access. Never launch after a duplicate or unknown claim. The local room-run command claims for itself; do not preclaim for it." + retry,
+    { requestId: id, requestMessageId: id, expectedRevision: revision, runId: id, contextEventId: id, instructionsRevision: revision,
+      maxRuntimeMs: { type: "integer", minimum: 1, maximum: 300000 }, maxOutputBytes: { type: "integer", minimum: 1, maximum: 1048576 } }],
+  ["room_stop_request_run", null, "Request a stop for an inspected run when you are its requester or executing recipient. Does not confirm process termination or cancel the reply request. Copy runId and expectedRevision from current.run in room_read_request." + retry,
+    { requestId: id, requestMessageId: id, expectedRevision: revision, runId: id }],
+  ["room_finish_request_run", null, "Record your own matching run's terminal status after confirming your process has ended. Read current.run for expectedRevision. This does not answer a request, approve results or prove outside effects. Never report another executor stopped. No automatic restart after unknown termination." + retry,
+    { requestId: id, requestMessageId: id, expectedRevision: revision, runId: id, status: { type: "string", enum: ["succeeded", "failed", "cancelled"] } }],
   ["room_post_message", null, "Post an ordinary message in the room, optionally addressed to a participant or linked to work. No task or reply request is required or created. Does not start a model or automation; addressed messages remain room-visible." + retry,
     { requestId: id, body: text, toMemberId: id, workItemId: id }, ["requestId", "body"]],
   ["room_list_requests", "/reply-requests", "Read current incoming/outgoing reply requests. No message bodies or read acknowledgement. Status is current, not a history filter.",
@@ -43,7 +52,7 @@ export function validReplyArguments(name, args) {
 export function buildReplyCommand(identity, name, args) {
   if (!validId(identity?.roomId) || !validId(identity?.memberId) || !validReplyArguments(name, args) || replyRoute(name) !== null)
     throw Object.assign(new Error("Invalid reply action input or identity"), { code: "invalid_reply_action" });
-  const { requestId, ...data } = structuredClone(args), type = name === "room_cancel_request" ? "reply_request.cancelled" : "message.posted";
+  const { requestId, ...data } = structuredClone(args), type = runTypes[name] ?? (name === "room_cancel_request" ? "reply_request.cancelled" : "message.posted");
   if (type === "message.posted") data.messageId = "reply-" + createHash("sha256").update(JSON.stringify([identity.roomId, identity.memberId, requestId])).digest("hex");
   if (name === "room_request_reply") data.requestKind = "reply";
   if (name === "room_respond_to_request") data.replyToId = data.responseToRequestId;
@@ -58,6 +67,11 @@ export async function submitReplyAction(client, identity, name, args, { signal }
     message: "Outcome unknown. Keep and retry the exact original input; do not create a replacement requestId." };
   const requestMessageId = name === "room_request_reply" ? command.data.messageId
     : command.data.responseToRequestId ?? command.data.requestMessageId ?? null;
+  if (runTypes[name]) return { contractVersion: 1, status: "recorded", requestId: command.id, requestMessageId,
+    runId: command.data.runId, appliedRunRevision: command.data.expectedRevision + 1,
+    sequence: receipt.sequence, eventId: receipt.event.id, duplicate: receipt.duplicate,
+    currentStateVerified: false, processStarted: false, workStateChanged: false, requestStateChanged: false,
+    next: { tool: "room_read_request", arguments: { requestMessageId } } };
   return { contractVersion: 1, status: "recorded", requestId: command.id, requestMessageId,
     messageId: command.data.messageId ?? null, sequence: receipt.sequence, eventId: receipt.event.id, duplicate: receipt.duplicate,
     appliedRequestRevision: name === "room_request_reply" ? 0 : ["room_reply", "room_post_message"].includes(name) ? null : args.expectedRequestRevision + 1,
@@ -191,6 +205,11 @@ export function validateReplyRead(result, { name, args, roomId }) {
       && typeof current.requesterAvailable === "boolean" && typeof current.recipientAvailable === "boolean"
       && current.workItemId === request.workItemId && integer(current.instructionsRevision)
       && current.actions?.reply === true && typeof current.actions.cancel === "boolean");
+    if (Object.hasOwn(current, "run") || Object.hasOwn(current, "runContractVersion")) {
+      assert(current.runContractVersion === 1 && Object.hasOwn(current, "run"));
+      if (current.run !== null) assert(validRequestRun(current.run) && current.run.requestMessageId === request.id
+        && current.run.memberId === request.recipientId && current.run.revision <= result.evaluatedThrough);
+    }
     const opened = page.items.find(row => row.kind === "opened");
     if (args.cursor === undefined) assert(page.items[0]?.kind === "opened");
     if (opened) assert(opened.eventId === request.openingEventId && opened.message.id === request.id && opened.at === request.createdAt);

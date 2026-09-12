@@ -18,7 +18,7 @@ test("real stdio process uses owner enrollment, selected work and stable draft r
   t.after(async () => { if (mcp) await mcp.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   mcp = await openMcpTestClient(directory);
   const available = (await mcp.request("tools/list")).result.tools;
-  assert.equal(available.length, 33);
+  assert.equal(available.length, 36);
   assert.ok(available.some(tool => tool.name === "room_post_message"));
   const before = f.store.snapshot(token, "commons");
   assert.equal((await mcp.call("room_check_access")).result.structuredContent.status, "credential_accepted");

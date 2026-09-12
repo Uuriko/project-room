@@ -45,7 +45,8 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
     assert.equal(cold.status, 0, cold.stderr);
     const replySource = join(destination, "client/reply-actions.mjs");
     const hasOrdinaryChat = existsSync(replySource) && readFileSync(replySource, "utf8").includes('"room_post_message"');
-    assert.deepEqual(JSON.parse(cold.stdout), { tools: hasOrdinaryChat ? 33 : existsSync(join(destination, "client/help-actions.mjs")) ? 32 : 27, helper: "function",
+    const hasRequestRuns = existsSync(replySource) && readFileSync(replySource, "utf8").includes('"room_claim_request_run"');
+    assert.deepEqual(JSON.parse(cold.stdout), { tools: hasRequestRuns ? 36 : hasOrdinaryChat ? 33 : existsSync(join(destination, "client/help-actions.mjs")) ? 32 : 27, helper: "function",
       command: { id: "cold-package", type: "work.accepted", data: { workItemId: "work", expectedRevision: 0 } } });
   }
   assert.throws(() => verifyRuntimePackage(destination, { expectedCommit: "0".repeat(40) }));

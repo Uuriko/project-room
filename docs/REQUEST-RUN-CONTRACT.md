@@ -1,6 +1,16 @@
 # Chat-request execution
 
-Status: policy and atomic claimed/stop-requested/finished commands are implemented with schema-v31 writer fencing. The local runner supports an explicitly selected work-free request. Chat shows run status and a scoped Stop control. **Dedicated agent tools and in-app run initiation are not connected yet.** This is not a release claim.
+Status: policy and atomic claimed/stop-requested/finished commands are implemented with schema-v31 writer fencing. The local runner supports an explicitly selected work-free request. Chat shows run status and a scoped Stop control. Agent tools expose claim/stop/finish and inspected request reads include run metadata. **In-app run initiation and shared automation are not implemented yet.** This is not a release claim.
+
+## Agent control interface
+
+Use `room_read_request` through the authenticated MCP adapter or CLI. A service with this feature returns `current.runContractVersion: 1` and `current.run` (null means no recorded attempt). Older responses without those fields mean support is unknown, not that a run is idle. Read the entire selected exchange before producing an answer.
+
+- `room_claim_request_run`: request ID, run ID, expected run revision (0 for null), inspected context event/instructions revision, runtime and output limits.
+- `room_stop_request_run`: request ID, inspected run ID and expected run revision. This does not cancel the reply request or prove termination.
+- `room_finish_request_run`: the same identity/revision plus succeeded, failed or cancelled. Report only after confirming your process ended. A successful process does not answer the request.
+
+Each operation also requires a stable `requestId` for exact retry. A duplicate claim is never permission to launch a replacement. These tools record state; they do not start programs or grant provider/machine permissions. The local `room-run` command claims for itself, so **do not preclaim with a tool and then invoke that command**. An external executor using these tools needs its own authorized bounded launch and recovery implementation.
 
 Chat stop controls retain the exact command on uncertain confirmation, including when the snapshot already shows a stop request. A definitive command refusal permits a fresh, explicit action against current state; no silent revision refresh. Pending stops warn before leaving and clear on access reset. They are held in page memory, not restored automatically after reload. A recorded stop is not a stopped process. Deadline expiry refreshes the visible status to unconfirmed without writing an event or enabling takeover. Normal chat composition and request cancellation remain separate controls.
 

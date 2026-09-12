@@ -102,6 +102,50 @@ test("ordinary agent chat crosses direct, MCP and CLI without creating requests 
   auditRecovery(f.store);
 });
 
+test("request run controls share direct MCP and CLI receipts without answering or executing", async t => {
+  const f = await fixture(t), q = f.open(), requestMessageId = q.command.data.messageId;
+  const before = f.store.snapshot(f.keys.owner, "commons").state.workItems;
+  const context = await f.client.replyContext(requestMessageId);
+  assert.equal(context.current.runContractVersion, 1); assert.equal(context.current.run, null);
+  const input = { requestId: "claim-run", requestMessageId, expectedRevision: 0, runId: "external-run",
+    contextEventId: context.current.contextEventId, instructionsRevision: context.current.instructionsRevision,
+    maxRuntimeMs: 10000, maxOutputBytes: 4096 };
+  const adapter = await f.mcp();
+  const claimed = (await adapter.call("room_claim_request_run", input)).result.structuredContent;
+  assert.equal(claimed.status, "recorded"); assert.equal(claimed.processStarted, false);
+  assert.equal(claimed.appliedRunRevision, 1); assert.equal(claimed.duplicate, false);
+  const current = await f.client.replyContext(requestMessageId);
+  assert.equal(current.current.run.runId, input.runId);
+  const stopped = await f.cli("room_stop_request_run", { requestId: "stop-run", requestMessageId, runId: input.runId, expectedRevision: 1 });
+  assert.equal(stopped.code, 0, stopped.err);
+  assert.equal(JSON.parse(stopped.out).appliedRunRevision, 2);
+  const retry = await f.client.replyAction("room_claim_request_run", input);
+  assert.equal(retry.eventId, claimed.eventId); assert.equal(retry.duplicate, true); assert.equal(retry.currentStateVerified, false);
+  const finished = await f.client.replyAction("room_finish_request_run", { requestId: "finish-run", requestMessageId, runId: input.runId, expectedRevision: 2, status: "cancelled" });
+  assert.equal(finished.appliedRunRevision, 3);
+  assert.equal((await f.client.replyContext(requestMessageId)).current.run.status, "cancelled");
+  assert.equal(f.store.room("commons").state.replyRequests[requestMessageId].status, "open");
+  assert.deepEqual(f.store.snapshot(f.keys.owner, "commons").state.workItems, before);
+  await assert.rejects(f.client.replyAction("room_claim_request_run", { ...input, maxRuntimeMs: 9000 }), { code: "idempotency_conflict" });
+  for (const extra of [{ actorId: "owner" }, { command: "/bin/sh" }, { token: "secret" }]) assert.equal(validReplyArguments("room_claim_request_run", { ...input, ...extra }), false);
+  auditRecovery(f.store);
+});
+
+test("selected run metadata rejects wrong identity, malformed bounds and unknown contract versions", async t => {
+  const f = await fixture(t), q = f.open(), requestMessageId = q.command.data.messageId;
+  await f.client.replyAction("room_claim_request_run", { requestId: "claim", requestMessageId, expectedRevision: 0, runId: "run", contextEventId: q.receipt.event.id, instructionsRevision: 0, maxRuntimeMs: 10000, maxOutputBytes: 4096 });
+  const source = await f.client.replyContext(requestMessageId), selection = { name: "room_read_request", args: { requestMessageId }, roomId: "commons" };
+  for (const corrupt of [value => { value.current.run.memberId = "owner"; }, value => { value.current.run.requestMessageId = "other"; },
+    value => { value.current.run.maxRuntimeMs = 300001; }, value => { value.current.run.deadlineAt = value.current.run.startedAt; },
+    value => { value.current.run.usedRunIds.push("run"); }, value => { value.current.run.secret = "not allowed"; },
+    value => { value.current.runContractVersion = 2; }, value => { delete value.current.run; }]) {
+    const value = structuredClone(source); corrupt(value);
+    assert.throws(() => validateReplyRead(value, selection), { code: "invalid_response" });
+  }
+  const legacy = structuredClone(source); delete legacy.current.run; delete legacy.current.runContractVersion;
+  assert.equal(validateReplyRead(legacy, selection).current.run, undefined, "legacy absence remains unknown, not an idle run");
+});
+
 test("ordinary chat preserves uncertain writes and refuses action or identity injection", async t => {
   const f = await fixture(t), input = { requestId: "chat-lost", body: "Posted once despite a lost confirmation." };
   const lossy = new RoomAgentClient({ ...f.config, fetchImpl: async (url, options) => {
@@ -191,7 +235,7 @@ test("read validators refuse changed identity, window, body, lineage and answer 
 });
 
 test("reply tool schemas are finite and partial/null bundles cannot be silently converted", () => {
-  assert.equal(replyTools.length, 8);
+  assert.equal(replyTools.length, 11);
   for (const name of ["room_respond_to_request", "room_request_reply", "room_cancel_request"]) {
     assert.equal(validReplyArguments(name, {}), false);
     assert.equal(validReplyArguments(name, { token: "secret" }), false);

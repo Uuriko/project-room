@@ -10,6 +10,27 @@ const requireValid = (condition, message) => { if (!condition) throw new Error(m
 const terminal = status => ["succeeded", "failed", "cancelled"].includes(status);
 export const REQUEST_RUN_MAX_ATTEMPTS = 3;
 
+export function validRequestRun(run) {
+  const timestamp = value => typeof value === "string" && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
+  if (!exact(run, ["requestMessageId", "runId", "memberId", "status", "revision", "usedRunIds", "contextEventId", "instructionsRevision",
+    "maxRuntimeMs", "maxOutputBytes", "startedAt", "updatedAt", "deadlineAt", "stoppedAt", "stopRequestedById"])) return false;
+  return [run.requestMessageId, run.runId, run.memberId, run.contextEventId].every(id)
+    && revision(run.revision) && run.revision > 0 && revision(run.instructionsRevision)
+    && ["running", "stop_requested", "succeeded", "failed", "cancelled"].includes(run.status)
+    && Array.isArray(run.usedRunIds) && run.usedRunIds.length >= 1 && run.usedRunIds.length <= REQUEST_RUN_MAX_ATTEMPTS
+    && run.usedRunIds.every(id) && new Set(run.usedRunIds).size === run.usedRunIds.length && run.usedRunIds.at(-1) === run.runId
+    && Number.isSafeInteger(run.maxRuntimeMs) && run.maxRuntimeMs >= 1 && run.maxRuntimeMs <= 300000
+    && Number.isSafeInteger(run.maxOutputBytes) && run.maxOutputBytes >= 1 && run.maxOutputBytes <= 1048576
+    && [run.startedAt, run.updatedAt, run.deadlineAt].every(timestamp)
+    && Date.parse(run.updatedAt) >= Date.parse(run.startedAt)
+    && Date.parse(run.deadlineAt) - Date.parse(run.startedAt) === run.maxRuntimeMs
+    && (terminal(run.status) ? run.stoppedAt === run.updatedAt : run.stoppedAt === null)
+    && (run.stopRequestedById === null || id(run.stopRequestedById))
+    && (run.status !== "stop_requested" || id(run.stopRequestedById))
+    && (run.status !== "running" || run.stopRequestedById === null)
+    && (run.status !== "succeeded" || run.stopRequestedById === null && Date.parse(run.updatedAt) < Date.parse(run.deadlineAt));
+}
+
 export function requestRunView(state, requestMessageId, viewerId, now = new Date().toISOString()) {
   const run = state?.requestRuns?.[requestMessageId], request = state?.replyRequests?.[requestMessageId], viewer = state?.members?.[viewerId];
   if (!run || !request) return null;

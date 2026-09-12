@@ -144,7 +144,8 @@ export class ReplyRequests {
           contextEventId: context.id, contextSequence: context.sequence, answerBasis,
           actions: { reply: true, answer: Boolean(answerBasis), decline: Boolean(answerBasis),
             cancel: open && (auth.member.id === request.requesterId || auth.member.kind === "human" && auth.member.id === state.room.ownerId) },
-          workItemId: request.workItemId, instructionsRevision: state.room.charter?.revision ?? 0 } });
+          workItemId: request.workItemId, instructionsRevision: state.room.charter?.revision ?? 0,
+          runContractVersion: 1, run: structuredClone(state.requestRuns?.[request.id] ?? null) } });
       }
       return result;
     });
