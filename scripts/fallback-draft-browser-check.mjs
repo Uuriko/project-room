@@ -10,8 +10,8 @@ import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRuntimePackage, verifyRuntimePackage } from './runtime-package.mjs';
 
 const repository = fileURLToPath(new URL('../', import.meta.url));
-const candidateCommit = process.env.ROOM_DRAFT_CANDIDATE_COMMIT ?? '9745978c784b71ac90487d37b4e5d7b26fa45ef4';
-const fallbackCommit = process.env.ROOM_DRAFT_FALLBACK_COMMIT ?? '4d22189ccdebc56db23397e6cc75b07eff0e3c2c';
+const candidateCommit = process.env.ROOM_DRAFT_CANDIDATE_COMMIT ?? '5715322b66039de114a3d7f56fec9eabd67c7373';
+const fallbackCommit = process.env.ROOM_DRAFT_FALLBACK_COMMIT ?? 'd729bfe9dfb7b93568ce1b577d597dcebb4d8796';
 
 for (const touch of [false, true]) test(`packaged browser fallback ${touch ? 'touch' : 'desktop'}: drafts survive and sign-out clears private state`, { timeout: 60000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), 'room-draft-switch-')), fixture = createAcceptanceFixture();
@@ -25,7 +25,7 @@ for (const touch of [false, true]) test(`packaged browser fallback ${touch ? 'to
   assert.notEqual(candidateCommit, fallbackCommit, 'Qualify a genuinely distinct fallback');
   const packages = new Map([['candidate', candidateCommit], ['fallback', fallbackCommit]].map(([name, commit]) => {
     const path = join(directory, name), receipt = createRuntimePackage({ repository, commit, destination: path });
-    assert.equal(receipt.schemaVersion, 12); return [name, { path, receipt }];
+    assert.equal(receipt.schemaVersion, 26); return [name, { path, receipt }];
   }));
   const start = async name => {
     await stop(); const pkg = packages.get(name);
@@ -66,6 +66,7 @@ for (const touch of [false, true]) test(`packaged browser fallback ${touch ? 'to
   await page.reload(); await page.locator('#main').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#message-input').inputValue(), 'Private request draft');
   await switchTo('fallback');
+  if (await page.locator('#request-mode-bar').isVisible()) await page.locator('#request-exit').click();
   if (await page.locator('#message-input').inputValue() !== 'Private ordinary draft') issues.push('ordinary draft unavailable on fallback');
   await remember(); await page.locator('#message-input').fill('Ordinary draft edited on fallback');
   await switchTo('candidate');
