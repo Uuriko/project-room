@@ -5,7 +5,9 @@ import { spawnSync } from "node:child_process";
 function files(path) { return readdirSync(path, { withFileTypes: true }).flatMap(e => e.isDirectory() ? files(join(path, e.name)) : /\.(mjs|js)$/.test(e.name) ? [join(path, e.name)] : []); }
 const cloudflare = readdirSync("cloudflare", { withFileTypes: true })
   .filter(e => e.isFile() && e.name.endsWith(".mjs")).map(e => join("cloudflare", e.name));
-for (const path of ["server.mjs", ...["src", "server", "client", "scripts", "tests"].flatMap(files), ...cloudflare]) {
+const deploy = readdirSync("deploy", { withFileTypes: true })
+  .filter(e => e.isFile() && e.name.endsWith(".mjs")).map(e => join("deploy", e.name));
+for (const path of ["server.mjs", ...["src", "server", "client", "scripts", "tests"].flatMap(files), ...cloudflare, ...deploy]) {
   const result = spawnSync(process.execPath, ["--check", path], { stdio: "inherit" });
   if (result.status !== 0) process.exit(result.status || 1);
 }

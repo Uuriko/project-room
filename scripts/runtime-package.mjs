@@ -66,7 +66,14 @@ function runtimeMetadata(files) {
 export function createRuntimePackage({ repository, commit, destination }) {
   check(typeof commit === "string" && hashPattern.test(commit));
   const git = (...args) => execFileSync("git", args, { cwd: repository, maxBuffer: 16 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
-  check(git("rev-parse", "--verify", `${commit}^{commit}`).toString().trim() === commit);
+  let resolved;
+  try {
+    resolved = git("rev-parse", "--verify", `${commit}^{commit}`).toString().trim();
+  } catch {
+    throw new Error(`Baseline commit ${commit} is not in this checkout's history.`
+      + ` The upgrade gates need the full history: run 'git fetch --unshallow' (or clone without --depth).`);
+  }
+  check(resolved === commit);
   const tree = git("rev-parse", `${commit}^{tree}`).toString().trim();
   const entries = git("ls-tree", "-r", "-z", commit, "--", ...allowed).toString().split("\0").filter(Boolean).map(line => {
     const match = /^(100644|100755) blob ([0-9a-f]{40})\t(.+)$/.exec(line); check(match && allowed.has(match[3]));
