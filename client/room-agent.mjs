@@ -388,6 +388,10 @@ export class RoomAgentClient {
   messageThread(messageId, { signal } = {}) {
     return this.#request(`/messages/${encodeURIComponent(messageId)}/thread`, undefined, signal);
   }
+  setNotificationPreferences(preferences, { signal } = {}) {
+    if (!preferences || typeof preferences !== "object" || Array.isArray(preferences)) throw new Error("Preferences must be an object");
+    return this.command({ id: randomUUID(), type: "notifications.preferences_set", data: { preferences } }, { signal });
+  }
   // Round-2 #106/#107: export returns NDJSON text; import posts it back.
   // These bypass #request because the payloads are NDJSON, not JSON.
   async exportRoom({ signal } = {}) {
