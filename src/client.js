@@ -229,6 +229,61 @@ export class RoomClient {
       return body;
     } finally { clearTimeout(timer); }
   }
+  async uploadAttachment(id, file, { signal } = {}) {
+    if (!validId(id) || !(file instanceof Blob) || typeof file.name !== 'string' || !file.name.trim()
+      || file.size > 1048576) throw new Error('Choose a file up to 1 MiB');
+    const session = this.session, generation = this.generation;
+    const owns = () => this.session === session && this.generation === generation && this.ownsAccountSession();
+    if (!session || !owns()) throw accountSessionError('Reopen the Room before uploading');
+    const controller = new AbortController(); this.fileTransfers.add(controller);
+    const abort = () => controller.abort();
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
+    const timer = setTimeout(abort, 10000);
+    const current = () => {
+      if (!owns() || controller.signal.aborted) throw new DOMException('Upload cancelled', 'AbortError');
+    };
+    let reader;
+    try {
+      current();
+      const bytes = new Uint8Array(await file.arrayBuffer()); current();
+      const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2, '0')).join('');
+      current();
+      const mediaType = file.type || 'application/octet-stream';
+      const response = await this.fetcher(`/api/rooms/${encodeURIComponent(session.roomId)}/attachments/${encodeURIComponent(id)}`, {
+        method: 'PUT', credentials: 'same-origin', signal: controller.signal, body: bytes,
+        headers: { 'Content-Type': mediaType, 'X-File-Name': encodeURIComponent(file.name),
+          ...(session.csrf ? { 'X-CSRF-Token': session.csrf } : {}),
+          ...(session.sessionBinding ? { 'X-Session-Binding': session.sessionBinding } : {}),
+          ...(session.authMode === 'account' ? { 'X-Project-Room-Auth': 'account' } : {}) }
+      });
+      current();
+      if (!response.ok) { const error = new Error(response.status === 413 ? 'File is too large' : 'Upload failed. Retry the same file.'); error.status = response.status; throw error; }
+      if (!response.body?.getReader) throw new Error('Upload receipt unavailable');
+      reader = response.body.getReader();
+      const chunks = []; let length = 0;
+      while (true) {
+        const { done, value } = await reader.read(); current();
+        if (done) break;
+        length += value.byteLength;
+        if (length > 4096) throw new Error('Upload receipt is too large');
+        chunks.push(value);
+      }
+      const raw = new Uint8Array(length); let offset = 0;
+      for (const chunk of chunks) { raw.set(chunk, offset); offset += chunk.length; }
+      const receipt = JSON.parse(new TextDecoder().decode(raw));
+      if (receipt?.id !== id || receipt.roomId !== session.roomId || receipt.uploaderId !== session.member.id
+        || receipt.filename !== file.name || receipt.mediaType !== mediaType || receipt.byteLength !== bytes.length
+        || receipt.sha256 !== sha256 || !['staged', 'committed'].includes(receipt.state)
+        || !Number.isSafeInteger(receipt.createdAt) || !Number.isSafeInteger(receipt.expiresAt) || receipt.expiresAt <= receipt.createdAt)
+        throw new Error('Upload could not be verified. Retry the same file.');
+      current(); return receipt;
+    } finally {
+      controller.abort();
+      if (reader) { try { await reader.cancel(); } catch {} reader.releaseLock(); }
+      clearTimeout(timer); signal?.removeEventListener('abort', abort); this.fileTransfers.delete(controller);
+    }
+  }
   async downloadAttachment(file, { signal } = {}) {
     if (!validId(file?.id) || !Number.isSafeInteger(file.byteLength) || file.byteLength < 0 || file.byteLength > 1048576
       || !/^[a-f0-9]{64}$/.test(file.sha256 ?? '')) throw new Error('Invalid file reference');
