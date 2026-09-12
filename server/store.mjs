@@ -255,7 +255,10 @@ export class RoomStore {
     this.inbox = new Inbox(this);
     this.email = new EmailImport(this);
     const version = this.storagePlatform.version(this.db);
-    const supported = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, STORE_SCHEMA_VERSION]);
+    // Supported schema versions are the contiguous range 0..STORE_SCHEMA_VERSION.
+    // A hand-maintained list dropped v26 when the version bumped to 27,
+    // which 500'd every room whose Durable Object was still on v26.
+    const supported = new Set([...Array(STORE_SCHEMA_VERSION + 1).keys()]);
     const hasSchema = version === 0 && this.storagePlatform.hasSchema(this.db);
     if (!supported.has(version) || hasSchema) {
       this.db.close();
