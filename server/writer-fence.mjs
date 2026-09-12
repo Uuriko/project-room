@@ -1,9 +1,9 @@
 // Upgrade compatibility fence, not authentication against a database administrator.
 // Older service connections do not register this function, so ordinary writes fail
 // after the schema transaction commits, even if the connection predates migration.
-export const STORE_SCHEMA_VERSION = 31;
-export const WRITER_FUNCTION = "project_room_writer_v31";
-export const writerVersions = Object.freeze([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]);
+export const STORE_SCHEMA_VERSION = 32;
+export const WRITER_FUNCTION = "project_room_writer_v32";
+export const writerVersions = Object.freeze([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]);
 const v6Tables = ["rooms", "events", "commands", "accounts", "member_accounts", "account_access_events",
   "credentials", "cursors", "projection_checkpoints", "account_credentials", "account_session_slots",
   "membership_invitations", "membership_invitation_events", "membership_invitation_journal"];
@@ -20,7 +20,7 @@ const v27Tables = [...tables, "agent_identities", "identity_links"];
 // existing v27 stores verify without a schema version bump.
 const v28Tables = [...v27Tables, "agent_invite_codes", "room_attachments"];
 export const applicationTables = Object.freeze(v28Tables);
-export const fenceDefinitions = version => Object.freeze(({ 6: v6Tables, 7: v7Tables, 8: v8Tables, 9: v14Tables, 10: v14Tables, 11: v14Tables, 12: v14Tables, 13: v14Tables, 14: v14Tables, 15: v17Tables, 16: v17Tables, 17: v17Tables, 18: tables, 19: tables, 20: tables, 21: tables, 22: tables, 23: tables, 24: tables, 25: tables, 26: tables, 27: v27Tables, 28: v28Tables, 29: v28Tables, 30: v28Tables, 31: v28Tables })[version].flatMap(table => ["INSERT", "UPDATE", "DELETE"].map(operation => {
+export const fenceDefinitions = version => Object.freeze(({ 6: v6Tables, 7: v7Tables, 8: v8Tables, 9: v14Tables, 10: v14Tables, 11: v14Tables, 12: v14Tables, 13: v14Tables, 14: v14Tables, 15: v17Tables, 16: v17Tables, 17: v17Tables, 18: tables, 19: tables, 20: tables, 21: tables, 22: tables, 23: tables, 24: tables, 25: tables, 26: tables, 27: v27Tables, 28: v28Tables, 29: v28Tables, 30: v28Tables, 31: v28Tables, 32: v28Tables })[version].flatMap(table => ["INSERT", "UPDATE", "DELETE"].map(operation => {
   const name = `writer_v${version}_${table}_${operation.toLowerCase()}`;
   return Object.freeze({ name, sql: `CREATE TRIGGER ${name} BEFORE ${operation} ON ${table} BEGIN SELECT CASE WHEN project_room_writer_v${version}() IS NOT ${version} THEN RAISE(ABORT,'unsupported database writer') END; END` });
 })));
@@ -52,6 +52,7 @@ export function registerWriter(db) {
   db.function("project_room_writer_v28", () => 28);
   db.function("project_room_writer_v29", () => 29);
   db.function("project_room_writer_v30", () => 30);
+  db.function("project_room_writer_v31", () => 31);
   db.function(WRITER_FUNCTION, () => STORE_SCHEMA_VERSION);
 }
 

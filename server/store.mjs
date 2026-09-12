@@ -204,6 +204,11 @@ const shapes = {
   [T.REQUEST_RUN_CLAIMED]: "requestMessageId expectedRevision runId contextEventId instructionsRevision maxRuntimeMs maxOutputBytes",
   [T.REQUEST_RUN_STOP_REQUESTED]: "requestMessageId expectedRevision runId",
   [T.REQUEST_RUN_FINISHED]: "requestMessageId expectedRevision runId status",
+  [T.AUTOMATION_CREATED]: "automationId expectedRevision definition",
+  [T.AUTOMATION_UPDATED]: "automationId expectedRevision definition",
+  [T.AUTOMATION_ENABLED]: "automationId expectedRevision",
+  [T.AUTOMATION_ACCEPTED]: "automationId expectedRevision",
+  [T.AUTOMATION_PAUSED]: "automationId expectedRevision",
   [T.MESSAGE_REACTION_SET]: "messageId reaction active",
   [T.WORK_PROPOSED]: "workItemId title definitionOfDone accountableMemberId verifierMemberId independentVerificationRequired ownerDecisionRequired humanDecisionMakerId mode sourceMessageId",
   [T.WORK_ACCEPTED]: work,
@@ -237,7 +242,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "instructionsRevision", "maxRuntimeMs", "maxOutputBytes"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "attachmentIds"].includes(name) ? "array" : ["preferences", "budget"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "instructionsRevision", "maxRuntimeMs", "maxOutputBytes"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "attachmentIds"].includes(name) ? "array" : ["preferences", "budget", "definition"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (Buffer.byteLength(JSON.stringify(command)) > 16384) fail(413, "too_large", "Command is too large");
@@ -305,6 +310,12 @@ export class RoomStore {
     // Reread under the write lock: another startup may have upgraded while we waited.
     if (this.storagePlatform.version(this.db) !== version) throw new Error("Database changed during startup; retry with the current service");
     if (version >= 6) this.storagePlatform.verifyWriterFence(this.db, version);
+    if (version > 0 && version < 32) {
+      const collision = table => this.db.prepare(`SELECT 1 FROM ${table} WHERE json_type(projection,'$.automations') IS NOT NULL LIMIT 1`).get();
+      if (collision("rooms") || version >= 2 && collision("projection_checkpoints")
+        || this.db.prepare("SELECT 1 FROM events WHERE json_extract(body,'$.type') LIKE 'automation.%' OR json_type(body,'$.data.automationId') IS NOT NULL OR json_type(body,'$.data.automationRevision') IS NOT NULL OR json_type(body,'$.data.automationSlot') IS NOT NULL LIMIT 1").get())
+        throw new Error("Legacy automation fields require operator reconciliation");
+    }
     if (version > 0 && version < 31) {
       const collision = table => this.db.prepare(`SELECT 1 FROM ${table} WHERE json_type(projection,'$.requestRuns') IS NOT NULL LIMIT 1`).get();
       if (collision("rooms") || version >= 2 && collision("projection_checkpoints")
@@ -1716,7 +1727,9 @@ export class RoomStore {
       const requestRun = room.state.requestRuns?.[command.data.requestMessageId];
       const endingRequestRun = requestRun && ([T.REQUEST_RUN_STOP_REQUESTED, T.REQUEST_RUN_FINISHED].includes(command.type))
         && ["running", "stop_requested"].includes(requestRun.status);
-      const cleanup = endingAccess || endingRequest || endingHelp || endingOffer || endingClaim || endingWork || endingSession || endingRequestRun;
+      const automation = room.state.automations?.[command.data.automationId];
+      const endingAutomation = command.type === T.AUTOMATION_PAUSED && (automation?.ownerEnabled || automation?.recipientAccepted);
+      const cleanup = endingAccess || endingRequest || endingHelp || endingOffer || endingClaim || endingWork || endingSession || endingRequestRun || endingAutomation;
       // At capacity, each remaining membership/request/help/offer/claim and each open work item can still be ended once.
       if ((room.sequence >= 10000 && !cleanup) || (command.type === T.MEMBER_ADDED && Object.keys(room.state.members).length >= 100) || (command.type === T.WORK_PROPOSED && Object.keys(room.state.workItems).length >= 500)) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       const memberAuthorityEvent = [T.MEMBER_ADDED, T.MEMBER_ACCESS_CHANGED].includes(command.type);

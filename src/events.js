@@ -6,6 +6,7 @@ import { WORK_HELP_UPDATED, helpFromEvent } from "./work-help.js";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, helpOfferFromEvent } from "./help-offers.js";
 import { SESSION_EVENT_TYPES, applySessionFields } from "./work-item-session.js";
 import { transitionRequestRun } from "./request-run-policy.js";
+import { transitionAutomation } from "./automation-policy.js";
 
 export const EVENT_TYPES = Object.freeze({
   ROOM_CREATED: "room.created",
@@ -22,6 +23,11 @@ export const EVENT_TYPES = Object.freeze({
   REQUEST_RUN_CLAIMED: "request_run.claimed",
   REQUEST_RUN_STOP_REQUESTED: "request_run.stop_requested",
   REQUEST_RUN_FINISHED: "request_run.finished",
+  AUTOMATION_CREATED: "automation.created",
+  AUTOMATION_UPDATED: "automation.updated",
+  AUTOMATION_ENABLED: "automation.enabled",
+  AUTOMATION_ACCEPTED: "automation.accepted",
+  AUTOMATION_PAUSED: "automation.paused",
   MESSAGE_REACTION_SET: "message.reaction_set",
   WORK_PROPOSED: "work.proposed",
   WORK_HELP_UPDATED,
@@ -127,6 +133,19 @@ function applyRequestRun(state, incoming) {
   state.requestRuns[requestMessageId] = run;
 }
 
+function applyAutomation(state, incoming) {
+  const { automationId, ...data } = incoming.data;
+  if (!validId(automationId)) throw new Error("Invalid automation selection");
+  const action = { "automation.created": "create", "automation.updated": "update", "automation.enabled": "enable",
+    "automation.accepted": "accept", "automation.paused": "pause" }[incoming.type];
+  const result = transitionAutomation({ automation: state.automations?.[automationId] ?? null,
+    actorId: incoming.actorId, roomOwnerId: state.room.ownerId, members: state.members,
+    automationCount: Object.keys(state.automations ?? {}).length, requests: state.replyRequests, runs: state.requestRuns },
+  action, action === "create" ? { ...data, automationId } : data, incoming.at);
+  state.automations ??= {};
+  state.automations[automationId] = result.automation;
+}
+
 export function applyEvent(current, incoming) {
   const state = structuredClone(current);
   validateEnvelope(incoming);
@@ -162,6 +181,11 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.REQUEST_RUN_CLAIMED]: applyRequestRun,
     [EVENT_TYPES.REQUEST_RUN_STOP_REQUESTED]: applyRequestRun,
     [EVENT_TYPES.REQUEST_RUN_FINISHED]: applyRequestRun,
+    [EVENT_TYPES.AUTOMATION_CREATED]: applyAutomation,
+    [EVENT_TYPES.AUTOMATION_UPDATED]: applyAutomation,
+    [EVENT_TYPES.AUTOMATION_ENABLED]: applyAutomation,
+    [EVENT_TYPES.AUTOMATION_ACCEPTED]: applyAutomation,
+    [EVENT_TYPES.AUTOMATION_PAUSED]: applyAutomation,
     [EVENT_TYPES.MESSAGE_REACTION_SET]: setMessageReaction,
     [EVENT_TYPES.WORK_PROPOSED]: proposeWork,
     [EVENT_TYPES.WORK_HELP_UPDATED]: (state, incoming) => {
@@ -223,7 +247,7 @@ function validateEnvelope(incoming) {
     if (["permissions", "paths", "checksClaimed", "capabilities"].includes(key) && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !v.trim() || v.length > 512))) throw new Error(`Invalid ${key}`);
     if (key === "preferences" && (Array.isArray(value) || typeof value !== "object" || Object.entries(value).some(([k, v]) => typeof k !== "string" || typeof v !== "string" || k.length > 64 || v.length > 64))) throw new Error(`Invalid ${key}`);
     if (key === 'attachments' && incoming.type !== EVENT_TYPES.MESSAGE_POSTED) throw new Error('Attachments belong to messages');
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "attachments"].includes(key)) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "attachments", "definition"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -327,6 +351,16 @@ function changeMemberAccess(state, incoming) {
   member.active = incoming.data.active;
   member.permissions = [...incoming.data.permissions];
   member.revision += 1;
+  // Access restoration must never silently revive previously accepted automation.
+  for (const automation of Object.values(state.automations ?? {})) {
+    if ((automation.ownerId === member.id || automation.definition.recipientId === member.id)
+      && (automation.ownerEnabled || automation.recipientAccepted)) {
+      automation.ownerEnabled = false;
+      automation.recipientAccepted = false;
+      automation.revision += 1;
+      automation.updatedAt = incoming.at;
+    }
+  }
 }
 
 // A member's status message ("working on X"). Members set their own;

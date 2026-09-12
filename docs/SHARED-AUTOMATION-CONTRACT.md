@@ -1,6 +1,6 @@
 # Shared automations
 
-Status: executable policy and synthetic tests only. No registered events, scheduler, UI, real routines or provider calls. This builds on native reply requests and request-run ownership, not hidden Work Items.
+Status: definition create/update/enable/accept/pause events are registered with schema32 writer fencing. Definitions and consent persist through replay/restart. Dispatch remains a pure-policy proposal: no registered dispatch, scheduler, UI, real routines or provider calls. This builds on native reply requests and request-run ownership, not hidden Work Items.
 
 ## First useful loop
 
@@ -9,6 +9,8 @@ Save a useful prompt as an automation. Choose a recipient, a manual or interval 
 The creator owns the definition. The recipient controls acceptance of its scope. A creator cannot accept for the recipient, including when the creator is the room owner. Scope edits revoke both approvals and are refused while a previous request/run remains unresolved. Either participant or the human room owner can pause; resume requires fresh creator enablement and recipient acceptance. Pause prevents new dispatches; use Stop run to interrupt an existing execution. Neither operation rolls back outside effects.
 
 The first dispatch interface requires the authenticated creator, not a scheduler impersonating them. A future background dispatcher needs an explicit delegated credential contract and audit attribution. Do not lend human credentials to the existing agent-only runner or silently broaden its identity checks.
+
+Any membership-access change to either participant clears both consent flags and advances the automation revision if consent existed. Restoring membership cannot silently revive an accepted automation; fresh consent is required. This does not cancel an already-running request.
 
 ## Bounded delivery
 
@@ -22,7 +24,7 @@ The first dispatch interface requires the authenticated creator, not a scheduler
 
 ## Durable integration plan
 
-1. Add schema32 fencing and tests before registering definition create/update/enable/accept/pause events. Reject legacy collisions in event fields and projections; preserve genuine31 data and fence pre-open old Node/Worker writers. Definitions and consumed slots must survive replay.
+1. Implemented definition lifecycle: `automation.created`, `.updated`, `.enabled`, `.accepted`, `.paused`, each with automationId and exact expectedRevision; create/update also require a validated definition. Schema32 rejects legacy collisions in event fields and projections and fences older writers. Definition/consent replay, restart, authentic identity, exact retry and genuine31 migration are covered by Node/Worker tests. Pause remains possible at pilot capacity, once per enabled/accepted definition. Consumed-slot durability still depends on step2.
 2. Keep dispatch as a native `message.posted` reply request, with a strictly validated automation ID, exact definition/state revision and due slot. Derive prompt and recipient from the accepted definition, not caller overrides. Resolve command retries before current-state checks. In one transaction and replay step, record the message/request, advance automation revision/count/slot and link the emitted request. Validate message ID uniqueness against all messages, not only requests. Do not create a second synthetic request history whose opening event is not `message.posted`.
 3. Add authenticated read/preview and mutation tools for humans and agents. Return versioned selected definition, consent, remaining budget, blocking request/run and next due slot without credentials. Preview must not consume a slot or create a request. Verify exact receipts and account-switch isolation.
 4. Build a compact Automations view: title, recipient, trigger, consent/paused state, remaining runs and last result. Short actions: Enable, Accept, Pause, Run. Show scope and limits before consent. Native linked requests provide run history and existing Stop controls. Do not claim a live schedule until a dispatcher exists.

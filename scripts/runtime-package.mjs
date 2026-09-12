@@ -15,8 +15,9 @@ const v13Assets = [...v12Assets, "src/work-help.js"];
 const v14Assets = [...v13Assets, "src/help-offers.js"];
 const inboxAssets = [...v14Assets, "src/inbox-client.js", "src/inbox-ui.js"];
 const v30Assets = [...inboxAssets, "src/inbox-send-ui.js", "src/room-roster.js", "src/work-item-session.js"];
-export const publicAssets = [...v30Assets, "src/request-run-policy.js"];
-const assetsFor = (schema, inbox, sendUI = false) => schema >= 31 ? publicAssets : schema === 8 ? v8Assets : schema <= 10 ? v9Assets : schema === 11 ? v11Assets : schema === 12 ? v12Assets : schema === 13 ? v13Assets : inbox && schema >= 15 ? sendUI ? v30Assets : inboxAssets : v14Assets;
+const v31Assets = [...v30Assets, "src/request-run-policy.js"];
+export const publicAssets = [...v31Assets, "src/automation-policy.js"];
+const assetsFor = (schema, inbox, sendUI = false) => schema >= 32 ? publicAssets : schema === 31 ? v31Assets : schema === 8 ? v8Assets : schema <= 10 ? v9Assets : schema === 11 ? v11Assets : schema === 12 ? v12Assets : schema === 13 ? v13Assets : inbox && schema >= 15 ? sendUI ? v30Assets : inboxAssets : v14Assets;
 const required = [...v8Assets, "server.mjs", "package.json", "package-lock.json",
   ...["backup", "bootstrap", "claim-scopes", "deployment", "http", "invitation-evidence", "invitation-journal", "reminders",
     "return-brief", "return-selectors", "share-links", "store", "work-context", "writer-fence"].map(name => `server/${name}.mjs`),
@@ -49,6 +50,7 @@ optional.push("deploy/agent-discovery.mjs", "deploy/room-entry.mjs", "server/gue
 optional.push("server/agent-identities.mjs");
 optional.push("server/agent-invites.mjs");
 optional.push("src/work-item-session.js", "src/request-run-policy.js");
+optional.push("src/automation-policy.js");
 optional.push("src/board.js");
 optional.push("src/work-templates.js");
 optional.push("src/room-templates.js");
@@ -66,7 +68,7 @@ function runtimeMetadata(files) {
   const schema = /export const STORE_SCHEMA_VERSION = (\d+);/.exec(files.get("server/writer-fence.mjs").toString());
   const pkg = JSON.parse(files.get("package.json"));
   const config = JSON.parse(files.get("cloudflare/wrangler.jsonc"));
-  check(["8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31"].includes(schema?.[1]) && typeof pkg.engines?.node === "string");
+  check(["8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32"].includes(schema?.[1]) && typeof pkg.engines?.node === "string");
   return { schemaVersion: Number(schema[1]), node: pkg.engines.node, cloudflare: { compatibilityDate: config.compatibility_date,
     compatibilityFlags: config.compatibility_flags, durableObjects: config.durable_objects, migrations: config.migrations } };
 }
