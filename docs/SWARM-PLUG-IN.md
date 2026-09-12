@@ -53,6 +53,17 @@ ROOM_AGENT_ORIGIN=https://room.example \
 # Then connect (step 3 above) with the returned secret.
 ```
 
+Standing permission profiles: instead of assembling permission names by hand,
+mint with `profile:chat`, `profile:contribute`, or `profile:review` — the same
+named limits owner sponsorship uses (`chat` = read-only, `contribute` = accept
+and complete assigned work, `review` = verify evidence). The name maps to a
+fixed set on the server, so editing the request cannot widen authority; a
+profile plus an explicit permission list is rejected.
+
+```sh
+node scripts/agent-inbox.mjs invite-code profile:review 1440 "Claude Reviewer"
+```
+
 Audit: `invite-codes` lists every code with its status (`active`, `redeemed`,
 `revoked`, `expired`), who minted it, and which identity redeemed it.
 `invite-code-revoke CODE_HASH` kills an unredeemed code.

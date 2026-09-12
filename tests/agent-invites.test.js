@@ -247,3 +247,53 @@ test("CLI rejects bad invite arglists at the boundary", async t => {
   assert.notEqual((await cli(origin, ["redeem-invite", "RM-AAAAAAAA"], ownerEnv)).status, 0);
   assert.notEqual((await cli(origin, ["invite-codes", "extra"], ownerEnv)).status, 0);
 });
+
+test("profile names map server-side to the sponsorship's standing permission sets", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const expectations = { chat: [], contribute: ["accept_work", "complete_work"], review: ["verify"] };
+  for (const [profile, permissions] of Object.entries(expectations)) {
+    const res = await post(origin, "/api/rooms/commons/agent-invites", { profile }, ownerKey);
+    assert.equal(res.status, 201, `${profile}: ${JSON.stringify(res.json)}`);
+    assert.deepEqual(res.json.permissions, permissions);
+    assert.equal(res.json.profile, profile);
+  }
+});
+
+test("a tampered brief cannot widen authority: profile plus permissions, unknown profile", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const both = await post(origin, "/api/rooms/commons/agent-invites",
+    { profile: "contribute", permissions: ["steer", "write_external", "decide"] }, ownerKey);
+  assert.equal(both.status, 422);
+  assert.equal(both.json?.error?.code, "invalid_invite_scope");
+  const unknown = await post(origin, "/api/rooms/commons/agent-invites", { profile: "admin" }, ownerKey);
+  assert.equal(unknown.status, 422);
+  const extraKey = await post(origin, "/api/rooms/commons/agent-invites", { profile: "review", grant: ["decide"] }, ownerKey);
+  assert.equal(extraKey.status, 422);
+  assert.equal(extraKey.json?.error?.code, "invalid_invite");
+});
+
+test("chat profile mints a read-only agent: redeem enrolls with no extra authority", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const minted = await post(origin, "/api/rooms/commons/agent-invites", { profile: "chat" }, ownerKey);
+  assert.equal(minted.status, 201);
+  assert.deepEqual(minted.json.permissions, []);
+  const redeemed = await post(origin, "/api/agent-invites/redeem",
+    { code: minted.json.code, displayName: "Quiet Observer" });
+  assert.equal(redeemed.status, 201, JSON.stringify(redeemed.json));
+  // The member's authority is exactly the profile's fixed set — prove it by
+  // reaching owner-only diagnostics with the agent's own credential.
+  const agentToken = redeemed.json.secret;
+  const check = await get(origin, "/api/rooms/commons/diagnostics", agentToken);
+  assert.notEqual(check.status, 200, "a read-only agent must not reach owner diagnostics");
+});
+
+test("CLI mints a code from a profile name and rejects unknown profiles", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const ownerEnv = { ROOM_AGENT_ROOM: "commons", ROOM_AGENT_MEMBER: "owner", ROOM_AGENT_TOKEN: ownerKey };
+  const minted = await cli(origin, ["invite-code", "profile:review", "60", "Review Bot"], ownerEnv);
+  assert.equal(minted.status, 0, minted.stderr);
+  assert.deepEqual(minted.json.permissions, ["verify"]);
+  assert.equal(minted.json.profile, "review");
+  const bad = await cli(origin, ["invite-code", "profile:admin"], ownerEnv);
+  assert.notEqual(bad.status, 0);
+});

@@ -49,7 +49,47 @@ export function isRunningSession(status) {
 }
 
 export function defaultWorkItemSession() {
-  return { status: SESSION_STATUSES.QUEUED, stop_requested_at: null, heartbeat_at: null, worker_member_id: null };
+  return { status: SESSION_STATUSES.QUEUED, stop_requested_at: null, heartbeat_at: null, worker_member_id: null,
+    started_at: null, attempt_count: 0, budget: null, spend_cents: null };
+}
+
+// W4-46 H5: session budgets. A claimer may declare bounds for their run;
+// undeclared keys stay "unknown" — never assumed zero or unlimited.
+export const SESSION_BUDGET_KEYS = Object.freeze(["maxRuntimeMs", "maxAttempts", "maxConcurrent", "maxSpendCents"]);
+const BUDGET_CAPS = Object.freeze({ maxRuntimeMs: 30 * 86400000, maxAttempts: 1000, maxConcurrent: 25, maxSpendCents: 100000000 });
+export function validateSessionBudget(value) {
+  if (value === undefined || value === null) return null;
+  if (!value || Array.isArray(value) || typeof value !== "object") throw new Error("Budget must be an object");
+  const keys = Object.keys(value);
+  if (!keys.length || keys.some(key => !SESSION_BUDGET_KEYS.includes(key)))
+    throw new Error("Budget keys are maxRuntimeMs, maxAttempts, maxConcurrent, maxSpendCents");
+  const budget = {};
+  for (const key of keys) {
+    const entry = value[key];
+    if (!Number.isSafeInteger(entry) || entry < 1 || entry > BUDGET_CAPS[key])
+      throw new Error(`Budget ${key} must be an integer 1-${BUDGET_CAPS[key]}`);
+    budget[key] = entry;
+  }
+  return budget;
+}
+// The budget as the worker sees it: every undeclared quota is labeled
+// "unknown" so a missing limit can never be mistaken for a granted one.
+export function budgetCard(budget) {
+  const card = {};
+  for (const key of SESSION_BUDGET_KEYS) card[key] = budget?.[key] ?? "unknown";
+  return Object.freeze(card);
+}
+// The tripped limit name when a live session has blown its budget, else null.
+// Spend only trips where spend is actually reported — unknown spend is not
+// evidence of anything.
+export function budgetLimitExceeded(item, nowMs = Date.now()) {
+  const session = sessionRecord(item);
+  if (isTerminalSession(session.status) || !session.budget) return null;
+  if (session.budget.maxRuntimeMs && session.started_at && Number.isFinite(nowMs)
+    && nowMs - Date.parse(session.started_at) > session.budget.maxRuntimeMs) return "maxRuntimeMs";
+  if (session.budget.maxSpendCents && session.spend_cents !== null && session.spend_cents > session.budget.maxSpendCents)
+    return "maxSpendCents";
+  return null;
 }
 
 export function sessionRecord(item) {
@@ -61,7 +101,13 @@ export function sessionRecord(item) {
   const heartbeat = typeof item.heartbeat_at === "string" && Number.isFinite(Date.parse(item.heartbeat_at))
     ? item.heartbeat_at : null;
   const worker = typeof item.worker_member_id === "string" && item.worker_member_id ? item.worker_member_id : null;
-  return { status, stop_requested_at: stop, heartbeat_at: heartbeat, worker_member_id: worker };
+  let budget = null;
+  try { budget = validateSessionBudget(item.budget); } catch { budget = null; }
+  const started = typeof item.started_at === "string" && Number.isFinite(Date.parse(item.started_at)) ? item.started_at : null;
+  const attempts = Number.isSafeInteger(item.attempt_count) && item.attempt_count >= 0 ? item.attempt_count : 0;
+  const spend = Number.isSafeInteger(item.spend_cents) && item.spend_cents >= 0 ? item.spend_cents : null;
+  return { status, stop_requested_at: stop, heartbeat_at: heartbeat, worker_member_id: worker,
+    started_at: started, attempt_count: attempts, budget, spend_cents: spend };
 }
 
 // The member currently holding a live claim on this session, or null when the
@@ -84,7 +130,13 @@ export function sessionCard(item) {
     worker_member_id: session.worker_member_id,
     revision: item.revision,
     state: item.state,
-    accountableMemberId: item.accountableMemberId
+    accountableMemberId: item.accountableMemberId,
+    // The limits this run can see: undeclared quotas are labeled "unknown",
+    // and unreported spend is "unknown" — never assumed.
+    budget: budgetCard(session.budget),
+    started_at: session.started_at,
+    attempt_count: session.attempt_count,
+    spendCents: session.spend_cents ?? "unknown"
   };
 }
 
@@ -102,7 +154,8 @@ export function workItemSessionContract() {
     status: "live",
     schemaBump: false,
     writer: 27,
-    workItemFields: Object.freeze(["status", "stop_requested_at", "heartbeat_at", "worker_member_id"]),
+    workItemFields: Object.freeze(["status", "stop_requested_at", "heartbeat_at", "worker_member_id",
+      "started_at", "attempt_count", "budget", "spend_cents"]),
     statuses: SESSION_STATUS_LIST,
     events: SESSION_EVENT_LIST,
     workStateSeparate: true,
@@ -125,6 +178,13 @@ export function sessionCommandType(item, action, nextStatus) {
   return SESSION_EVENT_TYPES.STATUS_CHANGED;
 }
 
+function reportSpend(item, incoming) {
+  if (incoming.data?.spendCents === undefined) return;
+  const value = incoming.data.spendCents;
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error("spendCents must be a non-negative integer of cents");
+  item.spend_cents = value;
+}
+
 export function applySessionFields(item, incoming) {
   const session = sessionRecord(item);
   const at = incoming.at;
@@ -136,6 +196,10 @@ export function applySessionFields(item, incoming) {
     item.stop_requested_at = null;
     item.heartbeat_at = at;
     item.worker_member_id = incoming.actorId;
+    item.started_at = at;
+    item.attempt_count = session.attempt_count + 1;
+    item.budget = validateSessionBudget(incoming.data?.budget);
+    item.spend_cents = null;
     return;
   }
   if (incoming.type === SESSION_EVENT_TYPES.STATUS_CHANGED) {
@@ -145,6 +209,7 @@ export function applySessionFields(item, incoming) {
     item.stop_requested_at = session.stop_requested_at;
     item.heartbeat_at = at;
     item.worker_member_id = incoming.actorId;
+    reportSpend(item, incoming);
     return;
   }
   if (incoming.type === SESSION_EVENT_TYPES.STOP_REQUESTED) {
@@ -163,6 +228,7 @@ export function applySessionFields(item, incoming) {
     item.stop_requested_at = session.stop_requested_at;
     item.heartbeat_at = at;
     item.worker_member_id = null;
+    reportSpend(item, incoming);
     return;
   }
   throw new Error(`Unsupported event type: ${incoming.type}`);

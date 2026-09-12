@@ -552,8 +552,8 @@ export class RoomAgentClient {
     }
     return value;
   }
-  async createAgentInvite({ permissions, expiresInMinutes, displayName } = {}, { signal } = {}) {
-    const value = await this.#inviteAdmin("/agent-invites", { permissions,
+  async createAgentInvite({ permissions, profile, expiresInMinutes, displayName } = {}, { signal } = {}) {
+    const value = await this.#inviteAdmin("/agent-invites", { permissions, profile,
       ...(expiresInMinutes === undefined ? {} : { expiresInMinutes }),
       ...(displayName === undefined ? {} : { displayName }) }, { signal });
     if (typeof value?.code !== "string" || typeof value?.codeHash !== "string") {
@@ -568,6 +568,16 @@ export class RoomAgentClient {
   }
   revokeAgentInvite(codeHash, { signal } = {}) {
     return this.#deletePath(`/api/rooms/${encodeURIComponent(this.#roomId)}/agent-invites`, { codeHash }, signal);
+  }
+  // W4-57 M6: sanitized support-export bundle (owner-only). Whitelisted
+  // scalar fields only — safe to hand to support without redaction.
+  async diagnosticsExport({ signal } = {}) {
+    const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}/diagnostics-export`, undefined, signal);
+    if (value?.format !== "project-room-support-export-v1" || value?.room?.id !== this.#roomId
+      || !Array.isArray(value?.diagnostics)) {
+      throw new RoomClientError(200, "invalid_response", "Room returned an invalid support export");
+    }
+    return value;
   }
   setNotificationPreferences(preferences, { signal } = {}) {
     if (!preferences || typeof preferences !== "object" || Array.isArray(preferences)) throw new Error("Preferences must be an object");
@@ -615,20 +625,25 @@ export class RoomAgentClient {
     if (status !== undefined && typeof status !== "string") throw new Error("Choose one session status");
     return this.#request(status ? `/work-sessions?status=${encodeURIComponent(status)}` : "/work-sessions", undefined, signal);
   }
-  workSessionAction({ requestId, workItemId, expectedRevision, action, status }, { signal } = {}) {
+  workSessionAction({ requestId, workItemId, expectedRevision, action, status, budget, spendCents }, { signal } = {}) {
     if (!validId(requestId) || !validId(workItemId)) throw new Error("requestId and workItemId are required");
     if (!["set_status", "request_stop"].includes(action)) throw new Error("action must be set_status or request_stop");
     return this.#request("/work-sessions", { requestId, workItemId, expectedRevision, action,
-      ...(status === undefined ? {} : { status }) }, signal);
+      ...(status === undefined ? {} : { status }),
+      ...(budget === undefined ? {} : { budget }),
+      ...(spendCents === undefined ? {} : { spendCents }) }, signal);
   }
   // Claim one queued session atomically: reads the card, then drives it to
   // processing with the card's revision. Throws session_claimed when held.
-  async claimSession(workItemId, { signal } = {}) {
+  // A budget declares the run's limits (maxRuntimeMs, maxAttempts,
+  // maxConcurrent, maxSpendCents); undeclared quotas stay "unknown".
+  async claimSession(workItemId, { budget, signal } = {}) {
     const sessions = await this.workSessions({ signal });
     const card = sessions?.sessions?.find?.(item => item.workItemId === workItemId && item.status === "queued");
     if (!card) throw new Error("No queued session card for that work item");
     return this.workSessionAction({ requestId: randomUUID(), workItemId,
-      expectedRevision: card.revision, action: "set_status", status: "processing" }, { signal });
+      expectedRevision: card.revision, action: "set_status", status: "processing",
+      ...(budget === undefined ? {} : { budget }) }, { signal });
   }
   workAction(name, args, options = {}) {
     return submitWorkAction(this, { roomId: this.#roomId, memberId: this.#memberId }, name, args, options);

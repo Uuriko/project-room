@@ -3,12 +3,16 @@ import { packetMarkdown } from "../src/work-packet.js";
 import { validId } from "../src/events.js";
 import { agentConnectionFromEnvironment, readConnectionInput, saveAgentConnection, connectionDiagnostic, ConnectionError } from "../client/agent-connection.mjs";
 
-const readStdin = () => new Promise((resolve, reject) => {
-  let text = ""; process.stdin.setEncoding("utf8");
+const readStdin = () => new Promise((resolve, reject) => {  let text = ""; process.stdin.setEncoding("utf8");
   process.stdin.on("data", chunk => text += chunk);
   process.stdin.on("end", () => resolve(text));
   process.stdin.on("error", reject);
 });
+
+const isJSONObject = text => {
+  try { const value = JSON.parse(text); return !!value && typeof value === "object" && !Array.isArray(value); }
+  catch { return false; }
+};
 
 const [action = "orient", checkpoint, ...extra] = process.argv.slice(2);
 if (action === "reply") {
@@ -48,12 +52,14 @@ if (action === "reply") {
   node scripts/agent-inbox.mjs identity-links
   node scripts/agent-inbox.mjs identity-unlink IDENTITY_ID
   node scripts/agent-inbox.mjs invite-code PERM1,PERM2 [EXPIRES_MINUTES] [DISPLAY_NAME]
+  node scripts/agent-inbox.mjs invite-code profile:chat|contribute|review [EXPIRES_MINUTES] [DISPLAY_NAME]
   node scripts/agent-inbox.mjs invite-codes
   node scripts/agent-inbox.mjs invite-code-revoke CODE_HASH
   node scripts/agent-inbox.mjs redeem-invite CODE DISPLAY_NAME
   node scripts/agent-inbox.mjs doctor
+  node scripts/agent-inbox.mjs support-export
   node scripts/agent-inbox.mjs sessions [STATUS]
-  node scripts/agent-inbox.mjs claim WORK_ID
+  node scripts/agent-inbox.mjs claim WORK_ID ['{"maxRuntimeMs":3600000,"maxAttempts":3}']
   node scripts/agent-inbox.mjs session WORK_ID STATUS
 Assignment watching: node scripts/agent-inbox.mjs watch --help
 Reply requests: node scripts/agent-inbox.mjs reply --help
@@ -95,7 +101,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
         || (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > 50))
         || (cursor !== undefined && (since !== undefined || cursor.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(cursor)))) throw new ConnectionError("usage_error");
     }
-    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "sessions", "claim", "session", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "identity-link", "identity-links", "identity-unlink", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "funnel", "export", "import-history", "thread", "doctor"].includes(action)
+    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "sessions", "claim", "session", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "identity-link", "identity-links", "identity-unlink", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "funnel", "export", "import-history", "thread", "doctor", "support-export"].includes(action)
       || (["connect", "import"].includes(action) && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
       || (action === "import" && ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"].some(name => process.env[name] !== undefined))
       || (["packet", "work", "discussion", "result", "claim"].includes(action) && !validId(checkpoint))
@@ -107,16 +113,19 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
       || (["discussion", "result"].includes(action) ? false : action === "work" ? new Set(extra).size !== extra.length || extra.some(flag => !["--include-source", "--include-offers"].includes(flag))
         : action === "search" ? extra.length > 1 || (extra.length === 1 && extra[0] !== "--needs-me")
         : ["advertise", "session", "identity-link", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite"].includes(action) ? false
+        : action === "claim" ? extra.length > 1 || (extra.length === 1 && !isJSONObject(extra[0]))
         : extra.length || (["check", "orient", "next", "brief"].includes(action) && checkpoint !== undefined))
       || (action === "changes" && (!/^\d+$/.test(checkpoint ?? "") || !Number.isSafeInteger(Number(checkpoint))))
       || (["identity-create", "identity-unlink"].includes(action) && (checkpoint === undefined || checkpoint.startsWith("--")))
       || (action === "identity-link" && (checkpoint === undefined || extra.length < 1 || extra.length > 3))
       || (action === "invite-code" && (checkpoint === undefined || checkpoint.startsWith("--")
+        || (checkpoint.startsWith("profile:") && !["chat", "contribute", "review"].includes(checkpoint.slice("profile:".length)))
         || (extra[0] !== undefined && !/^\d+$/.test(extra[0])) || extra.slice(1).join(" ").length > 80))
       || (action === "invite-code-revoke" && !/^[a-f0-9]{64}$/.test(checkpoint ?? ""))
       || (action === "redeem-invite" && (checkpoint === undefined || checkpoint.startsWith("--") || !extra.length || extra.join(" ").length > 80))
       || (action === "invite-codes" && (checkpoint !== undefined || extra.length))
-      || (action === "doctor" && (checkpoint !== undefined || extra.length))) throw new ConnectionError("usage_error");
+      || (action === "doctor" && (checkpoint !== undefined || extra.length))
+      || (action === "support-export" && (checkpoint !== undefined || extra.length))) throw new ConnectionError("usage_error");
     const config = ["identity-create", "redeem-invite"].includes(action) ? {} : action === "import" ? await readConnectionInput() : agentConnectionFromEnvironment(),
       client = ["identity-create", "redeem-invite"].includes(action) ? null : new RoomAgentClient(config);
     let result;
@@ -150,14 +159,18 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
       : action === "identity-link" ? await client.linkIdentity({ identityId: checkpoint, permissions: (extra[0] ?? "").split(",").map(p => p.trim()).filter(Boolean), ...(extra[1] === undefined ? {} : { memberId: extra[1] }), ...(extra[2] === undefined ? {} : { displayName: extra.slice(2).join(" ") }) })
       : action === "identity-links" ? await client.identityLinks()
       : action === "identity-unlink" ? await client.unlinkIdentity(checkpoint)
-      : action === "invite-code" ? await client.createAgentInvite({ permissions: checkpoint.split(",").map(p => p.trim()).filter(Boolean),
+      : action === "invite-code" ? await client.createAgentInvite({ ...(checkpoint.startsWith("profile:")
+            ? { profile: checkpoint.slice("profile:".length) }
+            : { permissions: checkpoint.split(",").map(p => p.trim()).filter(Boolean) }),
           ...(extra[0] === undefined ? {} : { expiresInMinutes: Number(extra[0]) }),
           ...(extra[1] === undefined ? {} : { displayName: extra.slice(1).join(" ") }) })
       : action === "invite-codes" ? await client.agentInvites()
       : action === "invite-code-revoke" ? await client.revokeAgentInvite(checkpoint)
       : action === "redeem-invite" ? await redeemAgentInvite(process.env.ROOM_AGENT_ORIGIN, checkpoint, extra.join(" "))
+      : action === "support-export" ? await client.diagnosticsExport()
       : action === "sessions" ? await client.workSessions(checkpoint === undefined ? {} : { status: checkpoint })
-      : action === "claim" ? await client.claimSession(checkpoint)
+      : action === "claim" ? await client.claimSession(checkpoint,
+          extra[0] === undefined ? {} : { budget: JSON.parse(extra[0]) })
       : action === "session" ? await (async () => {
           const sessions = await client.workSessions();
           const card = sessions?.sessions?.find?.(item => item.workItemId === checkpoint);

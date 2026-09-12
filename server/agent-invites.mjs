@@ -15,6 +15,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { ServiceError } from "./store.mjs";
 import { applyEvent, event, EVENT_TYPES as T, memberCan, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS } from "../src/events.js";
+import { agentAccessProfiles } from "./agent-connections.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const hash = text => createHash("sha256").update(text).digest("hex");
@@ -69,12 +70,23 @@ export class AgentInvites {
   constructor(store) { this.store = store; this.db = store.db; }
 
   // Owner-only: mint a one-time code. The raw code is returned once; only
-  // its hash is stored.
-  create(token, roomId, { permissions, expiresInMinutes = DEFAULT_TTL_MINUTES, displayName } = {}) {
+  // its hash is stored. Callers may pass an explicit permissions list or a
+  // standing profile name (chat/contribute/review); the profile maps
+  // server-side to a fixed set, so editing the request cannot widen authority.
+  create(token, roomId, { permissions, profile, expiresInMinutes = DEFAULT_TTL_MINUTES, displayName } = {}) {
     const auth = this.store.authenticate(token, roomId);
     const authority = this.store.roomAuthority(roomId);
     if (!memberCan(authority, auth.member.id, "manage_members")) fail(403, "access_denied", "Membership administration grant required");
-    if (!Array.isArray(permissions) || !permissions.length || new Set(permissions).size !== permissions.length
+    let profileName = null;
+    if (profile !== undefined) {
+      if (typeof profile !== "string" || !Object.hasOwn(agentAccessProfiles, profile))
+        fail(422, "invalid_invite_scope", "profile must be one of: chat, contribute, review");
+      if (permissions !== undefined)
+        fail(422, "invalid_invite_scope", "Choose a profile or explicit permissions, not both");
+      profileName = profile;
+      permissions = [...agentAccessProfiles[profile]];
+    }
+    if (!Array.isArray(permissions) || (profileName === null && !permissions.length) || new Set(permissions).size !== permissions.length
       || permissions.some(p => !PERMISSIONS.includes(p))) {
       fail(422, "invalid_invite_scope", "permissions must be a non-empty list of unique room permissions");
     }
@@ -100,7 +112,7 @@ export class AgentInvites {
       const expiresAt = now + expiresInMinutes * 60000;
       this.db.prepare(`INSERT INTO agent_invite_codes(code_hash,room_id,created_by,permissions_json,display_name,created_at,expires_at)
         VALUES(?,?,?,?,?,?,?)`).run(hash(code), roomId, auth.member.id, JSON.stringify(permissions), name, now, expiresAt);
-      return { code, codeHash: hash(code), roomId, permissions, displayName: name, createdAt: now, expiresAt };
+      return { code, codeHash: hash(code), roomId, permissions, profile: profileName, displayName: name, createdAt: now, expiresAt };
     });
   }
 
