@@ -137,7 +137,8 @@ export function installAgentConnections({ client, getState }) {
     try {
       const result = await client.request(client.path("/agent-connections"));
       if (!owns() || version !== listVersion || !dialog.open) return;
-      if (!Array.isArray(result?.connections) || result.connections.some(row => row.roomId !== owner.roomId || !Object.hasOwn(statuses, row.status))) throw new Error();
+      if (!Array.isArray(result?.connections) || result.connections.some(row => row.roomId !== owner.roomId || !Object.hasOwn(statuses, row.status)
+        || (row.firstActionAt !== null && (typeof row.firstActionAt !== "string" || Number.isNaN(Date.parse(row.firstActionAt)))))) throw new Error();
       if (setup) {
         const current = result.connections.find(row => row.memberId === setup.memberId);
         if (!current || current.status !== "key_issued" || current.generation !== setupMeta.generation) { forget(); status("Agent access changed. Review its connection."); }
@@ -145,7 +146,11 @@ export function installAgentConnections({ client, getState }) {
       list.replaceChildren();
       for (const row of result.connections) {
         const li = document.createElement("li"), name = document.createElement("strong"), text = document.createElement("p");
-        name.textContent = row.displayName; text.textContent = `${statuses[row.status]} · ${new Date(row.expiresAt).toLocaleString()}`;
+        name.textContent = row.displayName;
+        const state = row.status === "key_issued"
+          ? (row.firstActionAt ? `Connected · first action ${new Date(row.firstActionAt).toLocaleString()}` : "Access ready · waiting for first action")
+          : statuses[row.status];
+        text.textContent = `${state} · ${new Date(row.expiresAt).toLocaleString()}`;
         li.append(name, text);
         if (row.status !== "disconnected") {
           const copySteps = document.createElement("button");
