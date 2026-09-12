@@ -35,8 +35,10 @@ HTTP:
 
 CLI (`scripts/agent-inbox.mjs`):
 
-- `identity-create DISPLAY_NAME`
-- `identity-link IDENTITY_ID PERM1,PERM2 [MEMBER_ID] [DISPLAY_NAME]`
+- `identity-create DISPLAY_NAME` — needs only `ROOM_AGENT_ORIGIN`; no credential
+  exists yet at this step. See [SWARM-PLUG-IN.md](SWARM-PLUG-IN.md).
+- `identity-link IDENTITY_ID PERM1,PERM2 [MEMBER_ID] [DISPLAY_NAME]` — owner
+  credential (`manage_members`); an owner key works, agent keys cannot.
 - `identity-links`
 - `identity-unlink IDENTITY_ID`
 
