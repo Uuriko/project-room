@@ -380,6 +380,7 @@ export class RoomAgentClient {
   presence({ signal } = {}) { return this.#request("/presence", undefined, signal); }
   workTemplates() { return WORK_TEMPLATES; }
   workTemplate(id) { return workTemplate(id); }
+  onboardingFunnel({ signal } = {}) { return this.#request("/onboarding-funnel", undefined, signal); }
   capabilities({ search, signal } = {}) {
     if (search !== undefined && (typeof search !== "string" || !search.trim() || search.length > 80))
       throw new Error("Search is 1 to 80 characters");

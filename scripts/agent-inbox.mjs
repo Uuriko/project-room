@@ -24,6 +24,7 @@ if (action === "reply") {
   node scripts/agent-inbox.mjs capabilities [QUERY]
   node scripts/agent-inbox.mjs advertise CAPABILITY [CAPABILITY...]
   node scripts/agent-inbox.mjs templates [TEMPLATE_ID]
+  node scripts/agent-inbox.mjs funnel
   node scripts/agent-inbox.mjs sessions [STATUS]
   node scripts/agent-inbox.mjs claim WORK_ID
   node scripts/agent-inbox.mjs session WORK_ID STATUS
@@ -67,7 +68,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
         || (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > 50))
         || (cursor !== undefined && (since !== undefined || cursor.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(cursor)))) throw new ConnectionError("usage_error");
     }
-    if (!["connect", "import", "check", "orient", "next", "search", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "sessions", "claim", "session", "status", "templates"].includes(action)
+    if (!["connect", "import", "check", "orient", "next", "search", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "sessions", "claim", "session", "status", "templates", "funnel"].includes(action)
       || (["connect", "import"].includes(action) && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
       || (action === "import" && ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"].some(name => process.env[name] !== undefined))
       || (["packet", "work", "discussion", "result", "claim"].includes(action) && !validId(checkpoint))
@@ -100,6 +101,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
       : action === "advertise" ? await client.advertiseCapabilities([checkpoint, ...extra])
       : action === "status" ? await client.setStatus([checkpoint, ...extra].join(" "))
       : action === "templates" ? { templates: checkpoint === undefined ? client.workTemplates() : [client.workTemplate(checkpoint)].filter(Boolean) }
+      : action === "funnel" ? await client.onboardingFunnel()
       : action === "sessions" ? await client.workSessions(checkpoint === undefined ? {} : { status: checkpoint })
       : action === "claim" ? await client.claimSession(checkpoint)
       : action === "session" ? await (async () => {
