@@ -29,6 +29,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/guest-agent-links.mjs');
   paths.add('src/work-item-session.js');
   paths.add('src/board.js');
+  paths.add('src/work-templates.js');
+  paths.add('src/room-templates.js');
   paths.add('server/diagnostics.mjs');
   paths.add('scripts/release-evidence.mjs');
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
