@@ -128,12 +128,42 @@ paths:
                             properties:
                               workItemId: { type: string }
                               status: { type: string }
+  /api/rooms/{roomId}/onboarding-funnel:
+    get:
+      summary: Agent onboarding funnel
+      description: Per-agent timestamps for provisioned -> first claim -> first result, with minute deltas. Nulls mean the step hasn't happened yet.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Funnel metrics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  members:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        memberId: { type: string }
+                        displayName: { type: string }
+                        provisionedAt: { type: string, format: date-time, nullable: true }
+                        firstClaimAt: { type: string, format: date-time, nullable: true }
+                        firstResultAt: { type: string, format: date-time, nullable: true }
+                        minutesToFirstClaim: { type: integer, nullable: true }
+                        minutesToFirstResult: { type: integer, nullable: true }
   /api/rooms/{roomId}/capabilities:
     get:
       summary: Capability registry
       description: Active members and the skills they advertised via capabilities.advertised.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - name: search
+          in: query
+          description: Filter to members with a capability containing this keyword (case-insensitive)
+          schema: { type: string, maxLength: 80 }
       responses:
         '200':
           description: Registry

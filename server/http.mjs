@@ -463,7 +463,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         reject(405, "method_not_allowed", "Method not allowed");
       }
       const revokeMatch = /^\/api\/rooms\/([^/]{1,384})\/invitations\/([^/]{1,384})\/revoke$/.exec(url.pathname);
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|work-sessions|presence|capabilities|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics))?$/.exec(url.pathname);
       if (!match && !revokeMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((match ?? revokeMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
@@ -528,6 +528,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "capabilities" && req.method === "GET") {
         const search = url.searchParams.get("search");
         return json(res, 200, store.capabilities(selected.token, roomId, { search, expectedSessionBinding: fence }));
+      }
+      if (route === "onboarding-funnel" && req.method === "GET") {
+        return json(res, 200, store.onboardingFunnel(selected.token, roomId, fence));
       }
       if (route === "presence" && req.method === "GET") {
         const watchers = [...streams].filter(entry => entry.roomId === roomId).map(entry => entry.memberId);

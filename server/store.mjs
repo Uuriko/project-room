@@ -1240,6 +1240,40 @@ export class RoomStore {
         .sort((a, b) => a.memberId < b.memberId ? -1 : 1) };
     });
   }
+  // Round-2 #105: onboarding funnel metrics. provisionedAt = member.added,
+  // firstClaimAt = first work.accepted by the member, firstResultAt = first
+  // work.completed by the member. Nulls mean "hasn't happened yet".
+  onboardingFunnel(token, roomId, expectedSessionBinding = null) {
+    return this.readTransaction(() => {
+      this.authenticate(token, roomId, expectedSessionBinding);
+      const { members } = this.roomAuthority(roomId);
+      const agents = Object.values(members).filter(m => m && m.kind === "agent" && m.active !== false);
+      const provisioned = new Map(this.db.prepare(
+        `SELECT json_extract(body,'$.data.memberId') AS member, MIN(json_extract(body,'$.at')) AS at
+         FROM events WHERE room_id=? AND json_extract(body,'$.type')='member.added' GROUP BY member`
+      ).all(roomId).map(r => [r.member, r.at]));
+      const activity = this.db.prepare(
+        `SELECT json_extract(body,'$.actorId') AS actor, json_extract(body,'$.type') AS type, MIN(json_extract(body,'$.at')) AS at
+         FROM events WHERE room_id=? AND json_extract(body,'$.type') IN ('work.accepted','work.completed')
+         GROUP BY actor, type`
+      ).all(roomId);
+      const first = (actor, type) => activity.find(r => r.actor === actor && r.type === type)?.at ?? null;
+      return {
+        members: agents.map(m => {
+          const provisionedAt = provisioned.get(m.id) ?? null;
+          const firstClaimAt = first(m.id, "work.accepted");
+          const firstResultAt = first(m.id, "work.completed");
+          const minutes = (a, b) => a && b ? Math.round((Date.parse(b) - Date.parse(a)) / 60000) : null;
+          return {
+            memberId: m.id, displayName: m.displayName,
+            provisionedAt, firstClaimAt, firstResultAt,
+            minutesToFirstClaim: minutes(provisionedAt, firstClaimAt),
+            minutesToFirstResult: minutes(provisionedAt, firstResultAt)
+          };
+        }).sort((a, b) => a.memberId < b.memberId ? -1 : 1)
+      };
+    });
+  }
   workContext(token, roomId, workItemId, { includeSource = false, includeOffers = false, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
