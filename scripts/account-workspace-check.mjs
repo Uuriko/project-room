@@ -55,7 +55,7 @@ for (const mobile of [false, true]) test(`account Inbox ${mobile ? "mobile" : "d
   assert.equal(await p.locator("#account-rooms-list button").count(), 0); await f.capture(mobile ? "empty-rooms-mobile" : "empty-rooms-desktop");
   await p.locator("#nav-inbox").click(); await p.reload(); await p.locator("#inbox-reader").waitFor();
   assert.equal(await p.locator("#inbox-draft").inputValue(), "Let’s start with one small idea.");
-  await p.locator("#signout-button").click(); await p.locator("#auth-panel").waitFor();
+  if (await p.locator("#session-menu-button").isVisible()) await p.locator("#session-menu-button").click(); await p.locator("#signout-button").click(); await p.locator("#auth-panel").waitFor();
   assert.equal(await p.locator("#inbox-source-body").textContent(), "");
   assert.equal(await p.evaluate(() => sessionStorage.getItem("project-room:inbox-position:v1")), null);
 });
@@ -90,7 +90,7 @@ test("account-only other-tab replacement clears a held private read and navigati
   await p.locator("#inbox-refresh").click(); await reached;
   const other = await f.context.newPage(); const account = f.store.accountForMember("commons", "owner");
   await other.goto(f.origin + "/?account=1"); await other.locator("#inbox-panel").waitFor();
-  await other.locator("#signout-button").click(); await other.locator("#auth-panel").waitFor();
+  if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await other.locator("#signout-button").click(); await other.locator("#auth-panel").waitFor();
   await other.locator("#access-key").fill(f.store.issueAccountAccessKey(account.id));
   await other.locator('#auth-form button[type="submit"]').click(); await other.locator("#inbox-panel").waitFor();
   await p.locator("#auth-panel").waitFor(); release();
@@ -127,7 +127,7 @@ test("a lost account-only sign-out response clears private text and leaves a usa
     if (route.request().method() === "DELETE") { await route.fetch(); return route.abort(); }
     return route.continue();
   });
-  await p.locator("#signout-button").click(); await p.locator("#auth-panel").waitFor();
+  if (await p.locator("#session-menu-button").isVisible()) await p.locator("#session-menu-button").click(); await p.locator("#signout-button").click(); await p.locator("#auth-panel").waitFor();
   await p.getByText("Sign-out unconfirmed. Sign in to check your account.", { exact: true }).waitFor();
   assert.equal(await p.locator("#inbox-source-body").textContent(), "");
   assert.equal(await p.locator("#access-key").isEnabled(), true);
