@@ -7,8 +7,9 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { roomEntry, publicRoomDoorHtml } from "../deploy/room-entry.mjs";
 import {
-  agentCard, llmsTxt, llmsFullTxt, agentCardJson, discoveryDoc, DISCOVERY_PATHS,
+  agentCard, llmsTxt, llmsFullTxt, kitsTxt, agentCardJson, discoveryDoc, DISCOVERY_PATHS,
   SHORT_PACKET_FILES, SHORT_PACKET_SYNONYMS, AGENT_CARD_SYNONYMS, HEALTH_ALIAS_PATHS,
+  KITS_CATALOG_PATH, KITS_CATALOG_SYNONYMS, KITS_CATALOG_FILES,
   isHealthAliasPath, A2A_PROTOCOL_VERSION, AGENT_CARD_A2A_PATH,
   ROOM_ORIGIN, ROOM_DOOR, ROOM_PUBLIC_WWW, ROOM_PUBLIC_LOBBY, COMPUTE_DOOR, ROOM_DOCS,
   EDGE_DOOR_HOSTS, isEdgeDoorUrl
@@ -37,10 +38,10 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(card.product.compute, COMPUTE_DOOR);
   assert.equal(card.endpoints.healthz, `${ROOM_ORIGIN}/api/health`);
   assert.deepEqual(card.key_routes.map(row => row.path), [
-    "/api/health", "/llms.txt", "/llms-full.txt", "/.well-known/agent.json",
+    "/api/health", "/llms.txt", "/llms-full.txt", "/kits.txt", "/.well-known/agent.json",
     "/.well-known/agent-card.json",
     ...SHORT_PACKET_FILES.map(name => `/${name}`),
-    "/room/llms.txt", "/room/llms-full.txt", "/room/.well-known/agent.json",
+    "/room/llms.txt", "/room/llms-full.txt", "/room/kits.txt", "/room/.well-known/agent.json",
     "/room/.well-known/agent-card.json",
     ...SHORT_PACKET_FILES.map(name => `/room/${name}`)
   ]);
@@ -72,8 +73,11 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.match(text, new RegExp(ROOM_DOCS.client.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(full, /queued \/ processing \/ active/);
   assert.match(full, /Compute is a separate/);
+  assert.match(text, /\/kits\.txt/);
+  assert.match(full, /\/kits\.txt/);
   assert.equal(FORBIDDEN.test(text), false);
   assert.equal(FORBIDDEN.test(full), false);
+  assert.equal(FORBIDDEN.test(kitsTxt()), false);
   assert.equal(FORBIDDEN.test(agentCardJson()), false);
   assert.equal(JSON.parse(agentCardJson()).protocol, "project-room-discovery");
   assert.equal(card.protocolVersion, A2A_PROTOCOL_VERSION);
@@ -154,6 +158,53 @@ test("www leftover synonyms serve the short packet or agent card, not 404", asyn
   assert.equal(discoveryDoc("/room/"), null);
 });
 
+test("kits catalog is its own packet; leftover kit/apps/tools paths do not 404", async t => {
+  assert.equal(KITS_CATALOG_PATH, "/kits.txt");
+  assert.deepEqual([...KITS_CATALOG_SYNONYMS], ["/room/kit", "/room/kits", "/room/apps", "/room/tools"]);
+  assert.deepEqual([...KITS_CATALOG_FILES], [
+    "kits.md", "kit.txt", "kit.md", "apps.txt", "apps.md", "tools.txt", "tools.md"
+  ]);
+  const catalog = discoveryDoc("/kits.txt");
+  const short = discoveryDoc("/llms.txt");
+  assert.notEqual(catalog.body, short.body);
+  assert.match(catalog.type, /text\/plain/);
+  assert.equal(catalog.body, kitsTxt());
+  assert.match(catalog.body, /People and agents coordinate here\. Not Compute\./);
+  assert.match(catalog.body, /This is a catalog\. Not an App Store\. No paid apps\./);
+  assert.match(catalog.body, /packet \(live, no account\)/);
+  assert.match(catalog.body, /guest-agent-link \(live, owner-issued\)/);
+  assert.match(catalog.body, /enrolled-key \(live\)/);
+  assert.match(catalog.body, /\/room\/llms\.txt/);
+  assert.match(catalog.body, /\.well-known\/agent\.json/);
+  assert.match(catalog.body, /\/health/);
+  assert.match(catalog.body, /\/skill/);
+  assert.match(catalog.body, /curl -sS/);
+  assert.match(catalog.body, /follow Connect/);
+  assert.doesNotMatch(catalog.body, /getone\.one|Amore|Accessibility|Mic\/Mac|people-data dump|paid app list/i);
+  assert.equal(FORBIDDEN.test(catalog.body), false);
+  const origin = await serve(t);
+  const catalogPaths = [
+    "/kits.txt", "/room/kits.txt", "/project-room/kits.txt",
+    ...KITS_CATALOG_SYNONYMS, ...KITS_CATALOG_SYNONYMS.map(p => `${p}/`),
+    ...KITS_CATALOG_FILES.flatMap(name => [`/${name}`, `/room/${name}`])
+  ];
+  for (const path of catalogPaths) {
+    assert.ok(DISCOVERY_PATHS.includes(path), path);
+    assert.equal(discoveryDoc(path).body, catalog.body, path);
+    assert.equal(discoveryDoc(path).type, catalog.type, path);
+    const get = await fetch(origin + path);
+    assert.equal(get.status, 200, path);
+    assert.equal(get.headers.get("content-type"), catalog.type, path);
+    assert.equal(await get.text(), catalog.body, path);
+    const head = await fetch(origin + path, { method: "HEAD" });
+    assert.equal(head.status, 200, path);
+    assert.equal(await head.text(), "");
+  }
+  // Skill leftovers stay the short packet, not the kits catalog.
+  assert.equal(discoveryDoc("/room/skill").body, short.body);
+  assert.notEqual(discoveryDoc("/room/kit").body, short.body);
+});
+
 test("/room/health aliases return the same JSON as /api/health; bare /health stays 404", async t => {
   assert.deepEqual([...HEALTH_ALIAS_PATHS], [
     "/room/health", "/room/health/", "/room/api/health", "/room/api/health/"
@@ -191,7 +242,9 @@ test("door serves the same discovery bytes and points at origin", async () => {
     "/room/skill.md", "/room/agents.md", "/room/AGENTS.md", "/room/CLAUDE.md",
     "/room/skill", "/room/skill/", "/room/agents", "/room/llms",
     "/room/agent.json", "/room/readme.md", "/room/gemini.md", "/room/cursor.md",
-    "/project-room/llms.txt", "/project-room/llms-full.txt", "/project-room/.well-known/agent.json"
+    "/room/kits.txt", "/room/kits", "/room/kit", "/room/apps", "/room/tools",
+    "/project-room/llms.txt", "/project-room/llms-full.txt", "/project-room/kits.txt",
+    "/project-room/.well-known/agent.json"
   ]) {
     const expected = discoveryDoc(doorPath);
     const get = roomEntry(new Request(`https://www.trydemigod.com${doorPath}`));
@@ -237,7 +290,7 @@ test("advertised door root serves the HTML door; packets stay at /room/llms.txt"
 test("edge door predicate: getdasha /room only, prefix preserved", () => {
   assert.deepEqual([...EDGE_DOOR_HOSTS], ["getdasha.com", "www.getdasha.com"]);
   for (const host of EDGE_DOOR_HOSTS) {
-    for (const path of ["/room", "/room/", "/room/llms.txt", "/room/llms-full.txt", "/room/.well-known/agent.json", "/room/skill.md", "/room/skill", "/room/agent.json", "/room/health"]) {
+    for (const path of ["/room", "/room/", "/room/llms.txt", "/room/llms-full.txt", "/room/.well-known/agent.json", "/room/skill.md", "/room/skill", "/room/agent.json", "/room/health", "/room/kits", "/room/apps", "/room/tools"]) {
       assert.equal(isEdgeDoorUrl(`https://${host}${path}`), true, `${host}${path}`);
     }
   }

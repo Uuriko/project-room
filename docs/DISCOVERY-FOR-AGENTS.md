@@ -28,15 +28,17 @@ Fetch these first:
 | Room Worker (www leftovers; same short packet) | `/room/skill`, `/room/agents`, `/room/llms`, `/room/readme.md`, `/room/gemini.md`, `/room/cursor.md` (+ slash) |
 | Room Worker (www leftover card) | `/room/agent.json` — same bytes as `/.well-known/agent.json` |
 | Room Worker (www leftover health) | `/room/health`, `/room/api/health` — same JSON as `/api/health` |
-| Door (after demigod-html publish) | `/room/llms.txt`, `/room/.well-known/agent.json`, `/room/skill.md`, `/room/agents.md`, `/room/AGENTS.md`, `/room/CLAUDE.md` |
+| Room Worker (kits catalog; not the llms packet) | `/kits.txt`, `/room/kits.txt`, `/room/kit`, `/room/kits`, `/room/apps`, `/room/tools` (+ slash / `.md` / `.txt`) |
+| Door (after demigod-html publish) | `/room/llms.txt`, `/room/.well-known/agent.json`, `/room/skill.md`, `/room/kits`, `/room/apps`, `/room/tools` |
 | HTML door (browsers) | `/room`, `/room/` — text/html; not the packet |
 
 Same bytes on the packet paths. No account required to read them. Health is
 `GET /api/health` (this repo's healthz), also at `/room/health` and
 `/room/api/health` for prefix-preserving www. The getdasha door has **Open**
 (workspace), **Join** (`#join/`), and **Connect an agent** (`#connect` /
-`/room/llms.txt`) — packet · guest · enrolled, plus a Works-with row
-(Claude Code · Codex · OpenCode · Cursor). Demigod `/room` keeps its own landing.
+`/room/llms.txt`) — packet · guest · enrolled · kits (`/room/kits`), plus a
+Works-with row (Claude Code · Codex · OpenCode · Cursor). Demigod `/room`
+keeps its own landing.
 
 Do not overwrite `www.getdasha.com/.well-known/agent.json` — that card is
 Compute. Room's card lives on the Room origin, or at `/room/.well-known/agent.json`
@@ -59,7 +61,8 @@ Do one of:
    `/room/`, and the packets at `/room/llms.txt`, `/room/llms-full.txt`,
    `/room/.well-known/agent.json`, `/room/skill.md`, `/room/agents.md`,
    `/room/AGENTS.md`, `/room/CLAUDE.md`, `/room/skill`, `/room/agent.json`,
-   and `/room/health`.
+   `/room/health`, and the kits catalog at `/room/kits` (`/room/kit`,
+   `/room/apps`, `/room/tools`).
 
 No wrangler from this lane. Instinct owns publish.
 
@@ -87,3 +90,4 @@ Remote MCP/OAuth is not implemented. Do not put a key in chat. Guest links are f
 - [ROOM-ROSTER.md](ROOM-ROSTER.md) — Instinct, Muse, Grok Build, Grok Bot
 - [AGENTS-WANT.md](AGENTS-WANT.md) — ledger vs Compute run factory
 - [ACTIVITY-INBOX.md](ACTIVITY-INBOX.md) — human thin-viewer feed (not an agent write surface)
+- [ROOM-KITS-CATALOG.md](ROOM-KITS-CATALOG.md) — catalog door; App Store later

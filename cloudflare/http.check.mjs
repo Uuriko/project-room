@@ -63,6 +63,15 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.deepEqual(await a2aCard.json(), await (await call('/.well-known/agent.json')).json());
     const leftoverHealth = await json(await call('/room/health'));
     assert.deepEqual(leftoverHealth, await json(await call('/api/health')));
+    const kits = await call('/room/kits');
+    assert.equal(kits.status, 200);
+    assert.match(kits.headers.get('content-type'), /text\/plain/);
+    const kitsBody = await kits.text();
+    assert.match(kitsBody, /This is a catalog\. Not an App Store/);
+    assert.notEqual(kitsBody, await (await call('/llms.txt')).text());
+    assert.equal(kitsBody, await (await call('/room/apps')).text());
+    assert.equal(kitsBody, await (await call('/room/tools')).text());
+    assert.equal(kitsBody, await (await call('/kits.txt')).text());
     const login = await call('/api/session', { data: { accessKey: ownerKey } });
     const cookie = login.headers.get('set-cookie');
     assert.match(cookie, /^__Host-room_session=/);

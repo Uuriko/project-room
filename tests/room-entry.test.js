@@ -48,6 +48,9 @@ test("entry handler leaves other Demigod pages and hosts to existing routing", (
   assert.notEqual(roomEntry(new Request("https://www.trydemigod.com/room/AGENTS.md")), null);
   assert.notEqual(roomEntry(new Request("https://www.trydemigod.com/room/skill")), null);
   assert.notEqual(roomEntry(new Request("https://www.trydemigod.com/room/agent.json")), null);
+  assert.notEqual(roomEntry(new Request("https://www.trydemigod.com/room/kits")), null);
+  assert.notEqual(roomEntry(new Request("https://www.trydemigod.com/room/apps")), null);
+  assert.notEqual(roomEntry(new Request("https://www.trydemigod.com/room/tools")), null);
 });
 
 test("entry supports HEAD and rejects mutations", async () => {
@@ -81,6 +84,7 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(html, /href="\/room\/llms.txt">Packet</);
   assert.match(html, /href="\/room\/llms.txt">Guest link</);
   assert.match(html, /href="\/room\/llms.txt">Add agent</);
+  assert.match(html, /href="\/room\/kits">Kits</);
   assert.match(html, /Works with/);
   assert.match(html, /href="\/room\/llms.txt">Claude Code</);
   assert.match(html, /href="\/room\/llms.txt">Codex</);
