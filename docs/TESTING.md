@@ -46,7 +46,20 @@ numbers (~175 ops/sec, pilot caps: 100 members/room, 10k events).
 Proves a live room survives the sqlite backup round-trip (counts + content
 compared after restore).
 
-## What CI runs
+## Pre-push suggestion
+
+Add a git pre-push hook that runs the fast path only (syntax + gates,
+no unit tests):
+
+```sh
+# .git/hooks/pre-push
+node scripts/check.mjs --fast
+```
+
+`--fast` is not implemented yet — today `npm run check` runs the full
+unit suite too, which is too slow for a hook. Proposed: add a `--fast`
+flag that stops after the three static gates (syntax, journey-coverage,
+shadow-imports) and skips `node --test`. Full suite stays in CI.
 
 `.github/workflows/test.yml`: `contract` (`npm run check`), `browser`
 (`npm run test:browser`), `cloudflare` (Worker runtime checks). The
