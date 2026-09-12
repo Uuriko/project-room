@@ -164,7 +164,7 @@ test("reply comparison clears already visible original and unsaved text when ano
   await p.locator("#inbox-reply-original summary").click();
   assert.equal(await p.locator("#inbox-reply-original-body").textContent(), f.recorded.plan.expected.body);
   const other = await p.context().newPage(); await other.goto(f.origin + "/?room=commons");
-  await other.locator("#main").waitFor(); await other.locator("#signout-button").click(); await p.locator("#auth-panel").waitFor();
+  await other.locator("#main").waitFor(); if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await other.locator("#signout-button").click(); await p.locator("#auth-panel").waitFor();
   assert.equal(await p.locator("#inbox-reply-dialog").isVisible(), false);
   for (const id of ["inbox-reply-local-body", "inbox-reply-original-body", "inbox-reply-body"])
     assert.equal(await p.locator("#" + id).textContent(), "");
@@ -400,7 +400,7 @@ test("provider preview cannot repopulate private content after another tab chang
   await p.route("**/reply-review?view=reply-review-v4", async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); });
   await p.locator("#inbox-reply-open").click(); await started;
   const other = await p.context().newPage(); await other.goto(f.origin + "/?room=commons");
-  await other.locator("#main").waitFor(); await other.locator("#signout-button").click(); await other.locator("#auth-panel").waitFor();
+  await other.locator("#main").waitFor(); if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await other.locator("#signout-button").click(); await other.locator("#auth-panel").waitFor();
   const guest = f.store.accountForMember("commons", "guest");
   await other.locator("#access-key").fill(f.store.issueAccountAccessKey(guest.id)); await other.locator('#auth-form button[type="submit"]').click();
   await other.locator("#main").waitFor(); await p.locator("#auth-panel").waitFor(); release(); await p.waitForLoadState("networkidle");
@@ -707,7 +707,7 @@ test("sample reply: a late preview cannot reopen private text after another tab 
   await p.route("**/send-context", async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); });
   await p.locator("#inbox-send-preview").click(); await started;
   const other = await p.context().newPage(); await other.goto(f.origin + "/?room=commons");
-  await other.locator("#main").waitFor(); await other.locator("#signout-button").click();
+  await other.locator("#main").waitFor(); if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await other.locator("#signout-button").click();
   await other.locator("#auth-panel").waitFor();
   const guest = f.store.accountForMember("commons", "guest"), key = f.store.issueAccountAccessKey(guest.id);
   await other.locator("#access-key").fill(key); await other.locator('#auth-form button[type="submit"]').click();
@@ -766,7 +766,7 @@ test("sample arrival: two samples and existing localhost cookies coexist in one 
   assert.equal(await b.locator("#inbox-draft").inputValue(), "");
   await a.reload(); await a.locator("#inbox-reader").waitFor();
   assert.equal(await a.locator("#inbox-draft").inputValue(), "Only in the first sample");
-  await b.locator("#signout-button").click(); await b.locator("#auth-panel").waitFor();
+  if (await b.locator("#session-menu-button").isVisible()) await b.locator("#session-menu-button").click(); await b.locator("#signout-button").click(); await b.locator("#auth-panel").waitFor();
   await a.reload(); await a.locator("#inbox-reader").waitFor();
   assert.equal(await a.locator("#inbox-draft").inputValue(), "Only in the first sample");
   const cookies = await context.cookies();
@@ -810,7 +810,7 @@ for (const mobile of [false, true]) test(`inbox continuity ${mobile ? "mobile" :
   assert.equal(new URL(p.url()).hash, "#pr-view/inbox", "private source IDs are not shared in the URL");
   await p.locator("#nav-rooms").click(); await f.inbox();
   await p.waitForFunction(({ mobile, top }) => Math.abs((mobile ? scrollY : document.querySelector("#inbox-reader").scrollTop) - top) < 3, { mobile, top });
-  await p.locator("#signout-button").click(); await p.locator("#auth-panel").waitFor();
+  if (await p.locator("#session-menu-button").isVisible()) await p.locator("#session-menu-button").click(); await p.locator("#signout-button").click(); await p.locator("#auth-panel").waitFor();
   assert.equal(await p.evaluate(() => sessionStorage.getItem("project-room:inbox-position:v1")), null);
 });
 
@@ -941,7 +941,7 @@ test("real inbox: another tab changing the browser account clears private conten
   await p.route("**/api/inbox/sources/held?view=email-excerpt-v1", async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); });
   const read = p.locator('[data-source-id="held"]').click(); await started; await read;
   const other = await p.context().newPage(); await other.goto(f.origin + "/?room=commons");
-  await other.locator("#main").waitFor({ state: "visible" }); await other.locator("#signout-button").click();
+  await other.locator("#main").waitFor({ state: "visible" }); if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await other.locator("#signout-button").click();
   await other.locator("#auth-panel").waitFor({ state: "visible" });
   const guest = f.store.accountForMember("commons", "guest"), key = f.store.issueAccountAccessKey(guest.id);
   await other.locator("#access-key").fill(key); await other.locator('#auth-form button[type="submit"]').click(); await other.locator("#main").waitFor({ state: "visible" });
