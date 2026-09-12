@@ -381,6 +381,25 @@ export class RoomAgentClient {
   workTemplates() { return WORK_TEMPLATES; }
   workTemplate(id) { return workTemplate(id); }
   onboardingFunnel({ signal } = {}) { return this.#request("/onboarding-funnel", undefined, signal); }
+  // Round-2 #106/#107: export returns NDJSON text; import posts it back.
+  // These bypass #request because the payloads are NDJSON, not JSON.
+  async exportRoom({ signal } = {}) {
+    const response = await this.#fetch(`${this.#origin}/api/rooms/${encodeURIComponent(this.#roomId)}/export`, {
+      headers: { Authorization: `Bearer ${this.#token}` }, signal: signal ?? AbortSignal.timeout(15000)
+    });
+    if (!response.ok) throw new RoomClientError(response.status, "request_failed", "Room export failed");
+    return response.text();
+  }
+  async importRoom(ndjson, { signal } = {}) {
+    if (typeof ndjson !== "string" || !ndjson.trim()) throw new Error("Import needs NDJSON text");
+    const response = await this.#fetch(`${this.#origin}/api/rooms/${encodeURIComponent(this.#roomId)}/import`, {
+      method: "POST", headers: { Authorization: `Bearer ${this.#token}`, "Content-Type": "application/x-ndjson" },
+      body: ndjson, signal: signal ?? AbortSignal.timeout(15000)
+    });
+    const value = await response.json().catch(() => null);
+    if (!response.ok) throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room import failed");
+    return value;
+  }
   capabilities({ search, signal } = {}) {
     if (search !== undefined && (typeof search !== "string" || !search.trim() || search.length > 80))
       throw new Error("Search is 1 to 80 characters");

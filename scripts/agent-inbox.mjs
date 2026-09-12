@@ -3,6 +3,13 @@ import { packetMarkdown } from "../src/work-packet.js";
 import { validId } from "../src/events.js";
 import { agentConnectionFromEnvironment, readConnectionInput, saveAgentConnection, connectionDiagnostic, ConnectionError } from "../client/agent-connection.mjs";
 
+const readStdin = () => new Promise((resolve, reject) => {
+  let text = ""; process.stdin.setEncoding("utf8");
+  process.stdin.on("data", chunk => text += chunk);
+  process.stdin.on("end", () => resolve(text));
+  process.stdin.on("error", reject);
+});
+
 const [action = "orient", checkpoint, ...extra] = process.argv.slice(2);
 if (action === "reply") {
   const { replyMain } = await import("./agent-replies.mjs");
@@ -25,6 +32,8 @@ if (action === "reply") {
   node scripts/agent-inbox.mjs advertise CAPABILITY [CAPABILITY...]
   node scripts/agent-inbox.mjs templates [TEMPLATE_ID]
   node scripts/agent-inbox.mjs funnel
+  node scripts/agent-inbox.mjs export > room.jsonl
+  cat room.jsonl | node scripts/agent-inbox.mjs import-history
   node scripts/agent-inbox.mjs sessions [STATUS]
   node scripts/agent-inbox.mjs claim WORK_ID
   node scripts/agent-inbox.mjs session WORK_ID STATUS
@@ -68,7 +77,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
         || (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > 50))
         || (cursor !== undefined && (since !== undefined || cursor.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(cursor)))) throw new ConnectionError("usage_error");
     }
-    if (!["connect", "import", "check", "orient", "next", "search", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "sessions", "claim", "session", "status", "templates", "funnel"].includes(action)
+    if (!["connect", "import", "check", "orient", "next", "search", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "sessions", "claim", "session", "status", "templates", "funnel", "export", "import-history"].includes(action)
       || (["connect", "import"].includes(action) && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
       || (action === "import" && ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"].some(name => process.env[name] !== undefined))
       || (["packet", "work", "discussion", "result", "claim"].includes(action) && !validId(checkpoint))
@@ -102,6 +111,8 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
       : action === "status" ? await client.setStatus([checkpoint, ...extra].join(" "))
       : action === "templates" ? { templates: checkpoint === undefined ? client.workTemplates() : [client.workTemplate(checkpoint)].filter(Boolean) }
       : action === "funnel" ? await client.onboardingFunnel()
+      : action === "export" ? { ndjson: await client.exportRoom() }
+      : action === "import-history" ? await client.importRoom(await readStdin())
       : action === "sessions" ? await client.workSessions(checkpoint === undefined ? {} : { status: checkpoint })
       : action === "claim" ? await client.claimSession(checkpoint)
       : action === "session" ? await (async () => {
@@ -112,6 +123,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
             expectedRevision: card.revision, action: "set_status", status: extra[0] });
         })()
       : await client.changes(Number(checkpoint));
+    if (action === "export") { process.stdout.write(result.ndjson); return; }
     console.log(action === "packet" ? result : JSON.stringify(result, null, 2));
   } catch (error) {
     // Fixed diagnostic text avoids printing transport internals or environment secrets.
