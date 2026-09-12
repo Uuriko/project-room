@@ -751,6 +751,10 @@ function requirePermission(state, memberId, permission) {
   if (!hasPermission(state, memberId, permission)) throw new Error(`${memberId} lacks ${permission}`);
 }
 
+export function memberCan(state, memberId, permission) {
+  return hasPermission(state, memberId, permission);
+}
+
 function hasPermission(state, memberId, permission) {
   return requireMember(state, memberId).permissions.includes(permission);
 }
