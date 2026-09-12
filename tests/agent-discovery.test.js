@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { roomEntry } from "../deploy/room-entry.mjs";
+import { roomEntry, publicRoomDoorHtml } from "../deploy/room-entry.mjs";
 import {
   agentCard, llmsTxt, llmsFullTxt, agentCardJson, discoveryDoc, DISCOVERY_PATHS,
   SHORT_PACKET_FILES,
@@ -56,6 +56,10 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.match(text, /Work Items \+ next actions \+ receipts/);
   assert.match(text, /Not a run factory/);
   assert.match(text, /Compute stays separate/);
+  assert.match(text, /HTML door/);
+  assert.match(text, /\/room\/llms.txt/);
+  assert.equal(DISCOVERY_PATHS.includes("/room"), false);
+  assert.equal(DISCOVERY_PATHS.includes("/room/"), false);
   assert.match(text, new RegExp(ROOM_PUBLIC_WWW.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(text, new RegExp(ROOM_PUBLIC_LOBBY.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(text, /packet \(live, no account\)/);
@@ -129,20 +133,35 @@ test("door serves the same discovery bytes and points at origin", async () => {
   }
 });
 
-test("advertised door root serves the llms.txt entry doc, never 404", async (t) => {
-  for (const path of ["/room", "/room/"]) {
-    const doc = discoveryDoc(path);
-    assert.equal(doc?.body, llmsTxt());
-    assert.match(doc.type, /text\/plain/);
-  }
+test("advertised door root serves the HTML door; packets stay at /room/llms.txt", async (t) => {
+  assert.equal(discoveryDoc("/room"), null);
+  assert.equal(discoveryDoc("/room/"), null);
+  assert.equal(discoveryDoc("/room/llms.txt").body, llmsTxt());
+  assert.match(discoveryDoc("/room/llms.txt").type, /text\/plain/);
   const base = await serve(t);
+  const door = publicRoomDoorHtml();
   for (const path of ["/room", "/room/"]) {
     const res = await fetch(`${base}${path}`);
-    assert.equal(res.status, 200);
-    assert.equal(await res.text(), llmsTxt());
+    assert.equal(res.status, 200, path);
+    assert.match(res.headers.get("content-type"), /text\/html/);
+    assert.equal(await res.text(), door);
+    const head = await fetch(`${base}${path}`, { method: "HEAD" });
+    assert.equal(head.status, 200, path);
+    assert.equal(await head.text(), "");
+    assert.equal((await fetch(`${base}${path}`, { method: "POST" })).status, 405, path);
+    const plain = await fetch(`${base}${path}`, { headers: { Accept: "text/plain" } });
+    assert.equal(plain.status, 200, path);
+    assert.match(plain.headers.get("content-type"), /text\/plain/);
+    assert.equal(await plain.text(), llmsTxt());
   }
-  // The demigod door root stays the human HTML door page (covered above);
-  // the worker origin and getdasha edge doors serve the llms.txt alias.
+  const workspace = await fetch(`${base}/`);
+  assert.equal(workspace.status, 200);
+  assert.match(workspace.headers.get("content-type"), /text\/html/);
+  assert.match(await workspace.text(), /message-input/);
+  const packet = await fetch(`${base}/room/llms.txt`);
+  assert.equal(packet.status, 200);
+  assert.match(packet.headers.get("content-type"), /text\/plain/);
+  assert.equal(await packet.text(), llmsTxt());
 });
 
 test("edge door predicate: getdasha /room only, prefix preserved", () => {

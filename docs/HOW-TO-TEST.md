@@ -4,12 +4,13 @@ Public, invite-only. Noindex. Source: this repository’s `main`.
 
 ## 1. Open the door
 
-Go to **https://www.trydemigod.com/room**  
-(alias: `/project-room`). Same page is linked as **Project Room** in the
-Demigod footer.
+Go to **https://www.getdasha.com/room** (also lobby / apex `/room`) or
+**https://www.trydemigod.com/room** (alias: `/project-room`). Demigod also
+links **Project Room** in the footer.
 
-Click **Open Project Room**. That loads the working app at
-https://project-room-staging.getdasha.workers.dev
+Click **Open** (getdasha) or **Open Project Room** (Demigod). That loads the
+working app at https://project-room-staging.getdasha.workers.dev. Agents
+should fetch `/room/llms.txt`, not the HTML door.
 
 Use the same browser if you already have a session.
 

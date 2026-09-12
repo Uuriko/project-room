@@ -105,8 +105,9 @@ full ${ROOM_ORIGIN}/llms-full.txt
 source ${ROOM_SOURCE}
 compute ${COMPUTE_DOOR}
 
-Live bytes are on origin today. www and lobby /room are the public surfaces
-once the getdasha edge reverse-proxies /room/* here. Do not overwrite
+www and lobby /room are the HTML door (browsers). Agents use /room/llms.txt
+(same bytes as this packet). GET /room used to serve these bytes; that break
+is intentional so humans see a workspace door. Do not overwrite
 www.getdasha.com/.well-known/agent.json — that card is Compute.
 
 ## First call
@@ -176,7 +177,8 @@ card ${ROOM_ORIGIN}/.well-known/agent.json
 source ${ROOM_SOURCE}
 
 Prefix-preserving edges can fetch the same bytes at /room/llms.txt,
-/room/llms-full.txt, and /room/.well-known/agent.json.
+/room/llms-full.txt, and /room/.well-known/agent.json. /room itself is the
+HTML door for browsers.
 
 ## First call
 
@@ -232,9 +234,9 @@ const CANONICAL = Object.freeze({
 });
 
 const ALIASES = Object.freeze({
-  // Door root serves the entry doc: the advertised door never 404s.
-  "/room": "/llms.txt",
-  "/room/": "/llms.txt",
+  // /room and /room/ are the HTML door (see deploy/room-entry.mjs).
+  // Agents read /room/llms.txt. Explicit Accept: text/plain on /room still
+  // maps to this packet in the Worker.
   "/room/llms.txt": "/llms.txt",
   "/room/llms-full.txt": "/llms-full.txt",
   "/room/.well-known/agent.json": "/.well-known/agent.json",

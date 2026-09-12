@@ -43,7 +43,7 @@ optional.push("server/graph-reply-update-review.mjs");
 optional.push("src/inbox-client.js", "src/inbox-ui.js");
 optional.push("src/inbox-send-ui.js");
 optional.push("src/room-roster.js");
-optional.push("deploy/agent-discovery.mjs", "server/guest-agent-links.mjs");
+optional.push("deploy/agent-discovery.mjs", "deploy/room-entry.mjs", "server/guest-agent-links.mjs");
 optional.push("src/work-item-session.js");
 optional.push("scripts/release-evidence.mjs");
 const allowed = new Set([...required, ...optional]);
