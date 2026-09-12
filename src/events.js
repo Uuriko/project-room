@@ -12,7 +12,11 @@ export const EVENT_TYPES = Object.freeze({
   MEMBER_ADDED: "member.added",
   MEMBER_JOINED_VIA_INVITATION: "member.joined_via_invitation",
   MEMBER_ACCESS_CHANGED: "member.access_changed",
+  MEMBER_STATUS_UPDATED: "member.status_updated",
+  NOTIFICATION_PREFERENCES_SET: "notifications.preferences_set",
   MESSAGE_POSTED: "message.posted",
+  MESSAGE_EDITED: "message.edited",
+  MESSAGE_DELETED: "message.deleted",
   REPLY_REQUEST_CANCELLED: REPLY_CANCELLED,
   MESSAGE_REACTION_SET: "message.reaction_set",
   WORK_PROPOSED: "work.proposed",
@@ -34,7 +38,8 @@ export const EVENT_TYPES = Object.freeze({
   SESSION_STARTED: SESSION_EVENT_TYPES.STARTED,
   SESSION_STATUS_CHANGED: SESSION_EVENT_TYPES.STATUS_CHANGED,
   SESSION_STOP_REQUESTED: SESSION_EVENT_TYPES.STOP_REQUESTED,
-  SESSION_STOPPED: SESSION_EVENT_TYPES.STOPPED
+  SESSION_STOPPED: SESSION_EVENT_TYPES.STOPPED,
+  CAPABILITIES_ADVERTISED: "capabilities.advertised"
 });
 
 export const PERMISSIONS = Object.freeze(["steer", "decide", "manage_members", "manage_claims", "accept_work", "complete_work", "verify", "write_external"]);
@@ -133,7 +138,11 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.MEMBER_ADDED]: addMember,
     [EVENT_TYPES.MEMBER_JOINED_VIA_INVITATION]: joinMemberViaInvitation,
     [EVENT_TYPES.MEMBER_ACCESS_CHANGED]: changeMemberAccess,
+    [EVENT_TYPES.MEMBER_STATUS_UPDATED]: updateMemberStatus,
+    [EVENT_TYPES.NOTIFICATION_PREFERENCES_SET]: setNotificationPreferences,
     [EVENT_TYPES.MESSAGE_POSTED]: postMessage,
+    [EVENT_TYPES.MESSAGE_EDITED]: editMessage,
+    [EVENT_TYPES.MESSAGE_DELETED]: deleteMessage,
     [EVENT_TYPES.REPLY_REQUEST_CANCELLED]: cancelReplyRequest,
     [EVENT_TYPES.MESSAGE_REACTION_SET]: setMessageReaction,
     [EVENT_TYPES.WORK_PROPOSED]: proposeWork,
@@ -158,7 +167,8 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.SESSION_STARTED]: applySession,
     [EVENT_TYPES.SESSION_STATUS_CHANGED]: applySession,
     [EVENT_TYPES.SESSION_STOP_REQUESTED]: applySession,
-    [EVENT_TYPES.SESSION_STOPPED]: applySession
+    [EVENT_TYPES.SESSION_STOPPED]: applySession,
+    [EVENT_TYPES.CAPABILITIES_ADVERTISED]: advertiseCapabilities
   };
   const handler = handlers[incoming.type];
   if (!Object.hasOwn(handlers, incoming.type)) throw new Error(`Unsupported event type: ${incoming.type}`);
@@ -190,8 +200,9 @@ function validateEnvelope(incoming) {
     if (typeof value === "string" && (value.length > 4096 || !value.trim())) throw new Error(`Invalid ${key}`);
     if (["expectedRevision", "expectedMemberRevision"].includes(key) && (!Number.isSafeInteger(value) || value < 0)) throw new Error(`Invalid ${key}`);
     if (["independentVerificationRequired", "ownerDecisionRequired", "active"].includes(key) && typeof value !== "boolean") throw new Error(`Invalid ${key}`);
-    if (["permissions", "paths", "checksClaimed"].includes(key) && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !v.trim() || v.length > 512))) throw new Error(`Invalid ${key}`);
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed"].includes(key)) throw new Error(`Invalid ${key}`);
+    if (["permissions", "paths", "checksClaimed", "capabilities"].includes(key) && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !v.trim() || v.length > 512))) throw new Error(`Invalid ${key}`);
+    if (key === "preferences" && (Array.isArray(value) || typeof value !== "object" || Object.entries(value).some(([k, v]) => typeof k !== "string" || typeof v !== "string" || k.length > 64 || v.length > 64))) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -227,10 +238,17 @@ function addMember(state, incoming) {
     if (requireMember(state, incoming.data.accountableHumanId).kind !== "human") throw new Error("Accountable sponsor must be a human member");
   }
   if (isBootstrapOwner && (incoming.data.kind !== "human" || !incoming.data.permissions.includes("manage_members"))) throw new Error("Owner must retain membership administration");
+  // Round-2 #101: a member record may be bound to a global agent identity.
+  if (incoming.data.identityId != null
+    && (typeof incoming.data.identityId !== "string" || incoming.data.identityId.length > 64)) throw new Error("identityId must be a short string");
   state.members[memberId] = {
     id: memberId,
     displayName: incoming.data.displayName,
     kind: incoming.data.kind,
+    // Round-2 #101: only present when the member was linked from an agent
+    // identity; kept conditional so stored projections from before this field
+    // rebuild byte-identically.
+    ...(incoming.data.identityId === undefined ? {} : { identityId: incoming.data.identityId }),
     accountableHumanId: incoming.data.accountableHumanId || (incoming.data.kind === "human" ? memberId : state.room.ownerId),
     permissions: [...incoming.data.permissions],
     availability: incoming.data.availability || "unknown",
@@ -290,6 +308,43 @@ function changeMemberAccess(state, incoming) {
   member.revision += 1;
 }
 
+// A member's status message ("working on X"). Members set their own;
+// the owner may set anyone's. If memberId is omitted, the caller is the
+// target. Bounded length, no HTML — rendered as text.
+function updateMemberStatus(state, incoming) {
+  requireFields(incoming.data, ["message"]);
+  const targetId = incoming.data.memberId ?? incoming.actorId;
+  const member = Object.hasOwn(state.members, targetId) && state.members[targetId];
+  if (!member) throw new Error("Unknown member");
+  if (incoming.actorId !== member.id && incoming.actorId !== state.room.ownerId) {
+    throw new Error("Members may only set their own status message");
+  }
+  const message = String(incoming.data.message ?? "");
+  if (message.length > 140) throw new Error("Status message must be 140 characters or fewer");
+  member.statusMessage = message;
+  member.revision += 1;
+}
+
+const NOTIFICATION_CHANNELS = ["mentions", "replies", "work_updates", "announcements"];
+const NOTIFICATION_LEVELS = ["all", "mentions_only", "none"];
+
+function setNotificationPreferences(state, incoming) {
+  requireFields(incoming.data, ["preferences"]);
+  const member = requireMember(state, incoming.actorId);
+  const prefs = incoming.data.preferences;
+  if (!prefs || Array.isArray(prefs) || typeof prefs !== "object") throw new Error("Preferences must be an object");
+  for (const [channel, level] of Object.entries(prefs)) {
+    if (!NOTIFICATION_CHANNELS.includes(channel)) throw new Error(`Unknown notification channel: ${channel}`);
+    if (!NOTIFICATION_LEVELS.includes(level)) throw new Error(`Unknown notification level: ${level}`);
+  }
+  member.notificationPreferences = { ...(member.notificationPreferences ?? defaultNotificationPreferences()), ...prefs };
+  member.revision += 1;
+}
+
+function defaultNotificationPreferences() {
+  return { mentions: "all", replies: "all", work_updates: "all", announcements: "all" };
+}
+
 function requireScopedMemberAdministration(state, actorId, targetId, currentTarget, nextPermissions) {
   if (actorId === state.room.ownerId) return;
   if (targetId === state.room.ownerId) throw new Error("Only the Room owner may change owner authority");
@@ -321,6 +376,33 @@ function postMessage(state, incoming) {
     ...(proposal ? { proposal } : {})
   });
   recordReplyPost(state, incoming, requestMode);
+}
+
+function findEditableMessage(state, incoming) {
+  const message = state.messages.find(m => m.id === incoming.data.messageId);
+  if (!message) throw new Error("Message not found");
+  if (message.deletedAt) throw new Error("Message was deleted");
+  const actor = requireMember(state, incoming.actorId);
+  if (message.authorId !== actor.id && actor.id !== state.room.ownerId) throw new Error("Only the author or the Room owner can change this message");
+  if ((message.revision ?? 0) !== incoming.data.expectedMessageRevision) throw new Error("Message changed; refresh before editing");
+  return { message, actor };
+}
+
+function editMessage(state, incoming) {
+  const { message } = findEditableMessage(state, incoming);
+  if (typeof incoming.data.body !== "string" || !incoming.data.body.trim()) throw new Error("Message body must be text");
+  message.editHistory = [...(message.editHistory ?? []), { body: message.body, editedAt: incoming.at }];
+  message.body = incoming.data.body;
+  message.revision = (message.revision ?? 0) + 1;
+  message.editedAt = incoming.at;
+}
+
+function deleteMessage(state, incoming) {
+  const { message } = findEditableMessage(state, incoming);
+  message.body = null;
+  message.deletedAt = incoming.at;
+  message.deletedBy = incoming.actorId;
+  message.revision = (message.revision ?? 0) + 1;
 }
 
 function setMessageReaction(state, incoming) {
@@ -424,6 +506,27 @@ function blockWork(state, incoming) {
   commitMutation(item, incoming);
 }
 
+
+// Capability registry: members advertise what they can do so other agents can
+// discover and delegate. Self-advertised only; replaces the previous list.
+function advertiseCapabilities(state, incoming) {
+  const member = requireMember(state, incoming.actorId);
+  if (member.active === false) throw new Error("Inactive members cannot advertise capabilities");
+  const caps = incoming.data.capabilities;
+  if (!Array.isArray(caps) || caps.length === 0 || caps.length > 30) {
+    throw new Error("Capabilities must be a list of 1 to 30 entries");
+  }
+  const clean = [];
+  for (const cap of caps) {
+    if (typeof cap !== "string" || !cap.trim() || cap.length > 80) {
+      throw new Error("Each capability must be 1 to 80 characters");
+    }
+    const trimmed = cap.trim();
+    if (!clean.includes(trimmed)) clean.push(trimmed);
+  }
+  member.capabilities = clean;
+  commitMutation(member, incoming);
+}
 
 function recordHandoff(state, incoming) {
   const item = mutableWorkItem(state, incoming, [WORK_STATES.ACCEPTED, WORK_STATES.WORKING, WORK_STATES.BLOCKED]);
@@ -749,6 +852,10 @@ function requireWorkItem(state, workItemId) {
 
 function requirePermission(state, memberId, permission) {
   if (!hasPermission(state, memberId, permission)) throw new Error(`${memberId} lacks ${permission}`);
+}
+
+export function memberCan(state, memberId, permission) {
+  return hasPermission(state, memberId, permission);
 }
 
 function hasPermission(state, memberId, permission) {

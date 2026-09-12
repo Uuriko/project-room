@@ -1,7 +1,14 @@
-import { RoomAgentClient, validWorkSearchQuery } from "../client/room-agent.mjs";
+import { RoomAgentClient, validWorkSearchQuery, createAgentIdentity } from "../client/room-agent.mjs";
 import { packetMarkdown } from "../src/work-packet.js";
 import { validId } from "../src/events.js";
 import { agentConnectionFromEnvironment, readConnectionInput, saveAgentConnection, connectionDiagnostic, ConnectionError } from "../client/agent-connection.mjs";
+
+const readStdin = () => new Promise((resolve, reject) => {
+  let text = ""; process.stdin.setEncoding("utf8");
+  process.stdin.on("data", chunk => text += chunk);
+  process.stdin.on("end", () => resolve(text));
+  process.stdin.on("error", reject);
+});
 
 const [action = "orient", checkpoint, ...extra] = process.argv.slice(2);
 if (action === "reply") {
@@ -16,10 +23,30 @@ if (action === "reply") {
   pbpaste | node scripts/agent-inbox.mjs import NEW_PRIVATE_DIRECTORY
   node scripts/agent-inbox.mjs check
   node scripts/agent-inbox.mjs search "phrase" [--needs-me]
+  node scripts/agent-inbox.mjs find "phrase" [messages|work|all]
   node scripts/agent-inbox.mjs work WORK_ID [--include-source] [--include-offers]
   node scripts/agent-inbox.mjs result WORK_ID [--completion ID | --draft MESSAGE_ID]
   node scripts/agent-inbox.mjs discussion WORK_ID [--since N | --cursor CURSOR] [--limit N]
   node scripts/agent-inbox.mjs [orient|next|brief|changes CHECKPOINT|packet WORK_ID]
+  node scripts/agent-inbox.mjs presence
+  node scripts/agent-inbox.mjs capabilities [QUERY]
+  node scripts/agent-inbox.mjs advertise CAPABILITY [CAPABILITY...]
+  node scripts/agent-inbox.mjs templates [TEMPLATE_ID]
+  node scripts/agent-inbox.mjs funnel
+  node scripts/agent-inbox.mjs export > room.jsonl
+  cat room.jsonl | node scripts/agent-inbox.mjs import-history
+  node scripts/agent-inbox.mjs thread MESSAGE_ID
+  node scripts/agent-inbox.mjs notify '{"mentions":"mentions_only"}'
+  node scripts/agent-inbox.mjs templates
+  node scripts/agent-inbox.mjs apply-template team-standup [ACCOUNTABLE_MEMBER_ID]
+  node scripts/agent-inbox.mjs heartbeats
+  node scripts/agent-inbox.mjs identity-create DISPLAY_NAME
+  node scripts/agent-inbox.mjs identity-link IDENTITY_ID PERM1,PERM2 [MEMBER_ID] [DISPLAY_NAME]
+  node scripts/agent-inbox.mjs identity-links
+  node scripts/agent-inbox.mjs identity-unlink IDENTITY_ID
+  node scripts/agent-inbox.mjs sessions [STATUS]
+  node scripts/agent-inbox.mjs claim WORK_ID
+  node scripts/agent-inbox.mjs session WORK_ID STATUS
 Assignment watching: node scripts/agent-inbox.mjs watch --help
 Reply requests: node scripts/agent-inbox.mjs reply --help
 
@@ -60,16 +87,24 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
         || (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > 50))
         || (cursor !== undefined && (since !== undefined || cursor.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(cursor)))) throw new ConnectionError("usage_error");
     }
-    if (!["connect", "import", "check", "orient", "next", "search", "brief", "changes", "packet", "work", "discussion", "result"].includes(action)
+    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "sessions", "claim", "session", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "identity-link", "identity-links", "identity-unlink", "funnel", "export", "import-history", "thread"].includes(action)
       || (["connect", "import"].includes(action) && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
       || (action === "import" && ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"].some(name => process.env[name] !== undefined))
-      || (["packet", "work", "discussion", "result"].includes(action) && !validId(checkpoint))
+      || (["packet", "work", "discussion", "result", "claim"].includes(action) && !validId(checkpoint))
+      || (action === "advertise" && (checkpoint === undefined || checkpoint.startsWith("--") || !extra.every(cap => typeof cap === "string" && cap.trim() && cap.length <= 80) || [checkpoint, ...extra].length > 30))
+      || (action === "status" && (checkpoint === undefined || [checkpoint, ...extra].join(" ").length > 140))
+      || (action === "sessions" && checkpoint !== undefined && !/^[a-z]+$/.test(checkpoint))
+      || (action === "session" && (!validId(checkpoint) || extra.length !== 1 || !/^[a-z]+$/.test(extra[0])))
       || (action === "search" && !validWorkSearchQuery(checkpoint))
       || (["discussion", "result"].includes(action) ? false : action === "work" ? new Set(extra).size !== extra.length || extra.some(flag => !["--include-source", "--include-offers"].includes(flag))
         : action === "search" ? extra.length > 1 || (extra.length === 1 && extra[0] !== "--needs-me")
+        : ["advertise", "session", "identity-link"].includes(action) ? false
         : extra.length || (["check", "orient", "next", "brief"].includes(action) && checkpoint !== undefined))
-      || (action === "changes" && (!/^\d+$/.test(checkpoint ?? "") || !Number.isSafeInteger(Number(checkpoint))))) throw new ConnectionError("usage_error");
-    const config = action === "import" ? await readConnectionInput() : agentConnectionFromEnvironment(), client = new RoomAgentClient(config);
+      || (action === "changes" && (!/^\d+$/.test(checkpoint ?? "") || !Number.isSafeInteger(Number(checkpoint))))
+      || (["identity-create", "identity-unlink"].includes(action) && (checkpoint === undefined || checkpoint.startsWith("--")))
+      || (action === "identity-link" && (checkpoint === undefined || extra.length < 1 || extra.length > 3))) throw new ConnectionError("usage_error");
+    const config = action === "identity-create" ? {} : action === "import" ? await readConnectionInput() : agentConnectionFromEnvironment(),
+      client = action === "identity-create" ? null : new RoomAgentClient(config);
     let result;
     if (["connect", "import", "check"].includes(action)) {
       result = await client.checkConnection();
@@ -82,8 +117,37 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
       : action === "work" ? await client.workContext(checkpoint, { includeSource: extra.includes("--include-source"), includeOffers: extra.includes("--include-offers") })
       : action === "next" ? await client.orient({ focus: "needs_me" })
       : action === "search" ? await client.orient({ query: checkpoint, focus: extra[0] === "--needs-me" ? "needs_me" : "all" })
-      : action === "packet" ? packetMarkdown(await client.workPacket(checkpoint)) : action === "orient" ? await client.orient() : action === "brief" ? await client.returnBrief() : await client.changes(Number(checkpoint));
-    console.log(action === "packet" ? result : JSON.stringify(result, null, 2));
+      : action === "packet" ? packetMarkdown(await client.workPacket(checkpoint)) : action === "orient" ? await client.orient() : action === "brief" ? await client.returnBrief()
+      : action === "presence" ? await client.presence()
+      : action === "capabilities" ? await client.capabilities(checkpoint === undefined ? {} : { search: checkpoint })
+      : action === "advertise" ? await client.advertiseCapabilities([checkpoint, ...extra])
+      : action === "status" ? await client.setStatus([checkpoint, ...extra].join(" "))
+      : action === "templates" ? { templates: checkpoint === undefined ? client.workTemplates() : [client.workTemplate(checkpoint)].filter(Boolean) }
+      : action === "funnel" ? await client.onboardingFunnel()
+      : action === "export" ? { ndjson: await client.exportRoom() }
+      : action === "import-history" ? await client.importRoom(await readStdin())
+      : action === "find" ? await client.search(checkpoint, { kind: extra[0] ?? "all" })
+      : action === "thread" ? await client.messageThread(checkpoint)
+      : action === "notify" ? await client.setNotificationPreferences(JSON.parse(checkpoint))
+      : action === "templates" ? client.roomTemplates()
+      : action === "apply-template" ? await client.applyRoomTemplate(checkpoint, { accountableMemberId: extra[0] })
+      : action === "heartbeats" ? await client.providerHeartbeats()
+      : action === "identity-create" ? await createAgentIdentity(process.env.ROOM_AGENT_ORIGIN, checkpoint)
+      : action === "identity-link" ? await client.linkIdentity({ identityId: checkpoint, permissions: (extra[0] ?? "").split(",").map(p => p.trim()).filter(Boolean), ...(extra[1] === undefined ? {} : { memberId: extra[1] }), ...(extra[2] === undefined ? {} : { displayName: extra.slice(2).join(" ") }) })
+      : action === "identity-links" ? await client.identityLinks()
+      : action === "identity-unlink" ? await client.unlinkIdentity(checkpoint)
+      : action === "sessions" ? await client.workSessions(checkpoint === undefined ? {} : { status: checkpoint })
+      : action === "claim" ? await client.claimSession(checkpoint)
+      : action === "session" ? await (async () => {
+          const sessions = await client.workSessions();
+          const card = sessions?.sessions?.find?.(item => item.workItemId === checkpoint);
+          if (!card) throw new ConnectionError("usage_error");
+          return client.workSessionAction({ requestId: crypto.randomUUID(), workItemId: checkpoint,
+            expectedRevision: card.revision, action: "set_status", status: extra[0] });
+        })()
+      : await client.changes(Number(checkpoint));
+    if (action === "export") process.stdout.write(result.ndjson);
+    else console.log(action === "packet" ? result : JSON.stringify(result, null, 2));
   } catch (error) {
     // Fixed diagnostic text avoids printing transport internals or environment secrets.
     console.error(JSON.stringify(connectionDiagnostic(error)));

@@ -1,6 +1,7 @@
 // Local qualification of actual packaged runtimes, never live services/models.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -10,8 +11,22 @@ import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRuntimePackage, verifyRuntimePackage } from './runtime-package.mjs';
 
 const repository = fileURLToPath(new URL('../', import.meta.url));
-const candidateCommit = process.env.ROOM_DRAFT_CANDIDATE_COMMIT ?? '9745978c784b71ac90487d37b4e5d7b26fa45ef4';
-const fallbackCommit = process.env.ROOM_DRAFT_FALLBACK_COMMIT ?? '4d22189ccdebc56db23397e6cc75b07eff0e3c2c';
+// Pins track the current store schema, not fixed commits: a packaged runtime can only
+// open a fixture of its own schema generation (writer fence), so static pins age out at
+// every schema bump. The candidate defaults to HEAD and the fallback to the most recent
+// first-parent ancestor with the same schema. Explicit env pins still qualify an exact pair.
+const git = (...args) => execFileSync('git', args, { cwd: repository, encoding: 'utf8' }).trim();
+const schemaOf = ref => Number(/export const STORE_SCHEMA_VERSION = (\d+);/.exec(git('show', `${ref}:server/writer-fence.mjs`))?.[1]);
+const headCommit = git('rev-parse', 'HEAD');
+const currentSchema = schemaOf(headCommit);
+const sameSchemaAncestor = () => {
+  for (const sha of git('log', '--first-parent', '--format=%H', '-n', '120', `${headCommit}~1`).split('\n').filter(Boolean)) {
+    try { if (schemaOf(sha) === currentSchema) return sha; } catch { /* writer-fence path predates this history */ }
+  }
+  return null;
+};
+const candidateCommit = process.env.ROOM_DRAFT_CANDIDATE_COMMIT ?? headCommit;
+const fallbackCommit = process.env.ROOM_DRAFT_FALLBACK_COMMIT ?? sameSchemaAncestor();
 
 for (const touch of [false, true]) test(`packaged browser fallback ${touch ? 'touch' : 'desktop'}: drafts survive and sign-out clears private state`, { timeout: 60000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), 'room-draft-switch-')), fixture = createAcceptanceFixture();
@@ -22,10 +37,14 @@ for (const touch of [false, true]) test(`packaged browser fallback ${touch ? 'to
   };
   t.after(async () => { await browser?.close(); await stop(); fixture.store.close();
     rmSync(fixture.directory, { recursive: true, force: true }); rmSync(directory, { recursive: true, force: true }); });
+  if (!fallbackCommit) {
+    t.skip(`no packaged same-schema (v${currentSchema}) fallback ancestor yet; the gate re-engages on the next main commit`);
+    return;
+  }
   assert.notEqual(candidateCommit, fallbackCommit, 'Qualify a genuinely distinct fallback');
   const packages = new Map([['candidate', candidateCommit], ['fallback', fallbackCommit]].map(([name, commit]) => {
     const path = join(directory, name), receipt = createRuntimePackage({ repository, commit, destination: path });
-    assert.equal(receipt.schemaVersion, 12); return [name, { path, receipt }];
+    assert.equal(receipt.schemaVersion, currentSchema, 'packaged pair must match the current fixture schema'); return [name, { path, receipt }];
   }));
   const start = async name => {
     await stop(); const pkg = packages.get(name);
@@ -66,6 +85,7 @@ for (const touch of [false, true]) test(`packaged browser fallback ${touch ? 'to
   await page.reload(); await page.locator('#main').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#message-input').inputValue(), 'Private request draft');
   await switchTo('fallback');
+  if (await page.locator('#request-mode-bar').isVisible()) await page.locator('#request-exit').click();
   if (await page.locator('#message-input').inputValue() !== 'Private ordinary draft') issues.push('ordinary draft unavailable on fallback');
   await remember(); await page.locator('#message-input').fill('Ordinary draft edited on fallback');
   await switchTo('candidate');

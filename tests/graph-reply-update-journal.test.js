@@ -493,7 +493,7 @@ for (const [version, baseline] of [[23, v23ReplyAcknowledgmentBaseline], [24, v2
   const cached = f.store.db.prepare("UPDATE accounts SET revision=revision WHERE id=?");
   const current = new RoomStore(f.filename, { now: f.now }); t.after(() => current.close());
   assert.deepEqual(current.db.prepare("SELECT * FROM private_inbox_commands ORDER BY sequence").all(), history);
-  assert.throws(() => cached.run(f.owner.session.account.id), /project_room_writer_v26|unsupported database writer/);
+  assert.throws(() => cached.run(f.owner.session.account.id), /project_room_writer_v27|unsupported database writer/);
   const result = current.inbox.recordReplyUpdateAcknowledgment(token, acknowledgment, binding);
   assert.equal(result.duplicate, version === 24); assert.equal(result.receipt.update.status, "update_acknowledged");
   const c = current.inbox.prepareReplyUpdateInspection(token, sourceId, proposal.requestId, binding);

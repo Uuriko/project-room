@@ -155,7 +155,7 @@ test("fixture email import reuses private Inbox storage without changing rooms o
   assert.equal(f.store.inbox.list(f.auth.token, f.auth.sessionBinding, { includeEmail: true }).sources[0].subject, f.raw.message.subject);
   assert.deepEqual(f.store.room("commons"), before);
   assert.deepEqual(f.store.email.verify(), { connections: 1, folders: 1, sources: 1 });
-  assert.equal(auditRecovery(f.store).schemaVersion, 26);
+  assert.equal(auditRecovery(f.store).schemaVersion, 27);
 });
 test("exact page retries and unchanged observations do not create another source revision", t => {
   const f = fixture(t); f.configure(); const request = f.page(), original = f.apply(request);

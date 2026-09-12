@@ -47,6 +47,7 @@ const sessionView = auth => ({
   csrf: auth.csrf,
   sessionBinding: auth.sessionBinding,
   sessionRevision: auth.sessionRevision ?? null,
+  credentialKind: auth.kind,
   expiresAt: auth.expiresAt
 });
 const exact = (value, fields) => Object.keys(value).length === fields.length && fields.every(field => Object.hasOwn(value, field));
@@ -94,7 +95,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     const entry = rates.get(id) || { n: 0, until: now + 60000 };
     entry.n++;
     rates.set(id, entry);
-    if (entry.n > maximum) reject(429, "rate_limited", "Too many requests; retry after a minute");
+    if (entry.n > maximum) throw new ServiceError(429, "rate_limited", "Too many requests; retry after a minute",
+      { "X-RateLimit-Limit": maximum, "X-RateLimit-Remaining": 0, "X-RateLimit-Reset": Math.ceil(entry.until / 1000) });
   }
   function cookie(req, name) {
     const scoped = scopedCookieName(name);
@@ -104,7 +106,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   }
   function bearer(req) {
     if (!req.headers.authorization) return null;
-    const match = /^Bearer ([A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43})$/.exec(req.headers.authorization);
+    const match = /^Bearer ([A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43}|pri_[A-Za-z0-9_-]{43,128})$/.exec(req.headers.authorization);
     if (!match) reject(401, "unauthenticated", "Invalid Authorization header");
     return match[1];
   }
@@ -172,7 +174,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     if (streams.size >= 100 || [...streams].filter(item => item.credentialHash === auth.credentialHash).length >= 3) reject(429, "stream_limit", "Close another room connection before opening more");
     res.writeHead(200, { "Content-Type": "text/event-stream", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
     res.flushHeaders();
-    const entry = { credentialHash: auth.credentialHash, sessionBinding: binding, res };
+    const entry = { credentialHash: auth.credentialHash, sessionBinding: binding, memberId: auth.member.id, roomId, res };
     streams.add(entry);
     let cursor = after;
     let timer;
@@ -462,7 +464,23 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         reject(405, "method_not_allowed", "Method not allowed");
       }
       const revokeMatch = /^\/api\/rooms\/([^/]{1,384})\/invitations\/([^/]{1,384})\/revoke$/.exec(url.pathname);
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|work-sessions|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics))?$/.exec(url.pathname);
+      // Round-2 #101: creating an agent identity is open (an identity alone
+      // grants nothing); linking it into a room is owner-only per room.
+      if (url.pathname === "/api/agent-identities" && req.method === "POST") {
+        const data = await body(req);
+        rate(`identity-create:${remoteAddress}`, 30);
+        if (!exact(data, ["displayName"]) || typeof data.displayName !== "string") reject(422, "invalid_identity", "displayName is required");
+        return json(res, 201, store.identities.create(data.displayName));
+      }
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics|search|provider-heartbeats|identity-links))?$/.exec(url.pathname);
+      const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
+      if (threadMatch && req.method === "GET") {
+        // Round-2 #112: threaded replies.
+        const threadRoomId = threadMatch[1], threadMessageId = threadMatch[2];
+        const threadSelected = roomCredentials(req, url);
+        const threadFence = threadSelected.mode === "account" ? accountBinding(req) : expectedBinding(req);
+        return json(res, 200, store.messageThread(threadSelected.token, threadRoomId, threadMessageId, threadFence));
+      }
       if (!match && !revokeMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((match ?? revokeMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
@@ -524,6 +542,73 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           completionEventId: params.get("completionEventId"), draftMessageId: params.get("draftMessageId"), expectedSessionBinding: fence
         }));
       }
+      if (route === "capabilities" && req.method === "GET") {
+        const search = url.searchParams.get("search");
+        return json(res, 200, store.capabilities(selected.token, roomId, { search, expectedSessionBinding: fence }));
+      }
+      if (route === "onboarding-funnel" && req.method === "GET") {
+        return json(res, 200, store.onboardingFunnel(selected.token, roomId, fence));
+      }
+      if (route === "search" && req.method === "GET") {
+        // Round-2 #113: full-text search over messages and work items.
+        const q = url.searchParams.get("q");
+        const kind = url.searchParams.get("kind") ?? "all";
+        return json(res, 200, store.search(selected.token, roomId, q, kind, fence));
+      }
+      if (route === "provider-heartbeats" && req.method === "GET") {
+        // Round-2 #118: provider heartbeat dashboard.
+        return json(res, 200, store.providerHeartbeats(selected.token, roomId, fence));
+      }
+      if (route === "identity-links") {
+        // Round-2 #101: multi-room agent identity links.
+        const data = req.method === "GET" ? {} : await body(req);
+        if (req.method === "GET") return json(res, 200, { roomId, links: store.identities.list(selected.token, roomId) });
+        if (req.method === "POST") {
+          const keys = Object.keys(data);
+          if (!keys.includes("identityId") || !keys.includes("permissions")
+            || keys.some(k => !["identityId", "memberId", "displayName", "permissions"].includes(k))
+            || typeof data.identityId !== "string") reject(422, "invalid_identity", "identityId and permissions are required");
+          return json(res, 201, store.identities.link(selected.token, roomId, data));
+        }
+        if (req.method === "DELETE") {
+          if (!exact(data, ["identityId"]) || typeof data.identityId !== "string") reject(422, "invalid_identity", "identityId is required");
+          return json(res, 200, store.identities.unlink(selected.token, roomId, data.identityId));
+        }
+        reject(405, "method_not_allowed", "Method not allowed");
+      }
+      if (route === "export" && req.method === "GET") {
+        // Round-2 #106: JSONL export of the event log (same visibility as
+        // the events route — members only). One {sequence, event} per line.
+        res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8",
+          "Content-Disposition": `attachment; filename="room-${roomId}-export.jsonl"` });
+        for (const line of store.exportEvents(selected.token, roomId, fence)) {
+          res.write(JSON.stringify(line) + "\n");
+        }
+        return res.end();
+      }
+      if (route === "import" && req.method === "POST") {
+        // Round-2 #107: NDJSON import (the #106 export format). Owner-only,
+        // replaces room history. 8MB cap — larger restores go through backup.
+        if (!/^application\/x-ndjson/i.test(req.headers["content-type"] || "")) reject(415, "ndjson_required", "Use application/x-ndjson");
+        const text = await new Promise((resolve, rejectPromise) => {
+          let bytes = 0; const chunks = [];
+          req.on("data", chunk => {
+            bytes += chunk.length;
+            if (bytes > 8 * 1024 * 1024) { chunks.length = 0; req.destroy(); rejectPromise(new ServiceError(413, "too_large", "Import is too large; use database backup instead")); }
+            else chunks.push(chunk);
+          });
+          req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+          req.on("error", rejectPromise);
+        });
+        const lines = text.split("\n").filter(l => l.trim()).map((l, i) => {
+          try { return JSON.parse(l); } catch { reject(422, "invalid_import", `Line ${i + 1} is not valid JSON`); }
+        });
+        return json(res, 200, store.importEvents(selected.token, roomId, lines, fence));
+      }
+      if (route === "presence" && req.method === "GET") {
+        const watchers = [...streams].filter(entry => entry.roomId === roomId).map(entry => entry.memberId);
+        return json(res, 200, store.presence(selected.token, roomId, watchers, fence));
+      }
       if (route === "work-sessions" && req.method === "GET") {
         const params = url.searchParams;
         if ([...params.keys()].some(key => !["status", "auth"].includes(key) || params.getAll(key).length !== 1)
@@ -578,7 +663,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["linkId"])) reject(422, "invalid_link", "Select one invitation link to cancel");
         return json(res, 200, store.shareLinks.cancel(selected.token, roomId, data.linkId, fence));
       }
-      if (route === "events" && req.method === "GET") return json(res, 200, store.eventsAfter(selected.token, roomId, Number(url.searchParams.get("after") || 0), Number(url.searchParams.get("limit") || 100), fence));
+      if (route === "events" && req.method === "GET") {
+        const params = url.searchParams;
+        return json(res, 200, store.eventsAfter(selected.token, roomId,
+          Number(params.get("after") || 0), Number(params.get("limit") || 100),
+          { actor: params.get("actor"), since: params.get("since"), until: params.get("until"), expectedSessionBinding: fence }));
+      }
       if (route === "stream" && req.method === "GET") return stream(req, res, selected.token, roomId, Number(req.headers["last-event-id"] ?? url.searchParams.get("after") ?? 0), auth);
       if (route === "commands" && req.method === "POST") {
         const result = store.command(selected.token, roomId, await body(req), fence);
@@ -592,6 +682,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (!exact(data, ["sequence"])) reject(422, "invalid_cursor", "Supply sequence only");
         return json(res, 200, store.markCaughtUp(selected.token, roomId, data.sequence, fence));
+      }
+      if (route === "invitations" && req.method === "GET") {
+        // Round-2 #108: invite-link analytics.
+        if (selected.mode !== "account" || selected.bearer) reject(403, "account_session_required", "Invitation administration requires an account browser session");
+        return json(res, 200, store.invitationStats(selected.token, roomId, auth.sessionBinding));
       }
       if (route === "invitations" && req.method === "POST") {
         if (selected.mode !== "account" || selected.bearer) reject(403, "account_session_required", "Invitation administration requires an account browser session");
@@ -611,6 +706,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     } catch (error) {
       if (res.headersSent) { res.end(); return; }
       if (error.status === 429) res.setHeader("Retry-After", "60");
+      if (error.headers && typeof error.headers === "object") {
+        for (const [name, value] of Object.entries(error.headers)) res.setHeader(name, String(value));
+      }
       let roomId, workItemId;
       try {
         const parsed = new URL(req.url, expectedOrigin());

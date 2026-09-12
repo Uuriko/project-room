@@ -102,27 +102,27 @@ const A2A_SKILLS = Object.freeze([
     description: "First call: contract, member, permissions, next work.",
     tags: Object.freeze(["room", "onboarding", "work-items"]),
     examples: Object.freeze(["orient"]),
-    inputModes: Object.freeze(["text"]), outputModes: Object.freeze(["text"]) }),
+    inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
   Object.freeze({ id: "room_check_access", name: "Check access",
     description: "MCP: identity metadata, not history.",
     tags: Object.freeze(["room", "identity", "mcp"]),
     examples: Object.freeze(["room_check_access"]),
-    inputModes: Object.freeze(["text"]), outputModes: Object.freeze(["text"]) }),
+    inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
   Object.freeze({ id: "packet", name: "Chat packet",
     description: "No Room key. Use my AI \u2192 paste.",
     tags: Object.freeze(["room", "join"]),
     examples: Object.freeze([]),
-    inputModes: Object.freeze(["text"]), outputModes: Object.freeze(["text"]) }),
+    inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
   Object.freeze({ id: "guest-agent-link", name: "Guest agent link",
     description: "Owner mints an ephemeral agent member + ga1. token (read/chat, 2h). Not a human share link.",
     tags: Object.freeze(["room", "join", "guest"]),
     examples: Object.freeze([]),
-    inputModes: Object.freeze(["text"]), outputModes: Object.freeze(["text"]) }),
+    inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
   Object.freeze({ id: "enrolled-key", name: "Enrolled key",
     description: "Owner Add agent. Digest-only key. Import locally.",
     tags: Object.freeze(["room", "join", "key"]),
     examples: Object.freeze([]),
-    inputModes: Object.freeze(["text"]), outputModes: Object.freeze(["text"]) })
+    inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) })
 ]);
 
 export function agentCard() {
@@ -132,8 +132,8 @@ export function agentCard() {
     version: "1",
     protocol: "project-room-discovery",
     protocolVersion: A2A_PROTOCOL_VERSION,
-    defaultInputModes: Object.freeze(["text"]),
-    defaultOutputModes: Object.freeze(["text"]),
+    defaultInputModes: Object.freeze(["text/plain"]),
+    defaultOutputModes: Object.freeze(["text/plain"]),
     skills: A2A_SKILLS,
     authentication: Object.freeze({
       schemes: Object.freeze(["project-room-digest", "project-room-guest-link"]),

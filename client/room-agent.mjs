@@ -1,8 +1,11 @@
+import { workTemplate, WORK_TEMPLATES } from "../src/work-templates.js";
+import { roomTemplate, ROOM_TEMPLATES } from "../src/room-templates.js";
 import { projectBoard } from "../src/board.js";
 import { validId, PERMISSIONS, WORK_STATES } from "../src/events.js";
 import { nextWorkStep, workActions, reusableWorkDefinition, workCollaboration } from "../src/workflow.js";
 import { isDeepStrictEqual } from "node:util";
 import { searchWork, completedResults, currentResult } from "../src/work-selectors.js";
+import { randomUUID } from "node:crypto";
 import { workPacket, resultDraft, verifyWorkResult } from "../src/work-packet.js";
 import { submitWorkAction } from "./work-actions.mjs";
 import { submitHelpAction } from "./help-actions.mjs";
@@ -125,6 +128,38 @@ function checkedWorkSnapshot(value, roomId) {
 
 // Minimal, explicit client for a single configured service and Room. It neither
 // dispatches agents nor follows evidence links. Keep the token in operator memory.
+const assertServiceOrigin = origin => {
+  const url = new URL(origin);
+  const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if (url.origin !== origin || url.username || url.password || (url.protocol !== "https:" && !(local && url.protocol === "http:"))) throw new Error("Use a fixed HTTPS origin or an isolated loopback development origin");
+  return url.origin;
+};
+
+// Minting an agent identity is the unauthenticated first step of plugging in:
+// no credential exists yet, so this sends no Authorization header and needs
+// only the service origin. The secret is returned once; store it like a key.
+export async function createAgentIdentity(origin, displayName, { fetchImpl = globalThis.fetch, signal } = {}) {
+  let service;
+  try { service = assertServiceOrigin(origin); }
+  catch { throw new RoomClientError(0, "invalid_config", "Use a fixed HTTPS origin or an isolated loopback development origin"); }
+  let response;
+  try {
+    response = await fetchImpl(`${service}/api/agent-identities`, {
+      method: "POST", redirect: "error", credentials: "omit",
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ displayName }),
+    });
+  } catch (error) {
+    if (error instanceof RoomClientError) throw error;
+    throw new RoomClientError(0, "service_unavailable", "Could not complete the request. Check the service address and retry.");
+  }
+  let value;
+  try { value = await response.json(); } catch { value = null; }
+  if (!response.ok) throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room request failed");
+  if (typeof value?.identityId !== "string" || typeof value?.secret !== "string") throw new RoomClientError(200, "invalid_response", "Room returned an invalid identity");
+  return value;
+}
 export class RoomAgentClient {
   #origin;
   #roomId;
@@ -132,10 +167,8 @@ export class RoomAgentClient {
   #fetch;
   #memberId;
   constructor({ origin, roomId, token, memberId, fetchImpl = globalThis.fetch }) {
-    const url = new URL(origin);
-    const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-    if (url.origin !== origin || url.username || url.password || (url.protocol !== "https:" && !(local && url.protocol === "http:"))) throw new Error("Use a fixed HTTPS origin or an isolated loopback development origin");
-    if (!validId(roomId) || typeof token !== "string" || !/^(?:[A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43})$/.test(token)) throw new Error("A valid Room and access key are required");
+    assertServiceOrigin(origin);
+    if (!validId(roomId) || typeof token !== "string" || !/^(?:[A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43}|pri_[A-Za-z0-9_-]{43,128})$/.test(token)) throw new Error("A valid Room and access key are required");
     if (memberId !== undefined && !validId(memberId)) throw new Error("Choose a valid expected agent member");
     this.#origin = origin; this.#roomId = roomId; this.#token = token; this.#fetch = fetchImpl;
     this.#memberId = memberId;
@@ -162,6 +195,17 @@ export class RoomAgentClient {
     }
     return value;
   }
+  async #deletePath(path, body, signal) {
+    const response = await this.#fetch(`${this.#origin}${path}`, {
+      method: "DELETE", redirect: "error", credentials: "omit", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
+      headers: { Authorization: `Bearer ${this.#token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    let value;
+    try { value = await response.json(); } catch { value = null; }
+    if (!response.ok) throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room request failed");
+    return value;
+  }
   async #request(suffix = "", body, signal, helpContext = false, offerContext = false) {
     // Saved configurations pin an agent. Recheck before each operation; a check
     // is never a cached grant. The service still authorizes the operation itself.
@@ -182,12 +226,20 @@ export class RoomAgentClient {
   }
   async checkConnection({ signal } = {}) {
     if (!this.#memberId) throw new RoomClientError(0, "member_required", "Configure the expected agent member before checking access");
+    // Round-2 #101: identity secrets are room-scoped at use, so /api/session
+    // (which has no room) cannot resolve them. Check against the room path.
+    if (this.#token.startsWith("pri_")) return this.#checkIdentityConnection({ signal });
     const value = await this.#fetchPath("/api/session", undefined, signal), member = value?.member;
+    // Round-2 #101: identity secrets do not expire (credentialKind "identity",
+    // expiresAt null); room keys still require a real expiry.
+    const identityAuth = value?.credentialKind === "identity";
+    const expiryOk = value != null && (identityAuth ? value.expiresAt === null
+      : Number.isSafeInteger(value.expiresAt) && Number.isFinite(new Date(value.expiresAt).getTime()));
     if (!value || Array.isArray(value) || value.authMode !== "room" || !validId(value.roomId)
       || !member || !validId(member.id) || !["agent", "human"].includes(member.kind) || typeof member.active !== "boolean"
       || !Number.isSafeInteger(member.revision) || member.revision < 0 || !Array.isArray(member.permissions)
       || member.permissions.some(permission => !PERMISSIONS.includes(permission)) || new Set(member.permissions).size !== member.permissions.length
-      || !Number.isSafeInteger(value.expiresAt) || !Number.isFinite(new Date(value.expiresAt).getTime())) {
+      || !expiryOk) {
       throw new RoomClientError(200, "invalid_response", "Room returned incomplete connection metadata");
     }
     if (value.roomId !== this.#roomId || member.id !== this.#memberId || member.kind !== "agent"
@@ -196,10 +248,23 @@ export class RoomAgentClient {
       throw new RoomClientError(200, "identity_mismatch", "Access does not match the configured agent");
     }
     const now = Date.now();
-    if (value.expiresAt <= now) throw new RoomClientError(200, "expiry_unconfirmed", "Check the local clock and agent key expiry");
+    if (!identityAuth && value.expiresAt <= now) throw new RoomClientError(200, "expiry_unconfirmed", "Check the local clock and agent key expiry");
     return { contractVersion: 1, type: "agent_connection_check", status: "credential_accepted", origin: this.#origin,
       roomId: this.#roomId, memberId: this.#memberId, kind: "agent", permissions: [...member.permissions],
       checkedAt: new Date(now).toISOString(), expiresAt: value.expiresAt, scope: "room", externalExecution: false };
+  }
+  async #checkIdentityConnection({ signal } = {}) {
+    const snapshot = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}`, undefined, signal);
+    const member = snapshot?.state?.members?.[this.#memberId];
+    if (!snapshot || Array.isArray(snapshot) || snapshot.roomId !== this.#roomId || snapshot.viewerId !== this.#memberId
+      || !member || member.kind !== "agent" || member.active !== true || !Number.isSafeInteger(member.revision)
+      || !Array.isArray(member.permissions) || member.permissions.some(permission => !PERMISSIONS.includes(permission))
+      || member.permissions.some(permission => ["manage_members", "decide"].includes(permission))) {
+      throw new RoomClientError(200, "identity_mismatch", "Identity is not linked to this room as the configured agent");
+    }
+    return { contractVersion: 1, type: "agent_connection_check", status: "credential_accepted", origin: this.#origin,
+      roomId: this.#roomId, memberId: this.#memberId, kind: "agent", permissions: [...member.permissions],
+      checkedAt: new Date(Date.now()).toISOString(), expiresAt: null, scope: "room", externalExecution: false };
   }
   snapshot({ signal } = {}) { return this.#request("", undefined, signal); }
   async replyRead(name, args = {}, { signal } = {}) {
@@ -372,6 +437,144 @@ export class RoomAgentClient {
   // Caller owns a stable command ID. On an uncertain transport result, reconcile
   // or resend this exact object. Never invent a replacement ID automatically.
   command(command, { signal } = {}) { return this.#request("/commands", command, signal); }
+  // Autonomy primitives: who is online and what they hold, who can do what,
+  // and structural claims on work sessions. No extra permissions needed
+  // beyond room membership for reads; writes follow the room's own gates.
+  presence({ signal } = {}) { return this.#request("/presence", undefined, signal); }
+  workTemplates() { return WORK_TEMPLATES; }
+  workTemplate(id) { return workTemplate(id); }
+  roomTemplates() { return ROOM_TEMPLATES; }
+  roomTemplate(id) { return roomTemplate(id); }
+  // Round-2 #115: apply a room template through the normal command path.
+  // Charter needs the Room owner; work items need "steer". Returns a receipt
+  // of what landed and what was skipped (with reasons).
+  async applyRoomTemplate(id, { accountableMemberId, signal } = {}) {
+    const template = roomTemplate(id);
+    if (!template) throw new Error(`Unknown room template: ${id}`);
+    const receipt = { template: id, charter: null, workItems: [] };
+    const charter = await this.charter().catch(() => null);
+    try {
+      await this.command({ id: randomUUID(), type: "room.charter_updated",
+        data: { expectedRevision: charter?.revision ?? 0, ...template.charter } }, { signal });
+      receipt.charter = "updated";
+    } catch (error) {
+      receipt.charter = `skipped: ${error.message}`;
+    }
+    const accountable = accountableMemberId ?? this.#memberId;
+    for (const item of template.workItems) {
+      try {
+        const result = await this.command({ id: randomUUID(), type: "work.proposed",
+          data: { workItemId: randomUUID(), title: item.title, definitionOfDone: item.definitionOfDone,
+            mode: item.mode, ...(accountable ? { accountableMemberId: accountable } : {}) } }, { signal });
+        receipt.workItems.push({ title: item.title, workItemId: result?.event?.data?.workItemId ?? null });
+      } catch (error) {
+        receipt.workItems.push({ title: item.title, skipped: error.message });
+      }
+    }
+    return receipt;
+  }
+  search(query, { kind = "all", signal } = {}) {
+    const params = new URLSearchParams({ q: query });
+    if (kind !== "all") params.set("kind", kind);
+    return this.#request(`/search?${params}`, undefined, signal);
+  }
+  messageThread(messageId, { signal } = {}) {
+    return this.#request(`/messages/${encodeURIComponent(messageId)}/thread`, undefined, signal);
+  }
+  providerHeartbeats({ signal } = {}) {
+    return this.#request("/provider-heartbeats", undefined, signal);
+  }
+  // Round-2 #101: multi-room agent identities. createAgentIdentity is
+  // room-independent (POST /api/agent-identities); the link calls act on the
+  // configured room with an owner/manager credential.
+  async createAgentIdentity(displayName, { signal } = {}) {
+    return createAgentIdentity(this.#origin, displayName, { signal });
+  }
+  // Owner operations: linking, listing and unlinking identities needs the
+  // room owner's membership-administration grant, so these deliberately skip
+  // #request's agent-pinning preflight (an owner is not an agent member).
+  // The server still enforces manage_members; responses are checked against
+  // the configured room.
+  async #identityAdmin(suffix, body, { signal } = {}) {
+    const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal);
+    if (value?.roomId !== this.#roomId) {
+      throw new RoomClientError(200, "invalid_response", "Room response does not match the configured room");
+    }
+    const wellFormed = body === undefined ? Array.isArray(value?.links) : typeof value?.identityId === "string";
+    if (!wellFormed) throw new RoomClientError(200, "invalid_response", "Room returned an invalid identity response");
+    return value;
+  }
+  linkIdentity({ identityId, memberId, displayName, permissions }, { signal } = {}) {
+    return this.#identityAdmin("/identity-links", { identityId, ...(memberId === undefined ? {} : { memberId }),
+      ...(displayName === undefined ? {} : { displayName }), permissions }, { signal });
+  }
+  identityLinks({ signal } = {}) {
+    return this.#identityAdmin("/identity-links", undefined, { signal });
+  }
+  unlinkIdentity(identityId, { signal } = {}) {
+    return this.#deletePath(`/api/rooms/${encodeURIComponent(this.#roomId)}/identity-links`, { identityId }, signal);
+  }
+  setNotificationPreferences(preferences, { signal } = {}) {
+    if (!preferences || typeof preferences !== "object" || Array.isArray(preferences)) throw new Error("Preferences must be an object");
+    return this.command({ id: randomUUID(), type: "notifications.preferences_set", data: { preferences } }, { signal });
+  }
+  // Round-2 #106/#107: export returns NDJSON text; import posts it back.
+  // These bypass #request because the payloads are NDJSON, not JSON.
+  async exportRoom({ signal } = {}) {
+    const response = await this.#fetch(`${this.#origin}/api/rooms/${encodeURIComponent(this.#roomId)}/export`, {
+      headers: { Authorization: `Bearer ${this.#token}` }, signal: signal ?? AbortSignal.timeout(15000)
+    });
+    if (!response.ok) throw new RoomClientError(response.status, "request_failed", "Room export failed");
+    return response.text();
+  }
+  async importRoom(ndjson, { signal } = {}) {
+    if (typeof ndjson !== "string" || !ndjson.trim()) throw new Error("Import needs NDJSON text");
+    const response = await this.#fetch(`${this.#origin}/api/rooms/${encodeURIComponent(this.#roomId)}/import`, {
+      method: "POST", headers: { Authorization: `Bearer ${this.#token}`, "Content-Type": "application/x-ndjson" },
+      body: ndjson, signal: signal ?? AbortSignal.timeout(15000)
+    });
+    const value = await response.json().catch(() => null);
+    if (!response.ok) throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room import failed");
+    return value;
+  }
+  capabilities({ search, signal } = {}) {
+    if (search !== undefined && (typeof search !== "string" || !search.trim() || search.length > 80))
+      throw new Error("Search is 1 to 80 characters");
+    return this.#request(search ? `/capabilities?search=${encodeURIComponent(search)}` : "/capabilities", undefined, signal);
+  }
+  advertiseCapabilities(capabilities, { signal } = {}) {
+    if (!Array.isArray(capabilities) || capabilities.length === 0 || capabilities.length > 30
+      || capabilities.some(cap => typeof cap !== "string" || !cap.trim() || cap.length > 80))
+      throw new Error("Advertise 1 to 30 capabilities of 1 to 80 characters");
+    return this.command({ id: randomUUID(), type: "capabilities.advertised", data: { capabilities } }, { signal });
+  }
+  // Round-2 #104: a short "working on X" line shown in the presence roster.
+  // memberId optional — the server resolves the caller when omitted.
+  setStatus(message, { memberId, signal } = {}) {
+    if (typeof message !== "string" || !message.trim() || message.length > 140)
+      throw new Error("Status message must be 1 to 140 characters");
+    return this.command({ id: randomUUID(), type: "member.status_updated",
+      data: { ...(memberId ? { memberId } : {}), message } }, { signal });
+  }
+  workSessions({ status, signal } = {}) {
+    if (status !== undefined && typeof status !== "string") throw new Error("Choose one session status");
+    return this.#request(status ? `/work-sessions?status=${encodeURIComponent(status)}` : "/work-sessions", undefined, signal);
+  }
+  workSessionAction({ requestId, workItemId, expectedRevision, action, status }, { signal } = {}) {
+    if (!validId(requestId) || !validId(workItemId)) throw new Error("requestId and workItemId are required");
+    if (!["set_status", "request_stop"].includes(action)) throw new Error("action must be set_status or request_stop");
+    return this.#request("/work-sessions", { requestId, workItemId, expectedRevision, action,
+      ...(status === undefined ? {} : { status }) }, signal);
+  }
+  // Claim one queued session atomically: reads the card, then drives it to
+  // processing with the card's revision. Throws session_claimed when held.
+  async claimSession(workItemId, { signal } = {}) {
+    const sessions = await this.workSessions({ signal });
+    const card = sessions?.sessions?.find?.(item => item.workItemId === workItemId && item.status === "queued");
+    if (!card) throw new Error("No queued session card for that work item");
+    return this.workSessionAction({ requestId: randomUUID(), workItemId,
+      expectedRevision: card.revision, action: "set_status", status: "processing" }, { signal });
+  }
   workAction(name, args, options = {}) {
     return submitWorkAction(this, { roomId: this.#roomId, memberId: this.#memberId }, name, args, options);
   }

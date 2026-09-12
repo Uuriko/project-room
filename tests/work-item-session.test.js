@@ -12,7 +12,8 @@ import { seedEvents } from "../src/seed.js";
 import { validAgentNext } from "../src/agent-error.mjs";
 import {
   SESSION_STATUSES, SESSION_EVENT_TYPES, sessionRecord, sessionCommandType,
-  listWorkItemSessions, workItemSessionContract, applySessionFields
+  listWorkItemSessions, workItemSessionContract, applySessionFields, sessionWorker,
+  SESSION_HEARTBEAT_STALE_MS
 } from "../src/work-item-session.js";
 
 const PEOPLE = /@gmail|John |Potter |acct-|accountId|people-data/i;
@@ -48,11 +49,11 @@ function sessionBody(extras = {}) {
   return { requestId: randomUUID(), workItemId: "session-one", expectedRevision: 0, ...extras };
 }
 
-test("session contract stays on writer 26 and off Compute / Slack-with-bots / people-data", () => {
+test("session contract stays on writer 27 and off Compute / Slack-with-bots / people-data", () => {
   const contract = workItemSessionContract();
   assert.equal(contract.status, "live");
   assert.equal(contract.schemaBump, false);
-  assert.equal(contract.writer, 26);
+  assert.equal(contract.writer, 27);
   assert.deepEqual(contract.statuses, ["queued", "processing", "active", "suspended", "done", "failed"]);
   assert.deepEqual(contract.events, [
     SESSION_EVENT_TYPES.STARTED, SESSION_EVENT_TYPES.STATUS_CHANGED,
@@ -66,7 +67,7 @@ test("session contract stays on writer 26 and off Compute / Slack-with-bots / pe
 
 test("legacy work items read as queued; started/status/stop/stopped are exact transitions", () => {
   const item = { id: "legacy", title: "Old", state: "accepted", revision: 2, accountableMemberId: "agent" };
-  assert.deepEqual(sessionRecord(item), { status: "queued", stop_requested_at: null, heartbeat_at: null });
+  assert.deepEqual(sessionRecord(item), { status: "queued", stop_requested_at: null, heartbeat_at: null, worker_member_id: null });
   applySessionFields(item, { type: SESSION_EVENT_TYPES.STARTED, at: "2026-09-10T21:00:00.000Z" });
   assert.equal(item.status, SESSION_STATUSES.PROCESSING);
   applySessionFields(item, { type: SESSION_EVENT_TYPES.STATUS_CHANGED, at: "2026-09-10T21:01:00.000Z", data: { status: "active" } });
@@ -87,7 +88,7 @@ test("seed work keeps assignment state; session defaults do not rewrite history"
   const state = replay(seedEvents);
   const review = state.workItems["work-spec-review"];
   assert.equal(review.state, "completed");
-  assert.deepEqual(sessionRecord(review), { status: "queued", stop_requested_at: null, heartbeat_at: null });
+  assert.deepEqual(sessionRecord(review), { status: "queued", stop_requested_at: null, heartbeat_at: null, worker_member_id: null });
   const next = applyEvent(state, {
     id: "session-seed-start", idempotencyKey: "session-seed-start", roomId: state.room.id,
     type: T.SESSION_STARTED, actorId: "codex", at: "2026-09-10T21:10:00.000Z",
@@ -186,6 +187,57 @@ test("strangers cannot mutate; commands are idempotent; writer stays 26", async 
     data: { workItemId: "session-one", expectedRevision: 1, status: "active" }
   });
   assert.equal(viaCommand.event.type, T.SESSION_STATUS_CHANGED);
-  assert.equal(store.storagePlatform.version(store.db), 26);
+  assert.equal(store.storagePlatform.version(store.db), 27);
   assert.equal(store.db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'work_item_session%'").all().length, 0);
+});
+
+test("session claims: worker recorded on start, visible on card, cleared on stop; stale heartbeats are takeable", () => {
+  const item = { id: "w", title: "W", state: "accepted", revision: 0, accountableMemberId: "agent" };
+  assert.equal(sessionWorker(item), null);
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STARTED, actorId: "agent", at: "2026-09-10T21:00:00.000Z" });
+  assert.equal(item.worker_member_id, "agent");
+  assert.equal(listWorkItemSessions({ w: item })[0].worker_member_id, "agent");
+  const beat = Date.parse("2026-09-10T21:00:00.000Z");
+  assert.equal(sessionWorker(item, beat + SESSION_HEARTBEAT_STALE_MS - 1000), "agent");
+  assert.equal(sessionWorker(item, beat + SESSION_HEARTBEAT_STALE_MS + 1000), null);
+  // stop_requested does not steal the claim
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STOP_REQUESTED, actorId: "owner", at: "2026-09-10T21:01:00.000Z" });
+  assert.equal(item.worker_member_id, "agent");
+  // status change by the worker keeps the claim
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STATUS_CHANGED, actorId: "agent", at: "2026-09-10T21:02:00.000Z", data: { status: "active" } });
+  assert.equal(item.worker_member_id, "agent");
+  // terminal stop clears it
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STOPPED, actorId: "agent", at: "2026-09-10T21:03:00.000Z", data: { status: "done" } });
+  assert.equal(item.worker_member_id, null);
+  assert.equal(sessionWorker(item), null);
+});
+
+test("HTTP: second agent gets 409 on a claimed session; owner can override; card shows the worker", async t => {
+  const { store, request, ownerKey, agentKey } = await serve(t);
+  store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
+    data: { memberId: "agent-b", displayName: "Agent B", kind: "agent", permissions: ["accept_work", "complete_work"] } });
+  const bKey = store.issueAccessKey("commons", "agent-b");
+  const post = (token, data) => request("/api/rooms/commons/work-sessions", { method: "POST", token, data });
+
+  const started = await post(agentKey, sessionBody({ action: "set_status", status: "processing" }));
+  assert.equal(started.status, 201);
+
+  const listed = await request("/api/rooms/commons/work-sessions", { token: agentKey });
+  const card = (await listed.json()).sessions.find(c => c.workItemId === "session-one");
+  assert.equal(card.worker_member_id, "agent");
+
+  const stolen = await post(bKey, sessionBody({ action: "set_status", status: "suspended", expectedRevision: 1 }));
+  assert.equal(stolen.status, 409);
+  assert.equal((await stolen.json()).error.code, "session_claimed");
+
+  // request_stop is still restricted to the accountable member or steerers (pre-existing model)
+  const nudge = await post(bKey, sessionBody({ action: "request_stop", expectedRevision: 1 }));
+  assert.equal(nudge.status, 422);
+
+  // owner holds manage_claims: may drive someone else's session
+  const over = await post(ownerKey, sessionBody({ action: "set_status", status: "suspended", expectedRevision: 1 }));
+  assert.ok([200, 201].includes(over.status));
+  const after = (await (await request("/api/rooms/commons/work-sessions", { token: agentKey })).json())
+    .sessions.find(c => c.workItemId === "session-one");
+  assert.equal(after.worker_member_id, "owner");
 });

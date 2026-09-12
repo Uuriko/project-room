@@ -44,8 +44,11 @@ optional.push("src/inbox-client.js", "src/inbox-ui.js");
 optional.push("src/inbox-send-ui.js");
 optional.push("src/room-roster.js");
 optional.push("deploy/agent-discovery.mjs", "deploy/room-entry.mjs", "server/guest-agent-links.mjs");
+optional.push("server/agent-identities.mjs");
 optional.push("src/work-item-session.js");
 optional.push("src/board.js");
+optional.push("src/work-templates.js");
+optional.push("src/room-templates.js");
 optional.push("scripts/release-evidence.mjs");
 const allowed = new Set([...required, ...optional]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
@@ -58,7 +61,7 @@ function runtimeMetadata(files) {
   const schema = /export const STORE_SCHEMA_VERSION = (\d+);/.exec(files.get("server/writer-fence.mjs").toString());
   const pkg = JSON.parse(files.get("package.json"));
   const config = JSON.parse(files.get("cloudflare/wrangler.jsonc"));
-  check(["8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26"].includes(schema?.[1]) && typeof pkg.engines?.node === "string");
+  check(["8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27"].includes(schema?.[1]) && typeof pkg.engines?.node === "string");
   return { schemaVersion: Number(schema[1]), node: pkg.engines.node, cloudflare: { compatibilityDate: config.compatibility_date,
     compatibilityFlags: config.compatibility_flags, durableObjects: config.durable_objects, migrations: config.migrations } };
 }
@@ -66,7 +69,14 @@ function runtimeMetadata(files) {
 export function createRuntimePackage({ repository, commit, destination }) {
   check(typeof commit === "string" && hashPattern.test(commit));
   const git = (...args) => execFileSync("git", args, { cwd: repository, maxBuffer: 16 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
-  check(git("rev-parse", "--verify", `${commit}^{commit}`).toString().trim() === commit);
+  let resolved;
+  try {
+    resolved = git("rev-parse", "--verify", `${commit}^{commit}`).toString().trim();
+  } catch {
+    throw new Error(`Baseline commit ${commit} is not in this checkout's history.`
+      + ` The upgrade gates need the full history: run 'git fetch --unshallow' (or clone without --depth).`);
+  }
+  check(resolved === commit);
   const tree = git("rev-parse", `${commit}^{tree}`).toString().trim();
   const entries = git("ls-tree", "-r", "-z", commit, "--", ...allowed).toString().split("\0").filter(Boolean).map(line => {
     const match = /^(100644|100755) blob ([0-9a-f]{40})\t(.+)$/.exec(line); check(match && allowed.has(match[3]));

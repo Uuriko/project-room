@@ -3,7 +3,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
   applyEvent, emptyRoomState, event, EVENT_TYPES as T, WORK_STATES, INVITATION_ROLE_POLICIES,
   INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES,
-  MEMBERSHIP_AUTHORITY_POLICY_VERSION, validId
+  MEMBERSHIP_AUTHORITY_POLICY_VERSION, validId, memberCan
 } from "../src/events.js";
 import { buildReturnBrief, resolveHistoryWindow, RETURN_BRIEF_DEFAULT_LIMIT } from "./return-brief.mjs";
 import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal } from "./invitation-journal.mjs";
@@ -16,6 +16,7 @@ import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, isRoomAccessToken } from "./guest-agent-links.mjs";
+import { AgentIdentities, agentIdentitySchema, isIdentitySecret } from "./agent-identities.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
 import { charterContext, charterFromEvent } from "../src/room-charter.js";
 import { REPLY_FIELDS, REPLY_POLICY_VERSION, replyPostMode } from "../src/reply-requests.js";
@@ -24,13 +25,14 @@ import { validateHelpData } from "../src/work-help.js";
 import { auditWorkHelp } from "./work-help.mjs";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, validateHelpOfferData } from "../src/help-offers.js";
 import {
-  isSessionStatus, isTerminalSession, sessionRecord, listWorkItemSessions, sessionCommandType
+  isSessionStatus, isTerminalSession, sessionRecord, listWorkItemSessions, sessionCommandType, sessionWorker,
+  SESSION_HEARTBEAT_STALE_MS
 } from "../src/work-item-session.js";
 import { Inbox, inboxSchema } from "./inbox.mjs";
 import { EmailImport, emailImportSchema } from "./email-import.mjs";
 
 export class ServiceError extends Error {
-  constructor(status, code, message) { super(message); this.status = status; this.code = code; }
+  constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
 }
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const hash = text => createHash("sha256").update(text).digest("hex");
@@ -177,9 +179,13 @@ const nodeStorage = {
 const work = "workItemId expectedRevision";
 const shapes = {
   [T.ROOM_CHARTER_UPDATED]: "expectedRevision purpose outputs boundaries escalation",
-  [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId",
+  [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId identityId",
   [T.MEMBER_ACCESS_CHANGED]: "memberId expectedMemberRevision permissions active",
+  [T.MEMBER_STATUS_UPDATED]: "memberId message",
+  [T.NOTIFICATION_PREFERENCES_SET]: "preferences",
   [T.MESSAGE_POSTED]: `messageId body workItemId replyToId toMemberId packetId basisRevision allowOlderBasis ${REPLY_FIELDS.join(" ")}`,
+  [T.MESSAGE_EDITED]: "messageId body expectedMessageRevision",
+  [T.MESSAGE_DELETED]: "messageId expectedMessageRevision reason",
   [T.REPLY_REQUEST_CANCELLED]: "requestMessageId expectedRequestRevision reason",
   [T.MESSAGE_REACTION_SET]: "messageId reaction active",
   [T.WORK_PROPOSED]: "workItemId title definitionOfDone accountableMemberId verifierMemberId independentVerificationRequired ownerDecisionRequired humanDecisionMakerId mode sourceMessageId",
@@ -201,7 +207,8 @@ const shapes = {
   [T.SESSION_STARTED]: work,
   [T.SESSION_STATUS_CHANGED]: `${work} status`,
   [T.SESSION_STOP_REQUESTED]: work,
-  [T.SESSION_STOPPED]: `${work} status`
+  [T.SESSION_STOPPED]: `${work} status`,
+  [T.CAPABILITIES_ADVERTISED]: "capabilities"
 };
 
 export function validateCommand(command) {
@@ -213,8 +220,8 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed"].includes(name) ? "array" : "string";
-    if (type === "array" ? !Array.isArray(value) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities"].includes(name) ? "array" : name === "preferences" ? "object" : "string";
+    if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (Buffer.byteLength(JSON.stringify(command)) > 16384) fail(413, "too_large", "Command is too large");
   if (command.type === T.MESSAGE_POSTED) {
@@ -240,6 +247,7 @@ export class RoomStore {
     this.db = database ?? new DatabaseSync(filename, { readOnly });
     this.storagePlatform = storagePlatform;
     this.shareLinks = new ShareLinks(this);
+    this.identities = new AgentIdentities(this);
     this.reminders = new Reminders(this);
     this.agentConnections = new AgentConnections(this);
     this.guestAgentLinks = new GuestAgentLinks(this);
@@ -247,7 +255,10 @@ export class RoomStore {
     this.inbox = new Inbox(this);
     this.email = new EmailImport(this);
     const version = this.storagePlatform.version(this.db);
-    const supported = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, STORE_SCHEMA_VERSION]);
+    // Supported schema versions are the contiguous range 0..STORE_SCHEMA_VERSION.
+    // A hand-maintained list dropped v26 when the version bumped to 27,
+    // which 500'd every room whose Durable Object was still on v26.
+    const supported = new Set([...Array(STORE_SCHEMA_VERSION + 1).keys()]);
     const hasSchema = version === 0 && this.storagePlatform.hasSchema(this.db);
     if (!supported.has(version) || hasSchema) {
       this.db.close();
@@ -304,7 +315,8 @@ export class RoomStore {
       CREATE INDEX credential_account ON credentials(account_id);
       CREATE TABLE cursors (room_id TEXT NOT NULL REFERENCES rooms(id), member_id TEXT NOT NULL, sequence INTEGER NOT NULL, PRIMARY KEY(room_id, member_id));
       CREATE TABLE projection_checkpoints (room_id TEXT PRIMARY KEY REFERENCES rooms(id), sequence INTEGER NOT NULL, projection TEXT NOT NULL);
-      ${invitationSchema}`);
+      ${invitationSchema}
+      ${agentIdentitySchema}`);
       this.storagePlatform.setVersion(this.db, 4);
     }
     if (version > 0 && version < 26 && (
@@ -331,6 +343,7 @@ export class RoomStore {
         throw new Error("Pre-v24 reply acknowledgment history requires operator reconciliation");
       if (version < 25 && this.db.prepare("SELECT 1 FROM private_inbox_commands WHERE json_extract(request_json,'$.action') IN ('reply.update.inspected','reply.update.review') OR json_type(receipt_json,'$.update.inspection') IS NOT NULL OR json_type(receipt_json,'$.update.review') IS NOT NULL OR json_type(receipt_json,'$.update.resolvedAt') IS NOT NULL OR json_extract(receipt_json,'$.update.status')='resolved' LIMIT 1").get())
         throw new Error("Pre-v25 reply resolution history requires operator reconciliation");
+      if (version < 27) this.migrateAgentIdentitiesV27();
       if (version < STORE_SCHEMA_VERSION) this.storagePlatform.installWriterFence(this.db);
       this.storagePlatform.verifyWriterFence(this.db);
       this.verifyInvitationAudit();
@@ -393,6 +406,14 @@ export class RoomStore {
     this.transaction(() => {
       this.db.exec(invitationSchema);
       this.storagePlatform.setVersion(this.db, 4);
+    });
+  }
+  // Round-2 #101: multi-room agent identities. Additive tables only; no
+  // existing data is touched.
+  migrateAgentIdentitiesV27() {
+    this.transaction(() => {
+      this.db.exec(agentIdentitySchema);
+      this.storagePlatform.setVersion(this.db, 27);
     });
   }
   migrateInvitationJournalV5() {
@@ -913,6 +934,27 @@ export class RoomStore {
       };
     });
   }
+  // Round-2 #108: invite-link analytics. Aggregate conversion stats for the
+  // room's invitations, restricted to members who can manage memberships.
+  invitationStats(accountSessionToken, roomId, expectedSessionBinding) {
+    return this.readTransaction(() => {
+      const actor = this.authenticateAccountSession(accountSessionToken, roomId, expectedSessionBinding);
+      if (!actor.member.permissions.includes("manage_members")) fail(403, "access_denied", "Membership administration grant required");
+      const rows = this.db.prepare("SELECT status,expires_at,created_at,accepted_at FROM membership_invitations WHERE room_id=?").all(roomId);
+      const now = this.now();
+      const counts = { pending: 0, accepted: 0, revoked: 0, expired: 0 };
+      for (const row of rows) {
+        const status = row.status === "pending" && row.expires_at <= now ? "expired" : row.status;
+        counts[status] = (counts[status] ?? 0) + 1;
+      }
+      const issued = rows.length;
+      const decided = counts.accepted + counts.revoked + counts.expired;
+      return {
+        roomId, issued, ...counts,
+        conversionRate: decided ? Math.round(1000 * counts.accepted / decided) / 10 : null
+      };
+    });
+  }
   revokeInvitation(accountSessionToken, invitationId, { expectedRevision, reason, expectedSessionBinding, expectedRoomId = null } = {}) {
     if (!validId(invitationId) || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || typeof reason !== "string" || !reason.trim() || reason.length > 4096) {
       fail(422, "invalid_invitation_change", "Invitation revocation requires its current revision and a reason");
@@ -1052,6 +1094,17 @@ export class RoomStore {
     return token;
   }
   authenticate(token, roomId, expectedSessionBinding = null, { allowAccountSession = true } = {}) {
+    // Round-2 #101: multi-room agent identities. One identity secret works in
+    // every room the identity is linked to; rooms keep sovereignty via link/unlink.
+    if (isIdentitySecret(token)) {
+      const resolved = this.identities.resolveIdentityAuth(token, roomId);
+      if (!resolved) fail(401, "unauthenticated", "Unknown identity or no access to this room");
+      return {
+        account: null, member: resolved.member, roomId, identityId: resolved.identityId,
+        credentialHash: hash(token), credentialScope: "room", kind: "identity",
+        expiresAt: null, csrf: null, sessionBinding: null
+      };
+    }
     if (typeof token !== "string" || !isRoomAccessToken(token)) fail(401, "unauthenticated", "Sign in with an active room key");
     const row = this.db.prepare(`SELECT c.*, p.revoked AS parent_revoked, p.expires_at AS parent_expiry, p.account_id AS parent_account_id, p.account_auth_epoch AS parent_account_auth_epoch,
       m.account_id AS bound_account_id, a.active AS account_active, a.revision AS account_revision, a.auth_epoch AS current_account_auth_epoch
@@ -1169,14 +1222,249 @@ export class RoomStore {
         if (!sessionEventMatchesRequest(parsedEvent, request)) fail(409, "idempotency_conflict", "Command ID already used for different content");
         return { sequence: prior.sequence, event: parsedEvent, duplicate: true };
       }
-      const item = this.room(roomId).state.workItems[request.workItemId];
+      const roomState = this.room(roomId).state;
+      const item = roomState.workItems[request.workItemId];
       if (!item) fail(404, "work_not_found", "Work item not found in this Room");
+      if (request.action === "set_status") {
+        // Structural anti-collision: a live claim belongs to its worker. Anyone
+        // else needs the manage_claims permission; a stale heartbeat means the
+        // worker went away and the item is takeable. request_stop stays open to
+        // all members — it is a polite signal, not a state change.
+        const worker = sessionWorker(item, this.now());
+        if (worker && worker !== auth.member.id && !memberCan(roomState, auth.member.id, "manage_claims"))
+          fail(409, "session_claimed", "Another member is working on this; coordinate with them or ask a claim manager");
+      }
       let type;
       try { type = sessionCommandType(item, request.action, request.status); }
       catch (error) { fail(422, "invalid_session_action", error.message); }
       const data = { workItemId: request.workItemId, expectedRevision: request.expectedRevision };
       if (type === T.SESSION_STATUS_CHANGED || type === T.SESSION_STOPPED) data.status = request.status;
       return this.command(token, roomId, { id: request.requestId, type, data }, expectedSessionBinding);
+    });
+  }
+  // Who is around right now: live SSE watchers plus members holding fresh
+  // session claims. Derived from existing data — no new tables, no migration.
+  presence(token, roomId, watcherMemberIds, expectedSessionBinding = null) {
+    return this.readTransaction(() => {
+      this.authenticate(token, roomId, expectedSessionBinding);
+      const { members } = this.roomAuthority(roomId);
+      const room = this.room(roomId);
+      const now = this.now();
+      const working = new Map();
+      for (const item of Object.values(room.state.workItems ?? {})) {
+        const worker = sessionWorker(item, now);
+        if (!worker) continue;
+        if (!working.has(worker)) working.set(worker, []);
+        working.get(worker).push({ workItemId: item.id, title: item.title, heartbeat_at: item.heartbeat_at });
+      }
+      const online = new Map();
+      for (const memberId of watcherMemberIds ?? []) {
+        const m = members[memberId];
+        if (m && m.active !== false) online.set(memberId, { watching: true });
+      }
+      for (const [memberId, items] of working) {
+        const m = members[memberId];
+        if (!m || m.active === false) continue;
+        online.set(memberId, { watching: !!online.get(memberId)?.watching, workingOn: items });
+      }
+      return { members: [...online.entries()].map(([memberId, info]) => ({
+        memberId, displayName: members[memberId].displayName, kind: members[memberId].kind,
+        watching: info.watching, workingOn: info.workingOn ?? [],
+        statusMessage: members[memberId].statusMessage ?? null
+      })) };
+    });
+  }
+  capabilities(token, roomId, bindingOrOptions = null, options = {}) {
+    // 3rd arg may be the legacy session binding or an options object.
+    const opts = bindingOrOptions && typeof bindingOrOptions === "object" ? bindingOrOptions : options;
+    const expectedSessionBinding = opts.expectedSessionBinding ?? (typeof bindingOrOptions === "string" || bindingOrOptions === null ? bindingOrOptions : null);
+    const search = opts.search ?? null;
+    if (search !== null && (typeof search !== "string" || !search.trim() || search.length > 80)) fail(422, "invalid_search", "Search is 1 to 80 characters");
+    return this.readTransaction(() => {
+      this.authenticate(token, roomId, expectedSessionBinding);
+      const { members } = this.roomAuthority(roomId);
+      const needle = search?.toLowerCase();
+      return { members: Object.values(members)
+        .filter(m => m && m.active !== false && Array.isArray(m.capabilities) && m.capabilities.length > 0)
+        .map(m => ({ memberId: m.id, displayName: m.displayName, kind: m.kind, capabilities: m.capabilities }))
+        .filter(m => !needle || m.capabilities.some(c => c.toLowerCase().includes(needle)))
+        .sort((a, b) => a.memberId < b.memberId ? -1 : 1) };
+    });
+  }
+  // Round-2 #105: onboarding funnel metrics. provisionedAt = member.added,
+  // firstClaimAt = first work.accepted by the member, firstResultAt = first
+  // work.completed by the member. Nulls mean "hasn't happened yet".
+  // Round-2 #106: JSONL event-log export for audit/portability. Streams
+  // {sequence, event} lines; the consumer replays them in order for #107.
+  *exportEvents(token, roomId, expectedSessionBinding = null) {
+    this.authenticate(token, roomId, expectedSessionBinding);
+    const sequence = this.room(roomId).sequence;
+    const stmt = this.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND sequence>? ORDER BY sequence LIMIT 1000");
+    let after = 0;
+    for (;;) {
+      const rows = stmt.all(roomId, after);
+      if (!rows.length) break;
+      for (const r of rows) yield { sequence: r.sequence, event: JSON.parse(r.body) };
+      after = rows.at(-1).sequence;
+      if (after >= sequence) break;
+    }
+  }
+  // Round-2 #107: rehydrate a room from a #106 JSONL export. Owner-only and
+  // destructive — it replaces the room's event log. Each line is validated
+  // (dense sequences, matching roomId, well-formed event) and the projection
+  // is rebuilt by replaying applyEvent from empty state, so a corrupt export
+  // fails before anything is written.
+  importEvents(token, roomId, lines, expectedSessionBinding = null) {
+    return this.transaction(() => {
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const { ownerId } = this.roomAuthority(roomId);
+      if (auth.member.id !== ownerId) fail(403, "owner_required", "Only the room owner can import history");
+      if (!Array.isArray(lines) || !lines.length || lines.length > 10000) fail(422, "invalid_import", "Import is 1 to 10000 event lines");
+      const events = lines.map((line, i) => {
+        if (!line || typeof line !== "object" || line.sequence !== i + 1) fail(422, "invalid_import", `Line ${i + 1} breaks the event sequence`);
+        const e = line.event;
+        if (!e || typeof e !== "object" || e.roomId !== roomId || !e.type || !e.actorId || !e.at || !e.id) fail(422, "invalid_import", `Line ${i + 1} is not a well-formed event`);
+        return e;
+      });
+      let state;
+      try { state = compact(events.reduce(applyEvent, emptyRoomState())); }
+      catch (error) { fail(422, "invalid_import", `Export does not replay: ${error.message}`); }
+      if (new Set(events.map(e => e.id)).size !== events.length) fail(422, "invalid_import", "Import has duplicate event ids");
+      // Dependent rows reference event ids/sequences; a history replacement
+      // drops them. Pending invitations are lost on restore (documented).
+      this.db.prepare("DELETE FROM commands WHERE room_id=?").run(roomId);
+      this.db.prepare("DELETE FROM membership_invitation_events WHERE invitation_id IN (SELECT id FROM membership_invitations WHERE room_id=?)").run(roomId);
+      this.db.prepare("DELETE FROM membership_invitations WHERE room_id=?").run(roomId);
+      // Reader cursors point into the old history; reset them.
+      this.db.prepare("DELETE FROM cursors WHERE room_id=?").run(roomId);
+      // The projection checkpoint is a replay accelerator over the old
+      // history — a stale checkpoint would corrupt rebuildProjection, so
+      // replace it with one taken from the imported state.
+      this.db.prepare("DELETE FROM projection_checkpoints WHERE room_id=?").run(roomId);
+      this.db.prepare("DELETE FROM events WHERE room_id=?").run(roomId);
+      const insert = this.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
+      events.forEach((e, i) => insert.run(roomId, i + 1, e.id, JSON.stringify(e)));
+      this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(events.length, JSON.stringify(state), roomId);
+      this.db.prepare("INSERT INTO projection_checkpoints(room_id,sequence,projection) VALUES(?,?,?)").run(roomId, events.length, JSON.stringify(state));
+      return { imported: events.length, sequence: events.length };
+    });
+  }
+  // Round-2 #112: threaded replies. Returns the root message plus its
+  // reply tree (messages whose replyToId chains back to the root).
+  messageThread(token, roomId, messageId, expectedSessionBinding = null) {
+    return this.readTransaction(() => {
+      this.authenticate(token, roomId, expectedSessionBinding);
+      const { members } = this.roomAuthority(roomId);
+      const room = this.room(roomId);
+      const root = room.state.messages.find(m => m.id === messageId);
+      if (!root) fail(404, "message_not_found", "Message not found");
+      const byParent = new Map();
+      for (const m of room.state.messages) {
+        if (!m.replyToId) continue;
+        if (!byParent.has(m.replyToId)) byParent.set(m.replyToId, []);
+        byParent.get(m.replyToId).push(m);
+      }
+      const attach = message => ({
+        ...message,
+        author: members[message.authorId]?.displayName ?? message.authorId,
+        replies: (byParent.get(message.id) ?? []).map(attach)
+      });
+      return { roomId, thread: attach(root) };
+    });
+  }
+  // Round-2 #113: full-text search over messages and work items.
+  // Substring match, case-insensitive; deleted messages are excluded.
+  search(token, roomId, query, kind = "all", expectedSessionBinding = null) {
+    if (typeof query !== "string" || !query.trim() || query.length > 80) fail(422, "invalid_search", "Search is 1 to 80 characters");
+    if (!["all", "messages", "work"].includes(kind)) fail(422, "invalid_search", "kind is all, messages, or work");
+    return this.readTransaction(() => {
+      this.authenticate(token, roomId, expectedSessionBinding);
+      const room = this.room(roomId);
+      const needle = query.toLowerCase();
+      const result = { roomId, query: query.trim(), messages: [], workItems: [] };
+      if (kind === "all" || kind === "messages") {
+        for (const m of room.state.messages ?? []) {
+          if (m.body == null) continue; // tombstone
+          if (m.body.toLowerCase().includes(needle)) {
+            result.messages.push({ id: m.id, authorId: m.authorId, body: m.body, createdAt: m.createdAt, workItemId: m.workItemId });
+          }
+        }
+      }
+      if (kind === "all" || kind === "work") {
+        for (const w of Object.values(room.state.workItems ?? {})) {
+          const haystack = `${w.title ?? ""} ${w.description ?? ""} ${w.definitionOfDone ?? ""}`.toLowerCase();
+          if (haystack.includes(needle)) {
+            result.workItems.push({ id: w.id, title: w.title, state: w.state, accountableMemberId: w.accountableMemberId });
+          }
+        }
+      }
+      return result;
+    });
+  }
+  // Round-2 #118: provider heartbeat dashboard. Per-provider liveness
+  // derived from work-session heartbeats: live / stale / idle, plus what
+  // each provider is currently working on. Members-only read.
+  providerHeartbeats(token, roomId, expectedSessionBinding = null) {
+    return this.readTransaction(() => {
+      this.authenticate(token, roomId, expectedSessionBinding);
+      const { members } = this.roomAuthority(roomId);
+      const room = this.room(roomId);
+      const now = this.now();
+      const providers = [];
+      for (const member of Object.values(members)) {
+        if (member.kind !== "agent" || member.active === false) continue;
+        let lastHeartbeatAt = null;
+        const workingOn = [];
+        for (const item of Object.values(room.state.workItems ?? {})) {
+          const session = sessionRecord(item);
+          if (session.worker_member_id !== member.id || !session.heartbeat_at) continue;
+          if (!lastHeartbeatAt || session.heartbeat_at > lastHeartbeatAt) lastHeartbeatAt = session.heartbeat_at;
+          if (sessionWorker(item, now) === member.id) {
+            workingOn.push({ workItemId: item.id, title: item.title, heartbeat_at: session.heartbeat_at });
+          }
+        }
+        const stale = !lastHeartbeatAt || now - Date.parse(lastHeartbeatAt) > SESSION_HEARTBEAT_STALE_MS;
+        providers.push({
+          memberId: member.id, displayName: member.displayName,
+          capabilities: member.capabilities ?? [],
+          lastHeartbeatAt,
+          status: !lastHeartbeatAt ? "idle" : stale ? "stale" : "live",
+          workingOn
+        });
+      }
+      providers.sort((a, b) => (b.lastHeartbeatAt ?? "") < (a.lastHeartbeatAt ?? "") ? -1 : 1);
+      return { roomId, evaluatedAt: new Date(now).toISOString(), providers };
+    });
+  }
+  onboardingFunnel(token, roomId, expectedSessionBinding = null) {
+    return this.readTransaction(() => {
+      this.authenticate(token, roomId, expectedSessionBinding);
+      const { members } = this.roomAuthority(roomId);
+      const agents = Object.values(members).filter(m => m && m.kind === "agent" && m.active !== false);
+      const provisioned = new Map(this.db.prepare(
+        `SELECT json_extract(body,'$.data.memberId') AS member, MIN(json_extract(body,'$.at')) AS at
+         FROM events WHERE room_id=? AND json_extract(body,'$.type')='member.added' GROUP BY member`
+      ).all(roomId).map(r => [r.member, r.at]));
+      const activity = this.db.prepare(
+        `SELECT json_extract(body,'$.actorId') AS actor, json_extract(body,'$.type') AS type, MIN(json_extract(body,'$.at')) AS at
+         FROM events WHERE room_id=? AND json_extract(body,'$.type') IN ('work.accepted','work.completed')
+         GROUP BY actor, type`
+      ).all(roomId);
+      const first = (actor, type) => activity.find(r => r.actor === actor && r.type === type)?.at ?? null;
+      return {
+        members: agents.map(m => {
+          const provisionedAt = provisioned.get(m.id) ?? null;
+          const firstClaimAt = first(m.id, "work.accepted");
+          const firstResultAt = first(m.id, "work.completed");
+          const minutes = (a, b) => a && b ? Math.round((Date.parse(b) - Date.parse(a)) / 60000) : null;
+          return {
+            memberId: m.id, displayName: m.displayName,
+            provisionedAt, firstClaimAt, firstResultAt,
+            minutesToFirstClaim: minutes(provisionedAt, firstClaimAt),
+            minutesToFirstResult: minutes(provisionedAt, firstResultAt)
+          };
+        }).sort((a, b) => a.memberId < b.memberId ? -1 : 1)
+      };
     });
   }
   workContext(token, roomId, workItemId, { includeSource = false, includeOffers = false, expectedSessionBinding = null } = {}) {
@@ -1221,13 +1509,31 @@ export class RoomStore {
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
   }
-  eventsAfter(token, roomId, after = 0, limit = 100, expectedSessionBinding = null) {
+  eventsAfter(token, roomId, after = 0, limit = 100, bindingOrOptions = null, options = {}) {
+    // 5th arg may be the legacy session binding or an options object.
+    const opts = bindingOrOptions && typeof bindingOrOptions === "object" && !Array.isArray(bindingOrOptions)
+      ? bindingOrOptions : options;
+    const expectedSessionBinding = opts.expectedSessionBinding ?? (typeof bindingOrOptions === "string" || bindingOrOptions === null ? bindingOrOptions : null);
+    const { actor = null, since = null, until = null } = opts;
     return this.readTransaction(() => {
       this.authenticate(token, roomId, expectedSessionBinding);
       if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) fail(422, "invalid_cursor", "Invalid event cursor or limit");
+      if (actor !== null && (typeof actor !== "string" || !actor)) fail(422, "invalid_cursor", "Invalid actor filter");
+      for (const [name, value] of [["since", since], ["until", until]]) {
+        if (value !== null && (typeof value !== "string" || Number.isNaN(Date.parse(value)))) fail(422, "invalid_cursor", `Invalid ${name} timestamp`);
+      }
       const sequence = this.room(roomId).sequence;
       if (after > sequence) fail(409, "cursor_ahead", "Cursor exceeds room history; fetch a fresh snapshot");
-      const events = this.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND sequence>? ORDER BY sequence LIMIT ?").all(roomId, after, limit).map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
+      // Round-2 #110: audit filters. The event log is the audit log —
+      // every mutation records actorId + at, so "who did what when" is a
+      // filtered read, not a new table.
+      const events = this.db.prepare(
+        `SELECT sequence,body FROM events WHERE room_id=? AND sequence>?
+         AND (? IS NULL OR json_extract(body,'$.actorId')=?)
+         AND (? IS NULL OR json_extract(body,'$.at')>=?)
+         AND (? IS NULL OR json_extract(body,'$.at')<=?)
+         ORDER BY sequence LIMIT ?`
+      ).all(roomId, after, actor, actor, since, since, until, until, limit).map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
       const next = events.at(-1)?.sequence ?? after;
       return { events, next, hasMore: next < sequence };
     });
