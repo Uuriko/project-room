@@ -68,6 +68,8 @@ test("multi-room agent identity: one secret works across linked rooms (round-2 #
   };
   const inCommons = await link("commons", ownerCommons);
   const inLab = await link("lab", ownerLab);
+  assert.deepEqual(inCommons.permissions, ["accept_work", "complete_work"]);
+  assert.deepEqual(inLab.permissions, ["accept_work", "complete_work"]);
   // Same member id in both rooms: one identity, no re-provisioning.
   assert.equal(inCommons.memberId, inLab.memberId);
   assert.equal(inCommons.memberId, identityId);
@@ -99,6 +101,7 @@ test("multi-room agent identity: one secret works across linked rooms (round-2 #
   // Re-linking the same identity reactivates the member instead of failing.
   const relink = await link("lab", ownerLab);
   assert.equal(relink.relinked, true);
+  assert.deepEqual(relink.permissions, ["accept_work", "complete_work"]);
   const labAgain = new RoomAgentClient({ origin, roomId: "lab", token: secret, memberId: identityId });
   assert.equal((await labAgain.checkConnection()).status, "credential_accepted");
   assert.equal((await labAgain.snapshot()).state.members[identityId].active, true);

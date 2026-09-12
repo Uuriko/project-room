@@ -86,19 +86,23 @@ export class AgentIdentities {
         // identity) is reused and reactivated. A foreign member holding the
         // id is a conflict.
         if (roomMember.identityId !== identityId) fail(409, "identity_conflict", "Member id is already taken");
-        if (roomMember.active === false) {
-          this.store.command(token, roomId, { id: randomUUID(), type: "member.access_changed",
-            data: { memberId: resolvedMemberId, expectedMemberRevision: roomMember.revision, permissions: roomMember.permissions, active: true } });
-        }
+        // A new link is a new grant, not restoration of historical authority.
+        // Always use the live command boundary, even if a separate operation
+        // reactivated this member: it validates scope and current administrator
+        // authority, and shares the transaction with the link insertion.
+        this.store.command(token, roomId, { id: randomUUID(), type: "member.access_changed",
+          data: { memberId: resolvedMemberId, expectedMemberRevision: roomMember.revision, permissions, active: true } });
         this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
           .run(roomId, identityId, resolvedMemberId, this.store.now());
-        return { roomId, identityId, memberId: resolvedMemberId, relinked: true };
+        return { roomId, identityId, memberId: resolvedMemberId, relinked: true,
+          permissions: [...this.store.roomAuthority(roomId).members[resolvedMemberId].permissions] };
       }
       this.store.command(token, roomId, { id: randomUUID(), type: "member.added",
         data: { memberId: resolvedMemberId, displayName: displayName?.trim() || identity.displayName, kind: "agent", permissions, identityId } });
       this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
         .run(roomId, identityId, resolvedMemberId, this.store.now());
-      return { roomId, identityId, memberId: resolvedMemberId };
+      return { roomId, identityId, memberId: resolvedMemberId,
+        permissions: [...this.store.roomAuthority(roomId).members[resolvedMemberId].permissions] };
     });
   }
 
@@ -141,4 +145,3 @@ export class AgentIdentities {
     return { identityId: row.identity_id, member };
   }
 }
-
