@@ -84,7 +84,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.deepEqual(card.skills.map(row => row.id), ["orient", "room_check_access", "packet", "guest-agent-link", "enrolled-key"]);
   assert.equal(card.capabilities.streaming, true);
   assert.equal(card.capabilities.pushNotifications, false);
-  assert.deepEqual(card.defaultInputModes, ["text"]);
+  assert.deepEqual(card.defaultInputModes, ["text/plain"]);
   assert.equal(discoveryDoc(AGENT_CARD_A2A_PATH).body, discoveryDoc("/.well-known/agent.json").body);
   assert.equal(discoveryDoc("/room/.well-known/agent-card.json").body, discoveryDoc("/.well-known/agent.json").body);
   assert.equal(discoveryDoc("/project-room/.well-known/agent-card.json").body, discoveryDoc("/.well-known/agent.json").body);
@@ -315,4 +315,31 @@ test("edge door routes use wildcard patterns so query strings never fall through
   // origin guard instead of 404ing; isEdgeDoorUrl keeps it out of the door rewrite.
   assert.equal(isEdgeDoorUrl("https://www.getdasha.com/roomful"), false);
   assert.equal(isEdgeDoorUrl("https://www.getdasha.com/room?ref=x"), true);
+});
+
+test("A2A agent card conforms to the official A2A 0.3.0 AgentCard shape", () => {
+  // Validated 2026-09-12 against https://a2a-protocol.org/latest/specification/
+  // (the card declares protocolVersion 0.3.0). Required top-level fields:
+  // name, description, url, provider, version, capabilities,
+  // defaultInputModes, defaultOutputModes, skills.
+  const card = agentCard();
+  for (const field of ["name", "description", "url", "version"]) {
+    assert.equal(typeof card[field], "string");
+    assert.ok(card[field].length > 0, field);
+  }
+  assert.equal(typeof card.provider.organization, "string");
+  assert.equal(typeof card.provider.url, "string");
+  assert.equal(typeof card.capabilities.streaming, "boolean");
+  assert.equal(typeof card.capabilities.pushNotifications, "boolean");
+  // Modes are defined as media types in the spec.
+  const mime = value => typeof value === "string" && /^[a-z-]+\/[a-z0-9.+-]+$/.test(value);
+  assert.ok(card.defaultInputModes.length > 0 && card.defaultInputModes.every(mime));
+  assert.ok(card.defaultOutputModes.length > 0 && card.defaultOutputModes.every(mime));
+  assert.ok(card.skills.length > 0);
+  for (const skill of card.skills) {
+    for (const field of ["id", "name", "description"]) assert.equal(typeof skill[field], "string", `skill.${field}`);
+    assert.ok(Array.isArray(skill.tags) && skill.tags.length > 0, "skill.tags");
+    assert.ok((skill.inputModes ?? []).every(mime) && (skill.outputModes ?? []).every(mime), "skill modes");
+  }
+  assert.equal(card.protocolVersion, A2A_PROTOCOL_VERSION);
 });

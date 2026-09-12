@@ -66,8 +66,12 @@ for unit in project-room.service project-room-backup.service; do
   render "$SCRIPT_DIR/$unit" > "/etc/systemd/system/$unit"
   echo "Installed /etc/systemd/system/$unit."
 done
+# The timer has no local paths to render; copy it as-is so the
+# `enable` below does not fail on a missing unit.
+cp "$SCRIPT_DIR/project-room-backup.timer" "/etc/systemd/system/project-room-backup.timer"
+echo "Installed /etc/systemd/system/project-room-backup.timer."
 
 systemctl daemon-reload
 systemctl enable --now project-room.service
-systemctl enable project-room-backup.timer
+systemctl enable --now project-room-backup.timer
 echo "Done. Check: systemctl status project-room.service"
