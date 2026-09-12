@@ -1,0 +1,56 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile, mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { chromium } from 'playwright';
+import { RoomStore } from '../server/store.mjs';
+import { createRoomServer } from '../server/http.mjs';
+import { initialRoom } from '../server/bootstrap.mjs';
+
+for (const mobile of [false, true]) test(`verified file download ${mobile ? 'mobile' : 'desktop'}`, async t => {
+  const store = new RoomStore(':memory:'); store.initialize(initialRoom());
+  const token = store.issueAccessKey('commons', 'owner');
+  const bytes = new Uint8Array([0, 255, 7]);
+  store.attachments.stage(token, 'commons', { id: 'download-file', filename: 'résumé.html', mediaType: 'text/html', bytes });
+  store.command(token, 'commons', { id: 'post-file', type: 'message.posted', data: { messageId: 'file-message', body: 'Shared file', attachmentIds: ['download-file'] } });
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => { await browser.close(); server.closeAllConnections(); server.closeStreams(); await new Promise(resolve => server.close(resolve)); store.close(); });
+  const context = await browser.newContext({ acceptDownloads: true, viewport: mobile ? { width: 390, height: 844 } : { width: 1360, height: 900 }, isMobile: mobile, hasTouch: mobile });
+  const page = await context.newPage(), errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await page.locator('#access-key').fill(token);
+  await page.getByRole('button', { name: 'Enter room', exact: true }).click();
+  const button = page.getByRole('button', { name: 'Download résumé.html', exact: true });
+  await button.waitFor();
+  const screenshots = await mkdtemp(join(tmpdir(), 'room-file-ui-'));
+  const screenshot = join(screenshots, mobile ? 'mobile.png' : 'desktop.png');
+  await page.screenshot({ path: screenshot });
+  console.log('UI screenshot: ' + screenshot);
+  const bounds = await button.boundingBox();
+  assert.ok(bounds.height >= 44);
+  assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= (mobile ? 390 : 1360));
+  const received = page.waitForEvent('download');
+  await button.click();
+  const download = await received;
+  assert.equal(download.suggestedFilename(), 'résumé.html');
+  assert.deepEqual(new Uint8Array(await readFile(await download.path())), bytes);
+  await button.waitFor();
+  let unblock;
+  let unexpectedDownload = false;
+  page.on('download', () => { unexpectedDownload = true; });
+  await page.route('**/attachments/download-file', async route => {
+    await new Promise(resolve => { unblock = resolve; });
+    try { await route.continue(); } catch {}
+  });
+  const requested = page.waitForRequest('**/attachments/download-file');
+  await button.click(); await requested;
+  await page.getByRole('button', { name: 'Cancel download of résumé.html' }).click();
+  unblock();
+  await button.waitFor();
+  assert.equal(unexpectedDownload, false);
+  assert.deepEqual(errors, []);
+});

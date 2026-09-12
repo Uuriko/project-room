@@ -775,3 +775,9 @@ summary { overflow-wrap: anywhere; }
   .inbox-panel.reading .inbox-back { display: block; margin: 1rem 1.25rem 0; text-align: left; }
   .inbox-source-heading { flex-wrap: wrap; }
 }
+/* Files stay subordinate to the conversation, with a full keyboard/touch target. */
+.message-files { display: flex; flex-wrap: wrap; gap: .5rem; }
+.message-files:empty { display: none; }
+.file-download { display: flex; align-items: center; gap: .75rem; max-width: 100%; min-height: 44px; }
+.file-download span { overflow-wrap: anywhere; text-align: left; min-width: 0; }
+.file-download small { flex-shrink: 0; }

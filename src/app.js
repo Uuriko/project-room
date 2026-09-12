@@ -835,7 +835,7 @@ function renderMessages() {
   const anchorOffset = anchor?.getBoundingClientRect().top;
   const focused = list.contains(document.activeElement) ? document.activeElement : null;
   const focusKey = focused?.closest("[data-key]")?.dataset.key;
-  const focusAction = focused?.dataset.messageAction, focusReaction = focused?.dataset.reaction;
+  const focusAction = focused?.dataset.messageAction, focusReaction = focused?.dataset.reaction, focusFile = focused?.dataset.fileId;
   const focusedFeedback = focused?.closest(".draft-feedback");
   const focusedMessage = focused?.matches(".message");
   const newMessages = sameView ? messages.filter(m => !previous.has(m.id)) : [];
@@ -868,7 +868,7 @@ function renderMessages() {
       else {
         const next = document.createElement("div"); next.innerHTML = html;
         // Reply counts/reactions change independently; the selected message text stays put.
-        for (const selector of [".chat-divider", ".grouped-time", ".message-avatar", ".message-meta", ".message-body", ".message-context", ".reactions", ".message-links", ".draft-feedback"]) {
+        for (const selector of [".chat-divider", ".grouped-time", ".message-avatar", ".message-meta", ".message-body", ".message-context", ".reactions", ".message-links", ".message-files", ".draft-feedback"]) {
           const before = node.querySelector(selector), after = next.querySelector(selector);
           if (!before && !after) continue;
           if (!before) { node.insertBefore(after, node.firstChild); continue; }
@@ -907,7 +907,7 @@ function renderMessages() {
   if (focused && !focused.isConnected) {
     const row = [...list.children].find(e => e.dataset.key === focusKey);
     const replacement = focusedMessage ? row : focusedFeedback ? row?.querySelector(".draft-state")
-      : [...(row?.querySelectorAll("[data-message-action]") || [])].find(e => e.dataset.messageAction === focusAction && e.dataset.reaction === focusReaction);
+      : [...(row?.querySelectorAll("[data-message-action]") || [])].find(e => e.dataset.messageAction === focusAction && e.dataset.reaction === focusReaction && e.dataset.fileId === focusFile);
     replacement?.focus({ preventScroll: true });
   }
   $("#new-messages-button").hidden = newVisibleMessages === 0;
@@ -920,7 +920,36 @@ function draftFeedbackHTML(message) {
   const label = feedback?.label ?? "Draft";
 return `<p class="form-hint"><a class="source-link draft-state" href="${esc(workHref(message.workItemId))}" data-open-work="${esc(message.workItemId)}">${esc(label)}</a> · based on revision ${esc(message.proposal.basisRevision)}${message.proposal.basisRevision < message.proposal.submittedAtRevision ? " · older work" : ""} · authorship unverified · <button type="button" class="message-to-work" data-portable-work="${esc(message.workItemId)}" data-portable-mode="draft" data-portable-original="${esc(message.id)}" data-focus-key="refine:${esc(message.id)}">Refine draft</button></p>${feedback?.reason ? `<details><summary>Feedback</summary><p>${esc(feedback.reason)}</p></details>` : ""}`;
 }
+const fileDownloads = new Map();
+async function downloadMessageFile(messageId, fileId) {
+  const key = `${messageId}:${fileId}`;
+  if (fileDownloads.has(key)) { fileDownloads.get(key).abort(); return; }
+  const file = conversation.byId.get(messageId)?.attachments?.find(file => file.id === fileId);
+  if (!file || conversation.byId.get(messageId)?.deletedAt) return;
+  const generation = client.generation, identity = session;
+  const controller = new AbortController(); fileDownloads.set(key, controller); renderMessages();
+  try {
+    const blob = await client.downloadAttachment(file, { signal: controller.signal });
+    const current = conversation.byId.get(messageId);
+    if (generation !== client.generation || session !== identity || !state || controller.signal.aborted
+      || !current || current.deletedAt || !current.attachments?.some(item => item.id === file.id && item.sha256 === file.sha256)) return;
+    const url = URL.createObjectURL(blob), link = document.createElement('a');
+    link.href = url; link.download = file.filename; link.hidden = true;
+    document.body.append(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (error) {
+    if (error.name !== 'AbortError' && generation === client.generation && session === identity && state)
+      notice(error.message, true);
+  } finally {
+    fileDownloads.delete(key);
+    if (generation === client.generation && session === identity && state) renderMessages();
+  }
+}
 function messageContent(m, cluster = {}, unreadStart = false) {
+  const fileControls = `<div class="message-files">${!m.deletedAt ? (m.attachments ?? []).map(file => {
+    const downloading = fileDownloads.has(`${m.id}:${file.id}`);
+    return `<button type="button" class="button ghost file-download" data-message-action="file" data-message-id="${esc(m.id)}" data-file-id="${esc(file.id)}" aria-label="${downloading ? 'Cancel download of' : 'Download'} ${esc(file.filename)}"><span>${esc(file.filename)}</span><small>${downloading ? 'Cancel' : file.byteLength < 1024 ? `${file.byteLength} B` : `${Math.ceil(file.byteLength / 1024)} KB`}</small></button>`;
+  }).join('') : ''}</div>`;
   const author = state.members[m.authorId];
   const authorLabel = displayName(m.authorId);
   const divider = unreadStart || cluster.dayStart
@@ -938,7 +967,7 @@ function messageContent(m, cluster = {}, unreadStart = false) {
   const groupedTime = cluster.grouped
     ? `<time class="grouped-time" datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time>`
     : "";
-  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${author.kind === "agent" ? `<span>${esc(kindLabel(author.kind))}</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · room-visible</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${esc(parent.body.slice(0,90))}</a>` : ""}</div><p class="message-body">${mentionHtml(m.body, Object.values(state.members), esc)}</p><div class="draft-feedback">${draftFeedbackHTML(m)}</div><div class="reactions" role="group" aria-label="Reactions to message by ${esc(authorLabel)}">${reactionButtons}</div><div class="message-links">${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>${doneChip(i)}`).join("")}${m.workItemId && workActions(state.workItems[m.workItemId], state.members[session.member.id]).some(([action]) => action === "complete") ? `<button class="message-to-work" type="button" data-message-action="result" data-message-id="${esc(m.id)}">Save as result</button>` : ""}<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>${!currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : ""}${can("steer") && !(m.proposal && m.workItemId) ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : ""}</div></div>`;
+  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${author.kind === "agent" ? `<span>${esc(kindLabel(author.kind))}</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · room-visible</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${esc(parent.body.slice(0,90))}</a>` : ""}</div><p class="message-body">${mentionHtml(m.body, Object.values(state.members), esc)}</p>${fileControls}<div class="draft-feedback">${draftFeedbackHTML(m)}</div><div class="reactions" role="group" aria-label="Reactions to message by ${esc(authorLabel)}">${reactionButtons}</div><div class="message-links">${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>${doneChip(i)}`).join("")}${m.workItemId && workActions(state.workItems[m.workItemId], state.members[session.member.id]).some(([action]) => action === "complete") ? `<button class="message-to-work" type="button" data-message-action="result" data-message-id="${esc(m.id)}">Save as result</button>` : ""}<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>${!currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : ""}${can("steer") && !(m.proposal && m.workItemId) ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : ""}</div></div>`;
 }
 function mentionsFilterOn() {
   return $("#search-mentions")?.getAttribute("aria-pressed") === "true";
@@ -1717,6 +1746,7 @@ $("#message-list").addEventListener("click", e => {
   if (chip && state) { applyMentionMember(state.members[chip.dataset.mentionId]); return; }
   const button = e.target.closest("[data-message-id]"); if (!button || !state || busy) return;
   const id = button.dataset.messageId;
+  if (button.dataset.messageAction === 'file') { void downloadMessageFile(id, button.dataset.fileId); return; }
   if (button.dataset.messageAction?.startsWith("request-")) openRequestMode(button.dataset.messageAction.slice(8), id);
   else if (button.dataset.messageAction === "work") openWork(id);
   else if (button.dataset.messageAction === "result") {
