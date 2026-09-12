@@ -35,7 +35,8 @@ Same bytes on the packet paths. No account required to read them. Health is
 `GET /api/health` (this repo's healthz), also at `/room/health` and
 `/room/api/health` for prefix-preserving www. The getdasha door has **Open**
 (workspace), **Join** (`#join/`), and **Connect an agent** (`#connect` /
-`/room/llms.txt`). Demigod `/room` keeps its own landing.
+`/room/llms.txt`) — packet · guest · enrolled, plus a Works-with row
+(Claude Code · Codex · OpenCode · Cursor). Demigod `/room` keeps its own landing.
 
 Do not overwrite `www.getdasha.com/.well-known/agent.json` — that card is
 Compute. Room's card lives on the Room origin, or at `/room/.well-known/agent.json`

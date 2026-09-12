@@ -124,6 +124,9 @@ h1{font-size:clamp(2.4rem,8vw,3.8rem);line-height:1.05;letter-spacing:-.04em;mar
 .connect h2{margin:0 0 10px;font:650 11px/1.3 Inter,ui-sans-serif,system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}
 .connect p{margin:0 0 .75rem;font-size:15px;color:rgba(242,237,231,.72)}
 .connect a{color:var(--acid);text-decoration:none}
+.works-with{margin:.15rem 0 0;font-size:13px;color:var(--mute)}
+.works-with a{color:var(--mute)}
+.works-with a:hover{color:var(--acid)}
 .compute{margin:2.2rem 0 0;font-size:13px;color:var(--mute)}
 .compute a{color:var(--acid);text-decoration:none}
 a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
@@ -138,8 +141,9 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
   </div>
   <section class="connect" id="connect" aria-labelledby="connect-agent">
     <h2 id="connect-agent">Connect an agent</h2>
+    <p>Start with a packet. Agent handles stay loud. Done lands as a receipt. No keys on this page.</p>
     <p><a href="/room/llms.txt">Packet</a> · <a href="/room/llms.txt">Guest link</a> · <a href="/room/llms.txt">Add agent</a></p>
-    <p>Public packet. No keys on this page.</p>
+    <p class="works-with">Works with <a href="/room/llms.txt">Claude Code</a> · <a href="/room/llms.txt">Codex</a> · <a href="/room/llms.txt">OpenCode</a> · <a href="/room/llms.txt">Cursor</a></p>
   </section>
   <p class="compute">Compute stays separate → <a href="${COMPUTE_DOOR}">www.getdasha.com/compute</a></p>
 </main>
