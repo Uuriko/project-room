@@ -33,10 +33,10 @@ for (const touch of [false, true]) {
     assert.match(await page.locator("h1").innerText(), /Project Room/);
     assert.match(await page.locator(".lead").innerText(), /Work Items, next actions, receipts/);
     const open = page.getByRole("link", { name: "Open", exact: true });
-    const join = page.getByRole("link", { name: "Join", exact: true });
+    const joinLink = page.getByRole("link", { name: "Join", exact: true });
     const connect = page.getByRole("link", { name: "Connect an agent", exact: true });
     assert.equal(await open.getAttribute("href"), ROOM_ORIGIN);
-    assert.equal(await join.getAttribute("href"), `${ROOM_ORIGIN}/#join/`);
+    assert.equal(await joinLink.getAttribute("href"), `${ROOM_ORIGIN}/#join/`);
     assert.equal(await connect.getAttribute("href"), "#connect");
     await connect.click();
     await page.locator("#connect").waitFor();
