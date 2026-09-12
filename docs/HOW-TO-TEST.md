@@ -39,7 +39,7 @@ Once inside Commons:
 | Empty work | Owner: **Start work**. Guest: **Write a suggestion** |
 | Work / Results | Work section or Actions (`Cmd/Ctrl K`) |
 | Catch-up | Catch-up in the section bar (badge when something needs you). Chat stays open. |
-| People & agents | People in the section bar, or People panel → **Add agent** |
+| People & agents | Open **People & agents**: presence dots, one-line “what they’re on”, loud `@agent` handles, Done receipt chips. Owner: **Add agent** |
 | How-to | Actions (`⌘K` / `Ctrl K`) → How to invite / How to add an agent |
 | Named assistants | Instinct / Muse: Use my AI (key optional under Need a Room key later). Grok Build: Create access. How they connect is under More. |
 | Invite someone | **Invite** in the header |
