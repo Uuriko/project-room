@@ -24,7 +24,8 @@ import { validateHelpData } from "../src/work-help.js";
 import { auditWorkHelp } from "./work-help.mjs";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, validateHelpOfferData } from "../src/help-offers.js";
 import {
-  isSessionStatus, isTerminalSession, sessionRecord, listWorkItemSessions, sessionCommandType, sessionWorker
+  isSessionStatus, isTerminalSession, sessionRecord, listWorkItemSessions, sessionCommandType, sessionWorker,
+  SESSION_HEARTBEAT_STALE_MS
 } from "../src/work-item-session.js";
 import { Inbox, inboxSchema } from "./inbox.mjs";
 import { EmailImport, emailImportSchema } from "./email-import.mjs";
@@ -1364,6 +1365,41 @@ export class RoomStore {
         }
       }
       return result;
+    });
+  }
+  // Round-2 #118: provider heartbeat dashboard. Per-provider liveness
+  // derived from work-session heartbeats: live / stale / idle, plus what
+  // each provider is currently working on. Members-only read.
+  providerHeartbeats(token, roomId, expectedSessionBinding = null) {
+    return this.readTransaction(() => {
+      this.authenticate(token, roomId, expectedSessionBinding);
+      const { members } = this.roomAuthority(roomId);
+      const room = this.room(roomId);
+      const now = this.now();
+      const providers = [];
+      for (const member of Object.values(members)) {
+        if (member.kind !== "agent" || member.active === false) continue;
+        let lastHeartbeatAt = null;
+        const workingOn = [];
+        for (const item of Object.values(room.state.workItems ?? {})) {
+          const session = sessionRecord(item);
+          if (session.worker_member_id !== member.id || !session.heartbeat_at) continue;
+          if (!lastHeartbeatAt || session.heartbeat_at > lastHeartbeatAt) lastHeartbeatAt = session.heartbeat_at;
+          if (sessionWorker(item, now) === member.id) {
+            workingOn.push({ workItemId: item.id, title: item.title, heartbeat_at: session.heartbeat_at });
+          }
+        }
+        const stale = !lastHeartbeatAt || now - Date.parse(lastHeartbeatAt) > SESSION_HEARTBEAT_STALE_MS;
+        providers.push({
+          memberId: member.id, displayName: member.displayName,
+          capabilities: member.capabilities ?? [],
+          lastHeartbeatAt,
+          status: !lastHeartbeatAt ? "idle" : stale ? "stale" : "live",
+          workingOn
+        });
+      }
+      providers.sort((a, b) => (b.lastHeartbeatAt ?? "") < (a.lastHeartbeatAt ?? "") ? -1 : 1);
+      return { roomId, evaluatedAt: new Date(now).toISOString(), providers };
     });
   }
   onboardingFunnel(token, roomId, expectedSessionBinding = null) {
