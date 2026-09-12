@@ -4,6 +4,15 @@ import { ConversationDrafts, DraftRecovery } from '../src/conversation.js';
 import { RoomClient, draftCommand } from '../src/client.js';
 
 const hash = 'a'.repeat(64);
+test('exit guards include file-only selections and pending operations without redefining text', () => {
+  const drafts = new ConversationDrafts();
+  assert.equal(drafts.hasDraft(), false);
+  drafts.save(null, { files: [{ id: 'file' }] });
+  assert.equal(drafts.hasDraft(), true); assert.equal(drafts.hasText(), false);
+  drafts.clear(null); assert.equal(drafts.hasDraft(), false);
+  drafts.save(null, { pending: { command: { id: 'pending' } } });
+  assert.equal(drafts.hasDraft(), true);
+});
 const state = { messages: [], members: { owner: { active: true } } };
 const item = () => ({ id: 'upload', file: new File(['abc'], 'notes.txt', { type: 'text/plain' }),
   state: 'ready', receipt: { sha256: hash } });

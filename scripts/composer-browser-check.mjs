@@ -43,7 +43,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     };
     await login(owner);
     const input = page.locator("#message-input"), status = page.locator("#composer-status");
-    assert.match(await input.getAttribute("placeholder"), /Write to the room/);
+    assert.equal(await input.getAttribute("placeholder"), "Message the room…");
     const like = page.locator('[data-message-record-id="topic"] button[data-reaction="like"]');
     assert.equal(await like.isVisible(), true);
     await like.click();
@@ -57,7 +57,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await page.locator('[data-message-record-id="topic"] [data-message-action="thread"]').click();
     assert.match(await input.getAttribute("placeholder"), /Reply in this thread/);
     await page.locator("#thread-back").click();
-    assert.match(await input.getAttribute("placeholder"), /Write to the room/);
+    assert.equal(await input.getAttribute("placeholder"), "Message the room…");
     await page.locator("#composer-options > summary").click();
     await page.locator("#remember-drafts").check();
     const waitForFailure = () => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#composer-status").classList.contains("error"));

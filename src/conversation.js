@@ -290,6 +290,7 @@ export class ConversationDrafts {
   save(threadId, values) { Object.assign(this.get(threadId), values); }
   clear(threadId) { this.entries.delete(threadId); }
   hasText() { return [...this.entries.values()].some(draft => draft.body.trim()); }
+  hasDraft() { return [...this.entries.values()].some(draft => draft.body.trim() || draft.files?.length || draft.pending); }
 }
 
 // Restore only into the same authenticated account, membership and browser session.

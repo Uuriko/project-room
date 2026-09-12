@@ -333,7 +333,7 @@ async function loadAccountRooms(more = false) {
 async function openAccountRoom(roomId) {
   if (invitationIsCommitting() || signoutLoading) return;
   if (state) saveComposer();
-  if (state && (drafts.hasText() || pendingAction || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending()
+  if (state && (drafts.hasDraft() || pendingAction || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending()
       || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden)
       && !window.confirm("Switch rooms and clear unsent room drafts and pending retries? Saved work stays.")) return;
   const owned = accountClient.session;
@@ -535,10 +535,10 @@ function renderComposerFiles() {
   $('#attach-file').disabled = busy || locked || files.length >= 4;
   $('#message-input').readOnly = locked;
   const html = files.map(item => {
-    const action = ['uploading', 'queued'].includes(item.state) ? 'cancel' : item.state === 'ready' ? 'remove' : 'retry';
+    const action = ['uploading', 'queued'].includes(item.state) ? 'cancel' : ['ready', 'checking'].includes(item.state) ? 'remove' : 'retry';
     const label = { cancel: 'Cancel', remove: 'Remove', retry: 'Retry' };
     const control = kind => `<button type="button" class="text-button" data-file-control="${kind}" data-upload-id="${esc(item.id)}" aria-label="${label[kind]} ${esc(item.file.name)}">${label[kind]}</button>`;
-    return `<div class="composer-file"><span>${esc(item.file.name)}</span><small>${esc(item.state === 'ready' ? 'Ready' : item.state === 'checking' ? 'Checking…' : item.state === 'uploading' ? 'Uploading…' : item.state === 'queued' ? 'Waiting' : item.error || 'Not uploaded')}</small>${!locked && item.state !== 'checking' ? control(action) + (action === 'retry' ? control('remove') : '') : ''}</div>`;
+    return `<div class="composer-file"><span>${esc(item.file.name)}</span><small>${esc(item.state === 'ready' ? 'Ready' : item.state === 'checking' ? 'Checking…' : item.state === 'uploading' ? 'Uploading…' : item.state === 'queued' ? 'Waiting' : item.error || 'Not uploaded')}</small>${!locked ? control(action) + (action === 'retry' ? control('remove') : '') : ''}</div>`;
   }).join('') + (files.length ? `<small>${$('#remember-drafts').checked ? 'File references saved in this tab.' : 'Enable Remember drafts to restore these files after reload.'}</small>` : '');
   if (host._content !== html) { host.innerHTML = html; host._content = html; }
   if (focusId) {
@@ -555,9 +555,11 @@ async function restoreComposerFiles(ownerDrafts) {
     try {
       const receipt = await client.restoreAttachment(item, draft.pending?.command?.data?.messageId ?? null);
       if (ownerDrafts !== drafts || generation !== client.generation || !state) return;
+      if (!draft.files?.includes(item)) continue;
       item.receipt = receipt; item.state = 'ready'; item.error = '';
     } catch (error) {
       if (ownerDrafts !== drafts || generation !== client.generation || !state) return;
+      if (!draft.files?.includes(item)) continue;
       item.state = 'failed'; item.error = error.message;
     }
     renderComposerFiles(); persistDrafts();
@@ -1500,7 +1502,7 @@ $("#invitation-account-form").addEventListener("submit", async e => {
   const privateDraft = inboxUI?.hasPending();
   if (roomBefore || privateDraft) {
     if (roomBefore) saveComposer();
-    if ((privateDraft || drafts.hasText() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction)
+    if ((privateDraft || drafts.hasDraft() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction)
       && !window.confirm(privateDraft ? "Switching accounts clears unsent private drafts and local retries. Unconfirmed actions may already be saved. Continue?"
         : (pendingAction?.uncertain || instructionsUI?.hasUnknown()) ? "Switch accounts and clear drafts and the pending retry? The action may already be saved." : "Signing in with a different account clears this Room’s unsent drafts, private setup and forms before acceptance. Continue with this account key?")) return;
   }
@@ -1710,7 +1712,7 @@ $("#signout-button").addEventListener("click", async () => {
   }
   if (busy || signoutLoading || !state || !session || invitationIsCommitting()) return;
   saveComposer();
-  if (drafts.hasText() || inboxUI?.hasPending() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction) {
+  if (drafts.hasDraft() || inboxUI?.hasPending() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction) {
     if (!window.confirm((pendingAction?.uncertain || instructionsUI?.hasUnknown()) ? "Sign out and clear drafts and the pending retry? The action may already be saved." : "Sign out and clear unsent drafts and private setup on this device?")) return;
   }
   const operationId = ++signoutOperationId;
@@ -1794,9 +1796,13 @@ $("#message-form").addEventListener("submit", e => {
     locallyOwnedMessageIds.add(data.messageId || pendingMessage.command.id);
     try { await client.send(pendingMessage.command); }
     catch (error) {
-      if (generation === client.generation && state && error.code === 'command_rejected' && [409, 422].includes(error.status)) {
+      const rejected = error.code === 'command_rejected' && [409, 422].includes(error.status)
+        || data.attachmentIds?.length && error.code === 'attachment_unavailable' && error.status === 409;
+      if (generation === client.generation && state && rejected) {
         // The ledger has definitively rejected this exact command. Unlock the
         // retained files so the user can remove an expired one and try anew.
+        // attachment_unavailable on this command endpoint occurs after the
+        // duplicate ledger lookup, unlike a failed attachment-status read.
         const draft = drafts.get(threadId); draft.pending = null;
         if (currentThreadId === threadId && !requestMode) pendingMessage = null;
         persistDrafts();
@@ -2670,7 +2676,7 @@ $("#action-form").addEventListener("submit", e => {
 });
 window.addEventListener("beforeunload", e => {
   if (state) saveComposer();
-  if ((state && (drafts.hasText() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction))
+  if ((state && (drafts.hasDraft() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || !$("#new-work-form").hidden || pendingAction))
     || invitationIsCommitting() || invitation.phase === "unknown") { e.preventDefault(); e.returnValue = ""; }
 });
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden" && state) saveComposer(); });
