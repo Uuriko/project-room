@@ -172,7 +172,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     if (streams.size >= 100 || [...streams].filter(item => item.credentialHash === auth.credentialHash).length >= 3) reject(429, "stream_limit", "Close another room connection before opening more");
     res.writeHead(200, { "Content-Type": "text/event-stream", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
     res.flushHeaders();
-    const entry = { credentialHash: auth.credentialHash, sessionBinding: binding, res };
+    const entry = { credentialHash: auth.credentialHash, sessionBinding: binding, memberId: auth.member.id, roomId, res };
     streams.add(entry);
     let cursor = after;
     let timer;
@@ -462,7 +462,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         reject(405, "method_not_allowed", "Method not allowed");
       }
       const revokeMatch = /^\/api\/rooms\/([^/]{1,384})\/invitations\/([^/]{1,384})\/revoke$/.exec(url.pathname);
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|work-sessions|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|work-sessions|presence|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics))?$/.exec(url.pathname);
       if (!match && !revokeMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((match ?? revokeMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
@@ -523,6 +523,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, store.workResult(selected.token, roomId, params.get("workItemId"), {
           completionEventId: params.get("completionEventId"), draftMessageId: params.get("draftMessageId"), expectedSessionBinding: fence
         }));
+      }
+      if (route === "presence" && req.method === "GET") {
+        const watchers = [...streams].filter(entry => entry.roomId === roomId).map(entry => entry.memberId);
+        return json(res, 200, store.presence(selected.token, roomId, watchers, fence));
       }
       if (route === "work-sessions" && req.method === "GET") {
         const params = url.searchParams;

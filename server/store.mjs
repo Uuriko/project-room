@@ -1189,6 +1189,37 @@ export class RoomStore {
       return this.command(token, roomId, { id: request.requestId, type, data }, expectedSessionBinding);
     });
   }
+  // Who is around right now: live SSE watchers plus members holding fresh
+  // session claims. Derived from existing data — no new tables, no migration.
+  presence(token, roomId, watcherMemberIds, expectedSessionBinding = null) {
+    return this.readTransaction(() => {
+      this.authenticate(token, roomId, expectedSessionBinding);
+      const { members } = this.roomAuthority(roomId);
+      const room = this.room(roomId);
+      const now = this.now();
+      const working = new Map();
+      for (const item of Object.values(room.state.workItems ?? {})) {
+        const worker = sessionWorker(item, now);
+        if (!worker) continue;
+        if (!working.has(worker)) working.set(worker, []);
+        working.get(worker).push({ workItemId: item.id, title: item.title, heartbeat_at: item.heartbeat_at });
+      }
+      const online = new Map();
+      for (const memberId of watcherMemberIds ?? []) {
+        const m = members[memberId];
+        if (m && m.active !== false) online.set(memberId, { watching: true });
+      }
+      for (const [memberId, items] of working) {
+        const m = members[memberId];
+        if (!m || m.active === false) continue;
+        online.set(memberId, { watching: !!online.get(memberId)?.watching, workingOn: items });
+      }
+      return { members: [...online.entries()].map(([memberId, info]) => ({
+        memberId, displayName: members[memberId].displayName, kind: members[memberId].kind,
+        watching: info.watching, workingOn: info.workingOn ?? []
+      })) };
+    });
+  }
   workContext(token, roomId, workItemId, { includeSource = false, includeOffers = false, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
