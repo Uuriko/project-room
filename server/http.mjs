@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { ServiceError } from "./store.mjs";
+import { attachmentLimits } from "./attachments.mjs";
 import { clientAddress } from "./deployment.mjs";
 import { validId } from "../src/events.js";
 import { SyntheticInboxTransport } from "./inbox-transport.mjs";
@@ -75,6 +76,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // Avoid local-instance sign-in collisions; namespacing is not host isolation.
   const scopedCookieName = name => `${expectedOrigin().startsWith("https:") ? "__Host-" : ""}${cookieNamespace ? cookieNamespace + "_" : ""}${name}`;
   const streams = new Set();
+  const uploads = new Set();
   const diagnostics = new DiagnosticsLog();
 
   const rates = new Map();
@@ -157,6 +159,42 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     });
     try { const value = JSON.parse(text); if (!value || Array.isArray(value) || typeof value !== "object") throw new Error(); return value; }
     catch { reject(400, "invalid_json", "Expected a JSON object"); }
+  }
+  function fileBody(req, roomId, memberId) {
+    if (req.headers['content-encoding'] && req.headers['content-encoding'] !== 'identity')
+      reject(415, 'attachment_encoding', 'Send uncompressed file bytes');
+    if (uploads.size >= 4 || [...uploads].filter(item => item.roomId === roomId).length >= 2
+      || [...uploads].some(item => item.roomId === roomId && item.memberId === memberId))
+      reject(429, 'upload_limit', 'Wait for the current upload to finish');
+    const entry = { roomId, memberId }; uploads.add(entry);
+    return new Promise((resolve, rejectPromise) => {
+      let size = 0, settled = false;
+      const chunks = [];
+      const fail = error => { if (!settled) { settled = true; chunks.length = 0; rejectPromise(error); } };
+      // Keep the admission slot while a rejected request drains; slow senders
+      // cannot free a slot early and open unlimited in-flight uploads.
+      const cleanup = () => { clearTimeout(timer); uploads.delete(entry); };
+      const timer = setTimeout(() => {
+        fail(new ServiceError(408, 'upload_timeout', 'Upload took too long'));
+        req.destroy(); cleanup();
+      }, 10000);
+      req.on('data', chunk => {
+        if (settled) return;
+        size += chunk.length;
+        if (size > attachmentLimits.fileBytes) fail(new ServiceError(413, 'too_large', 'File is too large'));
+        else chunks.push(chunk);
+      });
+      req.once('end', () => {
+        cleanup();
+        if (!settled) { settled = true; resolve(Buffer.concat(chunks, size)); }
+        chunks.length = 0;
+      });
+      req.once('error', error => { fail(error); cleanup(); });
+      req.once('aborted', () => { fail(new ServiceError(400, 'aborted', 'Upload ended early')); cleanup(); });
+      req.once('close', () => { if (!req.complete) fail(new ServiceError(400, 'aborted', 'Upload ended early')); cleanup(); });
+      if (Number(req.headers['content-length']) > attachmentLimits.fileBytes)
+        fail(new ServiceError(413, 'too_large', 'File is too large'));
+    });
   }
   function stream(req, res, token, roomId, after, auth) {
     const binding = auth.sessionBinding;
@@ -498,10 +536,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|provider-heartbeats|identity-links|agent-invites))?$/.exec(url.pathname);
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
-      if (!match && !revokeMatch && !threadMatch) reject(404, "not_found", "Not found");
-      const roomId = pathId((match ?? revokeMatch ?? threadMatch)[1]);
+      const attachmentMatch = /^\/api\/rooms\/([^/]{1,384})\/attachments\/([^/]{1,384})$/.exec(url.pathname);
+      if (!match && !revokeMatch && !threadMatch && !attachmentMatch) reject(404, "not_found", "Not found");
+      const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? attachmentMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
-      const route = match ? (match[2] ?? "") : threadMatch ? "message-thread" : "invitation-revoke";
+      const route = match ? (match[2] ?? "") : threadMatch ? "message-thread" : attachmentMatch ? "attachment" : "invitation-revoke";
       const selected = roomCredentials(req, url);
       const fence = selected.mode === "account" ? accountBinding(req, route === "stream" ? url : null) : expectedBinding(req);
       const auth = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
@@ -510,6 +549,34 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
       rate(`read:${auth.credentialHash}`, 600);
       if (!["GET", "HEAD"].includes(req.method)) { protectWrite(req, auth, selected.bearer); rate(`write:${auth.credentialHash}`, 60); }
+      if (route === 'attachment') {
+        const id = pathId(attachmentMatch[2]);
+        if ([...url.searchParams.keys()].some(key => key !== 'auth') || url.searchParams.getAll('auth').length > 1)
+          reject(422, 'invalid_attachment_selection', 'Choose one file');
+        if (req.method === 'PUT') {
+          let filename;
+          try { filename = decodeURIComponent(req.headers['x-file-name'] ?? ''); }
+          catch { reject(422, 'invalid_attachment', 'Choose a valid file name'); }
+          const mediaType = req.headers['content-type'] ?? 'application/octet-stream';
+          const bytes = await fileBody(req, roomId, auth.member.id);
+          // Reauthenticate inside the transaction after the body arrives: an
+          // earlier successful check cannot outlive revoked access or a rebind.
+          return json(res, 200, store.attachments.stage(selected.token, roomId, { id, filename, mediaType, bytes }, auth.sessionBinding));
+        }
+        if (req.method === 'DELETE') return json(res, 200, store.attachments.discard(selected.token, roomId, id, fence));
+        if (['GET', 'HEAD'].includes(req.method)) {
+          const file = store.attachments.readCommitted(selected.token, roomId, id, fence);
+          const encoded = encodeURIComponent(file.attachment.filename).replace(/[!'()*]/g, char => '%' + char.charCodeAt(0).toString(16).toUpperCase());
+          res.writeHead(200, {
+            'Content-Type': 'application/octet-stream', 'Content-Length': file.bytes.length,
+            'Content-Disposition': `attachment; filename="download"; filename*=UTF-8''${encoded}`,
+            'Content-Security-Policy': "sandbox; default-src 'none'"
+          });
+          return res.end(req.method === 'HEAD' ? undefined : file.bytes);
+        }
+        res.setHeader('Allow', 'GET, HEAD, PUT, DELETE');
+        reject(405, 'method_not_allowed', 'Method not allowed');
+      }
       if (route === "message-thread" && req.method === "GET")
         return json(res, 200, store.messageThread(selected.token, roomId, pathId(threadMatch[2]), fence));
       if (!route && req.method === "GET") {

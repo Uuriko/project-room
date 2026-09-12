@@ -36,7 +36,8 @@ attachment fields fail for reconciliation instead of reinterpreting old data.
 - The Worker upgrade fixture now transports binary fixture values explicitly;
   ordinary JSON object serialization had broken BLOB seeding. It compares the
   original columns so adding a nullable field does not invalidate preservation.
-- Full regression run started and remains pending at this checkpoint.
+- Full regression on unchanged6f0003f finished:1195 passed,0failed/skip,
+  87,859ms. This qualifies that checkpoint, not later HTTP changes.
 
 ## Still required
 

@@ -11,6 +11,7 @@ export function diagnosticRoute(requestUrl, roomId, origin = "http://localhost")
   const rest = pathname.slice(prefix.length + 1);
   if (roomRoutes.has(rest)) return `/api/rooms/:roomId/${rest}`;
   if (/^messages\/[^/]+\/thread$/.test(rest)) return "/api/rooms/:roomId/messages/:item/thread";
+  if (/^attachments\/[^/]+$/.test(rest)) return "/api/rooms/:roomId/attachments/:item";
   if (/^invitations\/[^/]+\/revoke$/.test(rest)) return "/api/rooms/:roomId/invitations/:item/revoke";
   return "/api/rooms/:roomId/:unknown";
 }
