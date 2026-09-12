@@ -46,7 +46,8 @@ and query strings. No new runtime module was introduced.
   actual Node HTTP bridge. Transfer round trip included exactly1MiB and an
   oversize rejection. No deployed Worker was accessed.
 - Prior unchanged6f0003f baseline:1195/1195 full regression passed.
-  Full regression for this HTTP candidate remains required.
+  Exact02fba88 HTTP candidate full regression subsequently passed1200/1200,
+  0failed/skip,73733ms. Later client changes are separately qualified.
 
 ## Independent review and next implementation
 

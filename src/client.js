@@ -1,5 +1,6 @@
 import { verifyWorkResult } from "./work-packet.js";
 import { validateCharterRead } from "./room-charter.js";
+import { validId } from "./events.js";
 
 const accountSessionError = message => {
   const error = new Error(message);
@@ -201,6 +202,7 @@ export class RoomClient {
     this.generation = 0;
     this.accountOwnership = null;
     this.streamRetryDelay = 1000;
+    this.fileTransfers = new Set();
   }
   setAccountClient(accountClient) {
     if (this.accountClient === accountClient) return this;
@@ -226,6 +228,55 @@ export class RoomClient {
       if (!response.ok) { const error = new Error(body.error?.message || "Request failed"); error.status = response.status; error.code = body.error?.code; throw error; }
       return body;
     } finally { clearTimeout(timer); }
+  }
+  async downloadAttachment(file, { signal } = {}) {
+    if (!validId(file?.id) || !Number.isSafeInteger(file.byteLength) || file.byteLength < 0 || file.byteLength > 1048576
+      || !/^[a-f0-9]{64}$/.test(file.sha256 ?? '')) throw new Error('Invalid file reference');
+    const session = this.session, generation = this.generation;
+    const owns = () => this.session === session && this.generation === generation && this.ownsAccountSession();
+    if (!session || !owns()) throw accountSessionError('Reopen the Room before downloading');
+    const controller = new AbortController();
+    this.fileTransfers.add(controller);
+    const abort = () => controller.abort();
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
+    const timer = setTimeout(abort, 10000);
+    let reader;
+    try {
+      const response = await this.fetcher(`/api/rooms/${encodeURIComponent(session.roomId)}/attachments/${encodeURIComponent(file.id)}`, {
+        credentials: 'same-origin', signal: controller.signal,
+        headers: { ...(session.sessionBinding ? { 'X-Session-Binding': session.sessionBinding } : {}),
+          ...(session.authMode === 'account' ? { 'X-Project-Room-Auth': 'account' } : {}) }
+      });
+      if (!owns() || controller.signal.aborted) throw new DOMException('Download cancelled', 'AbortError');
+      if (!response.ok) {
+        // Do not parse an unbounded error body or expose server-provided markup.
+        const error = new Error(response.status === 404 ? 'File unavailable' : 'Download failed');
+        error.status = response.status; throw error;
+      }
+      const length = response.headers.get('content-length');
+      if (length !== null && (!/^\d+$/.test(length) || Number(length) !== file.byteLength)) throw new Error('File size did not match');
+      if (!response.body?.getReader) throw new Error('Download stream unavailable');
+      reader = response.body.getReader();
+      const bytes = new Uint8Array(file.byteLength);
+      let offset = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (!owns() || controller.signal.aborted) throw new DOMException('Download cancelled', 'AbortError');
+        if (done) break;
+        if (!(value instanceof Uint8Array) || offset + value.length > bytes.length) throw new Error('File size did not match');
+        bytes.set(value, offset); offset += value.length;
+      }
+      if (offset !== bytes.length) throw new Error('File size did not match');
+      const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2, '0')).join('');
+      if (!owns() || controller.signal.aborted) throw new DOMException('Download cancelled', 'AbortError');
+      if (hash !== file.sha256) throw new Error('File could not be verified');
+      return new Blob([bytes], { type: 'application/octet-stream' });
+    } finally {
+      controller.abort();
+      if (reader) { try { await reader.cancel(); } catch {} reader.releaseLock(); }
+      clearTimeout(timer); signal?.removeEventListener('abort', abort); this.fileTransfers.delete(controller);
+    }
   }
   async restore(roomId = null) {
     this.disconnect(); this.sequence = 0; this.session = null; this.accountOwnership = null;
@@ -512,6 +563,8 @@ export class RoomClient {
     else this.onStatus("Connection interrupted · refresh to recover; no peer activity inferred");
   }
   disconnect() {
+    for (const controller of this.fileTransfers) controller.abort();
+    this.fileTransfers.clear();
     this.generation++; clearTimeout(this.streamRetry); this.streamRetry = null; this.streamRetryDelay = 1000;
     this.stream?.close(); this.stream = null;
   }
