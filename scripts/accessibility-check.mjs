@@ -155,7 +155,7 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   assert.equal(await page.locator("#rb-ack-button").isDisabled(), true, "stale-horizon actions stay disabled during a fresh brief request");
 
   // End the owner session while its newly fetched brief is still in flight.
-  await page.locator("#signout-button").click();
+  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click();
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   assert.equal(await page.evaluate(() => document.activeElement.id), "access-key", "access end moves focus to sign-in");
   assert.match(await page.locator("#auth-error").textContent(), /Session ended; private drafts were cleared/);
