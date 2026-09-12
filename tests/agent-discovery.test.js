@@ -236,9 +236,9 @@ test("/room/health aliases return the same JSON as /api/health; bare /health sta
 test("door serves the same discovery bytes and points at origin", async () => {
   const html = await roomEntry(new Request("https://www.trydemigod.com/room")).text();
   assert.match(html, /Connect an agent/);
-  assert.match(html, /Start with a chat packet/);
+  assert.match(html, /<details[^>]*><summary>Connect an agent/);
   assert.match(html, /href="\/room\/llms.txt"/);
-  assert.match(html, /href="\/room\/\.well-known\/agent\.json"/);
+  assert.match(html, />Join</);
   for (const doorPath of [
     "/room/llms.txt", "/room/llms-full.txt", "/room/.well-known/agent.json",
     "/room/skill.md", "/room/agents.md", "/room/AGENTS.md", "/room/CLAUDE.md",
