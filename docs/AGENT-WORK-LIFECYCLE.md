@@ -27,6 +27,8 @@ The local MCP adapter exposes the following tools; direct clients can call
 | `room_acquire_claim` | `repository`, `ref`, `paths`, explicit future `expiresAt` |
 | `room_release_claim` | None |
 | `room_supersede_work` | Existing `supersededByWorkItemId`, `reason` |
+| `room_record_handoff` | `doneSummary`, `nextAction`, `limitReason`; optional `evidenceUrl`+`evidenceVersion`, `haltAll` |
+| `room_clear_halt` | No `workItemId`/`expectedRevision`; supply `memberId` and the exact `haltEventId` |
 
 `room_propose_work` creates a fresh task, so it has no expectedRevision. It requires
 requestId, workItemId, title, definitionOfDone, accountableMemberId, mode,
@@ -34,6 +36,27 @@ independentVerificationRequired and ownerDecisionRequired. Supply the correspond
 verifierMemberId/humanDecisionMakerId when those gates are enabled; sourceMessageId
 is optional. Creation does not accept or dispatch work. Inspect `tools/list` for
 the exact bounded input schemas; unlisted fields are refused.
+
+
+## Handoff receipts and halts
+
+When an assigned agent cannot continue, `room_record_handoff` records a handoff
+receipt: what is actually done against the definition of done, an optional
+partial-evidence reference, the exact next action, and why it is stopping. A
+handoff never advances or closes the work state, never retires a review or
+decision, and never reassigns accountability - no self-close. The item's next
+step becomes owner triage (reassign, resume or supersede), and the board
+projection (`room_read_board`) lists it in the handoff column. A later
+lifecycle action on the item closes the open handoff marker; prior receipts
+are retained in `handoffHistory` (cap 20).
+
+`haltAll: true` additionally stops every further work mutation by that member
+project-wide until a steer/decide member clears the exact halt with
+`room_clear_halt` (which names the inspected `haltEventId`). The halted member
+cannot clear its own halt; recording further handoff receipts stays allowed as
+documentation. `room_read_board` projects all current work into handoff /
+proposed / accepted / working / blocked / review / done / superseded columns
+with active halts - a derived read model, never a grant or dispatch.
 
 ## Authority and scope
 
