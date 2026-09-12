@@ -4,7 +4,7 @@ import { replyPostMode } from "../src/reply-requests.js";
 import { conforms, confirmsAgentCommand } from "./work-actions.mjs";
 import { agentErrorAx } from "../src/agent-error.mjs";
 import { validRequestRun } from "../src/request-run-policy.js";
-import { validAutomationRequest, validAutomationPreview } from "../src/automation-policy.js";
+import { validAutomationRequest, validAutomationPreview, validateAutomationDefinition } from "../src/automation-policy.js";
 
 const id = { type: "string", minLength: 1, maxLength: 128, pattern: "^(?!(?:constructor|prototype|__proto__)$)[A-Za-z0-9][A-Za-z0-9_.:-]*$" };
 const text = { type: "string", minLength: 1, maxLength: 4096, pattern: "\\S" };
@@ -14,7 +14,23 @@ const limit = { type: "integer", minimum: 1, maximum: 50 };
 const direction = { type: "string", enum: ["incoming", "outgoing", "both"] };
 const retry = " Keep this requestId and all input unchanged on an unknown result, cancellation or reconnect. A receipt confirms only the original operation. It is not current state, work completion or approval.";
 const runTypes = Object.freeze({ room_claim_request_run: "request_run.claimed", room_stop_request_run: "request_run.stop_requested", room_finish_request_run: "request_run.finished" });
+const automationTypes = { room_create_automation: "automation.created", room_edit_automation: "automation.updated",
+  room_enable_automation: "automation.enabled", room_accept_automation: "automation.accepted", room_pause_automation: "automation.paused", room_run_automation: "message.posted" };
+const objectSchema = (properties, required = Object.keys(properties)) => ({ type: "object", properties, required, additionalProperties: false });
+const automationDefinition = objectSchema({ title: { ...text, maxLength: 80 }, prompt: text, recipientId: id,
+  trigger: objectSchema({ kind: { type: "string", enum: ["manual", "interval"] }, startAt: { type: "string", maxLength: 32 }, intervalMs: { type: "integer", minimum: 60000, maximum: 2592000000 } }, ["kind"]),
+  maxRuns: { type: "integer", minimum: 1, maximum: 100 }, maxRuntimeMs: { type: "integer", minimum: 1, maximum: 300000 }, maxOutputBytes: { type: "integer", minimum: 1, maximum: 1048576 } });
 const definitions = [
+  ["room_create_automation", null, "Save an automation definition you own. Starts paused; does not schedule or execute anything. Recipient must separately accept scope." + retry,
+    { requestId: id, automationId: id, expectedRevision: { ...revision, maximum: 0 }, definition: automationDefinition }],
+  ["room_edit_automation", null, "Edit your inspected automation definition. Revokes both consents; cannot edit while prior execution is unresolved." + retry,
+    { requestId: id, automationId: id, expectedRevision: revision, definition: automationDefinition }],
+  ...[["room_enable_automation", "Enable your exact inspected definition; recipient consent remains separate. No background scheduler is started."],
+    ["room_accept_automation", "Accept an exact inspected definition addressed to you. Does not grant outside execution permission."],
+    ["room_pause_automation", "Pause future dispatches when authorized. Does not stop a running process; use its request-run stop control separately."]]
+    .map(([name, description]) => [name, null, description + retry, { requestId: id, automationId: id, expectedRevision: revision }]),
+  ["room_run_automation", null, "Dispatch one native chat request as the automation creator. Copy automationRevision, automationSlot and definition from an inspected preview. Definition is receipt evidence, never a scope override. No program/model is started by this tool." + retry,
+    { requestId: id, automationId: id, automationRevision: revision, automationSlot: revision, definition: automationDefinition }],
   ["room_list_automations", "/automations", "Read bounded room automation summaries without prompts or chat history. Does not consume a run, enable a schedule or execute anything.", {}, []],
   ["room_preview_automation", "/automations", "Inspect one automation's exact definition, consent, remaining runs and eligible next slot. A preview is not authorization or a reservation; actions must recheck current state. No background scheduler is enabled.", { automationId: id }, ["automationId"]],
   ["room_claim_request_run", null, "Record one bounded run claim for an open request addressed to you. Read room_read_request and pin its current context and instructions revision; expectedRevision is current.run.revision or 0 when run is null. No Work Item required. This records ownership only: it does not launch code or grant machine/provider access. Never launch after a duplicate or unknown claim. The local room-run command claims for itself; do not preclaim for it." + retry,
@@ -49,13 +65,16 @@ export const replyTools = [...actions.values()].map(action => action.tool);
 export const isReplyTool = name => actions.has(name);
 export const replyRoute = name => actions.get(name)?.route;
 export function validReplyArguments(name, args) {
-  return actions.has(name) && conforms(args, actions.get(name).tool.inputSchema)
-    && !(Object.hasOwn(args, "cursor") && Object.hasOwn(args, "checkpoint"));
+  if (!actions.has(name) || !conforms(args, actions.get(name).tool.inputSchema)
+    || Object.hasOwn(args, "cursor") && Object.hasOwn(args, "checkpoint")) return false;
+  try { if (Object.hasOwn(args, "definition")) validateAutomationDefinition(args.definition); } catch { return false; }
+  return true;
 }
 export function buildReplyCommand(identity, name, args) {
   if (!validId(identity?.roomId) || !validId(identity?.memberId) || !validReplyArguments(name, args) || replyRoute(name) !== null)
     throw Object.assign(new Error("Invalid reply action input or identity"), { code: "invalid_reply_action" });
-  const { requestId, ...data } = structuredClone(args), type = runTypes[name] ?? (name === "room_cancel_request" ? "reply_request.cancelled" : "message.posted");
+  const { requestId, ...data } = structuredClone(args), type = automationTypes[name] ?? runTypes[name] ?? (name === "room_cancel_request" ? "reply_request.cancelled" : "message.posted");
+  if (name === "room_run_automation") delete data.definition;
   if (type === "message.posted") data.messageId = "reply-" + createHash("sha256").update(JSON.stringify([identity.roomId, identity.memberId, requestId])).digest("hex");
   if (name === "room_request_reply") data.requestKind = "reply";
   if (name === "room_respond_to_request") data.replyToId = data.responseToRequestId;
@@ -65,9 +84,18 @@ export function buildReplyCommand(identity, name, args) {
   return command;
 }
 export async function submitReplyAction(client, identity, name, args, { signal } = {}) {
+  args = structuredClone(args);
   const command = buildReplyCommand(identity, name, args), receipt = await client.command(command, { signal });
-  if (!confirmsAgentCommand(receipt, command, identity)) return { status: "unconfirmed", requestId: command.id,
+  const expected = name === "room_run_automation" ? { ...command, data: { ...command.data,
+    body: args.definition.prompt, toMemberId: args.definition.recipientId, requestKind: "reply", workItemId: null } } : command;
+  if (!confirmsAgentCommand(receipt, expected, identity)) return { status: "unconfirmed", requestId: command.id,
     message: "Outcome unknown. Keep and retry the exact original input; do not create a replacement requestId." };
+  if (automationTypes[name]) return { contractVersion: 1, status: "recorded", requestId: command.id, automationId: args.automationId,
+    appliedAutomationRevision: (args.expectedRevision ?? args.automationRevision) + 1,
+    requestMessageId: name === "room_run_automation" ? command.data.messageId : null,
+    sequence: receipt.sequence, eventId: receipt.event.id, duplicate: receipt.duplicate,
+    currentStateVerified: false, processStarted: false, backgroundDispatchEnabled: false, workStateChanged: false,
+    next: { tool: "room_preview_automation", arguments: { automationId: args.automationId } } };
   const requestMessageId = name === "room_request_reply" ? command.data.messageId
     : command.data.responseToRequestId ?? command.data.requestMessageId ?? null;
   if (runTypes[name]) return { contractVersion: 1, status: "recorded", requestId: command.id, requestMessageId,

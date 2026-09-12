@@ -9,7 +9,7 @@ import { RoomAgentClient } from '../client/room-agent.mjs';
 import { saveAgentConnection } from '../client/agent-connection.mjs';
 import { openMcpTestClient } from '../scripts/mcp-test-client.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
-import { validateReplyRead } from '../client/reply-actions.mjs';
+import { validateReplyRead, submitReplyAction, buildReplyCommand, validReplyArguments } from '../client/reply-actions.mjs';
 
 async function fixture(t) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store }), handles = [];
@@ -76,7 +76,7 @@ test('HTTP selection, revocation and client identity are fail-closed', async t =
 
 test('real MCP and CLI expose read-only automation previews without consuming a run', async t => {
   const f = await fixture(t), mcp = await openMcpTestClient(f.configDirectory); f.handles.push(mcp);
-  const tools = (await mcp.request('tools/list')).result.tools.filter(tool => tool.name.includes('automation'));
+  const tools = (await mcp.request('tools/list')).result.tools.filter(tool => tool.name.includes('automation') && tool.annotations.readOnlyHint);
   assert.equal(tools.length, 2); assert.ok(tools.every(tool => tool.annotations.readOnlyHint));
   const before = auditRecovery(f.store);
   assert.equal((await mcp.call('room_preview_automation', { automationId: 'daily' })).result.structuredContent.automations[0].id, 'daily');
@@ -96,4 +96,44 @@ test('malformed preview scope, extra fields, limits and selected identity are re
     const changed = structuredClone(selected); mutate(changed);
     assert.throws(() => validateReplyRead(changed, { name: 'room_preview_automation', args: { automationId: 'daily' }, roomId: 'commons' }), { code: 'invalid_response' });
   }
+});
+
+test('agent automation lifecycle uses exact nested receipts and dispatch retries through MCP', async t => {
+  const f = await fixture(t), mcp = await openMcpTestClient(f.configDirectory); f.handles.push(mcp);
+  const definition = { title: 'Agent check', prompt: 'Review this', recipientId: 'owner', trigger: { kind: 'manual' }, maxRuns: 2, maxRuntimeMs: 10000, maxOutputBytes: 4096 };
+  const create = { requestId: 'create-agent', automationId: 'agent-check', expectedRevision: 0, definition };
+  const receipt = await f.client.replyAction('room_create_automation', create);
+  assert.equal(receipt.status, 'recorded'); assert.equal(receipt.processStarted, false);
+  assert.equal((await f.client.replyAction('room_create_automation', create)).duplicate, true);
+  await f.client.replyAction('room_enable_automation', { requestId: 'enable-agent', automationId: 'agent-check', expectedRevision: 1 });
+  await assert.rejects(f.client.replyAction('room_accept_automation', { requestId: 'forged-consent', automationId: 'agent-check', expectedRevision: 2 }));
+  f.store.command(f.keys.owner, 'commons', { id: 'human-accept', type: 'automation.accepted', data: { automationId: 'agent-check', expectedRevision: 2 } });
+  const run = { requestId: 'run-agent', automationId: 'agent-check', automationRevision: 3, automationSlot: 0, definition };
+  const result = (await mcp.call('room_run_automation', run)).result.structuredContent;
+  assert.equal(result.status, 'recorded'); assert.equal(result.processStarted, false);
+  assert.equal(f.store.room('commons').state.replyRequests[result.requestMessageId].recipientId, 'owner');
+  const paused = await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['scripts/agent-inbox.mjs', 'reply', 'room_pause_automation'], { env: { ROOM_AGENT_CONFIG: f.configDirectory }, stdio: ['pipe', 'pipe', 'pipe'] });
+    let out = '', err = ''; child.on('error', reject); child.stdout.on('data', c => { out += c; }); child.stderr.on('data', c => { err += c; }); child.on('exit', code => resolve({ code, out, err }));
+    child.stdin.end(JSON.stringify({ requestId: 'pause-agent', automationId: 'agent-check', expectedRevision: 4 }));
+  });
+  assert.equal(paused.code, 0, paused.err); assert.equal(JSON.parse(paused.out).status, 'recorded');
+  assert.equal((await f.client.replyAction('room_run_automation', run)).duplicate, true);
+  assert.equal(f.store.room('commons').state.automations['agent-check'].dispatchCount, 1);
+  const corrupted = { command: async command => { const r = await f.client.command(command); r.event.data.body = 'different'; return r; } };
+  const unknown = await submitReplyAction(corrupted, { roomId: 'commons', memberId: 'producer' }, 'room_run_automation', run);
+  assert.equal(unknown.status, 'unconfirmed'); assert.equal(unknown.requestId, run.requestId);
+  const wrongScope = await f.client.replyAction('room_run_automation', { ...run, definition: { ...definition, prompt: 'Wrong inspected scope' } });
+  assert.equal(wrongScope.status, 'unconfirmed');
+  assert.equal(f.store.room('commons').state.automations['agent-check'].dispatchCount, 1);
+});
+
+test('automation tools reject malformed definitions and do not send receipt evidence as a scope override', () => {
+  const definition = { title: 'Check', prompt: 'Hi', recipientId: 'owner', trigger: { kind: 'manual' }, maxRuns: 2, maxRuntimeMs: 10000, maxOutputBytes: 4096 };
+  const args = { requestId: 'run', automationId: 'a', automationRevision: 3, automationSlot: 0, definition };
+  const command = buildReplyCommand({ roomId: 'commons', memberId: 'producer' }, 'room_run_automation', args);
+  assert.deepEqual(Object.keys(command.data).sort(), ['automationId', 'automationRevision', 'automationSlot', 'messageId']);
+  assert.equal(validReplyArguments('room_run_automation', { ...args, token: 'secret' }), false);
+  assert.equal(validReplyArguments('room_run_automation', { ...args, definition: { ...definition, trigger: { kind: 'manual', intervalMs: 60000 } } }), false);
+  assert.equal(validReplyArguments('room_create_automation', { requestId: 'new', automationId: 'a', expectedRevision: 1, definition }), false);
 });
