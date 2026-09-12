@@ -67,7 +67,8 @@ test("session contract stays on writer 27 and off Compute / Slack-with-bots / pe
 
 test("legacy work items read as queued; started/status/stop/stopped are exact transitions", () => {
   const item = { id: "legacy", title: "Old", state: "accepted", revision: 2, accountableMemberId: "agent" };
-  assert.deepEqual(sessionRecord(item), { status: "queued", stop_requested_at: null, heartbeat_at: null, worker_member_id: null });
+  assert.deepEqual(sessionRecord(item), { status: "queued", stop_requested_at: null, heartbeat_at: null, worker_member_id: null,
+    started_at: null, attempt_count: 0, budget: null, spend_cents: null });
   applySessionFields(item, { type: SESSION_EVENT_TYPES.STARTED, at: "2026-09-10T21:00:00.000Z" });
   assert.equal(item.status, SESSION_STATUSES.PROCESSING);
   applySessionFields(item, { type: SESSION_EVENT_TYPES.STATUS_CHANGED, at: "2026-09-10T21:01:00.000Z", data: { status: "active" } });
@@ -88,7 +89,8 @@ test("seed work keeps assignment state; session defaults do not rewrite history"
   const state = replay(seedEvents);
   const review = state.workItems["work-spec-review"];
   assert.equal(review.state, "completed");
-  assert.deepEqual(sessionRecord(review), { status: "queued", stop_requested_at: null, heartbeat_at: null, worker_member_id: null });
+  assert.deepEqual(sessionRecord(review), { status: "queued", stop_requested_at: null, heartbeat_at: null, worker_member_id: null,
+    started_at: null, attempt_count: 0, budget: null, spend_cents: null });
   const next = applyEvent(state, {
     id: "session-seed-start", idempotencyKey: "session-seed-start", roomId: state.room.id,
     type: T.SESSION_STARTED, actorId: "codex", at: "2026-09-10T21:10:00.000Z",

@@ -27,7 +27,7 @@ import { auditWorkHelp } from "./work-help.mjs";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, validateHelpOfferData } from "../src/help-offers.js";
 import {
   isSessionStatus, isTerminalSession, sessionRecord, listWorkItemSessions, sessionCommandType, sessionWorker,
-  SESSION_HEARTBEAT_STALE_MS
+  validateSessionBudget, budgetLimitExceeded, SESSION_HEARTBEAT_STALE_MS
 } from "../src/work-item-session.js";
 import { Inbox, inboxSchema } from "./inbox.mjs";
 import { EmailImport, emailImportSchema } from "./email-import.mjs";
@@ -205,10 +205,10 @@ const shapes = {
   [T.CLAIM_RELEASED]: work,
   [T.VERIFICATION_RECORDED]: `${work} result completionEventId evidenceVersion summary nextAction`,
   [T.OWNER_DECISION_RECORDED]: `${work} decision completionEventId evidenceVersion reason`,
-  [T.SESSION_STARTED]: work,
-  [T.SESSION_STATUS_CHANGED]: `${work} status`,
+  [T.SESSION_STARTED]: `${work} budget`,
+  [T.SESSION_STATUS_CHANGED]: `${work} status spendCents`,
   [T.SESSION_STOP_REQUESTED]: work,
-  [T.SESSION_STOPPED]: `${work} status`,
+  [T.SESSION_STOPPED]: `${work} status spendCents budgetEnforced reason limit`,
   [T.CAPABILITIES_ADVERTISED]: "capabilities"
 };
 
@@ -221,7 +221,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities"].includes(name) ? "array" : name === "preferences" ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities"].includes(name) ? "array" : ["preferences", "budget"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (Buffer.byteLength(JSON.stringify(command)) > 16384) fail(413, "too_large", "Command is too large");
@@ -1209,10 +1209,12 @@ export class RoomStore {
   mutateWorkSession(token, roomId, request, expectedSessionBinding = null) {
     if (!request || Array.isArray(request) || typeof request !== "object") fail(422, "invalid_session_action", "Supply the session action fields");
     const keys = Object.keys(request);
-    const allowed = request.action === "set_status"
-      ? ["requestId", "workItemId", "expectedRevision", "action", "status"]
-      : ["requestId", "workItemId", "expectedRevision", "action"];
-    if (keys.length !== allowed.length || allowed.some(key => !keys.includes(key))) {
+    // W4-46 H5: a starting claim may declare a budget; any status change may
+    // report cumulative spend. Both are optional; nothing else is accepted.
+    const required = ["requestId", "workItemId", "expectedRevision", "action",
+      ...(request.action === "set_status" ? ["status"] : [])];
+    const optional = request.action === "set_status" ? ["budget", "spendCents"] : [];
+    if (required.some(key => !keys.includes(key)) || keys.some(key => ![...required, ...optional].includes(key))) {
       fail(422, "invalid_session_action", "Supply requestId, workItemId, expectedRevision, and set_status or request_stop");
     }
     if (!validId(request.requestId) || !validId(request.workItemId)
@@ -1221,6 +1223,37 @@ export class RoomStore {
       fail(422, "invalid_session_action", "Supply requestId, workItemId, expectedRevision, and set_status or request_stop");
     }
     if (request.action === "set_status" && !isSessionStatus(request.status)) fail(422, "invalid_session_status", "Choose a session status");
+    if (request.spendCents !== undefined && (!Number.isSafeInteger(request.spendCents) || request.spendCents < 0))
+      fail(422, "invalid_session_spend", "spendCents must be a non-negative integer of cents");
+    // W4-46 H5: the budget trip-wire fires before anything else touches the
+    // session — any interaction with a runaway session stops it first. A
+    // spend report on this mutation counts: the limit trips on the number
+    // the worker just declared, not only on stored history.
+    // This runs in its own committing transaction OUTSIDE the mutation's:
+    // the forced stop must stay in the log even though the caller's
+    // mutation below is rejected (a nested savepoint would roll back).
+    const tripped = this.transaction(() => {
+      const roomState = this.room(roomId).state;
+      const item = roomState.workItems[request.workItemId];
+      if (!item) fail(404, "work_not_found", "Work item not found in this Room");
+      const session = sessionRecord(item);
+      const pendingSpend = request.spendCents ?? session.spend_cents;
+      const wire = budgetLimitExceeded(item, this.now())
+        || (!isTerminalSession(session.status) && session.budget?.maxSpendCents != null && pendingSpend !== null
+          && pendingSpend > session.budget.maxSpendCents ? "maxSpendCents" : null);
+      if (wire) {
+        try {
+          this.command(token, roomId, { id: `budget-${request.requestId}`, type: T.SESSION_STOPPED,
+            data: { workItemId: request.workItemId, expectedRevision: item.revision, status: "failed",
+              budgetEnforced: true, reason: "budget_exceeded", limit: wire } }, expectedSessionBinding);
+        } catch {
+          // The 409 below still carries the reason; the worker's next
+          // heartbeat completes the stop.
+        }
+      }
+      return wire;
+    });
+    if (tripped) fail(409, "budget_exceeded", `Session budget exceeded (${tripped}); the session was stopped`);
     return this.transaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const prior = this.db.prepare("SELECT e.sequence,e.body FROM commands c JOIN events e ON e.room_id=c.room_id AND e.sequence=c.sequence WHERE c.room_id=? AND c.actor_id=? AND c.id=?").get(roomId, auth.member.id, request.requestId);
@@ -1244,8 +1277,31 @@ export class RoomStore {
       let type;
       try { type = sessionCommandType(item, request.action, request.status); }
       catch (error) { fail(422, "invalid_session_action", error.message); }
+      let budget = null;
+      if (request.budget !== undefined) {
+        if (type !== T.SESSION_STARTED) fail(422, "invalid_session_budget", "A budget is declared when the session starts");
+        try { budget = validateSessionBudget(request.budget); }
+        catch (error) { fail(422, "invalid_session_budget", error.message); }
+      }
+      if (type === T.SESSION_STARTED) {
+        const started = sessionRecord(item);
+        if (budget?.maxAttempts && started.attempt_count + 1 > budget.maxAttempts)
+          fail(409, "budget_exceeded", `Attempt ${started.attempt_count + 1} exceeds the attempt budget of ${budget.maxAttempts}`);
+        // The concurrency bound follows the worker: the new claim's declaration
+        // wins, otherwise the tightest bound the worker already declared on a
+        // live session applies. Undeclared everywhere stays "unknown".
+        const others = Object.values(roomState.workItems ?? {}).filter(other =>
+          other.id !== item.id && !isTerminalSession(sessionRecord(other).status)
+          && sessionRecord(other).worker_member_id === auth.member.id);
+        const declared = others.map(other => sessionRecord(other).budget?.maxConcurrent ?? null).filter(v => v !== null);
+        const cap = budget?.maxConcurrent ?? (declared.length ? Math.min(...declared) : null);
+        if (cap !== null && others.length >= cap)
+          fail(409, "budget_exceeded", `Concurrency budget of ${cap} reached (${others.length} active)`);
+      }
       const data = { workItemId: request.workItemId, expectedRevision: request.expectedRevision };
       if (type === T.SESSION_STATUS_CHANGED || type === T.SESSION_STOPPED) data.status = request.status;
+      if (type === T.SESSION_STARTED && budget) data.budget = budget;
+      if (request.spendCents !== undefined && type !== T.SESSION_STOP_REQUESTED) data.spendCents = request.spendCents;
       return this.command(token, roomId, { id: request.requestId, type, data }, expectedSessionBinding);
     });
   }

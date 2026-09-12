@@ -7,7 +7,7 @@ import { validId } from "../src/events.js";
 import { SyntheticInboxTransport } from "./inbox-transport.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
-import { DiagnosticsLog } from "./diagnostics.mjs";
+import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { discoveryDoc, isHealthAliasPath } from "../deploy/agent-discovery.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
 import { guestAgentLinkContract } from "./guest-agent-links.mjs";
@@ -480,7 +480,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["code", "displayName"]) || typeof data.code !== "string" || typeof data.displayName !== "string") reject(422, "invalid_invite", "Invite code and displayName are required");
         return json(res, 201, store.invites.redeem(data.code, { displayName: data.displayName }));
       }
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics|search|provider-heartbeats|identity-links|agent-invites))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|provider-heartbeats|identity-links|agent-invites))?$/.exec(url.pathname);
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
       if (threadMatch && req.method === "GET") {
         // Round-2 #112: threaded replies.
@@ -590,8 +590,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (req.method === "GET") return json(res, 200, { roomId, invites: store.invites.list(selected.token, roomId) });
         if (req.method === "POST") {
           const keys = Object.keys(data);
-          if (!keys.includes("permissions") || keys.some(k => !["permissions", "expiresInMinutes", "displayName"].includes(k)))
-            reject(422, "invalid_invite", "permissions is required; optional: expiresInMinutes, displayName");
+          if ((!keys.includes("permissions") && !keys.includes("profile"))
+            || keys.some(k => !["permissions", "profile", "expiresInMinutes", "displayName"].includes(k)))
+            reject(422, "invalid_invite", "permissions or profile is required; optional: expiresInMinutes, displayName");
           return json(res, 201, store.invites.create(selected.token, roomId, data));
         }
         if (req.method === "DELETE") {
@@ -661,6 +662,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "diagnostics" && req.method === "GET") {
         store.agentConnections.owner(selected.token, roomId, fence);
         return json(res, 200, { diagnostics: diagnostics.list(roomId) });
+      }
+      if (route === "diagnostics-export" && req.method === "GET") {
+        // W4-57 M6: sanitized support-export bundle. Owner-only, but accepts the
+        // owner's room bearer as well as a signed-in account session, so the
+        // CLI (bearer-only) can pull it. Whitelisted scalar fields only — no
+        // credentials, hashes, bodies, or member details.
+        const exportAuth = store.authenticate(selected.token, roomId, fence);
+        if (exportAuth.member.kind !== "human" || exportAuth.member.id !== store.room(roomId).state.room.ownerId
+          || !exportAuth.member.permissions.includes("manage_members")) {
+          reject(403, "owner_required", "Only the room owner can export diagnostics");
+        }
+        const bundle = supportExportBundle({ roomId, roomTitle: store.room(roomId).state.room.title,
+          service: { sourceRevision: SOURCE_REVISION, buildId: BUILD_ID, mode: serviceMode },
+          diagnostics: diagnostics.list(roomId) });
+        res.setHeader("Content-Disposition", `attachment; filename="room-${roomId}-support-export.json"`);
+        return json(res, 200, bundle);
       }
       if (route === "agent-connections" && req.method === "POST") {
         const result = store.agentConnections.apply(selected.token, roomId, await body(req), fence);
