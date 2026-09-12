@@ -3,7 +3,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
   applyEvent, emptyRoomState, event, EVENT_TYPES as T, WORK_STATES, INVITATION_ROLE_POLICIES,
   INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES,
-  MEMBERSHIP_AUTHORITY_POLICY_VERSION, validId
+  MEMBERSHIP_AUTHORITY_POLICY_VERSION, validId, memberCan
 } from "../src/events.js";
 import { buildReturnBrief, resolveHistoryWindow, RETURN_BRIEF_DEFAULT_LIMIT } from "./return-brief.mjs";
 import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal } from "./invitation-journal.mjs";
@@ -24,7 +24,7 @@ import { validateHelpData } from "../src/work-help.js";
 import { auditWorkHelp } from "./work-help.mjs";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, validateHelpOfferData } from "../src/help-offers.js";
 import {
-  isSessionStatus, isTerminalSession, sessionRecord, listWorkItemSessions, sessionCommandType
+  isSessionStatus, isTerminalSession, sessionRecord, listWorkItemSessions, sessionCommandType, sessionWorker
 } from "../src/work-item-session.js";
 import { Inbox, inboxSchema } from "./inbox.mjs";
 import { EmailImport, emailImportSchema } from "./email-import.mjs";
@@ -1169,8 +1169,18 @@ export class RoomStore {
         if (!sessionEventMatchesRequest(parsedEvent, request)) fail(409, "idempotency_conflict", "Command ID already used for different content");
         return { sequence: prior.sequence, event: parsedEvent, duplicate: true };
       }
-      const item = this.room(roomId).state.workItems[request.workItemId];
+      const roomState = this.room(roomId).state;
+      const item = roomState.workItems[request.workItemId];
       if (!item) fail(404, "work_not_found", "Work item not found in this Room");
+      if (request.action === "set_status") {
+        // Structural anti-collision: a live claim belongs to its worker. Anyone
+        // else needs the manage_claims permission; a stale heartbeat means the
+        // worker went away and the item is takeable. request_stop stays open to
+        // all members — it is a polite signal, not a state change.
+        const worker = sessionWorker(item, this.now());
+        if (worker && worker !== auth.member.id && !memberCan(roomState, auth.member.id, "manage_claims"))
+          fail(409, "session_claimed", "Another member is working on this; coordinate with them or ask a claim manager");
+      }
       let type;
       try { type = sessionCommandType(item, request.action, request.status); }
       catch (error) { fail(422, "invalid_session_action", error.message); }

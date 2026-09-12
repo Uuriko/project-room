@@ -23,6 +23,10 @@ export const SESSION_EVENT_TYPES = Object.freeze({
 export const SESSION_EVENT_LIST = Object.freeze(Object.values(SESSION_EVENT_TYPES));
 
 const RUNNING = new Set([SESSION_STATUSES.PROCESSING, SESSION_STATUSES.ACTIVE, SESSION_STATUSES.SUSPENDED]);
+
+// A running session whose heartbeat is older than this is considered abandoned:
+// another agent may take it over instead of waiting forever.
+export const SESSION_HEARTBEAT_STALE_MS = 10 * 60 * 1000;
 const TERMINAL = new Set([SESSION_STATUSES.DONE, SESSION_STATUSES.FAILED]);
 const STATUS_SET = new Set(SESSION_STATUS_LIST);
 
@@ -45,7 +49,7 @@ export function isRunningSession(status) {
 }
 
 export function defaultWorkItemSession() {
-  return { status: SESSION_STATUSES.QUEUED, stop_requested_at: null, heartbeat_at: null };
+  return { status: SESSION_STATUSES.QUEUED, stop_requested_at: null, heartbeat_at: null, worker_member_id: null };
 }
 
 export function sessionRecord(item) {
@@ -56,7 +60,17 @@ export function sessionRecord(item) {
     ? item.stop_requested_at : null;
   const heartbeat = typeof item.heartbeat_at === "string" && Number.isFinite(Date.parse(item.heartbeat_at))
     ? item.heartbeat_at : null;
-  return { status, stop_requested_at: stop, heartbeat_at: heartbeat };
+  const worker = typeof item.worker_member_id === "string" && item.worker_member_id ? item.worker_member_id : null;
+  return { status, stop_requested_at: stop, heartbeat_at: heartbeat, worker_member_id: worker };
+}
+
+// The member currently holding a live claim on this session, or null when the
+// session is not running or its heartbeat went stale (abandoned: takeable).
+export function sessionWorker(item, nowMs = Date.now()) {
+  const session = sessionRecord(item);
+  if (!RUNNING.has(session.status) || !session.worker_member_id || !session.heartbeat_at) return null;
+  if (Number.isFinite(nowMs) && nowMs - Date.parse(session.heartbeat_at) > SESSION_HEARTBEAT_STALE_MS) return null;
+  return session.worker_member_id;
 }
 
 export function sessionCard(item) {
@@ -67,6 +81,7 @@ export function sessionCard(item) {
     status: session.status,
     stop_requested_at: session.stop_requested_at,
     heartbeat_at: session.heartbeat_at,
+    worker_member_id: session.worker_member_id,
     revision: item.revision,
     state: item.state,
     accountableMemberId: item.accountableMemberId
@@ -87,7 +102,7 @@ export function workItemSessionContract() {
     status: "live",
     schemaBump: false,
     writer: 26,
-    workItemFields: Object.freeze(["status", "stop_requested_at", "heartbeat_at"]),
+    workItemFields: Object.freeze(["status", "stop_requested_at", "heartbeat_at", "worker_member_id"]),
     statuses: SESSION_STATUS_LIST,
     events: SESSION_EVENT_LIST,
     workStateSeparate: true,
@@ -120,6 +135,7 @@ export function applySessionFields(item, incoming) {
     item.status = SESSION_STATUSES.PROCESSING;
     item.stop_requested_at = null;
     item.heartbeat_at = at;
+    item.worker_member_id = incoming.actorId;
     return;
   }
   if (incoming.type === SESSION_EVENT_TYPES.STATUS_CHANGED) {
@@ -128,6 +144,7 @@ export function applySessionFields(item, incoming) {
     item.status = next;
     item.stop_requested_at = session.stop_requested_at;
     item.heartbeat_at = at;
+    item.worker_member_id = incoming.actorId;
     return;
   }
   if (incoming.type === SESSION_EVENT_TYPES.STOP_REQUESTED) {
@@ -145,6 +162,7 @@ export function applySessionFields(item, incoming) {
     item.status = next;
     item.stop_requested_at = session.stop_requested_at;
     item.heartbeat_at = at;
+    item.worker_member_id = null;
     return;
   }
   throw new Error(`Unsupported event type: ${incoming.type}`);
