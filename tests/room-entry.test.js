@@ -41,6 +41,8 @@ test("entry handler leaves other Demigod pages and hosts to existing routing", (
   assert.equal(roomEntry(new Request("https://lobby.getdasha.com/room/llms.txt")), null);
   assert.notEqual(roomEntry(new Request("https://www.trydemigod.com/room/llms.txt")), null);
   assert.notEqual(roomEntry(new Request("https://www.trydemigod.com/room/llms-full.txt")), null);
+  assert.notEqual(roomEntry(new Request("https://www.trydemigod.com/room/skill.md")), null);
+  assert.notEqual(roomEntry(new Request("https://www.trydemigod.com/room/AGENTS.md")), null);
 });
 
 test("entry supports HEAD and rejects mutations", async () => {
