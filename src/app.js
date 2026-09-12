@@ -1566,6 +1566,24 @@ $("#auth-form").addEventListener("submit", async e => {
     : "Check the access key and try again. If this is an account key, choose Account key." });
   if (state) revealLocationHash();
 });
+// C1: mobile session menu (short header) - toggle, Escape, outside click.
+const sessionMenu = $("#session-menu");
+const sessionMenuButton = $("#session-menu-button");
+const setSessionMenuOpen = open => {
+  sessionMenu.classList.toggle("open", open);
+  sessionMenuButton.setAttribute("aria-expanded", String(open));
+};
+sessionMenuButton.addEventListener("click", () => setSessionMenuOpen(!sessionMenu.classList.contains("open")));
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape" && sessionMenu.classList.contains("open")) {
+    setSessionMenuOpen(false);
+    sessionMenuButton.focus();
+  }
+});
+document.addEventListener("click", event => {
+  if (sessionMenu.classList.contains("open") && !sessionMenu.contains(event.target)) setSessionMenuOpen(false);
+});
+
 $("#signout-button").addEventListener("click", async () => {
   if (!state && accountClient.session?.authenticated) {
     if (signoutLoading || busy || invitationIsCommitting()) return;
