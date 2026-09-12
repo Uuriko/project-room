@@ -163,7 +163,7 @@ for (const touch of [false, true]) test(`discovery to contribution ${touch ? 'to
   assert.equal(state().workItems[workItemId].decision, null);
   for (const member of ['owner', 'producer', 'reviewer']) assert.equal(
     f.store.db.prepare('SELECT sequence FROM cursors WHERE room_id=? AND member_id=?').get('commons', member)?.sequence ?? 0, 0);
-  await page.locator('#cancel-action').click(); await page.locator('#signout-button').click();
+  await page.locator('#cancel-action').click(); if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator('#signout-button').click();
   await page.locator('#auth-panel').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#search-list').textContent(), ''); assert.equal(await page.locator('#decision-review-text').textContent(), '');
   assert.deepEqual(errors, []);
