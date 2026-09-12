@@ -67,8 +67,13 @@ test("runtime and output caps stop processes independently of Room events", asyn
 
 test("access revocation stops execution without claiming a successful remote update", async t => {
   const f = await fixture(t);
-  const timer = setTimeout(() => f.store.issueAccessKey("commons", "agent"), 150);
-  t.after(() => clearTimeout(timer));
+  // Revoke at the first post-launch monitor read, not after an arbitrary delay
+  // that can expire before the initial claim on a loaded test machine.
+  const snapshot = f.client.snapshot.bind(f.client); let reads = 0;
+  f.client.snapshot = async options => {
+    if (++reads === 3) f.store.issueAccessKey("commons", "agent");
+    return snapshot(options);
+  };
   const result = await runLocalSession({ ...f.options, args: ["-e", "setInterval(()=>{},100)"] });
   assert.equal(result.status, "failed"); assert.equal(result.reason, "access_unavailable");
   assert.equal(result.recording, "unconfirmed");
