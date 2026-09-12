@@ -161,3 +161,12 @@ export function workActions(item, member, now = Date.now()) {
   if (activeClaim(item, now) && (claim || can("manage_claims"))) actions.push(["release", "Release scope"]);
   return actions;
 }
+
+// Round-2 #117: done chip. Marks terminally finished work at a glance — a
+// small chip distinct from the state badge, rendered on work cards and on
+// message links that reference finished work. HTML-escaped by construction
+// (no item fields interpolated).
+export function doneChip(item) {
+  if (!item || item.state === "superseded" || item.supersededBy) return "";
+  return terminalWork(item) ? `<span class="done-chip" title="Finished and verified">✓ Done</span>` : "";
+}
