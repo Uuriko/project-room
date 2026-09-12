@@ -1,0 +1,103 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { RoomStore } from '../server/store.mjs';
+import { initialRoom } from '../server/bootstrap.mjs';
+import { RoomAttachments, attachmentSchema, attachmentLimits } from '../server/attachments.mjs';
+
+function setup(t) {
+  let now = Date.now();
+  const store = new RoomStore(':memory:', { now: () => now });
+  t.after(() => store.close());
+  store.initialize(initialRoom('files'));
+  store.initialize(initialRoom('other'));
+  const owner = store.issueAccessKey('files', 'owner'), other = store.issueAccessKey('other', 'owner');
+  store.command(owner, 'files', { id: randomUUID(), type: 'member.added', data: { memberId: 'guest', displayName: 'Guest', kind: 'human', permissions: [] } });
+  const guest = store.issueAccessKey('files', 'guest');
+  // Deliberately test-only until versioned migration + recovery integration.
+  store.transaction(() => store.db.exec(attachmentSchema));
+  const files = new RoomAttachments(store);
+  const input = (id = randomUUID(), bytes = new Uint8Array([0, 255, 12])) => ({ id, filename: 'notes.txt', mediaType: 'text/plain', bytes });
+  return { store, files, owner, guest, other, input, advance: ms => { now += ms; } };
+}
+
+test('staged uploads preserve exact bytes, stable retries and private ownership', t => {
+  const f = setup(t), input = f.input();
+  const result = f.files.stage(f.owner, 'files', input);
+  assert.deepEqual(f.files.stage(f.owner, 'files', input), result);
+  assert.deepEqual(f.files.readStaged(f.owner, 'files', input.id).bytes, input.bytes);
+  assert.throws(() => f.files.readStaged(f.guest, 'files', input.id), { status: 404 });
+  assert.throws(() => f.files.readStaged(f.other, 'other', input.id), { status: 404 });
+  assert.throws(() => f.files.stage(f.owner, 'files', { ...input, bytes: new Uint8Array([1]) }), { code: 'attachment_conflict' });
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM room_attachments').get().n, 1);
+});
+
+test('discard is idempotent, removes bytes and never resurrects on upload retry', t => {
+  const f = setup(t), input = f.input(); f.files.stage(f.owner, 'files', input);
+  assert.throws(() => f.files.discard(f.guest, 'files', input.id), { status: 404 });
+  const receipt = f.files.discard(f.owner, 'files', input.id);
+  assert.equal(receipt.state, 'discarded');
+  assert.deepEqual(f.files.discard(f.owner, 'files', input.id), receipt);
+  assert.equal(f.store.db.prepare('SELECT bytes FROM room_attachments').get().bytes, null);
+  assert.throws(() => f.files.stage(f.owner, 'files', input), { status: 410 });
+});
+
+test('expiry prevents reads without mutating them; next staging write reclaims bytes', t => {
+  const f = setup(t), input = f.input(); f.files.stage(f.owner, 'files', input);
+  f.advance(attachmentLimits.lifetimeMs);
+  assert.throws(() => f.files.readStaged(f.owner, 'files', input.id), { status: 404 });
+  assert.equal(f.store.db.prepare('SELECT state FROM room_attachments').get().state, 'staged');
+  f.files.stage(f.owner, 'files', f.input());
+  assert.equal(f.store.db.prepare('SELECT state FROM room_attachments WHERE id=?').get(input.id).state, 'expired');
+  assert.throws(() => f.files.stage(f.owner, 'files', input), { status: 410 });
+});
+
+test('file and member byte caps reject atomically; exact retry still works at capacity', t => {
+  const f = setup(t);
+  assert.throws(() => f.files.stage(f.owner, 'files', f.input('oversized', new Uint8Array(attachmentLimits.fileBytes + 1))), { status: 413 });
+  let last;
+  for (let n = 0; n < 8; n++) { last = f.input('file-' + n, new Uint8Array(attachmentLimits.fileBytes)); f.files.stage(f.owner, 'files', last); }
+  assert.throws(() => f.files.stage(f.owner, 'files', f.input()), { code: 'attachment_capacity' });
+  assert.equal(f.files.stage(f.owner, 'files', last).id, last.id);
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM room_attachments').get().n, 8);
+});
+
+test('unsafe names and malformed media types do not persist; current access is required', t => {
+  const f = setup(t);
+  for (const filename of ['../a', 'a\\b', 'a\r\nb', '\u202eevil', ' ', '..'])
+    assert.throws(() => f.files.stage(f.owner, 'files', { ...f.input(), filename }), { status: 422 });
+  assert.throws(() => f.files.stage(f.owner, 'files', { ...f.input(), mediaType: 'text/html\r\nInjected: x' }), { status: 422 });
+  const input = f.input(); f.files.stage(f.guest, 'files', input);
+  f.store.command(f.owner, 'files', { id: randomUUID(), type: 'member.access_changed', data: { memberId: 'guest', expectedMemberRevision: 0, active: false, permissions: [] } });
+  assert.throws(() => f.files.readStaged(f.guest, 'files', input.id), { status: 401 });
+  assert.throws(() => f.files.discard(f.guest, 'files', input.id), { status: 401 });
+  assert.throws(() => f.files.stage(f.guest, 'files', f.input()), { status: 401 });
+});
+
+test('sliced input persists only its view, and corrupted storage is never served', t => {
+  const f = setup(t), whole = new Uint8Array([9, 8, 0, 255, 7, 6]);
+  const input = f.input('slice', whole.subarray(2, 4));
+  f.files.stage(f.owner, 'files', input);
+  whole.fill(3);
+  assert.deepEqual(f.files.readStaged(f.owner, 'files', input.id).bytes, new Uint8Array([0, 255]));
+  f.store.transaction(() => f.store.db.prepare('UPDATE room_attachments SET bytes=? WHERE id=?').run(new Uint8Array([1, 2]), input.id));
+  assert.throws(() => f.files.readStaged(f.owner, 'files', input.id), { code: 'attachment_corrupt' });
+});
+
+test('outer rollback leaves no upload; wrong browser binding cannot stage or read', t => {
+  const f = setup(t), input = f.input();
+  assert.throws(() => f.store.transaction(() => { f.files.stage(f.owner, 'files', input); throw new Error('abort'); }), /abort/);
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM room_attachments').get().n, 0);
+  const session = f.store.createSession(f.owner);
+  assert.throws(() => f.files.stage(session.token, 'files', input, 'wrong'), { code: 'session_binding_changed' });
+  const binding = session.session.sessionBinding;
+  f.files.stage(session.token, 'files', input, binding);
+  assert.throws(() => f.files.readStaged(session.token, 'files', input.id, 'wrong'), { code: 'session_binding_changed' });
+});
+
+test('zero-byte uploads cannot bypass the staging count cap', t => {
+  const f = setup(t);
+  for (let n = 0; n < attachmentLimits.stagedPerMember; n++)
+    f.files.stage(f.owner, 'files', f.input('empty-' + n, new Uint8Array()));
+  assert.throws(() => f.files.stage(f.owner, 'files', f.input('extra', new Uint8Array())), { code: 'attachment_capacity' });
+});
