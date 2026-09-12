@@ -92,7 +92,7 @@ for (const touch of [false, true]) {
     await input.scrollIntoViewIfNeeded();
     await page.screenshot({ path: `test-results/quiet-${label}-large-text-viewport.png` });
     await page.screenshot({ path: `test-results/quiet-${label}-large-text.png`, fullPage: true });
-    await page.locator("#signout-button").click();
+    if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click();
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(await page.locator("#work-dialog").evaluate(e => e.open), false);
     for (const id of ["people-panel", "composer-options", "work-options"]) assert.equal(await page.locator("#" + id).evaluate(e => e.open), false);
