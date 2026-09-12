@@ -20,7 +20,7 @@ The source join-notice helper is not wired into a new human join page here.
 
 22 focused MCP/thread/import tests passed before commit. They exercise the new
 preview and retained security guards together. A fresh full check against the
-committed integration candidate is pending. The first package run exposed an
+integration run completed:1,178 passed, zero failures/skips,102,068 ms. The first package run exposed an
 old expected file count (98 vs100); the corrected test now imports both MCP
 modules from the cold package and verifies preview behavior. Final focused cold
 package tests:2 passed, zero failures/skips. The whole run started before that
