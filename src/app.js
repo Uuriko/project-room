@@ -526,10 +526,11 @@ function renderComposerFiles() {
   const host = $('#composer-files'); if (!host) return;
   const draft = drafts.get(composerKey()), locked = Boolean(pendingMessage?.command?.data?.attachmentIds?.length);
   const files = draft.files ?? [];
+  $('#message-input').required = Boolean(requestMode) || !files.some(item => item.state === 'ready');
   $('#attach-file').hidden = Boolean(requestMode);
   $('#attach-file').disabled = busy || locked || files.length >= 4;
   $('#message-input').readOnly = locked;
-  host.innerHTML = files.map(item => `<div class="composer-file"><span>${esc(item.file.name)}</span><small>${item.state === 'ready' ? 'Ready' : item.state === 'uploading' ? 'Uploading…' : item.state === 'queued' ? 'Waiting' : 'Not uploaded'}</small>${!locked ? `<button type="button" class="text-button" data-file-control="${item.state === 'uploading' || item.state === 'queued' ? 'cancel' : item.state === 'ready' ? 'remove' : 'retry'}" data-upload-id="${esc(item.id)}">${item.state === 'uploading' || item.state === 'queued' ? 'Cancel' : item.state === 'ready' ? 'Remove' : 'Retry'}</button>${!['ready', 'uploading', 'queued'].includes(item.state) ? `<button type="button" class="text-button" data-file-control="remove" data-upload-id="${esc(item.id)}">Remove</button>` : ''}` : ''}</div>`).join('') + (files.length ? '<small>Reloading clears this draft. Add a message to send.</small>' : '');
+  host.innerHTML = files.map(item => `<div class="composer-file"><span>${esc(item.file.name)}</span><small>${item.state === 'ready' ? 'Ready' : item.state === 'uploading' ? 'Uploading…' : item.state === 'queued' ? 'Waiting' : 'Not uploaded'}</small>${!locked ? `<button type="button" class="text-button" data-file-control="${item.state === 'uploading' || item.state === 'queued' ? 'cancel' : item.state === 'ready' ? 'remove' : 'retry'}" data-upload-id="${esc(item.id)}">${item.state === 'uploading' || item.state === 'queued' ? 'Cancel' : item.state === 'ready' ? 'Remove' : 'Retry'}</button>${!['ready', 'uploading', 'queued'].includes(item.state) ? `<button type="button" class="text-button" data-file-control="remove" data-upload-id="${esc(item.id)}">Remove</button>` : ''}` : ''}</div>`).join('') + (files.length ? '<small>Reloading clears this draft.</small>' : '');
 }
 async function uploadComposerFile(item, ownerDrafts) {
   if (item.state !== 'queued') return;
@@ -1731,8 +1732,8 @@ $("#message-form").addEventListener("submit", e => {
   e.preventDefault(); hideMentions(); if (!state || busy || requestReading) return;
   if (requestMode) { submitRequest(e.currentTarget); return; }
   const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId };
-  if (!content.body) return;
   const files = drafts.get(composerKey()).files ?? [];
+  if (!content.body && !files.length) return;
   if (files.some(item => item.state !== 'ready')) { setComposerError('Finish or remove uploads before sending.'); return; }
   const previous = pendingMessage?.command?.data;
   const unchanged = previous && previous.body === content.body && previous.toMemberId === content.toMemberId && previous.replyToId === content.replyToId;

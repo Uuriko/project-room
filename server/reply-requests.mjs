@@ -188,7 +188,10 @@ export function auditReplyRequests(state, history, checkpoint = null) {
     if (e.type === "message.posted") {
       const mode = prepareReplyPost(projected, e), messageId = data.messageId || e.id;
       check(validId(messageId) && !ids.has(messageId)); ids.add(messageId);
-      check(validId(e.actorId) && typeof data.body === "string" && data.body.length <= 4096 && data.body.trim().length > 0);
+      // Full event replay and attachment audit validate the file metadata/bytes.
+      // Ordinary file-only posts are valid; reply-request modes still require text.
+      const fileOnly = !mode && data.body === '' && Array.isArray(data.attachments) && data.attachments.length > 0;
+      check(validId(e.actorId) && typeof data.body === "string" && data.body.length <= 4096 && (data.body.trim().length > 0 || fileOnly));
       for (const key of ["messageId", "workItemId", "replyToId", "toMemberId"]) check(data[key] == null || validId(data[key]));
       check(!data.replyToId || projected.messages.some(message => message.id === data.replyToId));
       if (mode || projected.replyRequests) {

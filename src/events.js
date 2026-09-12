@@ -197,7 +197,9 @@ function validateEnvelope(incoming) {
   for (const [key, value] of Object.entries(incoming.data)) {
     if (value === null) continue;
     if (key.endsWith("Id") && !validId(value)) throw new Error(`Invalid ${key}`);
-    if (typeof value === "string" && (value.length > 4096 || !value.trim())) throw new Error(`Invalid ${key}`);
+    const fileOnlyBody = key === 'body' && value === '' && incoming.type === EVENT_TYPES.MESSAGE_POSTED
+      && Array.isArray(incoming.data.attachments) && incoming.data.attachments.length > 0;
+    if (typeof value === "string" && (value.length > 4096 || !value.trim() && !fileOnlyBody)) throw new Error(`Invalid ${key}`);
     if (["expectedRevision", "expectedMemberRevision"].includes(key) && (!Number.isSafeInteger(value) || value < 0)) throw new Error(`Invalid ${key}`);
     if (["independentVerificationRequired", "ownerDecisionRequired", "active"].includes(key) && typeof value !== "boolean") throw new Error(`Invalid ${key}`);
     if (["permissions", "paths", "checksClaimed", "capabilities"].includes(key) && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !v.trim() || v.length > 512))) throw new Error(`Invalid ${key}`);
@@ -358,7 +360,7 @@ function requireScopedMemberAdministration(state, actorId, targetId, currentTarg
 
 function postMessage(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
-  requireFields(incoming.data, ["body"]);
+  if (!incoming.data.attachments?.length) requireFields(incoming.data, ["body"]);
   const requestMode = prepareReplyPost(state, incoming);
   if (incoming.data.toMemberId) (requestMode === "respond" ? knownMember : requireMember)(state, incoming.data.toMemberId);
   if (typeof incoming.data.body !== "string") throw new Error("Message body must be text");

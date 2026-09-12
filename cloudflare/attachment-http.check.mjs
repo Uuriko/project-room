@@ -23,7 +23,7 @@ test('real Worker HTTP bridge preserves bounded file bytes and safe downloads', 
     assert.equal((await upload.json()).byteLength, bytes.length);
     assert.equal((await call(path, { headers })).status, 404);
     const post = await call('/api/rooms/commons/commands', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: 'worker-file-post', type: 'message.posted', data: { messageId: 'worker-message', body: 'File', attachmentIds: ['worker-file'] } }) });
+      body: JSON.stringify({ id: 'worker-file-post', type: 'message.posted', data: { messageId: 'worker-message', body: '', attachmentIds: ['worker-file'] } }) });
     assert.equal(post.status, 201, await post.clone().text());
     const result = await call(path, { headers });
     assert.equal(result.status, 200);

@@ -8,6 +8,19 @@ import { auditRecovery } from '../server/recovery.mjs';
 import { Worker } from 'node:worker_threads';
 import { once } from 'node:events';
 
+test('file-only messages replay and audit while an empty message without files still fails', t => {
+  const f = setup(t), input = f.input('file-only');
+  f.files.stage(f.owner, 'files', input);
+  const command = { id: randomUUID(), type: 'message.posted', data: { messageId: 'file-message', body: '', attachmentIds: [input.id] } };
+  f.store.command(f.owner, 'files', command);
+  assert.equal(f.store.room('files').state.messages.at(-1).body, '');
+  assert.deepEqual(f.files.readCommitted(f.guest, 'files', input.id).bytes, input.bytes);
+  assert.equal(f.store.command(f.owner, 'files', command).duplicate, true);
+  assert.equal(auditRecovery(f.store).schemaVersion, 30);
+  assert.throws(() => f.store.command(f.owner, 'files', { id: randomUUID(), type: 'message.posted', data: { messageId: 'empty', body: '', attachmentIds: [] } }), { status: 422 });
+  assert.equal(f.store.room('files').state.messages.length, 1);
+});
+
 function setup(t) {
   let now = Date.now();
   const store = new RoomStore(':memory:', { now: () => now });
@@ -192,7 +205,7 @@ test('message commitment makes exact bytes room-visible once and deletion remove
 
 test('failed message and cross-uploader attachment commitment roll back all selected uploads', t => {
   const f = setup(t), input = f.input(); f.files.stage(f.owner, 'files', input);
-  const command = (ids, body = '') => ({ id: randomUUID(), type: 'message.posted', data: { messageId: randomUUID(), body, attachmentIds: ids } });
+  const command = (ids, body = ' ') => ({ id: randomUUID(), type: 'message.posted', data: { messageId: randomUUID(), body, attachmentIds: ids } });
   assert.throws(() => f.store.command(f.guest, 'files', command([input.id], 'Attempt')), { code: 'attachment_unavailable' });
   assert.throws(() => f.store.command(f.owner, 'files', command([input.id])), { status: 422 });
   assert.throws(() => f.store.command(f.owner, 'files', command([input.id, 'missing'], 'Attempt')), { code: 'attachment_unavailable' });

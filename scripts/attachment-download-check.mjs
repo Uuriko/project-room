@@ -97,5 +97,12 @@ for (const mobile of [false, true]) test(`verified file download ${mobile ? 'mob
   await page.locator('#composer-files').getByRole('button', { name: 'Remove', exact: true }).click();
   assert.equal((await removed).status(), 200);
   assert.equal(store.db.prepare("SELECT bytes FROM room_attachments WHERE filename='retry.txt'").get().bytes, null);
+  await page.locator('#file-picker').setInputFiles({ name: 'captionless.txt', mimeType: 'text/plain', buffer: Buffer.from(bytes) });
+  await page.locator('#composer-files').getByText('Ready', { exact: true }).waitFor();
+  assert.equal(await page.locator('#message-input').inputValue(), '');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('button', { name: 'Download captionless.txt', exact: true }).waitFor();
+  assert.equal(store.room('commons').state.messages.at(-1).body, '');
+  assert.equal(store.room('commons').state.messages.length, 3);
   assert.deepEqual(errors, []);
 });
