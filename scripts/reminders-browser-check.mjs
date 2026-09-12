@@ -100,7 +100,7 @@ for (const mobile of [false, true]) {
     await page.locator("#reminder-cancel").click(); await page.locator("#reminder-dialog").waitFor({ state: "hidden" });
     assert.equal(await page.locator("#return-brief-panel > summary").evaluate(node => node === document.activeElement), true);
     await page.evaluate(() => { document.documentElement.style.fontSize = ""; });
-    await page.locator("#signout-button").click(); await page.locator("#auth-panel").waitFor({ state: "visible" });
+    if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click(); await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(await page.locator("#reminder-due").textContent(), ""); assert.equal(await page.locator("#reminder-upcoming").textContent(), "");
     assert.equal(await page.locator("#reminder-work-title").textContent(), ""); assert.deepEqual(errors, []); assert.deepEqual(external, []);
   });
