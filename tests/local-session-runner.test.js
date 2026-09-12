@@ -34,6 +34,14 @@ test("local run claims once, executes, and records session exit without completi
   assert.equal((await runLocalSession(f.options)).reason, "session_changed");
 });
 
+test("invalid or stale request guards cannot claim or execute work", async t => {
+  const f = await fixture(t), before = f.store.room("commons").sequence;
+  await assert.rejects(runLocalSession({ ...f.options, requestGuard: { requestMessageId: "q" } }), /Invalid request guard/);
+  const result = await runLocalSession({ ...f.options, requestGuard: { requestMessageId: "missing", contextEventId: "old", instructionsRevision: 0 } });
+  assert.equal(result.status, "not_started"); assert.equal(result.reason, "request_changed");
+  assert.equal(f.store.room("commons").sequence, before);
+});
+
 test("room stop terminates the actual local process and records failure", async t => {
   const f = await fixture(t);
   const interval = setInterval(() => {

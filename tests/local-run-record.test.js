@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, rmSync, statSync, symlinkSync, appendFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, rmSync, statSync, symlinkSync, appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
@@ -152,4 +152,29 @@ test("wrong-work context and oversized answers are not posted", async t => {
   const result = await f.cli("run", f.privateDir);
   assert.equal(result.code, 1); assert.equal(JSON.parse(result.stdout).answerStatus, "not_sent");
   assert.equal(f.store.room("commons").state.replyRequests.question.status, "open");
+});
+
+for (const change of ["cancel", "clarify", "instructions"]) test(`request ${change} stops an already running process without posting its output`, async t => {
+  const f = await fixture(t), marker = join(f.directory, "started");
+  requestRun(f, { args: ["-e", "require('node:fs').writeFileSync(process.argv[1],'started');console.log('UNFINISHED');setInterval(()=>{},100);", marker] });
+  let changed = false;
+  const timer = setInterval(() => {
+    if (changed || !existsSync(marker)) return;
+    changed = true;
+    f.store.command(f.owner, "commons", change === "cancel"
+      ? { id: "cancel-question", type: "reply_request.cancelled", data: { requestMessageId: "question", expectedRequestRevision: 0, reason: "No longer needed" } }
+      : change === "instructions"
+        ? { id: "instructions", type: "room.charter_updated", data: { expectedRevision: 0, purpose: "New room instructions", outputs: null, boundaries: null, escalation: null } }
+        : { id: "clarify-question", type: "message.posted", data: { replyToId: "question", body: "Use the updated requirements" } });
+  }, 10);
+  t.after(() => clearInterval(timer));
+  const result = await executeLocalRun(f.privateDir);
+  assert.equal(changed, true, "the process actually started before the request changed");
+  assert.equal(result.status, "failed");
+  assert.equal(result.reason, "request_changed");
+  assert.equal(result.recording, "recorded");
+  assert.equal(result.answerStatus, "not_sent");
+  assert.equal(f.store.room("commons").state.messages.some(message => message.body.includes("UNFINISHED")), false);
+  assert.equal(f.store.room("commons").state.replyRequests.question.status, change === "cancel" ? "cancelled" : "open");
+  await assert.rejects(executeLocalRun(f.privateDir), { code: "EEXIST" });
 });

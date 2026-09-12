@@ -8,7 +8,7 @@ import { sessionRecord } from "../src/work-item-session.js";
 // This is process supervision, NOT a filesystem/network/credential sandbox.
 export async function runLocalSession({ client, roomId, memberId, workItemId, runId,
   expectedRevision, command, args = [], cwd, env = {}, maxRuntimeMs,
-  maxOutputBytes = 65536, pollMs = 1000, killGraceMs = 1000, input = "", signal }) {
+  maxOutputBytes = 65536, pollMs = 1000, killGraceMs = 1000, input = "", requestGuard = null, signal }) {
   if (process.platform === "win32" || ![roomId, memberId, workItemId, runId].every(validId)
     || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || runId.length > 110
     || typeof command !== "string" || !isAbsolute(command) || typeof cwd !== "string" || !isAbsolute(cwd)
@@ -19,6 +19,13 @@ export async function runLocalSession({ client, roomId, memberId, workItemId, ru
     || !Number.isSafeInteger(pollMs) || pollMs < 10 || pollMs > 10000
     || typeof input !== "string" || Buffer.byteLength(input) > 65536
     || !Number.isSafeInteger(killGraceMs) || killGraceMs < 1 || killGraceMs > 5000) throw new Error("Invalid local run configuration");
+  if (requestGuard !== null && (!requestGuard || Array.isArray(requestGuard)
+    || Object.keys(requestGuard).length !== 3
+    || !validId(requestGuard.requestMessageId) || !validId(requestGuard.contextEventId)
+    || !Number.isSafeInteger(requestGuard.instructionsRevision) || requestGuard.instructionsRevision < 0))
+    throw new Error("Invalid request guard");
+  // Copy the inspected selection once. Never adopt a newer request mid-run.
+  const guard = requestGuard && structuredClone(requestGuard);
   const identity = { roomId, memberId };
   const claim = { id: `${runId}:start`, type: "session.started", data: { workItemId, expectedRevision,
     budget: { maxRuntimeMs, maxAttempts: 1, maxConcurrent: 1 } } };
@@ -27,10 +34,16 @@ export async function runLocalSession({ client, roomId, memberId, workItemId, ru
     if (snapshot.roomId !== roomId || snapshot.viewerId !== memberId
       || snapshot.state.members[memberId]?.active !== true) throw new Error("Run identity unavailable");
     const item = snapshot.state.workItems[workItemId];
-    return item ? { ...item, ...sessionRecord(item) } : null;
+    const request = guard && snapshot.state.replyRequests?.[guard.requestMessageId];
+    const requestCurrent = !guard || Boolean(request && request.status === "open"
+      && request.recipientId === memberId && request.workItemId === workItemId
+      && request.contextEventId === guard.contextEventId
+      && (snapshot.state.room.charter?.revision ?? 0) === guard.instructionsRevision);
+    return item ? { ...item, ...sessionRecord(item), requestCurrent } : null;
   };
   if (signal?.aborted) return { status: "not_started", reason: "cancelled" };
   const initial = await read();
+  if (initial && !initial.requestCurrent) return { status: "not_started", reason: "request_changed" };
   if (!initial || initial.status !== "queued" || initial.revision !== expectedRevision || initial.stop_requested_at)
     return { status: "not_started", reason: "session_changed" };
   const receipt = await client.command(claim, { signal: AbortSignal.timeout(5000) });
@@ -58,6 +71,7 @@ export async function runLocalSession({ client, roomId, memberId, workItemId, ru
     else if (Date.now() - started >= maxRuntimeMs) stop("runtime_limit");
     else if (!current || current.worker_member_id !== memberId || current.status !== "processing" || current.stop_requested_at)
       stop("session_changed");
+    else if (!current.requestCurrent) stop("request_changed");
     if (!reason) {
       child = spawn(command, args, { cwd, env, shell: false, detached: true, stdio: ["pipe", "pipe", "pipe"] });
       const closed = new Promise(resolve => {
@@ -82,6 +96,7 @@ export async function runLocalSession({ client, roomId, memberId, workItemId, ru
           const item = await read();
           if (!item || item.worker_member_id !== memberId || !["processing", "active"].includes(item.status)
             || item.stop_requested_at || item.handoff?.haltAll) stop("room_stop");
+          else if (!item.requestCurrent) stop("request_changed");
         } catch { stop("access_unavailable"); }
         finally { checking = false; }
       }, pollMs);

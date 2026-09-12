@@ -64,7 +64,7 @@ export async function executeLocalRun(directory, { signal } = {}) {
       if (answerRequestId) request = await localRequestContext(client, answerRequestId, config.workItemId,
         { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000) });
       result = await runLocalSession({ ...options, roomId: connection.roomId, memberId: connection.memberId,
-        client, ...(request ? { input: request.input } : {}), signal });
+        client, ...(request ? { input: request.input, requestGuard: request.requestGuard } : {}), signal });
     } catch {
       // Do not echo transport errors, commands or environment secrets.
       const record = { ...base, state: "unconfirmed", at: new Date().toISOString(),
