@@ -192,6 +192,8 @@ const shapes = {
   [T.WORK_BLOCKER_RESOLVED]: `${work} resolution`,
   [T.WORK_COMPLETED]: `${work} summary evidenceUrl evidenceVersion nextAction checksClaimed producerId externalProducer evidenceKind evidenceMessageId evidenceMessageEventId previousCompletionEventId`,
   [T.WORK_SUPERSEDED]: `${work} supersededByWorkItemId reason`,
+  [T.WORK_HANDOFF_RECORDED]: `${work} doneSummary evidenceUrl evidenceVersion nextAction limitReason haltAll`,
+  [T.WORK_HALT_CLEARED]: "memberId haltEventId note",
   [T.CLAIM_ACQUIRED]: `${work} repository ref paths expiresAt`,
   [T.CLAIM_RELEASED]: work,
   [T.VERIFICATION_RECORDED]: `${work} result completionEventId evidenceVersion summary nextAction`,
@@ -211,7 +213,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed"].includes(name) ? "array" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed"].includes(name) ? "array" : "string";
     if (type === "array" ? !Array.isArray(value) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (Buffer.byteLength(JSON.stringify(command)) > 16384) fail(413, "too_large", "Command is too large");
@@ -1278,6 +1280,10 @@ export class RoomStore {
           || priorOffer?.status === "selected" && command.data.status === "released");
       const endingClaim = command.type === T.CLAIM_RELEASED
         && room.state.workItems[command.data.workItemId]?.claim?.status === "active";
+      const HALT_GATED = [T.WORK_PROPOSED, T.WORK_ACCEPTED, T.WORK_STARTED, T.WORK_BLOCKED, T.WORK_BLOCKER_RESOLVED,
+        T.WORK_COMPLETED, T.WORK_SUPERSEDED, T.CLAIM_ACQUIRED, T.CLAIM_RELEASED, T.VERIFICATION_RECORDED, T.OWNER_DECISION_RECORDED];
+      if (HALT_GATED.includes(command.type) && room.state.agentHalts?.[auth.member.id])
+        fail(409, "halt_active", "This member recorded halt-all; a steer/decide member must clear the exact halt before further work mutations");
       const workItem = room.state.workItems[command.data.workItemId];
       const endingWork = (command.type === T.WORK_COMPLETED && [WORK_STATES.ACCEPTED, WORK_STATES.WORKING].includes(workItem?.state))
         || (command.type === T.WORK_BLOCKER_RESOLVED && workItem?.state === WORK_STATES.BLOCKED)
