@@ -366,7 +366,6 @@ function postMessage(state, incoming) {
     replyToId: incoming.data.replyToId || null,
     toMemberId: incoming.data.toMemberId || null,
     createdAt: incoming.at,
-    revision: 0,
     ...(proposal ? { proposal } : {})
   });
   recordReplyPost(state, incoming, requestMode);
