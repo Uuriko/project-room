@@ -12,6 +12,8 @@ import { discoveryDoc, isHealthAliasPath } from "../deploy/agent-discovery.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
 import { guestAgentLinkContract } from "./guest-agent-links.mjs";
 import { isSessionStatus, workItemSessionContract } from "../src/work-item-session.js";
+import { openJoinContract, publicMcpCard } from "./open-contract.mjs";
+import { handlePublicMcpMessage, MCP_CORS, MCP_VERSION, mcpOriginAllowed } from "../client/mcp-public.mjs";
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -198,11 +200,31 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
     try {
       if (req.headers.host !== new URL(expectedOrigin()).host) reject(403, "host_denied", "Unexpected host");
-      checkOrigin(req);
       let remoteAddress;
       try { remoteAddress = resolveClientAddress(req); }
       catch { reject(403, "proxy_denied", "Invalid proxy configuration"); }
       const url = new URL(req.url, expectedOrigin());
+      if (url.pathname === "/mcp" || url.pathname === "/mcp/") {
+        if (!mcpOriginAllowed(req.headers.origin, expectedOrigin())) reject(403, "origin_denied", "Origin is not allowed for this MCP endpoint");
+        Object.entries(MCP_CORS).forEach(([key, value]) => res.setHeader(key, value));
+        if (req.headers.origin) {
+          res.setHeader("Access-Control-Allow-Origin", req.headers.origin);
+          res.setHeader("Vary", "Origin");
+        }
+        if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
+        if (req.method !== "POST") {
+          res.setHeader("Allow", "POST, OPTIONS");
+          reject(405, "method_not_allowed", "POST JSON-RPC to /mcp");
+        }
+        const protocolVersion = req.headers["mcp-protocol-version"];
+        if (protocolVersion !== undefined && protocolVersion !== MCP_VERSION) reject(400, "unsupported_protocol_version", "Unsupported MCP-Protocol-Version");
+        rate(`mcp:${remoteAddress}`, 60);
+        const message = await body(req);
+        const reply = handlePublicMcpMessage(message);
+        if (!reply) { res.writeHead(202); return res.end(); }
+        return json(res, 200, reply);
+      }
+      checkOrigin(req);
       if (url.pathname.startsWith("/api/")) res.setHeader("X-Operation-Id", operationId);
       if ((url.pathname === "/api/health" || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode }, req.method === "HEAD");
@@ -351,6 +373,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === "/api/guest-agent-links" && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, guestAgentLinkContract(), req.method === "HEAD");
+      }
+      if (url.pathname === "/api/open" && ["GET", "HEAD"].includes(req.method)) {
+        return json(res, 200, openJoinContract({ origin: expectedOrigin() }), req.method === "HEAD");
+      }
+      if ((url.pathname === "/.well-known/mcp.json" || url.pathname === "/mcp.json") && ["GET", "HEAD"].includes(req.method)) {
+        return json(res, 200, publicMcpCard({ origin: expectedOrigin() }), req.method === "HEAD");
       }
       if (url.pathname === "/api/work-item-sessions" && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, workItemSessionContract(), req.method === "HEAD");
