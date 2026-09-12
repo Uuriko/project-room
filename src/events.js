@@ -34,7 +34,8 @@ export const EVENT_TYPES = Object.freeze({
   SESSION_STARTED: SESSION_EVENT_TYPES.STARTED,
   SESSION_STATUS_CHANGED: SESSION_EVENT_TYPES.STATUS_CHANGED,
   SESSION_STOP_REQUESTED: SESSION_EVENT_TYPES.STOP_REQUESTED,
-  SESSION_STOPPED: SESSION_EVENT_TYPES.STOPPED
+  SESSION_STOPPED: SESSION_EVENT_TYPES.STOPPED,
+  CAPABILITIES_ADVERTISED: "capabilities.advertised"
 });
 
 export const PERMISSIONS = Object.freeze(["steer", "decide", "manage_members", "manage_claims", "accept_work", "complete_work", "verify", "write_external"]);
@@ -158,7 +159,8 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.SESSION_STARTED]: applySession,
     [EVENT_TYPES.SESSION_STATUS_CHANGED]: applySession,
     [EVENT_TYPES.SESSION_STOP_REQUESTED]: applySession,
-    [EVENT_TYPES.SESSION_STOPPED]: applySession
+    [EVENT_TYPES.SESSION_STOPPED]: applySession,
+    [EVENT_TYPES.CAPABILITIES_ADVERTISED]: advertiseCapabilities
   };
   const handler = handlers[incoming.type];
   if (!Object.hasOwn(handlers, incoming.type)) throw new Error(`Unsupported event type: ${incoming.type}`);
@@ -190,8 +192,8 @@ function validateEnvelope(incoming) {
     if (typeof value === "string" && (value.length > 4096 || !value.trim())) throw new Error(`Invalid ${key}`);
     if (["expectedRevision", "expectedMemberRevision"].includes(key) && (!Number.isSafeInteger(value) || value < 0)) throw new Error(`Invalid ${key}`);
     if (["independentVerificationRequired", "ownerDecisionRequired", "active"].includes(key) && typeof value !== "boolean") throw new Error(`Invalid ${key}`);
-    if (["permissions", "paths", "checksClaimed"].includes(key) && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !v.trim() || v.length > 512))) throw new Error(`Invalid ${key}`);
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed"].includes(key)) throw new Error(`Invalid ${key}`);
+    if (["permissions", "paths", "checksClaimed", "capabilities"].includes(key) && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !v.trim() || v.length > 512))) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -424,6 +426,27 @@ function blockWork(state, incoming) {
   commitMutation(item, incoming);
 }
 
+
+// Capability registry: members advertise what they can do so other agents can
+// discover and delegate. Self-advertised only; replaces the previous list.
+function advertiseCapabilities(state, incoming) {
+  const member = requireMember(state, incoming.actorId);
+  if (member.active === false) throw new Error("Inactive members cannot advertise capabilities");
+  const caps = incoming.data.capabilities;
+  if (!Array.isArray(caps) || caps.length === 0 || caps.length > 30) {
+    throw new Error("Capabilities must be a list of 1 to 30 entries");
+  }
+  const clean = [];
+  for (const cap of caps) {
+    if (typeof cap !== "string" || !cap.trim() || cap.length > 80) {
+      throw new Error("Each capability must be 1 to 80 characters");
+    }
+    const trimmed = cap.trim();
+    if (!clean.includes(trimmed)) clean.push(trimmed);
+  }
+  member.capabilities = clean;
+  commitMutation(member, incoming);
+}
 
 function recordHandoff(state, incoming) {
   const item = mutableWorkItem(state, incoming, [WORK_STATES.ACCEPTED, WORK_STATES.WORKING, WORK_STATES.BLOCKED]);

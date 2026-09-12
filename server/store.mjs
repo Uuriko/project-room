@@ -201,7 +201,8 @@ const shapes = {
   [T.SESSION_STARTED]: work,
   [T.SESSION_STATUS_CHANGED]: `${work} status`,
   [T.SESSION_STOP_REQUESTED]: work,
-  [T.SESSION_STOPPED]: `${work} status`
+  [T.SESSION_STOPPED]: `${work} status`,
+  [T.CAPABILITIES_ADVERTISED]: "capabilities"
 };
 
 export function validateCommand(command) {
@@ -213,7 +214,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed"].includes(name) ? "array" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities"].includes(name) ? "array" : "string";
     if (type === "array" ? !Array.isArray(value) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (Buffer.byteLength(JSON.stringify(command)) > 16384) fail(413, "too_large", "Command is too large");
@@ -1218,6 +1219,16 @@ export class RoomStore {
         memberId, displayName: members[memberId].displayName, kind: members[memberId].kind,
         watching: info.watching, workingOn: info.workingOn ?? []
       })) };
+    });
+  }
+  capabilities(token, roomId, expectedSessionBinding = null) {
+    return this.readTransaction(() => {
+      this.authenticate(token, roomId, expectedSessionBinding);
+      const { members } = this.roomAuthority(roomId);
+      return { members: Object.values(members)
+        .filter(m => m && m.active !== false && Array.isArray(m.capabilities) && m.capabilities.length > 0)
+        .map(m => ({ memberId: m.id, displayName: m.displayName, kind: m.kind, capabilities: m.capabilities }))
+        .sort((a, b) => a.memberId < b.memberId ? -1 : 1) };
     });
   }
   workContext(token, roomId, workItemId, { includeSource = false, includeOffers = false, expectedSessionBinding = null } = {}) {
