@@ -30,7 +30,7 @@ import { Inbox, inboxSchema } from "./inbox.mjs";
 import { EmailImport, emailImportSchema } from "./email-import.mjs";
 
 export class ServiceError extends Error {
-  constructor(status, code, message) { super(message); this.status = status; this.code = code; }
+  constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
 }
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const hash = text => createHash("sha256").update(text).digest("hex");

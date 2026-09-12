@@ -94,7 +94,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     const entry = rates.get(id) || { n: 0, until: now + 60000 };
     entry.n++;
     rates.set(id, entry);
-    if (entry.n > maximum) reject(429, "rate_limited", "Too many requests; retry after a minute");
+    if (entry.n > maximum) throw new ServiceError(429, "rate_limited", "Too many requests; retry after a minute",
+      { "X-RateLimit-Limit": maximum, "X-RateLimit-Remaining": 0, "X-RateLimit-Reset": Math.ceil(entry.until / 1000) });
   }
   function cookie(req, name) {
     const scoped = scopedCookieName(name);
@@ -618,6 +619,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     } catch (error) {
       if (res.headersSent) { res.end(); return; }
       if (error.status === 429) res.setHeader("Retry-After", "60");
+      if (error.headers && typeof error.headers === "object") {
+        for (const [name, value] of Object.entries(error.headers)) res.setHeader(name, String(value));
+      }
       let roomId, workItemId;
       try {
         const parsed = new URL(req.url, expectedOrigin());

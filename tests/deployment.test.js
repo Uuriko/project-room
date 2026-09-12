@@ -59,7 +59,12 @@ test("deployed HTTP checks proxy identity, separate visitor limits, secure cooki
   assert.match(first.headers["set-cookie"][0], /; Secure$/);
   assert.equal(first.headers["x-robots-tag"], "noindex, nofollow");
   for (let i = 0; i < 19; i++) assert.equal((await get("/api/account-session")).status, 200);
-  assert.equal((await get("/api/account-session")).status, 429);
+  const limited = await get("/api/account-session");
+  assert.equal(limited.status, 429);
+  assert.equal(limited.headers["retry-after"], "60");
+  assert.equal(limited.headers["x-ratelimit-limit"], "20");
+  assert.equal(limited.headers["x-ratelimit-remaining"], "0");
+  assert.ok(Number(limited.headers["x-ratelimit-reset"]) > 0);
   assert.equal((await get("/api/account-session", { "x-real-ip": "192.0.2.11" })).status, 200);
   assert.equal((await get("/api/rooms/commons")).status, 401);
 });
