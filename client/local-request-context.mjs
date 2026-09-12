@@ -1,7 +1,7 @@
 import { validId } from "../src/events.js";
 
 export async function localRequestContext(client, requestMessageId, workItemId, { signal, limit = 50 } = {}) {
-  if (!validId(requestMessageId) || !validId(workItemId)) throw new Error("Invalid request selection");
+  if (!validId(requestMessageId) || !(workItemId === null || validId(workItemId))) throw new Error("Invalid request selection");
   const messages = [], cursors = new Set();
   let cursor, first, last, bytes = 0;
   for (let pages = 0; pages < 100; pages++) {

@@ -31,7 +31,8 @@ function configAt(directory) {
   if (!config || Array.isArray(config) || Object.keys(config).length !== fields.length + (Object.hasOwn(config, "answerRequestId") ? 1 : 0)
     || (Object.hasOwn(config, "answerRequestId") && !validId(config.answerRequestId))
     || fields.some(field => !Object.hasOwn(config, field)) || config.version !== 1
-    || ![config.workItemId, config.runId].every(validId) || config.runId.length > 110
+    || !(validId(config.workItemId) || config.workItemId === null && validId(config.answerRequestId))
+    || !validId(config.runId) || config.runId.length > 110
     || typeof config.connectionDirectory !== "string" || !isAbsolute(config.connectionDirectory)) throw new Error("invalid_run_config");
   return config;
 }

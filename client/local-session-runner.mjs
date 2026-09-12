@@ -3,13 +3,15 @@ import { isAbsolute } from "node:path";
 import { validId } from "../src/events.js";
 import { confirmsAgentCommand } from "./work-actions.mjs";
 import { sessionRecord } from "../src/work-item-session.js";
+import { requestRunMayExecute } from "../src/request-run-policy.js";
 
 // The command comes from a trusted local operator, never from room text.
 // This is process supervision, NOT a filesystem/network/credential sandbox.
 export async function runLocalSession({ client, roomId, memberId, workItemId, runId,
   expectedRevision, command, args = [], cwd, env = {}, maxRuntimeMs,
   maxOutputBytes = 65536, pollMs = 1000, killGraceMs = 1000, input = "", requestGuard = null, signal }) {
-  if (process.platform === "win32" || ![roomId, memberId, workItemId, runId].every(validId)
+  const requestRunMode = workItemId === null && requestGuard !== null;
+  if (process.platform === "win32" || ![roomId, memberId, runId].every(validId) || !(validId(workItemId) || requestRunMode)
     || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || runId.length > 110
     || typeof command !== "string" || !isAbsolute(command) || typeof cwd !== "string" || !isAbsolute(cwd)
     || !Array.isArray(args) || args.some(arg => typeof arg !== "string")
@@ -27,7 +29,9 @@ export async function runLocalSession({ client, roomId, memberId, workItemId, ru
   // Copy the inspected selection once. Never adopt a newer request mid-run.
   const guard = requestGuard && structuredClone(requestGuard);
   const identity = { roomId, memberId };
-  const claim = { id: `${runId}:start`, type: "session.started", data: { workItemId, expectedRevision,
+  const claim = requestRunMode ? { id: `${runId}:start`, type: "request_run.claimed", data: {
+    ...guard, expectedRevision, runId, maxRuntimeMs, maxOutputBytes } }
+    : { id: `${runId}:start`, type: "session.started", data: { workItemId, expectedRevision,
     budget: { maxRuntimeMs, maxAttempts: 1, maxConcurrent: 1 } } };
   const read = async () => {
     const snapshot = await client.snapshot({ signal: AbortSignal.timeout(Math.min(5000, maxRuntimeMs)) });
@@ -39,6 +43,23 @@ export async function runLocalSession({ client, roomId, memberId, workItemId, ru
       && request.recipientId === memberId && request.workItemId === workItemId
       && request.contextEventId === guard.contextEventId
       && (snapshot.state.room.charter?.revision ?? 0) === guard.instructionsRevision);
+    if (requestRunMode) {
+      const run = snapshot.state.requestRuns?.[guard.requestMessageId];
+      if (run && (!Number.isSafeInteger(run.revision) || run.revision < 1
+        || run.requestMessageId !== guard.requestMessageId || run.memberId !== memberId
+        || !validId(run.runId) || !["running", "stop_requested", "succeeded", "failed", "cancelled"].includes(run.status)))
+        throw new Error("Invalid request run state");
+      const owns = run?.runId === runId;
+      if (owns && (run.maxRuntimeMs !== maxRuntimeMs || run.maxOutputBytes !== maxOutputBytes
+        || run.contextEventId !== guard.contextEventId || run.instructionsRevision !== guard.instructionsRevision))
+        throw new Error("Request run does not match claim");
+      return { revision: run?.revision ?? 0,
+        status: !run || ["succeeded", "failed", "cancelled"].includes(run.status) ? "queued" : run.status === "running" ? "processing" : "suspended",
+        worker_member_id: owns ? memberId : null, stop_requested_at: run?.status === "stop_requested" ? run.updatedAt : null,
+        deadlineAt: run?.deadlineAt,
+        requestCurrent: requestCurrent && !snapshot.state.agentHalts?.[memberId],
+        executionAllowed: owns && requestRunMayExecute(run, request, guard.instructionsRevision, new Date().toISOString()) };
+    }
     return item ? { ...item, ...sessionRecord(item), requestCurrent } : null;
   };
   if (signal?.aborted) return { status: "not_started", reason: "cancelled" };
@@ -72,6 +93,7 @@ export async function runLocalSession({ client, roomId, memberId, workItemId, ru
     else if (!current || current.worker_member_id !== memberId || current.status !== "processing" || current.stop_requested_at)
       stop("session_changed");
     else if (!current.requestCurrent) stop("request_changed");
+    else if (requestRunMode && !current.executionAllowed) stop("runtime_limit");
     if (!reason) {
       child = spawn(command, args, { cwd, env, shell: false, detached: true, stdio: ["pipe", "pipe", "pipe"] });
       const closed = new Promise(resolve => {
@@ -88,7 +110,8 @@ export async function runLocalSession({ client, roomId, memberId, workItemId, ru
       child.stdin.end(input);
       signal?.addEventListener("abort", cancelled, { once: true });
       if (signal?.aborted) cancelled();
-      timer = setTimeout(() => stop("runtime_limit"), Math.max(1, maxRuntimeMs - (Date.now() - started)));
+      const remaining = Math.min(maxRuntimeMs - (Date.now() - started), requestRunMode ? Date.parse(current.deadlineAt) - Date.now() : Infinity);
+      timer = setTimeout(() => stop("runtime_limit"), Math.max(1, remaining));
       monitor = setInterval(async () => {
         if (checking || reason) return;
         checking = true;
@@ -97,6 +120,7 @@ export async function runLocalSession({ client, roomId, memberId, workItemId, ru
           if (!item || item.worker_member_id !== memberId || !["processing", "active"].includes(item.status)
             || item.stop_requested_at || item.handoff?.haltAll) stop("room_stop");
           else if (!item.requestCurrent) stop("request_changed");
+          else if (requestRunMode && !item.executionAllowed) stop("runtime_limit");
         } catch { stop("access_unavailable"); }
         finally { checking = false; }
       }, pollMs);
@@ -115,7 +139,9 @@ export async function runLocalSession({ client, roomId, memberId, workItemId, ru
   try {
     const current = await read();
     if (current?.worker_member_id === memberId && ["processing", "active", "suspended"].includes(current.status)) {
-      terminalCommand = { id: `${runId}:finish`, type: "session.stopped",
+      terminalCommand = requestRunMode ? { id: `${runId}:finish`, type: "request_run.finished",
+        data: { requestMessageId: guard.requestMessageId, runId, expectedRevision: current.revision, status: status === "done" ? "succeeded" : "failed" } }
+        : { id: `${runId}:finish`, type: "session.stopped",
         data: { workItemId, expectedRevision: current.revision, status } };
       const saved = await client.command(terminalCommand, { signal: AbortSignal.timeout(5000) });
       if (confirmsAgentCommand(saved, terminalCommand, identity)) recording = "recorded";

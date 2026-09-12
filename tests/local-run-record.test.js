@@ -12,22 +12,23 @@ import { saveAgentConnection, readAgentConnection } from "../client/agent-connec
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { localRequestContext } from "../client/local-request-context.mjs";
 import { executeLocalRun, inspectLocalRun } from "../client/local-run-record.mjs";
+import { runLocalSession } from "../client/local-session-runner.mjs";
 
-async function fixture(t) {
+async function fixture(t, { withoutWork = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "room-run-record-")), privateDir = join(directory, "run");
   mkdirSync(privateDir, { mode: 0o700 });
   const store = new RoomStore(":memory:"); store.initialize(initialRoom());
   const owner = store.issueAccessKey("commons", "owner");
   store.command(owner, "commons", { id: "member", type: "member.added", data: {
-    memberId: "agent", displayName: "Agent", kind: "agent", permissions: ["accept_work", "complete_work"] } });
-  store.command(owner, "commons", { id: "task", type: "work.proposed", data: {
+    memberId: "agent", displayName: "Participant", kind: "agent", permissions: ["accept_work", "complete_work"] } });
+  if (!withoutWork) store.command(owner, "commons", { id: "task", type: "work.proposed", data: {
     workItemId: "task", title: "Record fixture", definitionOfDone: "Separate review", accountableMemberId: "agent", mode: "read" } });
   const token = store.issueAccessKey("commons", "agent"), server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); rmSync(directory, { recursive: true, force: true }); });
   const connectionDirectory = join(directory, "connection");
   saveAgentConnection(connectionDirectory, { version: 1, origin: `http://127.0.0.1:${server.address().port}`, roomId: "commons", memberId: "agent", token });
-  const config = { version: 1, connectionDirectory, workItemId: "task", runId: "once", expectedRevision: 0,
+  const config = { version: 1, connectionDirectory, workItemId: withoutWork ? null : "task", runId: "once", expectedRevision: 0,
     command: process.execPath, args: ["-e", "console.log('PRIVATE_OUTPUT')"], cwd: directory, env: {}, maxRuntimeMs: 3000, maxOutputBytes: 4096 };
   const path = join(privateDir, "run.json"), journal = join(privateDir, "run-once.jsonl");
   writeFileSync(path, JSON.stringify(config), { mode: 0o600 });
@@ -98,7 +99,7 @@ test("failed configuration after reservation records uncertainty without leaking
 
 function requestRun(f, { requester = f.owner, args } = {}) {
   f.store.command(requester, "commons", { id: "question", type: "message.posted", data: {
-    messageId: "question", requestKind: "reply", toMemberId: "agent", workItemId: "task", body: "Summarize this exchange." } });
+    messageId: "question", requestKind: "reply", toMemberId: "agent", workItemId: f.config.workItemId, body: "Summarize this exchange." } });
   Object.assign(f.config, { answerRequestId: "question", args: args ?? ["-e",
     "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{const p=JSON.parse(s);console.error('PRIVATE_DIAGNOSTIC');console.log('Read '+p.messages.length+' messages for '+p.requestMessageId);});"] });
   writeFileSync(f.path, JSON.stringify(f.config), { mode: 0o600 });
@@ -180,4 +181,69 @@ for (const change of ["cancel", "clarify", "instructions"]) test(`request ${chan
   assert.equal(f.store.room("commons").state.messages.some(message => message.body.includes("UNFINISHED")), false);
   assert.equal(f.store.room("commons").state.replyRequests.question.status, change === "cancel" ? "cancelled" : "open");
   await assert.rejects(executeLocalRun(f.privateDir), { code: "EEXIST" });
+});
+
+for (const kind of ["human", "agent"]) test(`an agent answers a ${kind}'s chat request with no work item`, async t => {
+  const f = await fixture(t, { withoutWork: true });
+  let requester = f.owner;
+  if (kind === "agent") {
+    f.store.command(f.owner, "commons", { id: "peer", type: "member.added", data: { memberId: "peer", displayName: "Peer", kind: "agent", permissions: [] } });
+    requester = f.store.issueAccessKey("commons", "peer");
+  }
+  requestRun(f, { requester });
+  const result = await f.cli("run", f.privateDir);
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).answerStatus, "recorded");
+  const state = f.store.room("commons").state;
+  assert.deepEqual(state.workItems, {});
+  assert.equal(state.requestRuns.question.status, "succeeded");
+  assert.equal(state.replyRequests.question.status, "answered");
+  assert.equal(state.messages.at(-1).workItemId, null);
+  assert.equal(state.messages.at(-1).toMemberId, kind === "agent" ? "peer" : "owner");
+  assert.equal(state.messages.at(-1).body, "Read 1 messages for question\n");
+  assert.equal((await f.cli("run", f.privateDir)).code, 1);
+});
+
+test("two local executors competing for a work-free request launch only one program", async t => {
+  const f = await fixture(t, { withoutWork: true }), marker = join(f.directory, "launches");
+  requestRun(f, { args: ["-e", "require('node:fs').appendFileSync(process.argv[1],'launch\\n');process.stdin.resume();process.stdin.on('end',()=>console.log('Answer'));", marker] });
+  const other = join(f.directory, "other-run"); mkdirSync(other, { mode: 0o700 });
+  writeFileSync(join(other, "run.json"), JSON.stringify({ ...f.config, runId: "other" }), { mode: 0o600 });
+  const results = await Promise.all([executeLocalRun(f.privateDir), executeLocalRun(other)]);
+  assert.equal(results.filter(result => result.answerStatus === "recorded").length, 1);
+  assert.equal(readFileSync(marker, "utf8"), "launch\n");
+  assert.deepEqual(f.store.room("commons").state.workItems, {});
+});
+
+test("work-free request cancellation stops the process and records a failed run", async t => {
+  const f = await fixture(t, { withoutWork: true }), marker = join(f.directory, "started");
+  requestRun(f, { args: ["-e", "require('node:fs').writeFileSync(process.argv[1],'started');setInterval(()=>{},100);", marker] });
+  let cancelled = false;
+  const timer = setInterval(() => {
+    if (cancelled || !existsSync(marker)) return;
+    cancelled = true;
+    f.store.command(f.owner, "commons", { id: "cancel", type: "reply_request.cancelled", data: { requestMessageId: "question", expectedRequestRevision: 0, reason: "Stop" } });
+  }, 10);
+  t.after(() => clearInterval(timer));
+  const result = await executeLocalRun(f.privateDir);
+  assert.equal(cancelled, true); assert.equal(result.reason, "request_changed");
+  assert.equal(result.recording, "recorded"); assert.equal(result.answerStatus, "not_sent");
+  assert.equal(f.store.room("commons").state.requestRuns.question.status, "failed");
+  assert.deepEqual(f.store.room("commons").state.workItems, {});
+});
+
+test("lost work-free claim confirmation never launches or permits a replacement process", async t => {
+  const f = await fixture(t, { withoutWork: true }), marker = join(f.directory, "must-not-start");
+  requestRun(f, { args: ["-e", "require('node:fs').writeFileSync(process.argv[1],'unexpected');", marker] });
+  const connection = readAgentConnection(f.config.connectionDirectory), client = new RoomAgentClient(connection);
+  const packet = await localRequestContext(client, "question", null);
+  const original = client.command.bind(client);
+  client.command = async (...args) => { await original(...args); throw new Error("Lost claim confirmation"); };
+  const options = { ...f.config, roomId: connection.roomId, memberId: connection.memberId, client, input: packet.input, requestGuard: packet.requestGuard };
+  await assert.rejects(runLocalSession(options), /Lost claim confirmation/);
+  client.command = original;
+  assert.equal((await runLocalSession({ ...options, runId: "replacement" })).status, "not_started");
+  assert.equal(existsSync(marker), false);
+  assert.equal(f.store.room("commons").state.requestRuns.question.status, "running", "unknown claim retains ownership");
+  assert.deepEqual(f.store.room("commons").state.workItems, {});
 });

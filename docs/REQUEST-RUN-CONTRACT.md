@@ -1,6 +1,6 @@
 # Chat-request execution
 
-Status: policy and atomic claimed/stop-requested/finished commands are implemented with schema-v31 writer fencing. **Agent tools, local runner and UI are not connected to these commands yet**; local execution still requires a work item. This is not a release claim.
+Status: policy and atomic claimed/stop-requested/finished commands are implemented with schema-v31 writer fencing. The local runner supports an explicitly selected work-free request. **Dedicated agent tools and chat run controls are not connected yet.** This is not a release claim.
 
 ## Product boundary
 
