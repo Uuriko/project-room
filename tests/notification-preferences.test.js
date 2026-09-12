@@ -45,3 +45,23 @@ test("member notification preferences (round-2 #114)", async t => {
   const room = store.room("commons");
   assert.equal(room.state.members.agent.notificationPreferences.announcements, "all");
 });
+
+test("notification validation: preferences object-only, array fields array-only", async t => {
+  const { store, ownerKey, agentKey, set } = fixture(t);
+
+  // preferences rejects arrays and strings, accepts plain objects.
+  assert.throws(() => set(agentKey, ["mentions_only"]), /Invalid field: preferences/);
+  assert.throws(() => set(agentKey, "all"), /Invalid field: preferences/);
+  set(agentKey, { mentions: "none" });
+  assert.equal(store.room("commons").state.members.agent.notificationPreferences.mentions, "none");
+
+  // Array fields reject plain objects: permissions must be an array.
+  assert.throws(() => store.command(ownerKey, "commons",
+    { id: randomUUID(), type: T.MEMBER_ADDED,
+      data: { memberId: "badagent", displayName: "Bad", kind: "agent", permissions: { accept_work: true } } }),
+    /Invalid field: permissions/);
+  // capabilities must be an array.
+  assert.throws(() => store.command(ownerKey, "commons",
+    { id: randomUUID(), type: T.CAPABILITIES_ADVERTISED, data: { capabilities: { draft: true } } }),
+    /Invalid field: capabilities/);
+});

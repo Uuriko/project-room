@@ -6,11 +6,12 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRuntimePackage } from "../scripts/runtime-package.mjs";
 import { frozenRecoveryFixture, v8ConnectionBaseline, v9TextBaseline, v10CharterBaseline, v11ReplyBaseline, v12HelpBaseline, v13OfferBaseline, v14InboxBaseline, v15AdoptionBaseline, v16SendBaseline, v17EmailBaseline, v18EmailSourceBaseline, v19EmailExcerptBaseline, v20ReplyJournalBaseline, v21ReplyReviewBaseline, v22ReplyUpdateBaseline, v23ReplyAcknowledgmentBaseline, v24ReplyResolutionBaseline } from "../scripts/frozen-runtime-fixture.mjs";
+import { v26IdentitiesBaseline } from "../scripts/frozen-runtime-fixture.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { AgentConnections } from "../server/agent-connections.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 
-for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline], [10, v10CharterBaseline], [11, v11ReplyBaseline], [12, v12HelpBaseline], [13, v13OfferBaseline], [14, v14InboxBaseline], [15, v15AdoptionBaseline], [16, v16SendBaseline], [17, v17EmailBaseline], [18, v18EmailSourceBaseline], [19, v19EmailExcerptBaseline], [20, v20ReplyJournalBaseline], [21, v21ReplyReviewBaseline], [22, v22ReplyUpdateBaseline], [23, v23ReplyAcknowledgmentBaseline], [24, v24ReplyResolutionBaseline], [25, "33c817a911ebb9fb0310592cac77d8e61380541d"]]) test(`genuine v${version} data upgrades atomically; old writers cannot write v27`, async t => {
+for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline], [10, v10CharterBaseline], [11, v11ReplyBaseline], [12, v12HelpBaseline], [13, v13OfferBaseline], [14, v14InboxBaseline], [15, v15AdoptionBaseline], [16, v16SendBaseline], [17, v17EmailBaseline], [18, v18EmailSourceBaseline], [19, v19EmailExcerptBaseline], [20, v20ReplyJournalBaseline], [21, v21ReplyReviewBaseline], [22, v22ReplyUpdateBaseline], [23, v23ReplyAcknowledgmentBaseline], [24, v24ReplyResolutionBaseline], [25, "33c817a911ebb9fb0310592cac77d8e61380541d"], [26, v26IdentitiesBaseline]]) test(`genuine v${version} data upgrades atomically; old writers cannot write v27`, async t => {
   const root = mkdtempSync(join(tmpdir(), "room-agent-upgrade-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const repository = fileURLToPath(new URL("../", import.meta.url)), destination = join(root, "v8");

@@ -468,6 +468,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // grants nothing); linking it into a room is owner-only per room.
       if (url.pathname === "/api/agent-identities" && req.method === "POST") {
         const data = await body(req);
+        rate(`identity-create:${remoteAddress}`, 30);
         if (!exact(data, ["displayName"]) || typeof data.displayName !== "string") reject(422, "invalid_identity", "displayName is required");
         return json(res, 201, store.identities.create(data.displayName));
       }

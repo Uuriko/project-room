@@ -220,8 +220,8 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "preferences"].includes(name) ? "object-or-array" : "string";
-    if (type === "object-or-array" ? !(Array.isArray(value) || (value && typeof value === "object")) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities"].includes(name) ? "array" : name === "preferences" ? "object" : "string";
+    if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (Buffer.byteLength(JSON.stringify(command)) > 16384) fail(413, "too_large", "Command is too large");
   if (command.type === T.MESSAGE_POSTED) {
@@ -255,7 +255,10 @@ export class RoomStore {
     this.inbox = new Inbox(this);
     this.email = new EmailImport(this);
     const version = this.storagePlatform.version(this.db);
-    const supported = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, STORE_SCHEMA_VERSION]);
+    // Supported schema versions are the contiguous range 0..STORE_SCHEMA_VERSION.
+    // A hand-maintained list dropped v26 when the version bumped to 27,
+    // which 500'd every room whose Durable Object was still on v26.
+    const supported = new Set([...Array(STORE_SCHEMA_VERSION + 1).keys()]);
     const hasSchema = version === 0 && this.storagePlatform.hasSchema(this.db);
     if (!supported.has(version) || hasSchema) {
       this.db.close();
@@ -1326,15 +1329,23 @@ export class RoomStore {
       let state;
       try { state = compact(events.reduce(applyEvent, emptyRoomState())); }
       catch (error) { fail(422, "invalid_import", `Export does not replay: ${error.message}`); }
+      if (new Set(events.map(e => e.id)).size !== events.length) fail(422, "invalid_import", "Import has duplicate event ids");
       // Dependent rows reference event ids/sequences; a history replacement
       // drops them. Pending invitations are lost on restore (documented).
       this.db.prepare("DELETE FROM commands WHERE room_id=?").run(roomId);
       this.db.prepare("DELETE FROM membership_invitation_events WHERE invitation_id IN (SELECT id FROM membership_invitations WHERE room_id=?)").run(roomId);
       this.db.prepare("DELETE FROM membership_invitations WHERE room_id=?").run(roomId);
+      // Reader cursors point into the old history; reset them.
+      this.db.prepare("DELETE FROM cursors WHERE room_id=?").run(roomId);
+      // The projection checkpoint is a replay accelerator over the old
+      // history — a stale checkpoint would corrupt rebuildProjection, so
+      // replace it with one taken from the imported state.
+      this.db.prepare("DELETE FROM projection_checkpoints WHERE room_id=?").run(roomId);
       this.db.prepare("DELETE FROM events WHERE room_id=?").run(roomId);
       const insert = this.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
       events.forEach((e, i) => insert.run(roomId, i + 1, e.id, JSON.stringify(e)));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(events.length, JSON.stringify(state), roomId);
+      this.db.prepare("INSERT INTO projection_checkpoints(room_id,sequence,projection) VALUES(?,?,?)").run(roomId, events.length, JSON.stringify(state));
       return { imported: events.length, sequence: events.length };
     });
   }
