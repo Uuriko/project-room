@@ -1,3 +1,4 @@
+import { projectBoard } from "../src/board.js";
 import { validId, PERMISSIONS, WORK_STATES } from "../src/events.js";
 import { nextWorkStep, workActions, reusableWorkDefinition, workCollaboration } from "../src/workflow.js";
 import { isDeepStrictEqual } from "node:util";
@@ -377,6 +378,11 @@ export class RoomAgentClient {
   helpAction(name, args, options = {}) {
     return submitHelpAction(this, { roomId: this.#roomId, memberId: this.#memberId }, name, args, options);
   }
+  async board({ signal } = {}) {
+    const snapshot = await this.snapshot({ signal });
+    return { ...projectBoard(snapshot.state, Date.now()), roomId: snapshot.roomId,
+      evaluatedThrough: snapshot.sequence, evaluatedAt: new Date().toISOString() };
+  }
   async orient({ signal, focus = "all", query } = {}) {
     if (!["all", "needs_me", "help_wanted", "results"].includes(focus)) throw new RoomClientError(0, "invalid_focus", "Choose all work, work needing you, help invitations, or results");
     if (query !== undefined && !validWorkSearchQuery(query)) throw new RoomClientError(0, "invalid_query", "Use a nonblank work query of at most 200 UTF-16 code units");
@@ -432,7 +438,8 @@ export class RoomAgentClient {
       work: items.map(item => ({
         id: item.id, title: item.title, definitionOfDone: item.definitionOfDone, sourceMessageId: item.sourceMessageId,
         state: item.state, revision: item.revision, mode: item.mode, claim: item.claim, next: nextWorkStep(item, now),
-        receipt: item.receipt, verification: item.verification, decision: item.decision, blocker: item.blocker
+        receipt: item.receipt, verification: item.verification, decision: item.decision, blocker: item.blocker,
+        ...(item.handoff ? { handoff: item.handoff, handoffHistory: item.handoffHistory ?? [] } : {})
       }))
     };
   }
