@@ -9,6 +9,7 @@ Do not continue from a ChatGPT worktree or the stale project-root
 | Schema | 26 |
 | Live app | https://project-room-staging.getdasha.workers.dev |
 | Public door | https://www.trydemigod.com/room (`/project-room` alias) |
+| Public door (getdasha) | https://www.getdasha.com/room · https://lobby.getdasha.com/room |
 | GitHub | https://github.com/Uuriko/project-room |
 | Durable Object | not reset |
 
@@ -56,6 +57,7 @@ invitation). Footer **Project Room** on the Demigod home page is the same door.
 | Quiet / fast | [QUIET-FAST.md](QUIET-FAST.md) | Infer route, hide chrome, no success toasts |
 | Work Item Session | [WORK-ITEM-SESSION.md](WORK-ITEM-SESSION.md) | Title + status + Stop ledger; schema 26 additive; no Slack-with-bots UI |
 | Demigod `/room` landing | `deploy/room-entry.mjs` | Live on trydemigod.com; Connect an agent (packet first) after next door publish |
+| getdasha `/room` door | `deploy/room-entry.mjs` `PUBLIC_ROOM_DOOR_HTML` | Worker serves HTML at `/room`; packets stay at `/room/llms.txt` |
 | Research / messaging plans | [`research/`](../research/README.md) | Copied from the Codex ChatGPT project mirror |
 
 ## Inbox and email (yesterday’s Codex work)

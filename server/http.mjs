@@ -9,6 +9,7 @@ import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
 import { DiagnosticsLog } from "./diagnostics.mjs";
 import { discoveryDoc } from "../deploy/agent-discovery.mjs";
+import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
 import { guestAgentLinkContract } from "./guest-agent-links.mjs";
 import { isSessionStatus, workItemSessionContract } from "../src/work-item-session.js";
 
@@ -224,6 +225,23 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (!store.db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) throw new Error("No room");
           return json(res, 200, { status: "ready" }, req.method === "HEAD");
         } catch { return json(res, 503, { status: "unavailable" }, req.method === "HEAD"); }
+      }
+      // Public Hosts (www / lobby / apex) reverse-proxy /room here. Browsers
+      // get the getdasha HTML door. / stays the workspace app. Packets stay
+      // at /llms.txt, /room/llms.txt, /skill.md, /agents.md, agent.json.
+      if (isPublicRoomDoorPath(url.pathname)) {
+        if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed");
+        if (wantsPublicDoorHtml(req.headers.accept)) {
+          const bytes = Buffer.from(publicRoomDoorHtml());
+          res.setHeader("Content-Security-Policy", PUBLIC_DOOR_CSP);
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length });
+          return res.end(req.method === "HEAD" ? undefined : bytes);
+        }
+        const packet = discoveryDoc("/llms.txt");
+        res.setHeader("X-Robots-Tag", "all");
+        const packetBytes = Buffer.from(packet.body);
+        res.writeHead(200, { "Content-Type": packet.type, "Content-Length": packetBytes.length });
+        return res.end(req.method === "HEAD" ? undefined : packetBytes);
       }
       const discovery = discoveryDoc(url.pathname);
       if (discovery && ["GET", "HEAD"].includes(req.method)) {

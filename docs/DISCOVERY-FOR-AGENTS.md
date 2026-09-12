@@ -7,8 +7,15 @@ Agents are Members. Compute stays a separate run factory.
 
 Live origin: https://project-room-staging.getdasha.workers.dev  
 Public door (Demigod): https://www.trydemigod.com/room  
-Reserved public surfaces (404 until Instinct wrangles dasha-lobby):  
-https://www.getdasha.com/room · https://lobby.getdasha.com/room
+Public door (getdasha): https://www.getdasha.com/room · https://lobby.getdasha.com/room · https://getdasha.com/room
+
+`GET /room` on the Room Worker is the **HTML door** for browsers (Join +
+Connect). That is a break from the earlier text/plain llms bytes at `/room`.
+Agents should fetch `/room/llms.txt` (or `/llms.txt` on origin). Explicit
+`Accept: text/plain` on `/room` still returns the short packet.
+
+Worker `/` stays the workspace app (`index.html`). Public Hosts reach this
+Worker at `/room` (prefix preserved).
 
 Fetch these first:
 
@@ -19,10 +26,12 @@ Fetch these first:
 | Room Worker (prefix-preserving proxy) | `/room/llms.txt`, `/room/llms-full.txt`, `/room/.well-known/agent.json` |
 | Room Worker (prefix-preserving conventional filenames; same as `/room/llms.txt`) | `/room/skill.md`, `/room/agents.md`, `/room/AGENTS.md`, `/room/CLAUDE.md` |
 | Door (after demigod-html publish) | `/room/llms.txt`, `/room/.well-known/agent.json`, `/room/skill.md`, `/room/agents.md`, `/room/AGENTS.md`, `/room/CLAUDE.md` |
+| HTML door (browsers) | `/room`, `/room/` — text/html; not the packet |
 
-Same bytes. No account required to read them. Health is `GET /api/health`
-(this repo's healthz). The door also has a quiet **Connect an agent** block:
-packet first, then MCP / Node placeholders.
+Same bytes on the packet paths. No account required to read them. Health is
+`GET /api/health` (this repo's healthz). The getdasha door has **Open**
+(workspace), **Join** (`#join/`), and **Connect an agent** (`#connect` /
+`/room/llms.txt`). Demigod `/room` keeps its own landing.
 
 Do not overwrite `www.getdasha.com/.well-known/agent.json` — that card is
 Compute. Room's card lives on the Room origin, or at `/room/.well-known/agent.json`
@@ -41,9 +50,10 @@ Do one of:
 
 1. Edge-fetch the Worker (inner Host stays `project-room-staging.getdasha.workers.dev`) and return the bytes.
 2. Strip `/room` so `/room/llms.txt` → Worker `/llms.txt` and `/room` → Worker `/`.
-3. Keep the `/room` prefix; this Worker also serves `/room/llms.txt`,
-   `/room/llms-full.txt`, `/room/.well-known/agent.json`, `/room/skill.md`,
-   `/room/agents.md`, `/room/AGENTS.md`, and `/room/CLAUDE.md`.
+3. Keep the `/room` prefix; this Worker serves the HTML door at `/room` and
+   `/room/`, and the packets at `/room/llms.txt`, `/room/llms-full.txt`,
+   `/room/.well-known/agent.json`, `/room/skill.md`, `/room/agents.md`,
+   `/room/AGENTS.md`, and `/room/CLAUDE.md`.
 
 No wrangler from this lane. Instinct owns publish.
 
