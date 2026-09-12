@@ -7,7 +7,7 @@ import { validId } from "../src/events.js";
 import { SyntheticInboxTransport } from "./inbox-transport.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
-import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
+import { DiagnosticsLog, supportExportBundle, diagnosticRoute } from "./diagnostics.mjs";
 import { discoveryDoc, isHealthAliasPath } from "../deploy/agent-discovery.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
 import { guestAgentLinkContract } from "./guest-agent-links.mjs";
@@ -75,18 +75,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   const streams = new Set();
   const diagnostics = new DiagnosticsLog();
 
-  // Room-scoped support-export route templates: static words only, ids become :item.
-  function diagnosticRoute(requestUrl, roomId) {
-    if (!roomId) return null;
-    let pathname;
-    try { pathname = new URL(requestUrl, expectedOrigin()).pathname; } catch { return null; }
-    const prefix = `/api/rooms/${encodeURIComponent(roomId)}`;
-    if (pathname !== prefix && !pathname.startsWith(prefix + "/")) return null;
-    const rest = pathname.slice(prefix.length);
-    if (!rest) return "/api/rooms/:roomId";
-    const segments = rest.slice(1).split("/").map(segment => /^[a-z][a-z-]{0,40}$/.test(segment) ? segment : ":item");
-    return `/api/rooms/:roomId/${segments.join("/")}`;
-  }
   const rates = new Map();
   function rate(id, maximum) {
     const now = Date.now();
@@ -764,7 +752,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const code = error.code || "internal_error";
       const message = error.status ? error.message : "Service could not complete the request; no success is claimed";
       const category = errorCategory(httpStatus, code);
-      const route = diagnosticRoute(req.url, roomId);
+      const route = diagnosticRoute(req.url, roomId, expectedOrigin());
       if (route) {
         diagnostics.record({ operationId, at: new Date().toISOString(), status: httpStatus, code, category, route, roomId });
         console.warn(`room diagnostic ${operationId} ${httpStatus} ${code} ${category} ${route}`);
