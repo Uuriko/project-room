@@ -131,7 +131,7 @@ for (const touch of [false, true]) {
       data: { memberId: 'second-maya', displayName: 'Maya', kind: 'human', permissions: [] } });
     await owner.waitForFunction(() => document.querySelector('.message-meta strong')?.textContent.includes('guest-'));
     await guest.waitForFunction(() => document.querySelector('#identity-label')?.textContent.includes('guest-'));
-    await guest.locator('#signout-button').click();
+    if (await guest.locator("#session-menu-button").isVisible()) await guest.locator("#session-menu-button").click(); await guest.locator('#signout-button').click();
     await guest.locator('#auth-panel').waitFor({ state: 'visible' });
     assert.equal(await guest.locator('#identity-label').getAttribute('title'), null, 'sign-out clears private attribution');
     assert.deepEqual(errors, []);
