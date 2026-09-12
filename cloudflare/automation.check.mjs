@@ -7,11 +7,11 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
 import { createRuntimePackage } from '../scripts/runtime-package.mjs';
-test('Worker upgrades genuine31 and persists shared automation consent across restart', { timeout: 60000 }, async t => {
+test('Worker upgrades genuine32 and persists atomic dispatch across restart', { timeout: 60000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), 'automation-worker-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const destination = join(directory, 'old');
-  createRuntimePackage({ repository: fileURLToPath(new URL('../', import.meta.url)), commit: '0e3f824471b5e69f93a8e325a8c490d02c81029f', destination });
+  createRuntimePackage({ repository: fileURLToPath(new URL('../', import.meta.url)), commit: '51564ad22681569753d0479cebe12f798d9352ec', destination });
   const bundled = await build({ entryPoints: [fileURLToPath(new URL('./automation.test-fixture.mjs', import.meta.url))], bundle: true, write: false,
     format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'], plugins: [{ name: 'frozen-runtime', setup(build) {
       build.onResolve({ filter: /^old-runtime-/ }, args => ({ path: join(destination, args.path === 'old-runtime-store' ? 'server/store.mjs' : 'cloudflare/storage.mjs') }));

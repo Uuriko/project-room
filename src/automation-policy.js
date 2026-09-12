@@ -1,4 +1,4 @@
-// Pure shared-automation policy. Not registered as service commands yet.
+// Shared-automation policy. Persistence and authenticated dispatch live in events/store.
 // Caller must supply authenticated actor and committed room state atomically.
 const id = value => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value)
   && !["constructor", "prototype", "__proto__"].includes(value);
@@ -9,6 +9,26 @@ const check = (condition, message) => { if (!condition) throw new Error(message)
 const timestamp = value => typeof value === "string" && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
 const active = (members, memberId) => id(memberId) && members?.[memberId]?.active === true && ["human", "agent"].includes(members[memberId].kind);
 export const AUTOMATION_LIMIT = 100;
+export const AUTOMATION_MESSAGE_FIELDS = ["automationId", "automationRevision", "automationSlot"];
+export const isAutomationDispatch = data => AUTOMATION_MESSAGE_FIELDS.some(key => Object.hasOwn(data, key));
+export function validAutomationRequest(value) {
+  return Boolean(exact(value, ["id", "revision", "slot", "maxRuntimeMs", "maxOutputBytes"]) && id(value.id)
+    && integer(value.revision) && value.revision > 0 && integer(value.slot)
+    && Number.isSafeInteger(value.maxRuntimeMs) && value.maxRuntimeMs >= 1 && value.maxRuntimeMs <= 300000
+    && Number.isSafeInteger(value.maxOutputBytes) && value.maxOutputBytes >= 1 && value.maxOutputBytes <= 1048576);
+}
+export function validateAutomationDispatch(data) {
+  check(exact(data, ["messageId", ...AUTOMATION_MESSAGE_FIELDS]) && id(data.messageId) && id(data.automationId)
+    && integer(data.automationRevision) && integer(data.automationSlot), "Invalid automation dispatch selection");
+}
+export function prepareAutomationDispatch(state, actorId, data, now) {
+  validateAutomationDispatch(data);
+  check(!state.messages.some(message => message.id === data.messageId), "Message already exists");
+  check(!state.agentHalts?.[actorId], "Clear the recorded halt before dispatching automation");
+  return transitionAutomation({ automation: state.automations?.[data.automationId] ?? null, actorId,
+    roomOwnerId: state.room.ownerId, members: state.members, requests: state.replyRequests, runs: state.requestRuns },
+  "dispatch", { expectedRevision: data.automationRevision, requestMessageId: data.messageId, slot: data.automationSlot }, now);
+}
 const definitionFields = ["title", "prompt", "recipientId", "trigger", "maxRuns", "maxRuntimeMs", "maxOutputBytes"];
 
 export function validateAutomationDefinition(value) {

@@ -4,6 +4,7 @@ import { replyPostMode } from "../src/reply-requests.js";
 import { conforms, confirmsAgentCommand } from "./work-actions.mjs";
 import { agentErrorAx } from "../src/agent-error.mjs";
 import { validRequestRun } from "../src/request-run-policy.js";
+import { validAutomationRequest } from "../src/automation-policy.js";
 
 const id = { type: "string", minLength: 1, maxLength: 128, pattern: "^(?!(?:constructor|prototype|__proto__)$)[A-Za-z0-9][A-Za-z0-9_.:-]*$" };
 const text = { type: "string", minLength: 1, maxLength: 4096, pattern: "\\S" };
@@ -198,7 +199,9 @@ export function validateReplyRead(result, { name, args, roomId }) {
     }
   }
   if (selected) {
-    assert(keys(request, [...requestFields, "contextMessageId", "terminalActorId", "responseMessageId", "responseContextSequence", "reason"])
+    const automated = Object.hasOwn(request, "automation");
+    assert(keys(request, [...requestFields, "contextMessageId", "terminalActorId", "responseMessageId", "responseContextSequence", "reason", ...(automated ? ["automation"] : [])])
+      && (!automated || validAutomationRequest(request.automation) && request.automation.revision <= result.evaluatedThrough)
       && validRequest(request) && request.id === requestMessageId && validId(request.contextMessageId)
       && current?.evaluatedThrough === result.evaluatedThrough && current.contextEventId === request.contextEventId
       && integer(current.contextSequence) && current.contextSequence > 0 && current.contextSequence <= result.evaluatedThrough

@@ -6,7 +6,7 @@ import { WORK_HELP_UPDATED, helpFromEvent } from "./work-help.js";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, helpOfferFromEvent } from "./help-offers.js";
 import { SESSION_EVENT_TYPES, applySessionFields } from "./work-item-session.js";
 import { transitionRequestRun } from "./request-run-policy.js";
-import { transitionAutomation } from "./automation-policy.js";
+import { transitionAutomation, isAutomationDispatch, prepareAutomationDispatch } from "./automation-policy.js";
 
 export const EVENT_TYPES = Object.freeze({
   ROOM_CREATED: "room.created",
@@ -122,10 +122,13 @@ export function replay(events) {
   return events.reduce((state, next) => applyEvent(state, next), emptyRoomState());
 }
 
-function applyRequestRun(state, incoming) {
+export function applyRequestRun(state, incoming) {
   const { requestMessageId, ...data } = incoming.data;
   if (!validId(requestMessageId)) throw new Error("Invalid request selection");
   const action = { "request_run.claimed": "claim", "request_run.stop_requested": "request_stop", "request_run.finished": "finish" }[incoming.type];
+  const limits = state.replyRequests?.[requestMessageId]?.automation;
+  if (action === "claim" && limits && (data.maxRuntimeMs > limits.maxRuntimeMs || data.maxOutputBytes > limits.maxOutputBytes))
+    throw new Error("Run exceeds accepted automation limits");
   const run = transitionRequestRun({ run: state.requestRuns?.[requestMessageId] ?? null,
     request: state.replyRequests?.[requestMessageId], actor: state.members[incoming.actorId],
     ownerId: state.room.ownerId, instructionsRevision: state.room.charter?.revision ?? 0 }, action, data, incoming.at);
@@ -133,7 +136,7 @@ function applyRequestRun(state, incoming) {
   state.requestRuns[requestMessageId] = run;
 }
 
-function applyAutomation(state, incoming) {
+export function applyAutomation(state, incoming) {
   const { automationId, ...data } = incoming.data;
   if (!validId(automationId)) throw new Error("Invalid automation selection");
   const action = { "automation.created": "create", "automation.updated": "update", "automation.enabled": "enable",
@@ -351,14 +354,18 @@ function changeMemberAccess(state, incoming) {
   member.active = incoming.data.active;
   member.permissions = [...incoming.data.permissions];
   member.revision += 1;
+  invalidateAutomationConsent(state, member.id, incoming.at);
+}
+
+export function invalidateAutomationConsent(state, memberId, at) {
   // Access restoration must never silently revive previously accepted automation.
   for (const automation of Object.values(state.automations ?? {})) {
-    if ((automation.ownerId === member.id || automation.definition.recipientId === member.id)
+    if ((automation.ownerId === memberId || automation.definition.recipientId === memberId)
       && (automation.ownerEnabled || automation.recipientAccepted)) {
       automation.ownerEnabled = false;
       automation.recipientAccepted = false;
       automation.revision += 1;
-      automation.updatedAt = incoming.at;
+      automation.updatedAt = at;
     }
   }
 }
@@ -412,6 +419,13 @@ function requireScopedMemberAdministration(state, actorId, targetId, currentTarg
 
 function postMessage(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
+  let dispatch;
+  if (isAutomationDispatch(incoming.data)) {
+    const { messageId, automationId, automationRevision, automationSlot } = incoming.data;
+    dispatch = prepareAutomationDispatch(state, incoming.actorId, { messageId, automationId, automationRevision, automationSlot }, incoming.at);
+    const expected = { ...dispatch.message, requestPolicyVersion: 1 };
+    if (stableStringify(incoming.data) !== stableStringify(expected)) throw new Error("Automation message differs from accepted scope");
+  }
   if (!incoming.data.attachments?.length) requireFields(incoming.data, ["body"]);
   const requestMode = prepareReplyPost(state, incoming);
   if (incoming.data.toMemberId) (requestMode === "respond" ? knownMember : requireMember)(state, incoming.data.toMemberId);
@@ -439,6 +453,9 @@ function postMessage(state, incoming) {
     ...(proposal ? { proposal } : {})
   });
   recordReplyPost(state, incoming, requestMode);
+  if (dispatch) {
+    state.automations[incoming.data.automationId] = dispatch.automation;
+  }
 }
 
 function findEditableMessage(state, incoming) {

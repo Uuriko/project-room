@@ -42,7 +42,7 @@ test('automation definitions persist, consent is identity-bound and exact retrie
   assert.deepEqual(state.messages, []);
   const events = store.db.prepare('SELECT body FROM events ORDER BY sequence').all().map(row => JSON.parse(row.body));
   assert.deepEqual({ ...replay(events), eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} }, state);
-  assert.equal(auditRecovery(store).schemaVersion, 32);
+  assert.equal(auditRecovery(store).schemaVersion, 33);
   store.close();
   const reopened = new RoomStore(filename); t.after(() => reopened.close());
   assert.deepEqual(reopened.room('commons').state, state);
@@ -75,9 +75,9 @@ test('genuine31 migration preserves data and blocks an already-open old writer',
   const cached = old.db.prepare('UPDATE rooms SET projection=projection WHERE id=?');
   const current = new RoomStore(filename); t.after(() => current.close());
   assert.deepEqual(current.room('commons'), before);
-  assert.throws(() => cached.run('commons'), /writer_v32|unsupported database writer/);
+  assert.throws(() => cached.run('commons'), /writer_v33|unsupported database writer/);
   current.command(f.owner, 'commons', command('created', 0, { definition }));
-  assert.equal(auditRecovery(current).schemaVersion, 32);
+  assert.equal(auditRecovery(current).schemaVersion, 33);
 });
 
 test('pilot capacity still permits one authorized pause but no repeated cleanup writes', t => {
@@ -106,7 +106,7 @@ test('revoking then restoring membership cannot revive prior automation consent'
   assert.equal(automation.ownerEnabled, false);
   assert.equal(automation.recipientAccepted, false);
   assert.throws(() => store.command(f.owner, 'commons', command('enabled', 3)));
-  assert.equal(auditRecovery(store).schemaVersion, 32);
+  assert.equal(auditRecovery(store).schemaVersion, 33);
 });
 
 test('legacy automation projection and event fields fail migration without modifying schema', async t => {
@@ -119,8 +119,25 @@ test('legacy automation projection and event fields fail migration without modif
     const filename = join(directory, `${field}.sqlite`), old = new OldStore(filename); t.after(() => old.close()); setup(old);
     if (field === 'projection') old.db.prepare("UPDATE rooms SET projection=json_set(projection,'$.automations',json('null'))").run();
     else old.db.prepare(`UPDATE events SET body=json_set(body,'$.data.${field}',json('null')) WHERE sequence=1`).run();
-    assert.throws(() => new RoomStore(filename), /Legacy automation fields/);
+    assert.throws(() => new RoomStore(filename), /Legacy automation (dispatch )?fields/);
     assert.equal(old.db.prepare('PRAGMA user_version').get().user_version, 31);
-    assert.equal(old.db.prepare("SELECT count(*) n FROM sqlite_master WHERE name LIKE 'writer_v32_%'").get().n, 0);
+    assert.equal(old.db.prepare("SELECT count(*) n FROM sqlite_master WHERE name LIKE 'writer_v33_%'").get().n, 0);
+  }
+});
+
+test('genuine32 refuses legacy dispatch metadata while preserving the old database', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'dispatch-collision-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const destination = join(directory, 'old');
+  createRuntimePackage({ repository: process.cwd(), commit: '51564ad22681569753d0479cebe12f798d9352ec', destination });
+  const { RoomStore: OldStore } = await import(pathToFileURL(join(destination, 'server/store.mjs')));
+  for (const field of ['projection', 'automationId', 'automationRevision', 'automationSlot']) {
+    const filename = join(directory, `${field}.sqlite`), old = new OldStore(filename); t.after(() => old.close()); const f = setup(old);
+    old.command(f.owner, 'commons', { id: 'q', type: 'message.posted', data: { messageId: 'q', body: 'Question', requestKind: 'reply', toMemberId: 'agent' } });
+    if (field === 'projection') old.db.prepare("UPDATE rooms SET projection=json_set(projection,'$.replyRequests.q.automation',json('null'))").run();
+    else old.db.prepare(`UPDATE events SET body=json_set(body,'$.data.${field}',json('null')) WHERE json_extract(body,'$.type')='message.posted'`).run();
+    assert.throws(() => new RoomStore(filename), /Legacy automation dispatch fields/);
+    assert.equal(old.db.prepare('PRAGMA user_version').get().user_version, 32);
+    assert.equal(old.db.prepare("SELECT count(*) n FROM sqlite_master WHERE name LIKE 'writer_v33_%'").get().n, 0);
   }
 });

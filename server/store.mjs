@@ -22,6 +22,7 @@ import { RoomAttachments, attachmentSchema } from "./attachments.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
 import { charterContext, charterFromEvent } from "../src/room-charter.js";
 import { REPLY_FIELDS, REPLY_POLICY_VERSION, replyPostMode } from "../src/reply-requests.js";
+import { AUTOMATION_MESSAGE_FIELDS, isAutomationDispatch, validateAutomationDispatch, prepareAutomationDispatch } from "../src/automation-policy.js";
 import { ReplyRequests } from "./reply-requests.mjs";
 import { validateHelpData } from "../src/work-help.js";
 import { auditWorkHelp } from "./work-help.mjs";
@@ -197,7 +198,7 @@ const shapes = {
   [T.MEMBER_ACCESS_CHANGED]: "memberId expectedMemberRevision permissions active",
   [T.MEMBER_STATUS_UPDATED]: "memberId message",
   [T.NOTIFICATION_PREFERENCES_SET]: "preferences",
-  [T.MESSAGE_POSTED]: `messageId body workItemId replyToId toMemberId packetId basisRevision allowOlderBasis attachmentIds ${REPLY_FIELDS.join(" ")}`,
+  [T.MESSAGE_POSTED]: `messageId body workItemId replyToId toMemberId packetId basisRevision allowOlderBasis attachmentIds ${REPLY_FIELDS.join(" ")} ${AUTOMATION_MESSAGE_FIELDS.join(" ")}`,
   [T.MESSAGE_EDITED]: "messageId body expectedMessageRevision",
   [T.MESSAGE_DELETED]: "messageId expectedMessageRevision reason",
   [T.REPLY_REQUEST_CANCELLED]: "requestMessageId expectedRequestRevision reason",
@@ -242,12 +243,13 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "instructionsRevision", "maxRuntimeMs", "maxOutputBytes"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "attachmentIds"].includes(name) ? "array" : ["preferences", "budget", "definition"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "instructionsRevision", "maxRuntimeMs", "maxOutputBytes", "automationRevision", "automationSlot"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "attachmentIds"].includes(name) ? "array" : ["preferences", "budget", "definition"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (Buffer.byteLength(JSON.stringify(command)) > 16384) fail(413, "too_large", "Command is too large");
   if (command.type === T.MESSAGE_POSTED) {
-    try { replyPostMode(command.data); } catch (error) { fail(422, "invalid_command", error.message); }
+    try { if (isAutomationDispatch(command.data)) validateAutomationDispatch(command.data); else replyPostMode(command.data); }
+    catch (error) { fail(422, "invalid_command", error.message); }
   }
   if (command.type === T.WORK_HELP_UPDATED) {
     try { validateHelpData(command.data); } catch (error) { fail(422, "invalid_command", error.message); }
@@ -310,6 +312,12 @@ export class RoomStore {
     // Reread under the write lock: another startup may have upgraded while we waited.
     if (this.storagePlatform.version(this.db) !== version) throw new Error("Database changed during startup; retry with the current service");
     if (version >= 6) this.storagePlatform.verifyWriterFence(this.db, version);
+    if (version > 0 && version < 33) {
+      const collision = table => this.db.prepare(`SELECT 1 FROM ${table}, json_each(projection,'$.replyRequests') AS request WHERE json_type(request.value,'$.automation') IS NOT NULL LIMIT 1`).get();
+      if (collision("rooms") || version >= 2 && collision("projection_checkpoints")
+        || this.db.prepare("SELECT 1 FROM events WHERE json_type(body,'$.data.automationRevision') IS NOT NULL OR json_type(body,'$.data.automationSlot') IS NOT NULL OR (json_extract(body,'$.type')='message.posted' AND json_type(body,'$.data.automationId') IS NOT NULL) LIMIT 1").get())
+        throw new Error("Legacy automation dispatch fields require operator reconciliation");
+    }
     if (version > 0 && version < 32) {
       const collision = table => this.db.prepare(`SELECT 1 FROM ${table} WHERE json_type(projection,'$.automations') IS NOT NULL LIMIT 1`).get();
       if (collision("rooms") || version >= 2 && collision("projection_checkpoints")
@@ -1668,7 +1676,8 @@ export class RoomStore {
         fail(409, "halt_active", "Clear the recorded halt before claiming request execution");
       const endingAccess = command.type === T.MEMBER_ACCESS_CHANGED && target?.active === true && command.data.active === false
         && canonical(target.permissions) === canonical(command.data.permissions);
-      const requestMode = command.type === T.MESSAGE_POSTED && replyPostMode(command.data);
+      const automationDispatch = command.type === T.MESSAGE_POSTED && isAutomationDispatch(command.data);
+      const requestMode = command.type === T.MESSAGE_POSTED && (automationDispatch ? "open" : replyPostMode(command.data));
       const endingRequest = (requestMode === "respond" || command.type === T.REPLY_REQUEST_CANCELLED)
         && room.state.replyRequests?.[command.data.responseToRequestId ?? command.data.requestMessageId]?.status === "open";
       const endingHelp = command.type === T.WORK_HELP_UPDATED && command.data.status === "withdrawn"
@@ -1741,6 +1750,10 @@ export class RoomStore {
         data: memberAuthorityEvent ? { ...command.data, authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION }
           : requestMode ? { ...command.data, requestPolicyVersion: REPLY_POLICY_VERSION } : command.data
       });
+      if (automationDispatch) {
+        try { incoming.data = { ...prepareAutomationDispatch(room.state, auth.member.id, command.data, incoming.at).message, requestPolicyVersion: REPLY_POLICY_VERSION }; }
+        catch (error) { fail(409, "command_rejected", error.message); }
+      }
       if (messageAttachments) {
         const { attachmentIds, ...data } = incoming.data;
         incoming.data = { ...data, attachments: messageAttachments };

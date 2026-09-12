@@ -16,7 +16,7 @@ export class RequestRunExperiment {
     const before = old.room('commons');
     const current = new RoomStore(null, { database: new DurableDatabase(this.storage), storagePlatform: durableStorage });
     assert.deepEqual(current.room('commons'), before);
-    assert.equal(durableStorage.version(current.db), 32);
+    assert.equal(durableStorage.version(current.db), 33);
     assert.throws(() => old.command(owner, 'commons', { id: 'old-write', type: 'message.posted', data: { body: 'Must not write' } }));
     const claim = { id: 'claim', type: 'request_run.claimed', data: { requestMessageId: 'q', expectedRevision: 0, runId: 'run', contextEventId: q.event.id, instructionsRevision: 0, maxRuntimeMs: 10000, maxOutputBytes: 4096 } };
     current.command(agent, 'commons', claim);

@@ -16,7 +16,7 @@ test('file-only messages replay and audit while an empty message without files s
   assert.equal(f.store.room('files').state.messages.at(-1).body, '');
   assert.deepEqual(f.files.readCommitted(f.guest, 'files', input.id).bytes, input.bytes);
   assert.equal(f.store.command(f.owner, 'files', command).duplicate, true);
-  assert.equal(auditRecovery(f.store).schemaVersion, 32);
+  assert.equal(auditRecovery(f.store).schemaVersion, 33);
   assert.throws(() => f.store.command(f.owner, 'files', { id: randomUUID(), type: 'message.posted', data: { messageId: 'empty', body: '', attachmentIds: [] } }), { status: 422 });
   assert.equal(f.store.room('files').state.messages.length, 1);
 });

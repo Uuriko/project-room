@@ -36,7 +36,7 @@ test('durable request claims serialize, retry exactly, stop and replay without w
   store.command(agent, 'commons', finish);
   assert.deepEqual(store.room('commons').state.workItems, {});
   assert.equal(store.room('commons').state.replyRequests.question.status, 'open');
-  assert.equal(auditRecovery(store).schemaVersion, 32);
+  assert.equal(auditRecovery(store).schemaVersion, 33);
   assert.throws(() => store.command(agent, 'commons', { ...claim, data: { ...claim.data, actorId: 'owner' } }), { code: 'invalid_command' });
   store.revoke(agent);
   assert.throws(() => store.command(agent, 'commons', claim), { status: 401 });
@@ -55,10 +55,10 @@ test('genuine v30 upgrade preserves data and rejects the pre-open old writer', a
   const cached = old.db.prepare('UPDATE rooms SET projection=projection WHERE id=?');
   const current = new RoomStore(filename); t.after(() => current.close());
   assert.deepEqual(current.room('commons'), before);
-  assert.equal(current.db.prepare('PRAGMA user_version').get().user_version, 32);
-  assert.throws(() => cached.run('commons'), /writer_v32|unsupported database writer/);
+  assert.equal(current.db.prepare('PRAGMA user_version').get().user_version, 33);
+  assert.throws(() => cached.run('commons'), /writer_v33|unsupported database writer/);
   current.command(f.agent, 'commons', f.claim);
-  assert.equal(auditRecovery(current).schemaVersion, 32);
+  assert.equal(auditRecovery(current).schemaVersion, 33);
 });
 
 test('concurrent HTTP claim attempts yield only one new execution owner', async t => {

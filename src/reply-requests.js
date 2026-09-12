@@ -112,7 +112,8 @@ export function prepareReplyPost(state, incoming) {
   const mode = replyPostMode(incoming.data);
   requireValid(mode, "Reply request policy requires explicit request fields");
   const data = incoming.data;
-  const allowed = ["messageId", "body", "workItemId", "replyToId", "toMemberId", "requestPolicyVersion", ...REPLY_FIELDS];
+  const allowed = ["messageId", "body", "workItemId", "replyToId", "toMemberId", "requestPolicyVersion", ...REPLY_FIELDS,
+    ...(mode === "open" ? ["automationId", "automationRevision", "automationSlot"] : [])];
   requireValid(Object.keys(data).every(key => allowed.includes(key)), "Unexpected reply request fields");
   if (mode === "open") {
     requireValid(data.toMemberId !== incoming.actorId, "A reply request needs another participant");
@@ -152,6 +153,11 @@ export function recordReplyPost(state, incoming, mode) {
       terminalEventId: null, terminalActorId: null, closedAt: null,
       responseMessageId: null, responseContextSequence: null, reason: null
     };
+    if (own(data, "automationId")) {
+      const { definition } = state.automations[data.automationId];
+      state.replyRequests[messageId].automation = { id: data.automationId, revision: data.automationRevision,
+        slot: data.automationSlot, maxRuntimeMs: definition.maxRuntimeMs, maxOutputBytes: definition.maxOutputBytes };
+    }
   } else if (mode === "respond") {
     Object.assign(replyRequest(state, data.responseToRequestId), {
       status: data.responseOutcome, revision: data.expectedRequestRevision + 1,

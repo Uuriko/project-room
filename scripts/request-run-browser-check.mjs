@@ -8,12 +8,19 @@ import { RoomAgentClient } from '../client/room-agent.mjs';
 import { localRequestContext } from '../client/local-request-context.mjs';
 import { runLocalSession } from '../client/local-session-runner.mjs';
 
-async function setup(t, viewport) {
+async function setup(t, viewport, automation = false) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 30 });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({ headless: true });
   t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
-  const q = f.store.command(f.keys.owner, 'commons', { id: 'question', type: 'message.posted', data: { messageId: 'question', requestKind: 'reply', toMemberId: 'producer', body: 'Answer this without creating a task' } });
+  let q;
+  if (automation) {
+    for (const [type, revision, key] of [['created', 0, f.keys.owner], ['enabled', 1, f.keys.owner], ['accepted', 2, f.keys.producer]]) f.store.command(key, 'commons', {
+      id: `automation-${type}`, type: `automation.${type}`, data: { automationId: 'daily', expectedRevision: revision,
+        ...(type === 'created' ? { definition: { title: 'Check', prompt: 'Answer this without creating a task', recipientId: 'producer', trigger: { kind: 'manual' }, maxRuns: 3, maxRuntimeMs: 15000, maxOutputBytes: 65536 } } : {}) }
+    });
+    q = f.store.command(f.keys.owner, 'commons', { id: 'question', type: 'message.posted', data: { messageId: 'question', automationId: 'daily', automationRevision: 3, automationSlot: 0 } });
+  } else q = f.store.command(f.keys.owner, 'commons', { id: 'question', type: 'message.posted', data: { messageId: 'question', requestKind: 'reply', toMemberId: 'producer', body: 'Answer this without creating a task' } });
   const page = await browser.newPage({ viewport, reducedMotion: 'reduce' }), errors = [];
   page.on('pageerror', error => errors.push(error.message)); page.setDefaultTimeout(8000);
   await page.goto(origin); await page.locator('#access-key').fill(f.keys.owner);
@@ -46,8 +53,8 @@ for (const [name, viewport] of [['desktop', { width: 1440, height: 1000 }], ['mo
   assert.deepEqual(f.errors, []);
 });
 
-test('chat Stop run terminates a real work-free process', async t => {
-  const f = await setup(t, { width: 1100, height: 850 }), controller = new AbortController();
+for (const automation of [false, true]) test(`chat Stop run terminates a real work-free ${automation ? 'automation' : 'direct'} process`, async t => {
+  const f = await setup(t, { width: 1100, height: 850 }, automation), controller = new AbortController();
   t.after(() => controller.abort());
   const client = new RoomAgentClient({ origin: f.origin, roomId: 'commons', memberId: 'producer', token: f.keys.producer });
   const packet = await localRequestContext(client, 'question', null);
