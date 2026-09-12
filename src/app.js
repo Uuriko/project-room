@@ -137,6 +137,7 @@ const client = new RoomClient({
         $("#remember-drafts").checked = true;
         updateReply(); renderMessages(); syncRequestComposer(); renderComposerError();
         $("#draft-recovery-status").textContent = "Recovered drafts for this room. Review before sending.";
+        void restoreComposerFiles(drafts);
       }
     }
     if (!briefView.owns(briefView.chain)) loadReturnBrief();
@@ -529,7 +530,7 @@ function renderComposerFiles() {
   const draft = drafts.get(composerKey()), locked = Boolean(pendingMessage?.command?.data?.attachmentIds?.length);
   const files = draft.files ?? [];
   if (!files.length) $('#file-upload-status').textContent = '';
-  $('#message-input').required = Boolean(requestMode) || !files.some(item => item.state === 'ready');
+  $('#message-input').required = Boolean(requestMode) || (!locked && !files.some(item => item.state === 'ready'));
   $('#attach-file').hidden = Boolean(requestMode);
   $('#attach-file').disabled = busy || locked || files.length >= 4;
   $('#message-input').readOnly = locked;
@@ -537,13 +538,29 @@ function renderComposerFiles() {
     const action = ['uploading', 'queued'].includes(item.state) ? 'cancel' : item.state === 'ready' ? 'remove' : 'retry';
     const label = { cancel: 'Cancel', remove: 'Remove', retry: 'Retry' };
     const control = kind => `<button type="button" class="text-button" data-file-control="${kind}" data-upload-id="${esc(item.id)}" aria-label="${label[kind]} ${esc(item.file.name)}">${label[kind]}</button>`;
-    return `<div class="composer-file"><span>${esc(item.file.name)}</span><small>${esc(item.state === 'ready' ? 'Ready' : item.state === 'uploading' ? 'Uploading…' : item.state === 'queued' ? 'Waiting' : item.error || 'Not uploaded')}</small>${!locked ? control(action) + (action === 'retry' ? control('remove') : '') : ''}</div>`;
-  }).join('') + (files.length ? '<small>Reloading clears this draft.</small>' : '');
+    return `<div class="composer-file"><span>${esc(item.file.name)}</span><small>${esc(item.state === 'ready' ? 'Ready' : item.state === 'checking' ? 'Checking…' : item.state === 'uploading' ? 'Uploading…' : item.state === 'queued' ? 'Waiting' : item.error || 'Not uploaded')}</small>${!locked && item.state !== 'checking' ? control(action) + (action === 'retry' ? control('remove') : '') : ''}</div>`;
+  }).join('') + (files.length ? `<small>${$('#remember-drafts').checked ? 'File references saved in this tab.' : 'Enable Remember drafts to restore these files after reload.'}</small>` : '');
   if (host._content !== html) { host.innerHTML = html; host._content = html; }
   if (focusId) {
     const controls = [...host.querySelectorAll('[data-upload-id]')].filter(button => button.dataset.uploadId === focusId);
     const target = controls.find(button => button.dataset.fileControl === focusAction) || controls[0] || $('#attach-file');
     if (!target.disabled && !target.hidden) target.focus({ preventScroll: true });
+  }
+}
+async function restoreComposerFiles(ownerDrafts) {
+  const generation = client.generation;
+  for (const draft of ownerDrafts.entries.values()) for (const item of draft.files ?? []) {
+    if (item.state !== 'checking') continue;
+    if (ownerDrafts !== drafts || generation !== client.generation || !state) return;
+    try {
+      const receipt = await client.restoreAttachment(item, draft.pending?.command?.data?.messageId ?? null);
+      if (ownerDrafts !== drafts || generation !== client.generation || !state) return;
+      item.receipt = receipt; item.state = 'ready'; item.error = '';
+    } catch (error) {
+      if (ownerDrafts !== drafts || generation !== client.generation || !state) return;
+      item.state = 'failed'; item.error = error.message;
+    }
+    renderComposerFiles(); persistDrafts();
   }
 }
 async function uploadComposerFile(item, ownerDrafts) {
@@ -560,6 +577,7 @@ async function uploadComposerFile(item, ownerDrafts) {
     item.controller = null;
     if (drafts === ownerDrafts && state) {
       renderComposerFiles();
+      persistDrafts();
       if (drafts.get(composerKey()).files?.includes(item)) $('#file-upload-status').textContent = `${item.file.name}: ${item.state === 'ready' ? 'Ready' : item.error}`;
     }
   }
@@ -582,7 +600,10 @@ $('#composer-files').addEventListener('click', async event => {
   const draft = drafts.get(composerKey()), item = draft.files?.find(item => item.id === button.dataset.uploadId);
   if (!item) return;
   if (button.dataset.fileControl === 'cancel') { if (item.controller) item.controller.abort(); else item.state = 'failed'; }
-  else if (button.dataset.fileControl === 'retry') { item.state = 'queued'; await uploadComposerFile(item, drafts); }
+  else if (button.dataset.fileControl === 'retry') {
+    if (!(item.file instanceof Blob)) { item.state = 'checking'; renderComposerFiles(); await restoreComposerFiles(drafts); }
+    else { item.state = 'queued'; await uploadComposerFile(item, drafts); }
+  }
   else {
     draft.files = draft.files.filter(entry => entry !== item);
     const path = client.path(`/attachments/${encodeURIComponent(item.id)}`);
@@ -1757,8 +1778,10 @@ $("#message-form").addEventListener("submit", e => {
   const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId };
   const files = drafts.get(composerKey()).files ?? [];
   if (!content.body && !files.length) return;
-  if (files.some(item => item.state !== 'ready')) { setComposerError('Finish or remove uploads before sending.'); return; }
   const previous = pendingMessage?.command?.data;
+  // An uncertain send must reach the command ledger even if its file status is
+  // temporarily unavailable. Only a new send requires every staged file ready.
+  if (!previous?.attachmentIds?.length && files.some(item => item.state !== 'ready')) { setComposerError('Finish or remove uploads before sending.'); return; }
   const unchanged = previous && previous.body === content.body && previous.toMemberId === content.toMemberId && previous.replyToId === content.replyToId;
   const data = previous?.attachmentIds?.length ? previous : { messageId: unchanged ? previous.messageId : crypto.randomUUID(), ...content,
     ...(files.length ? { attachmentIds: files.map(item => item.id) } : {}) };
@@ -1769,7 +1792,17 @@ $("#message-form").addEventListener("submit", e => {
     // Ownership must outlive pendingMessage: the command can commit while its immediate
     // snapshot fails, then first appear on a later refresh after the draft was cleared.
     locallyOwnedMessageIds.add(data.messageId || pendingMessage.command.id);
-    await client.send(pendingMessage.command);
+    try { await client.send(pendingMessage.command); }
+    catch (error) {
+      if (generation === client.generation && state && error.code === 'command_rejected' && [409, 422].includes(error.status)) {
+        // The ledger has definitively rejected this exact command. Unlock the
+        // retained files so the user can remove an expired one and try anew.
+        const draft = drafts.get(threadId); draft.pending = null;
+        if (currentThreadId === threadId && !requestMode) pendingMessage = null;
+        persistDrafts();
+      }
+      throw error;
+    }
     if (generation !== client.generation || !state) return;
     drafts.clear(threadId);
     if (currentThreadId === threadId && !requestMode) {

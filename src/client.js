@@ -229,6 +229,20 @@ export class RoomClient {
       return body;
     } finally { clearTimeout(timer); }
   }
+  async restoreAttachment(item, pendingMessageId = null) {
+    const session = this.session, generation = this.generation;
+    if (!session || !this.ownsAccountSession()) throw accountSessionError('Reopen the Room before restoring files');
+    const receipt = await this.request(this.path(`/attachments/${encodeURIComponent(item.id)}/status`), { authSession: session });
+    if (session !== this.session || generation !== this.generation || !this.ownsAccountSession()) throw new DOMException('Recovery cancelled', 'AbortError');
+    if (receipt.id !== item.id || receipt.roomId !== session.roomId || receipt.uploaderId !== session.member.id
+      || receipt.filename !== item.file.name || receipt.byteLength !== item.file.size
+      || receipt.mediaType !== (item.file.type || 'application/octet-stream') || !/^[a-f0-9]{64}$/.test(receipt.sha256)
+      || item.expectedSha256 && receipt.sha256 !== item.expectedSha256)
+      throw new Error('Saved file could not be verified');
+    if (receipt.state !== 'staged' && !(pendingMessageId && receipt.messageId === pendingMessageId && ['committed', 'deleted'].includes(receipt.state)))
+      throw new Error('File unavailable. Remove it and choose it again.');
+    return receipt;
+  }
   async uploadAttachment(id, file, { signal } = {}) {
     if (!validId(id) || !(file instanceof Blob) || typeof file.name !== 'string' || !file.name.trim()
       || file.size > 1048576) throw new Error('Choose a file up to 1 MiB');
