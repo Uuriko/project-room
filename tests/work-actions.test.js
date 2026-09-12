@@ -17,7 +17,9 @@ const cases = [
   ["record_verification", "verification.recorded", { ...base, result: "pass", completionEventId: "completion", evidenceVersion: "v1", summary: "Checked exact bytes" }],
   ["acquire_claim", "claim.acquired", { ...base, repository: "fictional/repo", ref: "main", paths: ["notes/a", "notes/b"], expiresAt: "2030-01-01T00:00:00.000Z" }],
   ["release_claim", "claim.released", base],
-  ["supersede_work", "work.superseded", { ...base, supersededByWorkItemId: "next-work", reason: "New definition" }]
+  ["supersede_work", "work.superseded", { ...base, supersededByWorkItemId: "next-work", reason: "New definition" }],
+  ["record_handoff", "work.handoff_recorded", { ...base, doneSummary: "3 of 5 done", nextAction: "Reassign the adapter feed", limitReason: "context window exhausted" }],
+  ["clear_halt", "work.halt_cleared", { requestId: "operation", memberId: "agent", haltEventId: "halt-event" }]
 ];
 const receipt = command => ({ sequence: 7, duplicate: false, event: { id: "saved-event", roomId: identity.roomId, actorId: identity.memberId,
   type: command.type, data: structuredClone(command.data), causationId: null, at: "2026-09-08T00:00:00.000Z",
@@ -31,8 +33,8 @@ test("every lifecycle descriptor maps exactly to one existing command without ne
     assert.deepEqual(command, { id: requestId, type, data: action === "submit_text_result" ? { ...data, evidenceKind: "room_text" } : data });
     const response = await submitWorkAction({ command: async value => { sent.push(value); return receipt(value); } }, identity, name, args);
     assert.deepEqual(sent, [command]); assert.equal(response.status, "recorded");
-    assert.equal(response.appliedRevision, action === "propose_work" ? 0 : args.expectedRevision + 1);
-    assert.equal(response.currentStateVerified, false); assert.equal(response.next.tool, "room_read_work");
+    assert.equal(response.appliedRevision, action === "propose_work" ? 0 : action === "clear_halt" ? null : args.expectedRevision + 1);
+    assert.equal(response.currentStateVerified, false); assert.equal(response.next.tool, action === "clear_halt" ? "room_read_board" : "room_read_work");
     assert.deepEqual(args, { requestId, ...data });
   }
   assert.throws(() => buildWorkCommand("room_record_owner_decision", base), { code: "invalid_work_action" });
