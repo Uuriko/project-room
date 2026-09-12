@@ -76,8 +76,6 @@ export function shouldAddressPresenceClick(target) {
   return !(block && row.contains(block));
 }
 
-const PRESENCE_ONLINE_MS = 15 * 60 * 1000;
-const RUNNING_SESSION = new Set(["processing", "active"]);
 const ENGAGED_WORK = new Set(["accepted", "working", "blocked"]);
 
 function workList(workItems) {
@@ -108,24 +106,6 @@ export function memberHandle(member, label) {
   if (!name) return "";
   if (member?.kind !== "agent") return name;
   return name.startsWith("@") ? name : `@${name}`;
-}
-
-export function presenceLabel(presence) {
-  return presence === "online" ? "Online" : presence === "offline" ? "Offline" : "Away";
-}
-
-// Presence is derived from room work + recent chat. No extra people-data store.
-export function memberPresence(member, { workItems, messages, now } = {}) {
-  if (!member || member.active === false) return "offline";
-  const clock = Number.isFinite(now) ? now : Date.now();
-  const items = workList(workItems);
-  if (items.some(item => item.accountableMemberId === member.id
-    && (ENGAGED_WORK.has(item.state) || RUNNING_SESSION.has(item.status)))) return "online";
-  if (items.some(item => waitingOnMember(item, member.id))) return "online";
-  const last = [...(messages || [])].reverse().find(message => message?.authorId === member.id);
-  const at = last && Date.parse(last.createdAt ?? last.at);
-  if (Number.isFinite(at) && clock - at < PRESENCE_ONLINE_MS) return "online";
-  return "away";
 }
 
 // One-line “what they’re on”: current work title, else kind. Not a profile.

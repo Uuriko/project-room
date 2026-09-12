@@ -189,7 +189,7 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /syncComposerChrome/);
   assert.match(app, /dismissRoomGuide/);
   assert.match(app, /escapeChatAction, messageCluster/);
-  assert.match(app, /kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills/);
+  assert.match(app, /kindLabel, memberStatus, memberHandle, memberDoneChip, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills/);
   assert.match(app, /replyAuthorToAddress/);
   assert.match(app, /shouldAddressPresenceClick\(e\.target\)/);
   assert.match(app, /grouped-time/);
@@ -233,7 +233,8 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(css, /--room-rule/);
   assert.match(css, /\.member-status/);
   assert.match(css, /\.done-chip/);
-  assert.match(css, /\.presence-dot/);
+  assert.doesNotMatch(css, /\.presence-dot/);
+  assert.doesNotMatch(app, /memberPresence|presenceLabel|data-presence=/);
   assert.match(css, /\.member-handle-agent/);
   assert.match(css, /\.agent-roster \.button \{ width: auto; min-height: 44px;/);
   assert.match(css, /\.composer-toolbar select \{[^}]*min-height: 44px/);
