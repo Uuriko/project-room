@@ -146,10 +146,18 @@ const invitationSchema = `
   CREATE TRIGGER IF NOT EXISTS membership_invitation_events_append_only_delete BEFORE DELETE ON membership_invitation_events BEGIN SELECT RAISE(ABORT,'invitation audit is append-only'); END;
 `;
 const compact = state => ({ ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} });
-const sessionEventMatchesRequest = (event, request) => event?.data?.workItemId === request.workItemId
+const sessionEventMatchesRequest = (event, request) => {
+  const data = { workItemId: request.workItemId, expectedRevision: request.expectedRevision };
+  if (request.action === "set_status") {
+    if (event.type !== T.SESSION_STARTED) data.status = request.status;
+    if (request.budget !== undefined && !(event.type === T.SESSION_STARTED && request.budget === null)) data.budget = request.budget;
+    if (request.spendCents !== undefined) data.spendCents = request.spendCents;
+  }
+  return canonical(event?.data) === canonical(data)
   && (request.action === "request_stop" ? event.type === T.SESSION_STOP_REQUESTED
     : event.type === T.SESSION_STARTED ? request.status === "processing"
       : (event.type === T.SESSION_STATUS_CHANGED || event.type === T.SESSION_STOPPED) && event.data.status === request.status);
+};
 // Platform differences stay at the database boundary; identity, invitation and
 // command rules below are shared by every runtime. The default remains Node.
 const nodeReadTransactions = new WeakSet();
@@ -1225,15 +1233,21 @@ export class RoomStore {
     if (request.action === "set_status" && !isSessionStatus(request.status)) fail(422, "invalid_session_status", "Choose a session status");
     if (request.spendCents !== undefined && (!Number.isSafeInteger(request.spendCents) || request.spendCents < 0))
       fail(422, "invalid_session_spend", "spendCents must be a non-negative integer of cents");
-    // W4-46 H5: the budget trip-wire fires before anything else touches the
-    // session — any interaction with a runaway session stops it first. A
+    // Resolve accepted retries before budget side effects. A new interaction
+    // with a runaway session stops it first. A
     // spend report on this mutation counts: the limit trips on the number
     // the worker just declared, not only on stored history.
     // This runs in its own committing transaction OUTSIDE the mutation's:
     // the forced stop must stay in the log even though the caller's
     // mutation below is rejected (a nested savepoint would roll back).
-    const tripped = this.transaction(() => {
-      this.authenticate(token, roomId, expectedSessionBinding);
+    const preflight = this.transaction(() => {
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const prior = this.db.prepare("SELECT e.sequence,e.body FROM commands c JOIN events e ON e.room_id=c.room_id AND e.sequence=c.sequence WHERE c.room_id=? AND c.actor_id=? AND c.id=?").get(roomId, auth.member.id, request.requestId);
+      if (prior) {
+        const parsedEvent = JSON.parse(prior.body);
+        if (!sessionEventMatchesRequest(parsedEvent, request)) fail(409, "idempotency_conflict", "Command ID already used for different content");
+        return { sequence: prior.sequence, event: parsedEvent, duplicate: true };
+      }
       const roomState = this.room(roomId).state;
       const item = roomState.workItems[request.workItemId];
       if (!item) fail(404, "work_not_found", "Work item not found in this Room");
@@ -1248,9 +1262,10 @@ export class RoomStore {
           data: { workItemId: request.workItemId, expectedRevision: item.revision, status: "failed",
             budgetEnforced: true, reason: "budget_exceeded", limit: wire } }, expectedSessionBinding, true);
       }
-      return wire;
+      return { wire };
     });
-    if (tripped) fail(409, "budget_exceeded", `Session budget exceeded (${tripped}); the session was stopped`);
+    if (preflight.duplicate) return preflight;
+    if (preflight.wire) fail(409, "budget_exceeded", `Session budget exceeded (${preflight.wire}); the session was stopped`);
     return this.transaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const prior = this.db.prepare("SELECT e.sequence,e.body FROM commands c JOIN events e ON e.room_id=c.room_id AND e.sequence=c.sequence WHERE c.room_id=? AND c.actor_id=? AND c.id=?").get(roomId, auth.member.id, request.requestId);

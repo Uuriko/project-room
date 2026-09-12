@@ -74,10 +74,12 @@ test("a claimed budget is visible on the card; undeclared quotas read 'unknown'"
 });
 
 test("a runaway session is stopped by its runtime limit on the next interaction", async t => {
-  const { propose, claim, mutate, card, request, origin, agentKey } = await serve(t);
+  const { store, propose, claim, mutate, card, request, agentKey } = await serve(t);
+  let now = Date.now();
+  store.now = () => now;
   const workItemId = propose("runaway run");
   assert.equal((await claim(workItemId, { budget: { maxRuntimeMs: 1 } })).status, 201);
-  // The 1ms budget has elapsed by the time the worker heartbeats again.
+  now += 2;
   const beat = await mutate(workItemId, 1, { status: "active" });
   assert.equal(beat.status, 409);
   assert.equal(beat.json?.error?.code, "budget_exceeded");

@@ -131,3 +131,35 @@ test("failed budget-stop persistence propagates failure and does not claim succe
   assert.equal((await f.mutate(id, { status: "active" })).body.error.code, "budget_exceeded");
   assert.equal(f.item(id).status, "failed");
 });
+
+test("exact session retries after expiry return the original result without new writes", async t => {
+  const f = await fixture(t), id = f.propose();
+  const request = { requestId: randomUUID(), workItemId: id, expectedRevision: f.item(id).revision,
+    action: "set_status", status: "processing", budget: { maxRuntimeMs: 1000 } };
+  const original = f.store.mutateWorkSession(f.worker, "policy", request);
+  const sequence = f.store.room("policy").sequence;
+  f.advance(2000);
+  const retry = f.store.mutateWorkSession(f.worker, "policy", request);
+  assert.equal(retry.duplicate, true);
+  assert.deepEqual(retry.event, original.event);
+  assert.equal(f.store.room("policy").sequence, sequence);
+  assert.equal(f.item(id).status, "processing");
+});
+
+test("reused session request IDs reject changed budget, spend, or revision without side effects", async t => {
+  const f = await fixture(t), id = f.propose();
+  const request = { requestId: randomUUID(), workItemId: id, expectedRevision: f.item(id).revision,
+    action: "set_status", status: "processing", budget: { maxRuntimeMs: 1000, maxSpendCents: 100 } };
+  f.store.mutateWorkSession(f.worker, "policy", request);
+  const sequence = f.store.room("policy").sequence;
+  for (const elapsed of [0, 2000]) {
+    f.advance(elapsed);
+    for (const changed of [{ budget: { maxRuntimeMs: 9000 } }, { spendCents: 101 },
+      { expectedRevision: request.expectedRevision + 1 }]) {
+      assert.throws(() => f.store.mutateWorkSession(f.worker, "policy", { ...request, ...changed }),
+        error => error.code === "idempotency_conflict");
+      assert.equal(f.store.room("policy").sequence, sequence);
+      assert.equal(f.item(id).status, "processing");
+    }
+  }
+});
