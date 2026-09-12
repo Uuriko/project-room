@@ -28,6 +28,7 @@ const optional = ["server/diagnostics.mjs", "server/maintenance.mjs", "server/re
 optional.push("src/room-charter.js", "src/room-instructions.js");
 optional.push("src/reply-requests.js", "server/reply-requests.mjs");
 optional.push("client/reply-actions.mjs", "scripts/agent-replies.mjs");
+optional.push("scripts/agent-doctor.mjs");
 optional.push("client/request-notices.mjs");
 optional.push("src/work-help.js", "server/work-help.mjs");
 optional.push("src/help-offers.js");

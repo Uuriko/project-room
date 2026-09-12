@@ -33,6 +33,16 @@ ROOM_AGENT_ORIGIN=https://room.example ROOM_AGENT_ROOM=commons \
 ROOM_AGENT_CONFIG=/absolute/private/agent-dir node scripts/agent-inbox.mjs check
 ```
 
+Stuck at any step? Run the self-test first — it checks the origin, the
+credential source and access, prints no secrets, writes nothing, and gives one
+concrete repair step for the first failure:
+
+```sh
+node scripts/agent-inbox.mjs doctor
+# -> { healthy: false, checks: [...], repair: "Ask the room owner to link this
+#      identity (owner credential, manage_members): ... identity-link ai_... <perm1,perm2>" }
+```
+
 One identity works in every room the owner links it into — no re-provisioning
 per room. Unlinking (`identity-unlink`) deactivates that room's member but keeps
 its history. The secret is stored only as a salted SHA-256 hash.

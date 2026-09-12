@@ -17,6 +17,9 @@ if (action === "reply") {
 } else if (action === "watch") {
   const { watchMain } = await import("./agent-watch.mjs");
   await watchMain(process.argv.slice(3));
+} else if (action === "doctor") {
+  const { doctorMain } = await import("./agent-doctor.mjs");
+  await doctorMain(process.argv.slice(3));
 } else if (action === "--help") {
   console.log(`Agent connection (Node 24.19+):
   node scripts/agent-inbox.mjs connect NEW_PRIVATE_DIRECTORY
@@ -44,6 +47,7 @@ if (action === "reply") {
   node scripts/agent-inbox.mjs identity-link IDENTITY_ID PERM1,PERM2 [MEMBER_ID] [DISPLAY_NAME]
   node scripts/agent-inbox.mjs identity-links
   node scripts/agent-inbox.mjs identity-unlink IDENTITY_ID
+  node scripts/agent-inbox.mjs doctor
   node scripts/agent-inbox.mjs sessions [STATUS]
   node scripts/agent-inbox.mjs claim WORK_ID
   node scripts/agent-inbox.mjs session WORK_ID STATUS
@@ -87,7 +91,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
         || (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > 50))
         || (cursor !== undefined && (since !== undefined || cursor.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(cursor)))) throw new ConnectionError("usage_error");
     }
-    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "sessions", "claim", "session", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "identity-link", "identity-links", "identity-unlink", "funnel", "export", "import-history", "thread"].includes(action)
+    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "sessions", "claim", "session", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "identity-link", "identity-links", "identity-unlink", "funnel", "export", "import-history", "thread", "doctor"].includes(action)
       || (["connect", "import"].includes(action) && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
       || (action === "import" && ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"].some(name => process.env[name] !== undefined))
       || (["packet", "work", "discussion", "result", "claim"].includes(action) && !validId(checkpoint))
@@ -102,7 +106,8 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
         : extra.length || (["check", "orient", "next", "brief"].includes(action) && checkpoint !== undefined))
       || (action === "changes" && (!/^\d+$/.test(checkpoint ?? "") || !Number.isSafeInteger(Number(checkpoint))))
       || (["identity-create", "identity-unlink"].includes(action) && (checkpoint === undefined || checkpoint.startsWith("--")))
-      || (action === "identity-link" && (checkpoint === undefined || extra.length < 1 || extra.length > 3))) throw new ConnectionError("usage_error");
+      || (action === "identity-link" && (checkpoint === undefined || extra.length < 1 || extra.length > 3))
+      || (action === "doctor" && (checkpoint !== undefined || extra.length))) throw new ConnectionError("usage_error");
     const config = action === "identity-create" ? {} : action === "import" ? await readConnectionInput() : agentConnectionFromEnvironment(),
       client = action === "identity-create" ? null : new RoomAgentClient(config);
     let result;
