@@ -62,7 +62,7 @@ Requires Node 24.19+.
 ```sh
 npm ci
 npm run check
-npx playwright install chromium
+npx playwright install --with-deps chromium
 npm run test:browser
 node scripts/acceptance-fixture.mjs --port 52331
 ```
