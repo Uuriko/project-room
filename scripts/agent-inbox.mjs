@@ -95,7 +95,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
       : action === "search" ? await client.orient({ query: checkpoint, focus: extra[0] === "--needs-me" ? "needs_me" : "all" })
       : action === "packet" ? packetMarkdown(await client.workPacket(checkpoint)) : action === "orient" ? await client.orient() : action === "brief" ? await client.returnBrief()
       : action === "presence" ? await client.presence()
-      : action === "capabilities" ? await client.capabilities()
+      : action === "capabilities" ? await client.capabilities(checkpoint === undefined ? {} : { search: checkpoint })
       : action === "advertise" ? await client.advertiseCapabilities([checkpoint, ...extra])
       : action === "status" ? await client.setStatus([checkpoint, ...extra].join(" "))
       : action === "sessions" ? await client.workSessions(checkpoint === undefined ? {} : { status: checkpoint })

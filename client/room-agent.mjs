@@ -377,7 +377,11 @@ export class RoomAgentClient {
   // and structural claims on work sessions. No extra permissions needed
   // beyond room membership for reads; writes follow the room's own gates.
   presence({ signal } = {}) { return this.#request("/presence", undefined, signal); }
-  capabilities({ signal } = {}) { return this.#request("/capabilities", undefined, signal); }
+  capabilities({ search, signal } = {}) {
+    if (search !== undefined && (typeof search !== "string" || !search.trim() || search.length > 80))
+      throw new Error("Search is 1 to 80 characters");
+    return this.#request(search ? `/capabilities?search=${encodeURIComponent(search)}` : "/capabilities", undefined, signal);
+  }
   advertiseCapabilities(capabilities, { signal } = {}) {
     if (!Array.isArray(capabilities) || capabilities.length === 0 || capabilities.length > 30
       || capabilities.some(cap => typeof cap !== "string" || !cap.trim() || cap.length > 80))

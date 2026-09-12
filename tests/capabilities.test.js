@@ -66,3 +66,18 @@ test("capability validation rejects bad lists", async t => {
   assert.equal((await advertise(request, agentKey, ["   "])).status, 422);
   assert.equal((await advertise(request, agentKey, "not-a-list")).status, 422);
 });
+
+test("capability registry searches by keyword (round-2 #102)", async t => {
+  const { request, agentKey } = await serve(t);
+  await advertise(request, agentKey, ["web-research", "code-review"]);
+  const all = await (await request("/api/rooms/commons/capabilities", { token: agentKey })).json();
+  assert.equal(all.members.length, 1);
+  const hit = await (await request("/api/rooms/commons/capabilities?search=code", { token: agentKey })).json();
+  assert.equal(hit.members.length, 1);
+  assert.deepEqual(hit.members[0].capabilities, ["web-research", "code-review"]);
+  const miss = await (await request("/api/rooms/commons/capabilities?search=deploy", { token: agentKey })).json();
+  assert.deepEqual(miss.members, []);
+  // case-insensitive
+  const upper = await (await request("/api/rooms/commons/capabilities?search=WEB", { token: agentKey })).json();
+  assert.equal(upper.members.length, 1);
+});

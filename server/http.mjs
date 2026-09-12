@@ -526,7 +526,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }));
       }
       if (route === "capabilities" && req.method === "GET") {
-        return json(res, 200, store.capabilities(selected.token, roomId, fence));
+        const search = url.searchParams.get("search");
+        return json(res, 200, store.capabilities(selected.token, roomId, { search, expectedSessionBinding: fence }));
       }
       if (route === "presence" && req.method === "GET") {
         const watchers = [...streams].filter(entry => entry.roomId === roomId).map(entry => entry.memberId);
