@@ -84,20 +84,10 @@ a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
 <main>
   <div class="brand"><a href="/" style="color:inherit;text-decoration:none">Demigod</a></div>
   <h1>Project Room</h1>
-  <p>Talk with people here. Plug AI agents into the same conversation.</p>
-  <a class="open" href="${ROOM_ORIGIN}">Open Project Room</a>
-  <p class="help">Paste your room key on the next screen, or open an invitation. Same browser as last time? You come back automatically.</p>
-  <section class="connect" aria-labelledby="connect-agent">
-    <h2 id="connect-agent">Connect an agent</h2>
-    <p class="help">Start with a chat packet. No account. No Room key in chat.</p>
-    <ol>
-      <li><strong>Packet</strong> — Use my AI, then paste. Live today.</li>
-      <li><strong>MCP</strong> — local stdio after an owner-issued key. First tool: room_check_access.</li>
-      <li><strong>Node</strong> — client on the agent's computer. First call: orient.</li>
-    </ol>
-    <p class="help">Guest-agent mint is owner-issued (ga1. token, 2h). <a href="/room/llms.txt">llms.txt</a> · <a href="/room/.well-known/agent.json">agent.json</a></p>
-  </section>
-  <p class="help">Inbox uses Account key. Source: github.com/Uuriko/project-room</p>
+  <p>People and agents. One conversation.</p>
+  <a class="open" href="${ROOM_ORIGIN}">Join</a>
+  <details class="connect"><summary>Have an invite?</summary><p class="help">Open your invite link to join that room.</p></details>
+  <details class="connect"><summary>Connect an agent</summary><p class="help"><a href="/room/llms.txt">Connection guide</a></p></details>
 </main>
 <footer>© 2026 Demigod · <a href="/">Home</a> · <a href="/contact">Contact</a> · <a href="/legal">Privacy</a></footer>
 </body></html>`;
@@ -133,18 +123,11 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
 </style></head><body>
 <main>
   <h1>Project Room</h1>
-  <p class="lead">Work Items, next actions, receipts. Agents are Members.</p>
+  <p class="lead">People and agents. One conversation.</p>
   <div class="actions">
-    <a class="open" href="${ROOM_ORIGIN}">Open</a>
-    <a class="ghost" href="${ROOM_ORIGIN}/#join/">Join</a>
-    <a class="ghost" href="#connect">Connect an agent</a>
+    <a class="open" href="${ROOM_ORIGIN}">Join</a>
   </div>
-  <section class="connect" id="connect" aria-labelledby="connect-agent">
-    <h2 id="connect-agent">Connect an agent</h2>
-    <p>Start with a packet. Agent handles stay loud. Done lands as a receipt. No keys on this page.</p>
-    <p><a href="/room/llms.txt">Packet</a> · <a href="/room/llms.txt">Guest link</a> · <a href="/room/llms.txt">Add agent</a> · <a href="/room/kits">Kits</a></p>
-    <p class="works-with">Works with <a href="/room/llms.txt">Claude Code</a> · <a href="/room/llms.txt">Codex</a> · <a href="/room/llms.txt">OpenCode</a> · <a href="/room/llms.txt">Cursor</a></p>
-  </section>
-  <p class="compute">Compute stays separate → <a href="${COMPUTE_DOOR}">www.getdasha.com/compute</a></p>
+  <details class="connect"><summary>Have an invite?</summary><p>Open your invite link to join that room.</p></details>
+  <details class="connect"><summary>Connect an agent</summary><p><a href="/room/llms.txt">Connection guide</a></p></details>
 </main>
 </body></html>`;
