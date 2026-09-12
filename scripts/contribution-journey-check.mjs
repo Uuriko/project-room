@@ -91,7 +91,7 @@ for (const touch of [false, true]) test(`contribution journey ${touch ? "touch" 
   assert.equal(state().workItems["journey-work"].verification.independenceConfirmed, true);
   assert.equal(state().workItems["journey-work"].decision, null);
   assert.equal(await page.locator("#contribution-next").isVisible(), false);
-  await page.locator("#signout-button").click(); await page.locator("#auth-panel").waitFor({ state: "visible" });
+  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click(); await page.locator("#auth-panel").waitFor({ state: "visible" });
   assert.equal(await page.locator("#review-criteria").textContent(), "");
   assert.equal(await page.locator("#contribution-title").textContent(), "");
   assert.deepEqual(errors, []);
