@@ -23,6 +23,7 @@ if (action === "reply") {
   pbpaste | node scripts/agent-inbox.mjs import NEW_PRIVATE_DIRECTORY
   node scripts/agent-inbox.mjs check
   node scripts/agent-inbox.mjs search "phrase" [--needs-me]
+  node scripts/agent-inbox.mjs find "phrase" [messages|work|all]
   node scripts/agent-inbox.mjs work WORK_ID [--include-source] [--include-offers]
   node scripts/agent-inbox.mjs result WORK_ID [--completion ID | --draft MESSAGE_ID]
   node scripts/agent-inbox.mjs discussion WORK_ID [--since N | --cursor CURSOR] [--limit N]
@@ -34,6 +35,7 @@ if (action === "reply") {
   node scripts/agent-inbox.mjs funnel
   node scripts/agent-inbox.mjs export > room.jsonl
   cat room.jsonl | node scripts/agent-inbox.mjs import-history
+  node scripts/agent-inbox.mjs thread MESSAGE_ID
   node scripts/agent-inbox.mjs sessions [STATUS]
   node scripts/agent-inbox.mjs claim WORK_ID
   node scripts/agent-inbox.mjs session WORK_ID STATUS
@@ -77,7 +79,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
         || (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > 50))
         || (cursor !== undefined && (since !== undefined || cursor.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(cursor)))) throw new ConnectionError("usage_error");
     }
-    if (!["connect", "import", "check", "orient", "next", "search", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "sessions", "claim", "session", "status", "templates", "funnel", "export", "import-history"].includes(action)
+    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "sessions", "claim", "session", "status", "templates", "funnel", "export", "import-history", "thread"].includes(action)
       || (["connect", "import"].includes(action) && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
       || (action === "import" && ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"].some(name => process.env[name] !== undefined))
       || (["packet", "work", "discussion", "result", "claim"].includes(action) && !validId(checkpoint))
@@ -113,6 +115,8 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
       : action === "funnel" ? await client.onboardingFunnel()
       : action === "export" ? { ndjson: await client.exportRoom() }
       : action === "import-history" ? await client.importRoom(await readStdin())
+      : action === "find" ? await client.search(checkpoint, { kind: extra[0] ?? "all" })
+      : action === "thread" ? await client.messageThread(checkpoint)
       : action === "sessions" ? await client.workSessions(checkpoint === undefined ? {} : { status: checkpoint })
       : action === "claim" ? await client.claimSession(checkpoint)
       : action === "session" ? await (async () => {

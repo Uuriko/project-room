@@ -14,6 +14,8 @@ export const EVENT_TYPES = Object.freeze({
   MEMBER_ACCESS_CHANGED: "member.access_changed",
   MEMBER_STATUS_UPDATED: "member.status_updated",
   MESSAGE_POSTED: "message.posted",
+  MESSAGE_EDITED: "message.edited",
+  MESSAGE_DELETED: "message.deleted",
   REPLY_REQUEST_CANCELLED: REPLY_CANCELLED,
   MESSAGE_REACTION_SET: "message.reaction_set",
   WORK_PROPOSED: "work.proposed",
@@ -137,6 +139,8 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.MEMBER_ACCESS_CHANGED]: changeMemberAccess,
     [EVENT_TYPES.MEMBER_STATUS_UPDATED]: updateMemberStatus,
     [EVENT_TYPES.MESSAGE_POSTED]: postMessage,
+    [EVENT_TYPES.MESSAGE_EDITED]: editMessage,
+    [EVENT_TYPES.MESSAGE_DELETED]: deleteMessage,
     [EVENT_TYPES.REPLY_REQUEST_CANCELLED]: cancelReplyRequest,
     [EVENT_TYPES.MESSAGE_REACTION_SET]: setMessageReaction,
     [EVENT_TYPES.WORK_PROPOSED]: proposeWork,
@@ -339,9 +343,37 @@ function postMessage(state, incoming) {
     replyToId: incoming.data.replyToId || null,
     toMemberId: incoming.data.toMemberId || null,
     createdAt: incoming.at,
+    revision: 0,
     ...(proposal ? { proposal } : {})
   });
   recordReplyPost(state, incoming, requestMode);
+}
+
+function findEditableMessage(state, incoming) {
+  const message = state.messages.find(m => m.id === incoming.data.messageId);
+  if (!message) throw new Error("Message not found");
+  if (message.deletedAt) throw new Error("Message was deleted");
+  const actor = requireMember(state, incoming.actorId);
+  if (message.authorId !== actor.id && actor.id !== state.room.ownerId) throw new Error("Only the author or the Room owner can change this message");
+  if ((message.revision ?? 0) !== incoming.data.expectedMessageRevision) throw new Error("Message changed; refresh before editing");
+  return { message, actor };
+}
+
+function editMessage(state, incoming) {
+  const { message } = findEditableMessage(state, incoming);
+  if (typeof incoming.data.body !== "string" || !incoming.data.body.trim()) throw new Error("Message body must be text");
+  message.editHistory = [...(message.editHistory ?? []), { body: message.body, editedAt: incoming.at }];
+  message.body = incoming.data.body;
+  message.revision = (message.revision ?? 0) + 1;
+  message.editedAt = incoming.at;
+}
+
+function deleteMessage(state, incoming) {
+  const { message } = findEditableMessage(state, incoming);
+  message.body = null;
+  message.deletedAt = incoming.at;
+  message.deletedBy = incoming.actorId;
+  message.revision = (message.revision ?? 0) + 1;
 }
 
 function setMessageReaction(state, incoming) {

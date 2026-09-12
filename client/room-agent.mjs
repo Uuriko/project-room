@@ -380,7 +380,14 @@ export class RoomAgentClient {
   presence({ signal } = {}) { return this.#request("/presence", undefined, signal); }
   workTemplates() { return WORK_TEMPLATES; }
   workTemplate(id) { return workTemplate(id); }
-  onboardingFunnel({ signal } = {}) { return this.#request("/onboarding-funnel", undefined, signal); }
+  search(query, { kind = "all", signal } = {}) {
+    const params = new URLSearchParams({ q: query });
+    if (kind !== "all") params.set("kind", kind);
+    return this.#request(`/search?${params}`, undefined, signal);
+  }
+  messageThread(messageId, { signal } = {}) {
+    return this.#request(`/messages/${encodeURIComponent(messageId)}/thread`, undefined, signal);
+  }
   // Round-2 #106/#107: export returns NDJSON text; import posts it back.
   // These bypass #request because the payloads are NDJSON, not JSON.
   async exportRoom({ signal } = {}) {
