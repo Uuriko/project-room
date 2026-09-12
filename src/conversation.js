@@ -75,9 +75,84 @@ export function shouldAddressPresenceClick(target) {
   return !(block && row.contains(block));
 }
 
-export function memberStatus(member) {
+const PRESENCE_ONLINE_MS = 15 * 60 * 1000;
+const RUNNING_SESSION = new Set(["processing", "active"]);
+const ENGAGED_WORK = new Set(["accepted", "working", "blocked"]);
+
+function workList(workItems) {
+  return Object.values(workItems ?? {}).filter(item => item && typeof item === "object" && !item.supersededBy && item.state !== "superseded");
+}
+
+function waitingOnMember(item, memberId) {
+  if (!item || item.supersededBy || item.state === "superseded") return false;
+  if (item.accountableMemberId === memberId && (item.state === "proposed" || ENGAGED_WORK.has(item.state))) return true;
+  if (item.independentVerificationRequired && item.verifierMemberId === memberId
+    && item.state === "completed" && item.receipt?.eventId && !item.verification?.result) return true;
+  if (item.ownerDecisionRequired && item.humanDecisionMakerId === memberId
+    && item.state === "completed" && item.receipt?.eventId && !item.decision?.decision) return true;
+  return false;
+}
+
+function latestStamp(item) {
+  return item?.updatedAt || item?.heartbeat_at || item?.createdAt || "";
+}
+
+function byLatest(a, b) {
+  return latestStamp(b).localeCompare(latestStamp(a)) || String(a.id).localeCompare(String(b.id));
+}
+
+// Loud @agent handle. Humans keep a readable name; IDs stay in details.
+export function memberHandle(member, label) {
+  const name = String(label ?? member?.displayName ?? "").trim();
+  if (!name) return "";
+  if (member?.kind !== "agent") return name;
+  return name.startsWith("@") ? name : `@${name}`;
+}
+
+export function presenceLabel(presence) {
+  return presence === "online" ? "Online" : presence === "offline" ? "Offline" : "Away";
+}
+
+// Presence is derived from room work + recent chat. No extra people-data store.
+export function memberPresence(member, { workItems, messages, now } = {}) {
+  if (!member || member.active === false) return "offline";
+  const clock = Number.isFinite(now) ? now : Date.now();
+  const items = workList(workItems);
+  if (items.some(item => item.accountableMemberId === member.id
+    && (ENGAGED_WORK.has(item.state) || RUNNING_SESSION.has(item.status)))) return "online";
+  if (items.some(item => waitingOnMember(item, member.id))) return "online";
+  const last = [...(messages || [])].reverse().find(message => message?.authorId === member.id);
+  const at = last && Date.parse(last.createdAt ?? last.at);
+  if (Number.isFinite(at) && clock - at < PRESENCE_ONLINE_MS) return "online";
+  return "away";
+}
+
+// One-line “what they’re on”: current work title, else kind. Not a profile.
+export function memberOnLine(member, { workItems, now } = {}) {
+  if (!member || member.active === false) return "";
+  const items = workList(workItems);
+  const waiting = items.filter(item => waitingOnMember(item, member.id)).sort(byLatest);
+  if (waiting[0]?.title) return waiting[0].title;
+  const own = items.filter(item => item.accountableMemberId === member.id && item.state !== "completed").sort(byLatest);
+  if (own[0]?.title) return own[0].title;
+  return "";
+}
+
+export function memberStatus(member, context) {
   if (!member || member.active === false) return "access revoked";
-  return kindLabel(member.kind);
+  const line = context ? memberOnLine(member, context) : "";
+  return line || kindLabel(member.kind);
+}
+
+// Compact Done receipt for an agent who posted completion. Not chat spam.
+export function memberDoneChip(member, { workItems } = {}) {
+  if (!member || member.kind !== "agent" || member.active === false) return null;
+  const done = workList(workItems)
+    .filter(item => item.receipt?.eventId && (item.accountableMemberId === member.id || item.receipt.producerId === member.id))
+    .sort(byLatest)[0];
+  if (!done) return null;
+  const title = String(done.receipt.summary || done.title || "").trim();
+  return { label: "Done", title, workItemId: done.id };
 }
 
 export function addressMember(text, caret, member) {

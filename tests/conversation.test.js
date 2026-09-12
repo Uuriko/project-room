@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T, replay } from "../src/events.js";
-import { conversationIndex, searchMessages, ConversationDrafts, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS, kindLabel, memberStatus, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, escapeChatAction, composerPlaceholder, removeMention, parseSearchQuery, messageAddressesMember, reactionPills, REACTIONS } from "../src/conversation.js";
+import { conversationIndex, searchMessages, ConversationDrafts, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS, kindLabel, memberStatus, memberHandle, memberPresence, memberOnLine, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, escapeChatAction, composerPlaceholder, removeMention, parseSearchQuery, messageAddressesMember, reactionPills, REACTIONS } from "../src/conversation.js";
 import { draftCommand } from "../src/client.js";
 
 function room(t) {
@@ -206,6 +206,10 @@ test("composer @ query picks people and agents and mention HTML stays escaped", 
   assert.equal(memberStatus({ kind: "agent", active: true }), "Agent");
   assert.equal(memberStatus({ kind: "human", active: true }), "Person");
   assert.equal(memberStatus({ kind: "agent", active: false }), "access revoked");
+  assert.equal(memberHandle({ kind: "agent", displayName: "Codex" }), "@Codex");
+  assert.equal(memberHandle({ kind: "human", displayName: "Maya" }), "Maya");
+  assert.equal(memberHandle({ kind: "agent", displayName: "Codex" }, "Codex (codex)"), "@Codex (codex)");
+  assert.equal(presenceLabel("online"), "Online");
   const fromClick = addressMember("hello", 5, members[0]);
   assert.equal(fromClick.body, "hello @Instinct ");
   assert.equal(fromClick.toMemberId, "instinct");
@@ -290,4 +294,52 @@ test("People-panel wrapping details does not swallow a name click; inner capabil
   assert.equal(shouldAddressPresenceClick(name), true);
   assert.equal(shouldAddressPresenceClick(innerSummary), false);
   assert.equal(shouldAddressPresenceClick(panelSummary), false);
+});
+
+test("People rail derives presence, one-line status, and Done chips from room work", () => {
+  const now = Date.parse("2026-09-12T02:00:00.000Z");
+  const codex = { id: "codex", displayName: "Codex", kind: "agent", active: true };
+  const instinct = { id: "instinct", displayName: "Instinct", kind: "agent", active: true };
+  const potter = { id: "potter", displayName: "Potter", kind: "human", active: true };
+  const maya = { id: "maya", displayName: "Maya", kind: "human", active: true };
+  const revoked = { id: "gone", displayName: "Gone", kind: "agent", active: false };
+  const workItems = {
+    review: {
+      id: "work-spec-review",
+      title: "Review the Project Room v0 contract",
+      state: "completed",
+      accountableMemberId: "codex",
+      verifierMemberId: "instinct",
+      independentVerificationRequired: true,
+      ownerDecisionRequired: true,
+      humanDecisionMakerId: "potter",
+      receipt: { eventId: "evt-done", summary: "Four consistency corrections before implementation." },
+      verification: { result: "pass" },
+      updatedAt: "2026-09-05T09:30:00.000Z"
+    },
+    build: {
+      id: "work-vertical-slice",
+      title: "Build the first executable Room slice",
+      state: "working",
+      accountableMemberId: "codex",
+      updatedAt: "2026-09-05T09:36:00.000Z"
+    }
+  };
+  const messages = [{ id: "m1", authorId: "maya", createdAt: "2026-09-12T01:50:00.000Z" }];
+  const ctx = { workItems, messages, now };
+  assert.equal(memberPresence(codex, ctx), "online");
+  assert.equal(memberPresence(potter, ctx), "online");
+  assert.equal(memberPresence(instinct, ctx), "away");
+  assert.equal(memberPresence(maya, ctx), "online");
+  assert.equal(memberPresence(revoked, ctx), "offline");
+  assert.equal(memberOnLine(codex, ctx), "Build the first executable Room slice");
+  assert.equal(memberStatus(codex, ctx), "Build the first executable Room slice");
+  assert.equal(memberStatus(potter, ctx), "Review the Project Room v0 contract");
+  assert.equal(memberStatus(instinct, ctx), "Agent");
+  assert.equal(memberDoneChip(codex, ctx)?.label, "Done");
+  assert.equal(memberDoneChip(codex, ctx)?.workItemId, "work-spec-review");
+  assert.match(memberDoneChip(codex, ctx)?.title, /consistency corrections/);
+  assert.equal(memberDoneChip(instinct, ctx), null);
+  assert.equal(memberDoneChip(potter, ctx), null);
+  assert.equal(memberDoneChip(revoked, { workItems }), null);
 });

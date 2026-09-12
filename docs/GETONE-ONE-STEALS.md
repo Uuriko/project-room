@@ -41,10 +41,16 @@ OG UI in one line: a docked black capsule that makes the *agent handle* and the 
 - getdasha `PUBLIC_ROOM_DOOR_HTML`: calmer Connect copy (handles + Done receipts) and a text **Works with** row (Claude Code · Codex · OpenCode · Cursor) → `/room/llms.txt`. No fake logos. No One / Amore claim.
 - Optional `--room-*` tokens + a `.member-status` placeholder on the People rail (one-line status, not a redesign).
 
-## Still for Instinct (after merge)
+## People-rail (this change)
 
-- People-rail one-line “what they’re on” (presence dots + live status, not just kind).
-- Handoff **Done** chips next to loud `@agent` handles.
+- Presence dots from current work / recent chat / revoked membership. No new people-data store.
+- One-line `.member-status` = the work they’re on (title), not just Person/Agent.
+- Loud `@agent` handles on the existing People rail.
+- Compact **Done** receipt chips next to those handles when the agent posted a completion receipt. Not chat spam. Not a Handoff board.
+
+## Still for Instinct
+
+- Phase 0 board / Handoff deep work (#8 / #9). People-rail Done chips are the face only — tip #11.
 - Workspace paper/ink chrome if/when a quiet theme is wanted. Door stays acid.
 
 ## Non-steals
