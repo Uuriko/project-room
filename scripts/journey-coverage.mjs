@@ -16,7 +16,15 @@ export function parseCoverageMap(markdown) {
   return map;
 }
 
+// Extract wired script paths from an npm script string. checkCoverage takes an
+// array and tests exact membership: the old string form allowed substring
+// false-negatives ("scripts/check.mjs" matching "scripts/other-check.mjs").
+export function parseBrowserSuite(script) {
+  return [...new Set(String(script || "").match(/scripts\/[A-Za-z0-9_.-]+\.mjs/g) ?? [])];
+}
+
 export function checkCoverage(map, { exists = existsSync, browserSuite = [] } = {}) {
+  const wired = Array.isArray(browserSuite) ? browserSuite : [];
   const problems = [];
   const seen = new Set();
   for (const claim of map.claims) {
@@ -39,7 +47,7 @@ export function checkCoverage(map, { exists = existsSync, browserSuite = [] } = 
     for (const path of browser) {
       if (!/^scripts\/.+\.mjs$/.test(path)) problems.push(`${label}: browser evidence ${path} is not a scripts/*.mjs path`);
       else if (!exists(path)) problems.push(`${label}: browser evidence ${path} does not exist`);
-      else if (!browserSuite.includes(path)) problems.push(`${label}: browser evidence ${path} is not wired into npm run test:browser`);
+      else if (!wired.includes(path)) problems.push(`${label}: browser evidence ${path} is not wired into npm run test:browser`);
     }
     for (const path of [...agent, ...hosted]) {
       if (!exists(path)) problems.push(`${label}: evidence ${path} does not exist`);
@@ -51,7 +59,7 @@ export function checkCoverage(map, { exists = existsSync, browserSuite = [] } = 
 function main() {
   const map = parseCoverageMap(readFileSync("docs/JOURNEY-COVERAGE-MAP.md", "utf8"));
   const pkg = JSON.parse(readFileSync("package.json", "utf8"));
-  const problems = checkCoverage(map, { browserSuite: String(pkg.scripts?.["test:browser"] || "") });
+  const problems = checkCoverage(map, { browserSuite: parseBrowserSuite(pkg.scripts?.["test:browser"]) });
   if (problems.length) {
     for (const p of problems) console.error(`journey-coverage: ${p}`);
     process.exit(1);
