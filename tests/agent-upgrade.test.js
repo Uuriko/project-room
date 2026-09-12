@@ -11,7 +11,7 @@ import { RoomStore } from "../server/store.mjs";
 import { AgentConnections } from "../server/agent-connections.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 
-for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline], [10, v10CharterBaseline], [11, v11ReplyBaseline], [12, v12HelpBaseline], [13, v13OfferBaseline], [14, v14InboxBaseline], [15, v15AdoptionBaseline], [16, v16SendBaseline], [17, v17EmailBaseline], [18, v18EmailSourceBaseline], [19, v19EmailExcerptBaseline], [20, v20ReplyJournalBaseline], [21, v21ReplyReviewBaseline], [22, v22ReplyUpdateBaseline], [23, v23ReplyAcknowledgmentBaseline], [24, v24ReplyResolutionBaseline], [25, "33c817a911ebb9fb0310592cac77d8e61380541d"], [26, v26IdentitiesBaseline], [27, "b1ec4f0c0b72f2a6967acdec33345ae713c1b53e"]]) test(`genuine v${version} data upgrades atomically; old writers cannot write v28`, async t => {
+for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline], [10, v10CharterBaseline], [11, v11ReplyBaseline], [12, v12HelpBaseline], [13, v13OfferBaseline], [14, v14InboxBaseline], [15, v15AdoptionBaseline], [16, v16SendBaseline], [17, v17EmailBaseline], [18, v18EmailSourceBaseline], [19, v19EmailExcerptBaseline], [20, v20ReplyJournalBaseline], [21, v21ReplyReviewBaseline], [22, v22ReplyUpdateBaseline], [23, v23ReplyAcknowledgmentBaseline], [24, v24ReplyResolutionBaseline], [25, "33c817a911ebb9fb0310592cac77d8e61380541d"], [26, v26IdentitiesBaseline], [27, "b1ec4f0c0b72f2a6967acdec33345ae713c1b53e"], [28, "37f5e4d08758fac857ef5298f5c656efd98f000f"]]) test(`genuine v${version} data upgrades atomically; old writers cannot write v29`, async t => {
   const root = mkdtempSync(join(tmpdir(), "room-agent-upgrade-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const repository = fileURLToPath(new URL("../", import.meta.url)), destination = join(root, "v8");
@@ -28,21 +28,21 @@ for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline
   AgentConnections.prototype.verifyHistory = function () { observedVersion = this.store.storagePlatform.version(this.store.db); throw new Error("synthetic final failure"); };
   try { assert.throws(() => new RoomStore(f.filename), { code: "connection_integrity_error" }); }
   finally { AgentConnections.prototype.verifyHistory = verify; }
-  assert.equal(observedVersion, 28, "fault was injected after installing the new writer");
+  assert.equal(observedVersion, 29, "fault was injected after installing the new writer");
   assert.equal(f.store.db.prepare("PRAGMA user_version").get().user_version, version);
   assert.deepEqual(catalog(), oldCatalog); assert.deepEqual(oldAudit(f.store), before);
   assert.equal(cached.run(f.owner.session.account.id).changes, 1);
   const current = new RoomStore(f.filename, { now: f.now }); t.after(() => current.close());
   const originalTables = new Set(before.tables.map(row => row.table));
   assert.deepEqual(auditRecovery(current).tables.filter(row => originalTables.has(row.table)), before.tables);
-  assert.equal(auditRecovery(current).tables.find(row => row.table === "room_attachments").rows, 0);
+  assert.equal(auditRecovery(current).tables.find(row => row.table === "room_attachments").rows, before.tables.find(row => row.table === "room_attachments")?.rows ?? 0);
   assert.deepEqual(current.email.verify(), version >= 18 ? { connections: 1, folders: 1, sources: 1 } : { connections: 0, folders: 0, sources: 0 });
   assert.equal(current.authenticate(f.keys.agent).member.id, "agent");
-  assert.throws(() => cached.run(f.owner.session.account.id), /project_room_writer_v28|unsupported database writer/);
+  assert.throws(() => cached.run(f.owner.session.account.id), /project_room_writer_v29|unsupported database writer/);
   assert.throws(() => new OldStore(f.filename), /newer than this service/);
-  current.createAccount("after-v28-upgrade");
-  assert.equal(current.account("after-v28-upgrade").active, true);
-  assert.equal(auditRecovery(current).schemaVersion, 28);
+  current.createAccount("after-v29-upgrade");
+  assert.equal(current.account("after-v29-upgrade").active, true);
+  assert.equal(auditRecovery(current).schemaVersion, 29);
   if (version >= 21) {
     f.replyRequests.forEach((request, index) => assert.deepEqual(current.inbox.reply(f.owner.token, request, f.owner.session.sessionBinding).receipt, f.replyReceipts[index]));
     const attempt = current.inbox.replyAttempts(f.owner.token, f.emailEnvelope.sourceId, f.owner.session.sessionBinding).attempts[0];

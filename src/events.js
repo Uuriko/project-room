@@ -202,7 +202,8 @@ function validateEnvelope(incoming) {
     if (["independentVerificationRequired", "ownerDecisionRequired", "active"].includes(key) && typeof value !== "boolean") throw new Error(`Invalid ${key}`);
     if (["permissions", "paths", "checksClaimed", "capabilities"].includes(key) && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !v.trim() || v.length > 512))) throw new Error(`Invalid ${key}`);
     if (key === "preferences" && (Array.isArray(value) || typeof value !== "object" || Object.entries(value).some(([k, v]) => typeof k !== "string" || typeof v !== "string" || k.length > 64 || v.length > 64))) throw new Error(`Invalid ${key}`);
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget"].includes(key)) throw new Error(`Invalid ${key}`);
+    if (key === 'attachments' && incoming.type !== EVENT_TYPES.MESSAGE_POSTED) throw new Error('Attachments belong to messages');
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "attachments"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -361,6 +362,13 @@ function postMessage(state, incoming) {
   const requestMode = prepareReplyPost(state, incoming);
   if (incoming.data.toMemberId) (requestMode === "respond" ? knownMember : requireMember)(state, incoming.data.toMemberId);
   if (typeof incoming.data.body !== "string") throw new Error("Message body must be text");
+  const attachments = incoming.data.attachments;
+  if (attachments !== undefined && (!Array.isArray(attachments) || attachments.length > 4
+    || new Set(attachments.map(file => file?.id)).size !== attachments.length
+    || attachments.some(file => !file || Object.keys(file).sort().join(',') !== 'byteLength,filename,id,mediaType,sha256'
+      || !validId(file.id) || typeof file.filename !== 'string' || !file.filename.trim()
+      || typeof file.mediaType !== 'string' || !Number.isSafeInteger(file.byteLength) || file.byteLength < 0
+      || typeof file.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(file.sha256)))) throw new Error('Invalid message attachments');
   if (incoming.data.workItemId) requireWorkItem(state, incoming.data.workItemId);
   const proposal = proposalContext(incoming.data, state.workItems[incoming.data.workItemId]);
   if (incoming.data.replyToId && !state.messages.some(m => m.id === incoming.data.replyToId)) throw new Error("Reply must reference a message in this Room");
@@ -373,6 +381,7 @@ function postMessage(state, incoming) {
     replyToId: incoming.data.replyToId || null,
     toMemberId: incoming.data.toMemberId || null,
     createdAt: incoming.at,
+    ...(attachments?.length ? { attachments: structuredClone(attachments) } : {}),
     ...(proposal ? { proposal } : {})
   });
   recordReplyPost(state, incoming, requestMode);

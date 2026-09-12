@@ -197,7 +197,7 @@ const shapes = {
   [T.MEMBER_ACCESS_CHANGED]: "memberId expectedMemberRevision permissions active",
   [T.MEMBER_STATUS_UPDATED]: "memberId message",
   [T.NOTIFICATION_PREFERENCES_SET]: "preferences",
-  [T.MESSAGE_POSTED]: `messageId body workItemId replyToId toMemberId packetId basisRevision allowOlderBasis ${REPLY_FIELDS.join(" ")}`,
+  [T.MESSAGE_POSTED]: `messageId body workItemId replyToId toMemberId packetId basisRevision allowOlderBasis attachmentIds ${REPLY_FIELDS.join(" ")}`,
   [T.MESSAGE_EDITED]: "messageId body expectedMessageRevision",
   [T.MESSAGE_DELETED]: "messageId expectedMessageRevision reason",
   [T.REPLY_REQUEST_CANCELLED]: "requestMessageId expectedRequestRevision reason",
@@ -234,7 +234,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities"].includes(name) ? "array" : ["preferences", "budget"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "attachmentIds"].includes(name) ? "array" : ["preferences", "budget"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (Buffer.byteLength(JSON.stringify(command)) > 16384) fail(413, "too_large", "Command is too large");
@@ -302,6 +302,8 @@ export class RoomStore {
     // Reread under the write lock: another startup may have upgraded while we waited.
     if (this.storagePlatform.version(this.db) !== version) throw new Error("Database changed during startup; retry with the current service");
     if (version >= 6) this.storagePlatform.verifyWriterFence(this.db, version);
+    if (version > 0 && version < 29 && this.db.prepare("SELECT 1 FROM events WHERE json_extract(body,'$.type')='message.posted' AND (json_type(body,'$.data.attachments') IS NOT NULL OR json_type(body,'$.data.attachmentIds') IS NOT NULL) LIMIT 1").get())
+      throw new Error('Legacy attachment fields require operator reconciliation');
     if (version > 0 && version < 12) {
       // Legacy fixture import allowed ignored scalar fields. Never reinterpret a
       // previously stored policy marker, even when it is null or behind a checkpoint.
@@ -367,6 +369,7 @@ export class RoomStore {
       // and the v0 block above covers fresh databases.
       this.db.exec(agentInviteSchema);
       if (version < 28) this.db.exec(attachmentSchema);
+      else if (version === 28) this.attachments.migrateV28();
       if (version < STORE_SCHEMA_VERSION) this.storagePlatform.installWriterFence(this.db);
       this.storagePlatform.verifyWriterFence(this.db);
       this.verifyInvitationAudit();
@@ -1702,12 +1705,18 @@ export class RoomStore {
       // At capacity, each remaining membership/request/help/offer/claim and each open work item can still be ended once.
       if ((room.sequence >= 10000 && !cleanup) || (command.type === T.MEMBER_ADDED && Object.keys(room.state.members).length >= 100) || (command.type === T.WORK_PROPOSED && Object.keys(room.state.workItems).length >= 500)) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       const memberAuthorityEvent = [T.MEMBER_ADDED, T.MEMBER_ACCESS_CHANGED].includes(command.type);
+      const messageAttachments = command.type === T.MESSAGE_POSTED && Object.hasOwn(command.data, 'attachmentIds')
+        ? this.attachments.bindMessage(roomId, auth.member.id, command.data.attachmentIds, command.data.messageId) : null;
       const incoming = event({
         type: command.type, roomId, actorId: auth.member.id, at: new Date(this.now()).toISOString(),
         idempotencyKey: hash(`${auth.member.id}:${command.id}`), causationId: command.causationId,
         data: memberAuthorityEvent ? { ...command.data, authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION }
           : requestMode ? { ...command.data, requestPolicyVersion: REPLY_POLICY_VERSION } : command.data
       });
+      if (messageAttachments) {
+        const { attachmentIds, ...data } = incoming.data;
+        incoming.data = { ...data, attachments: messageAttachments };
+      }
       let state;
       try {
         if (requestMode === "respond") {
@@ -1730,6 +1739,7 @@ export class RoomStore {
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("INSERT INTO commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, command.id, fingerprint, sequence);
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
+      if (command.type === T.MESSAGE_DELETED) this.attachments.deleteForMessage(roomId, command.data.messageId);
       if (command.data.workItemId) this.reminders.resolveWork(roomId, state.workItems[command.data.workItemId]);
       if (command.type === T.MEMBER_ACCESS_CHANGED) this.agentConnections.revokeMember(roomId, command.data.memberId);
       if (command.type === T.MEMBER_ACCESS_CHANGED && command.data.active === false) {

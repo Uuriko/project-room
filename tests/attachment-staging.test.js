@@ -167,3 +167,35 @@ test('shared-memory mutation cannot separate the stored bytes from their digest'
     f.files.discard(f.owner, 'files', input.id);
   }
 });
+
+test('message commitment makes exact bytes room-visible once and deletion removes them', t => {
+  const f = setup(t), input = f.input(); f.files.stage(f.owner, 'files', input);
+  assert.throws(() => f.files.readCommitted(f.guest, 'files', input.id), { status: 404 });
+  const command = { id: randomUUID(), type: 'message.posted', data: { messageId: 'with-file', body: 'Shared notes', attachmentIds: [input.id] } };
+  const saved = f.store.command(f.owner, 'files', command);
+  assert.equal(saved.event.data.attachments[0].sha256, f.files.readCommitted(f.guest, 'files', input.id).attachment.sha256);
+  assert.deepEqual(f.files.readCommitted(f.guest, 'files', input.id).bytes, input.bytes);
+  assert.equal(f.store.command(f.owner, 'files', command).duplicate, true);
+  assert.throws(() => f.files.readCommitted(f.other, 'other', input.id), { status: 404 });
+  assert.throws(() => f.files.discard(f.owner, 'files', input.id), { code: 'attachment_committed' });
+  const message = f.store.room('files').state.messages.find(m => m.id === 'with-file');
+  assert.equal(message.attachments[0].filename, input.filename);
+  assert.doesNotThrow(() => auditRecovery(f.store));
+  f.store.command(f.owner, 'files', { id: randomUUID(), type: 'message.deleted', data: { messageId: message.id, expectedMessageRevision: 0 } });
+  assert.throws(() => f.files.readCommitted(f.owner, 'files', input.id), { status: 404 });
+  assert.equal(f.store.db.prepare('SELECT state FROM room_attachments WHERE id=?').get(input.id).state, 'deleted');
+  assert.equal(f.store.command(f.owner, 'files', command).duplicate, true, 'old message retry cannot restore the deleted file');
+  assert.doesNotThrow(() => auditRecovery(f.store));
+  f.store.transaction(() => f.store.db.prepare('DELETE FROM room_attachments WHERE id=?').run(input.id));
+  assert.throws(() => auditRecovery(f.store), /Message attachment missing/);
+});
+
+test('failed message and cross-uploader attachment commitment roll back all selected uploads', t => {
+  const f = setup(t), input = f.input(); f.files.stage(f.owner, 'files', input);
+  const command = (ids, body = '') => ({ id: randomUUID(), type: 'message.posted', data: { messageId: randomUUID(), body, attachmentIds: ids } });
+  assert.throws(() => f.store.command(f.guest, 'files', command([input.id], 'Attempt')), { code: 'attachment_unavailable' });
+  assert.throws(() => f.store.command(f.owner, 'files', command([input.id])), { status: 422 });
+  assert.throws(() => f.store.command(f.owner, 'files', command([input.id, 'missing'], 'Attempt')), { code: 'attachment_unavailable' });
+  assert.deepEqual(f.files.readStaged(f.owner, 'files', input.id).bytes, input.bytes);
+  assert.equal(f.store.room('files').state.messages.length, 0);
+});
