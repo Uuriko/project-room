@@ -136,7 +136,10 @@ test("new clarification during execution refuses the old answer without silent r
   }, 10);
   t.after(() => clearInterval(timer));
   const result = await executeLocalRun(f.privateDir);
-  assert.equal(result.answerStatus, "refused");
+  // Depending on scheduling, the guard stops first or the final context check
+  // refuses the answer. Both must leave the changed exchange unanswered.
+  assert.ok(["refused", "not_sent"].includes(result.answerStatus));
+  if (result.answerStatus === "not_sent") assert.equal(result.reason, "request_changed");
   assert.equal(f.store.room("commons").state.replyRequests.question.status, "open");
   assert.equal(f.store.room("commons").state.messages.some(m => m.body.includes("Old-context answer")), false);
   await assert.rejects(executeLocalRun(f.privateDir), { code: "EEXIST" });

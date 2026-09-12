@@ -8,6 +8,7 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
 import { createRuntimePackage } from '../scripts/runtime-package.mjs';
+import { createRoomServer } from '../server/http.mjs';
 
 function setup(store) {
   store.initialize(initialRoom());
@@ -58,4 +59,18 @@ test('genuine v30 upgrade preserves data and rejects the pre-open old writer', a
   assert.throws(() => cached.run('commons'), /writer_v31|unsupported database writer/);
   current.command(f.agent, 'commons', f.claim);
   assert.equal(auditRecovery(current).schemaVersion, 31);
+});
+
+test('concurrent HTTP claim attempts yield only one new execution owner', async t => {
+  const store = new RoomStore(':memory:'), f = setup(store), server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
+  const url = `http://127.0.0.1:${server.address().port}/api/rooms/commons/commands`;
+  const post = command => fetch(url, { method: 'POST', headers: { authorization: `Bearer ${f.agent}`, 'content-type': 'application/json' }, body: JSON.stringify(command) });
+  const commands = [f.claim, { ...f.claim, id: 'other', data: { ...f.claim.data, runId: 'other-run' } }];
+  const results = await Promise.all(commands.map(post));
+  assert.equal(results.filter(result => result.ok).length, 1);
+  const winner = results.findIndex(result => result.ok), retry = await post(commands[winner]);
+  assert.equal((await retry.json()).duplicate, true);
+  assert.equal(store.room('commons').state.requestRuns.question.usedRunIds.length, 1);
 });
