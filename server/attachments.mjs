@@ -173,6 +173,20 @@ export class RoomAttachments {
       UNION SELECT room_id,member_id FROM agent_connections WHERE sponsor_account_id=?`).all(accountId, accountId))
       this.retireMember(row.room_id, row.member_id);
   }
+  status(token, roomId, id, binding = null) {
+    return this.store.readTransaction(() => {
+      const auth = this.store.authenticate(token, roomId, binding);
+      const row = this.db.prepare('SELECT * FROM room_attachments WHERE room_id=? AND id=?').get(roomId, id);
+      if (!row || row.uploader_id !== auth.member.id) fail(404, 'attachment_unavailable', 'Upload unavailable');
+      const state = stateAt(row, this.store.now());
+      if (state === 'staged') {
+        const bytes = new Uint8Array(row.bytes);
+        if (bytes.byteLength !== row.byte_length || digest(bytes) !== row.sha256) fail(500, 'attachment_corrupt', 'File could not be verified');
+      }
+      if (state === 'committed') this.readCommitted(token, roomId, id, binding);
+      return { ...view(row, this.store.now()), messageId: row.message_id ?? null };
+    });
+  }
   readStaged(token, roomId, id, binding = null) {
     return this.store.readTransaction(() => {
       const auth = this.store.authenticate(token, roomId, binding);

@@ -536,7 +536,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|provider-heartbeats|identity-links|agent-invites))?$/.exec(url.pathname);
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
-      const attachmentMatch = /^\/api\/rooms\/([^/]{1,384})\/attachments\/([^/]{1,384})$/.exec(url.pathname);
+      const attachmentMatch = /^\/api\/rooms\/([^/]{1,384})\/attachments\/([^/]{1,384})(\/status)?$/.exec(url.pathname);
       if (!match && !revokeMatch && !threadMatch && !attachmentMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? attachmentMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
@@ -553,6 +553,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const id = pathId(attachmentMatch[2]);
         if ([...url.searchParams.keys()].some(key => key !== 'auth') || url.searchParams.getAll('auth').length > 1)
           reject(422, 'invalid_attachment_selection', 'Choose one file');
+        if (attachmentMatch[3]) {
+          if (!['GET', 'HEAD'].includes(req.method)) {
+            res.setHeader('Allow', 'GET, HEAD'); reject(405, 'method_not_allowed', 'Method not allowed');
+          }
+          return json(res, 200, store.attachments.status(selected.token, roomId, id, fence), req.method === 'HEAD');
+        }
         if (req.method === 'PUT') {
           let filename;
           try { filename = decodeURIComponent(req.headers['x-file-name'] ?? ''); }

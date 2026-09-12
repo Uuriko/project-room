@@ -21,10 +21,17 @@ test('real Worker HTTP bridge preserves bounded file bytes and safe downloads', 
     const upload = await call(path, { method: 'PUT', headers, body: bytes });
     assert.equal(upload.status, 200, await upload.clone().text());
     assert.equal((await upload.json()).byteLength, bytes.length);
+    const status = await call(path + '/status', { headers });
+    assert.equal(status.status, 200);
+    const staged = await status.json();
+    assert.equal(staged.state, 'staged'); assert.equal(staged.byteLength, bytes.length);
+    assert.equal(Object.hasOwn(staged, 'bytes'), false);
     assert.equal((await call(path, { headers })).status, 404);
     const post = await call('/api/rooms/commons/commands', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: 'worker-file-post', type: 'message.posted', data: { messageId: 'worker-message', body: '', attachmentIds: ['worker-file'] } }) });
     assert.equal(post.status, 201, await post.clone().text());
+    const committed = await (await call(path + '/status', { headers })).json();
+    assert.equal(committed.state, 'committed'); assert.equal(committed.messageId, 'worker-message');
     const result = await call(path, { headers });
     assert.equal(result.status, 200);
     assert.deepEqual(new Uint8Array(await result.arrayBuffer()), bytes);

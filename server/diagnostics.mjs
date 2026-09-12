@@ -12,6 +12,7 @@ export function diagnosticRoute(requestUrl, roomId, origin = "http://localhost")
   if (roomRoutes.has(rest)) return `/api/rooms/:roomId/${rest}`;
   if (/^messages\/[^/]+\/thread$/.test(rest)) return "/api/rooms/:roomId/messages/:item/thread";
   if (/^attachments\/[^/]+$/.test(rest)) return "/api/rooms/:roomId/attachments/:item";
+  if (/^attachments\/[^/]+\/status$/.test(rest)) return "/api/rooms/:roomId/attachments/:item/status";
   if (/^invitations\/[^/]+\/revoke$/.test(rest)) return "/api/rooms/:roomId/invitations/:item/revoke";
   return "/api/rooms/:roomId/:unknown";
 }
