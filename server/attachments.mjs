@@ -8,7 +8,7 @@ export const attachmentLimits = Object.freeze({ fileBytes: 1048576, roomBytes: 1
 export const attachmentSchema = `CREATE TABLE room_attachments (
   room_id TEXT NOT NULL REFERENCES rooms(id), id TEXT NOT NULL,
   uploader_id TEXT NOT NULL, filename TEXT NOT NULL, media_type TEXT NOT NULL,
-  byte_length INTEGER NOT NULL CHECK(byte_length>=0 AND byte_length<=1048576),
+  byte_length INTEGER NOT NULL CHECK(byte_length>=0 AND byte_length<=${attachmentLimits.fileBytes}),
   sha256 TEXT NOT NULL CHECK(length(sha256)=64), bytes BLOB,
   state TEXT NOT NULL CHECK(state IN ('staged','discarded','expired')),
   created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
@@ -42,6 +42,8 @@ export class RoomAttachments {
     const expected = attachmentSchema.split(';')[0];
     if (this.db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='room_attachments'").get()?.sql !== expected)
       throw new Error('Attachment schema requires operator reconciliation');
+    if (this.db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='room_attachments_owner'").get()?.sql !== attachmentSchema.split(';')[1].trim())
+      throw new Error('Attachment index requires operator reconciliation');
   }
   audit() {
     this.verify();
@@ -64,7 +66,10 @@ export class RoomAttachments {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId, binding);
       validate(input);
-      const now = this.store.now(), hash = digest(input.bytes);
+      // Freeze the exact view before computing the digest. Shared-memory callers
+      // cannot change bytes between hashing and persistence.
+      const copy = new Uint8Array(input.bytes);
+      const now = this.store.now(), hash = digest(copy);
       const prior = this.db.prepare('SELECT * FROM room_attachments WHERE room_id=? AND id=?').get(roomId, input.id);
       if (prior) {
         if (prior.uploader_id !== auth.member.id || prior.filename !== input.filename || prior.media_type !== input.mediaType
@@ -86,13 +91,23 @@ export class RoomAttachments {
         fail(409, 'attachment_capacity', 'Attachment capacity reached');
       // Node binds a byte view; Durable SQLite binds its exact ArrayBuffer.
       // Copy first so a sliced caller buffer cannot persist adjacent bytes.
-      const copy = new Uint8Array(input.bytes);
       const bytes = this.db.storage ? copy.buffer : copy;
       this.db.prepare('INSERT INTO room_attachments VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(roomId, input.id,
         auth.member.id, input.filename, input.mediaType, input.bytes.byteLength, hash,
         bytes, 'staged', now, now + attachmentLimits.lifetimeMs);
       return view(this.db.prepare('SELECT * FROM room_attachments WHERE room_id=? AND id=?').get(roomId, input.id), now);
     });
+  }
+  retireMember(roomId, memberId) {
+    if (!this.db.isTransaction || this.db.readOnlyTransaction) throw new Error('Attachment retirement requires a write transaction');
+    this.db.prepare(`UPDATE room_attachments SET state='discarded',bytes=NULL WHERE room_id=? AND state='staged'
+      AND (uploader_id=? OR uploader_id IN (SELECT member_id FROM agent_connections WHERE room_id=? AND sponsor_member_id=?))`)
+      .run(roomId, memberId, roomId, memberId);
+  }
+  retireAccount(accountId) {
+    for (const row of this.db.prepare(`SELECT room_id,member_id FROM member_accounts WHERE account_id=?
+      UNION SELECT room_id,member_id FROM agent_connections WHERE sponsor_account_id=?`).all(accountId, accountId))
+      this.retireMember(row.room_id, row.member_id);
   }
   readStaged(token, roomId, id, binding = null) {
     return this.store.readTransaction(() => {

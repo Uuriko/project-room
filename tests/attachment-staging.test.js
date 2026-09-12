@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { attachmentLimits } from '../server/attachments.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
+import { Worker } from 'node:worker_threads';
+import { once } from 'node:events';
 
 function setup(t) {
   let now = Date.now();
@@ -71,6 +73,8 @@ test('unsafe names and malformed media types do not persist; current access is r
   assert.throws(() => f.files.readStaged(f.guest, 'files', input.id), { status: 401 });
   assert.throws(() => f.files.discard(f.guest, 'files', input.id), { status: 401 });
   assert.throws(() => f.files.stage(f.guest, 'files', f.input()), { status: 401 });
+  assert.equal(f.store.db.prepare('SELECT bytes FROM room_attachments WHERE id=?').get(input.id).bytes, null);
+  assert.equal(f.store.db.prepare('SELECT state FROM room_attachments WHERE id=?').get(input.id).state, 'discarded');
 });
 
 test('sliced input persists only its view, and corrupted storage is never served', t => {
@@ -116,4 +120,50 @@ test('recovery includes verified attachment bytes and tombstones without leaking
   const discarded = auditRecovery(f.store);
   assert.notEqual(discarded.dataSha256, staged.dataSha256);
   assert.equal(discarded.tables.find(row => row.table === 'room_attachments').rows, 1);
+});
+
+test('retirement cleanup shares the access transaction and account retirement reclaims bytes', t => {
+  const f = setup(t), input = f.input(); f.files.stage(f.guest, 'files', input);
+  assert.throws(() => f.store.transaction(() => {
+    f.store.command(f.owner, 'files', { id: randomUUID(), type: 'member.access_changed', data: { memberId: 'guest', expectedMemberRevision: 0, active: false, permissions: [] } });
+    throw new Error('rollback retirement');
+  }), /rollback retirement/);
+  assert.deepEqual(f.files.readStaged(f.guest, 'files', input.id).bytes, input.bytes);
+  const account = f.store.accountForMember('files', 'guest');
+  f.store.changeAccountAccess(account.id, { expectedRevision: account.revision, active: false, reason: 'Synthetic suspension' });
+  assert.equal(f.store.db.prepare('SELECT bytes FROM room_attachments WHERE id=?').get(input.id).bytes, null);
+});
+
+test('schema verification refuses a missing attachment ownership index', t => {
+  const f = setup(t);
+  f.store.transaction(() => f.store.db.exec('DROP INDEX room_attachments_owner'));
+  assert.throws(() => f.files.verify(), /Attachment index/);
+});
+
+test('sponsor account retirement also reclaims managed-agent staged bytes', t => {
+  const f = setup(t), session = f.store.createSession(f.owner);
+  const token = randomBytes(32).toString('base64url');
+  f.store.agentConnections.apply(session.token, 'files', { action: 'create', requestId: randomUUID(), memberId: 'managed',
+    displayName: 'Managed test agent', access: 'chat', keyHash: createHash('sha256').update(token).digest('hex'),
+    expiresAt: Date.now() + 3600000, expectedOwnerRevision: 0 }, session.session.sessionBinding);
+  const input = f.input(); f.files.stage(token, 'files', input);
+  assert.throws(() => f.files.readStaged(f.owner, 'files', input.id), { status: 404 });
+  const account = f.store.accountForMember('files', 'owner');
+  f.store.changeAccountAccess(account.id, { expectedRevision: account.revision, active: false, reason: 'Synthetic sponsor suspension' });
+  assert.equal(f.store.db.prepare('SELECT bytes FROM room_attachments WHERE id=?').get(input.id).bytes, null);
+});
+
+test('shared-memory mutation cannot separate the stored bytes from their digest', async t => {
+  const f = setup(t), shared = new SharedArrayBuffer(1048576);
+  const worker = new Worker(`const {workerData,parentPort}=require('node:worker_threads');
+    const bytes=new Uint8Array(workerData); parentPort.postMessage('ready');
+    while(true) { bytes.fill(17); bytes.fill(239); }`, { eval: true, workerData: shared });
+  t.after(() => worker.terminate());
+  await once(worker, 'message');
+  for (let n = 0; n < 8; n++) {
+    const input = f.input('shared-' + n, new Uint8Array(shared));
+    f.files.stage(f.owner, 'files', input);
+    assert.equal(f.files.readStaged(f.owner, 'files', input.id).bytes.byteLength, shared.byteLength);
+    f.files.discard(f.owner, 'files', input.id);
+  }
 });

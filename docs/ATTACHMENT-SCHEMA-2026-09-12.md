@@ -39,6 +39,10 @@ The first broad check was started before final test-expectation and cold-test
 corrections. Do not treat it as an unchanged-candidate release gate; record its
 outcome separately and repeat a final exact-state check before release claims.
 
+The subsequent full run passed **1,188 tests, zero failures/skips**, 112,992 ms.
+Source was unchanged during this rerun and saved as `e273a7b` while the check
+was running. This result precedes the separate G5 lifecycle follow-up changes.
+
 ## Open work
 
 Grok's G5 independent staging review remains pending. Aggregate room and lifetime

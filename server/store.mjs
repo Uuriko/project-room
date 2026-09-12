@@ -1087,7 +1087,7 @@ export class RoomStore {
       this.db.prepare("UPDATE account_credentials SET revoked=1 WHERE account_id=?").run(accountId);
       this.db.prepare("UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?").run(accountId);
       this.db.prepare("INSERT INTO account_access_events(account_id,revision,active,auth_epoch,reason,at) VALUES(?,?,?,?,?,?)").run(accountId, revision, active ? 1 : 0, authEpoch, reason.trim(), at);
-      if (!active) this.reminders.retireAccount(accountId);
+      if (!active) { this.reminders.retireAccount(accountId); this.attachments.retireAccount(accountId); }
       return this.account(accountId);
     });
   }
@@ -1735,6 +1735,7 @@ export class RoomStore {
       if (command.type === T.MEMBER_ACCESS_CHANGED && command.data.active === false) {
         this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, command.data.memberId);
         this.reminders.retireMember(roomId, command.data.memberId);
+        this.attachments.retireMember(roomId, command.data.memberId);
       }
       return { sequence, event: incoming, duplicate: false };
     });
