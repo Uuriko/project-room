@@ -1,6 +1,6 @@
 // Pure policy for a request's execution, independent of Work Items.
 // The service must supply authenticated actor/current request in one transaction.
-// Not yet registered as commands: see docs/REQUEST-RUN-CONTRACT.md.
+// Registered as schema-v31 commands: see docs/REQUEST-RUN-CONTRACT.md.
 const id = value => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value)
   && !["constructor", "prototype", "__proto__"].includes(value);
 const revision = value => Number.isSafeInteger(value) && value >= 0 && value < Number.MAX_SAFE_INTEGER;

@@ -38,11 +38,11 @@ for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline
   assert.equal(auditRecovery(current).tables.find(row => row.table === "room_attachments").rows, before.tables.find(row => row.table === "room_attachments")?.rows ?? 0);
   assert.deepEqual(current.email.verify(), version >= 18 ? { connections: 1, folders: 1, sources: 1 } : { connections: 0, folders: 0, sources: 0 });
   assert.equal(current.authenticate(f.keys.agent).member.id, "agent");
-  assert.throws(() => cached.run(f.owner.session.account.id), /project_room_writer_v30|unsupported database writer/);
+  assert.throws(() => cached.run(f.owner.session.account.id), /project_room_writer_v31|unsupported database writer/);
   assert.throws(() => new OldStore(f.filename), /newer than this service/);
   current.createAccount("after-v30-upgrade");
   assert.equal(current.account("after-v30-upgrade").active, true);
-  assert.equal(auditRecovery(current).schemaVersion, 30);
+  assert.equal(auditRecovery(current).schemaVersion, 31);
   if (version >= 21) {
     f.replyRequests.forEach((request, index) => assert.deepEqual(current.inbox.reply(f.owner.token, request, f.owner.session.sessionBinding).receipt, f.replyReceipts[index]));
     const attempt = current.inbox.replyAttempts(f.owner.token, f.emailEnvelope.sourceId, f.owner.session.sessionBinding).attempts[0];

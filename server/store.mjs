@@ -201,6 +201,9 @@ const shapes = {
   [T.MESSAGE_EDITED]: "messageId body expectedMessageRevision",
   [T.MESSAGE_DELETED]: "messageId expectedMessageRevision reason",
   [T.REPLY_REQUEST_CANCELLED]: "requestMessageId expectedRequestRevision reason",
+  [T.REQUEST_RUN_CLAIMED]: "requestMessageId expectedRevision runId contextEventId instructionsRevision maxRuntimeMs maxOutputBytes",
+  [T.REQUEST_RUN_STOP_REQUESTED]: "requestMessageId expectedRevision runId",
+  [T.REQUEST_RUN_FINISHED]: "requestMessageId expectedRevision runId status",
   [T.MESSAGE_REACTION_SET]: "messageId reaction active",
   [T.WORK_PROPOSED]: "workItemId title definitionOfDone accountableMemberId verifierMemberId independentVerificationRequired ownerDecisionRequired humanDecisionMakerId mode sourceMessageId",
   [T.WORK_ACCEPTED]: work,
@@ -234,7 +237,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "attachmentIds"].includes(name) ? "array" : ["preferences", "budget"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "instructionsRevision", "maxRuntimeMs", "maxOutputBytes"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "attachmentIds"].includes(name) ? "array" : ["preferences", "budget"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (Buffer.byteLength(JSON.stringify(command)) > 16384) fail(413, "too_large", "Command is too large");
@@ -302,6 +305,12 @@ export class RoomStore {
     // Reread under the write lock: another startup may have upgraded while we waited.
     if (this.storagePlatform.version(this.db) !== version) throw new Error("Database changed during startup; retry with the current service");
     if (version >= 6) this.storagePlatform.verifyWriterFence(this.db, version);
+    if (version > 0 && version < 31) {
+      const collision = table => this.db.prepare(`SELECT 1 FROM ${table} WHERE json_type(projection,'$.requestRuns') IS NOT NULL LIMIT 1`).get();
+      if (collision("rooms") || version >= 2 && collision("projection_checkpoints")
+        || this.db.prepare("SELECT 1 FROM events WHERE json_extract(body,'$.type') LIKE 'request_run.%' LIMIT 1").get())
+        throw new Error("Legacy request run fields require operator reconciliation");
+    }
     if (version > 0 && version < 29 && this.db.prepare("SELECT 1 FROM events WHERE json_extract(body,'$.type')='message.posted' AND (json_type(body,'$.data.attachments') IS NOT NULL OR json_type(body,'$.data.attachmentIds') IS NOT NULL) LIMIT 1").get())
       throw new Error('Legacy attachment fields require operator reconciliation');
     if (version > 0 && version < 12) {
@@ -1644,6 +1653,8 @@ export class RoomStore {
       if (command.causationId && !this.db.prepare("SELECT 1 FROM events WHERE room_id=? AND id=?").get(roomId, command.causationId)) fail(422, "invalid_cause", "Causation event must exist in this room");
       const room = this.room(roomId);
       const target = room.state.members[command.data.memberId];
+      if (command.type === T.REQUEST_RUN_CLAIMED && room.state.agentHalts?.[auth.member.id])
+        fail(409, "halt_active", "Clear the recorded halt before claiming request execution");
       const endingAccess = command.type === T.MEMBER_ACCESS_CHANGED && target?.active === true && command.data.active === false
         && canonical(target.permissions) === canonical(command.data.permissions);
       const requestMode = command.type === T.MESSAGE_POSTED && replyPostMode(command.data);
@@ -1702,7 +1713,10 @@ export class RoomStore {
         || (command.type === T.WORK_SUPERSEDED && workItem != null && workItem.state !== WORK_STATES.SUPERSEDED && !workItem.supersededBy);
       const endingSession = [T.SESSION_STOP_REQUESTED, T.SESSION_STOPPED].includes(command.type)
         && workItem != null && !isTerminalSession(sessionRecord(workItem).status);
-      const cleanup = endingAccess || endingRequest || endingHelp || endingOffer || endingClaim || endingWork || endingSession;
+      const requestRun = room.state.requestRuns?.[command.data.requestMessageId];
+      const endingRequestRun = requestRun && ([T.REQUEST_RUN_STOP_REQUESTED, T.REQUEST_RUN_FINISHED].includes(command.type))
+        && ["running", "stop_requested"].includes(requestRun.status);
+      const cleanup = endingAccess || endingRequest || endingHelp || endingOffer || endingClaim || endingWork || endingSession || endingRequestRun;
       // At capacity, each remaining membership/request/help/offer/claim and each open work item can still be ended once.
       if ((room.sequence >= 10000 && !cleanup) || (command.type === T.MEMBER_ADDED && Object.keys(room.state.members).length >= 100) || (command.type === T.WORK_PROPOSED && Object.keys(room.state.workItems).length >= 500)) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       const memberAuthorityEvent = [T.MEMBER_ADDED, T.MEMBER_ACCESS_CHANGED].includes(command.type);

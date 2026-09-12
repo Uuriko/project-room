@@ -5,6 +5,7 @@ import { REPLY_CANCELLED, prepareReplyPost, recordReplyPost, cancelReplyRequest 
 import { WORK_HELP_UPDATED, helpFromEvent } from "./work-help.js";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, helpOfferFromEvent } from "./help-offers.js";
 import { SESSION_EVENT_TYPES, applySessionFields } from "./work-item-session.js";
+import { transitionRequestRun } from "./request-run-policy.js";
 
 export const EVENT_TYPES = Object.freeze({
   ROOM_CREATED: "room.created",
@@ -18,6 +19,9 @@ export const EVENT_TYPES = Object.freeze({
   MESSAGE_EDITED: "message.edited",
   MESSAGE_DELETED: "message.deleted",
   REPLY_REQUEST_CANCELLED: REPLY_CANCELLED,
+  REQUEST_RUN_CLAIMED: "request_run.claimed",
+  REQUEST_RUN_STOP_REQUESTED: "request_run.stop_requested",
+  REQUEST_RUN_FINISHED: "request_run.finished",
   MESSAGE_REACTION_SET: "message.reaction_set",
   WORK_PROPOSED: "work.proposed",
   WORK_HELP_UPDATED,
@@ -112,6 +116,17 @@ export function replay(events) {
   return events.reduce((state, next) => applyEvent(state, next), emptyRoomState());
 }
 
+function applyRequestRun(state, incoming) {
+  const { requestMessageId, ...data } = incoming.data;
+  if (!validId(requestMessageId)) throw new Error("Invalid request selection");
+  const action = { "request_run.claimed": "claim", "request_run.stop_requested": "request_stop", "request_run.finished": "finish" }[incoming.type];
+  const run = transitionRequestRun({ run: state.requestRuns?.[requestMessageId] ?? null,
+    request: state.replyRequests?.[requestMessageId], actor: state.members[incoming.actorId],
+    ownerId: state.room.ownerId, instructionsRevision: state.room.charter?.revision ?? 0 }, action, data, incoming.at);
+  state.requestRuns ??= {};
+  state.requestRuns[requestMessageId] = run;
+}
+
 export function applyEvent(current, incoming) {
   const state = structuredClone(current);
   validateEnvelope(incoming);
@@ -144,6 +159,9 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.MESSAGE_EDITED]: editMessage,
     [EVENT_TYPES.MESSAGE_DELETED]: deleteMessage,
     [EVENT_TYPES.REPLY_REQUEST_CANCELLED]: cancelReplyRequest,
+    [EVENT_TYPES.REQUEST_RUN_CLAIMED]: applyRequestRun,
+    [EVENT_TYPES.REQUEST_RUN_STOP_REQUESTED]: applyRequestRun,
+    [EVENT_TYPES.REQUEST_RUN_FINISHED]: applyRequestRun,
     [EVENT_TYPES.MESSAGE_REACTION_SET]: setMessageReaction,
     [EVENT_TYPES.WORK_PROPOSED]: proposeWork,
     [EVENT_TYPES.WORK_HELP_UPDATED]: (state, incoming) => {

@@ -1,6 +1,6 @@
 # Chat-request execution
 
-Status: executable policy implemented; **not wired into the service, agent tools or UI yet**. Existing local execution still requires a work item. This contract is the next integration slice, not a release claim.
+Status: policy and atomic claimed/stop-requested/finished commands are implemented with schema-v31 writer fencing. **Agent tools, local runner and UI are not connected to these commands yet**; local execution still requires a work item. This is not a release claim.
 
 ## Product boundary
 
