@@ -72,6 +72,58 @@ test("direct, MCP and CLI share one request/clarification/answer journey with ex
   auditRecovery(f.store);
 });
 
+test("ordinary agent chat crosses direct, MCP and CLI without creating requests or work", async t => {
+  const f = await fixture(t), before = f.store.snapshot(f.keys.owner, "commons");
+  const input = { requestId: "ordinary-root", body: "Here is a useful observation for the room." };
+  const posted = await f.client.replyAction("room_post_message", input);
+  assert.equal(posted.status, "recorded");
+  assert.equal(posted.requestMessageId, null);
+  assert.equal(posted.appliedRequestRevision, null);
+  assert.equal(posted.next, null);
+  const adapter = await f.mcp();
+  const retry = (await adapter.call("room_post_message", input)).result.structuredContent;
+  assert.equal(retry.duplicate, true);
+  assert.equal(retry.eventId, posted.eventId);
+  const addressed = await f.cli("room_post_message", {
+    requestId: "ordinary-addressed", body: "An observation, not a formal request.", toMemberId: "reviewer"
+  });
+  assert.equal(addressed.code, 0, addressed.err);
+  assert.equal(JSON.parse(addressed.out).status, "recorded");
+  const after = f.store.snapshot(f.keys.owner, "commons");
+  assert.equal(after.sequence, before.sequence + 2);
+  assert.deepEqual(after.state.workItems, before.state.workItems);
+  assert.deepEqual(after.state.replyRequests, before.state.replyRequests);
+  assert.equal(after.cursor, before.cursor);
+  const message = after.state.messages.find(item => item.id === posted.messageId);
+  assert.equal(message.authorId, "producer");
+  assert.equal(message.body, input.body);
+  assert.equal(message.replyToId, null);
+  await assert.rejects(f.client.replyAction("room_post_message", { ...input, body: "Changed" }), { code: "idempotency_conflict" });
+  auditRecovery(f.store);
+});
+
+test("ordinary chat preserves uncertain writes and refuses action or identity injection", async t => {
+  const f = await fixture(t), input = { requestId: "chat-lost", body: "Posted once despite a lost confirmation." };
+  const lossy = new RoomAgentClient({ ...f.config, fetchImpl: async (url, options) => {
+    const response = await fetch(url, options);
+    if (url.endsWith("/commands")) throw new TypeError("Lost chat confirmation");
+    return response;
+  } });
+  await assert.rejects(lossy.replyAction("room_post_message", input), /Lost chat confirmation/);
+  const sequence = f.store.room("commons").sequence;
+  const receipt = await f.client.replyAction("room_post_message", input);
+  assert.equal(receipt.duplicate, true);
+  assert.equal(f.store.room("commons").sequence, sequence);
+  for (const extra of [{ actorId: "owner" }, { requestKind: "reply" }, { replyToId: "other" }, { token: "secret" }, { responseOutcome: "answered" }]) {
+    assert.equal(validReplyArguments("room_post_message", { ...input, ...extra }), false);
+  }
+  assert.equal(validReplyArguments("room_post_message", { ...input, body: " " }), false);
+  assert.equal(validReplyArguments("room_post_message", { ...input, body: "a".repeat(4097) }), false);
+  f.store.issueAccessKey("commons", "producer");
+  await assert.rejects(f.client.replyAction("room_post_message", { requestId: "revoked-chat", body: "No longer allowed" }), { status: 401 });
+  assert.equal(f.store.room("commons").sequence, sequence);
+});
+
 test("HTTP rejects unknown, duplicate, mixed and malformed selections; each read reauthenticates", async t => {
   const f = await fixture(t), q = f.open(), headers = { Authorization: "Bearer " + f.keys.producer };
   const query = async (route, suffix, extraHeaders = {}) => fetch(f.origin + "/api/rooms/commons/" + route + "?" + suffix, { headers: { ...headers, ...extraHeaders } });
@@ -139,7 +191,7 @@ test("read validators refuse changed identity, window, body, lineage and answer 
 });
 
 test("reply tool schemas are finite and partial/null bundles cannot be silently converted", () => {
-  assert.equal(replyTools.length, 7);
+  assert.equal(replyTools.length, 8);
   for (const name of ["room_respond_to_request", "room_request_reply", "room_cancel_request"]) {
     assert.equal(validReplyArguments(name, {}), false);
     assert.equal(validReplyArguments(name, { token: "secret" }), false);
