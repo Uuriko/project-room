@@ -53,6 +53,20 @@ OG UI in one line: a docked black capsule that makes the *agent handle* and the 
 - Phase 0 board / Handoff deep work (#8 / #9). People-rail Done chips are the face only — tip #11.
 - Workspace paper/ink chrome if/when a quiet theme is wanted. Door stays acid.
 
+## Connect P1 fold-ins (door HTML only)
+
+Tip #11 — `deploy/room-entry.mjs` only. No People-rail restack (#88). No packet after-paste UI.
+
+- Agents: Use my AI → paste the packet. No Room key in chat.
+- Guest: Owner mints ga1. guest-agent (not human #join/).
+- Add agent: Owner Add agent · enrolled digest key.
+- Ladder: Built-ins → Custom API connector (Member+kit) → Receipt on connect. Not a store.
+- Ashni: tools as agents — research, edit, plan — not one mega chat.
+- Rauch (≤3): plan: frontier member · do: workhorse member · Steer mid-task = Handoff note, not cancel.
+- Demigod door now matches the getdasha Connect face: loud handles + Done receipt + Works-with.
+
+Meta’s muse.ai product is not Room’s Muse member. The door does not name either.
+
 ## Non-steals
 
 Voice/mic/screen capture web, Mac Accessibility, One/Amore affiliation claims, Compute fold, people-data, Phase 0 ledger rewrite (#8/#9).

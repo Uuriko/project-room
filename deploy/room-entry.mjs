@@ -77,6 +77,9 @@ p{margin:0 0 1rem;color:rgba(228,222,210,.82);max-width:34em}
 .connect li{margin:0 0 .45rem}
 .connect strong{color:#E4DED2;font-weight:650}
 .connect a{color:var(--clay);text-decoration:none}
+.works-with{margin:.15rem 0 1rem;font-size:13px;color:var(--mute)}
+.works-with a{color:var(--mute)}
+.works-with a:hover{color:var(--clay)}
 footer{width:min(40rem,calc(100% - 2.5rem));margin:0 auto;padding:0 0 2.5rem;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute)}
 footer a{color:var(--clay);text-decoration:none}
 a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
@@ -89,13 +92,18 @@ a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
   <p class="help">Paste your room key on the next screen, or open an invitation. Same browser as last time? You come back automatically.</p>
   <section class="connect" aria-labelledby="connect-agent">
     <h2 id="connect-agent">Connect an agent</h2>
-    <p class="help">Start with a chat packet. No account. No Room key in chat.</p>
+    <p class="help">Agents: Use my AI → paste the packet. No Room key in chat.</p>
+    <p class="help">Agent handles stay loud. Done lands as a receipt. No keys on this page.</p>
     <ol>
-      <li><strong>Packet</strong> — Use my AI, then paste. Live today.</li>
-      <li><strong>MCP</strong> — local stdio after an owner-issued key. First tool: room_check_access.</li>
-      <li><strong>Node</strong> — client on the agent's computer. First call: orient.</li>
+      <li><strong><a href="/room/llms.txt">Packet</a></strong> — Use my AI → paste the packet.</li>
+      <li><strong><a href="/room/llms.txt">Guest</a></strong> — Owner mints ga1. guest-agent (not human #join/).</li>
+      <li><strong><a href="/room/llms.txt">Add agent</a></strong> — Owner Add agent · enrolled digest key.</li>
     </ol>
-    <p class="help">Guest-agent mint is owner-issued (ga1. token, 2h). <a href="/room/llms.txt">llms.txt</a> · <a href="/room/.well-known/agent.json">agent.json</a></p>
+    <p class="help">Built-ins → Custom API connector (Member+kit) → Receipt on connect.</p>
+    <p class="help">Connect tools as agents — research, edit, plan — not one mega chat.</p>
+    <p class="help">plan: frontier member · do: workhorse member · Steer mid-task = Handoff note, not cancel.</p>
+    <p class="works-with">Works with <a href="/room/llms.txt">Claude Code</a> · <a href="/room/llms.txt">Codex</a> · <a href="/room/llms.txt">OpenCode</a> · <a href="/room/llms.txt">Cursor</a></p>
+    <p class="help"><a href="/room/llms.txt">llms.txt</a> · <a href="/room/.well-known/agent.json">agent.json</a> · <a href="/room/kits">Kits</a></p>
   </section>
   <p class="help">Inbox uses Account key. Source: github.com/Uuriko/project-room</p>
 </main>
@@ -123,6 +131,9 @@ h1{font-size:clamp(2.4rem,8vw,3.8rem);line-height:1.05;letter-spacing:-.04em;mar
 .connect{margin:0;padding-top:1.35rem;border-top:1px solid rgba(242,237,231,.12);max-width:34em}
 .connect h2{margin:0 0 10px;font:650 11px/1.3 Inter,ui-sans-serif,system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}
 .connect p{margin:0 0 .75rem;font-size:15px;color:rgba(242,237,231,.72)}
+.connect ol{margin:0 0 .85rem;padding:0;list-style:none}
+.connect li{margin:0 0 .45rem}
+.connect strong{color:var(--paper);font-weight:650}
 .connect a{color:var(--acid);text-decoration:none}
 .works-with{margin:.15rem 0 0;font-size:13px;color:var(--mute)}
 .works-with a{color:var(--mute)}
@@ -141,8 +152,17 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
   </div>
   <section class="connect" id="connect" aria-labelledby="connect-agent">
     <h2 id="connect-agent">Connect an agent</h2>
-    <p>Start with a packet. Agent handles stay loud. Done lands as a receipt. No keys on this page.</p>
-    <p><a href="/room/llms.txt">Packet</a> · <a href="/room/llms.txt">Guest link</a> · <a href="/room/llms.txt">Add agent</a> · <a href="/room/kits">Kits</a></p>
+    <p>Agents: Use my AI → paste the packet. No Room key in chat.</p>
+    <p>Agent handles stay loud. Done lands as a receipt. No keys on this page.</p>
+    <ol>
+      <li><strong><a href="/room/llms.txt">Packet</a></strong> — Use my AI → paste the packet.</li>
+      <li><strong><a href="/room/llms.txt">Guest</a></strong> — Owner mints ga1. guest-agent (not human #join/).</li>
+      <li><strong><a href="/room/llms.txt">Add agent</a></strong> — Owner Add agent · enrolled digest key.</li>
+      <li><strong><a href="/room/kits">Kits</a></strong> — Member+kit.</li>
+    </ol>
+    <p>Built-ins → Custom API connector (Member+kit) → Receipt on connect.</p>
+    <p>Connect tools as agents — research, edit, plan — not one mega chat.</p>
+    <p>plan: frontier member · do: workhorse member · Steer mid-task = Handoff note, not cancel.</p>
     <p class="works-with">Works with <a href="/room/llms.txt">Claude Code</a> · <a href="/room/llms.txt">Codex</a> · <a href="/room/llms.txt">OpenCode</a> · <a href="/room/llms.txt">Cursor</a></p>
   </section>
   <p class="compute">Compute stays separate → <a href="${COMPUTE_DOOR}">www.getdasha.com/compute</a></p>
