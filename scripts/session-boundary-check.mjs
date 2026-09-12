@@ -140,7 +140,7 @@ test("late caught-up success and access error cannot cross an account switch", {
   await page.locator("#rb-ack-button").click();
   await successCaptured.promise;
   assert.equal(store.snapshot(owner, "commons").cursor, ownerHorizon, "the old account's committed marker remains its own");
-  await page.locator("#signout-button").click();
+  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click();
   await enterRoom(page, maya, "Maya");
   await page.waitForFunction(() => document.querySelector("#rb-attention-list")?.textContent.includes("Maya return item"));
   releaseSuccess.resolve();
@@ -159,7 +159,7 @@ test("late caught-up success and access error cannot cross an account switch", {
   await page.evaluate(() => { window.boundaryNotices = []; });
   await page.locator("#rb-ack-button").click();
   await errorCaptured.promise;
-  await page.locator("#signout-button").click();
+  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click();
   await enterRoom(page, owner, "Room owner");
   releaseError.resolve();
   await errorDelivered.promise;
@@ -795,7 +795,7 @@ test("record identities and fragments remain collision-safe and legacy work link
 
   // Reply addressing (#57) leaves an @-mention draft; accept the draft-guard confirm so sign-out proceeds.
   page.once("dialog", dialog => dialog.accept());
-  await page.locator("#signout-button").click();
+  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click();
   await enterRoom(page, duplicateA, "Alex (duplicate-a)");
   assert.equal(await page.locator("#identity-label").textContent(), "Alex (duplicate-a)");
   assert.equal(await page.locator("#identity-label").getAttribute("title"), "Alex (duplicate-a) · Person");
