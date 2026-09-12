@@ -3,6 +3,7 @@ import { validId, PERMISSIONS, WORK_STATES } from "../src/events.js";
 import { nextWorkStep, workActions, reusableWorkDefinition, workCollaboration } from "../src/workflow.js";
 import { isDeepStrictEqual } from "node:util";
 import { searchWork, completedResults, currentResult } from "../src/work-selectors.js";
+import { randomUUID } from "node:crypto";
 import { workPacket, resultDraft, verifyWorkResult } from "../src/work-packet.js";
 import { submitWorkAction } from "./work-actions.mjs";
 import { submitHelpAction } from "./help-actions.mjs";
@@ -372,6 +373,36 @@ export class RoomAgentClient {
   // Caller owns a stable command ID. On an uncertain transport result, reconcile
   // or resend this exact object. Never invent a replacement ID automatically.
   command(command, { signal } = {}) { return this.#request("/commands", command, signal); }
+  // Autonomy primitives: who is online and what they hold, who can do what,
+  // and structural claims on work sessions. No extra permissions needed
+  // beyond room membership for reads; writes follow the room's own gates.
+  presence({ signal } = {}) { return this.#request("/presence", undefined, signal); }
+  capabilities({ signal } = {}) { return this.#request("/capabilities", undefined, signal); }
+  advertiseCapabilities(capabilities, { signal } = {}) {
+    if (!Array.isArray(capabilities) || capabilities.length === 0 || capabilities.length > 30
+      || capabilities.some(cap => typeof cap !== "string" || !cap.trim() || cap.length > 80))
+      throw new Error("Advertise 1 to 30 capabilities of 1 to 80 characters");
+    return this.command({ id: randomUUID(), type: "capabilities.advertised", data: { capabilities } }, { signal });
+  }
+  workSessions({ status, signal } = {}) {
+    if (status !== undefined && typeof status !== "string") throw new Error("Choose one session status");
+    return this.#request(status ? `/work-sessions?status=${encodeURIComponent(status)}` : "/work-sessions", undefined, signal);
+  }
+  workSessionAction({ requestId, workItemId, expectedRevision, action, status }, { signal } = {}) {
+    if (!validId(requestId) || !validId(workItemId)) throw new Error("requestId and workItemId are required");
+    if (!["set_status", "request_stop"].includes(action)) throw new Error("action must be set_status or request_stop");
+    return this.#request("/work-sessions", { requestId, workItemId, expectedRevision, action,
+      ...(status === undefined ? {} : { status }) }, signal);
+  }
+  // Claim one queued session atomically: reads the card, then drives it to
+  // processing with the card's revision. Throws session_claimed when held.
+  async claimSession(workItemId, { signal } = {}) {
+    const sessions = await this.workSessions({ signal });
+    const card = sessions?.sessions?.find?.(item => item.workItemId === workItemId && item.status === "queued");
+    if (!card) throw new Error("No queued session card for that work item");
+    return this.workSessionAction({ requestId: randomUUID(), workItemId,
+      expectedRevision: card.revision, action: "set_status", status: "processing" }, { signal });
+  }
   workAction(name, args, options = {}) {
     return submitWorkAction(this, { roomId: this.#roomId, memberId: this.#memberId }, name, args, options);
   }
