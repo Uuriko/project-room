@@ -25,3 +25,20 @@ The earlier G8 blanket claim about download focus is separate from these compose
 fixes; download controls already had keyed focus restoration.
 
 No deployment or canonical source edits occurred.
+
+## Combined regression checkpoint
+
+Unchanged c024c8b subsequently passed all1221 tests,0failed/skip,66017ms.
+This includes the filename search and private upload-status changes preceding
+the accessibility fixes. The historical database upgrade suite completed; no
+test process was restarted while it was still running. Browser/file-draft recovery
+remains explicitly unimplemented and is not covered by that success claim.
+
+Recovery implementation must use a new tab-storage format so older text-only
+readers cannot reinterpret file-bearing drafts. Retain bounded file identifiers,
+names, sizes, MIME types and known checksums, never raw file contents or tokens.
+On restoration, treat every upload as unverified until its owner-only server
+status matches. Preserve the entire original pending message payload for unknown
+sends. Missing/expired uploads need explicit re-selection, never silent removal
+or an automatic text-only send. Opt-in, identity scope,12hour expiry and sign-out
+clearing remain part of the existing recovery contract.
