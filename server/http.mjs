@@ -463,7 +463,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         reject(405, "method_not_allowed", "Method not allowed");
       }
       const revokeMatch = /^\/api\/rooms\/([^/]{1,384})\/invitations\/([^/]{1,384})\/revoke$/.exec(url.pathname);
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics))?$/.exec(url.pathname);
       if (!match && !revokeMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((match ?? revokeMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
@@ -531,6 +531,35 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "onboarding-funnel" && req.method === "GET") {
         return json(res, 200, store.onboardingFunnel(selected.token, roomId, fence));
+      }
+      if (route === "export" && req.method === "GET") {
+        // Round-2 #106: JSONL export of the event log (same visibility as
+        // the events route — members only). One {sequence, event} per line.
+        res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8",
+          "Content-Disposition": `attachment; filename="room-${roomId}-export.jsonl"` });
+        for (const line of store.exportEvents(selected.token, roomId, fence)) {
+          res.write(JSON.stringify(line) + "\n");
+        }
+        return res.end();
+      }
+      if (route === "import" && req.method === "POST") {
+        // Round-2 #107: NDJSON import (the #106 export format). Owner-only,
+        // replaces room history. 8MB cap — larger restores go through backup.
+        if (!/^application\/x-ndjson/i.test(req.headers["content-type"] || "")) reject(415, "ndjson_required", "Use application/x-ndjson");
+        const text = await new Promise((resolve, rejectPromise) => {
+          let bytes = 0; const chunks = [];
+          req.on("data", chunk => {
+            bytes += chunk.length;
+            if (bytes > 8 * 1024 * 1024) { chunks.length = 0; req.destroy(); rejectPromise(new ServiceError(413, "too_large", "Import is too large; use database backup instead")); }
+            else chunks.push(chunk);
+          });
+          req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+          req.on("error", rejectPromise);
+        });
+        const lines = text.split("\n").filter(l => l.trim()).map((l, i) => {
+          try { return JSON.parse(l); } catch { reject(422, "invalid_import", `Line ${i + 1} is not valid JSON`); }
+        });
+        return json(res, 200, store.importEvents(selected.token, roomId, lines, fence));
       }
       if (route === "presence" && req.method === "GET") {
         const watchers = [...streams].filter(entry => entry.roomId === roomId).map(entry => entry.memberId);

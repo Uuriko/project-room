@@ -1243,6 +1243,53 @@ export class RoomStore {
   // Round-2 #105: onboarding funnel metrics. provisionedAt = member.added,
   // firstClaimAt = first work.accepted by the member, firstResultAt = first
   // work.completed by the member. Nulls mean "hasn't happened yet".
+  // Round-2 #106: JSONL event-log export for audit/portability. Streams
+  // {sequence, event} lines; the consumer replays them in order for #107.
+  *exportEvents(token, roomId, expectedSessionBinding = null) {
+    this.authenticate(token, roomId, expectedSessionBinding);
+    const sequence = this.room(roomId).sequence;
+    const stmt = this.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND sequence>? ORDER BY sequence LIMIT 1000");
+    let after = 0;
+    for (;;) {
+      const rows = stmt.all(roomId, after);
+      if (!rows.length) break;
+      for (const r of rows) yield { sequence: r.sequence, event: JSON.parse(r.body) };
+      after = rows.at(-1).sequence;
+      if (after >= sequence) break;
+    }
+  }
+  // Round-2 #107: rehydrate a room from a #106 JSONL export. Owner-only and
+  // destructive — it replaces the room's event log. Each line is validated
+  // (dense sequences, matching roomId, well-formed event) and the projection
+  // is rebuilt by replaying applyEvent from empty state, so a corrupt export
+  // fails before anything is written.
+  importEvents(token, roomId, lines, expectedSessionBinding = null) {
+    return this.transaction(() => {
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const { ownerId } = this.roomAuthority(roomId);
+      if (auth.member.id !== ownerId) fail(403, "owner_required", "Only the room owner can import history");
+      if (!Array.isArray(lines) || !lines.length || lines.length > 10000) fail(422, "invalid_import", "Import is 1 to 10000 event lines");
+      const events = lines.map((line, i) => {
+        if (!line || typeof line !== "object" || line.sequence !== i + 1) fail(422, "invalid_import", `Line ${i + 1} breaks the event sequence`);
+        const e = line.event;
+        if (!e || typeof e !== "object" || e.roomId !== roomId || !e.type || !e.actorId || !e.at || !e.id) fail(422, "invalid_import", `Line ${i + 1} is not a well-formed event`);
+        return e;
+      });
+      let state;
+      try { state = compact(events.reduce(applyEvent, emptyRoomState())); }
+      catch (error) { fail(422, "invalid_import", `Export does not replay: ${error.message}`); }
+      // Dependent rows reference event ids/sequences; a history replacement
+      // drops them. Pending invitations are lost on restore (documented).
+      this.db.prepare("DELETE FROM commands WHERE room_id=?").run(roomId);
+      this.db.prepare("DELETE FROM membership_invitation_events WHERE invitation_id IN (SELECT id FROM membership_invitations WHERE room_id=?)").run(roomId);
+      this.db.prepare("DELETE FROM membership_invitations WHERE room_id=?").run(roomId);
+      this.db.prepare("DELETE FROM events WHERE room_id=?").run(roomId);
+      const insert = this.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
+      events.forEach((e, i) => insert.run(roomId, i + 1, e.id, JSON.stringify(e)));
+      this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(events.length, JSON.stringify(state), roomId);
+      return { imported: events.length, sequence: events.length };
+    });
+  }
   onboardingFunnel(token, roomId, expectedSessionBinding = null) {
     return this.readTransaction(() => {
       this.authenticate(token, roomId, expectedSessionBinding);

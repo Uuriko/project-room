@@ -128,6 +128,39 @@ paths:
                             properties:
                               workItemId: { type: string }
                               status: { type: string }
+  /api/rooms/{roomId}/export:
+    get:
+      summary: Export the event log as JSONL
+      description: One {sequence, event} per line, ordered. Same visibility as the events route (members only).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: NDJSON export
+          content:
+            application/x-ndjson:
+              schema: { type: string }
+  /api/rooms/{roomId}/import:
+    post:
+      summary: Import a JSONL event-log export
+      description: Owner-only. Replaces the room's event log with the export's events after validating sequences and replaying the projection. Pending invitations are lost on restore.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/x-ndjson:
+            schema: { type: string }
+      responses:
+        '200':
+          description: Import result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  imported: { type: integer }
+                  sequence: { type: integer }
   /api/rooms/{roomId}/onboarding-funnel:
     get:
       summary: Agent onboarding funnel
