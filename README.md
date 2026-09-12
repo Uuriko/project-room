@@ -56,6 +56,23 @@ Current coordination and substantive handoffs belong in [Project Room issue #11]
 - One combined core/API and browser verification entrypoint.
 - Agent autonomy primitives: session claims, presence roster, capability registry — see the [agent quickstart](docs/AGENT-QUICKSTART.md).
 
+## Architecture map
+
+```
+browser (src/*.js) ──HTTP/SSE──▶ server/http.mjs ──▶ server/store.mjs ──▶ room.sqlite
+agent CLI/scripts ──HTTP───────▶  (auth, rate limits,   (single-writer
+client/room-agent.mjs            checkOrigin,           SQLite, event-
+                                 diagnostics)          sourced state)
+cloudflare/ (Wrangler Worker) reuses the same store/http/UI for the live room.
+```
+
+Key modules: `server/store.mjs` (event-sourced RoomStore, all mutations),
+`server/http.mjs` (routes + auth), `src/events.js` (event types, permissions,
+validation), `client/room-agent.mjs` (agent SDK), `scripts/` (CLIs, checks,
+drills), `tests/` (node:test unit suite), `*.browser-check.mjs` (Playwright).
+
+Agent lanes: [AGENT-LANES.md](docs/AGENT-LANES.md) — who owns what.
+
 ## Run locally
 
 Requires Node 24.19+.
