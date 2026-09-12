@@ -1,0 +1,16 @@
+{
+  "name": "@project-room/conformance-pilot",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Isolated Project Room conformance-pilot skeleton. Design/skeleton only. Full run blocked on published #8 tip.",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
