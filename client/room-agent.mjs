@@ -419,6 +419,9 @@ export class RoomAgentClient {
   messageThread(messageId, { signal } = {}) {
     return this.#request(`/messages/${encodeURIComponent(messageId)}/thread`, undefined, signal);
   }
+  providerHeartbeats({ signal } = {}) {
+    return this.#request("/provider-heartbeats", undefined, signal);
+  }
   setNotificationPreferences(preferences, { signal } = {}) {
     if (!preferences || typeof preferences !== "object" || Array.isArray(preferences)) throw new Error("Preferences must be an object");
     return this.command({ id: randomUUID(), type: "notifications.preferences_set", data: { preferences } }, { signal });
