@@ -59,6 +59,18 @@ paths:
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
+        - name: actor
+          in: query
+          description: Only events by this member (audit filter)
+          schema: { type: string }
+        - name: since
+          in: query
+          description: Only events at or after this ISO timestamp (audit filter)
+          schema: { type: string, format: date-time }
+        - name: until
+          in: query
+          description: Only events at or before this ISO timestamp (audit filter)
+          schema: { type: string, format: date-time }
       responses:
         '200':
           description: Events after the given sequence

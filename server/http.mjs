@@ -586,7 +586,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["linkId"])) reject(422, "invalid_link", "Select one invitation link to cancel");
         return json(res, 200, store.shareLinks.cancel(selected.token, roomId, data.linkId, fence));
       }
-      if (route === "events" && req.method === "GET") return json(res, 200, store.eventsAfter(selected.token, roomId, Number(url.searchParams.get("after") || 0), Number(url.searchParams.get("limit") || 100), fence));
+      if (route === "events" && req.method === "GET") {
+        const params = url.searchParams;
+        return json(res, 200, store.eventsAfter(selected.token, roomId,
+          Number(params.get("after") || 0), Number(params.get("limit") || 100),
+          { actor: params.get("actor"), since: params.get("since"), until: params.get("until"), expectedSessionBinding: fence }));
+      }
       if (route === "stream" && req.method === "GET") return stream(req, res, selected.token, roomId, Number(req.headers["last-event-id"] ?? url.searchParams.get("after") ?? 0), auth);
       if (route === "commands" && req.method === "POST") {
         const result = store.command(selected.token, roomId, await body(req), fence);

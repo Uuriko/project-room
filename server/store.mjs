@@ -1275,13 +1275,31 @@ export class RoomStore {
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
   }
-  eventsAfter(token, roomId, after = 0, limit = 100, expectedSessionBinding = null) {
+  eventsAfter(token, roomId, after = 0, limit = 100, bindingOrOptions = null, options = {}) {
+    // 5th arg may be the legacy session binding or an options object.
+    const opts = bindingOrOptions && typeof bindingOrOptions === "object" && !Array.isArray(bindingOrOptions)
+      ? bindingOrOptions : options;
+    const expectedSessionBinding = opts.expectedSessionBinding ?? (typeof bindingOrOptions === "string" || bindingOrOptions === null ? bindingOrOptions : null);
+    const { actor = null, since = null, until = null } = opts;
     return this.readTransaction(() => {
       this.authenticate(token, roomId, expectedSessionBinding);
       if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) fail(422, "invalid_cursor", "Invalid event cursor or limit");
+      if (actor !== null && (typeof actor !== "string" || !actor)) fail(422, "invalid_cursor", "Invalid actor filter");
+      for (const [name, value] of [["since", since], ["until", until]]) {
+        if (value !== null && (typeof value !== "string" || Number.isNaN(Date.parse(value)))) fail(422, "invalid_cursor", `Invalid ${name} timestamp`);
+      }
       const sequence = this.room(roomId).sequence;
       if (after > sequence) fail(409, "cursor_ahead", "Cursor exceeds room history; fetch a fresh snapshot");
-      const events = this.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND sequence>? ORDER BY sequence LIMIT ?").all(roomId, after, limit).map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
+      // Round-2 #110: audit filters. The event log is the audit log —
+      // every mutation records actorId + at, so "who did what when" is a
+      // filtered read, not a new table.
+      const events = this.db.prepare(
+        `SELECT sequence,body FROM events WHERE room_id=? AND sequence>?
+         AND (? IS NULL OR json_extract(body,'$.actorId')=?)
+         AND (? IS NULL OR json_extract(body,'$.at')>=?)
+         AND (? IS NULL OR json_extract(body,'$.at')<=?)
+         ORDER BY sequence LIMIT ?`
+      ).all(roomId, after, actor, actor, since, since, until, until, limit).map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
       const next = events.at(-1)?.sequence ?? after;
       return { events, next, hasMore: next < sequence };
     });
