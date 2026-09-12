@@ -59,29 +59,26 @@ test("room export streams the full event log as JSONL", async t => {
   return ndjson;
 });
 
-test("room import round-trips an export (round-2 #107)", async t => {
+test("online import is unavailable even for an owner's unchanged export", async t => {
   const { request, importNdjson, ownerKey, agentKey } = await serve(t);
   const ndjson = await (await request("/api/rooms/commons/export", { token: ownerKey })).text();
   const before = await (await request("/api/rooms/commons", { token: ownerKey })).json();
   const lineCount = ndjson.trim().split("\n").length;
 
-  // Wrong content type rejected.
-  assert.equal((await importNdjson(ownerKey, "{}", "application/json")).status, 415);
-  // Corrupt line rejected before anything is written.
-  assert.equal((await importNdjson(ownerKey, ndjson + "not json\n")).status, 422);
-  // Non-owner rejected.
-  assert.equal((await importNdjson(agentKey, ndjson)).status, 403);
+  assert.equal((await importNdjson(ownerKey, "{}", "application/json")).status, 409);
+  assert.equal((await importNdjson(ownerKey, ndjson + "not json\n")).status, 409);
+  assert.equal((await importNdjson(agentKey, ndjson)).status, 409);
 
-  // Owner round-trip: restore of the same history.
+  // Even an unchanged history is not a complete authority backup.
   const ok = await importNdjson(ownerKey, ndjson);
-  assert.equal(ok.status, 200);
-  assert.deepEqual(await ok.json(), { imported: lineCount, sequence: lineCount });
+  assert.equal(ok.status, 409);
+  assert.equal((await ok.json()).error.code, "recovery_requires_maintenance");
   const after = await (await request("/api/rooms/commons", { token: ownerKey })).json();
   assert.deepEqual(after.state.members, before.state.members);
   assert.equal(after.sequence, before.sequence);
 });
 
-test("room import resets cursors and refreshes the projection checkpoint", async t => {
+test("rejected online import preserves cursors and projection checkpoints", async t => {
   const { request, importNdjson, ownerKey, agentKey, store } = await serve(t);
   const before = await (await request("/api/rooms/commons", { token: ownerKey })).json();
   const seq = before.sequence;
@@ -93,18 +90,16 @@ test("room import resets cursors and refreshes the projection checkpoint", async
 
   const ndjson = await (await request("/api/rooms/commons/export", { token: ownerKey })).text();
   const ok = await importNdjson(ownerKey, ndjson);
-  assert.equal(ok.status, 200);
+  assert.equal(ok.status, 409);
 
-  // Cursors reset; checkpoint replaced with the imported state.
-  assert.equal(store.db.prepare("SELECT COUNT(*) n FROM cursors WHERE room_id='commons'").get().n, 0);
+  // Neither cursors nor checkpoints are changed by the refused request.
+  assert.equal(store.db.prepare("SELECT COUNT(*) n FROM cursors WHERE room_id='commons'").get().n, 1);
   const checkpoint = store.db.prepare("SELECT sequence,projection FROM projection_checkpoints WHERE room_id='commons'").get();
   assert.equal(checkpoint.sequence, seq);
-  assert.deepEqual(JSON.parse(checkpoint.projection).members, before.state.members);
-  // rebuildProjection still works off the fresh checkpoint.
-  assert.equal(store.rebuildProjection("commons").sequence, seq);
+  assert.deepEqual(JSON.parse(checkpoint.projection), { stale: true });
 });
 
-test("room import rejects duplicate event ids cleanly", async t => {
+test("online import refuses duplicate-event payload without parsing or writing", async t => {
   const { request, importNdjson, ownerKey, store } = await serve(t);
   const ndjson = await (await request("/api/rooms/commons/export", { token: ownerKey })).text();
   const lines = ndjson.trim().split("\n");
@@ -113,13 +108,13 @@ test("room import rejects duplicate event ids cleanly", async t => {
   const dup = lines.concat(JSON.stringify({ ...JSON.parse(lines[0]), sequence: lines.length + 1 }));
   const before = store.room("commons").sequence;
   const res = await importNdjson(ownerKey, dup.join("\n") + "\n");
-  assert.equal(res.status, 422);
-  assert.match(await res.text(), /duplicate event ids/);
+  assert.equal(res.status, 409);
+  assert.equal((await res.json()).error.code, "recovery_requires_maintenance");
   // Failed import writes nothing: room untouched.
   assert.equal(store.room("commons").sequence, before);
 });
 
-test("room import round-trips a large (1500-event) export", async t => {
+test("large export remains available while online replacement is refused", async t => {
   const { request, importNdjson, ownerKey, store } = await serve(t);
   for (let i = 0; i < 1500; i++) {
     store.command(ownerKey, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED,
@@ -130,26 +125,44 @@ test("room import round-trips a large (1500-event) export", async t => {
   assert.ok(lineCount > 1500, `expected >1500 lines, got ${lineCount}`);
   const before = await (await request("/api/rooms/commons", { token: ownerKey })).json();
   const ok = await importNdjson(ownerKey, ndjson);
-  assert.equal(ok.status, 200);
-  assert.deepEqual(await ok.json(), { imported: lineCount, sequence: lineCount });
+  assert.equal(ok.status, 409);
+  assert.equal((await ok.json()).error.code, "recovery_requires_maintenance");
   const after = await (await request("/api/rooms/commons", { token: ownerKey })).json();
   assert.deepEqual(after.state.members, before.state.members);
   assert.equal(after.sequence, before.sequence);
 });
 
-test("database failures during import surface as clean invalid_import, not raw errors", async t => {
+test("malformed imports receive a stable maintenance requirement", async t => {
   const { importNdjson, ownerKey } = await serve(t);
   const brokenSequence = JSON.stringify({ sequence: 99, event: { id: "x", roomId: "commons", type: "MESSAGE_POSTED", actorId: "a", at: 1 } });
   let res = await importNdjson(ownerKey, brokenSequence);
-  assert.equal(res.status, 422);
-  assert.equal((await res.json()).error.code, "invalid_import");
+  assert.equal(res.status, 409);
+  assert.equal((await res.json()).error.code, "recovery_requires_maintenance");
   const malformed = JSON.stringify({ sequence: 1, event: { id: "y", roomId: "commons" } });
   res = await importNdjson(ownerKey, malformed);
-  assert.equal(res.status, 422);
-  assert.equal((await res.json()).error.code, "invalid_import");
+  assert.equal(res.status, 409);
+  assert.equal((await res.json()).error.code, "recovery_requires_maintenance");
   // Duplicate ids across lines: clean invalid_import, no partial writes.
   const dup = [1, 2].map(i => JSON.stringify({ sequence: i, event: { id: "same", roomId: "commons", type: "MESSAGE_POSTED", actorId: "a", at: 1 } })).join("\n");
   res = await importNdjson(ownerKey, dup);
-  assert.equal(res.status, 422);
-  assert.equal((await res.json()).error.code, "invalid_import");
+  assert.equal(res.status, 409);
+  assert.equal((await res.json()).error.code, "recovery_requires_maintenance");
+});
+
+test("old online export cannot resurrect revoked access or invoke the legacy importer", async t => {
+  const { request, importNdjson, ownerKey, agentKey, store } = await serve(t);
+  const oldExport = await (await request("/api/rooms/commons/export", { token: ownerKey })).text();
+  store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED,
+    data: { memberId: "agent", expectedMemberRevision: store.room("commons").state.members.agent.revision,
+      permissions: ["accept_work"], active: false } });
+  const before = JSON.stringify(store.room("commons"));
+  let invoked = false;
+  store.importEvents = () => { invoked = true; throw new Error("Legacy importer must be unreachable from HTTP"); };
+  const response = await importNdjson(ownerKey, oldExport);
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).error.code, "recovery_requires_maintenance");
+  assert.equal(invoked, false);
+  assert.equal(JSON.stringify(store.room("commons")), before);
+  assert.throws(() => store.authenticate(agentKey, "commons"));
+  assert.equal((await request("/api/rooms/commons/import", { method: "POST", data: {} })).status, 401);
 });

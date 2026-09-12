@@ -142,8 +142,9 @@ paths:
               schema: { type: string }
   /api/rooms/{roomId}/import:
     post:
-      summary: Import a JSONL event-log export
-      description: Owner-only. Replaces the room's event log with the export's events after validating sequences and replaying the projection. Pending invitations are lost on restore.
+      summary: Online import unavailable
+      description: Event exports are not authority backups. Online history replacement is disabled; recovery requires operator review and isolated storage.
+      deprecated: true
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -152,15 +153,8 @@ paths:
           application/x-ndjson:
             schema: { type: string }
       responses:
-        '200':
-          description: Import result
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  imported: { type: integer }
-                  sequence: { type: integer }
+        '409':
+          description: recovery_requires_maintenance; no room data changed
   /api/rooms/{roomId}/messages/{messageId}/thread:
     get:
       summary: Threaded replies

@@ -595,23 +595,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return res.end();
       }
       if (route === "import" && req.method === "POST") {
-        // Round-2 #107: NDJSON import (the #106 export format). Owner-only,
-        // replaces room history. 8MB cap — larger restores go through backup.
-        if (!/^application\/x-ndjson/i.test(req.headers["content-type"] || "")) reject(415, "ndjson_required", "Use application/x-ndjson");
-        const text = await new Promise((resolve, rejectPromise) => {
-          let bytes = 0; const chunks = [];
-          req.on("data", chunk => {
-            bytes += chunk.length;
-            if (bytes > 8 * 1024 * 1024) { chunks.length = 0; req.destroy(); rejectPromise(new ServiceError(413, "too_large", "Import is too large; use database backup instead")); }
-            else chunks.push(chunk);
-          });
-          req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-          req.on("error", rejectPromise);
-        });
-        const lines = text.split("\n").filter(l => l.trim()).map((l, i) => {
-          try { return JSON.parse(l); } catch { reject(422, "invalid_import", `Line ${i + 1} is not valid JSON`); }
-        });
-        return json(res, 200, store.importEvents(selected.token, roomId, lines, fence));
+        // Event history alone cannot restore the credential/identity authority
+        // ledger. Never replace it while the room remains online.
+        reject(409, "recovery_requires_maintenance", "Online import is unavailable. Use an operator-reviewed recovery into isolated storage.");
       }
       if (route === "presence" && req.method === "GET") {
         const watchers = [...streams].filter(entry => entry.roomId === roomId).map(entry => entry.memberId);
