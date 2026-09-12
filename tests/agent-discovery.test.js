@@ -9,7 +9,7 @@ import { roomEntry, publicRoomDoorHtml } from "../deploy/room-entry.mjs";
 import {
   agentCard, llmsTxt, llmsFullTxt, agentCardJson, discoveryDoc, DISCOVERY_PATHS,
   SHORT_PACKET_FILES, SHORT_PACKET_SYNONYMS, AGENT_CARD_SYNONYMS, HEALTH_ALIAS_PATHS,
-  isHealthAliasPath,
+  isHealthAliasPath, A2A_PROTOCOL_VERSION, AGENT_CARD_A2A_PATH,
   ROOM_ORIGIN, ROOM_DOOR, ROOM_PUBLIC_WWW, ROOM_PUBLIC_LOBBY, COMPUTE_DOOR, ROOM_DOCS,
   EDGE_DOOR_HOSTS, isEdgeDoorUrl
 } from "../deploy/agent-discovery.mjs";
@@ -38,8 +38,10 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(card.endpoints.healthz, `${ROOM_ORIGIN}/api/health`);
   assert.deepEqual(card.key_routes.map(row => row.path), [
     "/api/health", "/llms.txt", "/llms-full.txt", "/.well-known/agent.json",
+    "/.well-known/agent-card.json",
     ...SHORT_PACKET_FILES.map(name => `/${name}`),
     "/room/llms.txt", "/room/llms-full.txt", "/room/.well-known/agent.json",
+    "/room/.well-known/agent-card.json",
     ...SHORT_PACKET_FILES.map(name => `/room/${name}`)
   ]);
   assert.deepEqual(card.join.map(row => row.id), ["packet", "guest-agent-link", "enrolled-key"]);
@@ -74,6 +76,14 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(FORBIDDEN.test(full), false);
   assert.equal(FORBIDDEN.test(agentCardJson()), false);
   assert.equal(JSON.parse(agentCardJson()).protocol, "project-room-discovery");
+  assert.equal(card.protocolVersion, A2A_PROTOCOL_VERSION);
+  assert.deepEqual(card.skills.map(row => row.id), ["orient", "room_check_access", "packet", "guest-agent-link", "enrolled-key"]);
+  assert.equal(card.capabilities.streaming, true);
+  assert.equal(card.capabilities.pushNotifications, false);
+  assert.deepEqual(card.defaultInputModes, ["text"]);
+  assert.equal(discoveryDoc(AGENT_CARD_A2A_PATH).body, discoveryDoc("/.well-known/agent.json").body);
+  assert.equal(discoveryDoc("/room/.well-known/agent-card.json").body, discoveryDoc("/.well-known/agent.json").body);
+  assert.equal(discoveryDoc("/project-room/.well-known/agent-card.json").body, discoveryDoc("/.well-known/agent.json").body);
 });
 
 test("Room Worker serves llms.txt, llms-full.txt, agent.json and /room aliases", async t => {

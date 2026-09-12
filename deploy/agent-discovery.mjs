@@ -70,11 +70,46 @@ export const KEY_ROUTES = Object.freeze([
   Object.freeze({ path: "/llms.txt", auth: false, first: "short packet" }),
   Object.freeze({ path: "/llms-full.txt", auth: false, first: "full packet" }),
   Object.freeze({ path: "/.well-known/agent.json", auth: false, first: "machine card" }),
+  Object.freeze({ path: "/.well-known/agent-card.json", auth: false, first: "A2A agent card (same bytes as machine card)" }),
   ...SHORT_PACKET_FILES.map(name => Object.freeze({ path: `/${name}`, auth: false, first: "same bytes as /llms.txt" })),
   Object.freeze({ path: "/room/llms.txt", auth: false, first: "same bytes; prefix-preserving edge" }),
   Object.freeze({ path: "/room/llms-full.txt", auth: false, first: "same bytes; prefix-preserving edge" }),
   Object.freeze({ path: "/room/.well-known/agent.json", auth: false, first: "same bytes; prefix-preserving edge" }),
+  Object.freeze({ path: "/room/.well-known/agent-card.json", auth: false, first: "A2A card; prefix-preserving edge" }),
   ...SHORT_PACKET_FILES.map(name => Object.freeze({ path: `/room/${name}`, auth: false, first: "same bytes as /room/llms.txt" }))
+]);
+
+// A2A-protocol skill entries (https://google.github.io/A2A): machine-readable
+// descriptions of what an agent can do with this Room. Superset fields below
+// keep every existing project-room-discovery field intact.
+export const A2A_PROTOCOL_VERSION = "0.3.0";
+export const AGENT_CARD_A2A_PATH = "/.well-known/agent-card.json";
+const A2A_SKILLS = Object.freeze([
+  Object.freeze({ id: "orient", name: "Orient",
+    description: "First call: contract, member, permissions, next work.",
+    tags: Object.freeze(["room", "onboarding", "work-items"]),
+    examples: Object.freeze(["orient"]),
+    inputModes: Object.freeze(["text"]), outputModes: Object.freeze(["text"]) }),
+  Object.freeze({ id: "room_check_access", name: "Check access",
+    description: "MCP: identity metadata, not history.",
+    tags: Object.freeze(["room", "identity", "mcp"]),
+    examples: Object.freeze(["room_check_access"]),
+    inputModes: Object.freeze(["text"]), outputModes: Object.freeze(["text"]) }),
+  Object.freeze({ id: "packet", name: "Chat packet",
+    description: "No Room key. Use my AI \u2192 paste.",
+    tags: Object.freeze(["room", "join"]),
+    examples: Object.freeze([]),
+    inputModes: Object.freeze(["text"]), outputModes: Object.freeze(["text"]) }),
+  Object.freeze({ id: "guest-agent-link", name: "Guest agent link",
+    description: "Owner mints an ephemeral agent member + ga1. token (read/chat, 2h). Not a human share link.",
+    tags: Object.freeze(["room", "join", "guest"]),
+    examples: Object.freeze([]),
+    inputModes: Object.freeze(["text"]), outputModes: Object.freeze(["text"]) }),
+  Object.freeze({ id: "enrolled-key", name: "Enrolled key",
+    description: "Owner Add agent. Digest-only key. Import locally.",
+    tags: Object.freeze(["room", "join", "key"]),
+    examples: Object.freeze([]),
+    inputModes: Object.freeze(["text"]), outputModes: Object.freeze(["text"]) })
 ]);
 
 export function agentCard() {
@@ -83,6 +118,15 @@ export function agentCard() {
     description: "Agent-native ledger: Work Items, next actions, and receipts. Agents are Members. Not a run factory.",
     version: "1",
     protocol: "project-room-discovery",
+    protocolVersion: A2A_PROTOCOL_VERSION,
+    defaultInputModes: Object.freeze(["text"]),
+    defaultOutputModes: Object.freeze(["text"]),
+    skills: A2A_SKILLS,
+    authentication: Object.freeze({
+      schemes: Object.freeze(["project-room-digest", "project-room-guest-link"]),
+      credentials: ROOM_DOCS.guestAgent
+    }),
+    provider: Object.freeze({ organization: "Project Room", url: ROOM_SOURCE }),
     url: ROOM_ORIGIN,
     base_url: ROOM_ORIGIN,
     door: ROOM_DOOR,
@@ -111,7 +155,10 @@ export function agentCard() {
     routes: CONNECT_ROUTES,
     firstTools: FIRST_TOOLS,
     docs: ROOM_DOCS,
-    capabilities: { remoteMcp: false, oauth: false, autoEnroll: false, guestAgentLinkMint: true }
+    capabilities: Object.freeze({
+      streaming: true, pushNotifications: false, stateTransitionHistory: false,
+      remoteMcp: false, oauth: false, autoEnroll: false, guestAgentLinkMint: true
+    })
   };
 }
 
@@ -127,6 +174,7 @@ www ${ROOM_PUBLIC_WWW}
 lobby ${ROOM_PUBLIC_LOBBY}
 healthz ${ROOM_ORIGIN}/api/health
 card ${ROOM_ORIGIN}/.well-known/agent.json
+a2a-card ${ROOM_ORIGIN}/.well-known/agent-card.json
 full ${ROOM_ORIGIN}/llms-full.txt
 source ${ROOM_SOURCE}
 compute ${COMPUTE_DOOR}
@@ -200,6 +248,7 @@ www ${ROOM_PUBLIC_WWW}
 lobby ${ROOM_PUBLIC_LOBBY}
 healthz ${ROOM_ORIGIN}/api/health
 card ${ROOM_ORIGIN}/.well-known/agent.json
+a2a-card ${ROOM_ORIGIN}/.well-known/agent-card.json
 source ${ROOM_SOURCE}
 
 Prefix-preserving edges can fetch the same bytes at /room/llms.txt,
@@ -256,7 +305,8 @@ export function agentCardJson() {
 const CANONICAL = Object.freeze({
   "/llms.txt": Object.freeze({ type: "text/plain; charset=utf-8", body: llmsTxt() }),
   "/llms-full.txt": Object.freeze({ type: "text/plain; charset=utf-8", body: llmsFullTxt() }),
-  "/.well-known/agent.json": Object.freeze({ type: "application/json; charset=utf-8", body: agentCardJson() })
+  "/.well-known/agent.json": Object.freeze({ type: "application/json; charset=utf-8", body: agentCardJson() }),
+  [AGENT_CARD_A2A_PATH]: Object.freeze({ type: "application/json; charset=utf-8", body: agentCardJson() })
 });
 
 const ALIASES = Object.freeze({
@@ -277,7 +327,10 @@ const ALIASES = Object.freeze({
   // Extensionless + extra doc leftovers (same short packet as /llms.txt).
   ...Object.fromEntries(SHORT_PACKET_SYNONYMS.flatMap(path => withSlash(path).map(alias => [alias, "/llms.txt"]))),
   // Card leftovers — not /.well-known on www (that card is Compute).
-  ...Object.fromEntries(AGENT_CARD_SYNONYMS.flatMap(path => withSlash(path).map(alias => [alias, "/.well-known/agent.json"])))
+  ...Object.fromEntries(AGENT_CARD_SYNONYMS.flatMap(path => withSlash(path).map(alias => [alias, "/.well-known/agent.json"]))),
+  // A2A-standard card path + prefix-preserving twins.
+  ...Object.fromEntries(["/room/.well-known/agent-card.json", "/project-room/.well-known/agent-card.json"]
+    .flatMap(path => withSlash(path).map(alias => [alias, AGENT_CARD_A2A_PATH])))
 });
 
 export const DISCOVERY_PATHS = Object.freeze([...Object.keys(CANONICAL), ...Object.keys(ALIASES)]);
