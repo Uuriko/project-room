@@ -693,8 +693,10 @@ export class RoomStore {
   createAccountSessionSlot(lifetimeMs = 30 * 86400000) {
     if (!Number.isSafeInteger(lifetimeMs) || lifetimeMs <= 0 || lifetimeMs > 90 * 86400000) fail(422, "invalid_expiry", "Account session slots expire within 90 days");
     return this.transaction(() => {
+      const now = this.now();
+      this.db.prepare("DELETE FROM account_session_slots WHERE expires_at <= ?").run(now);
       if (this.db.prepare("SELECT count(*) AS n FROM account_session_slots").get().n >= 10000) fail(409, "pilot_limit", "Account session slot limit reached; administrator maintenance required");
-      const token = key(), now = this.now();
+      const token = key();
       this.db.prepare("INSERT INTO account_session_slots(hash,revision,expires_at,created_at) VALUES(?,0,?,?)").run(hash(token), now + lifetimeMs, now);
       return { token, session: this.accountSessionSlot(token) };
     });
