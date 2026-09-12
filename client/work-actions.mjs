@@ -43,10 +43,22 @@ const definitions = [
     expiresAt: { ...text, description: "Explicit ISO timestamp. The service checks that it is in the future; no automatic renewal." }
   }],
   ["release_claim", "Release work scope", T.CLAIM_RELEASED, "Release an active claim you hold (or manage with manage_claims). Does not stop an outside worker. A duplicate receipt does not describe the current reservation.", {}],
-  ["supersede_work", "Replace work", T.WORK_SUPERSEDED, "Replace work with an already-existing work item. Requires steer, not granted by enrollment presets. Retires the original work's active reservation/approval; does not transfer them to its replacement.", { supersededByWorkItemId: id, reason: text }]
+  ["supersede_work", "Replace work", T.WORK_SUPERSEDED, "Replace work with an already-existing work item. Requires steer, not granted by enrollment presets. Retires the original work's active reservation/approval; does not transfer them to its replacement.", { supersededByWorkItemId: id, reason: text }],
+  ["record_handoff", "Record handoff receipt", T.WORK_HANDOFF_RECORDED, "Record a handoff receipt when you cannot continue your assigned task: what is actually done against the done criteria, an optional partial-evidence reference, the exact next action, and why you are stopping. This never closes, completes or reassigns the work; the state and review gates stay with the room. haltAll=true also stops all your further work mutations until a steer/decide member clears the exact halt.", {
+    doneSummary: { ...text, description: "What is actually done against the definition of done; partial is expected, state it exactly." },
+    evidenceUrl: { ...text, description: "Optional HTTPS reference without embedded credentials; not fetched. Requires evidenceVersion when present." },
+    evidenceVersion: { ...text, description: "Version of the partial evidence; required with evidenceUrl." },
+    nextAction: { ...text, description: "The exact next action for whoever picks this up." },
+    limitReason: { ...text, description: "Why you cannot continue (limit hit, missing permission, context exhausted)." },
+    haltAll: { ...bool, description: "true halts all your further work mutations project-wide until the exact halt is cleared." }
+  }, ["doneSummary", "nextAction", "limitReason"]],
+  ["clear_halt", "Clear a member halt", T.WORK_HALT_CLEARED, "Clear one exact recorded halt-all after triage. Requires steer or decide; the halted member cannot clear its own halt. Names the exact halt event inspected.", {
+    memberId: id, haltEventId: id, note: { ...text, maxLength: 512, description: "Optional triage note." }
+  }, ["memberId", "haltEventId"]]
 ];
+
 const actions = new Map(definitions.map(([name, title, type, description, properties, required = Object.keys(properties)]) => {
-  const fields = type === T.WORK_PROPOSED ? { requestId: common.requestId, workItemId: id } : common;
+  const fields = type === T.WORK_PROPOSED ? { requestId: common.requestId, workItemId: id } : type === T.WORK_HALT_CLEARED ? { requestId: common.requestId } : common;
   return ["room_" + name, { type, tool: { name: "room_" + name, title, description: description + retry,
     inputSchema: object({ ...fields, ...properties }, [...Object.keys(fields), ...required]),
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } } }];
@@ -99,8 +111,10 @@ export async function submitWorkAction(client, identity, name, args, { signal } 
     message: "Outcome unknown. Retain and retry the exact original input; do not create a replacement requestId." };
   return { contractVersion: 1, status: "recorded", requestId: command.id, workItemId: command.data.workItemId,
     action: name, sequence: receipt.sequence, eventId: receipt.event.id, duplicate: receipt.duplicate,
-    appliedRevision: command.type === T.WORK_PROPOSED ? 0 : command.data.expectedRevision + 1,
-    currentStateVerified: false, next: { tool: "room_read_work", arguments: { workItemId: command.data.workItemId } },
+    appliedRevision: command.type === T.WORK_PROPOSED ? 0 : command.data.expectedRevision === undefined ? null : command.data.expectedRevision + 1,
+    currentStateVerified: false, next: command.type === T.WORK_HALT_CLEARED
+    ? { tool: "room_read_board", arguments: {} }
+    : { tool: "room_read_work", arguments: { workItemId: command.data.workItemId } },
     ...(command.data.evidenceKind === "room_text" ? { result: { completionEventId: receipt.event.id, evidenceVersion: command.data.evidenceVersion,
       read: { tool: "room_read_result", arguments: { workItemId: command.data.workItemId, completionEventId: receipt.event.id } } } } : {}),
     message: "This original operation was recorded. Read current work before another action; this receipt does not prove current ownership, review or human approval." };
