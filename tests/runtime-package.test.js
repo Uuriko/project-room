@@ -148,8 +148,11 @@ test("uncommitted candidate packages cold in an isolated synthetic commit, inclu
   const directory = mkdtempSync(join(tmpdir(), "room-candidate-package-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const candidate = candidateRuntimeFixture(repository, directory), destination = join(directory, "runtime");
-  const receipt = createRuntimePackage({ ...candidate, destination }); assert.equal(receipt.files, 98);
+  const receipt = createRuntimePackage({ ...candidate, destination }); assert.equal(receipt.files, 100);
   const program = `
+    import { handlePublicMcpMessage } from ${JSON.stringify(pathToFileURL(join(destination, "client/mcp-public.mjs")).href)};
+    import { openJoinContract } from ${JSON.stringify(pathToFileURL(join(destination, "server/open-contract.mjs")).href)};
+    if (openJoinContract().ship !== false || handlePublicMcpMessage({jsonrpc:"2.0",id:1,method:"tools/list"}).result.tools.length !== 5) throw new Error("Missing gated MCP runtime");
     import { RoomStore } from ${JSON.stringify(pathToFileURL(join(destination, "server/store.mjs")).href)};
     import { SyntheticInboxTransport } from ${JSON.stringify(pathToFileURL(join(destination, "server/inbox-transport.mjs")).href)};
     import { initialRoom } from ${JSON.stringify(pathToFileURL(join(destination, "server/bootstrap.mjs")).href)};
