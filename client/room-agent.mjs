@@ -161,6 +161,33 @@ export async function createAgentIdentity(origin, displayName, { fetchImpl = glo
   if (typeof value?.identityId !== "string" || typeof value?.secret !== "string") throw new RoomClientError(200, "invalid_response", "Room returned an invalid identity");
   return value;
 }
+
+// One-time agent invite code redemption. Unauthenticated: the code is the
+// bearer credential. Returns a fresh identity secret for the new room member.
+export async function redeemAgentInvite(origin, code, displayName, { fetchImpl = globalThis.fetch, signal } = {}) {
+  let service;
+  try { service = assertServiceOrigin(origin); }
+  catch { throw new RoomClientError(0, "invalid_config", "Use a fixed HTTPS origin or an isolated loopback development origin"); }
+  let response;
+  try {
+    response = await fetchImpl(`${service}/api/agent-invites/redeem`, {
+      method: "POST", redirect: "error", credentials: "omit",
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, displayName }),
+    });
+  } catch (error) {
+    if (error instanceof RoomClientError) throw error;
+    throw new RoomClientError(0, "service_unavailable", "Could not complete the request. Check the service address and retry.");
+  }
+  let value;
+  try { value = await response.json(); } catch { value = null; }
+  if (!response.ok) throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room request failed");
+  if (typeof value?.identityId !== "string" || typeof value?.secret !== "string" || typeof value?.memberId !== "string") {
+    throw new RoomClientError(200, "invalid_response", "Room returned an invalid invite redemption");
+  }
+  return value;
+}
 export class RoomAgentClient {
   #origin;
   #roomId;
@@ -514,6 +541,33 @@ export class RoomAgentClient {
   }
   unlinkIdentity(identityId, { signal } = {}) {
     return this.#deletePath(`/api/rooms/${encodeURIComponent(this.#roomId)}/identity-links`, { identityId }, signal);
+  }
+  // One-time agent invite codes. Issuance is owner-only; the raw code is
+  // shown once at creation and only its hash is stored. Redemption is
+  // unauthenticated (the code is the bearer credential).
+  async #inviteAdmin(suffix, body, { signal } = {}) {
+    const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal);
+    if (value?.roomId !== this.#roomId) {
+      throw new RoomClientError(200, "invalid_response", "Room response does not match the configured room");
+    }
+    return value;
+  }
+  async createAgentInvite({ permissions, expiresInMinutes, displayName } = {}, { signal } = {}) {
+    const value = await this.#inviteAdmin("/agent-invites", { permissions,
+      ...(expiresInMinutes === undefined ? {} : { expiresInMinutes }),
+      ...(displayName === undefined ? {} : { displayName }) }, { signal });
+    if (typeof value?.code !== "string" || typeof value?.codeHash !== "string") {
+      throw new RoomClientError(200, "invalid_response", "Room returned an invalid invite code");
+    }
+    return value;
+  }
+  async agentInvites({ signal } = {}) {
+    const value = await this.#inviteAdmin("/agent-invites", undefined, { signal });
+    if (!Array.isArray(value?.invites)) throw new RoomClientError(200, "invalid_response", "Room returned an invalid invite list");
+    return value;
+  }
+  revokeAgentInvite(codeHash, { signal } = {}) {
+    return this.#deletePath(`/api/rooms/${encodeURIComponent(this.#roomId)}/agent-invites`, { codeHash }, signal);
   }
   setNotificationPreferences(preferences, { signal } = {}) {
     if (!preferences || typeof preferences !== "object" || Array.isArray(preferences)) throw new Error("Preferences must be an object");

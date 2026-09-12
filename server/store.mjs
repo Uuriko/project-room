@@ -17,6 +17,7 @@ import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs"
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, isRoomAccessToken } from "./guest-agent-links.mjs";
 import { AgentIdentities, agentIdentitySchema, isIdentitySecret } from "./agent-identities.mjs";
+import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
 import { charterContext, charterFromEvent } from "../src/room-charter.js";
 import { REPLY_FIELDS, REPLY_POLICY_VERSION, replyPostMode } from "../src/reply-requests.js";
@@ -248,6 +249,7 @@ export class RoomStore {
     this.storagePlatform = storagePlatform;
     this.shareLinks = new ShareLinks(this);
     this.identities = new AgentIdentities(this);
+    this.invites = new AgentInvites(this);
     this.reminders = new Reminders(this);
     this.agentConnections = new AgentConnections(this);
     this.guestAgentLinks = new GuestAgentLinks(this);
@@ -316,7 +318,8 @@ export class RoomStore {
       CREATE TABLE cursors (room_id TEXT NOT NULL REFERENCES rooms(id), member_id TEXT NOT NULL, sequence INTEGER NOT NULL, PRIMARY KEY(room_id, member_id));
       CREATE TABLE projection_checkpoints (room_id TEXT PRIMARY KEY REFERENCES rooms(id), sequence INTEGER NOT NULL, projection TEXT NOT NULL);
       ${invitationSchema}
-      ${agentIdentitySchema}`);
+      ${agentIdentitySchema}
+      ${agentInviteSchema}`);
       this.storagePlatform.setVersion(this.db, 4);
     }
     if (version > 0 && version < 26 && (
@@ -344,6 +347,10 @@ export class RoomStore {
       if (version < 25 && this.db.prepare("SELECT 1 FROM private_inbox_commands WHERE json_extract(request_json,'$.action') IN ('reply.update.inspected','reply.update.review') OR json_type(receipt_json,'$.update.inspection') IS NOT NULL OR json_type(receipt_json,'$.update.review') IS NOT NULL OR json_type(receipt_json,'$.update.resolvedAt') IS NOT NULL OR json_extract(receipt_json,'$.update.status')='resolved' LIMIT 1").get())
         throw new Error("Pre-v25 reply resolution history requires operator reconciliation");
       if (version < 27) this.migrateAgentIdentitiesV27();
+      // Agent invite codes are purely additive (no data migration, no fence
+      // impact), so no schema version bump: IF NOT EXISTS is idempotent here
+      // and the v0 block above covers fresh databases.
+      this.db.exec(agentInviteSchema);
       if (version < STORE_SCHEMA_VERSION) this.storagePlatform.installWriterFence(this.db);
       this.storagePlatform.verifyWriterFence(this.db);
       this.verifyInvitationAudit();

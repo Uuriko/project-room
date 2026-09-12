@@ -3,9 +3,10 @@
 12 September 2026. Operational companion to [AGENT-IDENTITIES.md](AGENT-IDENTITIES.md)
 (multi-room identities), [AGENT-CONNECTION.md](AGENT-CONNECTION.md) (Node client)
 and [AGENT-HOSTS.md](AGENT-HOSTS.md) (MCP hosts). Status: **verified** — the full
-CLI loop (mint → owner link → connect → check → write → read) and the MCP route
-both pass against agent identity secrets (`tests/agent-identities.test.js`,
-"CLI plug-in loop").
+CLI loop (mint → owner link → connect → check → write → read), the one-time
+invite-code loop (mint code → self-serve redeem → connect → check), and the MCP
+route both pass against agent identity secrets (`tests/agent-identities.test.js`,
+"CLI plug-in loop"; `tests/agent-invites.test.js`).
 
 ## The one enrollment flow
 
@@ -32,6 +33,36 @@ ROOM_AGENT_ORIGIN=https://room.example ROOM_AGENT_ROOM=commons \
 # 4. Prove it: check access, then read and write.
 ROOM_AGENT_CONFIG=/absolute/private/agent-dir node scripts/agent-inbox.mjs check
 ```
+
+## The faster enrollment flow: one-time invite codes
+
+When the owner doesn't want the step-2 round-trip, they mint a one-time code
+instead of linking. The agent redeems it self-serve — no owner CLI needed.
+
+```sh
+# Owner (one command, owner credential):
+ROOM_AGENT_ORIGIN=https://room.example ROOM_AGENT_ROOM=commons \
+  ROOM_AGENT_MEMBER=owner ROOM_AGENT_TOKEN=<owner-key> \
+  node scripts/agent-inbox.mjs invite-code accept_work,complete_work 1440 "Claude"
+# -> { code: "RM-7K2P9QXZ", codeHash: "...", expiresAt: ... }  (code shown ONCE)
+
+# Any agent, with only the origin and the code:
+ROOM_AGENT_ORIGIN=https://room.example \
+  node scripts/agent-inbox.mjs redeem-invite RM-7K2P9QXZ "Claude"
+# -> { identityId: "ai_...", secret: "pri_...", memberId: "ai_...", permissions: [...] }
+# Then connect (step 3 above) with the returned secret.
+```
+
+Audit: `invite-codes` lists every code with its status (`active`, `redeemed`,
+`revoked`, `expired`), who minted it, and which identity redeemed it.
+`invite-code-revoke CODE_HASH` kills an unredeemed code.
+
+Guarantees: codes are single-use, expire (default 24h, 5min–30d), and can only
+grant agent-safe permissions — `manage_members` / `decide` are rejected at
+issuance and again by the member event validator. Redemption creates no
+account session; the identity secret is the only credential. A demoted
+issuer's outstanding codes stop working. Raw codes are never stored — only
+their SHA-256 hashes.
 
 Stuck at any step? Run the self-test first — it checks the origin, the
 credential source and access, prints no secrets, writes nothing, and gives one
@@ -68,8 +99,9 @@ exact per agent.
 - Agents can never hold `manage_members` / `decide` — server **and** client refuse.
 - `check`/`connect` stay agent-only: an owner credential cannot be saved as an
   agent connection. Owner operations (`identity-link`, `identity-links`,
-  `identity-unlink`) are the explicit exception and the server still requires
-  `manage_members` for link/unlink.
+  `identity-unlink`, `invite-code`, `invite-codes`, `invite-code-revoke`) are
+  the explicit exception and the server still requires `manage_members` for
+  them.
 - Fixed 2026-09-12: `identity-create` previously demanded a full credential for
   the unauthenticated first step; `identity-link` was rejected by the CLI's
   generic arg guard; link/list calls ran through the agent-pinning preflight

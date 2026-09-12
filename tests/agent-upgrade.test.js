@@ -33,7 +33,7 @@ for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline
   assert.deepEqual(catalog(), oldCatalog); assert.deepEqual(oldAudit(f.store), before);
   assert.equal(cached.run(f.owner.session.account.id).changes, 1);
   const current = new RoomStore(f.filename, { now: f.now }); t.after(() => current.close());
-  assert.deepEqual(auditRecovery(current).tables.filter(row => (version >= 18 || !row.table.startsWith("private_email_")) && (version >= 15 || !row.table.startsWith("private_inbox_")) && (version >= 9 || !row.table.startsWith("agent_connection")) && row.table !== "agent_identities" && row.table !== "identity_links"), before.tables);
+  assert.deepEqual(auditRecovery(current).tables.filter(row => (version >= 18 || !row.table.startsWith("private_email_")) && (version >= 15 || !row.table.startsWith("private_inbox_")) && (version >= 9 || !row.table.startsWith("agent_connection")) && row.table !== "agent_identities" && row.table !== "identity_links" && row.table !== "agent_invite_codes"), before.tables);
   assert.deepEqual(current.email.verify(), version >= 18 ? { connections: 1, folders: 1, sources: 1 } : { connections: 0, folders: 0, sources: 0 });
   assert.equal(current.authenticate(f.keys.agent).member.id, "agent");
   assert.throws(() => cached.run(f.owner.session.account.id), /project_room_writer_v27|unsupported database writer/);

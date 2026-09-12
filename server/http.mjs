@@ -472,7 +472,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["displayName"]) || typeof data.displayName !== "string") reject(422, "invalid_identity", "displayName is required");
         return json(res, 201, store.identities.create(data.displayName));
       }
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics|search|provider-heartbeats|identity-links))?$/.exec(url.pathname);
+      // Agent invite codes: redemption is unauthenticated (the code is the
+      // bearer credential); issuance is owner-only per room.
+      if (url.pathname === "/api/agent-invites/redeem" && req.method === "POST") {
+        const data = await body(req);
+        rate(`invite-redeem:${remoteAddress}`, 20);
+        if (!exact(data, ["code", "displayName"]) || typeof data.code !== "string" || typeof data.displayName !== "string") reject(422, "invalid_invite", "Invite code and displayName are required");
+        return json(res, 201, store.invites.redeem(data.code, { displayName: data.displayName }));
+      }
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics|search|provider-heartbeats|identity-links|agent-invites))?$/.exec(url.pathname);
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
       if (threadMatch && req.method === "GET") {
         // Round-2 #112: threaded replies.
@@ -573,6 +581,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (req.method === "DELETE") {
           if (!exact(data, ["identityId"]) || typeof data.identityId !== "string") reject(422, "invalid_identity", "identityId is required");
           return json(res, 200, store.identities.unlink(selected.token, roomId, data.identityId));
+        }
+        reject(405, "method_not_allowed", "Method not allowed");
+      }
+      if (route === "agent-invites") {
+        // One-time agent invite codes: owner-only issuance, audit, revocation.
+        const data = req.method === "GET" ? {} : await body(req);
+        if (req.method === "GET") return json(res, 200, { roomId, invites: store.invites.list(selected.token, roomId) });
+        if (req.method === "POST") {
+          const keys = Object.keys(data);
+          if (!keys.includes("permissions") || keys.some(k => !["permissions", "expiresInMinutes", "displayName"].includes(k)))
+            reject(422, "invalid_invite", "permissions is required; optional: expiresInMinutes, displayName");
+          return json(res, 201, store.invites.create(selected.token, roomId, data));
+        }
+        if (req.method === "DELETE") {
+          if (!exact(data, ["codeHash"]) || typeof data.codeHash !== "string") reject(422, "invalid_invite", "codeHash is required");
+          return json(res, 200, store.invites.revoke(selected.token, roomId, data.codeHash));
         }
         reject(405, "method_not_allowed", "Method not allowed");
       }
