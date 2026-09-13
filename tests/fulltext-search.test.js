@@ -62,6 +62,12 @@ test("full-text search over messages and work (round-2 #113)", async t => {
   r = await search("FOX", "messages");
   assert.equal(r.messages.length, 1);
 
+  // Surrounding whitespace is ignored, matching the echoed trimmed query.
+  r = await search("  jumps ", "messages");
+  assert.equal(r.query, "jumps");
+  assert.equal(r.messages.length, 1);
+  assert.equal(r.messages[0].id, keepId);
+
   // Bad input rejected.
   assert.equal((await get("/api/rooms/commons/search", ownerKey)).status, 422);
   assert.equal((await get("/api/rooms/commons/search?q=x&kind=bogus", ownerKey)).status, 422);
