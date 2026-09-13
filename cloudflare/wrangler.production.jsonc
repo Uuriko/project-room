@@ -16,6 +16,9 @@
     "ROOM_ORIGIN": "https://room.trydemigod.com",
     "ROOM_PRODUCTION": "1"
   },
+  "secrets": {
+    "required": ["ROOM_CLERK_ISSUER", "ROOM_CLERK_PUBLISHABLE_KEY", "ROOM_CLERK_PUBLIC_KEY"]
+  },
   "limits": { "cpu_ms": 50 },
   "observability": { "enabled": false }
 }

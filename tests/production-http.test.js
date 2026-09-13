@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { generateKeyPairSync } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -59,5 +60,34 @@ test('GET /api/open and /api/version on the real HTTP server', async t => {
   const prod = readFileSync(new URL('../cloudflare/wrangler.production.jsonc', import.meta.url), 'utf8');
   assert.match(prod, /ROOM_PRODUCTION": "1"/);
   assert.match(prod, /room\.trydemigod\.com/);
+  assert.match(prod, /ROOM_CLERK_ISSUER/);
+  assert.match(prod, /ROOM_CLERK_PUBLISHABLE_KEY/);
+  assert.match(prod, /ROOM_CLERK_PUBLIC_KEY/);
   assert.doesNotMatch(prod, /sk_live|BEGIN PRIVATE KEY|pk_live_/);
+});
+
+test('GET /api/auth-config exposes Clerk public fields when providerAuth is set', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'prod-auth-'));
+  const store = new RoomStore(join(directory, 'room.sqlite'));
+  const issuer = 'https://clerk.example.com';
+  const publishableKey = 'pk_live_' + Buffer.from('clerk.example.com$').toString('base64');
+  const keys = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const server = createRoomServer({
+    store,
+    providerAuth: {
+      issuer, publishableKey,
+      publicKey: keys.publicKey.export({ type: 'spki', format: 'pem' }),
+      authorizedParties: ['https://room.example.com']
+    }
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(r => server.close(r));
+    store.close(); rmSync(directory, { recursive: true, force: true });
+  });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const auth = await (await fetch(origin + '/api/auth-config')).json();
+  assert.deepEqual(auth, { provider: 'clerk', issuer, publishableKey });
+  assert.equal((await (await fetch(origin + '/api/open')).json()).ship, false);
 });
