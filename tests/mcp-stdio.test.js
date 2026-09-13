@@ -29,6 +29,18 @@ function harness(t, client = {}, options = {}) {
 const args = { requestId: "draft-one", workItemId: "work", packetId: "packet", basisRevision: 0, body: "A draft ☀️" };
 const receipt = command => ({ sequence: 4, duplicate: false, event: { id: "event", type: "message.posted", roomId: "commons", actorId: "agent", data: { ...command.data } } });
 
+test('private context MCP tool accepts only one exact grant and remains read-only',async t=>{
+  let seen;
+  const h=harness(t,{privateContext:async(grantId,{signal})=>{seen=grantId;assert.ok(signal);return {body:'Private fixture',permissions:['read']};}});
+  await h.ready();const tools=(await h.rpc('tools/list')).result.tools;
+  assert.equal(tools.find(t=>t.name==='room_read_private_context').annotations.readOnlyHint,true);
+  for(const arguments_ of [{},{grantId:'../other'},{grantId:'one',roomId:'other'},{grantId:'one',send:true}])
+    assert.equal((await h.rpc('tools/call',{name:'room_read_private_context',arguments:arguments_})).error.code,-32602);
+  assert.equal(seen,undefined);
+  const response=await h.rpc('tools/call',{name:'room_read_private_context',arguments:{grantId:'one'}});
+  assert.equal(seen,'one');assert.equal(response.result.structuredContent.body,'Private fixture');
+});
+
 test("MCP draft reply links are strict and must match the returned receipt", async t => {
   let sent;
   const h = harness(t, { command: async command => { sent = command; const result = receipt(command); delete result.event.data.replyToId; return result; } });
@@ -80,7 +92,7 @@ test("stdio version negotiation, discovery fallback, tools and notification sile
   assert.equal((await h.rpc("tools/list")).error.code, -32000);
   await h.ready();
   const tools = (await h.rpc("tools/list")).result.tools;
-  assert.equal(tools.length, 45); assert.ok(tools.every(tool => tool.inputSchema.additionalProperties === false));
+  assert.equal(tools.length, 46); assert.ok(tools.every(tool => tool.inputSchema.additionalProperties === false));
   assert.ok(tools.some(tool => tool.name === "room_post_message"));
   assert.equal((await h.rpc("tools/call", { name: "room_check_access", arguments: {} }, "typed-id")).result.structuredContent.status, "credential_accepted");
   const count = h.replies.length; h.send({ method: "unknown-notification" }); await tick(); assert.equal(h.replies.length, count);

@@ -295,6 +295,18 @@ export class RoomAgentClient {
       checkedAt: new Date(Date.now()).toISOString(), expiresAt: null, scope: "room", externalExecution: false };
   }
   snapshot({ signal } = {}) { return this.#request("", undefined, signal); }
+  async privateContext(grantId,{signal}={}) {
+    if(!this.#memberId||!validId(grantId))throw new RoomClientError(422,'invalid_private_context','Choose one private share for the configured agent');
+    const value=await this.#request(`/private-context/${encodeURIComponent(grantId)}`,undefined,signal);
+    const keys=['contractVersion','grantId','roomId','body','expiresAt','permissions','viewerId','viewerSessionBinding'];
+    if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length!==keys.length||!keys.every(k=>Object.hasOwn(value,k))
+      ||value.contractVersion!==1||value.grantId!==grantId||value.roomId!==this.#roomId||value.viewerId!==this.#memberId||value.viewerSessionBinding!==null
+      ||typeof value.body!=='string'||!value.body.trim()||value.body.length>4000||!value.body.isWellFormed()
+      ||!Number.isSafeInteger(value.expiresAt)||value.expiresAt<=Date.now()
+      ||!Array.isArray(value.permissions)||value.permissions.length!==1||value.permissions[0]!=='read')
+      throw new RoomClientError(200,'invalid_response','Private context did not match the selected share and recipient');
+    return value;
+  }
   async replyRead(name, args = {}, { signal } = {}) {
     const route = replyRoute(name);
     if (!route || !validReplyArguments(name, args)) throw new Error("Invalid request read selection");
