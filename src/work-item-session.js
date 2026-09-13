@@ -163,7 +163,7 @@ export function sessionWorker(item, nowMs = Date.now()) {
   return session.worker_member_id;
 }
 
-export function sessionCard(item) {
+export function sessionCard(item, cancellation = null) {
   const session = sessionRecord(item);
   return {
     workItemId: item.id,
@@ -182,15 +182,20 @@ export function sessionCard(item) {
     attempt_count: session.attempt_count,
     spendCents: session.spend_cents ?? "unknown",
     attempts: session.attempts,
-    receipts: attemptReceipts(item)
+    receipts: attemptReceipts(item),
+    cancellation
   };
 }
 
-export function listWorkItemSessions(workItems, status = null) {
+export function listWorkItemSessions(workItems, status = null, { members = null, nowMs = Date.now() } = {}) {
   if (status != null && !isSessionStatus(status)) throw new RangeError("Choose one session status");
   return Object.values(workItems ?? {})
     .filter(item => item && typeof item === "object" && item.supersededBy == null && item.state !== "superseded")
-    .map(sessionCard)
+    .map(item => {
+      const worker = sessionRecord(item).worker_member_id;
+      const workerActive = members && worker ? members[worker]?.active !== false : true;
+      return sessionCard(item, cancellationState(item, { nowMs, workerActive }));
+    })
     .filter(card => status == null || card.status === status)
     .sort((a, b) => a.workItemId < b.workItemId ? -1 : 1);
 }
@@ -210,6 +215,29 @@ export function attemptReceipts(item) {
     successClaim: a.outcome !== "done" ? "not-claimed"
       : (Array.isArray(a.outputs) && a.outputs.length > 0 && Number.isSafeInteger(a.usageCents) ? "verified" : "unverified")
   })));
+}
+
+// W4-42 G7: meaningful cancellation. The four stops stay distinct, and
+// silence is never read as termination: a stale heartbeat is "unresponsive"
+// (process state unknown), which is exactly what a lost worker looks like.
+// Read-time derivation only; nothing historical is rewritten.
+export function cancellationState(item, { nowMs = Date.now(), workerActive = true } = {}) {
+  const session = sessionRecord(item);
+  const stopped = TERMINAL.has(session.status);
+  const unresponsive = !stopped && typeof session.heartbeat_at === "string"
+    && Number.isFinite(nowMs) && nowMs - Date.parse(session.heartbeat_at) > SESSION_HEARTBEAT_STALE_MS;
+  return Object.freeze({
+    // A polite signal was sent; the run may still be live.
+    stopRequested: !stopped && session.stop_requested_at !== null,
+    // A budget wire forbids further dispatch (name of the tripped limit).
+    dispatchDisabled: stopped ? null : budgetLimitExceeded(item, nowMs),
+    // The worker's access was revoked while a run shows live.
+    accessRevoked: !stopped && workerActive === false && session.worker_member_id !== null,
+    // An actual stop event landed (done/failed). The only termination proof.
+    runtimeStopped: stopped,
+    // Silence: heartbeat stale. Never infer termination from this.
+    unresponsive
+  });
 }
 
 export function workItemSessionContract() {
