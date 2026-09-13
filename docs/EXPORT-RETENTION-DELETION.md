@@ -39,8 +39,9 @@ behaviors marked (pinned).
   (pinned).
 - Catch-up, reply previews, decision sources and linked-work chips render
   "Message deleted" in place of the body.
-- Composer drafts live in memory in the open tab only; they are not written to
-  the room or the browser profile.
+- Composer drafts persist only in the tab's session storage (12-hour expiry,
+  at most 50 drafts); they are never written to the room, and closing the tab
+  discards them.
 - Presence is ephemeral and is not part of the event log.
 - Export files are unencrypted point-in-time copies. Whoever downloads one owns
   its handling; deleting content in the room cannot reach copies already taken.
