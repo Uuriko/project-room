@@ -65,3 +65,46 @@ Evidence: 11/11 inbox tests and 3/3 focused browser checks pass. This confirms t
 room-history boundary, not a fixed-recipient grant. The selected-audience feature
 must use a distinct private read path with revocable, explicit grants; ordinary
 room events are unsuitable storage for that content.
+
+## Private grant backend (local, not deployed)
+
+The separate backend path now supports `source.grant` and `grant.revoke` through
+the account-session/CSRF-protected `/api/inbox/commands` endpoint. Creation accepts
+the same revision-bound excerpt selection as room sharing, plus 1–20 explicit
+`memberIds`. It records selected text privately without emitting a room event.
+
+Named recipients read `/api/rooms/:roomId/private-context/:grantId` using their
+existing room identity. Every read requires active current authentication, the
+same recipient membership revision, the source owner's active account/auth epoch
+and membership revision, an unrevoked grant, and an unexpired seven-day lifetime.
+The owner retains access. Reads return selected text and read-only scope, not
+source metadata, recipients, attachments or drafts. The grant ID is not a bearer
+capability; unselected and future room members receive an unavailable response.
+
+Revocation is owner-account-only, works without room access, and is permitted at
+the normal journal capacity limit. Exact retries return historical receipts and
+cannot revive a revoked grant. Already received copies cannot be recalled.
+
+Remaining work before presenting this as a complete feature:
+
+- Concise recipient review, grant management/revocation and owner-visible receipts.
+- Private recipient discovery and agent tools; never announce the text or private
+  recipient list in a room-wide message, notification, search index or export.
+- Clear handling for copied context and derived work: read access is not permission
+  to repost privately shared text into a public room or send an external reply.
+- Load tests before scaling beyond bounded pilot data. Grant reads use a primary-key
+  lookup, while revocation checks remain bounded by the owner's private journal.
+- A compatible rollback candidate and replay/recovery proof containing actual
+  grant/revoke records. The table schema remains 33, but older code does not
+  understand these new journal actions. Schema equality is NOT proof of fallback
+  compatibility. Do not deploy using the previous pre-grant fallback pairing.
+
+Live email and other service connectors remain separate, unfinished work.
+
+Backend checkpoint evidence: 7/7 dedicated private-grant tests; full Node suite
+1,315/1,315 passes, zero skipped (41,739 ms); existing Workers HTTP smoke 1/1 passes.
+The latter checks shared HTTP compatibility, not a hosted grant journey. No UI or
+MCP grant test is claimed. New tests cover real HTTP creation/read/revocation,
+unselected identities, future membership, exact retries, restart replay, owner
+account epoch revocation, expiry using a fresh credential, malformed selections,
+and transactional journal failure. No deployment or production-data migration.

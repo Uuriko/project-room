@@ -51,6 +51,18 @@ export const inboxSchema = `
   CREATE TRIGGER private_inbox_commands_no_delete BEFORE DELETE ON private_inbox_commands BEGIN SELECT RAISE(ABORT,'inbox receipts are retained'); END;
 `;
 function validate(request) {
+  if (request?.action === "source.grant") {
+    const { memberIds, ...selection } = request;
+    if (!Array.isArray(memberIds) || !memberIds.length || memberIds.length > 20
+      || !memberIds.every(validId) || new Set(memberIds).size !== memberIds.length)
+      fail(422, "invalid_inbox_grant", "Choose up to 20 specific members.");
+    return validate({ ...selection, action: Object.hasOwn(selection, "selection") ? "source.excerpt" : "source.share" });
+  }
+  if (request?.action === "grant.revoke") {
+    if (!exact(request, ["action", "requestId", "sourceId", "grantId"]) || ![request.requestId, request.sourceId, request.grantId].every(validId))
+      fail(422, "invalid_inbox_grant", "Choose an exact private grant.");
+    return;
+  }
   if (isReplyAttempt(request)) return validateReplyAttempt(request);
   if (isSend(request)) return validateSend(request);
   const common = ["requestId", "action", "sourceId"], fields = {
@@ -123,6 +135,51 @@ const replyPreview = (observation, version) => {
 
 export class Inbox {
   constructor(store) { this.store = store; this.db = store.db; }
+  grantRow(grantId) {
+    const match = typeof grantId === "string" && /^grant-([1-9][0-9]{0,15})-[a-f0-9]{64}$/.exec(grantId);
+    if (!match || !Number.isSafeInteger(Number(match[1]))) fail(404, "inbox_grant_not_found", "Private context unavailable.");
+    // Primary-key lookup: never scan other accounts' private journals on a read.
+    const row = this.db.prepare("SELECT * FROM private_inbox_commands WHERE sequence=?").get(Number(match[1]));
+    return row && JSON.parse(row.request_json).action === "source.grant" && JSON.parse(row.receipt_json).grantId === grantId ? row : undefined;
+  }
+  grantRevoked(accountId, grantId, before = Number.MAX_SAFE_INTEGER) {
+    return Boolean(this.db.prepare("SELECT 1 FROM private_inbox_commands WHERE account_id=? AND sequence<? AND json_extract(request_json,'$.action')='grant.revoke' AND json_extract(request_json,'$.grantId')=?").get(accountId, before, grantId));
+  }
+  grantReceipt(accountId, request, state, sequence, ownerId, at, journalSequence) {
+    if (request.audienceVersion !== digest(inboxAudience(state))) fail(409, "stale_inbox_audience", "Audience changed. Review again.");
+    const owner = state.members[ownerId];
+    if (!owner?.active || owner.kind !== "human") fail(403, "access_denied", "Current human membership required.");
+    const members = request.memberIds.map(id => {
+      const member = state.members[id];
+      if (!member?.active) fail(409, "stale_inbox_audience", "Audience changed. Review again.");
+      return { memberId: id, revision: member.revision };
+    });
+    const body = sharedBody(this.version(accountId, request.sourceId, request.sourceRevision), {
+      ...request, action: Object.hasOwn(request, "selection") ? "source.excerpt" : "source.share"
+    });
+    return { grantId: `grant-${journalSequence}-` + digest([accountId, request.requestId]), roomId: request.roomId,
+      sourceRevision: request.sourceRevision, roomSequence: sequence, owner: { memberId: ownerId, revision: owner.revision },
+      members, body, expiresAt: at + 7 * 24 * 3600000 };
+  }
+  readGrant(token, roomId, grantId, binding = null) {
+    return this.store.readTransaction(() => {
+      const auth = this.store.authenticate(token, roomId, binding), row = this.grantRow(grantId);
+      const unavailable = () => fail(404, "inbox_grant_not_found", "Private context unavailable.");
+      if (!row) return unavailable();
+      const grant = JSON.parse(row.receipt_json), state = this.store.room(roomId).state;
+      const ownerAccount = this.db.prepare("SELECT active,auth_epoch FROM accounts WHERE id=?").get(row.account_id);
+      const ownerBinding = this.db.prepare("SELECT account_id FROM member_accounts WHERE room_id=? AND member_id=?").get(roomId, grant.owner.memberId);
+      const owner = state.members[grant.owner.memberId];
+      const recipient = grant.members.find(m => m.memberId === auth.member.id);
+      const isOwner = auth.account?.id === row.account_id && auth.member.id === grant.owner.memberId;
+      if (grant.roomId !== roomId || !ownerAccount?.active || ownerAccount.auth_epoch !== row.auth_epoch
+        || ownerBinding?.account_id !== row.account_id || !owner?.active || owner.revision !== grant.owner.revision
+        || grant.expiresAt <= this.store.now() || this.grantRevoked(row.account_id, grantId)
+        || !isOwner && (!recipient || recipient.revision !== auth.member.revision)) return unavailable();
+      return { contractVersion: 1, grantId, roomId, body: grant.body, expiresAt: grant.expiresAt,
+        permissions: ["read"], viewerId: auth.member.id, viewerSessionBinding: auth.sessionBinding };
+    });
+  }
   auth(token, binding, roomId = null) {
     if (typeof binding !== "string" || !/^[a-f0-9]{64}$/.test(binding)) fail(422, "session_binding_required", "Current account session binding required.");
     return this.store.authenticateAccountSession(token, roomId, binding);
@@ -466,19 +523,30 @@ export class Inbox {
       if (request.action === "source.import" && authority !== importAuthority) fail(403, "email_importer_required", "Only the configured importer can record this source.");
       if (request.action === "source.import" && request.data.envelope.connection.accountId !== auth.account.id)
         fail(403, "email_account_mismatch", "Email observation belongs to another account.");
-      if (isShare(request) || request.action === "draft.adopt") this.auth(token, binding, request.roomId);
+      if (isShare(request) || request.action === "draft.adopt" || request.action === "source.grant") this.auth(token, binding, request.roomId);
       const accountId = auth.account.id, fingerprint = digest(request);
       const prior = this.db.prepare("SELECT fingerprint,receipt_json FROM private_inbox_commands WHERE account_id=? AND request_id=?").get(accountId, request.requestId);
       if (prior) {
         if (prior.fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Request ID already used for different inbox content.");
         return { contractVersion: 1, viewer: viewer(auth), receipt: JSON.parse(prior.receipt_json), duplicate: true };
       }
-      if (!internalSend(request) && request.action !== "send.cancel" && !["reply.cancel", "reply.created", "reply.update.cancel", "reply.update.acknowledged"].includes(request.action)
+      if (!internalSend(request) && request.action !== "send.cancel" && request.action !== "grant.revoke" && !["reply.cancel", "reply.created", "reply.update.cancel", "reply.update.acknowledged"].includes(request.action)
         && this.db.prepare("SELECT count(*) n FROM private_inbox_commands WHERE account_id=?").get(accountId).n >= inboxLimits.commands)
         fail(409, "inbox_limit", "Private inbox pilot capacity reached.");
       const now = this.store.now(), { sourceId, action, requestId } = request;
       let receipt = { requestId, action, sourceId };
-      if (isReplyUpdate(request)) {
+      if (action === "source.grant") {
+        if (this.source(accountId, sourceId).revision !== request.sourceRevision) fail(409, "stale_inbox_source", "Source changed. Review again.");
+        const owner = this.auth(token, binding, request.roomId), room = this.store.room(request.roomId);
+        const nextSequence = this.db.prepare("SELECT coalesce(max(sequence),0)+1 AS n FROM private_inbox_commands").get().n;
+        Object.assign(receipt, this.grantReceipt(accountId, request, room.state, room.sequence, owner.member.id, now, nextSequence));
+      } else if (action === "grant.revoke") {
+        const row = this.grantRow(request.grantId);
+        if (!row || row.account_id !== accountId || JSON.parse(row.request_json).sourceId !== sourceId)
+          fail(404, "inbox_grant_not_found", "Private context unavailable.");
+        if (this.grantRevoked(accountId, request.grantId)) fail(409, "inbox_grant_revoked", "Already revoked.");
+        Object.assign(receipt, { grantId: request.grantId, revoked: true });
+      } else if (isReplyUpdate(request)) {
         this.source(accountId, sourceId);
         const updates = this.replyUpdateHistory(accountId), prior = updates.get(request.updateId);
         const proposal = (action === "reply.update.reserve" || action === "reply.update.dispatch" && prior?.status === "reserved") ? prepareGraphReplyUpdate({ store: this.store, token, binding,
@@ -555,7 +623,17 @@ export class Inbox {
       require(row.request_id === request.requestId && row.fingerprint === digest(request) && revision(row.auth_epoch) && Number.isSafeInteger(row.at));
       const key = canonical([row.account_id, request.sourceId]), prior = sources.get(key);
       const expected = { requestId: request.requestId, action: request.action, sourceId: request.sourceId };
-      if (isReplyAttempt(request)) {
+      if (request.action === "source.grant") {
+        require(prior?.revision === request.sourceRevision && revision(receipt.roomSequence) && receipt.roomSequence > 0);
+        const room = this.store.rebuildProjection(request.roomId, receipt.roomSequence);
+        const member = this.db.prepare("SELECT member_id FROM member_accounts WHERE room_id=? AND account_id=?").get(request.roomId, row.account_id);
+        Object.assign(expected, this.grantReceipt(row.account_id, request, room.state, room.sequence, member?.member_id, row.at, row.sequence));
+      } else if (request.action === "grant.revoke") {
+        const grant = this.grantRow(request.grantId);
+        require(grant && grant.sequence < row.sequence && grant.account_id === row.account_id
+          && JSON.parse(grant.request_json).sourceId === request.sourceId && !this.grantRevoked(row.account_id, request.grantId, row.sequence));
+        Object.assign(expected, { grantId: request.grantId, revoked: true });
+      } else if (isReplyAttempt(request)) {
         require(prior);
         if (!replyBoxes.has(row.account_id)) replyBoxes.set(row.account_id, new Map());
         if (!updateBoxes.has(row.account_id)) updateBoxes.set(row.account_id, new Map());
