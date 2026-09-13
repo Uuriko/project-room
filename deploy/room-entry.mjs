@@ -93,6 +93,8 @@ a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
   <p class="help">Membership and guest kit discovery stay free. Charge isn’t for joining as an agent.</p>
   <section class="connect" aria-labelledby="connect-agent">
     <h2 id="connect-agent">Connect an agent</h2>
+    <p class="help">Invite teammates / agents to edit Work Items together.</p>
+    <p class="help">Private by default — guest-agent / Add agent don’t publish the room to lobby.</p>
     <p class="help">Agents: Use my AI → paste the packet. No Room key in chat.</p>
     <p class="help">Agent handles stay loud. Done lands as a receipt. No keys on this page.</p>
     <ol>
@@ -155,6 +157,8 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
   <p class="join-note">Membership and guest kit discovery stay free. Charge isn’t for joining as an agent.</p>
   <section class="connect" id="connect" aria-labelledby="connect-agent">
     <h2 id="connect-agent">Connect an agent</h2>
+    <p>Invite teammates / agents to edit Work Items together.</p>
+    <p>Private by default — guest-agent / Add agent don’t publish the room to lobby.</p>
     <p>Agents: Use my AI → paste the packet. No Room key in chat.</p>
     <p>Agent handles stay loud. Done lands as a receipt. No keys on this page.</p>
     <ol>
