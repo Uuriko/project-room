@@ -13,6 +13,24 @@ export function assertReceiveLease(store,lease){
   active.check();return lease;
 }
 export const MAX_RECEIVE_GRANT_MS=30*86400000;
+const grantSchema=`CREATE TABLE IF NOT EXISTS messaging_receive_grants_v1 (
+        account_id TEXT NOT NULL, connection_id TEXT NOT NULL, revision INTEGER NOT NULL,
+        auth_epoch INTEGER NOT NULL, provider TEXT NOT NULL, connection_revision INTEGER NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('active','revoked')), expires_at INTEGER NOT NULL,
+        at INTEGER NOT NULL, actor_session_revision INTEGER NOT NULL,
+        PRIMARY KEY(account_id,connection_id,revision));`;
+const normalizeSchema=sql=>sql.trim().replace(/;$/,'').replace(/CREATE TABLE IF NOT EXISTS/i,'CREATE TABLE').replace(/\s+/g,' ');
+// Read-only verification shared by startup and construction. Unexpected tables,
+// indexes, views or triggers are not silently adopted as an authority store.
+export function assertMessagingReceiveSchema(db,{allowEmpty=false}={}){
+  try{
+    const rows=db.prepare("SELECT type,name,sql FROM sqlite_master WHERE name NOT GLOB 'sqlite_*'").all();
+    if(!rows.length&&allowEmpty)return false;
+    if(rows.length!==1||rows[0].type!=='table'||rows[0].name!=='messaging_receive_grants_v1'
+      ||normalizeSchema(rows[0].sql)!==normalizeSchema(grantSchema))fail();
+    return true;
+  }catch{fail();}
+}
 
 // Host-only authority, NOT a bearer token or an account session. Private metadata
 // DB owned by the host, with no message bodies or provider credentials. No live
@@ -22,13 +40,9 @@ export class MessagingReceiveGrants {
   #db; #store; #closed=false;
   constructor({db,store}) {
     this.#db=db;this.#store=store;
-    db.exec(`PRAGMA synchronous=FULL;
-      CREATE TABLE IF NOT EXISTS messaging_receive_grants_v1 (
-        account_id TEXT NOT NULL, connection_id TEXT NOT NULL, revision INTEGER NOT NULL,
-        auth_epoch INTEGER NOT NULL, provider TEXT NOT NULL, connection_revision INTEGER NOT NULL,
-        state TEXT NOT NULL CHECK(state IN ('active','revoked')), expires_at INTEGER NOT NULL,
-        at INTEGER NOT NULL, actor_session_revision INTEGER NOT NULL,
-        PRIMARY KEY(account_id,connection_id,revision));`);
+    if(!assertMessagingReceiveSchema(db,{allowEmpty:true}))db.exec(grantSchema);
+    assertMessagingReceiveSchema(db);
+    db.exec('PRAGMA synchronous=FULL;');
   }
   close(){this.#closed=true;}
   #transaction(fn){

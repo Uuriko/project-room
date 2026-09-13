@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { TwilioConnectionRegistry } from './twilio-connection-registry.mjs';
 import { createTwilioConnections } from './twilio-connections.mjs';
-import { MessagingReceiveGrants } from './messaging-receive-grants.mjs';
+import { MessagingReceiveGrants, assertMessagingReceiveSchema } from './messaging-receive-grants.mjs';
 import { createTwilioWebhookServer } from './twilio-webhook.mjs';
 const names=['ROOM_TWILIO_REGISTRY_FILE','ROOM_TWILIO_KEY_FILE','ROOM_TWILIO_ACCOUNT_ID','ROOM_TWILIO_CONNECTION_ID'];
 const fail=()=>{const e=new Error('Messaging private configuration is invalid');e.code='twilio_private_configuration_invalid';throw e;};
@@ -51,9 +51,7 @@ export function createTwilioRuntime({env=process.env,store,sourceRoot=fileURLToP
     const provider=row.address.startsWith('whatsapp:')?'whatsapp':'sms';
     if(receiveFile){
       const check=new DatabaseSync(receiveFile,{readOnly:true});
-      try{const tables=check.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
-        if(tables.length!==1||tables[0].name!=='messaging_receive_grants_v1')fail();
-      }finally{check.close();}
+      try{assertMessagingReceiveSchema(check);}finally{check.close();}
       grantDb=new DatabaseSync(receiveFile);grants=new MessagingReceiveGrants({db:grantDb,store});
       const getBinding=()=>{
         const current=store.account(binding.accountId),b={...binding,authEpoch:current.authEpoch};
