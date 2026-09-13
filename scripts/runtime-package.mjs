@@ -53,6 +53,7 @@ optional.push("src/work-templates.js");
 optional.push("src/room-templates.js");
 optional.push("scripts/release-evidence.mjs");
 optional.push("src/work-loops.js");
+optional.push("server/channel-connection.mjs", "server/channel-import.mjs", "server/channel-adapters/index.mjs", "server/channel-adapters/email.mjs", "server/channel-adapters/telegram.mjs");
 const allowed = new Set([...required, ...optional]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 const check = condition => { if (!condition) throw new Error("Runtime package does not match its exact allowlisted contract"); };
