@@ -21,6 +21,10 @@ export function setShareLinkStatus(element, text) {
 
 const interrupted = error => error?.name === "AbortError" || error?.name === "TimeoutError" || error instanceof TypeError;
 export const canRetryInvitation = error => interrupted(error) || error?.status === 429 || error?.status >= 500;
+// Raw transport text ("signal is aborted without reason", "Unexpected token '<'") is not a user message.
+export function requestFailureMessage(error) {
+  return interrupted(error) || error instanceof SyntaxError ? "The connection was interrupted and the result could not be confirmed" : error.message;
+}
 export function invitationFailureMessage(error) {
   if (interrupted(error)) {
     return "The connection was interrupted. We could not confirm the result. Your entries are kept; try again here to check or finish the same request.";
@@ -94,8 +98,11 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     const duration = hours === 168 ? "7 days" : `${hours} ${hours === 1 ? "hour" : "hours"}`;
     $("#share-settings-summary").textContent = `${duration} · ${Number.isInteger(limit) && limit >= 1 && limit <= 25 ? `${limit} ${limit === 1 ? "guest" : "guests"}` : "Choose a guest limit"}`;
   }
+  let creating = false;
   function creationBusy(value) {
-    for (const id of ["share-link-create", "share-link-expiry", "share-link-limit"]) $("#" + id).disabled = value;
+    creating = value;
+    // The close control is held too: dismissing mid-request would orphan a shown-once link.
+    for (const id of ["share-link-create", "share-link-expiry", "share-link-limit", "share-link-close"]) $("#" + id).disabled = value;
   }
   function updateSwitchWarning() {
     const currentRoom = getSession()?.roomId ?? getState()?.room?.id;
@@ -177,7 +184,8 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     // Link-list feedback never owns the newer creation/clipboard status.
     await list(version, generation).catch(() => {});
   });
-  $("#share-link-close").addEventListener("click", () => manager.close());
+  $("#share-link-close").addEventListener("click", () => { if (!creating) manager.close(); });
+  manager.addEventListener("cancel", event => { if (creating) event.preventDefault(); });
   manager.addEventListener("close", () => { resetManagement(); if (!$("#invite-people-button").hidden) $("#invite-people-button").focus(); });
   $("#share-link-another").addEventListener("click", () => {
     clearResult(); $("#share-link-create").focus();

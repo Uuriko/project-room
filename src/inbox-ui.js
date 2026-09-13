@@ -378,7 +378,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
         persistShare(); current.request = null; sharing = null; text("#inbox-share-status", "Not shared. Close and try again.");
       } else { text("#inbox-share-status", retained ? "Share unconfirmed. Retry the original selection." : "Share unconfirmed. Keep this tab open and retry.");
         $("#inbox-share-confirm").textContent = "Confirm share"; $("#inbox-share-confirm").disabled = false; }
-    } finally { if (sharing === current || sharing === null) sharingBusy = false; }
+    } finally { sharingBusy = false; } // Only one share is in flight at a time; a dialog reopened mid-flight must not stay locked.
   });
   $("#inbox-share-close").addEventListener("click", () => $("#inbox-share-dialog").close());
   $("#inbox-ask").addEventListener("click", ask);
