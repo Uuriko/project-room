@@ -610,9 +610,43 @@ function focusAuthEntry() {
   const selector = $('#key-access').open ? '#access-key' : $('#provider-join').hidden ? '#sign-in-entry' : '#provider-join-button';
   $(selector).focus({ preventScroll: true });
 }
+const helpDialog = $('#project-help');
+let helpOpener = null;
+function openProjectHelp(opener) {
+  helpOpener = opener;
+  if (!helpDialog.open) helpDialog.showModal();
+}
+$('#project-help-button').addEventListener('click', event => openProjectHelp(event.currentTarget));
+$('#project-help-close').addEventListener('click', () => helpDialog.close());
+helpDialog.addEventListener('close', () => { helpOpener?.focus(); });
+// Only include the origin: invitations, account selectors and credentials never enter the prompt.
+const setupAddress = location.protocol === 'file:' ? 'the Project Room page my human has open' : location.origin;
+$('#agent-setup-prompt').value = `Help me and you get started in Project Room at ${setupAddress}.
+
+Use the existing sign-in or invitation flow. If you cannot access this address (a localhost/127.0.0.1 address works only on my computer), tell me what to open locally. Do not claim signup succeeded until verified.
+
+Guide me through signing in myself; never ask me to paste my password, human account key, email token, or other secrets into this chat. Pause for my consent before granting access or accepting terms.
+
+After I sign in, help me open or create a room. Use Add agent and its supported connection instructions to connect you with a separate agent identity and only the permissions needed. Keep agent credentials in the host's private credential storage, not messages. If you cannot connect directly, explain that and help me use the supported chat-packet route instead.
+
+Confirm the room, your identity, and your actual access. Ask what we should work on first. Do not connect my Inbox, share private messages, send external messages, or change permissions without my approval.`;
+async function copyAgentSetup(event) {
+  const button = event.currentTarget;
+  try {
+    await navigator.clipboard.writeText($('#agent-setup-prompt').value);
+    $('#agent-setup-status').textContent = 'Copied. Paste into your agent.';
+    button.textContent = 'Copied';
+  } catch {
+    openProjectHelp(button);
+    $('#agent-setup-prompt').closest('details').open = true;
+    $('#agent-setup-prompt').focus(); $('#agent-setup-prompt').select();
+    $('#agent-setup-status').textContent = 'Select and copy the prompt below.';
+  }
+}
+$('#copy-agent-setup').addEventListener('click', copyAgentSetup);
+$('#help-copy-agent-setup').addEventListener('click', copyAgentSetup);
 function configureAuthPanel(roomId = selectedRoomFromLocation()) {
   const accountMode = accountSignIn();
-  $("#auth-title").textContent = "Sign in";
   $("#access-key-label").textContent = accountMode ? "Account key" : "Room key";
   if ($("#auth-lead")) {
     $("#auth-lead").textContent = accountMode
@@ -3271,6 +3305,7 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
         $('#provider-join').hidden = false; $('#key-access').open = false;
         $('#sign-in-entry').textContent = 'Other options';
         $('#sign-in-entry').className = 'text-button';
+        $('#project-help-signin').textContent = 'Choose Join and use an available sign-in method. Have a key or invitation? Open Other options. Keep account keys private.';
       }
     } catch { /* Existing key access remains available during config failure. */ }
   }

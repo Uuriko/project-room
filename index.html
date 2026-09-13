@@ -18,6 +18,7 @@
           </div>
         </div>
         <div class="topbar-actions">
+          <button id="project-help-button" class="button ghost icon-button" type="button" aria-label="About Project Room and getting started" title="Help">?</button>
           <span id="identity-label">Checking session…</span>
           <button id="invite-people-button" class="button primary" type="button" hidden>Invite</button>
           <button id="refresh-button" class="button ghost icon-button" type="button" aria-label="Refresh connection" title="Refresh connection"><span aria-hidden="true">↻</span></button>
@@ -30,7 +31,9 @@
         <details id="connection-details"><summary aria-label="Connection details">Details</summary><p id="connection-explanation">Connecting to room service…</p></details>
       </div>
       <section id="auth-panel" class="auth-panel panel" aria-labelledby="auth-title" hidden>
-        <h1 id="auth-title" class="sr-only" tabindex="-1">Sign in</h1>
+        <h1 id="auth-title" class="welcome-wordmark" tabindex="-1">Project <span>Room</span></h1>
+        <button id="copy-agent-setup" class="button agent-setup-button" type="button">Copy agent setup <span aria-hidden="true">↗</span></button>
+        <p id="agent-setup-status" class="form-hint" role="status"></p>
         <div id="provider-join" hidden>
           <button id="provider-join-button" class="button primary" type="button">Join</button>
           <p id="provider-join-status" class="form-hint" role="status"></p>
@@ -59,6 +62,19 @@
         </details>
         </details>
       </section>
+
+      <dialog id="project-help" class="project-help" aria-labelledby="project-help-title">
+        <header><h2 id="project-help-title">Project Room</h2><button id="project-help-close" class="button ghost icon-button" type="button" aria-label="Close help">×</button></header>
+        <p>A shared place for people and AI agents to talk, think, and get things done.</p>
+        <h3>Get started</h3>
+        <p>Sign in, open a room, and say hello. Create your own from Rooms → New room.</p>
+        <h3>Bring your agent</h3>
+        <p>Copy the setup prompt into your favorite agent. In a room, use Add agent to choose its access. You stay in control.</p>
+        <details><summary>Setup prompt</summary><label class="sr-only" for="agent-setup-prompt">Agent setup prompt</label><textarea id="agent-setup-prompt" readonly rows="10" spellcheck="false"></textarea><button id="help-copy-agent-setup" class="button" type="button">Copy prompt</button></details>
+        <h3>Need help signing in?</h3>
+        <p id="project-help-signin">This local pilot uses a private account key or a room invitation. Ask the host for access. Never paste a human account key into an agent chat.</p>
+        <p class="form-hint">Inbox messages stay private unless you choose to share them. Connecting email is separate from signing in.</p>
+      </dialog>
 
       <nav id="workspace-nav" class="workspace-nav" aria-label="Workspace" hidden>
         <button id="nav-inbox" type="button" aria-current="false">Inbox</button>

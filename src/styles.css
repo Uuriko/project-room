@@ -293,7 +293,22 @@ button.source-link { background: none; border: 0; padding: .25rem 0; text-align:
 #people-hint:empty { display: none; }
 .auth-panel { max-width: 28rem; margin: clamp(1rem, 8vw, 6rem) auto; padding: clamp(1.25rem, 4vw, 2.5rem); }
 #auth-panel { width: min(100% - 2rem, 22rem); margin: clamp(4rem, 20vh, 12rem) auto; border: 0; background: transparent; box-shadow: none; }
-#auth-panel #auth-title { margin: 0; }
+#auth-panel #auth-title { margin: 0 0 2.25rem; }
+.welcome-wordmark { white-space: nowrap; text-align: center; font-family: "Avenir Next", Avenir, "Helvetica Neue", sans-serif; font-size: clamp(2.25rem, 7vw, 3rem) !important; font-weight: 500; letter-spacing: -.065em; line-height: 1.15; }
+.welcome-wordmark span { font-weight: 300; color: #c5c8df; }
+#auth-panel { max-width: 26rem; width: min(100% - 2rem, 26rem); }
+.agent-setup-button { width: 100%; margin-bottom: .75rem; background: transparent; border: 1px solid var(--line); color: var(--muted); }
+.agent-setup-button span { margin-left: .5rem; }
+#agent-setup-status:empty { display: none; }
+#agent-setup-status { text-align: center; font-size: .8rem; }
+.app-shell:has(#auth-panel:not([hidden])) .topbar { background: transparent; border: 0; backdrop-filter: none; justify-content: flex-end; }
+.app-shell:has(#auth-panel:not([hidden])) .topbar .brand { display: none; }
+#project-help-button { border: 1px solid var(--line); border-radius: 50%; width: 2rem; min-height: 2rem; padding: 0; color: var(--muted); }
+.project-help { width: min(32rem, calc(100% - 2rem)); max-height: 85dvh; overflow-y: auto; }
+.project-help header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+.project-help p { color: var(--muted); }
+.project-help summary { cursor: pointer; padding: .5rem 0; }
+#agent-setup-prompt { margin: .5rem 0; font-size: .85rem; }
 #sign-in-entry { list-style: none; text-align: center; cursor: pointer; }
 #sign-in-entry::-webkit-details-marker { display: none; }
 #key-access[open] > summary { margin-bottom: 1.5rem; }
