@@ -16,7 +16,7 @@ import { isSessionStatus, workItemSessionContract } from "../src/work-item-sessi
 import { openJoinContract, publicMcpCard } from "./open-contract.mjs";
 import { handlePublicMcpMessage, MCP_CORS, MCP_VERSION, mcpOriginAllowed } from "../client/mcp-public.mjs";
 import { createClerkVerifier } from './clerk-verifier.mjs';
-import { loginWithProvider } from './provider-onboarding.mjs';
+import { loginWithProvider, refreshWithProvider } from './provider-onboarding.mjs';
 import { createAccountRoom } from './account-room-create.mjs';
 
 const roomCookieName = "room_session";
@@ -379,6 +379,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (!exact(data, ['requestId', 'title'])) reject(422, 'invalid_room_creation', 'Choose a room name.');
         return json(res, 201, createAccountRoom(store, token, binding, data));
+      }
+      if (url.pathname === '/api/provider-session/refresh' && providerVerifier) {
+        if (req.method !== 'POST') reject(405, 'method_not_allowed', 'Method not allowed');
+        checkOrigin(req, true);
+        if (req.headers.authorization) reject(403, 'account_session_required', 'Use an account browser session');
+        const slotToken = cookie(req, accountCookieName), binding = accountBinding(req);
+        const auth = store.authenticateAccountSession(slotToken, null, binding);
+        protectWrite(req, auth, false);
+        rate(`provider-refresh:${auth.account.id}`, 60);
+        const data = await body(req);
+        if (!exact(data, ['token'])) reject(422, 'invalid_provider_login', 'Invalid sign-in');
+        const refreshed = await refreshWithProvider(store, { token: data.token, verify: providerVerifier,
+          issuer: providerAuth.issuer, slotToken, binding });
+        return json(res, 200, accountView(refreshed));
       }
       if (url.pathname === '/api/provider-session' && providerVerifier) {
         if (req.method !== 'POST') reject(405, 'method_not_allowed', 'Method not allowed');

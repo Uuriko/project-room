@@ -34,6 +34,34 @@ function joinWelcome(store, accountId, memberId, provenance) {
 }
 
 const fail = (status, code) => { throw new ServiceError(status, code, 'Sign-in could not be completed'); };
+// Renewal keeps browser identity/generation stable without extending any shared
+// credential. No access key is accepted or returned.
+export async function refreshWithProvider(store, { token, verify, issuer, slotToken, binding }) {
+  if (typeof token !== 'string' || !token || token.length > 16384 || typeof verify !== 'function') fail(422, 'invalid_provider_login');
+  const claims = await verify(token);
+  if (claims?.iss !== issuer || !/^user_[A-Za-z0-9]{1,100}$/.test(claims.sub ?? '')
+    || !/^sess_[A-Za-z0-9]{1,100}$/.test(claims.sid ?? '')
+    || !Number.isSafeInteger(claims.exp) || claims.exp * 1000 <= store.now()) fail(401, 'invalid_provider_identity');
+  const accountId = `idp-${createHash('sha256').update(JSON.stringify([issuer, claims.sub])).digest('hex')}`;
+  const provenance = `clerk:${createHash('sha256').update(issuer).digest('hex')}`;
+  return store.transaction(() => {
+    const current = store.authenticateAccountSession(slotToken, null, binding);
+    if (current.account.id !== accountId || store.db.prepare('SELECT origin FROM accounts WHERE id=?').get(accountId)?.origin !== provenance)
+      fail(403, 'provider_identity_changed');
+    const slot = store.db.prepare('SELECT * FROM account_session_slots WHERE hash=?').get(current.credentialHash);
+    // Never shorten a current assertion when responses arrive out of order.
+    const expiry = Math.max(current.expiresAt, Math.min(claims.exp * 1000, store.now() + 15 * 60000, slot.expires_at));
+    // Reclaim only expired, unreferenced credentials of this verified account.
+    // Other browser slots retain their original expiry and revocation parent.
+    store.db.prepare(`DELETE FROM account_credentials WHERE account_id=? AND expires_at<=?
+      AND NOT EXISTS (SELECT 1 FROM account_session_slots WHERE parent_credential_hash=account_credentials.hash)`).run(accountId, store.now());
+    const credential = store.insertAccountCredential(accountId, expiry);
+    const access = store.authenticateAccountAccessKey(credential);
+    store.db.prepare('UPDATE account_session_slots SET authenticated_until=?,parent_credential_hash=? WHERE hash=?')
+      .run(expiry, access.credentialHash, current.credentialHash);
+    return store.authenticateAccountSession(slotToken, null, binding);
+  });
+}
 // Called only after server-side provider verification, never with browser profile
 // fields. The verifier must authenticate signature, issuer, audience/authorized
 // party, expiry and session identity. Email is deliberately not an account key.

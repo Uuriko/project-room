@@ -37,7 +37,9 @@ authentication DNS was configured and verified in the subsequent launch pass bel
    existing Clerk application. The five one-time Domain Connect CNAMEs for clerk,
    accounts, clkmail, clk._domainkey and clk2._domainkey were authorized and checked
    against authoritative DNS. Clerk reports all verified; certificates still
-   show Issuing at the last dashboard check. Issuer: https://clerk.trydemigod.com.
+   showed Issuing in the dashboard; subsequent HTTPS public JWKS fetch succeeds
+   with status200 and normal certificate verification. Public key ID matches the
+   production instance. Issuer: https://clerk.trydemigod.com.
    This does not publish room.trydemigod.com. No secret keys were revealed or
    copied, and no paid upgrade was selected.
 4. Verified operator identity and moderation recovery; no first-signup or email-only
@@ -55,6 +57,20 @@ authentication DNS was configured and verified in the subsequent launch pass bel
    roll schema33 back to the schema26 code against the same migrated database.
 8. Hosted two-user sign-in, chat/reconnect, revocation, agent operation, admin and
    first-room checks, then verify both domain entrypoints and exact served assets.
+
+## Verified provider renewal implementation
+
+The optional refresh endpoint now verifies a fresh signed provider assertion,
+requires current account session, CSRF and binding, and preserves that browser's
+identity generation. It replaces only that slot's credential parent; another
+browser's expiry is not extended. Expired unreferenced credentials for that
+account are reclaimed to prevent renewal exhausting the retention cap. Changed
+identity, logout, revocation, expired sessions and stale bindings fail closed.
+Out-of-order valid assertions cannot shorten current expiry. Focused provider
+and verifier tests:13 pass. Browser refresh integration remains outstanding.
+Full regression after renewal:1296 tests pass, zero failures/skips (202860ms).
+Grok independently reports ad18f33 private-room/runtime checks5/5; browser checks
+were not repeated by Grok. The live version endpoint still serves a5f2dca.
 
 Release copy retained at /Users/johnpotter/src/project-room-release-20260912-c79dfa5.
 It contains generated stamp/assets from the successful dry-run; don't stamp again

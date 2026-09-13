@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RoomStore } from '../server/store.mjs';
-import { loginWithProvider, STARTER_ROOM_ID } from '../server/provider-onboarding.mjs';
+import { loginWithProvider, refreshWithProvider, STARTER_ROOM_ID } from '../server/provider-onboarding.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
@@ -17,6 +17,47 @@ function fixture(t) {
   const options = { issuer, token: 'signed-test-assertion', verify: async () => claims, slotToken: slot.token, expectedRevision: 0 };
   return { store, claims, options, slot };
 }
+
+test('provider renewal preserves identity and drafts binding without extending another browser', async t => {
+  const f = fixture(t), first = await loginWithProvider(f.store, f.options);
+  const otherSlot = f.store.createAccountSessionSlot();
+  const other = await loginWithProvider(f.store, { ...f.options, slotToken: otherSlot.token });
+  const oldExpiry = first.session.expiresAt;
+  f.claims.exp += 60;
+  const renewed = await refreshWithProvider(f.store, { ...f.options, binding: first.session.sessionBinding });
+  assert.equal(renewed.expiresAt, oldExpiry + 60000);
+  for (const field of ['sessionBinding', 'sessionRevision', 'csrf']) assert.equal(renewed[field], first.session[field]);
+  assert.equal(f.store.authenticateAccountSession(otherSlot.token).expiresAt, other.session.expiresAt);
+  f.claims.exp -= 60;
+  assert.equal((await refreshWithProvider(f.store, { ...f.options, binding: renewed.sessionBinding })).expiresAt, renewed.expiresAt);
+  assert.equal(f.store.room(first.roomId).sequence, 3);
+});
+
+test('provider renewal rejects changed identity, logout, stale binding and expired sessions', async t => {
+  for (const scenario of ['identity', 'logout', 'binding', 'expired', 'revoked']) {
+    const f = fixture(t), first = await loginWithProvider(f.store, f.options);
+    let binding = first.session.sessionBinding;
+    if (scenario === 'identity') f.claims.sub = 'user_other';
+    if (scenario === 'logout') f.store.logoutAccountSession(f.slot.token, 1);
+    if (scenario === 'binding') binding = 'wrong';
+    if (scenario === 'expired') { const later = first.session.expiresAt + 1; f.store.now = () => later; f.claims.exp += 120; }
+    if (scenario === 'revoked') f.store.changeAccountAccess(first.session.account.id, { expectedRevision: 0, active: false, reason: 'test' });
+    const before = f.store.db.prepare('SELECT count(*) AS n FROM account_credentials').get().n;
+    await assert.rejects(refreshWithProvider(f.store, { ...f.options, binding }), undefined, scenario);
+    assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM account_credentials').get().n, before);
+  }
+});
+
+test('renewal reclaims expired unreferenced credentials, not credentials of other slots', async t => {
+  const f = fixture(t), first = await loginWithProvider(f.store, f.options);
+  const start = f.store.now(); let now = start;
+  f.store.now = () => now;
+  for (let i = 0; i < 20; i++) {
+    now += 30000; f.claims.exp = Math.floor(now / 1000) + 60;
+    await refreshWithProvider(f.store, { ...f.options, binding: first.session.sessionBinding });
+  }
+  assert.ok(f.store.db.prepare('SELECT count(*) AS n FROM account_credentials').get().n <= 3);
+});
 
 test('verified first sign-in joins Welcome without elevated permissions, repeated sign-in reuses membership', async t => {
   const f = fixture(t), first = await loginWithProvider(f.store, f.options);
@@ -78,6 +119,16 @@ test('HTTP provider exchange requires browser CSRF and a signed identity, then o
   assert.equal(result.starterRoomId, STARTER_ROOM_ID);
   assert.deepEqual(f.store.authenticateAccountSession(cookie.split('=')[1], result.starterRoomId).member.permissions, []);
   assert.equal(JSON.stringify(result).includes(token), false);
+  const refreshOptions = { method: 'POST', headers: { Origin: origin, Cookie: cookie, 'Content-Type': 'application/json',
+    'X-Session-Binding': result.sessionBinding }, body: JSON.stringify({ token }) };
+  assert.equal((await fetch(origin + '/api/provider-session/refresh', refreshOptions)).status, 403);
+  const refreshed = await fetch(origin + '/api/provider-session/refresh', { ...refreshOptions,
+    headers: { ...refreshOptions.headers, 'X-CSRF-Token': result.csrf } });
+  assert.equal(refreshed.status, 200, await refreshed.clone().text());
+  const renewed = await refreshed.json();
+  assert.equal(renewed.sessionBinding, result.sessionBinding);
+  assert.equal(renewed.sessionRevision, result.sessionRevision);
+  assert.equal(JSON.stringify(renewed).includes(token), false);
 });
 
 test('an unrelated Welcome room cannot be opened through onboarding', async t => {
