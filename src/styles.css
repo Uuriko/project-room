@@ -309,6 +309,12 @@ button.source-link { background: none; border: 0; padding: .25rem 0; text-align:
 .project-help p { color: var(--muted); }
 .project-help summary { cursor: pointer; padding: .5rem 0; }
 #agent-setup-prompt { margin: .5rem 0; font-size: .85rem; }
+.inbox-views { display: flex; gap: .25rem; margin: .5rem 0; }
+.inbox-views button { flex: 1; border: 0; border-radius: .4rem; background: transparent; color: var(--muted); }
+.inbox-views button[aria-pressed="true"] { background: var(--panel-raised); color: var(--text); }
+#inbox-search { margin-bottom: .75rem; }
+.messaging-setup { margin-top: .75rem; }
+.messaging-setup summary { cursor: pointer; padding: .5rem 0; }
 #sign-in-entry { list-style: none; text-align: center; cursor: pointer; }
 #sign-in-entry::-webkit-details-marker { display: none; }
 #key-access[open] > summary { margin-bottom: 1.5rem; }

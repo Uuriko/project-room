@@ -10,6 +10,12 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   let navigationEpoch = 0;
   let grantsEpoch = 0;
   let connectionTurn = 0, connectionBusy = false;
+  let inboxView = 'all';
+  const visibleRows = () => {
+    const query = $('#inbox-search').value.trim().toLocaleLowerCase();
+    return rows.filter(source => (inboxView === 'all' || (inboxView === 'email' ? source.adapter === 'email' : source.adapter === 'message'))
+      && (!query || `${source.sender ?? ''} ${source.subject ?? ''}`.toLocaleLowerCase().includes(query)));
+  };
   const storageKey = "project-room:pending-private-share:v1";
   const positionKey = "project-room:inbox-position:v1";
   let storage; try { storage = sessionStorage; } catch {}
@@ -83,6 +89,8 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     }
   }
   function reset({ preservePending = false } = {}) {
+    inboxView = 'all'; $('#inbox-search').value = '';
+    $('#inbox-views').querySelectorAll('button').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.inboxView === 'all')));
     connectionTurn++; connectionBusy = false;
     $('#inbox-connections').open = false; $('#inbox-gmail-form').reset(); $('#inbox-gmail-form').hidden = true;
     $('#inbox-connections').querySelectorAll('button').forEach(button => { button.disabled = false; });
@@ -119,7 +127,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   }
   const errorText = error => error.code === "obsolete_inbox" ? "" : error.status === 404 ? "Message unavailable." : "Couldn’t load inbox. Try again.";
   function renderList() {
-    $("#inbox-list").replaceChildren(...rows.map(source => {
+    $("#inbox-list").replaceChildren(...visibleRows().map(source => {
       const button = document.createElement("button"); button.type = "button"; button.className = "inbox-row";
       button.dataset.sourceId = source.id; button.setAttribute("aria-current", selected === source.id ? "true" : "false");
       const sender = document.createElement("span"), subject = document.createElement("strong");
@@ -127,6 +135,34 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       button.append(sender, subject); button.addEventListener("click", () => open(source.id)); return button;
     }));
   }
+  function changeView() {
+    if (!owns()) return;
+    remember(); epoch++;
+    const visible = visibleRows();
+    if (!visible.some(source => source.id === selected) || !drafts.has(selected)) {
+      selected = null; $('#inbox-reader').hidden = true; $('#inbox-panel').classList.remove('reading');
+      if (visible.length) open(visible[0].id);
+    }
+    renderList();
+    text('#inbox-status', visible.length ? '' : rows.length ? 'No matches in this view.' : 'No messages yet.');
+  }
+  $('#inbox-views').addEventListener('click', event => {
+    const button = event.target.closest('[data-inbox-view]'); if (!button) return;
+    inboxView = button.dataset.inboxView;
+    $('#inbox-views').querySelectorAll('button').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+    changeView();
+  });
+  $('#inbox-search').addEventListener('input', changeView);
+  document.addEventListener('keydown', event => {
+    if (!active || !owns() || event.defaultPrevented || event.isComposing || event.metaKey || event.ctrlKey || event.altKey
+      || document.querySelector('dialog[open]') || event.target.closest('input,textarea,select,[contenteditable="true"]')) return;
+    if (event.key === '/') { event.preventDefault(); $('#inbox-search').focus(); }
+    if (event.key === 'j' || event.key === 'k') {
+      const visible = visibleRows(), index = visible.findIndex(source => source.id === selected);
+      const next = index < 0 ? 0 : index + (event.key === 'j' ? 1 : -1);
+      if (visible[next]) { event.preventDefault(); open(visible[next].id); }
+    }
+  });
   async function loadConnections() {
     if (!owns()) return;
     const turn = ++connectionTurn, capturedOwner = owner;
@@ -189,13 +225,15 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     const turn = ++epoch;
     try {
       const result = await api.list(); if (!owns() || turn !== epoch) return;
-      rows = result.sources; renderList(); text("#inbox-status", rows.length ? "" : "No messages yet.");
+      rows = result.sources; renderList(); const visible = visibleRows();
+      text("#inbox-status", visible.length ? "" : rows.length ? "No matches in this view." : "No messages yet.");
       $("#inbox-empty").hidden = rows.length > 0;
-      if (selected && drafts.has(selected)) { render(); loadResults(selected); return; }
+      if (selected && drafts.has(selected) && visible.some(source => source.id === selected)) { render(); loadResults(selected); return; }
+      selected = null; $('#inbox-reader').hidden = true; $('#inbox-panel').classList.remove('reading');
       const pending = pendingShare(), saved = savedPosition();
       if (saved && rows.some(r => r.id === saved.sourceId && r.revision === saved.sourceRevision))
         positions.set(saved.sourceId, { sourceRevision: saved.sourceRevision, reader: saved.reader, page: saved.page });
-      if (rows.length) await open(rows.find(r => r.id === pending?.sourceId)?.id ?? rows.find(r => r.id === saved?.sourceId)?.id ?? rows[0].id);
+      if (visible.length) await open(visible.find(r => r.id === pending?.sourceId)?.id ?? visible.find(r => r.id === saved?.sourceId)?.id ?? visible[0].id);
     } catch (error) { if (owns() && turn === epoch) text("#inbox-status", errorText(error)); }
   }
   async function open(sourceId) {
@@ -214,12 +252,12 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     } catch (error) { if (owns() && turn === epoch) text("#inbox-status", errorText(error)); }
   }
   function render() {
-    const d = drafts.get(selected); if (!d || !owns()) return;
+    const d = drafts.get(selected); if (!d || !owns() || !visibleRows().some(source => source.id === selected)) return;
     loadGrants();
     $("#inbox-reader").hidden = false;
     text("#inbox-subject", d.source.subject || "(No subject)");
     const email = d.source.email;
-    text("#inbox-source-label", email ? "Sample email · only you" : "Sample message · only you");
+    text("#inbox-source-label", email ? "Email · only you" : "Sample message · only you");
     $("#inbox-ask").hidden = Boolean(email) && !d.source.capabilities.share && !pendingShare();
     $("#inbox-email-details").hidden = !email;
     const metadata = email ? ["Mailbox: " + d.source.recipient,
