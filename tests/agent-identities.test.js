@@ -110,6 +110,35 @@ test("multi-room agent identity: one secret works across linked rooms (round-2 #
   await assert.rejects(stranger.snapshot(), error => error.status === 401);
 });
 
+test("re-linking applies the permissions the owner supplies now, not the unlinked record's", async t => {
+  const { origin, ownerCommons } = await serve(t);
+  const { identityId } = await createAgentIdentity(origin, "Scoped Bot");
+  const link = async (permissions) => fetch(`${origin}/api/rooms/commons/identity-links`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${ownerCommons}` },
+    body: JSON.stringify({ identityId, permissions })
+  });
+  const members = async () => (await (await fetch(`${origin}/api/rooms/commons`, { headers: { Authorization: `Bearer ${ownerCommons}` } })).json()).state.members;
+  assert.equal((await link(["accept_work", "complete_work", "verify"])).status, 201);
+  assert.deepEqual([...(await members())[identityId].permissions].sort(), ["accept_work", "complete_work", "verify"]);
+  const unlink = await fetch(`${origin}/api/rooms/commons/identity-links`, {
+    method: "DELETE", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${ownerCommons}` },
+    body: JSON.stringify({ identityId })
+  });
+  assert.equal(unlink.status, 200);
+  const relink = await link(["accept_work"]);
+  assert.equal(relink.status, 201);
+  assert.equal((await relink.json()).relinked, true);
+  const member = (await members())[identityId];
+  assert.equal(member.active, true);
+  assert.deepEqual(member.permissions, ["accept_work"]);
+  // A non-text display name is a validation error, not a service failure.
+  const badName = await fetch(`${origin}/api/rooms/commons/identity-links`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${ownerCommons}` },
+    body: JSON.stringify({ identityId: (await createAgentIdentity(origin, "Other")).identityId, permissions: ["accept_work"], displayName: 42 })
+  });
+  assert.equal(badName.status, 422);
+});
+
 test("CLI plug-in loop: a new AI goes from no credential to connected member", async t => {
   const { origin, ownerCommons } = await serve(t);
   const ownerEnv = { ROOM_AGENT_ROOM: "commons", ROOM_AGENT_MEMBER: "owner", ROOM_AGENT_TOKEN: ownerCommons };

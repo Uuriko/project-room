@@ -77,6 +77,7 @@ export class AgentIdentities {
     const resolvedMemberId = memberId ?? identityId;
     if (!MEMBER_ID_PATTERN.test(resolvedMemberId)) fail(422, "invalid_identity", "memberId must match [A-Za-z0-9][A-Za-z0-9_-]{0,63}");
     if (!Array.isArray(permissions) || !permissions.length) fail(422, "invalid_identity", "permissions are required to link an identity");
+    if (displayName !== undefined && (typeof displayName !== "string" || displayName.length > 80)) fail(422, "invalid_identity", "displayName must be text of at most 80 characters");
     return this.store.transaction(() => {
       const existing = this.db.prepare("SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?").get(roomId, identityId);
       if (existing) fail(409, "identity_already_linked", "This identity is already linked to this room");
@@ -86,9 +87,12 @@ export class AgentIdentities {
         // identity) is reused and reactivated. A foreign member holding the
         // id is a conflict.
         if (roomMember.identityId !== identityId) fail(409, "identity_conflict", "Member id is already taken");
-        if (roomMember.active === false) {
+        // The permissions the owner supplies now win; the stale record's
+        // grants must not come back silently.
+        const samePermissions = JSON.stringify([...roomMember.permissions].sort()) === JSON.stringify([...permissions].sort());
+        if (roomMember.active === false || !samePermissions) {
           this.store.command(token, roomId, { id: randomUUID(), type: "member.access_changed",
-            data: { memberId: resolvedMemberId, expectedMemberRevision: roomMember.revision, permissions: roomMember.permissions, active: true } });
+            data: { memberId: resolvedMemberId, expectedMemberRevision: roomMember.revision, permissions, active: true } });
         }
         this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
           .run(roomId, identityId, resolvedMemberId, this.store.now());
