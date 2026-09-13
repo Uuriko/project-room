@@ -159,7 +159,7 @@ test("uncommitted candidate packages cold in an isolated synthetic commit, inclu
   const directory = mkdtempSync(join(tmpdir(), "room-candidate-package-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const candidate = candidateRuntimeFixture(repository, directory), destination = join(directory, "runtime");
-  const receipt = createRuntimePackage({ ...candidate, destination }); assert.equal(receipt.files, 132);
+  const receipt = createRuntimePackage({ ...candidate, destination }); assert.equal(receipt.files, 133);
   const program = `
     import { handlePublicMcpMessage } from ${JSON.stringify(pathToFileURL(join(destination, "client/mcp-public.mjs")).href)};
     import { openJoinContract } from ${JSON.stringify(pathToFileURL(join(destination, "server/open-contract.mjs")).href)};
