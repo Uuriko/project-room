@@ -822,3 +822,7 @@ summary { overflow-wrap: anywhere; }
 .work-changes-list { margin: 0.35rem 0 0.55rem; padding: 0.45rem 0.7rem; border-left: 3px solid var(--accent, #4a6fa5); background: var(--panel, rgba(127,127,127,0.06)); border-radius: 0 6px 6px 0; }
 .work-changes-list ul { margin: 0; padding-left: 1.1rem; }
 .work-changes-list li { margin: 0.15rem 0; }
+.result-diff { margin: 0.4rem 0 0; padding: 0.5rem 0.7rem; border: 1px solid var(--border, rgba(127,127,127,0.35)); border-radius: 6px; overflow-x: auto; font-size: 0.9em; }
+.result-diff span { display: block; white-space: pre-wrap; }
+.result-diff .diff-added { color: #1a7f37; background: rgba(26,127,55,0.08); }
+.result-diff .diff-removed { color: #b42318; background: rgba(180,35,24,0.08); text-decoration: line-through; }
