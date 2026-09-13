@@ -134,6 +134,22 @@ for (const mobile of [false, true]) {
     assert.equal(snapshot().cursor, 0); assert.deepEqual(writes, []);
     assert.equal(await page.locator("#message-input").inputValue(), "A draft to keep while catching up.");
     failBrief = false; await page.locator("#rb-refresh-button").click(); await ready();
+
+    // Result-first catch-up (C6): the refreshed history groups by outcome,
+    // blocker and remaining volume, and each grouped line still opens its exact
+    // supporting record. The completed/blocked events are on the second page,
+    // so page the frozen window first - grouping covers every loaded page.
+    await page.locator("#rb-history-section > summary").click();
+    const moreBrief = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/return-brief"));
+    await page.locator("#rb-more-button").click(); await moreBrief;
+    await page.waitForFunction(() => document.querySelector("#return-brief-panel").getAttribute("aria-busy") === "false");
+    const groupLabels = await page.locator("#rb-history-list .rb-group-label").allTextContents();
+    assert.deepEqual(groupLabels.map(text => text.replace(/\s*\(\d+\)$/, "")), ["Results", "Blockers", "Other updates"]);
+    const resultsGroup = page.locator("#rb-history-list .rb-group", { has: page.locator(".rb-group-label", { hasText: "Results" }) });
+    assert.equal(await resultsGroup.locator('[data-open-work="return-0"]').count(), 1, "the result line keeps its exact work-record link");
+    assert.equal(await resultsGroup.locator('[data-brief-key^="history:"]').count(), 1);
+    const blockersGroup = page.locator("#rb-history-list .rb-group", { has: page.locator(".rb-group-label", { hasText: "Blockers" }) });
+    assert.equal(await blockersGroup.locator('[data-open-work="return-0"]').count(), 1, "the blocker line keeps its exact work-record link");
     await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; scrollTo(0, 0); });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), true);
     assert.equal(await summary.evaluate(node => getComputedStyle(node).fontSize), "32px");
