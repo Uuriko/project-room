@@ -106,6 +106,31 @@ Configuration checkpoint verification:1305 full Node tests pass, zero skips
 both exact-commit and uncommitted-candidate cold packaging checks pass. These
 checks do not substitute for a real provider browser sign-in journey.
 
+## Visible Join candidate
+
+Configured instances now show Join with key/invite recovery collapsed. The app
+loads Clerk UI1/JS6 only for Join, returning provider authentication, or provider
+sign-out. Explicit sign-in intent survives OAuth navigation without storing a
+token. The exchange opens Welcome for new users, or the explicitly requested
+room. Existing provider account restores retain their room selection. Renewal
+uses the guarded account client on a bounded timer; confirmed expiry clears
+access, while a brief network failure preserves drafts. Sign-out clears pending
+Join intent and ends provider authentication before local account logout.
+
+Provider-only CSP allows the configured issuer and documented bot-protection
+hosts, inline styles for provider components, Clerk images and blob workers.
+It does NOT allow inline scripts or eval. Unconfigured instances retain the
+previous strict CSP and visible key controls. Marketing door CSP is unchanged.
+
+Synthetic-provider browser checks pass at390/1280: actual RSA-verified Welcome
+admission, no elevated member permissions, narrow-screen layout, renewal retaining
+an unsent draft, and provider/local sign-out. Legacy New room browser checks2/2
+also pass. The provider SDK is intercepted in these tests; real hosted email,
+Google, OAuth redirect, CSP compatibility and session restoration remain gates.
+Full candidate regression:1305 pass, zero failed/skipped (60753ms); current
+Workers HTTP scenario also passes. Grok independently reports c9d957d client19/19
+and b3728f0 config16/16 plus auth-config HTTP2/2; visible Join review is separate.
+
 Release copy retained at /Users/johnpotter/src/project-room-release-20260912-c79dfa5.
 It contains generated stamp/assets from the successful dry-run; don't stamp again
 without a fresh clean candidate. Integration .wrangler cache was not removed.

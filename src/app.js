@@ -18,6 +18,96 @@ import { installInbox } from "./inbox-ui.js";
 import { sessionRunView } from "./work-item-session.js";
 
 const $ = selector => document.querySelector(selector);
+let providerSettings = null, providerSDK = null, providerLoad = null, providerBusy = false;
+let providerTimer = null, providerJoinRequested = false;
+try { providerJoinRequested = sessionStorage.getItem('pr-provider-join') === '1'; } catch {}
+function providerIntent(value) {
+  providerJoinRequested = value;
+  try { if (value) sessionStorage.setItem('pr-provider-join', '1'); else sessionStorage.removeItem('pr-provider-join'); } catch {}
+}
+async function loadProvider() {
+  if (providerLoad) return providerLoad;
+  providerLoad = (async () => {
+    const config = providerSettings;
+    if (config?.provider !== 'clerk' || new URL(config.issuer).origin !== config.issuer || !config.issuer.startsWith('https://')) throw Error('Sign-in unavailable');
+    const loadScript = (path, key = null) => new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      const timer = setTimeout(() => { script.remove(); reject(Error('Sign-in timed out. Refresh to retry.')); }, 15000);
+      script.src = config.issuer + path; script.async = true; script.crossOrigin = 'anonymous';
+      if (key) script.setAttribute('data-clerk-publishable-key', key);
+      script.onload = () => { clearTimeout(timer); resolve(); };
+      script.onerror = () => { clearTimeout(timer); reject(Error('Sign-in unavailable. Refresh to retry.')); };
+      document.head.append(script);
+    });
+    await loadScript('/npm/@clerk/ui@1/dist/ui.browser.js');
+    await loadScript('/npm/@clerk/clerk-js@6/dist/clerk.browser.js', config.publishableKey);
+    const sdk = window.Clerk;
+    await sdk.load({ ui: { ClerkUI: window.__internal_ClerkUICtor } });
+    providerSDK = sdk;
+    sdk.addListener(() => {
+      if (providerJoinRequested && sdk.session && !providerBusy) completeProviderJoin().catch(providerFailure);
+    });
+    return sdk;
+  })();
+  return providerLoad;
+}
+function providerFailure(error) {
+  $('#provider-join-status').textContent = error?.message || 'Sign-in unavailable. Try again.';
+  $('#provider-join-button').disabled = false;
+}
+async function completeProviderJoin() {
+  if (providerBusy || !providerSDK?.session || !providerJoinRequested) return;
+  providerBusy = true; $('#provider-join-button').disabled = true;
+  try {
+    await ensureAccountSession();
+    const owned = accountClient.session, generation = accountClient.generation, identity = providerSDK.session;
+    const token = await identity.getToken();
+    if (!providerJoinRequested || identity !== providerSDK.session || !accountClient.owns(generation, owned)) return;
+    if (!token) throw Error('Sign in to continue.');
+    const result = await accountClient.loginProvider(token);
+    if (!result) throw Error('Sign-in changed. Try again.');
+    providerIntent(false);
+    providerSDK.closeSignIn();
+    authKind = 'account'; clearPrivateWorkspace();
+    await openAccountRoom(selectedRoomFromLocation() || result.starterRoomId);
+    scheduleProviderRenewal();
+  } finally { providerBusy = false; $('#provider-join-button').disabled = false; }
+}
+function scheduleProviderRenewal() {
+  clearTimeout(providerTimer);
+  if (!accountClient.session?.account?.id.startsWith('idp-')) return;
+  providerTimer = setTimeout(async () => {
+    const owned = accountClient.session, generation = accountClient.generation;
+    try {
+      const sdk = await loadProvider(), identity = sdk.session;
+      const token = await identity?.getToken();
+      if (!accountClient.owns(generation, owned)) return;
+      if (!token || identity !== sdk.session) { endAccountAccess(); return; }
+      await accountClient.refreshProvider(token);
+      if (!accountClient.session) endAccountAccess();
+    } catch (error) {
+      if (!accountClient.session) endAccountAccess();
+      else if (accountClient.owns(generation, owned) && Date.now() >= owned.expiresAt) endAccountAccess();
+    } finally { scheduleProviderRenewal(); }
+  }, Math.max(5000, Math.min(20000, accountClient.session.expiresAt - Date.now() - 15000)));
+}
+async function signOutProvider() {
+  providerIntent(false); clearTimeout(providerTimer);
+  if (providerSettings && accountClient.session?.account?.id.startsWith('idp-')) {
+    const sdk = await loadProvider();
+    if (sdk.session) await sdk.signOut();
+  }
+}
+$('#provider-join-button').addEventListener('click', async () => {
+  providerIntent(true); $('#provider-join-button').disabled = true; $('#provider-join-status').textContent = '';
+  try {
+    const sdk = await loadProvider();
+    if (sdk.session) await completeProviderJoin();
+    else sdk.openSignIn({ forceRedirectUrl: location.origin + location.pathname + location.search,
+      signUpForceRedirectUrl: location.origin + location.pathname + location.search });
+  } catch (error) { providerFailure(error); }
+  finally { $('#provider-join-button').disabled = false; }
+});
 $("#skip-link").addEventListener("click", event => {
   event.preventDefault();
   const target = !$("#inbox-panel").hidden ? "#inbox-heading"
@@ -1746,7 +1836,7 @@ $("#invite-link")?.addEventListener("paste", event => {
 });
 $("#auth-form").addEventListener("submit", async e => {
   if (signoutLoading) { e.preventDefault(); return; }
-  e.preventDefault(); setFormStatus($("#auth-error"), "");
+  e.preventDefault(); providerIntent(false); setFormStatus($("#auth-error"), "");
   const accessKey = $("#access-key").value.trim();
   const requestedRoom = selectedRoomFromLocation();
   const accountMode = accountSignIn();
@@ -1773,6 +1863,7 @@ $("#signout-button").addEventListener("click", async () => {
     const operation = ++signoutOperationId;
     signoutLoading = true; $("#signout-button").disabled = true;
     try {
+      await signOutProvider();
       const ended = await accountClient.logout();
       if (operation !== signoutOperationId) return;
       if (ended || !accountClient.session) endAccountAccess();
@@ -1797,7 +1888,7 @@ $("#signout-button").addEventListener("click", async () => {
   const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
   const isCurrentOperation = () => operationId === signoutOperationId && sameSession(generation, roomId, memberId);
   signoutLoading = true; $("#signout-button").disabled = true;
-  try { await client.logout(); }
+  try { await signOutProvider(); await client.logout(); }
   catch (error) {
     if (!isCurrentOperation()) return;
     if ([401, 403].includes(error.status)) client.endAccess();
@@ -3156,6 +3247,15 @@ shareLinksUI = installShareLinks({ client, accountClient, getState: () => state,
 configureAuthPanel();
 if (initialInvitationFragment) openInvitation(initialInvitationFragment);
 (async () => {
+  if (location.protocol !== 'file:') {
+    try {
+      const config = await accountClient.request('/api/auth-config');
+      if (config?.provider === 'clerk') {
+        providerSettings = config;
+        $('#provider-join').hidden = false; $('#key-access').open = false;
+      }
+    } catch { /* Existing key access remains available during config failure. */ }
+  }
   if (initialJoinFragment) {
     // Invitation preview deliberately does not restore/open a Room session.
     // Do not leave the initial session/connection progress labels running.
@@ -3164,6 +3264,15 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
     await shareLinksUI.open(initialJoinFragment); return;
   }
   const requestedRoom = selectedRoomFromLocation();
+  if (providerSettings && !initialInvitationFragment) {
+    const account = await ensureAccountSession();
+    if (providerJoinRequested) { await loadProvider(); await completeProviderJoin(); if (accountClient.session?.authenticated) return; }
+    if (account?.authenticated) {
+      authKind = 'account';
+      if (requestedRoom) await client.restore(requestedRoom); else showAccountWorkspace();
+      scheduleProviderRenewal(); return;
+    }
+  }
   if (requestedRoom || accountHomeFromLocation()) {
     const account = await ensureAccountSession();
     if (!account?.authenticated) {
