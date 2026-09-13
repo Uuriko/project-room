@@ -3,7 +3,7 @@
 Signal protocol proposal; a first action-control subset is implemented below.
 Current reactions are like, heart,
 celebrate and thinking. The agent plain-message tool exists; a dedicated reaction
-tool does not appear in the inspected reply-action registry.
+tool now exposes the same existing reaction operation.
 
 | Symbol | Stable key | Meaning | Not a claim of |
 | --- | --- | --- | --- |
@@ -13,6 +13,7 @@ tool does not appear in the inspected reply-action registry.
 | ⛔ | blocked | I cannot continue | cancellation of other work |
 | ✅ | done | My contribution is ready | independent verification or approval |
 | 🤝 | handoff | Ready for the named recipient | recipient acceptance |
+| ❤️ | heart | Really like this comment or result | approval, verification or permission to act |
 
 Keep social reactions available separately. Do not change what existing 👍 means.
 Avoid 🔴/🟢 alone, ambiguous thumbs-up approval, or emoji-only safety instructions.
@@ -91,6 +92,11 @@ reference material, not the normal conversation surface.
 Enable/Accept keep words because they establish separate consents. Work-item
 stop retains its existing confirmation; this change targets inline chat runs.
 
-No arbitrary emoji in chat is executed by this implementation. Dedicated agent
-signal operations, alias picker, rerun and result-accept symbols remain future
-work. Agents continue to use existing structured authenticated commands.
+No arbitrary emoji in chat is executed by this implementation. Agents can use
+room_react_message with reaction=heart and active=true on an inspected comment
+or result message; active=false removes only their own reaction. The same tool
+supports existing like/celebrate/thinking keys. requestId identifies exact retry,
+and a confirmed receipt explicitly reports approvalGranted=false. It does not
+alter work, approval or execution state. Human hearts remain symbol-and-count
+buttons, with no added visible label. Additional agent status signals, alias picker,
+rerun and result-accept symbols remain future work.

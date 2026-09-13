@@ -40,6 +40,8 @@ const definitions = [
     { requestId: id, requestMessageId: id, expectedRevision: revision, runId: id }],
   ["room_finish_request_run", null, "Record your own matching run's terminal status after confirming your process has ended. Read current.run for expectedRevision. This does not answer a request, approve results or prove outside effects. Never report another executor stopped. No automatic restart after unknown termination." + retry,
     { requestId: id, requestMessageId: id, expectedRevision: revision, runId: id, status: { type: "string", enum: ["succeeded", "failed", "cancelled"] } }],
+  ["room_react_message", null, "Set or remove your own reaction on an inspected comment or result message. heart (❤️) means really like it, not approval, verification, or permission to act. Other keys: like, celebrate, thinking. active=true adds; false removes. Never react on behalf of another participant." + retry,
+    { requestId: id, messageId: id, reaction: { type: "string", enum: ["heart", "like", "celebrate", "thinking"] }, active: { type: "boolean" } }],
   ["room_post_message", null, "Post an ordinary message in the room, optionally addressed to a participant or linked to work. No task or reply request is required or created. Does not start a model or automation; addressed messages remain room-visible." + retry,
     { requestId: id, body: text, toMemberId: id, workItemId: id }, ["requestId", "body"]],
   ["room_list_requests", "/reply-requests", "Read current incoming/outgoing reply requests. No message bodies or read acknowledgement. Status is current, not a history filter.",
@@ -73,7 +75,7 @@ export function validReplyArguments(name, args) {
 export function buildReplyCommand(identity, name, args) {
   if (!validId(identity?.roomId) || !validId(identity?.memberId) || !validReplyArguments(name, args) || replyRoute(name) !== null)
     throw Object.assign(new Error("Invalid reply action input or identity"), { code: "invalid_reply_action" });
-  const { requestId, ...data } = structuredClone(args), type = automationTypes[name] ?? runTypes[name] ?? (name === "room_cancel_request" ? "reply_request.cancelled" : "message.posted");
+  const { requestId, ...data } = structuredClone(args), type = automationTypes[name] ?? runTypes[name] ?? (name === 'room_react_message' ? 'message.reaction_set' : name === "room_cancel_request" ? "reply_request.cancelled" : "message.posted");
   if (name === "room_run_automation") delete data.definition;
   if (type === "message.posted") data.messageId = "reply-" + createHash("sha256").update(JSON.stringify([identity.roomId, identity.memberId, requestId])).digest("hex");
   if (name === "room_request_reply") data.requestKind = "reply";
@@ -86,6 +88,13 @@ export function buildReplyCommand(identity, name, args) {
 export async function submitReplyAction(client, identity, name, args, { signal } = {}) {
   args = structuredClone(args);
   const command = buildReplyCommand(identity, name, args), receipt = await client.command(command, { signal });
+  if (name === 'room_react_message') {
+    if (!confirmsAgentCommand(receipt, command, identity)) return { status: 'unconfirmed', requestId: command.id,
+      message: 'Outcome unknown. Retry the exact original input and requestId.' };
+    return { contractVersion: 1, status: 'recorded', requestId: command.id, messageId: args.messageId,
+      reaction: args.reaction, active: args.active, sequence: receipt.sequence, eventId: receipt.event.id,
+      duplicate: receipt.duplicate, currentStateVerified: false, workStateChanged: false, approvalGranted: false };
+  }
   const expected = name === "room_run_automation" ? { ...command, data: { ...command.data,
     body: args.definition.prompt, toMemberId: args.definition.recipientId, requestKind: "reply", workItemId: null } } : command;
   if (!confirmsAgentCommand(receipt, expected, identity)) return { status: "unconfirmed", requestId: command.id,

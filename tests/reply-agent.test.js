@@ -72,6 +72,26 @@ test("direct, MCP and CLI share one request/clarification/answer journey with ex
   auditRecovery(f.store);
 });
 
+test('human and agent hearts are appreciation, own reactions only, with exact retries', async t => {
+  const f = await fixture(t), q = f.open(), messageId = q.command.data.messageId;
+  const before = structuredClone(f.store.room('commons').state.workItems);
+  f.store.command(f.keys.owner, 'commons', { id: 'human-heart', type: 'message.reaction_set', data: { messageId, reaction: 'heart', active: true } });
+  const input = { requestId: 'agent-heart', messageId, reaction: 'heart', active: true };
+  const first = await f.client.replyAction('room_react_message', input);
+  assert.equal(first.status, 'recorded'); assert.equal(first.approvalGranted, false);
+  const adapter = await f.mcp(), retry = (await adapter.call('room_react_message', input)).result.structuredContent;
+  assert.equal(retry.duplicate, true); assert.equal(retry.eventId, first.eventId);
+  const message = () => f.store.room('commons').state.messages.find(m => m.id === messageId);
+  assert.deepEqual(message().reactions.heart, ['owner', 'producer']);
+  await f.client.replyAction('room_react_message', { ...input, requestId: 'remove-agent-heart', active: false });
+  assert.deepEqual(message().reactions.heart, ['owner']);
+  assert.deepEqual(f.store.room('commons').state.workItems, before);
+  assert.equal(validReplyArguments('room_react_message', { ...input, memberId: 'owner' }), false);
+  assert.equal(validReplyArguments('room_react_message', { ...input, reaction: 'approve' }), false);
+  f.store.issueAccessKey('commons', 'producer');
+  await assert.rejects(f.client.replyAction('room_react_message', { ...input, requestId: 'revoked-heart' }), { status: 401 });
+});
+
 test("ordinary agent chat crosses direct, MCP and CLI without creating requests or work", async t => {
   const f = await fixture(t), before = f.store.snapshot(f.keys.owner, "commons");
   const input = { requestId: "ordinary-root", body: "Here is a useful observation for the room." };
@@ -235,7 +255,7 @@ test("read validators refuse changed identity, window, body, lineage and answer 
 });
 
 test("reply tool schemas are finite and partial/null bundles cannot be silently converted", () => {
-  assert.equal(replyTools.length, 19);
+  assert.equal(replyTools.length, 20);
   for (const name of ["room_respond_to_request", "room_request_reply", "room_cancel_request"]) {
     assert.equal(validReplyArguments(name, {}), false);
     assert.equal(validReplyArguments(name, { token: "secret" }), false);
