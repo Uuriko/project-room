@@ -1,0 +1,34 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { RoomStore } from '../server/store.mjs';
+import { createRoomServer } from '../server/http.mjs';
+import { openJoinContract } from '../server/open-contract.mjs';
+import { readFileSync } from 'node:fs';
+
+test('GET /api/open and /api/version on the real HTTP server', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'prod-http-'));
+  const store = new RoomStore(join(directory, 'room.sqlite'));
+  const server = createRoomServer({ store });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(r => server.close(r));
+    store.close(); rmSync(directory, { recursive: true, force: true });
+  });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const open = await (await fetch(origin + '/api/open')).json();
+  assert.equal(open.ship, false);
+  assert.equal(open.persistence, 'none');
+  assert.equal(openJoinContract().ship, false);
+  const version = await (await fetch(origin + '/api/version')).json();
+  assert.equal(version.status, 'ok');
+  assert.equal(typeof version.sourceRevision, 'string');
+  assert.ok(version.sourceRevision.length > 0);
+  const prod = readFileSync(new URL('../cloudflare/wrangler.production.jsonc', import.meta.url), 'utf8');
+  assert.match(prod, /ROOM_PRODUCTION": "1"/);
+  assert.match(prod, /room\.trydemigod\.com/);
+  assert.doesNotMatch(prod, /sk_live|BEGIN PRIVATE KEY|pk_live_/);
+});
