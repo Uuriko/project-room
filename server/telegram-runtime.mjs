@@ -6,13 +6,21 @@ import { TelegramConnectionRegistry } from './telegram-connection-registry.mjs';
 import { TelegramReceiveQueue } from './telegram-receive-queue.mjs';
 import { createTelegramConnections } from './telegram-connections.mjs';
 import { MessagingReceiveGrants,assertMessagingReceiveSchema } from './messaging-receive-grants.mjs';
+import { createTelegramScheduler } from './telegram-scheduler.mjs';
 const names=['ROOM_TELEGRAM_REGISTRY_FILE','ROOM_TELEGRAM_QUEUE_FILE','ROOM_TELEGRAM_KEY_FILE','ROOM_TELEGRAM_ACCOUNT_ID','ROOM_TELEGRAM_CONNECTION_ID'];
 const fail=()=>{const error=new Error('Telegram private configuration is invalid');error.code='telegram_private_configuration_invalid';throw error;};
 const outside=(root,path)=>{const r=relative(root,path);return r==='..'||r.startsWith('../')||isAbsolute(r);};
+export function telegramPollInterval(env=process.env){
+  const value=env.ROOM_TELEGRAM_POLL_INTERVAL_MS;
+  if(value===undefined||value==='')return null;
+  if(typeof value!=='string'||!/^\d{4,5}$/.test(value)||Number(value)<1000||Number(value)>60000||!env.ROOM_TELEGRAM_RECEIVE_GRANTS_FILE)fail();
+  return Number(value);
+}
 
 // Opt-in: opens preprovisioned stores only, creates no keys/grants, makes no calls.
 export function createTelegramRuntime({env=process.env,store,fetchImpl=fetch,sourceRoot=fileURLToPath(new URL('../',import.meta.url))}) {
-  if(names.every(n=>!env[n])&&!env.ROOM_TELEGRAM_RECEIVE_GRANTS_FILE)return null;
+  const intervalMs=telegramPollInterval(env);
+  if(names.every(n=>!env[n])&&!env.ROOM_TELEGRAM_RECEIVE_GRANTS_FILE&&intervalMs===null)return null;
   let rdb,qdb,gdb,registry,queue,receiveGrants,key;
   try {
     if(names.some(n=>!env[n]))fail();
@@ -48,8 +56,14 @@ export function createTelegramRuntime({env=process.env,store,fetchImpl=fetch,sou
     qdb=new DatabaseSync(paths[1]);queue=new TelegramReceiveQueue({db:qdb,key,...binding});queue.pending();
     if(paths[3]){gdb=new DatabaseSync(paths[3]);receiveGrants=new MessagingReceiveGrants({db:gdb,store});}
     const connections=createTelegramConnections({store,registry,connections:[{...binding,queue}],fetchImpl,receiveGrants});
+    const scheduler=intervalMs===null?null:createTelegramScheduler({intervalMs,sync:()=>connections.syncReceiving(binding.accountId,binding.connectionId)});
     let closed=false;
-    return {connections,close(){if(closed)return;closed=true;receiveGrants?.close();gdb?.close();queue.key.fill(0);registry.close();qdb.close();rdb.close();}};
+    return {connections,
+      startReceiving(){if(closed)throw new Error('telegram_runtime_closed');scheduler?.start();},
+      async stopReceiving(){await scheduler?.stop();},
+      close(){if(closed)return;
+        if(scheduler&&['running','waiting','draining'].includes(scheduler.status().state))throw new Error('telegram_scheduler_must_stop');
+        closed=true;receiveGrants?.close();gdb?.close();queue.key.fill(0);registry.close();qdb.close();rdb.close();}};
   }catch{receiveGrants?.close();gdb?.close();queue?.key.fill(0);registry?.close();qdb?.close();rdb?.close();fail();}
   finally{key?.fill(0);}
 }

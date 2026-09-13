@@ -22,6 +22,6 @@ export function createTelegramScheduler({sync,intervalMs=15000,setTimer=setTimeo
   return {
     start(){if(stopped)throw new Error('telegram_scheduler_closed');if(started)return;started=true;schedule();},
     async stop(){stopped=true;if(timer!==null){clearTimer(timer);timer=null;}await inFlight;},
-    status(){return {state:stopped?'stopped':!started?'idle':inFlight?'running':'waiting',lastResult};}
+    status(){return {state:stopped?(inFlight?'draining':'stopped'):!started?'idle':inFlight?'running':'waiting',lastResult};}
   };
 }

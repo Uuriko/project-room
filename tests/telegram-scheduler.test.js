@@ -13,6 +13,7 @@ test('scheduler is opt-in, sequential and stop drains in-flight work without rea
   s.start();s.start();assert.equal(clock.pending.size,1);
   const tick=clock.fire();await Promise.resolve();assert.equal(calls,1);assert.equal(clock.pending.size,0);assert.equal(s.status().state,'running');
   let stopped=false;const stop=s.stop().then(()=>stopped=true);await Promise.resolve();assert.equal(stopped,false);
+  assert.equal(s.status().state,'draining');
   finish();await tick;await stop;assert.equal(clock.pending.size,0);assert.equal(s.status().state,'stopped');
   assert.throws(()=>s.start(),/closed/);await s.stop();
 });

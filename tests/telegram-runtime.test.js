@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TelegramConnectionRegistry } from '../server/telegram-connection-registry.mjs';
 import { TelegramReceiveQueue } from '../server/telegram-receive-queue.mjs';
-import { createTelegramRuntime } from '../server/telegram-runtime.mjs';
+import { createTelegramRuntime,telegramPollInterval } from '../server/telegram-runtime.mjs';
 import { MessagingReceiveGrants } from '../server/messaging-receive-grants.mjs';
 import { createAcceptanceFixture } from '../scripts/acceptance-fixture.mjs';
 import { createTelegramScheduler } from '../server/telegram-scheduler.mjs';
@@ -55,6 +55,12 @@ test('optional receive store must be preprovisioned, private, distinct and exact
   const inspect=new DatabaseSync(path,{readOnly:true});assert.equal(inspect.prepare('PRAGMA table_info(messaging_receive_grants_v1)').all()[0].name,'junk');inspect.close();
   assert.throws(()=>f.open({env:{...f.env,ROOM_TELEGRAM_RECEIVE_GRANTS_FILE:f.env.ROOM_TELEGRAM_QUEUE_FILE}}));
   chmodSync(path,0o644);assert.throws(()=>f.open());
+});
+test('polling requires an explicit bounded interval and a receive store',()=>{
+  assert.equal(telegramPollInterval({}),null);
+  assert.equal(telegramPollInterval({ROOM_TELEGRAM_POLL_INTERVAL_MS:'15000',ROOM_TELEGRAM_RECEIVE_GRANTS_FILE:'/private/fixture'}),15000);
+  for(const value of ['0','999','60001','15000ms',' 15000','1e4',15000])assert.throws(()=>telegramPollInterval({ROOM_TELEGRAM_POLL_INTERVAL_MS:value,ROOM_TELEGRAM_RECEIVE_GRANTS_FILE:'/fixture'}));
+  assert.throws(()=>telegramPollInterval({ROOM_TELEGRAM_POLL_INTERVAL_MS:'15000'}));
 });
 test('partial configuration, weak permissions, symlinks and source-tree paths rejected',t=>{
   const f=fixture(t);assert.throws(()=>f.open({env:{ROOM_TELEGRAM_KEY_FILE:f.env.ROOM_TELEGRAM_KEY_FILE}}));

@@ -24,7 +24,7 @@ if (store && ['ROOM_GMAIL_CLIENT_FILE', 'ROOM_GMAIL_KEY_FILE', 'ROOM_GMAIL_VAULT
     gmailRuntime = createGmailRuntime({ store, origin });
   } catch (error) { store.close(); throw error; }
 }
-if (store && ['ROOM_TELEGRAM_REGISTRY_FILE','ROOM_TELEGRAM_QUEUE_FILE','ROOM_TELEGRAM_KEY_FILE','ROOM_TELEGRAM_ACCOUNT_ID','ROOM_TELEGRAM_CONNECTION_ID','ROOM_TELEGRAM_RECEIVE_GRANTS_FILE'].some(name=>process.env[name])) {
+if (store && ['ROOM_TELEGRAM_REGISTRY_FILE','ROOM_TELEGRAM_QUEUE_FILE','ROOM_TELEGRAM_KEY_FILE','ROOM_TELEGRAM_ACCOUNT_ID','ROOM_TELEGRAM_CONNECTION_ID','ROOM_TELEGRAM_RECEIVE_GRANTS_FILE','ROOM_TELEGRAM_POLL_INTERVAL_MS'].some(name=>process.env[name])) {
   try {
     const { createTelegramRuntime } = await import('./server/telegram-runtime.mjs');
     telegramRuntime = createTelegramRuntime({store});
@@ -54,7 +54,8 @@ function close(exitCode=0) {
   closing = true;
   server.closeStreams?.();
   twilioRuntime?.close();
-  server.close(() => { telegramRuntime?.close(); gmailRuntime?.close(); store?.close(); process.exit(exitCode); });
+  const drained=telegramRuntime?.stopReceiving();
+  server.close(async () => { await drained;telegramRuntime?.close(); gmailRuntime?.close(); store?.close(); process.exit(exitCode); });
   server.closeIdleConnections();
 }
 process.on("SIGINT", () => close());
@@ -65,9 +66,10 @@ const listen=(target,p,h)=>new Promise((resolve,reject)=>{
 try{
   if(webhookPort!==null)await listen(twilioRuntime.webhook,webhookPort,'127.0.0.1');
   await listen(server,port,host);
+  if(!closing)telegramRuntime?.startReceiving();
   console.log(`Project Room ${paused ? "paused" : production ? "invite-only pilot" : "local pilot"}: ${origin}`);
 }catch{
-  server.closeAllConnections();server.close();twilioRuntime?.close();telegramRuntime?.close();gmailRuntime?.close();store?.close();
+  server.closeAllConnections();server.close();twilioRuntime?.close();await telegramRuntime?.stopReceiving();telegramRuntime?.close();gmailRuntime?.close();store?.close();
   throw new Error('Project Room listener startup failed');
 }
 for(const target of [server,twilioRuntime?.webhook].filter(Boolean))target.on('error',()=>close(1));
