@@ -205,6 +205,7 @@ const shapes = {
   [T.CLAIM_RELEASED]: work,
   [T.VERIFICATION_RECORDED]: `${work} result completionEventId evidenceVersion summary nextAction`,
   [T.OWNER_DECISION_RECORDED]: `${work} decision completionEventId evidenceVersion reason`,
+  [T.DECISION_RECORDED]: "sourceMessageId statement note",
   [T.SESSION_STARTED]: `${work} budget`,
   [T.SESSION_STATUS_CHANGED]: `${work} status spendCents`,
   [T.SESSION_STOP_REQUESTED]: work,
