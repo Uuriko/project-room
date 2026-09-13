@@ -9,6 +9,9 @@ import { createTwilioRuntime } from '../server/twilio-runtime.mjs';
 import { MessagingReceiveGrants } from '../server/messaging-receive-grants.mjs';
 import { createAcceptanceFixture } from '../scripts/acceptance-fixture.mjs';
 import twilio from 'twilio';
+import {spawn} from 'node:child_process';
+import {createServer} from 'node:net';
+import {fileURLToPath} from 'node:url';
 function fixture(t) {
   const dir=realpathSync(mkdtempSync(join(tmpdir(),'tw-runtime-')));t.after(()=>rmSync(dir,{recursive:true,force:true}));
   const key=Buffer.alloc(32,7),env={ROOM_TWILIO_REGISTRY_FILE:join(dir,'registry.sqlite'),ROOM_TWILIO_KEY_FILE:join(dir,'key'),ROOM_TWILIO_ACCOUNT_ID:'account',ROOM_TWILIO_CONNECTION_ID:'one'};
@@ -66,4 +69,35 @@ test('existing private receive store assembles an unstarted listener; consent re
   runtime.connections.stopReceiving(session,{connectionId:'one',expectedRevision:1});assert.equal((await deliver()).status,503);
   runtime.connections.startReceiving(session,{connectionId:'one',expectedRevision:2,expectedConnectionRevision:2});assert.equal((await deliver()).status,200);
   assert.equal(a.store.inbox.verify().versions,1);
+});
+
+test('entry point starts explicit loopback receiver and releases both ports on shutdown or bind failure',async t=>{
+  const f=fixture(t),a=createAcceptanceFixture();a.store.createAccount('account');
+  const controls=f.open();controls.connections.disconnect({},'one',1);controls.close();
+  const grantPath=join(f.dir,'entry-grants.sqlite'),gd=new DatabaseSync(grantPath),g=new MessagingReceiveGrants({db:gd,store:a.store});g.close();gd.close();chmodSync(grantPath,0o600);
+  const filename=join(a.directory,'room.sqlite');a.store.close();t.after(()=>rmSync(a.directory,{recursive:true,force:true}));
+  const reserve=async(port=0)=>{const s=createServer();await new Promise((r,j)=>{s.once('error',j);s.listen(port,'127.0.0.1',r);});const p=s.address().port;await new Promise(r=>s.close(r));return p;};
+  for(const collision of [false,true]){
+    const webhookPort=await reserve(),appPort=collision?webhookPort:await reserve();
+    const child=spawn(process.execPath,['server.mjs'],{cwd:fileURLToPath(new URL('../',import.meta.url)),env:{
+      NODE_ENV:'development',HOST:'127.0.0.1',PORT:String(appPort),ROOM_DB:filename,...f.env,
+      ROOM_TWILIO_RECEIVE_GRANTS_FILE:grantPath,ROOM_TWILIO_WEBHOOK_PATH:'/webhooks/twilio/one',ROOM_TWILIO_WEBHOOK_PORT:String(webhookPort)},stdio:['ignore','pipe','pipe']});
+    let output='';child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);
+    let resolveExit;const exit=new Promise(r=>resolveExit=r);child.once('exit',(code,signal)=>resolveExit({code,signal}));
+    const timer=setTimeout(()=>child.kill('SIGKILL'),10000);
+    try{
+      if(!collision){
+        await new Promise((resolve,reject)=>{
+          const check=()=>{if(output.includes('Project Room local pilot:')){clearInterval(poll);resolve();}};
+          const poll=setInterval(check,20);child.once('exit',()=>{clearInterval(poll);reject(new Error(output));});check();
+        });
+        const response=await fetch(`http://127.0.0.1:${webhookPort}/webhooks/twilio/one`,{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded','x-twilio-signature':'invalid'},body:'Body=test'});
+        assert.equal(response.status,503);child.kill('SIGTERM');
+      }
+      const ended=await exit;
+      assert.equal(ended.code,collision?1:0);
+      if(collision){assert.ok(output.includes('listener startup failed'));assert.ok(!output.includes('Project Room local pilot:'));}
+      await reserve(webhookPort);if(!collision)await reserve(appPort);
+    }finally{clearTimeout(timer);if(child.exitCode===null&&child.signalCode===null){child.kill('SIGKILL');await exit;}}
+  }
 });

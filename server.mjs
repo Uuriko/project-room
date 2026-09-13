@@ -17,7 +17,7 @@ catch (error) { if (error?.code !== "ENOENT") throw error; }
 if (!paused && production && !havePilotDb) throw new Error("Provision a persistent pilot database before startup");
 if (!paused) mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
 const store = paused ? null : new RoomStore(filename);
-let gmailRuntime = null, telegramRuntime = null, twilioRuntime = null;
+let gmailRuntime = null, telegramRuntime = null, twilioRuntime = null, webhookPort = null;
 if (store && ['ROOM_GMAIL_CLIENT_FILE', 'ROOM_GMAIL_KEY_FILE', 'ROOM_GMAIL_VAULT_FILE'].some(name => process.env[name])) {
   try {
     const { createGmailRuntime } = await import('./server/gmail-runtime.mjs');
@@ -30,9 +30,10 @@ if (store && ['ROOM_TELEGRAM_REGISTRY_FILE','ROOM_TELEGRAM_QUEUE_FILE','ROOM_TEL
     telegramRuntime = createTelegramRuntime({store});
   } catch (error) { gmailRuntime?.close(); store.close(); throw error; }
 }
-if (store && ['ROOM_TWILIO_REGISTRY_FILE','ROOM_TWILIO_KEY_FILE','ROOM_TWILIO_ACCOUNT_ID','ROOM_TWILIO_CONNECTION_ID'].some(name=>process.env[name])) {
+if (store && ['ROOM_TWILIO_REGISTRY_FILE','ROOM_TWILIO_KEY_FILE','ROOM_TWILIO_ACCOUNT_ID','ROOM_TWILIO_CONNECTION_ID','ROOM_TWILIO_RECEIVE_GRANTS_FILE','ROOM_TWILIO_WEBHOOK_PATH','ROOM_TWILIO_WEBHOOK_PORT'].some(name=>process.env[name])) {
   try {
-    const {createTwilioRuntime}=await import('./server/twilio-runtime.mjs');
+    const {createTwilioRuntime,twilioWebhookPort}=await import('./server/twilio-runtime.mjs');
+    webhookPort=twilioWebhookPort();
     twilioRuntime=createTwilioRuntime({store});
   }catch(error){telegramRuntime?.close();gmailRuntime?.close();store.close();throw error;}
 }
@@ -47,14 +48,26 @@ const server = paused ? createServer((req, res) => {
     res.writeHead(reply.status, reply.headers); res.end(req.method === "HEAD" ? undefined : reply.body);
   } catch { res.writeHead(400, { "Cache-Control": "no-store" }); res.end(); }
 }) : createRoomServer({ store, origin, trustedLocalProxy: production, providerAuth, gmailConnections: gmailRuntime?.connections, telegramConnections: telegramRuntime?.connections, twilioConnections: twilioRuntime?.connections });
-server.listen(port, host, () => console.log(`Project Room ${paused ? "paused" : production ? "invite-only pilot" : "local pilot"}: ${origin}`));
 let closing = false;
-function close() {
+function close(exitCode=0) {
   if (closing) return;
   closing = true;
   server.closeStreams?.();
-  server.close(() => { twilioRuntime?.close(); telegramRuntime?.close(); gmailRuntime?.close(); store?.close(); process.exit(0); });
+  twilioRuntime?.close();
+  server.close(() => { telegramRuntime?.close(); gmailRuntime?.close(); store?.close(); process.exit(exitCode); });
   server.closeIdleConnections();
 }
-process.on("SIGINT", close);
-process.on("SIGTERM", close);
+process.on("SIGINT", () => close());
+process.on("SIGTERM", () => close());
+const listen=(target,p,h)=>new Promise((resolve,reject)=>{
+  target.once('error',reject);target.listen(p,h,()=>{target.removeListener('error',reject);resolve();});
+});
+try{
+  if(webhookPort!==null)await listen(twilioRuntime.webhook,webhookPort,'127.0.0.1');
+  await listen(server,port,host);
+  console.log(`Project Room ${paused ? "paused" : production ? "invite-only pilot" : "local pilot"}: ${origin}`);
+}catch{
+  server.closeAllConnections();server.close();twilioRuntime?.close();telegramRuntime?.close();gmailRuntime?.close();store?.close();
+  throw new Error('Project Room listener startup failed');
+}
+for(const target of [server,twilioRuntime?.webhook].filter(Boolean))target.on('error',()=>close(1));

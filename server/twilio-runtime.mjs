@@ -8,11 +8,19 @@ import { MessagingReceiveGrants } from './messaging-receive-grants.mjs';
 import { createTwilioWebhookServer } from './twilio-webhook.mjs';
 const names=['ROOM_TWILIO_REGISTRY_FILE','ROOM_TWILIO_KEY_FILE','ROOM_TWILIO_ACCOUNT_ID','ROOM_TWILIO_CONNECTION_ID'];
 const fail=()=>{const e=new Error('Messaging private configuration is invalid');e.code='twilio_private_configuration_invalid';throw e;};
+export function twilioWebhookPort(env=process.env){
+  const value=env.ROOM_TWILIO_WEBHOOK_PORT;
+  if(!value)return null;
+  if(typeof value!=='string'||!/^\d{4,5}$/.test(value)||Number(value)<1024||Number(value)>65535
+    ||!env.ROOM_TWILIO_RECEIVE_GRANTS_FILE||!env.ROOM_TWILIO_WEBHOOK_PATH)fail();
+  return Number(value);
+}
 
 // Opt-in account controls only. Opens existing private stores, creates no grant
 // or session, starts no webhook listener, and makes no provider/network calls.
 export function createTwilioRuntime({env=process.env,store,sourceRoot=fileURLToPath(new URL('../',import.meta.url))}) {
   const receiveFile=env.ROOM_TWILIO_RECEIVE_GRANTS_FILE,webhookPath=env.ROOM_TWILIO_WEBHOOK_PATH;
+  twilioWebhookPort(env);
   if(names.every(n=>!env[n])&&!receiveFile&&!webhookPath)return null;
   let db,registry,key,grantDb,grants,webhook;
   try {
