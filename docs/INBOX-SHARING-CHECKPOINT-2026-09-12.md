@@ -129,3 +129,30 @@ changed between those runs. The legacy case reconstructs the prior receipt shape
 in a disposable database, verifies replay/restart, denies recipient access, keeps
 owner access, and confirms that a new pinned grant works. Grok independently
 confirmed the original 20ee115 recipient-epoch gap; this addendum addresses it.
+
+## Owner-side sharing interface
+
+The share sheet now offers Room or Selected people & agents. Private sharing
+requires an explicit recipient selection (maximum 20), uses the existing text
+selection, and explains the seven-day lifetime and copied-content limitation.
+Private submission stays in Inbox and emits no room message. An uncertain retry
+persists only operation metadata, including exact recipient IDs, never message
+text. Scope and recipients remain locked until the original request is resolved.
+The scope control is disabled while context loads to prevent a late response from
+overwriting an early choice.
+
+An account-private grant listing backs the collapsed Private shares section.
+Owners can revoke access and recover the listing after reload. It shows the latest
+100 records, explicitly says when more exist, and does not claim that an unrevoked
+record guarantees current recipient authorization. Revocation retries retain the
+same request in the open view; reopening reloads current recorded state.
+
+This completes owner-side selection and revocation, not recipient discovery or
+agent integration. A recipient still needs the specific grant ID and the existing
+authenticated private-context HTTP endpoint. No content or grant IDs are announced
+to room-wide listeners. Recipient UI, agent tools, older-grant pagination and the
+compatible recovery/release candidate remain outstanding.
+
+Owner UI evidence: 68/68 full inbox browser checks pass (71,549 ms), including
+desktop/mobile private selection, reload/revoke and uncertain-response exact retry.
+Full Node regression: 1,318/1,318 passes, zero skipped (53,719 ms).

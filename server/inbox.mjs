@@ -145,6 +145,17 @@ export class Inbox {
   grantRevoked(accountId, grantId, before = Number.MAX_SAFE_INTEGER) {
     return Boolean(this.db.prepare("SELECT 1 FROM private_inbox_commands WHERE account_id=? AND sequence<? AND json_extract(request_json,'$.action')='grant.revoke' AND json_extract(request_json,'$.grantId')=?").get(accountId, before, grantId));
   }
+  grants(token, sourceId, binding) {
+    return this.store.readTransaction(() => {
+      const auth = this.auth(token, binding); this.source(auth.account.id, sourceId);
+      const rows = this.db.prepare("SELECT receipt_json FROM private_inbox_commands WHERE account_id=? AND json_extract(request_json,'$.action')='source.grant' AND json_extract(request_json,'$.sourceId')=? ORDER BY sequence DESC LIMIT 101").all(auth.account.id, sourceId);
+      return { contractVersion: 1, viewer: viewer(auth), sourceId, hasMore: rows.length > 100, grants: rows.slice(0, 100).map(row => {
+        const g = JSON.parse(row.receipt_json);
+        return { grantId: g.grantId, roomId: g.roomId, memberIds: g.members.map(m => m.memberId), expiresAt: g.expiresAt,
+          revoked: this.grantRevoked(auth.account.id, g.grantId) };
+      }) };
+    });
+  }
   grantReceipt(accountId, request, state, sequence, ownerId, at, journalSequence, historicalMembers = null) {
     if (request.audienceVersion !== digest(inboxAudience(state))) fail(409, "stale_inbox_audience", "Audience changed. Review again.");
     const owner = state.members[ownerId];

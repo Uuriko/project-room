@@ -458,6 +458,49 @@ for (const mobile of [false, true]) test(`email all text ${mobile ? "mobile" : "
   await selectExcerpt(p, "xxx");
   assert.equal(await p.locator("#inbox-share-confirm").isEnabled(), true);
 });
+for (const mobile of [false, true]) test(`private sharing ${mobile ? "mobile" : "desktop"}: selected agent, no room post, reload and revoke`, { timeout: 40000 }, async t => {
+  const f = await setup(t, mobile), p = f.page;
+  await f.inbox(); await f.pick("note"); const before = f.store.room("commons").sequence;
+  await p.locator("#inbox-ask").click(); await p.locator("#inbox-share-paragraphs input").first().check();
+  await p.locator("#inbox-share-scope").selectOption("private");
+  assert.equal(await p.locator("#inbox-share-confirm").isEnabled(), false);
+  await p.locator('#inbox-share-member-list input[value="producer"]').check();
+  await p.locator("#inbox-share-confirm").click(); await p.locator("#inbox-share-dialog").waitFor({ state: "hidden" });
+  assert.equal(await p.locator("#inbox-panel").isVisible(), true);
+  const row = f.store.db.prepare("SELECT receipt_json FROM private_inbox_commands WHERE json_extract(request_json,'$.action')='source.grant'").get();
+  const grant = JSON.parse(row.receipt_json);
+  assert.deepEqual(grant.members.map(m => m.memberId), ["producer"]);
+  assert.equal(f.store.room("commons").sequence, before);
+  assert.doesNotMatch(f.store.inbox.readGrant(f.keys.producer, "commons", grant.grantId).body, /4200/);
+  assert.throws(() => f.store.inbox.readGrant(f.keys.reviewer, "commons", grant.grantId), { status: 404 });
+  await p.reload(); await f.inbox(); await f.pick("note");
+  await p.locator("#inbox-grants summary").click(); await p.locator("#inbox-grant-list").getByRole("button", { name: "Revoke", exact: true }).click();
+  await p.locator("#inbox-grant-list").getByText("1 recipient · Revoked", { exact: true }).waitFor();
+  assert.throws(() => f.store.inbox.readGrant(f.keys.producer, "commons", grant.grantId), { status: 404 });
+  assert.equal(f.store.room("commons").sequence, before);
+  assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+});
+test("private sharing uncertain response retains exact recipients after reload", { timeout: 40000 }, async t => {
+  const f = await setup(t), p = f.page; await f.inbox(); await f.pick("note");
+  await p.locator("#inbox-ask").click(); await p.locator("#inbox-share-scope").selectOption("private");
+  await p.locator("#inbox-share-paragraphs input").first().check();
+  await p.locator('#inbox-share-member-list input[value="producer"]').check();
+  const requests = [];
+  await p.route("**/api/inbox/commands", async route => {
+    const request = route.request().postDataJSON(); if (request.action !== "source.grant") return route.continue();
+    requests.push(request); const response = await route.fetch();
+    if (requests.length === 1) return route.abort();
+    return route.fulfill({ response });
+  });
+  await p.locator("#inbox-share-confirm").click(); await p.getByText("Share unconfirmed. Retry the original selection.", { exact: true }).waitFor();
+  await p.reload(); await f.inbox(); await f.pick("note"); await p.locator("#inbox-ask").click();
+  await p.locator("#inbox-share-confirm:not([disabled])").waitFor();
+  assert.equal(await p.locator("#inbox-share-scope").isEnabled(), false);
+  assert.equal(await p.locator('#inbox-share-member-list input[value="reviewer"]').isEnabled(), false);
+  await p.locator("#inbox-share-confirm").click(); await p.locator("#inbox-share-dialog").waitFor({ state: "hidden" });
+  assert.equal(requests.length, 2); assert.deepEqual(requests[0], requests[1]);
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM private_inbox_commands WHERE json_extract(request_json,'$.action')='source.grant'").get().n, 1);
+});
 async function selectExcerpt(page, value) {
   const field = page.locator("#inbox-excerpt-text"); await field.focus();
   await field.press("ControlOrMeta+A"); await field.press("ArrowLeft");

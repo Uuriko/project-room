@@ -8,6 +8,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   const drafts = new Map(), positions = new Map();
   let owner = null, active = false, browsing = false, selected = null, epoch = 0, rows = [], sharing = null, sharingBusy = false, retryShare = null;
   let navigationEpoch = 0;
+  let grantsEpoch = 0;
   const storageKey = "project-room:pending-private-share:v1";
   const positionKey = "project-room:inbox-position:v1";
   let storage; try { storage = sessionStorage; } catch {}
@@ -37,9 +38,10 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     if (retryShare) return retryShare;
     try {
       const saved = JSON.parse(storage?.getItem(storageKey) ?? "null"), r = saved?.request;
-      if (saved?.owner === owner && ["source.share", "source.excerpt"].includes(r?.action) && typeof r.requestId === "string"
+      if (saved?.owner === owner && ["source.share", "source.excerpt", "source.grant"].includes(r?.action) && typeof r.requestId === "string"
         && typeof r.sourceId === "string" && typeof r.roomId === "string"
-        && (r.action === "source.share" ? Array.isArray(r.paragraphs) : Number.isSafeInteger(r.selection?.start) && Number.isSafeInteger(r.selection?.end))) return (retryShare = r);
+        && (r.action !== "source.grant" || Array.isArray(r.memberIds) && r.memberIds.length > 0 && r.memberIds.length <= 20)
+        && (Array.isArray(r.paragraphs) || Number.isSafeInteger(r.selection?.start) && Number.isSafeInteger(r.selection?.end))) return (retryShare = r);
       storage?.removeItem(storageKey);
     } catch { return null; }
     return null;
@@ -81,6 +83,8 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   }
   function reset({ preservePending = false } = {}) {
     navigationEpoch++;
+    grantsEpoch++; $("#inbox-grant-list").replaceChildren(); $("#inbox-grants").open = false;
+    $("#inbox-share-member-list").replaceChildren();
     if (!preservePending) { try { storage?.removeItem(positionKey); } catch {} }
     sendUI.reset({ preservePending });
     replyUI.reset({ preservePending });
@@ -150,6 +154,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   }
   function render() {
     const d = drafts.get(selected); if (!d || !owns()) return;
+    loadGrants();
     $("#inbox-reader").hidden = false;
     text("#inbox-subject", d.source.subject || "(No subject)");
     const email = d.source.email;
@@ -297,11 +302,56 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     d.conflict = null; d.reviewedSource = d.source.revision; d.dirty = true; d.note = choice === "mine" ? "Your draft kept. Save when ready." : "Saved draft selected. Review before saving.";
     render();
   });
+  async function loadGrants() {
+    const sourceId = selected, capturedOwner = owner, turn = ++grantsEpoch;
+    const current = () => owns() && owner === capturedOwner && selected === sourceId && grantsEpoch === turn;
+    const list = $("#inbox-grant-list"); list.replaceChildren();
+    if (!owns() || !sourceId || !$("#inbox-grants").open) return;
+    list.textContent = "Loading…";
+    try {
+      const result = await api.grants(sourceId); if (!current()) return;
+      list.replaceChildren();
+      if (!result.grants.length) list.textContent = "No private shares.";
+      if (result.hasMore) list.textContent = "Latest 100 shares shown.";
+      for (const grant of result.grants) {
+        const row = document.createElement("p"), label = document.createElement("span"), button = document.createElement("button");
+        const expired = grant.expiresAt <= Date.now();
+        label.textContent = `${grant.memberIds.length} recipient${grant.memberIds.length === 1 ? "" : "s"} · ${grant.revoked ? "Revoked" : expired ? "Expired" : "Private share"} `;
+        label.title = grant.memberIds.join(", "); row.append(label);
+        if (!grant.revoked && !expired) {
+          button.type = "button"; button.textContent = "Revoke"; button.className = "button ghost";
+          const request = { action: "grant.revoke", requestId: crypto.randomUUID(), sourceId, grantId: grant.grantId };
+          button.addEventListener("click", async () => {
+            if (!current() || button.disabled) return;
+            button.disabled = true;
+            try { await api.apply(request); if (current()) await loadGrants(); }
+            catch { if (current()) { button.disabled = false; button.textContent = "Retry revoke"; } }
+          }); row.append(button);
+        }
+        list.append(row);
+      }
+    } catch { if (current()) list.textContent = "Couldn’t load private shares. Reopen to retry."; }
+  }
+  $("#inbox-grants").addEventListener("toggle", loadGrants);
+  function updateShareChoice() {
+    if (!sharing || !owns()) return;
+    const privateShare = $("#inbox-share-scope").value === "private";
+    $("#inbox-share-members").hidden = !privateShare;
+    text("#inbox-share-title", privateShare ? "Share privately" : "Share with room");
+    text("#inbox-share-boundary", privateShare ? "Only selected recipients and you. Expires in 7 days; copies can’t be recalled."
+      : "Selected text becomes room history, including for future members.");
+    const count = document.querySelectorAll("#inbox-share-member-list input:checked").length;
+    const hasText = sharing.source.adapter === "email" ? Boolean(sharing.selection) : Boolean($("#inbox-share-paragraphs input:checked"));
+    $("#inbox-share-confirm").disabled = sharingBusy || (!sharing.request && (!hasText || privateShare && (count === 0 || count > 20)));
+  }
+  $("#inbox-share-scope").addEventListener("change", updateShareChoice);
+  $("#inbox-share-members").addEventListener("change", updateShareChoice);
   async function ask() {
     if (!owns() || !selected) return;
     const d = drafts.get(selected); if (d?.source.adapter === "email" && !d.source.capabilities.share && !pendingShare()) return;
     if (!getRoom()) { show("rooms"); return; }
     $("#inbox-share-dialog").showModal(); text("#inbox-share-status", "Loading…");
+    sharing = null; $("#inbox-share-scope").disabled = true; $("#inbox-share-member-list").replaceChildren();
     $("#inbox-share-confirm").disabled = true; $("#inbox-share-paragraphs").replaceChildren();
     const pending = pendingShare(), sourceId = pending?.sourceId ?? selected, turn = ++epoch;
     try {
@@ -309,6 +359,13 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       if (!owns() || turn !== epoch || !$("#inbox-share-dialog").open) return;
       if (source.source.revision !== context.sourceRevision) throw new Error("Source changed");
       sharing = { source: source.source, context, request: pending };
+      $("#inbox-share-scope").value = pending?.action === "source.grant" ? "private" : "room";
+      $("#inbox-share-scope").disabled = Boolean(pending);
+      $("#inbox-share-member-list").replaceChildren(...context.members.map(member => {
+        const label = document.createElement("label"), input = document.createElement("input");
+        input.type = "checkbox"; input.value = member.id; input.checked = pending?.memberIds?.includes(member.id) ?? false;
+        input.disabled = Boolean(pending); label.append(input, document.createTextNode(member.displayName + (member.kind === "agent" ? " (agent)" : ""))); return label;
+      }));
       text("#inbox-share-audience", context.roomTitle + " · " + context.members.map(m => m.displayName + (m.kind === "agent" ? " (agent)" : "")).join(", "));
       $("#inbox-share-paragraphs").replaceChildren(...(pending ? [] : source.source.paragraphs).map((value, index) => {
         const label = document.createElement("label"), input = document.createElement("input"), span = document.createElement("span");
@@ -339,7 +396,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
           sharing.selection = valid ? { start, end } : null;
           preview.textContent = valid ? body : ""; preview.hidden = !valid;
           text("#inbox-share-status", body.length > 4000 ? "Select a shorter excerpt." : "");
-          $("#inbox-share-confirm").disabled = !valid;
+          updateShareChoice();
         };
         for (const event of ["select", "keyup", "mouseup", "touchend"]) input.addEventListener(event, select);
         const all = document.createElement("button");
@@ -353,27 +410,37 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       }
       text("#inbox-share-status", pending ? "Share unconfirmed. Retry the original selection." : "");
       $("#inbox-share-confirm").textContent = pending ? "Confirm share" : "Share";
-      $("#inbox-share-confirm").disabled = !pending;
+      updateShareChoice();
     } catch (error) { if (owns() && turn === epoch) text("#inbox-share-status", "Couldn’t load sharing context. Close and try again."); }
   }
   $("#inbox-share-paragraphs").addEventListener("change", event => {
     if (!event.target.matches('input[type="checkbox"]')) return;
-    $("#inbox-share-confirm").disabled = !$("#inbox-share-paragraphs input:checked");
+    updateShareChoice();
   });
   $("#inbox-share-confirm").addEventListener("click", async () => {
     if (!sharing || sharingBusy || !owns()) return;
     const current = sharing, c = current.context;
+    const privateShare = $("#inbox-share-scope").value === "private";
+    const memberIds = [...document.querySelectorAll("#inbox-share-member-list input:checked")].map(el => el.value);
+    if (!current.request && privateShare && (memberIds.length === 0 || memberIds.length > 20)) return;
     if (!current.request && current.source.adapter === "email" && !current.selection) return;
-    current.request ??= { action: current.source.adapter === "email" ? "source.excerpt" : "source.share", requestId: crypto.randomUUID(), sourceId: current.source.id,
+    current.request ??= { action: privateShare ? "source.grant" : current.source.adapter === "email" ? "source.excerpt" : "source.share", requestId: crypto.randomUUID(), sourceId: current.source.id,
+      ...(privateShare ? { memberIds } : {}),
       sourceRevision: c.sourceRevision, roomId: c.roomId, audienceVersion: c.audienceVersion,
       ...(current.source.adapter === "email" ? { selection: current.selection }
         : { paragraphs: [...document.querySelectorAll("#inbox-share-paragraphs input:checked")].map(el => Number(el.value)) }) };
     const retained = persistShare(current.request); sharingBusy = true; $("#inbox-share-confirm").disabled = true;
+    $("#inbox-share-scope").disabled = true;
+    for (const el of document.querySelectorAll("#inbox-share-member-list input")) el.disabled = true;
     for (const el of document.querySelectorAll("#inbox-share-paragraphs input, #inbox-share-paragraphs textarea, #inbox-share-paragraphs button")) el.disabled = true;
     text("#inbox-share-status", "Sharing…");
     try {
       const result = await api.apply(current.request); if (!owns() || sharing !== current) return;
-      persistShare(); $("#inbox-share-dialog").close(); sharing = null; sharingBusy = false; show("rooms");
+      persistShare(); $("#inbox-share-dialog").close(); sharing = null; sharingBusy = false;
+      if (current.request.action === "source.grant") {
+        text("#inbox-status", "Shared privately"); $("#inbox-grants").open = true; await loadGrants(); return;
+      }
+      show("rooms");
       const navigation = navigationEpoch;
       text("#inbox-status", "Shared"); await onShared(result.receipt, () => owns() && navigation === navigationEpoch
         && !active && !browsing && getRoom()?.room.id === result.receipt.roomId);

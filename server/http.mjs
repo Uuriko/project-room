@@ -337,9 +337,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (view !== null && (!["email-text-v1", "email-excerpt-v1"].includes(view) || url.searchParams.getAll("view").length !== 1))
           reject(422, "unsupported_inbox_view", "This inbox view is not supported.");
         if (url.pathname === "/api/inbox" && req.method === "GET") return json(res, 200, store.inbox.list(token, binding, { includeEmail: view !== null }));
-        const source = /^\/api\/inbox\/sources\/([^/]{1,384})(?:\/(share-context|room-results|send-context|sends))?$/.exec(url.pathname);
+        const source = /^\/api\/inbox\/sources\/([^/]{1,384})(?:\/(share-context|room-results|send-context|sends|grants))?$/.exec(url.pathname);
         if (source && req.method === "GET") {
           const id = pathId(source[1]);
+          if (source[2] === "grants") return json(res, 200, store.inbox.grants(token, id, binding));
           if (source[2] === "send-context") return json(res, 200, { ...store.inbox.sendContext(token, id, binding), simulationAvailable: Boolean(syntheticInboxTransport) });
           if (source[2] === "sends") return json(res, 200, { ...store.inbox.sends(token, id, binding), simulationAvailable: Boolean(syntheticInboxTransport) });
           if (source[2]) {

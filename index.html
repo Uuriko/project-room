@@ -94,6 +94,7 @@
           <details id="inbox-email-details" class="form-hint" hidden><summary>Details</summary><div id="inbox-email-metadata"></div></details>
           <p id="inbox-source-notice" class="form-hint" hidden></p>
           <div id="inbox-source-body" class="inbox-source-body"></div>
+          <details id="inbox-grants"><summary>Private shares</summary><div id="inbox-grant-list"></div></details>
           <section id="inbox-results" class="inbox-results" aria-label="Related room work" hidden><h3>From the room</h3><div id="inbox-result-list"></div></section>
           <form id="inbox-draft-form" class="inbox-draft-form">
             <label for="inbox-draft">Private reply draft</label>
@@ -123,7 +124,9 @@
       </section>
       <dialog id="inbox-share-dialog" class="inbox-share-dialog" aria-labelledby="inbox-share-title">
         <h2 id="inbox-share-title">Share with room</h2><p id="inbox-share-audience"></p>
-        <p class="form-hint">Selected text becomes room history, including for future members.</p>
+        <label for="inbox-share-scope">Share with</label><select id="inbox-share-scope"><option value="room">Room</option><option value="private">Selected people &amp; agents</option></select>
+        <fieldset id="inbox-share-members" hidden><legend>Recipients</legend><div id="inbox-share-member-list"></div></fieldset>
+        <p id="inbox-share-boundary" class="form-hint">Selected text becomes room history, including for future members.</p>
         <div id="inbox-share-paragraphs"></div><p id="inbox-share-status" role="status"></p>
         <div class="inbox-draft-actions"><button id="inbox-share-close" class="button ghost" type="button">Close</button><button id="inbox-share-confirm" class="button primary" type="button" disabled>Share</button></div>
       </dialog>

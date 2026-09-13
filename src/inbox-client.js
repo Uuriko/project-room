@@ -133,6 +133,12 @@ export class InboxClient {
         && /^[a-f0-9]{64}$/.test(v.audienceVersion) && typeof v.roomTitle === "string"
         && Array.isArray(v.members) && v.members.every(m => id(m.id) && typeof m.displayName === "string" && ["human", "agent"].includes(m.kind)));
   }
+  grants(sourceId) {
+    return this.request("/sources/" + encodeURIComponent(sourceId) + "/grants", {}, v => v.sourceId === sourceId
+      && typeof v.hasMore === "boolean" && Array.isArray(v.grants) && v.grants.length <= 100 && v.grants.every(g => id(g.grantId) && id(g.roomId)
+        && Array.isArray(g.memberIds) && g.memberIds.length > 0 && g.memberIds.length <= 20 && g.memberIds.every(id)
+        && revision(g.expiresAt) && typeof g.revoked === "boolean"));
+  }
   sendContext(sourceId) {
     return this.request("/sources/" + encodeURIComponent(sourceId) + "/send-context", {}, async v => v.sourceId === sourceId
       && typeof v.simulationAvailable === "boolean" && v.preview?.authEpoch === v.viewer.authEpoch
@@ -176,6 +182,14 @@ export class InboxClient {
     const data = structuredClone(request);
     return this.request("/commands", { method: "POST", data }, async v => {
       const r = v.receipt;
+      if (["source.grant", "grant.revoke"].includes(data.action)) {
+        if (typeof v.duplicate !== "boolean" || r?.requestId !== data.requestId || r.action !== data.action || r.sourceId !== data.sourceId) return false;
+        if (data.action === "grant.revoke") return r.grantId === data.grantId && r.revoked === true;
+        return id(r.grantId) && r.roomId === data.roomId && r.sourceRevision === data.sourceRevision
+          && boundedText(r.body, 4000) && revision(r.expiresAt) && revision(r.roomSequence)
+          && Array.isArray(r.members) && r.members.length === data.memberIds.length
+          && r.members.every((m, i) => m.memberId === data.memberIds[i] && revision(m.revision));
+      }
       if (data.action.startsWith("send.")) {
         if (!["send.reserve", "send.cancel"].includes(data.action) || typeof v.duplicate !== "boolean"
           || r?.requestId !== data.requestId || r.action !== data.action || r.sourceId !== data.sourceId
