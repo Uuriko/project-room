@@ -271,7 +271,7 @@ paths:
                 - required: [profile]
                 - required: [permissions]
               properties:
-                profile: { type: string, enum: [chat, contribute, review] }
+                profile: { type: string, enum: [chat, contribute, review, max] }
                 permissions:
                   type: array
                   minItems: 1

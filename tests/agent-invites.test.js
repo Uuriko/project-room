@@ -294,6 +294,11 @@ test("CLI mints a code from a profile name and rejects unknown profiles", async 
   assert.equal(minted.status, 0, minted.stderr);
   assert.deepEqual(minted.json.permissions, ["verify"]);
   assert.equal(minted.json.profile, "review");
+  const max = await cli(origin, ["invite-code", "profile:max", "60", "Max Bot"], ownerEnv);
+  assert.equal(max.status, 0, max.stderr);
+  assert.equal(max.json.profile, "max");
+  assert.deepEqual(max.json.permissions, ["steer", "manage_claims", "accept_work", "complete_work", "verify"]);
+  assert.equal(max.json.permissions.includes("manage_members"), false);
   const bad = await cli(origin, ["invite-code", "profile:admin"], ownerEnv);
   assert.notEqual(bad.status, 0);
 });

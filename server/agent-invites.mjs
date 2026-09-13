@@ -80,7 +80,7 @@ export class AgentInvites {
     let profileName = null;
     if (profile !== undefined) {
       if (typeof profile !== "string" || !Object.hasOwn(agentAccessProfiles, profile))
-        fail(422, "invalid_invite_scope", "profile must be one of: chat, contribute, review");
+        fail(422, "invalid_invite_scope", "profile must be one of: " + Object.keys(agentAccessProfiles).join(", "));
       if (permissions !== undefined)
         fail(422, "invalid_invite_scope", "Choose a profile or explicit permissions, not both");
       profileName = profile;

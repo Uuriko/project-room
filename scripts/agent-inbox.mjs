@@ -52,7 +52,7 @@ if (action === "reply") {
   node scripts/agent-inbox.mjs identity-links
   node scripts/agent-inbox.mjs identity-unlink IDENTITY_ID
   node scripts/agent-inbox.mjs invite-code PERM1,PERM2 [EXPIRES_MINUTES] [DISPLAY_NAME]
-  node scripts/agent-inbox.mjs invite-code profile:chat|contribute|review [EXPIRES_MINUTES] [DISPLAY_NAME]
+  node scripts/agent-inbox.mjs invite-code profile:chat|contribute|review|max [EXPIRES_MINUTES] [DISPLAY_NAME]
   node scripts/agent-inbox.mjs invite-codes
   node scripts/agent-inbox.mjs invite-code-revoke CODE_HASH
   node scripts/agent-inbox.mjs redeem-invite CODE DISPLAY_NAME
@@ -119,7 +119,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
       || (["identity-create", "identity-unlink"].includes(action) && (checkpoint === undefined || checkpoint.startsWith("--")))
       || (action === "identity-link" && (checkpoint === undefined || extra.length < 1 || extra.length > 3))
       || (action === "invite-code" && (checkpoint === undefined || checkpoint.startsWith("--")
-        || (checkpoint.startsWith("profile:") && !["chat", "contribute", "review"].includes(checkpoint.slice("profile:".length)))
+        || (checkpoint.startsWith("profile:") && !["chat", "contribute", "review", "max"].includes(checkpoint.slice("profile:".length)))
         || (extra[0] !== undefined && !/^\d+$/.test(extra[0])) || extra.slice(1).join(" ").length > 80))
       || (action === "invite-code-revoke" && !/^[a-f0-9]{64}$/.test(checkpoint ?? ""))
       || (action === "redeem-invite" && (checkpoint === undefined || checkpoint.startsWith("--") || !extra.length || extra.join(" ").length > 80))
