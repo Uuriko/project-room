@@ -79,6 +79,44 @@ export function budgetCard(budget) {
   for (const key of SESSION_BUDGET_KEYS) card[key] = budget?.[key] ?? "unknown";
   return Object.freeze(card);
 }
+// G1: attempt contract. Every session start records an attributable attempt:
+// input version (the work revision it started against), performer, the declared
+// environment and the limits in force; a stop closes the attempt with its
+// outcome and output references. The ledger derives during replay - historical
+// events carry no attempt fields and derive nulls, never errors.
+export function validateAttemptEnvironment(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || !value.trim() || value.length > 200)
+    throw new Error("Environment is a string of 1-200 characters");
+  return value;
+}
+
+export function validateAttemptOutputs(value) {
+  if (value === undefined || value === null) return null;
+  if (!Array.isArray(value) || !value.length || value.length > 10
+    || value.some(ref => typeof ref !== "string" || !ref.trim() || ref.length > 500))
+    throw new Error("Outputs are 1-10 references, each a string of 1-500 characters");
+  return [...value];
+}
+
+export function attemptLedger(item) {
+  const list = Array.isArray(item?.attempts) ? item.attempts : [];
+  return Object.freeze(list.filter(a => a && typeof a === "object" && !Array.isArray(a)
+    && Number.isSafeInteger(a.attempt) && a.attempt >= 1
+    && typeof a.performer === "string" && typeof a.startedAt === "string")
+    .map(a => Object.freeze({
+      attempt: a.attempt,
+      performer: a.performer,
+      startedAt: a.startedAt,
+      inputRevision: Number.isSafeInteger(a.inputRevision) ? a.inputRevision : null,
+      environment: typeof a.environment === "string" ? a.environment : null,
+      limits: a.limits && typeof a.limits === "object" && !Array.isArray(a.limits) ? Object.freeze({ ...a.limits }) : null,
+      endedAt: typeof a.endedAt === "string" ? a.endedAt : null,
+      outcome: a.outcome === "done" || a.outcome === "failed" ? a.outcome : null,
+      outputs: Array.isArray(a.outputs) ? Object.freeze(a.outputs.filter(o => typeof o === "string")) : null
+    })));
+}
+
 // The tripped limit name when a live session has blown its budget, else null.
 // Spend only trips where spend is actually reported — unknown spend is not
 // evidence of anything.
@@ -107,7 +145,7 @@ export function sessionRecord(item) {
   const attempts = Number.isSafeInteger(item.attempt_count) && item.attempt_count >= 0 ? item.attempt_count : 0;
   const spend = Number.isSafeInteger(item.spend_cents) && item.spend_cents >= 0 ? item.spend_cents : null;
   return { status, stop_requested_at: stop, heartbeat_at: heartbeat, worker_member_id: worker,
-    started_at: started, attempt_count: attempts, budget, spend_cents: spend };
+    started_at: started, attempt_count: attempts, budget, spend_cents: spend, attempts: attemptLedger(item) };
 }
 
 // The member currently holding a live claim on this session, or null when the
@@ -136,7 +174,8 @@ export function sessionCard(item) {
     budget: budgetCard(session.budget),
     started_at: session.started_at,
     attempt_count: session.attempt_count,
-    spendCents: session.spend_cents ?? "unknown"
+    spendCents: session.spend_cents ?? "unknown",
+    attempts: session.attempts
   };
 }
 
@@ -155,7 +194,7 @@ export function workItemSessionContract() {
     schemaBump: false,
     writer: 27,
     workItemFields: Object.freeze(["status", "stop_requested_at", "heartbeat_at", "worker_member_id",
-      "started_at", "attempt_count", "budget", "spend_cents"]),
+      "started_at", "attempt_count", "budget", "spend_cents", "attempts"]),
     statuses: SESSION_STATUS_LIST,
     events: SESSION_EVENT_LIST,
     workStateSeparate: true,
@@ -205,6 +244,7 @@ export function applySessionFields(item, incoming) {
     if (budget?.maxAttempts && attempts > budget.maxAttempts) {
       throw new Error(`Invalid session retry: attempt ${attempts} exceeds the attempt budget of ${budget.maxAttempts}`);
     }
+    const environment = validateAttemptEnvironment(incoming.data?.environment);
     item.status = SESSION_STATUSES.PROCESSING;
     item.stop_requested_at = null;
     item.heartbeat_at = at;
@@ -213,6 +253,9 @@ export function applySessionFields(item, incoming) {
     item.attempt_count = attempts;
     item.budget = budget;
     item.spend_cents = null;
+    (Array.isArray(item.attempts) ? item.attempts : (item.attempts = [])).push({
+      attempt: attempts, performer: incoming.actorId, startedAt: at, inputRevision: item.revision,
+      environment, limits: budget, endedAt: null, outcome: null, outputs: null });
     return;
   }
   if (incoming.type === SESSION_EVENT_TYPES.STATUS_CHANGED) {
@@ -238,6 +281,10 @@ export function applySessionFields(item, incoming) {
     if (!TERMINAL.has(next)) throw new Error("Stopped session status must be done or failed");
     if (TERMINAL.has(session.status)) throw new Error(`Invalid session transition from ${session.status}`);
     item.status = next;
+    const outputs = validateAttemptOutputs(incoming.data?.outputs);
+    const attemptsList = Array.isArray(item.attempts) ? item.attempts : [];
+    const openAttempt = attemptsList.findLast(a => a && typeof a === "object" && a.endedAt == null) ?? null;
+    if (openAttempt) { openAttempt.endedAt = at; openAttempt.outcome = next; openAttempt.outputs = outputs; }
     item.stop_requested_at = session.stop_requested_at;
     item.heartbeat_at = at;
     item.worker_member_id = null;
