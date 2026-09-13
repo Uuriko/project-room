@@ -10,7 +10,7 @@ import { auditRecovery } from "../server/recovery.mjs";
 import { backupRoom } from "../server/backup.mjs";
 
 const data = { adapter: "synthetic", sender: "maya@example.test", recipient: "you@example.test", subject: "Private launch",
-  paragraphs: ["Please draft a friendly launch note.", "Private budget: 4200."] };
+  paragraphs: ["Please draft a friendly launch note.", "Private budget: PRIVATE-BUDGET-SENTINEL-4200."] };
 function fixture(t) {
   const f = createAcceptanceFixture(); f.filename = join(f.directory, "room.sqlite");
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
@@ -67,7 +67,9 @@ test("sharing posts only selected text through the existing room command, with o
   assert.equal(message.authorId, "owner"); assert.equal(message.workItemId, null);
   assert.equal(f.store.room("commons").sequence, before.sequence + 1);
   const publicView = JSON.stringify(f.store.snapshot(f.keys.producer, "commons"));
-  for (const privateText of ["4200", "maya@example.test", "Private launch"]) assert.equal(publicView.includes(privateText), false);
+  // A short number can occur in public timestamps or random IDs; use the
+  // distinctive private fixture value while still checking the entire snapshot.
+  for (const privateText of ["PRIVATE-BUDGET-SENTINEL-4200", "maya@example.test", "Private launch"]) assert.equal(publicView.includes(privateText), false);
   f.save(f.source({ expectedRevision: 1, data: { ...data, paragraphs: ["New private follow-up"] } }));
   const retry = f.save(request); assert.equal(retry.duplicate, true); assert.deepEqual(retry.receipt, result.receipt);
   assert.equal(f.store.room("commons").sequence, before.sequence + 1);
