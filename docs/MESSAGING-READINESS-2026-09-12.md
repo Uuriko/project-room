@@ -22,6 +22,23 @@ No phone number, paid account, remote webhook or live messaging service was enab
 
 ## Provider inventory
 
+### Opt-in startup for account controls
+
+Startup can now open an **existing** Twilio registry for status/disconnect using
+all four host variables: `ROOM_TWILIO_REGISTRY_FILE`, `ROOM_TWILIO_KEY_FILE`,
+`ROOM_TWILIO_ACCOUNT_ID`, and `ROOM_TWILIO_CONNECTION_ID`. With none, it remains
+disabled; partial configuration fails. Paths must be canonical absolute paths
+outside the source tree, in owner-private directories, with owner-private regular
+single-link files. The key must be 32 bytes. Foreign database schemas, wrong keys,
+inactive accounts and mismatched account epochs are rejected. Credentials are not
+returned to the browser. Shutdown closes the registry and clears its key buffer.
+
+This opt-in initializes **account controls only**, not the webhook listener. It
+does not create or migrate private files, grant background access, start polling,
+or make provider calls. No live runtime was restarted. The next receiving-runtime
+decision remains explicit background/session authority and secure HTTPS exposure;
+the tested webhook factory currently requires a valid account session per delivery.
+
 Latest checkpoint: Telegram's 35 targeted checks pass, including desktop/mobile
 end-to-end controls and durable recovery. A live manual check returned imported 0,
 pageFull false, without acknowledging updates. Encrypted queue, registry,
