@@ -1,5 +1,15 @@
 # Messaging excerpts checkpoint
 
+## Journey acceptance follow-up
+
+`42ffa22` changes tests only; runtime remains `07b32d9`. Telegram/SMS/WhatsApp tests now exercise room excerpt → accountable producer completion → independent review → human approval → private draft adoption, including rejection before approval and zero send records. SMS/WhatsApp mobile browser acceptance additionally exercises explicit private recipient selection, inability to confirm without a recipient, recipient-only read, revoke, separate room sharing, result preview and saved private draft.
+
+Private sharing and room work are intentionally separate paths: a private grant does not become public work context automatically. The room-result journey uses an explicit room share. No claim is made that a private-only grant can already drive a fully private multi-agent work item. That remains a product gap.
+
+Focused acceptance passed 5/5 and the complete messaging package passed 50/50 on `42ffa22`, with zero failures or skips. Grok independently passed the three provider excerpt tests on earlier runtime `07b32d9`; review of the expanded journey tests is pending. Corrected test-only timing (wait for enabled result adoption, not merely a visible button) and a false-positive privacy assertion matching a short numeric sender inside random event IDs. No production behavior changed.
+
+## Runtime checkpoint
+
 Runtime `07b32d9` adds selected-text sharing for imported Telegram, SMS and WhatsApp messages. It reuses existing Inbox review, not a new access model.
 
 Exact runtime full regression: 1,509/1,509 Node tests passed, zero failures or skips.
