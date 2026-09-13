@@ -308,10 +308,20 @@ test("G1 attempt fields validate; historical events without them replay to nulls
   for (const bad of [42, {}, "", "  ", "x".repeat(201)])
     assert.throws(() => applySessionFields({ id: "x", state: "accepted", revision: 0 },
       { type: SESSION_EVENT_TYPES.STARTED, actorId: "a", at: "2026-09-01T00:00:00.000Z", data: { environment: bad } }));
-  for (const bad of [[], ["ok", 5], ["x".repeat(501)], Array(11).fill("ref"), "refs"])
+  for (const bad of [[], ["ok", 5], ["x".repeat(501)], Array(11).fill("ref"), "", "  ", "x".repeat(501)])
     assert.throws(() => applySessionFields(
       { id: "x", state: "accepted", revision: 0, status: "processing", heartbeat_at: "2026-09-01T00:00:00.000Z", attempt_count: 1, attempts: [{ attempt: 1, performer: "a", startedAt: "2026-09-01T00:00:00.000Z", endedAt: null }] },
       { type: SESSION_EVENT_TYPES.STOPPED, actorId: "a", at: "2026-09-01T01:00:00.000Z", data: { status: "done", outputs: bad } }));
+});
+
+test("G1 legacy string outputs (v11-v18 shape) stay valid and record as one reference", () => {
+  const item = { id: "w3", title: "Legacy", state: "accepted", revision: 0, accountableMemberId: "owner" };
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STARTED, actorId: "agent", at: "2026-09-01T00:00:00.000Z" });
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STOPPED, actorId: "agent", at: "2026-09-01T01:00:00.000Z",
+    data: { status: "done", outputs: "A reviewed result" } });
+  assert.deepEqual(JSON.parse(JSON.stringify(sessionRecord(item).attempts)),
+    [{ attempt: 1, performer: "agent", startedAt: "2026-09-01T00:00:00.000Z", inputRevision: 0,
+      environment: null, limits: null, endedAt: "2026-09-01T01:00:00.000Z", outcome: "done", outputs: ["A reviewed result"] }]);
 });
 
 test("G1 attempt environment and outputs flow through the session command path", async t => {
