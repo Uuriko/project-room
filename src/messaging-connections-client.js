@@ -4,14 +4,16 @@ const exact=(v,keys)=>v!==null&&typeof v==='object'&&!Array.isArray(v)
   &&Object.keys(v).length===keys.length&&keys.every(k=>Object.hasOwn(v,k));
 
 // Reuses the Inbox client's account/session-bound request and response fencing.
-export function messagingConnectionsClient(inbox) {
+export function messagingConnectionsClient(inbox,provider='twilio') {
+  if(!['twilio','telegram'].includes(provider))throw new Error('invalid_messaging_provider');
+  const providers=provider==='telegram'?['telegram']:['sms','whatsapp'];
   return {
     receivingStatus() {
-      return inbox.request('/connections/twilio/receiving',{},v=>typeof v.enabled==='boolean'&&Array.isArray(v.connections)
+      return inbox.request('/connections/'+provider+'/receiving',{},v=>typeof v.enabled==='boolean'&&Array.isArray(v.connections)
         &&v.connections.length<=100&&(!v.enabled?v.connections.length===0:true)
         &&v.connections.every(c=>exact(c,['connectionId','revision','state','expiresAt','connectionRevision','provider','expectedConnectionRevision','canStart'])
           &&id(c.connectionId)&&revision(c.revision)&&revision(c.expectedConnectionRevision)&&typeof c.canStart==='boolean'
-          &&['sms','whatsapp'].includes(c.provider)&&['missing','active','revoked','expired','reauthorize'].includes(c.state)
+          &&providers.includes(c.provider)&&['missing','active','revoked','expired','reauthorize'].includes(c.state)
           &&(c.state==='missing'?c.revision===0&&c.expiresAt===null&&c.connectionRevision===null:
             c.revision>0&&Number.isSafeInteger(c.expiresAt)&&c.expiresAt>0&&revision(c.connectionRevision)&&c.connectionRevision>0))
         &&new Set(v.connections.map(c=>c.connectionId)).size===v.connections.length);
@@ -22,7 +24,7 @@ export function messagingConnectionsClient(inbox) {
         ||action==='stop'&&data.expectedRevision<1||action==='start'&&(!revision(data.expectedConnectionRevision)||data.expectedConnectionRevision<1))
         throw new Error('invalid_messaging_action');
       const intent=Object.freeze({...data});
-      return inbox.request('/connections/twilio/receiving/'+action,{method:'POST',data:intent},v=>v.connectionId===intent.connectionId
+      return inbox.request('/connections/'+provider+'/receiving/'+action,{method:'POST',data:intent},v=>v.connectionId===intent.connectionId
         &&v.revision===intent.expectedRevision+1&&v.state===(action==='start'?'active':'revoked')
         &&Number.isSafeInteger(v.expiresAt)&&v.expiresAt>0);
     },

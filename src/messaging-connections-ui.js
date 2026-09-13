@@ -1,5 +1,23 @@
 // Compact connection controls. The host supplies validated API responses and
 // an owner key that becomes null immediately when account authority ends.
+export function receivingDisclosure({doc,permission,name,busy,onAction}) {
+  const details=doc.createElement('details'),summary=doc.createElement('summary'),explanation=doc.createElement('p');
+  summary.textContent='Receiving';details.append(summary);
+  explanation.textContent=permission.state==='active'
+    ?'Allowed until '+new Date(permission.expiresAt).toLocaleString()+'.'
+    :'Allow incoming messages for 24 hours, even after sign-out. No sending or sharing.';
+  details.append(explanation);
+  const actions=[];
+  if(permission.state!=='active'&&permission.canStart)actions.push('start');
+  if(permission.revision>0&&permission.state!=='revoked')actions.push('stop');
+  for(const action of actions){
+    const button=doc.createElement('button');button.type='button';button.className='text-button';button.disabled=busy;
+    button.textContent=action==='stop'?'Stop receiving':'Allow for 24 hours';
+    button.setAttribute('aria-label',button.textContent+' · '+name);
+    button.addEventListener('click',()=>onAction(action));details.append(button);
+  }
+  return details;
+}
 export function installMessagingConnections({list,status,api,ownerKey}) {
   let generation=0,busy=false;
   const current=(owner,turn)=>owner!==null && owner===ownerKey() && generation===turn;
@@ -21,24 +39,7 @@ export function installMessagingConnections({list,status,api,ownerKey}) {
         button.addEventListener('click',()=>{if(current(owner,turn))disconnect(c);});row.append(button);
       }
       const permission=receiving.find(p=>p.connectionId===c.connectionId&&p.provider===c.provider);
-      if(permission){
-        const details=doc.createElement('details'),summary=doc.createElement('summary'),explanation=doc.createElement('p');
-        summary.textContent='Receiving';details.append(summary);
-        explanation.textContent=permission.state==='active'
-          ?'Allowed until '+new Date(permission.expiresAt).toLocaleString()+'.'
-          :'Allow incoming messages for 24 hours, even after sign-out. No sending or sharing.';
-        details.append(explanation);
-        const actions=[];
-        if(permission.state!=='active'&&permission.canStart)actions.push('start');
-        if(permission.revision>0&&permission.state!=='revoked')actions.push('stop');
-        for(const action of actions){
-          const button=doc.createElement('button');button.type='button';button.className='text-button';button.disabled=busy;
-          button.textContent=action==='stop'?'Stop receiving':'Allow for 24 hours';
-          button.setAttribute('aria-label',button.textContent+' · '+name);
-          button.addEventListener('click',()=>{if(current(owner,turn))change(permission,action);});details.append(button);
-        }
-        row.append(details);
-      }
+      if(permission)row.append(receivingDisclosure({doc,permission,name,busy,onAction:action=>{if(current(owner,turn))change(permission,action);}}));
       return row;
     }));
   }

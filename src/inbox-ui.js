@@ -2,7 +2,7 @@ import { InboxClient, inboxTextVersion } from "./inbox-client.js";
 import { installInboxSend, installInboxReplyReview } from "./inbox-send-ui.js";
 import { validId } from "./events.js";
 import { messagingConnectionsClient } from './messaging-connections-client.js';
-import { installMessagingConnections } from './messaging-connections-ui.js';
+import { installMessagingConnections, receivingDisclosure } from './messaging-connections-ui.js';
 
 export function installInbox({ account, room, getRoom, onShared, onOpenWork, onAccountEnded = () => room.endAccess(), onRooms = () => {}, onNavigate = () => {} }) {
   const $ = selector => document.querySelector(selector);
@@ -31,6 +31,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   const owns = () => owner !== null && owner === ownerKey();
   const messagingUI=installMessagingConnections({list:$('#inbox-messaging-list'),status:$('#inbox-messaging-status'),
     api:messagingConnectionsClient(api),ownerKey:()=>owns()?owner:null});
+  const telegramReceiving=messagingConnectionsClient(api,'telegram');
   const replyUI = installInboxReplyReview({ api, ownerKey: () => owns() ? owner : null });
   const sendUI = installInboxSend({ api, ownerKey: () => owns() ? owner : null, reviewChanges: async () => {
     const id = selected, d = drafts.get(id); if (!d || !owns()) return;
@@ -175,17 +176,20 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     const turn=++telegramTurn,capturedOwner=owner;
     $('#inbox-telegram-list').replaceChildren();
     try {
-      const result=await api.telegramStatus();
+      const [result,receiving]=await Promise.all([api.telegramStatus(),telegramReceiving.receivingStatus().catch(()=>null)]);
       if (!owns() || capturedOwner!==owner || turn!==telegramTurn) return;
-      text('#inbox-telegram-status','');
+      text('#inbox-telegram-status',receiving?'':'Receiving permission unavailable. Refresh to check.');
       $('#inbox-telegram-list').replaceChildren(...result.connections.map(connection=>{
         const row=document.createElement('div'),label=document.createElement('p');
         label.textContent='Telegram'+(connection.state==='active'?'':connection.state==='disconnected'?' · Disconnected':' · Setup needed');row.append(label);
         if(connection.state==='active') for(const action of ['sync','disconnect']) {
           const button=document.createElement('button');button.type='button';button.className='text-button';
           button.textContent=action==='sync'?'Sync':'Disconnect';button.setAttribute('aria-label',button.textContent+' Telegram');button.disabled=connectionBusy;
-          button.addEventListener('click',()=>telegramAction(action,connection));row.append(button);
+          button.addEventListener('click',()=>{if(owns()&&capturedOwner===owner&&turn===telegramTurn)telegramAction(action,connection);});row.append(button);
         }
+        const permission=receiving?.enabled&&receiving.connections.find(p=>p.connectionId===connection.connectionId);
+        if(permission)row.append(receivingDisclosure({doc:document,permission,name:'Telegram',busy:connectionBusy,
+          onAction:action=>{if(owns()&&capturedOwner===owner&&turn===telegramTurn)telegramAction(action,permission);}}));
         return row;
       }));
     } catch {
@@ -198,15 +202,24 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     $('#inbox-connections').querySelectorAll('button').forEach(b=>{b.disabled=true;});
     text('#inbox-telegram-status','Working…');
     try {
-      const result=await api.telegram(action,{connectionId:connection.connectionId,expectedRevision:connection.revision});
+      const data={connectionId:connection.connectionId,expectedRevision:connection.revision};
+      if(action==='start')data.expectedConnectionRevision=connection.expectedConnectionRevision;
+      const result=await (['start','stop'].includes(action)?telegramReceiving.receivingAction(action,data):api.telegram(action,data));
       if(!owns()||capturedOwner!==owner)return;
       if(action==='sync')await load();
       if(!owns()||capturedOwner!==owner)return;
       await loadTelegram();
       if(!owns()||capturedOwner!==owner)return;
-      text('#inbox-telegram-status',action==='disconnect'?'Disconnected here. Saved messages remain.':`${result.imported} message${result.imported===1?'':'s'} synced.`);
+      text('#inbox-telegram-status',action==='start'?'Receiving allowed for 24 hours.':action==='stop'?'Receiving stopped. Saved messages remain.':
+        action==='disconnect'?'Disconnected here. Saved messages remain.':`${result.imported} message${result.imported===1?'':'s'} synced.`);
     } catch {
-      if(owns()&&capturedOwner===owner){await loadTelegram();if(owns()&&capturedOwner===owner)text('#inbox-telegram-status','Action unconfirmed. Refresh before trying again.');}
+      if(owns()&&capturedOwner===owner){
+        text('#inbox-telegram-status','Action unconfirmed. Refresh before trying again.');
+        const turn=telegramTurn,refresh=document.createElement('button');refresh.type='button';refresh.className='text-button';refresh.textContent='Refresh';
+        refresh.setAttribute('aria-label','Refresh Telegram connections');
+        refresh.addEventListener('click',()=>{if(owns()&&capturedOwner===owner&&turn===telegramTurn)loadTelegram();});
+        $('#inbox-telegram-list').replaceChildren(refresh);
+      }
     } finally {
       if(owns()&&capturedOwner===owner){connectionBusy=false;$('#inbox-connections').querySelectorAll('button').forEach(b=>{b.disabled=false;});}
     }
