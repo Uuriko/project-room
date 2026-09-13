@@ -4,7 +4,7 @@ import { rmSync } from "node:fs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
-import { reusableWorkDefinition, confirmsWorkProposal } from "../src/workflow.js";
+import { reusableWorkDefinition, confirmsWorkProposal, workRecipeOptions } from "../src/workflow.js";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 test("reusable definition is an exact two-field projection, not cloned authority or state", () => {
@@ -21,6 +21,28 @@ test("reusable definition is an exact two-field projection, not cloned authority
   for (const key of Object.keys(content)) for (const value of [" ", "", null, {}, 10, false, "x".repeat(4097)]) {
     assert.throws(() => reusableWorkDefinition({ ...content, [key]: value }));
   }
+});
+
+
+test("recipe options are the room's distinct recent definitions, content only and capped", () => {
+  const item = (id, title, definitionOfDone, updatedAt, extra = {}) => Object.freeze({ id, title, definitionOfDone, updatedAt, state: "completed", accountableMemberId: "old", receipt: { pass: true }, ...extra });
+  const workItems = {
+    a: item("a", "One", "Done one", "2026-09-01T00:00:00.000Z"),
+    b: item("b", "Two", "Done two", "2026-09-03T00:00:00.000Z"),
+    c: item("c", "One", "Done one", "2026-09-02T00:00:00.000Z"),
+    d: { id: "d", title: "  ", definitionOfDone: "Done d", updatedAt: "2026-09-04T00:00:00.000Z" },
+    e: item("e", "Missing criteria", "", "2026-09-05T00:00:00.000Z"),
+  };
+  const before = structuredClone(workItems);
+  assert.deepEqual(workRecipeOptions(workItems), [
+    { workItemId: "b", title: "Two", definitionOfDone: "Done two" },
+    { workItemId: "c", title: "One", definitionOfDone: "Done one" },
+  ]);
+  assert.deepEqual(workItems, before, "derivation does not mutate the room state");
+  assert.deepEqual(workRecipeOptions(workItems, { limit: 1 }), [{ workItemId: "b", title: "Two", definitionOfDone: "Done two" }]);
+  assert.deepEqual(workRecipeOptions({}), []);
+  for (const bad of [null, undefined, [], "work"]) assert.throws(() => workRecipeOptions(bad));
+  for (const limit of [0, -1, 51, 1.5, "8", NaN]) assert.throws(() => workRecipeOptions(workItems, { limit }));
 });
 
 async function fixture(t) {
