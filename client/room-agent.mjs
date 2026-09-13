@@ -295,6 +295,26 @@ export class RoomAgentClient {
       checkedAt: new Date(Date.now()).toISOString(), expiresAt: null, scope: "room", externalExecution: false };
   }
   snapshot({ signal } = {}) { return this.#request("", undefined, signal); }
+  async privateContexts(options={}) {
+    const sequence=id=>{const m=typeof id==='string'&&/^grant-([1-9][0-9]{0,15})-[a-f0-9]{64}$/.exec(id);return m&&Number.isSafeInteger(Number(m[1]))?Number(m[1]):null;};
+    if(!this.#memberId||!options||typeof options!=='object'||Array.isArray(options)||Object.keys(options).some(k=>!['before','signal'].includes(k))
+      ||options.before!==undefined&&sequence(options.before)===null)throw new RoomClientError(422,'invalid_private_context','Choose one private context page');
+    const {before,signal}=options;
+    const value=await this.#request('/private-context'+(before===undefined?'':'?before='+encodeURIComponent(before)),undefined,signal);
+    const exact=(v,keys)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===keys.length&&keys.every(k=>Object.hasOwn(v,k));
+    let ceiling=before===undefined?Number.MAX_SAFE_INTEGER:sequence(before);
+    if(!exact(value,['contractVersion','roomId','viewerId','viewerSessionBinding','shares','next'])||value.contractVersion!==1
+      ||value.roomId!==this.#roomId||value.viewerId!==this.#memberId||value.viewerSessionBinding!==null
+      ||!Array.isArray(value.shares)||value.shares.length>25||!value.shares.every(g=>{
+        if(!exact(g,['grantId','expiresAt','permissions']))return false;
+        const n=sequence(g.grantId);
+        if(n===null||n>=ceiling||!Number.isSafeInteger(g.expiresAt)||g.expiresAt<=Date.now()
+          ||!Array.isArray(g.permissions)||g.permissions.length!==1||g.permissions[0]!=='read')return false;
+        ceiling=n;return true;
+      })||value.next!==null&&(value.shares.length!==25||value.next!==value.shares.at(-1).grantId))
+      throw new RoomClientError(200,'invalid_response','Private context page did not match the selected recipient');
+    return value;
+  }
   async privateContext(grantId,{signal}={}) {
     if(!this.#memberId||!validId(grantId))throw new RoomClientError(422,'invalid_private_context','Choose one private share for the configured agent');
     const value=await this.#request(`/private-context/${encodeURIComponent(grantId)}`,undefined,signal);

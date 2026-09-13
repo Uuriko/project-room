@@ -4,6 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {rmSync} from 'node:fs';
 import {createAcceptanceFixture} from '../scripts/acceptance-fixture.mjs';
 import {createRoomServer} from '../server/http.mjs';
+import {RoomAgentClient} from '../client/room-agent.mjs';
 
 test('agent discovery pages only current recipient metadata and rejects foreign or revoked cursors',async t=>{
   const f=createAcceptanceFixture(),account=f.store.accountForMember('commons','owner'),slot=f.store.createAccountSessionSlot();
@@ -18,6 +19,17 @@ test('agent discovery pages only current recipient metadata and rejects foreign 
   const get=(suffix='',token=f.keys.producer)=>fetch(url+suffix,{headers:{Authorization:'Bearer '+token}});
   const response=await get();assert.equal(response.status,200);assert.ok(response.headers.get('cache-control').includes('no-store'));
   const page=await response.json();assert.equal(page.shares.length,25);assert.equal(page.next,ids[3]);
+  const config={origin,roomId:'commons',memberId:'producer',token:f.keys.producer},client=new RoomAgentClient(config);
+  assert.deepEqual(await client.privateContexts(),page);
+  assert.equal((await client.privateContexts({before:page.next})).shares.length,3);
+  for(const patch of [{viewerId:'reviewer'},{roomId:'other'},{body:'unwanted private body'},{next:ids[0]},
+    {shares:[page.shares[0],page.shares[0]]},{shares:[{...page.shares[0],sourceId:'secret'}]},
+    {shares:[{...page.shares[0],permissions:['read','write']}]},{shares:[{...page.shares[0],expiresAt:1}]}]){
+    const bad=new RoomAgentClient({...config,fetchImpl:async(url,options)=>url.includes('/private-context')?Response.json({...page,...patch}):fetch(url,options)});
+    await assert.rejects(bad.privateContexts(),{code:'invalid_response'});
+  }
+  await assert.rejects(client.privateContexts({before:'../other'}),{code:'invalid_private_context'});
+  await assert.rejects(client.privateContexts({sourceId:'source'}),{code:'invalid_private_context'});
   assert.deepEqual(page.shares.map(g=>g.grantId),ids.slice(3).reverse());
   assert.ok(!JSON.stringify(page).includes('PRIVATE'));assert.ok(!JSON.stringify(page).includes(foreign));
   for(const g of page.shares)assert.deepEqual(Object.keys(g).sort(),['expiresAt','grantId','permissions']);

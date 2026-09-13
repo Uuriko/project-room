@@ -29,6 +29,17 @@ function harness(t, client = {}, options = {}) {
 const args = { requestId: "draft-one", workItemId: "work", packetId: "packet", basisRevision: 0, body: "A draft ☀️" };
 const receipt = command => ({ sequence: 4, duplicate: false, event: { id: "event", type: "message.posted", roomId: "commons", actorId: "agent", data: { ...command.data } } });
 
+test('private discovery MCP returns metadata without reading bodies and forwards explicit continuation',async t=>{
+  const marker='grant-1-'+'a'.repeat(64);
+  const seen=[];const h=harness(t,{privateContexts:async options=>{seen.push(options.before);assert.ok(options.signal);return {shares:[],next:null};},
+    privateContext:()=>{throw new Error('must not prefetch');}});
+  await h.ready();
+  for(const args of [{},{before:marker}])assert.deepEqual((await h.rpc('tools/call',{name:'room_list_private_context',arguments:args})).result.structuredContent,{shares:[],next:null});
+  assert.deepEqual(seen,[undefined,marker]);
+  assert.equal((await h.rpc('tools/call',{name:'room_list_private_context',arguments:{before:'grant-one'}})).error.code,-32602);
+  assert.equal((await h.rpc('tools/call',{name:'room_list_private_context',arguments:{body:true}})).error.code,-32602);
+});
+
 test('private context MCP tool accepts only one exact grant and remains read-only',async t=>{
   let seen;
   const h=harness(t,{privateContext:async(grantId,{signal})=>{seen=grantId;assert.ok(signal);return {body:'Private fixture',permissions:['read']};}});
@@ -92,7 +103,7 @@ test("stdio version negotiation, discovery fallback, tools and notification sile
   assert.equal((await h.rpc("tools/list")).error.code, -32000);
   await h.ready();
   const tools = (await h.rpc("tools/list")).result.tools;
-  assert.equal(tools.length, 46); assert.ok(tools.every(tool => tool.inputSchema.additionalProperties === false));
+  assert.equal(tools.length, 47); assert.ok(tools.every(tool => tool.inputSchema.additionalProperties === false));
   assert.ok(tools.some(tool => tool.name === "room_post_message"));
   assert.equal((await h.rpc("tools/call", { name: "room_check_access", arguments: {} }, "typed-id")).result.structuredContent.status, "credential_accepted");
   const count = h.replies.length; h.send({ method: "unknown-notification" }); await tick(); assert.equal(h.replies.length, count);

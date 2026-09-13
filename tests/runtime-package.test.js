@@ -55,7 +55,8 @@ assert.equal(receipt.files, 47 + gmailPackageFiles.filter(path => existsSync(joi
     const hasAutomationWrites = existsSync(replySource) && readFileSync(replySource, "utf8").includes('"room_create_automation"');
     const hasReactions = existsSync(replySource) && readFileSync(replySource, "utf8").includes('"room_react_message"');
     const hasPrivateContext = readFileSync(join(destination,'client/mcp-stdio.mjs'),'utf8').includes('room_read_private_context');
-    assert.deepEqual(JSON.parse(cold.stdout), { tools: hasPrivateContext ? 46 : hasReactions ? 45 : hasAutomationWrites ? 44 : hasAutomationReads ? 38 : hasRequestRuns ? 36 : hasOrdinaryChat ? 33 : existsSync(join(destination, "client/help-actions.mjs")) ? 32 : 27, helper: "function",
+    const hasPrivateDiscovery = readFileSync(join(destination,'client/mcp-stdio.mjs'),'utf8').includes('room_list_private_context');
+    assert.deepEqual(JSON.parse(cold.stdout), { tools: hasPrivateDiscovery ? 47 : hasPrivateContext ? 46 : hasReactions ? 45 : hasAutomationWrites ? 44 : hasAutomationReads ? 38 : hasRequestRuns ? 36 : hasOrdinaryChat ? 33 : existsSync(join(destination, "client/help-actions.mjs")) ? 32 : 27, helper: "function",
       command: { id: "cold-package", type: "work.accepted", data: { workItemId: "work", expectedRevision: 0 } } });
   }
   assert.throws(() => verifyRuntimePackage(destination, { expectedCommit: "0".repeat(40) }));
