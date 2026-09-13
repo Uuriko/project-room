@@ -26,6 +26,14 @@ The module reads only the mailbox profile after consent, not messages. It grants
 
 ## Required next integration (not complete)
 
+Storage checkpoint: `server/mail-credential-vault.mjs` now provides AES-256-GCM
+credential encryption in a separate caller-supplied SQLite database. The key is supplied
+externally and is not written by the module. Account, connection, epoch, mailbox and
+version are authenticated with the ciphertext. Compare-and-swap updates and disconnect
+tombstones reject late refreshes; reconnect requires a newer connection revision.
+The module does not itself authorize callers, provision a key, revoke Google grants,
+erase backups, or wire the Inbox. Host lifecycle integration remains required.
+
 1. Add account-authenticated, CSRF-protected start route and callback handler with fresh
    server-derived account epoch/session/connection revision. Never accept these bindings
    from browser JSON. Do not log callback query strings; return a clean same-origin redirect
