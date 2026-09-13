@@ -28,7 +28,8 @@ import { auditWorkHelp } from "./work-help.mjs";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, validateHelpOfferData } from "../src/help-offers.js";
 import {
   isSessionStatus, isTerminalSession, sessionRecord, listWorkItemSessions, sessionCommandType, sessionWorker,
-  validateSessionBudget, budgetLimitExceeded, SESSION_HEARTBEAT_STALE_MS
+  validateSessionBudget, budgetLimitExceeded, SESSION_HEARTBEAT_STALE_MS,
+  validateAttemptEnvironment, validateAttemptOutputs
 } from "../src/work-item-session.js";
 import { Inbox, inboxSchema } from "./inbox.mjs";
 import { EmailImport, emailImportSchema } from "./email-import.mjs";
@@ -150,7 +151,9 @@ const compact = state => ({ ...state, eventLog: [], seenEvents: {}, seenIdempote
 const sessionEventMatchesRequest = (event, request) => event?.data?.workItemId === request.workItemId
   && (request.action === "request_stop" ? event.type === T.SESSION_STOP_REQUESTED
     : event.type === T.SESSION_STARTED ? request.status === "processing"
-      : (event.type === T.SESSION_STATUS_CHANGED || event.type === T.SESSION_STOPPED) && event.data.status === request.status);
+      : (event.type === T.SESSION_STATUS_CHANGED || event.type === T.SESSION_STOPPED) && event.data.status === request.status)
+  && (event?.data?.environment ?? null) === (request.environment ?? null)
+  && JSON.stringify(event?.data?.outputs ?? null) === JSON.stringify(request.outputs ?? null);
 // Platform differences stay at the database boundary; identity, invitation and
 // command rules below are shared by every runtime. The default remains Node.
 const nodeReadTransactions = new WeakSet();
@@ -207,10 +210,10 @@ const shapes = {
   [T.VERIFICATION_RECORDED]: `${work} result completionEventId evidenceVersion summary nextAction`,
   [T.OWNER_DECISION_RECORDED]: `${work} decision completionEventId evidenceVersion reason`,
   [T.DECISION_RECORDED]: "sourceMessageId statement note",
-  [T.SESSION_STARTED]: `${work} budget`,
+  [T.SESSION_STARTED]: `${work} budget environment`,
   [T.SESSION_STATUS_CHANGED]: `${work} status spendCents`,
   [T.SESSION_STOP_REQUESTED]: work,
-  [T.SESSION_STOPPED]: `${work} status spendCents budgetEnforced reason limit`,
+  [T.SESSION_STOPPED]: `${work} status spendCents budgetEnforced reason limit outputs`,
   [T.CAPABILITIES_ADVERTISED]: "capabilities"
 };
 
@@ -223,7 +226,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities"].includes(name) ? "array" : ["preferences", "budget"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "outputs"].includes(name) ? "array" : ["preferences", "budget"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (Buffer.byteLength(JSON.stringify(command)) > 16384) fail(413, "too_large", "Command is too large");
@@ -1232,7 +1235,7 @@ export class RoomStore {
     // report cumulative spend. Both are optional; nothing else is accepted.
     const required = ["requestId", "workItemId", "expectedRevision", "action",
       ...(request.action === "set_status" ? ["status"] : [])];
-    const optional = request.action === "set_status" ? ["budget", "spendCents"] : [];
+    const optional = request.action === "set_status" ? ["budget", "spendCents", "environment", "outputs"] : [];
     if (required.some(key => !keys.includes(key)) || keys.some(key => ![...required, ...optional].includes(key))) {
       fail(422, "invalid_session_action", "Supply requestId, workItemId, expectedRevision, and set_status or request_stop");
     }
@@ -1317,9 +1320,22 @@ export class RoomStore {
         if (cap !== null && others.length >= cap)
           fail(409, "budget_exceeded", `Concurrency budget of ${cap} reached (${others.length} active)`);
       }
+      // G1: the attempt contract. A start may declare its environment; a stop
+      // may record output references. Both are optional and validated.
+      if (request.environment !== undefined && type !== T.SESSION_STARTED)
+        fail(422, "invalid_session_environment", "An environment is declared when the session starts");
+      if (request.outputs !== undefined && type !== T.SESSION_STOPPED)
+        fail(422, "invalid_session_outputs", "Output references are recorded when the session stops");
+      let environment = null, outputs = null;
+      try { environment = validateAttemptEnvironment(request.environment); }
+      catch (error) { fail(422, "invalid_session_environment", error.message); }
+      try { outputs = validateAttemptOutputs(request.outputs); }
+      catch (error) { fail(422, "invalid_session_outputs", error.message); }
       const data = { workItemId: request.workItemId, expectedRevision: request.expectedRevision };
       if (type === T.SESSION_STATUS_CHANGED || type === T.SESSION_STOPPED) data.status = request.status;
       if (type === T.SESSION_STARTED && budget) data.budget = budget;
+      if (type === T.SESSION_STARTED && environment) data.environment = environment;
+      if (type === T.SESSION_STOPPED && outputs) data.outputs = outputs;
       if (request.spendCents !== undefined && type !== T.SESSION_STOP_REQUESTED) data.spendCents = request.spendCents;
       return this.command(token, roomId, { id: request.requestId, type, data }, expectedSessionBinding);
     });
