@@ -16,7 +16,7 @@ export class GmailMailReader {
   #connection; #epoch; #authorize; #fetch; #now;
   constructor({ connection, authEpoch, authorize, fetchImpl = fetch, now = Date.now }) {
     this.#connection = emailConnection(connection);
-    if (connection.provider !== 'gmail' || !Number.isSafeInteger(authEpoch) || authEpoch < 1
+    if (connection.provider !== 'gmail' || !Number.isSafeInteger(authEpoch) || authEpoch < 0
       || typeof authorize !== 'function') fail('gmail_reader_configuration_invalid');
     this.#epoch = authEpoch; this.#authorize = authorize; this.#fetch = fetchImpl; this.#now = now;
   }

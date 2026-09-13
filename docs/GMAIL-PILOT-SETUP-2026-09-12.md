@@ -26,6 +26,23 @@ The module reads only the mailbox profile after consent, not messages. It grants
 
 ## Required next integration (not complete)
 
+Lifecycle checkpoint: `server/gmail-connections.mjs` now joins the OAuth boundary,
+credential vault and page reader to the existing account-private Inbox import.
+Tests exercise consent exchange, encrypted storage, reading/import, reconnect,
+stale callbacks, concurrent scans and disconnect during an in-flight read with mocked
+Google responses. Real accounts begin at authorization epoch zero; the new modules
+now match that invariant. Session bindings and account epochs come from the store.
+Source revision preconditions are captured before fetching so concurrent changes cannot
+be silently overwritten. Failed configuration can leave an inert unmatched vault
+revision; reads require a matching active import connection. Cross-database crash
+recovery still needs operational testing, not an atomicity claim.
+
+Still not live: HTTP/CSRF wiring, concise UI, external key provisioning and private
+database file permissions, token refresh, Google-side revocation, durable worker scheduling,
+runtime dependency packaging, and real-user consent/testing. The existing importer’s
+legacy `mode: fixture` marker is not an assertion of live connectivity; it must be
+reconciled before public UI claims. Expired tokens currently fail closed.
+
 Storage checkpoint: `server/mail-credential-vault.mjs` now provides AES-256-GCM
 credential encryption in a separate caller-supplied SQLite database. The key is supplied
 externally and is not written by the module. Account, connection, epoch, mailbox and

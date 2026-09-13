@@ -14,7 +14,7 @@ export class GmailOAuthError extends Error {
 
 function binding(context) {
   if (!context || !opaque(context.accountId) || !opaque(context.sessionBinding)
-    || !Number.isSafeInteger(context.authEpoch) || context.authEpoch < 1
+    || !Number.isSafeInteger(context.authEpoch) || context.authEpoch < 0
     || !opaque(context.connectionId) || !Number.isSafeInteger(context.revision) || context.revision < 1)
     fail('gmail_session_required');
   return digest(JSON.stringify([context.accountId, context.sessionBinding, context.authEpoch, context.connectionId, context.revision]));

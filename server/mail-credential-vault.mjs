@@ -8,7 +8,7 @@ export class MailCredentialError extends Error {
 const positive = n => Number.isSafeInteger(n) && n > 0;
 const id = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 function validateBinding(value) {
-  if (!value || !id(value.accountId) || !id(value.connectionId) || !positive(value.authEpoch)
+  if (!value || !id(value.accountId) || !id(value.connectionId) || !Number.isSafeInteger(value.authEpoch) || value.authEpoch < 0
     || !positive(value.connectionRevision) || value.provider !== 'gmail'
     || typeof value.mailbox !== 'string' || value.mailbox.length > 254
     || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.mailbox) || value.mailbox !== value.mailbox.toLowerCase())
@@ -52,6 +52,11 @@ export class MailCredentialVault {
       .get(binding.accountId, binding.connectionId);
   }
   #aad(binding, version) { return Buffer.from(JSON.stringify(['project-room-mail-v1', binding, version])); }
+  // Metadata only, including tombstones. Host must authorize the account first.
+  status(binding) {
+    const row = this.#row(binding);
+    return row ? { version: row.version, state: row.state } : { version: 0, state: 'missing' };
+  }
   #version(value) { if (!Number.isSafeInteger(value) || value < 0 || value >= Number.MAX_SAFE_INTEGER) fail('mail_credential_version_invalid'); }
 
   put({ binding, credentials, expectedVersion }) {
