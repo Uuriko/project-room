@@ -267,7 +267,12 @@ inboxUI = installInbox({ account: accountClient, room: client, getRoom: () => st
   catch { if (isCurrent()) notice("Shared. Refresh the room to view it.", true); }
 } });
 let accountCheckFlight = null, roomListVersion = 0, roomListCursor = null;
+let pendingRoomCreation = null, roomCreationBusy = false;
 function clearPrivateWorkspace(options) {
+  pendingRoomCreation = null; roomCreationBusy = false;
+  $("#create-room-form").reset(); $("#create-room-name").disabled = false;
+  $("#create-room-form button").disabled = false;
+  $("#create-room-status").textContent = '';
   inboxUI?.reset(options); roomListVersion++;
   $("#account-rooms-list").replaceChildren(); $("#account-rooms-status").textContent = "";
   $("#account-status").textContent = ""; $("#account-status").hidden = true;
@@ -360,6 +365,35 @@ async function openAccountRoom(roomId) {
 }
 $("#choose-room").addEventListener("click", () => inboxUI.showRoomList());
 $("#account-rooms-more").addEventListener("click", () => loadAccountRooms(true));
+$("#create-room-form").addEventListener('submit', async event => {
+  event.preventDefault();
+  if (roomCreationBusy || !accountClient.session?.authenticated) return;
+  const owned = accountClient.session;
+  pendingRoomCreation ??= { requestId: crypto.randomUUID(), title: $("#create-room-name").value.trim() };
+  const pending = pendingRoomCreation;
+  roomCreationBusy = true;
+  $("#create-room-name").disabled = true; $("#create-room-form button").disabled = true;
+  $("#create-room-status").textContent = 'Creating…';
+  try {
+    const result = await accountClient.createRoom(pending);
+    if (accountClient.session !== owned || pendingRoomCreation !== pending || !result) return;
+    pendingRoomCreation = null;
+    $("#create-room-form").reset();
+    $("#create-room-status").textContent = 'Created. Only you have access until you invite someone.';
+    await loadAccountRooms();
+    await openAccountRoom(result.roomId);
+  } catch (error) {
+    if (accountClient.session !== owned || pendingRoomCreation !== pending) return;
+    if (Number.isSafeInteger(error.status) && error.status < 500) pendingRoomCreation = null;
+    $("#create-room-status").textContent = pendingRoomCreation ? 'Not confirmed. Try again to check the same room.' : error.message;
+  } finally {
+    if (accountClient.session === owned) {
+      roomCreationBusy = false;
+      $("#create-room-name").disabled = Boolean(pendingRoomCreation);
+      $("#create-room-form button").disabled = false;
+    }
+  }
+});
 window.addEventListener("focus", () => confirmAccount());
 document.addEventListener("visibilitychange", () => { if (!document.hidden) confirmAccount(); });
 setInterval(() => { if (!document.hidden) confirmAccount(); }, 5000);
@@ -534,7 +568,7 @@ function renderRoomGuide() {
   const steps = [
     state.room.id === 'welcome' ? 'Welcome is shared. Everyone here can read what you post.' : 'Messages are visible to everyone in this room.',
     'Write below. Type @ to address a person or agent.',
-    'Open People to see who’s here. Room admins manage invitations and agent access.'
+    session.authMode === 'account' ? 'Choose Rooms → New room for your own space. Use Invite and People there to add people and agents.' : 'Open People to see who’s here. Room admins manage invitations and agent access.'
   ];
   $("#room-guide-copy").textContent = steps[roomGuideStep];
   $("#room-guide-next").textContent = roomGuideStep === steps.length - 1 ? 'Got it' : 'Next';

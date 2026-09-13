@@ -63,6 +63,12 @@
       <p id="account-status" class="form-hint" role="status" hidden></p>
       <section id="account-rooms-panel" class="auth-panel panel" aria-labelledby="account-rooms-title" hidden>
         <h1 id="account-rooms-title">Rooms</h1>
+        <form id="create-room-form">
+          <label class="sr-only" for="create-room-name">New room name</label>
+          <input id="create-room-name" maxlength="80" required placeholder="Room name" autocomplete="off">
+          <button class="button primary" type="submit">New room</button>
+          <p id="create-room-status" class="form-hint" role="status"></p>
+        </form>
         <p id="account-rooms-status" role="status"></p>
         <div id="account-rooms-list"></div>
         <button id="account-rooms-more" class="text-button" type="button" hidden>More</button>

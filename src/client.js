@@ -136,6 +136,13 @@ export class AccountClient {
       throw error;
     }
   }
+  async createRoom(request) {
+    const session = this.currentSession('creating a room', { authenticated: true }), generation = this.generation;
+    const result = await this.request('/api/account-rooms', { method: 'POST', session, data: request });
+    if (!this.owns(generation, session)) return null;
+    if (!validId(result?.roomId) || typeof result.duplicate !== 'boolean') throw new Error('Room creation could not be confirmed.');
+    return result;
+  }
   previewInvitation(invitationToken) {
     // Preview deliberately sends neither the current account cookie nor its CSRF/binding.
     return this.request("/api/invitations/preview", { method: "POST", credentials: "omit", data: { invitationToken } });

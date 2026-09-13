@@ -17,6 +17,7 @@ import { openJoinContract, publicMcpCard } from "./open-contract.mjs";
 import { handlePublicMcpMessage, MCP_CORS, MCP_VERSION, mcpOriginAllowed } from "../client/mcp-public.mjs";
 import { createClerkVerifier } from './clerk-verifier.mjs';
 import { loginWithProvider } from './provider-onboarding.mjs';
+import { createAccountRoom } from './account-room-create.mjs';
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -367,6 +368,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const token = cookie(req, accountCookieName), binding = accountBinding(req);
         if (url.searchParams.getAll("after").length > 1) reject(422, "invalid_room", "Invalid room continuation");
         return json(res, 200, store.accountRooms(token, binding, { after: url.searchParams.get("after") }));
+      }
+      if (url.pathname === '/api/account-rooms' && req.method === 'POST') {
+        checkOrigin(req, true);
+        if (req.headers.authorization) reject(403, 'account_session_required', 'Use your account session.');
+        const token = cookie(req, accountCookieName), binding = accountBinding(req);
+        const auth = store.authenticateAccountSession(token, null, binding);
+        protectWrite(req, auth, false);
+        rate(`create-room:${auth.account.id}`, 10);
+        const data = await body(req);
+        if (!exact(data, ['requestId', 'title'])) reject(422, 'invalid_room_creation', 'Choose a room name.');
+        return json(res, 201, createAccountRoom(store, token, binding, data));
       }
       if (url.pathname === '/api/provider-session' && providerVerifier) {
         if (req.method !== 'POST') reject(405, 'method_not_allowed', 'Method not allowed');

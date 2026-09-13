@@ -1,7 +1,8 @@
 # Production preparation — not a launch receipt
 
 John explicitly requested publication and a complete usable production experience.
-No deployment, live migration, DNS change or paid-plan change occurred in this pass.
+No application deployment, live migration or paid-plan change occurred. Production
+authentication DNS was configured and verified in the subsequent launch pass below.
 
 ## Verified
 
@@ -27,17 +28,25 @@ No deployment, live migration, DNS change or paid-plan change occurred in this p
 
 1. Browser provider login and refresh wired to the verified exchange. Existing
    endpoint is optional and not configured in Worker or server entrypoints.
-2. Production Clerk environment, domain/DNS and email/Google configuration.
+2. Production Clerk environment and authentication DNS are now verified; real
+   email delivery and custom Google OAuth configuration remain to be tested.
    Proposed canonical app host: room.trydemigod.com, isolated from marketing pages;
    both requested domain entry pages should lead there. Neither room subdomain
-   returned DNS records in the read-only check. No DNS records were changed.
-3. Production creation was attempted in the existing Clerk dashboard for that
-   host. No success was verified: environment picker still showed development
-   and Create production instance afterward. Reconcile before retrying. No secret
-   keys were revealed or copied, and no paid upgrade was selected.
+   returned application DNS records in the earlier read-only check.
+3. Production instance ins_3JFb4xTLkAurvyARPwtxOd004Us is now confirmed in the
+   existing Clerk application. The five one-time Domain Connect CNAMEs for clerk,
+   accounts, clkmail, clk._domainkey and clk2._domainkey were authorized and checked
+   against authoritative DNS. Clerk reports all verified; certificates still
+   show Issuing at the last dashboard check. Issuer: https://clerk.trydemigod.com.
+   This does not publish room.trydemigod.com. No secret keys were revealed or
+   copied, and no paid upgrade was selected.
 4. Verified operator identity and moderation recovery; no first-signup or email-only
    superadmin bypass. Never publish an owner key or disable authorization to launch.
-5. Self-service room creation and per-human scoped agent sponsorship. Current
+5. Self-service private room creation now passes 1293 full Node tests and two
+   desktop/mobile browser checks, including a lost-response retry creating only
+   one room. New rooms bind ownership to the authenticated durable account,
+   have no other members, and enforce quotas and exact retry semantics.
+   Per-human scoped agent sponsorship remains required. Current
    agent connection issuance remains owner-only. Contribute work is the UI default.
 6. Request-bound emoji action controls as approved by John. Proposal now explicitly
    permits emoji-only approval within existing authority; it is not implemented.
