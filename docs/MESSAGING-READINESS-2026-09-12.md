@@ -2,6 +2,14 @@
 
 ## Latest verified acceptance
 
+- Startup/runtime checkpoint `07c7d80` plus the new webhook failure tests passed
+  **1479/1479 Node tests**, zero skipped. No runtime code changed during that run.
+- Five webhook checks now explicitly include a failure after journal writes:
+  transaction rollback leaves no private source, HTTP returns non-success, and
+  retry imports once. An incomplete HTTP body receives 408 after the five-second
+  deadline without importing or returning success TwiML. These are disposable
+  fault tests, not evidence of production traffic or provider retry guarantees.
+
 - `627b4db`: full Node suite **1474/1474**, zero skipped, after UI integration.
 - `npm run test:messaging`: **22/22** checks pass, including SMS and WhatsApp
   signed HTTP → encrypted connection registry → private Inbox → browser disconnect

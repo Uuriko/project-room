@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { rmSync } from 'node:fs';
+import { connect } from 'node:net';
 import twilio from 'twilio';
 import { createAcceptanceFixture } from '../scripts/acceptance-fixture.mjs';
 import { TwilioConnectionRegistry } from '../server/twilio-connection-registry.mjs';
@@ -46,4 +47,29 @@ test('HTTP rate limit is bounded by configured route, not spoofed forwarding hea
   assert.equal((await send()).status,200);
   const response=await send(p,{headers:{'x-forwarded-for':'other'}});
   assert.equal(response.status,429);assert.equal(response.headers.get('retry-after'),'60');
+});
+
+test('failure after journal work rolls back before HTTP acknowledgement; retry imports once',async t=>{
+  const {f,slot,session,send}=await fixture(t),original=f.store.inbox.importMessage;
+  f.store.inbox.importMessage=function(...args){original.apply(this,args);throw new Error('PRIVATE_STORAGE_ERROR');};
+  const failed=await send();assert.equal(failed.status,503);assert.equal(await failed.text(),'Message not confirmed.');
+  assert.equal(f.store.inbox.list(slot.token,session.sessionBinding).sources.length,0);
+  assert.equal(f.store.inbox.verify().versions,0);
+  f.store.inbox.importMessage=original;
+  assert.equal((await send()).status,200);assert.equal((await send()).status,200);
+  assert.equal(f.store.inbox.verify().versions,1);
+});
+
+test('partial body expires without acknowledgement or private import', {timeout:12000}, async t=>{
+  const {url,f,slot,session}=await fixture(t),parsed=new URL(url);
+  const socket=connect({host:parsed.hostname,port:Number(parsed.port)});t.after(()=>socket.destroy());
+  const response=await new Promise((resolve,reject)=>{
+    let text='';const deadline=setTimeout(()=>reject(new Error('body deadline did not respond')),8000);
+    socket.once('error',error=>{clearTimeout(deadline);reject(error);});
+    socket.on('data',chunk=>{text+=chunk.toString();if(text.includes('\r\n\r\n')){clearTimeout(deadline);resolve(text);}});
+    socket.once('connect',()=>socket.write(`POST ${parsed.pathname} HTTP/1.1\r\nHost: ${parsed.host}\r\nContent-Type: application/x-www-form-urlencoded\r\nX-Twilio-Signature: incomplete-fixture\r\nContent-Length: 100\r\n\r\nBody=partial`));
+  });
+  assert.match(response,/^HTTP\/1\.1 408 /);
+  assert.doesNotMatch(response,/<Response>/);
+  assert.equal(f.store.inbox.list(slot.token,session.sessionBinding).sources.length,0);
 });
