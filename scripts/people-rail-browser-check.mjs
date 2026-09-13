@@ -1,4 +1,5 @@
 // People-rail: presence dots, one-line status, loud @agent handles, Done chips.
+// Also checks tip #11 Done-chip spring is instant under prefers-reduced-motion.
 // Real browser + local HTTP service; identities and keys are disposable fixtures.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -86,6 +87,17 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   assert.equal(await chip.getAttribute("data-done-work"), "work-review");
   assert.match(await chip.getAttribute("title"), /consistency corrections/);
   assert.equal(await instinct.locator(".done-chip").count(), 0);
+  // Context is reducedMotion: "reduce" — chip must be instant, not mid-spring.
+  const reduced = await chip.evaluate(el => {
+    const style = getComputedStyle(el);
+    return { animationName: style.animationName, opacity: style.opacity, transform: style.transform };
+  });
+  assert.equal(reduced.animationName, "none");
+  assert.equal(reduced.opacity, "1");
+  assert.equal(reduced.transform, "none");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  assert.equal(await chip.evaluate(el => getComputedStyle(el).animationName), "done-chip-pop");
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await ownerRow.click();
   assert.match(await page.locator("#message-input").inputValue(), /@Room owner/);
   mkdirSync("test-results", { recursive: true });
