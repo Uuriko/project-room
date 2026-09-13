@@ -284,7 +284,7 @@ export function searchMessages(state, query, limit = 50, { viewer = null, mentio
   const parsed = parseSearchQuery(query);
   const term = parsed.term.toLocaleLowerCase();
   const only = Boolean(mentionsOnly || parsed.mentionsOnly);
-  let pool = state.messages || [];
+  let pool = (state.messages || []).filter(message => !message.deletedAt);
   if (only) {
     if (!viewer?.id) return { messages: [], total: 0, mentionsOnly: true };
     pool = pool.filter(message => messageAddressesMember(message, viewer));
