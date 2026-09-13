@@ -1224,7 +1224,7 @@ export class RoomStore {
       const room = this.room(roomId);
       return {
         contractVersion: 1, roomId, evaluatedThrough: room.sequence, viewerId: auth.member.id,
-        sessions: listWorkItemSessions(room.state.workItems, status)
+        sessions: listWorkItemSessions(room.state.workItems, status, { members: room.state.members, nowMs: this.now() })
       };
     });
   }
