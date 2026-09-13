@@ -16,8 +16,9 @@ const v14Assets = [...v13Assets, "src/help-offers.js"];
 const inboxAssets = [...v14Assets, "src/inbox-client.js", "src/inbox-ui.js"];
 const v30Assets = [...inboxAssets, "src/inbox-send-ui.js", "src/room-roster.js", "src/work-item-session.js"];
 const v31Assets = [...v30Assets, "src/request-run-policy.js"];
-export const publicAssets = [...v31Assets, "src/automation-policy.js"];
-const assetsFor = (schema, inbox, sendUI = false) => schema >= 32 ? publicAssets : schema === 31 ? v31Assets : schema === 8 ? v8Assets : schema <= 10 ? v9Assets : schema === 11 ? v11Assets : schema === 12 ? v12Assets : schema === 13 ? v13Assets : inbox && schema >= 15 ? sendUI ? v30Assets : inboxAssets : v14Assets;
+const v32Assets = [...v31Assets, "src/automation-policy.js"];
+export const publicAssets = [...v32Assets,'src/messaging-connections-client.js','src/messaging-connections-ui.js'];
+const assetsFor = (schema, inbox, sendUI = false) => schema >= 32 ? v32Assets : schema === 31 ? v31Assets : schema === 8 ? v8Assets : schema <= 10 ? v9Assets : schema === 11 ? v11Assets : schema === 12 ? v12Assets : schema === 13 ? v13Assets : inbox && schema >= 15 ? sendUI ? v30Assets : inboxAssets : v14Assets;
 const required = [...v8Assets, "server.mjs", "package.json", "package-lock.json",
   ...["backup", "bootstrap", "claim-scopes", "deployment", "http", "invitation-evidence", "invitation-journal", "reminders",
     "return-brief", "return-selectors", "share-links", "store", "work-context", "writer-fence"].map(name => `server/${name}.mjs`),
@@ -45,6 +46,7 @@ optional.push("server/graph-reply-journal.mjs");
 optional.push("server/graph-reply-update-review.mjs");
 optional.push("src/inbox-client.js", "src/inbox-ui.js");
 optional.push("src/inbox-send-ui.js");
+optional.push('src/messaging-connections-client.js','src/messaging-connections-ui.js');
 optional.push("src/room-roster.js");
 optional.push("deploy/agent-discovery.mjs", "deploy/room-entry.mjs", "server/guest-agent-links.mjs");
 optional.push("server/agent-identities.mjs");
@@ -63,7 +65,7 @@ optional.push("server/provider-config.mjs");
 const allowed = new Set([...required, ...optional]);
 for (const path of ['src/gmail-callback.js', ...['gmail-runtime', 'gmail-connections', 'gmail-oauth', 'gmail-mail-reader', 'gmail-email', 'mail-credential-vault'].map(name => `server/${name}.mjs`)]) allowed.add(path);
 for (const name of ['telegram-runtime','telegram-connection-registry','telegram-connections','telegram-receiver','telegram-inbox-import','telegram-receive-queue','telegram-receive-tick','telegram-bot-reader','twilio-message-reader','twilio-inbox-import','twilio-connection-registry','twilio-webhook','twilio-connections','slack-event-reader']) allowed.add(`server/${name}.mjs`);
-const gmailAssets = (assets, files) => files.has('src/gmail-callback.js') ? [...assets, 'src/gmail-callback.js'] : assets;
+const gmailAssets = (assets, files) => [...assets,...['src/gmail-callback.js','src/messaging-connections-client.js','src/messaging-connections-ui.js'].filter(path=>files.has(path))];
 function externalDependencies(files) {
   const pkg = JSON.parse(files.get('package.json'));
   const entries = Object.entries(pkg.dependencies ?? {});

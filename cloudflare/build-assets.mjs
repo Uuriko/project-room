@@ -4,6 +4,8 @@ import { resolve } from 'node:path';
 export const assetPaths = ['index.html', ...['app.js', 'client.js', 'events.js', 'conversation.js', 'workflow.js',
   'share-links.js', 'return-brief.js', 'work-selectors.js', 'work-status.js', 'work-packet.js', 'portable-work.js', 'reminders.js', 'reminder-time.js', 'styles.css', 'agent-connections.js', 'room-charter.js', 'room-instructions.js', 'reply-requests.js', 'work-help.js', 'help-offers.js', 'inbox-client.js', 'inbox-ui.js', 'inbox-send-ui.js', 'room-roster.js', 'work-item-session.js', 'request-run-policy.js', 'automation-policy.js'].map(file => 'src/' + file)];
 
+assetPaths.push('src/messaging-connections-client.js','src/messaging-connections-ui.js');
+
 // Fail closed on unexpected output instead of uploading or deleting unknown files.
 async function checkOutput(directory, prefix = '') {
   const info = await lstat(resolve(fileURLToPath(directory))).catch(error => { if (error.code !== 'ENOENT') throw error; });

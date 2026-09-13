@@ -16,7 +16,11 @@ for (const provider of ['sms','whatsapp']) test(`${provider} signed text renders
   const p={AccountSid:c.accountSid,MessageSid:'SM'+'b'.repeat(32),From:prefix+'+14155550101',To:c.addresses[0],NumMedia:'0',Body:'Private signed message fixture'};
   importTwilioMessage({store:f.store,slot,session,withConnection:fn=>fn(c),request:{rawBody:new URLSearchParams(p).toString(),
     contentType:'application/x-www-form-urlencoded',signature:twilio.getExpectedTwilioSignature(c.authToken,c.webhookUrl,p)}});
-  const server=createRoomServer({store:f.store});await new Promise(r=>server.listen(0,'127.0.0.1',r));
+  let connectionState='active',connectionRevision=1;const disconnects=[];
+  const twilioConnections={list:()=>[{connectionId:'twilio-test',provider,state:connectionState,revision:connectionRevision}],
+    disconnect:(_session,connectionId,expectedRevision)=>{disconnects.push({connectionId,expectedRevision});connectionState='disconnected';connectionRevision++;
+      return {connectionId,state:connectionState,revision:connectionRevision};}};
+  const server=createRoomServer({store:f.store,twilioConnections});await new Promise(r=>server.listen(0,'127.0.0.1',r));
   const browser=await chromium.launch({headless:true});
   t.after(async()=>{await browser.close();server.closeStreams();server.closeAllConnections();await new Promise(r=>server.close(r));f.store.close();rmSync(f.directory,{recursive:true,force:true});});
   const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(7000);
@@ -28,4 +32,16 @@ for (const provider of ['sms','whatsapp']) test(`${provider} signed text renders
   assert.equal(await page.locator('#inbox-source-label').textContent(),`${provider==='sms'?'SMS':'WhatsApp'} · only you`);
   assert.equal(await page.locator('#inbox-ask').isVisible(),false);
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  const label=provider==='sms'?'SMS':'WhatsApp';
+  assert.equal(await page.getByRole('button',{name:`Disconnect ${label}`,exact:true}).count(),0);
+  await page.locator('#inbox-back').click();
+  await page.locator('#inbox-connections > summary').click();
+  await page.getByRole('button',{name:`Disconnect ${label}`,exact:true}).click();
+  await page.getByText('Disconnected here. Saved messages remain.',{exact:true}).waitFor();
+  assert.deepEqual(disconnects,[{connectionId:'twilio-test',expectedRevision:1}]);
+  assert.equal(await page.getByRole('button',{name:`Disconnect ${label}`,exact:true}).count(),0);
+  await page.locator('#inbox-list button').first().click();
+  assert.equal(await page.getByText('Private signed message fixture',{exact:true}).isVisible(),true);
+  page.on('dialog',d=>d.accept());await page.locator('#signout-button').click();
+  await page.waitForFunction(()=>document.querySelector('#inbox-messaging-list').childElementCount===0&&document.querySelector('#inbox-messaging-status').textContent==='');
 });

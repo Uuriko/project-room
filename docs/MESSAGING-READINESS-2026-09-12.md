@@ -134,6 +134,23 @@ configuration are still unfinished. HTTP controls plus cold packaging: 3/3 pass.
 
 ### Broader browser regression disposition
 
+Superseding checkpoint: **bbed875** passed **317/317 full scripted browser tests**
+and **1472/1472 Node tests**, zero skipped. This includes all earlier failure
+groups after the request retry-lock fix, signed-out service Refresh repair,
+narrow large-text wordmark repair, and visible sign-in/copy test updates.
+Grok independently verified the recovery and quiet-copy fixes.
+
+The following messaging-controls integration is newer than that full-suite
+checkpoint: compact SMS/WhatsApp status/disconnect now lives under Inbox →
+Connections. Unknown outcomes offer an explicit Refresh; late account responses
+and stale-owner buttons are ignored. Credentials and receiving addresses do not
+appear in these controls. Confirmed disconnect preserves already saved messages.
+Five isolated client/UI checks, two integrated mobile Inbox checks and the
+Telegram-controls/cold-packaging checks pass. Production startup still does not
+construct a Twilio service or configure a live webhook. No provider was enabled.
+
+Historical failure record (resolved at bbed875):
+
 The full scripted browser run completed with 300/317 passing, 17 failing. Several
 checks still assume the older expanded sign-in or old copy. A real composer bug
 was also confirmed: attachment rendering overwrote the read-only state of an

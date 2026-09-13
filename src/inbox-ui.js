@@ -1,6 +1,8 @@
 import { InboxClient, inboxTextVersion } from "./inbox-client.js";
 import { installInboxSend, installInboxReplyReview } from "./inbox-send-ui.js";
 import { validId } from "./events.js";
+import { messagingConnectionsClient } from './messaging-connections-client.js';
+import { installMessagingConnections } from './messaging-connections-ui.js';
 
 export function installInbox({ account, room, getRoom, onShared, onOpenWork, onAccountEnded = () => room.endAccess(), onRooms = () => {}, onNavigate = () => {} }) {
   const $ = selector => document.querySelector(selector);
@@ -27,6 +29,8 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       ? JSON.stringify([s.account.id, s.account.authEpoch, s.sessionRevision, s.sessionBinding]) : null;
   };
   const owns = () => owner !== null && owner === ownerKey();
+  const messagingUI=installMessagingConnections({list:$('#inbox-messaging-list'),status:$('#inbox-messaging-status'),
+    api:messagingConnectionsClient(api),ownerKey:()=>owns()?owner:null});
   const replyUI = installInboxReplyReview({ api, ownerKey: () => owns() ? owner : null });
   const sendUI = installInboxSend({ api, ownerKey: () => owns() ? owner : null, reviewChanges: async () => {
     const id = selected, d = drafts.get(id); if (!d || !owns()) return;
@@ -89,6 +93,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     }
   }
   function reset({ preservePending = false } = {}) {
+    messagingUI.reset();
     telegramTurn++; $('#inbox-telegram-list').replaceChildren(); text('#inbox-telegram-status','');
     inboxView = 'all'; $('#inbox-search').value = '';
     $('#inbox-views').querySelectorAll('button').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.inboxView === 'all')));
@@ -256,7 +261,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       }
     }
   }
-  $('#inbox-connections').addEventListener('toggle', () => { if ($('#inbox-connections').open && !connectionBusy) { loadConnections(); loadTelegram(); } });
+  $('#inbox-connections').addEventListener('toggle', () => { if ($('#inbox-connections').open && !connectionBusy) { loadConnections(); loadTelegram(); messagingUI.load(); } });
   $('#inbox-connect-empty').addEventListener('click', () => {
     $('#inbox-connections').open = true;
     $('#inbox-connections summary').focus();

@@ -27,6 +27,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/graph-reply-update-review.mjs');
   paths.add('src/inbox-client.js'); paths.add('src/inbox-ui.js');
   paths.add('src/inbox-send-ui.js');
+  paths.add('src/messaging-connections-client.js');paths.add('src/messaging-connections-ui.js');
   paths.add('src/room-roster.js');
   paths.add('deploy/agent-discovery.mjs');
   paths.add('deploy/room-entry.mjs');
