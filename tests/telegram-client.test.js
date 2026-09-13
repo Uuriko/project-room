@@ -13,6 +13,11 @@ test('Telegram receipts pin exact connection and revision',async()=>{
   assert.equal((await setup(async()=>reply(base)).client.telegram('sync',data)).imported,2);
   await assert.rejects(setup(async()=>reply({...base,state:'disconnected'})).client.telegram('disconnect',data),{code:'invalid_inbox_response'});
 });
+test('Telegram status rejects extra connection keys',async()=>{
+  const ok={contractVersion:1,viewer,enabled:true,connections:[{connectionId:'telegram-one',state:'active',revision:1}]};
+  assert.equal((await setup(async()=>reply(ok)).client.telegramStatus()).connections[0].revision,1);
+  await assert.rejects(setup(async()=>reply({...ok,connections:[{...ok.connections[0],token:'secret'}]})).client.telegramStatus(),{code:'invalid_inbox_response'});
+});
 test('Telegram status arriving after account replacement is discarded',async()=>{
   let finish;const f=setup(()=>new Promise(resolve=>{finish=resolve;}));
   const pending=f.client.telegramStatus();

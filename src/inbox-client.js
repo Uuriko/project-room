@@ -4,6 +4,8 @@ const id = value => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,
 const revision = value => Number.isSafeInteger(value) && value >= 0;
 const boundedText = (value, max) => typeof value === "string" && value.isWellFormed() && value.length <= max;
 const hash = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+const exact = (v, keys) => v && typeof v === "object" && !Array.isArray(v)
+  && Object.keys(v).length === keys.length && keys.every(k => Object.hasOwn(v, k));
 function validReplyReview(value, sourceId, view = "reply-review-v1") {
   if (value.view !== view || value.sourceId !== sourceId) return false;
   if (view !== "reply-review-v1" && (value.attempt === null ? value.comparison !== null
@@ -128,7 +130,8 @@ export class InboxClient {
     && v.connections.length <= 20 && v.connections.every(c => id(c.connectionId) && boundedText(c.mailbox, 320)
       && ['connected', 'disconnected', 'reconnect_required'].includes(c.state))); }
   telegramStatus() { return this.request('/connections/telegram', {}, v => typeof v.enabled === 'boolean' && Array.isArray(v.connections)
-    && v.connections.length <= 20 && v.connections.every(c => id(c.connectionId) && revision(c.revision)
+    && v.connections.length <= 20 && v.connections.every(c => exact(c, ['connectionId', 'revision', 'state'])
+      && id(c.connectionId) && revision(c.revision)
       && ['active','disconnected','missing','reauthorize'].includes(c.state))); }
   telegram(action,data) {
     if (!['sync','disconnect'].includes(action) || !id(data?.connectionId) || !revision(data.expectedRevision) || data.expectedRevision < 1)
