@@ -168,6 +168,26 @@ export class Inbox {
   ensurePrivateContextIndexes() {
     for (const sql of privateContextIndexes) this.db.exec(sql);
   }
+  dumpJournal() {
+    const tables = ['private_inbox_sources', 'private_inbox_versions', 'private_inbox_drafts', 'private_inbox_commands'];
+    const out = { format: 'project-room-private-inbox-v1', tables: {} };
+    for (const name of tables) out.tables[name] = this.db.prepare(`SELECT * FROM ${name}`).all();
+    return out;
+  }
+  restoreJournal(dump) {
+    if (dump?.format !== 'project-room-private-inbox-v1' || !dump.tables) throw new Error('Invalid private inbox dump');
+    const tables = ['private_inbox_sources', 'private_inbox_versions', 'private_inbox_drafts', 'private_inbox_commands'];
+    for (const name of tables) {
+      if (this.db.prepare(`SELECT count(*) n FROM ${name}`).get().n) throw new Error('Private inbox restore requires empty tables');
+    }
+    for (const name of tables) {
+      const rows = dump.tables[name] || [];
+      if (!rows.length) continue;
+      const cols = Object.keys(rows[0]);
+      const stmt = this.db.prepare(`INSERT INTO ${name}(${cols.join(',')}) VALUES(${cols.map(() => '?').join(',')})`);
+      for (const row of rows) stmt.run(...cols.map(c => row[c]));
+    }
+  }
   grantRow(grantId) {
     const match = typeof grantId === "string" && /^grant-([1-9][0-9]{0,15})-[a-f0-9]{64}$/.exec(grantId);
     if (!match || !Number.isSafeInteger(Number(match[1]))) fail(404, "inbox_grant_not_found", "Private context unavailable.");

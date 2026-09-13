@@ -6,10 +6,14 @@ import { deploymentConfig } from "./server/deployment.mjs";
 import { createServer } from "node:http";
 import { maintenanceEnabled, maintenanceReply } from "./server/maintenance.mjs";
 import { providerConfig } from './server/provider-config.mjs';
+import { assertProductionReady } from './server/production-gates.mjs';
+import { openJoinContract } from './server/open-contract.mjs';
 
 const { host, port, origin, filename, production } = deploymentConfig();
 const paused = maintenanceEnabled(process.env.ROOM_MAINTENANCE);
-const providerAuth = paused ? null : providerConfig(process.env, origin);
+const productionGates = paused ? { production: false, providerAuth: null, operatorAccountId: null }
+  : assertProductionReady(process.env, origin, { ship: openJoinContract().ship });
+const providerAuth = paused ? null : (productionGates.providerAuth || providerConfig(process.env, origin));
 process.umask(0o077);
 let havePilotDb = false;
 try { havePilotDb = statSync(filename).isFile(); }
@@ -47,7 +51,7 @@ const server = paused ? createServer((req, res) => {
     const reply = maintenanceReply(url.pathname);
     res.writeHead(reply.status, reply.headers); res.end(req.method === "HEAD" ? undefined : reply.body);
   } catch { res.writeHead(400, { "Cache-Control": "no-store" }); res.end(); }
-}) : createRoomServer({ store, origin, trustedLocalProxy: production, providerAuth, gmailConnections: gmailRuntime?.connections, telegramConnections: telegramRuntime?.connections, twilioConnections: twilioRuntime?.connections });
+}) : createRoomServer({ store, origin, trustedLocalProxy: production, providerAuth, gmailConnections: gmailRuntime?.connections, telegramConnections: telegramRuntime?.connections, twilioConnections: twilioRuntime?.connections, operatorAccountId: productionGates.operatorAccountId });
 let closing = false;
 function close(exitCode=0) {
   if (closing) return;

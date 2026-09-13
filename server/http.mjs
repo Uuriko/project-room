@@ -64,6 +64,7 @@ const rateHash = value => createHash("sha256").update(String(value)).digest("hex
 export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = 1000, trustedLocalProxy = false,
   loadAsset = path => readFile(new URL(path, assetRoot)), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
   resolveRequestSignal = () => null, syntheticInboxTransport = null, cookieNamespace = "", providerAuth = null, gmailConnections = null, telegramConnections = null, twilioConnections = null,
+  operatorAccountId = null,
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot" }) {
   if (trustedLocalProxy && !origin?.startsWith("https://")) throw new Error("The deployment proxy requires a fixed HTTPS origin");
   if (typeof cookieNamespace !== "string" || !/^[A-Za-z0-9_-]{0,64}$/.test(cookieNamespace))
@@ -512,7 +513,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const oldRoomToken = cookie(req, roomCookieName);
         const result = await loginWithProvider(store, { token: data.token, verify: providerVerifier, issuer: providerAuth.issuer,
           slotToken, expectedRevision: data.expectedSessionRevision,
-          revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null });
+          revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null,
+          operatorAccountId });
         return json(res, 201, { ...accountView(result.session), starterRoomId: result.roomId });
       }
       if (url.pathname === "/api/account-session") {

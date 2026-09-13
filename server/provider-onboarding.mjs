@@ -33,6 +33,22 @@ function joinWelcome(store, accountId, memberId, provenance) {
   store.ensureHumanAccountBinding(STARTER_ROOM_ID, memberId, accountId, provenance);
 }
 
+function maybeGrantOperator(store, accountId, memberId, roomId, operatorAccountId) {
+  if (!operatorAccountId || accountId !== operatorAccountId || roomId !== STARTER_ROOM_ID) return;
+  const room = store.room(STARTER_ROOM_ID);
+  const member = room.state.members[memberId];
+  if (!member?.active || member.permissions.includes('manage_members')) return;
+  const incoming = event({
+    type: T.MEMBER_ACCESS_CHANGED, roomId: STARTER_ROOM_ID, actorId: HOST_ID,
+    at: new Date(store.now()).toISOString(),
+    data: { memberId, expectedMemberRevision: member.revision, active: true, permissions: ['manage_members'] }
+  });
+  const next = applyEvent(room.state, incoming);
+  const projection = JSON.stringify({ ...next, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} });
+  store.db.prepare('INSERT INTO events VALUES(?,?,?,?)').run(STARTER_ROOM_ID, room.sequence + 1, incoming.id, JSON.stringify(incoming));
+  store.db.prepare('UPDATE rooms SET sequence=?,projection=? WHERE id=?').run(room.sequence + 1, projection, STARTER_ROOM_ID);
+}
+
 const fail = (status, code) => { throw new ServiceError(status, code, 'Sign-in could not be completed'); };
 // Renewal keeps browser identity/generation stable without extending any shared
 // credential. No access key is accepted or returned.
@@ -68,7 +84,7 @@ export async function refreshWithProvider(store, { token, verify, issuer, slotTo
 // Called only after server-side provider verification, never with browser profile
 // fields. The verifier must authenticate signature, issuer, audience/authorized
 // party, expiry and session identity. Email is deliberately not an account key.
-export async function loginWithProvider(store, { token, verify, issuer, slotToken, expectedRevision, revokeRoomToken = null }) {
+export async function loginWithProvider(store, { token, verify, issuer, slotToken, expectedRevision, revokeRoomToken = null, operatorAccountId = null }) {
   if (typeof token !== 'string' || token.length > 16384 || !token || typeof verify !== 'function'
     || typeof issuer !== 'string' || issuer.length > 256 || new URL(issuer).protocol !== 'https:') fail(422, 'invalid_provider_login');
   const claims = await verify(token);
@@ -102,6 +118,7 @@ export async function loginWithProvider(store, { token, verify, issuer, slotToke
     if (binding?.account_id !== accountId) fail(403, 'provider_room_unavailable');
     const member = store.room(roomId).state.members[memberId];
     if (!member?.active) fail(403, 'provider_room_unavailable');
+    maybeGrantOperator(store, accountId, memberId, roomId, operatorAccountId);
     // Match the verified assertion lifetime. Refresh is a new verified exchange,
     // never an unverified extension of an external session.
     const credential = store.insertAccountCredential(accountId, Math.min(claims.exp * 1000, store.now() + 15 * 60000));

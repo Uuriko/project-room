@@ -8,6 +8,8 @@ import { bootstrapRoom } from './bootstrap.mjs';
 import { maintenanceEnabled, maintenanceResponse } from '../server/maintenance.mjs';
 import { isEdgeDoorUrl } from '../deploy/agent-discovery.mjs';
 import { providerConfig } from '../server/provider-config.mjs';
+import { assertProductionReady } from '../server/production-gates.mjs';
+import { openJoinContract } from '../server/open-contract.mjs';
 
 function roomOrigin(env) {
   const origin = new URL(env.ROOM_ORIGIN);
@@ -24,11 +26,12 @@ export class ProjectRoom {
     const origin = roomOrigin(env);
     this.paused = maintenanceEnabled(env.ROOM_MAINTENANCE);
     if (this.paused) return;
-    const providerAuth = providerConfig(env, env.ROOM_ORIGIN);
+    const productionGates = assertProductionReady(env, env.ROOM_ORIGIN, { ship: openJoinContract().ship });
+    const providerAuth = productionGates.providerAuth || providerConfig(env, env.ROOM_ORIGIN);
     this.store = new RoomStore(null, { database: new DurableDatabase(ctx.storage), storagePlatform: durableStorage });
     bootstrapRoom(this.store, env);
     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: 'cloudflare-staging',
-      providerAuth,
+      providerAuth, operatorAccountId: productionGates.operatorAccountId,
       resolveRequestSignal: () => this.requestSignals.getStore(),
       loadAsset: async path => {
         const response = await env.ASSETS.fetch(new Request(new URL('/' + path, env.ROOM_ORIGIN)));
