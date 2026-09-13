@@ -2,6 +2,28 @@
 
 ## Current state
 
+## Latest verified acceptance
+
+- `627b4db`: full Node suite **1474/1474**, zero skipped, after UI integration.
+- `npm run test:messaging`: **22/22** checks pass, including SMS and WhatsApp
+  signed HTTP → encrypted connection registry → private Inbox → browser disconnect
+  at 390px and 1280px. Those four full-path checks use real application layers
+  and locally signed provider fixtures, not live Twilio accounts or network calls.
+- Disconnect blocks the next signed delivery; a newly opened registry handle
+  sees the persisted tombstone. Already saved text remains readable, the room
+  sequence is unchanged, and private journal recovery verifies.
+- Last complete full browser checkpoint remains `bbed875` (**317/317**). Newer
+  controls have targeted browser acceptance, not a new complete browser run.
+
+Next highest-value work: secure opt-in host startup with existing private stores;
+document explicit background authority and webhook retry/media policy; live
+provider onboarding only after the separate credential/spending/deployment gates.
+Then replies with clear send confirmation and provider delivery receipts. Slack
+still has signed parsing only; personal Signal/WhatsApp mirroring is not available.
+No phone number, paid account, remote webhook or live messaging service was enabled.
+
+## Provider inventory
+
 Latest checkpoint: Telegram's 35 targeted checks pass, including desktop/mobile
 end-to-end controls and durable recovery. A live manual check returned imported 0,
 pageFull false, without acknowledging updates. Encrypted queue, registry,
