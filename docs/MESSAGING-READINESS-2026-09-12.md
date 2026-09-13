@@ -80,6 +80,23 @@ ownership and revocation, rate-limited webhook runtime, then provider onboarding
 Return provider success only after durable commit; failures must remain retryable.
 There is no SMS/WhatsApp edit support (provider revision is fixed at zero).
 
+### Durable SMS/WhatsApp permission checkpoint
+
+`TwilioConnectionRegistry` now provides encrypted credentials, account-epoch and
+revision checks, immutable receiving-address ownership, and persisted disconnect
+tombstones. One connection selects one SMS or WhatsApp address. Reconfiguration
+requires the current revision; old configuration cannot silently restore access.
+The host must authenticate the account and verify provider ownership before
+configuration. Address and account identifiers remain private database metadata;
+the auth token and callback URL are encrypted. Host file security is still required.
+
+`withGrant` holds the registry write lock through synchronous Inbox import, so
+another registry handle cannot disconnect midway through that import. Disconnect
+blocks subsequent deliveries, including duplicate signed retries. It clears local
+encrypted credentials, not provider-side access, and retains already saved messages.
+No HTTP webhook, provisioning UI, or live registry has been enabled. Next is the
+bounded webhook host and authenticated connection controls, not a claim of live SMS.
+
 Run `npm run test:messaging` for signed readers, private import and mobile display;
 run `npm run test:telegram` for the Telegram integration. All use disposable
 fixtures except the explicitly reported manual local check.

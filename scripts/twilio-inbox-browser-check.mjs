@@ -11,7 +11,7 @@ for (const provider of ['sms','whatsapp']) test(`${provider} signed text renders
   const f=createAcceptanceFixture(), account=f.store.accountForMember('commons','owner');
   const key=f.store.issueAccountAccessKey(account.id),slot=f.store.createAccountSessionSlot();
   const session=f.store.loginAccountSession(slot.token,key,0),prefix=provider==='sms'?'':'whatsapp:';
-  const c={active:true,accountId:account.id,connectionId:'twilio-test',accountSid:'AC'+'a'.repeat(32),
+  const c={active:true,accountId:account.id,connectionId:'twilio-test',authEpoch:0,revision:1,accountSid:'AC'+'a'.repeat(32),
     authToken:'test-secret',webhookUrl:'https://example.test/incoming',addresses:[prefix+'+14155550100']};
   const p={AccountSid:c.accountSid,MessageSid:'SM'+'b'.repeat(32),From:prefix+'+14155550101',To:c.addresses[0],NumMedia:'0',Body:'Private signed message fixture'};
   importTwilioMessage({store:f.store,slot,session,withConnection:fn=>fn(c),request:{rawBody:new URLSearchParams(p).toString(),

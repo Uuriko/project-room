@@ -12,7 +12,7 @@ for (const channel of ['sms', 'whatsapp']) test(`${channel}: signed private impo
   const account = f.store.accountForMember('commons', 'owner'), slot = f.store.createAccountSessionSlot();
   const session = f.store.loginAccountSession(slot.token, f.store.issueAccountAccessKey(account.id), 0);
   const prefix = channel === 'sms' ? '' : 'whatsapp:';
-  const connection = {active:true, accountId:account.id, connectionId:'twilio-one',
+  const connection = {active:true, accountId:account.id, connectionId:'twilio-one', authEpoch:0, revision:1,
     accountSid:'AC'+'a'.repeat(32), authToken:'fixture-secret', webhookUrl:'https://example.test/incoming', addresses:[prefix+'+14155550100']};
   const params = {AccountSid:connection.accountSid, MessageSid:'SM'+'b'.repeat(32),
     From:prefix+'+14155550101', To:connection.addresses[0], NumMedia:'0', Body:'Private incoming text'};
@@ -24,6 +24,8 @@ for (const channel of ['sms', 'whatsapp']) test(`${channel}: signed private impo
   assert.deepEqual(incoming(), {imported:0,duplicate:true});
   assert.throws(() => incoming({...params,Body:'Altered replay'}));
   assert.throws(() => incoming({...params,MessageSid:'SM'+'c'.repeat(32)}, {...connection,active:false}));
+  assert.throws(() => incoming(params, {...connection,authEpoch:1}), /unconfirmed/);
+  assert.throws(() => incoming(params, {...connection,revision:0}), /unconfirmed/);
   const rows = f.store.inbox.list(slot.token,session.sessionBinding).sources;
   assert.equal(rows.length,1);
   const source = f.store.inbox.read(slot.token,rows[0].id,session.sessionBinding).source;

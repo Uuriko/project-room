@@ -7,7 +7,9 @@ import { readTwilioMessage } from './twilio-message-reader.mjs';
 export function importTwilioMessage({ store, slot, session, withConnection, request }) {
   if (typeof withConnection !== 'function') throw new Error('twilio_connection_required');
   return withConnection(connection => store.transaction(() => {
-    store.authenticateAccountSession(slot.token, null, session.sessionBinding);
+    const auth = store.authenticateAccountSession(slot.token, null, session.sessionBinding);
+    if (connection.authEpoch !== auth.account.authEpoch || !Number.isSafeInteger(connection.revision) || connection.revision < 1)
+      throw new Error('twilio_connection_unconfirmed');
     const o = readTwilioMessage({ ...request, connection });
     const data = { adapter: 'message', provider: o.channel, accountId: o.accountId,
       connectionId: o.connectionId, providerAccountId: o.providerAccountId,
