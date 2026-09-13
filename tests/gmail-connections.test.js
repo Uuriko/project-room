@@ -58,7 +58,7 @@ test('OAuth to encrypted credentials to private Inbox, followed by disconnect', 
   const view = f.store.inbox.read(f.session.token, source.id, f.session.binding, { emailView: true, excerptView: true });
   assert.match(view.source.paragraphs[0], /Private live-shaped note/);
   assert.equal(JSON.stringify(f.store.room('commons').state.messages), before);
-  assert.equal(f.service.disconnect(f.session, pending.connectionId).providerRevoked, false);
+  assert.equal((await f.service.disconnect(f.session, pending.connectionId)).providerRevoked, true);
   assert.equal(f.service.list(f.session)[0].state, 'disconnected');
   await assert.rejects(f.service.sync(f.session, pending.connectionId), { code: 'gmail_reconnect_required' });
   assert.equal(f.db.prepare('SELECT ciphertext FROM mail_credentials_v1').get().ciphertext, null);
@@ -80,7 +80,7 @@ test('disconnect during fetch prevents importing the returned page', async t => 
 
 test('reconnect uses a new revision and never revives an old callback', async t => {
   const f = fixture(t); const first = f.begin(); await f.service.complete(f.session, f.callback(first));
-  f.service.disconnect(f.session, first.connectionId);
+  await f.service.disconnect(f.session, first.connectionId);
   const second = f.begin(); await f.service.complete(f.session, f.callback(second));
   assert.equal(f.store.email.connection(f.account.id, first.connectionId).profile.revision, 3);
   await assert.rejects(f.service.complete(f.session, f.callback(first)), { code: 'gmail_state_invalid' });
@@ -109,7 +109,16 @@ test('disconnect during token renewal cannot restore credentials or read mail', 
   f.hook(url => { if (url === 'https://oauth2.googleapis.com/token') f.service.disconnect(f.session, pending.connectionId); });
   const before = f.calls.length;
   await assert.rejects(f.service.sync(f.session, pending.connectionId), { code: 'gmail_read_authorization_required' });
-  assert.equal(f.calls.length, before + 1);
+  assert.equal(f.calls.length, before + 2); // refresh plus revoke; no mailbox request
   const row = f.db.prepare('SELECT state,ciphertext FROM mail_credentials_v1').get();
   assert.equal(row.state, 'disconnected'); assert.equal(row.ciphertext, null);
+});
+
+test('failed Google revocation still removes local credentials and reports uncertainty', async t => {
+  const f = fixture(t); const pending = f.begin(); await f.service.complete(f.session, f.callback(pending));
+  f.hook(url => { if (url.endsWith('/revoke')) throw new Error('private-provider-error'); });
+  const result = await f.service.disconnect(f.session, pending.connectionId);
+  assert.deepEqual(result, { connectionId: pending.connectionId, state: 'disconnected', providerRevoked: false });
+  assert.equal(f.db.prepare('SELECT ciphertext FROM mail_credentials_v1').get().ciphertext, null);
+  await assert.rejects(f.service.sync(f.session, pending.connectionId), { code: 'gmail_reconnect_required' });
 });

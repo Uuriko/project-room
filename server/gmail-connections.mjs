@@ -132,15 +132,18 @@ export class GmailConnections {
       reset, complete: page.complete, observations: page.observations.map(value => ({ ...value, expectedSourceRevision: heads.get(value.envelope.sourceId) ?? 0 })) }, session.binding);
     return { connectionId: id, imported: result.receipt.imports.length, complete: page.complete };
   }
-  disconnect(session, id) {
+  async disconnect(session, id) {
     const { auth, connection } = this.#current(session, id);
     const binding = vaultBinding(connection.profile, auth.account.authEpoch);
     const version = this.#vault.status(binding).version;
+    let refreshToken;
+    try { refreshToken = this.#vault.read(binding).credentials.refreshToken; } catch { /* Local disconnect still applies. */ }
     // Disable import authority first. Even if private credential removal fails,
     // subsequent reads fail closed. This does not claim Google-side revocation.
     this.#store.email.apply(session.token, { action: 'connection.disconnect', requestId: randomUUID(),
       connectionId: id, expectedRevision: connection.profile.revision }, session.binding);
     if (version) this.#vault.disconnect({ binding, expectedVersion: version });
-    return { connectionId: id, state: 'disconnected', providerRevoked: false };
+    const providerRevoked = refreshToken ? await this.#oauth.revoke(refreshToken) : false;
+    return { connectionId: id, state: 'disconnected', providerRevoked };
   }
 }

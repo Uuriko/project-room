@@ -140,3 +140,15 @@ test('refresh accepts rotation but rejects broadened or malformed grants', async
     await assert.rejects(bad.oauth.refresh({ refreshToken: 'old', scope: GMAIL_READ_SCOPE }));
   }
 });
+
+test('revocation uses a fixed POST body and never claims success after provider failure', async () => {
+  const f = fixture(() => new Response(null, { status: 200 }));
+  assert.equal(await f.oauth.revoke('refresh-secret'), true);
+  assert.equal(f.calls[0].url, 'https://oauth2.googleapis.com/revoke');
+  assert.equal(f.calls[0].init.method, 'POST');
+  assert.equal(f.calls[0].init.redirect, 'error');
+  assert.equal(new URLSearchParams(f.calls[0].init.body).get('token'), 'refresh-secret');
+  for (const respond of [() => new Response('secret', { status: 500 }), () => { throw new Error('secret'); }]) {
+    assert.equal(await fixture(respond).oauth.revoke('refresh-secret'), false);
+  }
+});

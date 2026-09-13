@@ -26,7 +26,7 @@ for (const mobile of [false, true]) test(`Gmail connection disclosure, sync and 
   await page.getByRole('button', { name: 'Sync pilot@example.com', exact: true }).click();
   await page.getByText('Inbox updated.', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Disconnect pilot@example.com', exact: true }).click();
-  await page.getByText('Disconnected here. Saved mail remains.', { exact: true }).waitFor();
+  await page.getByText('Disconnected here. Google revocation unconfirmed.', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Reconnect pilot@example.com', exact: true }).waitFor();
   assert.deepEqual(calls, ['sync', 'disconnect']); assert.deepEqual(errors, []);
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));

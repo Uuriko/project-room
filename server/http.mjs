@@ -349,7 +349,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             const result = action === 'start' ? gmailConnections.begin(session, data.mailbox)
               : action === 'complete' ? await gmailConnections.complete(session, data.callbackUrl)
               : action === 'sync' ? await gmailConnections.sync(session, data.connectionId)
-              : gmailConnections.disconnect(session, data.connectionId);
+              : await gmailConnections.disconnect(session, data.connectionId);
             return json(res, 200, { ...result, contractVersion: 1, viewer: inboxViewer });
           } catch (error) {
             if (error instanceof ServiceError) throw error;

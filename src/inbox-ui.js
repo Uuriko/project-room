@@ -168,7 +168,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       if (!owns() || capturedOwner !== owner) return;
       await loadConnections();
       if (!owns() || capturedOwner !== owner) return;
-      text('#inbox-connection-status', action === 'disconnect' ? 'Disconnected here. Saved mail remains.'
+      text('#inbox-connection-status', action === 'disconnect' ? result.providerRevoked ? 'Disconnected. Saved mail remains.' : 'Disconnected here. Google revocation unconfirmed.'
         : result.complete ? 'Inbox updated.' : 'Page synced. Sync again for more.');
     } catch (error) { if (owns() && capturedOwner === owner) text('#inbox-connection-status', errorText(error)); }
     finally {

@@ -58,7 +58,7 @@ revision; reads require a matching active import connection. Cross-database cras
 recovery still needs operational testing, not an atomicity claim.
 
 Still not live: real configuration, external key provisioning and private
-database file permissions, Google-side revocation, durable worker scheduling,
+database file permissions, durable revocation recovery, durable worker scheduling,
 runtime dependency packaging, and real-user consent/testing. The existing importer’s
 legacy `mode: fixture` marker is not an assertion of live connectivity; it must be
 reconciled before public UI claims. Token renewal is implemented with narrow-scope
@@ -72,7 +72,12 @@ are returned to these controls. Status checks include active account epoch and m
 vault binding, not the legacy fixture marker. Disabled hosts say connections are not
 enabled. Desktop/mobile Chromium tests cover sync/disconnect, no horizontal overflow,
 and sign-out clearing the address/list. Client checks reject foreign OAuth destinations
-and stale account responses. Provider revocation is not claimed by local Disconnect.
+and stale account responses. Disconnect now stops local import authority and removes
+local credentials first, then attempts Google's fixed revocation endpoint. Only a
+successful provider response sets `providerRevoked: true`; failures are explicitly
+unconfirmed in the UI. Tests cover network/provider failure without credential revival.
+There is no durable retry queue after process failure, nor a cross-process reconnect
+lock while revocation is in flight; these remain pilot/release risks. Saved mail is retained.
 
 Storage checkpoint: `server/mail-credential-vault.mjs` now provides AES-256-GCM
 credential encryption in a separate caller-supplied SQLite database. The key is supplied

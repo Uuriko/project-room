@@ -86,6 +86,19 @@ export class GmailOAuth {
     }
   }
 
+  async revoke(refreshToken) {
+    if (!opaque(refreshToken)) fail('gmail_token_invalid');
+    try {
+      const response = await this.#fetch('https://oauth2.googleapis.com/revoke', {
+        method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15000),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ token: refreshToken }).toString()
+      });
+      await response.body?.cancel();
+      return response.status === 200;
+    } catch { return false; }
+  }
+
   async refresh({ refreshToken, scope }) {
     if (!opaque(refreshToken) || scope !== GMAIL_READ_SCOPE) fail('gmail_token_invalid');
     const requestedAt = this.#now();

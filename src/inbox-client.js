@@ -131,7 +131,7 @@ export class InboxClient {
       if (action === 'start') {
         try { const url = new URL(v.authorizationUrl); return url.origin === 'https://accounts.google.com' && url.pathname === '/o/oauth2/v2/auth' && !url.username && !url.password; } catch { return false; }
       }
-      return action === 'sync' ? revision(v.imported) && typeof v.complete === 'boolean' : v.state === 'disconnected';
+      return action === 'sync' ? revision(v.imported) && typeof v.complete === 'boolean' : v.state === 'disconnected' && typeof v.providerRevoked === 'boolean';
     });
   }
   list() { return this.request("?view=email-excerpt-v1", {}, v => Array.isArray(v.sources) && v.sources.every(s => id(s.id) && revision(s.revision) && s.revision > 0 && typeof s.subject === "string")); }
