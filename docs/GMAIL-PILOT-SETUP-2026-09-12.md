@@ -49,6 +49,17 @@ erase backups, or wire the Inbox. Host lifecycle integration remains required.
    disconnect without room events. Live network synchronization and its HTTP/UI wiring
    remain incomplete. Large-message fallback and attachment retrieval remain pending.
    Never disguise Gmail as Graph, reuse fixture send transport, or publish mail into room events.
+
+   Reader checkpoint: `server/gmail-mail-reader.mjs` now fetches a bounded page
+   (up to 25 messages) from fixed Gmail endpoints, checks mailbox identity first,
+   rechecks account/epoch/connection authorization before and after each response,
+   and normalizes complete RAW messages. Failures discard the page rather than
+   silently advancing its cursor. Page tokens cannot become URLs or extra query
+   parameters. A mocked-provider-to-real-Inbox test verifies the import seam.
+   This is a page scanner, not a Gmail history/delta implementation or a consistent
+   mailbox snapshot. Host must persist cursor and source revision preconditions
+   atomically, serialize scans, refresh credentials, and recheck authority at commit.
+   No actual mailbox has been read and no HTTP route calls this reader yet.
 4. Present Google's actual read-only consent screen to John. No broad Gmail modify/delete
    permission is needed for the first reading pilot. Sending requires its own scoped flow,
    exact reviewed recipients/content, and durable outcome/retry handling.
