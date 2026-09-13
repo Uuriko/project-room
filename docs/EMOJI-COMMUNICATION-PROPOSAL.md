@@ -48,9 +48,25 @@ the sender's earlier status for the same target, with audit history, not flood c
 
 Test plain-label fallbacks, screen readers, narrow screens, keyboard navigation,
 Unicode variation, duplicate delivery, stale/offline state and revoked senders.
-Check that social reactions cannot trigger automation. Compare misunderstandings
+Check that ordinary social reactions cannot trigger automation. Compare misunderstandings
 and interaction count against short text. Measure actual token use with each
 selected model/tokenizer: small visual size does not guarantee fewer tokens.
 
 Codex owns implementation. Claude Tag can refine this proposal within its existing
 private product-lab lane; Grok independently reviews the eventual frozen change.
+
+## User refinement: symbols can authorize actions
+
+An emoji-only gesture CAN authorize an action when presented as an explicit,
+request-bound control: ▶️ approve and start, ⏸️ pause, ⏹️ stop, 🔁 run again,
+✅ accept the result. These are actions, distinct from ordinary social reactions.
+Both people and agents may use them within their authenticated existing authority.
+This supersedes any reading of the proposal that symbols must only communicate.
+
+Bind each gesture to a specific action, target, revision and authenticated actor;
+record its receipt and deduplicate retries. A rerun requires a fresh intentional
+action ID, not replaying the prior approval. Show scope before sensitive actions.
+Never infer execution authority from emoji embedded in quoted or untrusted chat.
+Accessible labels expose the full action even when the visible control is a symbol.
+Reuse existing command authorization and consent rather than create a parallel
+emoji permission system. These controls are not yet implemented.

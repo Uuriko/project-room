@@ -1,6 +1,7 @@
 // Disposable local test only. Never a deployment entrypoint.
 import assert from 'node:assert/strict';
 import { RoomStore } from '../server/store.mjs';
+import { STORE_SCHEMA_VERSION } from '../server/writer-fence.mjs';
 import { DurableDatabase, durableStorage } from './storage.mjs';
 
 // Frozen v7 write behavior from 884d086: an already-constructed adapter does not
@@ -62,7 +63,7 @@ export class ReminderUpgradeRoom {
       const tables = JSON.parse(this.env.TABLES);
       const rows = () => Object.fromEntries(tables.map(table => [table, sql.exec(`SELECT * FROM ${table}`).toArray()]));
       const before = rows(), store = fresh();
-      assert.equal(marker(), 27); assert.equal(permit(), 0);
+      assert.equal(marker(), STORE_SCHEMA_VERSION); assert.equal(permit(), 0);
       assert.deepEqual(rows(), before);
       assert.throws(legacyWrite, /unsupported database writer/);
       assert.equal(sql.exec("SELECT count(*) n FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v7_*'").one().n, 0);

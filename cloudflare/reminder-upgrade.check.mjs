@@ -1,18 +1,27 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
-import { createAcceptanceFixture } from '../scripts/acceptance-fixture.mjs';
+import { STORE_SCHEMA_VERSION } from '../server/writer-fence.mjs';
 import { durableFenceDefinitions } from './storage.mjs';
 
-test('real Workers v7→v30 migration fences a cached legacy adapter, rolls back failures and survives restart', { timeout: 90000 }, async () => {
+test(`real Workers v7→v${STORE_SCHEMA_VERSION} migration fences a cached legacy adapter, rolls back failures and survives restart`, { timeout: 90000 }, async t => {
+  // Use real immutable v7 source, not today's schema with selected tables removed.
+  const frozen = mkdtempSync(join(tmpdir(), 'room-frozen-v7-'));
+  t.after(() => rmSync(frozen, { recursive: true, force: true }));
+  const archive = execFileSync('git', ['archive', '884d086d37283ba6937eb6e5f6624e38f8768e87'],
+    { cwd: fileURLToPath(new URL('../', import.meta.url)), maxBuffer: 32 * 1024 * 1024 });
+  execFileSync('tar', ['-xf', '-', '-C', frozen], { input: archive });
+  const { createAcceptanceFixture } = await import(pathToFileURL(join(frozen, 'scripts/acceptance-fixture.mjs')));
   const fixture = createAcceptanceFixture(), db = fixture.store.db;
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 7);
   const persistence = mkdtempSync(join(tmpdir(), 'room-reminder-upgrade-'));
-  const schema = db.prepare("SELECT name,type,sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT GLOB 'writer_v*' AND name NOT GLOB 'private_reminder*' AND name NOT GLOB 'private_inbox*' AND name NOT GLOB 'private_email*' AND name NOT GLOB 'agent_connection*' ORDER BY rowid").all();
+  const schema = db.prepare("SELECT name,type,sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT GLOB 'writer_v*' ORDER BY rowid").all();
   const tables = schema.filter(row => row.type === 'table').map(row => row.name);
   const rows = tables.flatMap(table => db.prepare(`SELECT * FROM ${table}`).all().map(row => ({ table, columns: Object.keys(row), values: Object.values(row) })));
   const account = fixture.store.accountForMember('commons', 'owner').id;

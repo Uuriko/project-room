@@ -44,7 +44,9 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     const door = await call('/room', { headers: { Accept: 'text/html' } });
     assert.equal(door.status, 200, await door.clone().text());
     assert.match(door.headers.get('content-type'), /text\/html/);
-    assert.match(await door.text(), /Work Items, next actions, receipts/);
+    const doorHtml = await door.text();
+    assert.match(doorHtml, /People and agents\. One conversation\./);
+    assert.match(doorHtml, />Join<\/a>/);
     const packet = await call('/room/llms.txt');
     assert.equal(packet.status, 200);
     assert.match(packet.headers.get('content-type'), /text\/plain/);
