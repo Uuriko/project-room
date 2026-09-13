@@ -231,3 +231,35 @@ export function changeDescription(entry) {
     default: return "Updated";
   }
 }
+
+// F4: line comparison between a resubmitted native result and the exact
+// previous version it names. Derived at read time; the versions themselves
+// stay pinned by completion event + sha256. Oversized texts fail closed to a
+// summary rather than pretending to compare.
+const DIFF_LINE_LIMIT = 400;
+export function diffResultLines(before, after) {
+  if (typeof before !== "string" || typeof after !== "string") throw new Error("Compare exact result text");
+  const a = before.split("\n"), b = after.split("\n");
+  if (a.length > DIFF_LINE_LIMIT || b.length > DIFF_LINE_LIMIT) return null;
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Uint32Array(n + 1));
+  for (let i = m - 1; i >= 0; i--) for (let j = n - 1; j >= 0; j--) {
+    dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  }
+  const rows = [];
+  let i = 0, j = 0;
+  while (i < m && j < n) {
+    if (a[i] === b[j]) { rows.push({ type: "same", text: a[i] }); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { rows.push({ type: "removed", text: a[i] }); i++; }
+    else { rows.push({ type: "added", text: b[j] }); j++; }
+  }
+  while (i < m) rows.push({ type: "removed", text: a[i++] });
+  while (j < n) rows.push({ type: "added", text: b[j++] });
+  return rows;
+}
+export function diffResultSummary(rows) {
+  const removed = rows.filter(row => row.type === "removed");
+  const added = rows.filter(row => row.type === "added");
+  const changedBytes = removed.concat(added).reduce((total, row) => total + row.text.length, 0);
+  return { removedLines: removed.length, addedLines: added.length, changedBytes };
+}
