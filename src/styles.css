@@ -817,3 +817,4 @@ summary { overflow-wrap: anywhere; }
   .inbox-panel.reading .inbox-back { display: block; margin: 1rem 1.25rem 0; text-align: left; }
   .inbox-source-heading { flex-wrap: wrap; }
 }
+.message-tombstone { color: var(--muted); font-style: italic; }
