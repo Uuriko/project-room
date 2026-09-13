@@ -13,7 +13,9 @@ test('messaging status validates providers, identifiers, revisions and duplicate
   assert.equal((await setup(async()=>reply(good)).client.twilioStatus()).connections.length,1);
   for(const bad of [{...good,connections:[null]},{...good,connections:[row,row]}, {...good,connections:[{...row,provider:'unknown'}]},
     {...good,connections:[{...row,revision:-1}]},{...good,connections:[{...row,connectionId:'bad id'}]},
-    {...good,connections:[{...row,state:'connected'}]}])
+    {...good,connections:[{...row,state:'connected'}]},
+    {...good,connections:[{...row,authToken:'unexpected-secret'}]},
+    {...good,connections:[['one','sms',1,'active']]}])
     await assert.rejects(setup(async()=>reply(bad)).client.twilioStatus(),{code:'invalid_inbox_response'});
 });
 test('disconnect validates exact receipt and discards late account responses',async()=>{
@@ -24,4 +26,31 @@ test('disconnect validates exact receipt and discards late account responses',as
   let finish;const f=setup(()=>new Promise(r=>finish=r));const pending=f.client.twilioDisconnect(data);
   f.account.session={...session,account:{id:'other',authEpoch:0},sessionBinding:'b'.repeat(64)};finish(reply(good));
   await assert.rejects(pending,{code:'obsolete_inbox'});
+});
+
+test('disconnect pins intent across caller mutation and rejects extra request fields before transport',async()=>{
+  for(const data of [null,[],{connectionId:'one',expectedRevision:1,accountId:'other'},
+    {connectionId:'one',expectedRevision:0}]) {
+    let called=false;
+    const {client}=setup(async()=>{called=true;return reply({});});
+    assert.throws(()=>client.twilioDisconnect(data),/invalid_messaging_action/);
+    assert.equal(called,false);
+  }
+  let finish;
+  const data={connectionId:'one',expectedRevision:1};
+  const {client}=setup(()=>new Promise(resolve=>finish=resolve));
+  const pending=client.twilioDisconnect(data);
+  data.connectionId='other';data.expectedRevision=90;
+  finish(reply({connectionId:'one',revision:2,state:'disconnected'}));
+  assert.equal((await pending).connectionId,'one');
+
+  let captured,validate;
+  const delayed=messagingConnectionsClient({request(path,options,check){captured=options.data;validate=check;}});
+  const original={connectionId:'one',expectedRevision:1};
+  delayed.twilioDisconnect(original);
+  original.connectionId='other';original.expectedRevision=90;
+  assert.deepEqual(captured,{connectionId:'one',expectedRevision:1});
+  assert.equal(Object.isFrozen(captured),true);
+  assert.equal(validate({connectionId:'other',revision:91,state:'disconnected'}),false);
+  assert.equal(validate({connectionId:'one',revision:2,state:'disconnected'}),true);
 });
