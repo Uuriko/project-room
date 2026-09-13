@@ -23,6 +23,7 @@
     "playwright": "1.62.1"
   },
   "dependencies": {
-    "postal-mime": "3.0.0"
+    "postal-mime": "3.0.0",
+    "twilio": "6.1.1"
   }
 }

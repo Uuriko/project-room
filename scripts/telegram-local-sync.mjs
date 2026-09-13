@@ -38,8 +38,13 @@ export function importTelegramPage(store, slot, session, page) {
 }
 
 export async function syncLocalTelegram(directory) {
+  const parent = lstatSync(directory);
+  if (!parent.isDirectory() || parent.isSymbolicLink() || (parent.mode & 0o077)) throw new Error('Private directory required');
   const credential = privateJSON(join(directory, 'telegram-bot.json'));
-  if (credential.username !== 'ProjectRoomDemigodBot' || !/^[0-9]+:[A-Za-z0-9_-]{20,}$/.test(credential.token)) throw new Error('Invalid bot');
+  if (credential.username !== 'ProjectRoomDemigodBot' || !/^[0-9]+:[A-Za-z0-9_-]{20,}$/.test(credential.token)
+    || String(credential.botId) !== credential.token.split(':')[0]) throw new Error('Invalid bot');
+  const dbStat = lstatSync(join(directory, 'room.sqlite'));
+  if (!dbStat.isFile() || dbStat.isSymbolicLink()) throw new Error('Existing database required');
   const store = new RoomStore(join(directory, 'room.sqlite'));
   let slot, session;
   try {
@@ -65,9 +70,11 @@ export async function syncLocalTelegram(directory) {
       return { active: true, accountId: current.account.id, connectionId: `telegram-${credential.botId}`, authEpoch: current.account.authEpoch,
         revision: 1, token: credential.token, chatIds: [binding.chatId] }; };
     const page = await readTelegramBotPage({ authorize, offset: 0 });
+    const pageFull = page.observations.length + page.skipped.length === 25;
     // Do not retain the one-time linking challenge as an Inbox message.
     page.observations = page.observations.filter(o => o.text !== `/start ${credential.challenge}`);
-    return importTelegramPage(store, slot, session, page);
+    return { ...importTelegramPage(store, slot, session, page), mode: 'manual-first-page', pageFull,
+      ...(pageFull ? { warning: 'Queue page full. Durable cursor required to receive later messages.' } : {}) };
   } finally {
     if (session) store.logoutAccountSession(slot.token, session.sessionRevision);
     store.close();
