@@ -13,6 +13,7 @@ import { ShareLinks, shareLinkSchema } from "./share-links.mjs";
 import { conflictingClaim } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
 import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
+import { workItemChanges } from "../src/workflow.js";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, isRoomAccessToken } from "./guest-agent-links.mjs";
@@ -1174,6 +1175,23 @@ export class RoomStore {
       return { ...room, roomId, ...(offerContext ? { offerContextVersion: 1 } : {}), charter: charterContext(room.state.room), replyRequestContractVersion: REPLY_POLICY_VERSION, state: { ...room.state, eventLog: rows.reverse().map(r => JSON.parse(r.body)) }, cursor, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
   }
+
+  workItemHistory(token, roomId, workItemId, expectedSessionBinding = null, since = null) {
+    // F3: derived, read-time change list for one work item from its own revision
+    // events. Never a write; the event log stays the only record.
+    return this.readTransaction(() => {
+      this.authenticate(token, roomId, expectedSessionBinding);
+      const room = this.room(roomId);
+      const item = room.state.workItems[workItemId];
+      if (!item) fail(404, "work_not_found", "Choose an existing work item");
+      if (since !== null && (!Number.isSafeInteger(since) || since < 0 || since > item.revision)) fail(422, "invalid_history_basis", "Choose a revision this work item has reached");
+      const rows = this.db.prepare("SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.data.workItemId')=? ORDER BY sequence").all(roomId, workItemId);
+      const changes = workItemChanges(rows.map(row => JSON.parse(row.body)));
+      return { historyVersion: 1, workItemId, revision: item.revision,
+        changes: since === null ? changes : changes.filter(change => change.revision > since) };
+    });
+  }
+
   charter(token, roomId, { revision, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding), room = this.room(roomId);
