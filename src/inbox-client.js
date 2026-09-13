@@ -127,6 +127,16 @@ export class InboxClient {
   gmailStatus() { return this.request('/connections/gmail', {}, v => typeof v.enabled === 'boolean' && Array.isArray(v.connections)
     && v.connections.length <= 20 && v.connections.every(c => id(c.connectionId) && boundedText(c.mailbox, 320)
       && ['connected', 'disconnected', 'reconnect_required'].includes(c.state))); }
+  telegramStatus() { return this.request('/connections/telegram', {}, v => typeof v.enabled === 'boolean' && Array.isArray(v.connections)
+    && v.connections.length <= 20 && v.connections.every(c => id(c.connectionId) && revision(c.revision)
+      && ['active','disconnected','missing','reauthorize'].includes(c.state))); }
+  telegram(action,data) {
+    if (!['sync','disconnect'].includes(action) || !id(data?.connectionId) || !revision(data.expectedRevision) || data.expectedRevision < 1)
+      throw fail('invalid_telegram_action','Choose a connection action.');
+    return this.request('/connections/telegram/'+action,{method:'POST',data},v => v.connectionId === data.connectionId
+      && v.revision === data.expectedRevision + (action === 'disconnect' ? 1 : 0)
+      && (action === 'sync' ? revision(v.imported) : v.state === 'disconnected'));
+  }
   gmail(action, data) {
     if (!['start', 'sync', 'disconnect'].includes(action)) throw fail('invalid_gmail_action', 'Choose a connection action.');
     return this.request('/connections/gmail/' + action, { method: 'POST', data }, v => {

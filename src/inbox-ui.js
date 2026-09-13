@@ -89,6 +89,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     }
   }
   function reset({ preservePending = false } = {}) {
+    telegramTurn++; $('#inbox-telegram-list').replaceChildren(); text('#inbox-telegram-status','');
     inboxView = 'all'; $('#inbox-search').value = '';
     $('#inbox-views').querySelectorAll('button').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.inboxView === 'all')));
     connectionTurn++; connectionBusy = false;
@@ -163,6 +164,48 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       if (visible[next]) { event.preventDefault(); open(visible[next].id); }
     }
   });
+  let telegramTurn = 0;
+  async function loadTelegram() {
+    if (!owns()) return;
+    const turn=++telegramTurn,capturedOwner=owner;
+    $('#inbox-telegram-list').replaceChildren();
+    try {
+      const result=await api.telegramStatus();
+      if (!owns() || capturedOwner!==owner || turn!==telegramTurn) return;
+      text('#inbox-telegram-status','');
+      $('#inbox-telegram-list').replaceChildren(...result.connections.map(connection=>{
+        const row=document.createElement('div'),label=document.createElement('p');
+        label.textContent='Telegram'+(connection.state==='active'?'':connection.state==='disconnected'?' · Disconnected':' · Setup needed');row.append(label);
+        if(connection.state==='active') for(const action of ['sync','disconnect']) {
+          const button=document.createElement('button');button.type='button';button.className='text-button';
+          button.textContent=action==='sync'?'Sync':'Disconnect';button.setAttribute('aria-label',button.textContent+' Telegram');button.disabled=connectionBusy;
+          button.addEventListener('click',()=>telegramAction(action,connection));row.append(button);
+        }
+        return row;
+      }));
+    } catch {
+      if(owns()&&capturedOwner===owner&&turn===telegramTurn)text('#inbox-telegram-status','Telegram status unavailable.');
+    }
+  }
+  async function telegramAction(action,connection) {
+    if(!owns()||connectionBusy)return;
+    const capturedOwner=owner;connectionBusy=true;telegramTurn++;connectionTurn++;
+    $('#inbox-connections').querySelectorAll('button').forEach(b=>{b.disabled=true;});
+    text('#inbox-telegram-status','Working…');
+    try {
+      const result=await api.telegram(action,{connectionId:connection.connectionId,expectedRevision:connection.revision});
+      if(!owns()||capturedOwner!==owner)return;
+      if(action==='sync')await load();
+      if(!owns()||capturedOwner!==owner)return;
+      await loadTelegram();
+      if(!owns()||capturedOwner!==owner)return;
+      text('#inbox-telegram-status',action==='disconnect'?'Disconnected here. Saved messages remain.':`${result.imported} message${result.imported===1?'':'s'} synced.`);
+    } catch {
+      if(owns()&&capturedOwner===owner){await loadTelegram();if(owns()&&capturedOwner===owner)text('#inbox-telegram-status','Action unconfirmed. Refresh before trying again.');}
+    } finally {
+      if(owns()&&capturedOwner===owner){connectionBusy=false;$('#inbox-connections').querySelectorAll('button').forEach(b=>{b.disabled=false;});}
+    }
+  }
   async function loadConnections() {
     if (!owns()) return;
     const turn = ++connectionTurn, capturedOwner = owner;
@@ -213,7 +256,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       }
     }
   }
-  $('#inbox-connections').addEventListener('toggle', () => { if ($('#inbox-connections').open && !connectionBusy) loadConnections(); });
+  $('#inbox-connections').addEventListener('toggle', () => { if ($('#inbox-connections').open && !connectionBusy) { loadConnections(); loadTelegram(); } });
   $('#inbox-connect-empty').addEventListener('click', () => {
     $('#inbox-connections').open = true;
     $('#inbox-connections summary').focus();

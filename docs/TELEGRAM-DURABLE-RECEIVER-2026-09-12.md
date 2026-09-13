@@ -126,3 +126,20 @@ The main server entry point still does not configure this optional service. No
 live receiver activation, file bootstrap, scheduling or browser controls happened
 in this checkpoint. Next is the compact Inbox UI and secure host bootstrap with
 explicit queue/registry file ownership, followed by browser/runtime acceptance.
+
+## Compact Inbox controls
+
+Telegram status and Sync/Disconnect now render inside the existing collapsed
+Connections disclosure. Disconnected and setup-needed states expose no misleading
+active buttons. Unknown/unconfigured servers render no active Telegram controls.
+No credentials or connection identifiers are displayed in the row. Actions send
+the exact saved connection revision; response validation requires the same ID and
+the expected resulting revision. Sign-out clears rows/status and late responses
+from the previous account are discarded.
+
+Four desktop/mobile browser checks pass across Gmail and Telegram, plus two new
+Telegram client tests for exact action receipts and late account-switch responses.
+Nine existing Inbox client tests also passed earlier in this checkpoint. Browser
+checks use mocked connection services with the real HTTP/auth/UI layers; live
+Telegram status or automatic receiving is not implied. Secure server bootstrap
+and live activation remain separate, unfinished steps.
