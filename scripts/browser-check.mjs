@@ -209,11 +209,12 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const context = await browser.newContext({ viewport, reducedMotion: "reduce" });
     // CI load headroom: warm, this whole test completes in about 2 seconds, but on a
     // busy shared runner (40 sequential browser files, 2 vCPU) a single Playwright
-    // call can be starved past the 30s default timeout - observed failing twice on
-    // mobile at ~31s (d3713b1, 967b0ea). Not reproducible under local CPU
-    // saturation; the bump keeps individual waits below the 90s test budget rather
-    // than masking a real hang with a longer test timeout.
-    context.setDefaultTimeout(60000);
+    // call can be starved past the default timeout - observed failing twice on
+    // mobile at ~31s (d3713b1, 967b0ea), then three times at ~61s against the 60s
+    // bump (6b3d566 attempts 1-3, both viewport variants). Not reproducible under
+    // local CPU saturation; the bump keeps individual waits below the 90s test
+    // budget rather than masking a real hang with a longer test timeout.
+    context.setDefaultTimeout(75000);
     page = await context.newPage();
     const errors = [];
     page.on("pageerror", error => errors.push(error.message));
