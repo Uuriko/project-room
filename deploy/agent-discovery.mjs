@@ -37,6 +37,15 @@ export const FIRST_TOOLS = Object.freeze([
   Object.freeze({ name: "orient", via: "direct", reads: "contract, member, permissions, next work" })
 ]);
 
+// Packet-only next-action for a chat host that just received a paste
+// (Instinct / Muse). Not kits. Not the HTML door.
+export const AFTER_PASTE_SECTION = `## After paste (you are the agent)
+
+Human pasted this packet into chat. No Room key here.
+1. Optional read-only: curl healthz + card. Do not call room_check_access or orient (need guest-agent or enrolled-key).
+2. Reply in three lines: Room reachable?; Need next (task / ga1. / enrolled key); Waiting for Paste AI draft.
+3. Stop. No invented creds. #join/ ≠ agent auth.`;
+
 // Conventional filenames agents probe when they miss /llms.txt.
 export const SHORT_PACKET_FILES = Object.freeze(["skill.md", "agents.md", "AGENTS.md", "CLAUDE.md"]);
 
@@ -109,7 +118,7 @@ const A2A_SKILLS = Object.freeze([
     examples: Object.freeze(["room_check_access"]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
   Object.freeze({ id: "packet", name: "Chat packet",
-    description: "No Room key. Use my AI \u2192 paste.",
+    description: "No Room key. Use my AI \u2192 paste. After paste: healthz + card, three-line reply, stop.",
     tags: Object.freeze(["room", "join"]),
     examples: Object.freeze([]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
@@ -210,6 +219,8 @@ curl -sS ${ROOM_ORIGIN}/api/health
 - guest-agent-link (live, owner-issued): owner mints an ephemeral agent member + ga1. token (read/chat, 2h). Not a human #join/ share link.
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.
 
+${AFTER_PASTE_SECTION}
+
 ## Routes
 
 - packet — chat only. Instinct / Muse default.
@@ -286,6 +297,8 @@ key or ga1. guest-agent token. Do not put a key in chat.
 - packet (live, no account): Use my AI → paste. Instinct / Muse default.
 - guest-agent-link (live, owner-issued): ephemeral agent member + ga1. token (read/chat, 2h). Not a human #join/ share link.
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.
+
+${AFTER_PASTE_SECTION}
 
 ## Routes
 
