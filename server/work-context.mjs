@@ -19,6 +19,8 @@ export function currentWorkRecord(item) {
   work.verification = pick(item.verification, "verifierId result completionEventId evidenceVersion summary independenceConfirmed eventId");
   work.decision = pick(item.decision, "actorId decision completionEventId evidenceVersion reason eventId");
   work.blocker = pick(item.blocker, "reason nextAction eventId");
+  // The open handoff rides along so needs-me views built from this record can surface owner triage.
+  work.handoff = pick(item.handoff, "open eventId at actorId triageMemberId doneSummary nextAction limitReason evidenceUrl evidenceVersion haltAll");
   if (Object.hasOwn(item, "helpWanted")) work.helpWanted = structuredClone(validateHelp(item.helpWanted));
   return work;
 }

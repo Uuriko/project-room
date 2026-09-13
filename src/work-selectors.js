@@ -124,13 +124,15 @@ export function workInvolvingMe({ workItems, memberId }) {
   return Object.freeze(out);
 }
 
-export function needsAttention({ workItems, memberId, now = Date.now() }) {
+// `ownerId` is optional: it lets an open handoff recorded before the handoff carried
+// its own triage member still resolve to the Room owner.
+export function needsAttention({ workItems, memberId, now = Date.now(), ownerId = null }) {
   if (!workItems || typeof workItems !== "object" || Array.isArray(workItems)) throw new CursorError("cursor.work_items_required", "needsAttention requires the current work-item projection map");
   if (!memberId) throw new CursorError("cursor.member_required", "needsAttention requires a memberId");
   const out = [];
   for (const item of Object.values(workItems)) {
     if (!item || typeof item !== "object") continue;
-    const next = nextWorkStep(item, now);
+    const next = nextWorkStep(item, now, ownerId);
     if (next.needsAttention && next.memberId === memberId) out.push(Object.freeze({ workItemId: item.id, action: item.title ?? null, role: next.role, step: next.action }));
   }
   return Object.freeze(out);
@@ -146,7 +148,7 @@ export function contributionSteps(state, memberId, now = Date.now()) {
     request.status === "open" && request.recipientId === memberId && messages.has(request.id));
   const steps = requests.map(request => ({ key: `request:${request.id}`, kind: "request", id: request.id,
     title: messages.get(request.id).body, label: "Reply requested", button: "Open request", priority: 1, at: request.createdAt }));
-  for (const attention of needsAttention({ workItems: state.workItems, memberId, now })) {
+  for (const attention of needsAttention({ workItems: state.workItems, memberId, now, ownerId: state.room?.ownerId ?? null })) {
     const item = state.workItems[attention.workItemId], step = attention.step;
     const action = step === "revise" ? "resolve" : step;
     const permitted = workActions(item, member, now).some(([candidate]) => candidate === action);

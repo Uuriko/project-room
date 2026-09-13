@@ -315,16 +315,19 @@ function changeMemberAccess(state, incoming) {
 // target. Bounded length, no HTML — rendered as text.
 function updateMemberStatus(state, incoming) {
   requireFields(incoming.data, ["message"]);
+  requireMember(state, incoming.actorId);
   const targetId = incoming.data.memberId ?? incoming.actorId;
   const member = Object.hasOwn(state.members, targetId) && state.members[targetId];
   if (!member) throw new Error("Unknown member");
+  if (member.active === false) throw new Error("Member access revoked");
   if (incoming.actorId !== member.id && incoming.actorId !== state.room.ownerId) {
     throw new Error("Members may only set their own status message");
   }
   const message = String(incoming.data.message ?? "");
   if (message.length > 140) throw new Error("Status message must be 140 characters or fewer");
+  // A status line is presence, not authority: it must not move member.revision,
+  // which pins open help invitations/offers and concurrent member.access_changed.
   member.statusMessage = message;
-  member.revision += 1;
 }
 
 const NOTIFICATION_CHANNELS = ["mentions", "replies", "work_updates", "announcements"];
@@ -339,8 +342,9 @@ function setNotificationPreferences(state, incoming) {
     if (!NOTIFICATION_CHANNELS.includes(channel)) throw new Error(`Unknown notification channel: ${channel}`);
     if (!NOTIFICATION_LEVELS.includes(level)) throw new Error(`Unknown notification level: ${level}`);
   }
+  // Preferences are private delivery settings, not authority: only member.added
+  // and member.access_changed move member.revision.
   member.notificationPreferences = { ...(member.notificationPreferences ?? defaultNotificationPreferences()), ...prefs };
-  member.revision += 1;
 }
 
 function defaultNotificationPreferences() {
@@ -402,6 +406,8 @@ function editMessage(state, incoming) {
 function deleteMessage(state, incoming) {
   const { message } = findEditableMessage(state, incoming);
   message.body = null;
+  // Deletion hides every earlier version too; the tombstone keeps only who/when.
+  message.editHistory = [];
   message.deletedAt = incoming.at;
   message.deletedBy = incoming.actorId;
   message.revision = (message.revision ?? 0) + 1;
@@ -527,7 +533,9 @@ function advertiseCapabilities(state, incoming) {
     if (!clean.includes(trimmed)) clean.push(trimmed);
   }
   member.capabilities = clean;
-  commitMutation(member, incoming);
+  // Advertising capabilities is self-description, not an authority change, so it
+  // leaves member.revision alone (open help invitations/offers are pinned to it).
+  member.updatedAt = incoming.at;
 }
 
 function recordHandoff(state, incoming) {
@@ -550,6 +558,9 @@ function recordHandoff(state, incoming) {
   }
   item.handoff = {
     open: true, eventId: incoming.id, at: incoming.at, actorId: incoming.actorId,
+    // An open handoff is triage work addressed to the Room owner, so needs-me
+    // views and attention inboxes can surface it to a named member.
+    triageMemberId: state.room.ownerId,
     doneSummary: incoming.data.doneSummary,
     evidenceUrl: incoming.data.evidenceUrl ?? null, evidenceVersion: incoming.data.evidenceVersion ?? null,
     nextAction: incoming.data.nextAction, limitReason: incoming.data.limitReason,

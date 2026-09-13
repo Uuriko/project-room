@@ -577,17 +577,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "identity-links") {
         // Round-2 #101: multi-room agent identity links.
         const data = req.method === "GET" ? {} : await body(req);
-        if (req.method === "GET") return json(res, 200, { roomId, links: store.identities.list(selected.token, roomId) });
+        if (req.method === "GET") return json(res, 200, { roomId, links: store.identities.list(selected.token, roomId, fence) });
         if (req.method === "POST") {
           const keys = Object.keys(data);
           if (!keys.includes("identityId") || !keys.includes("permissions")
             || keys.some(k => !["identityId", "memberId", "displayName", "permissions"].includes(k))
             || typeof data.identityId !== "string") reject(422, "invalid_identity", "identityId and permissions are required");
-          return json(res, 201, store.identities.link(selected.token, roomId, data));
+          return json(res, 201, store.identities.link(selected.token, roomId, data, fence));
         }
         if (req.method === "DELETE") {
           if (!exact(data, ["identityId"]) || typeof data.identityId !== "string") reject(422, "invalid_identity", "identityId is required");
-          return json(res, 200, store.identities.unlink(selected.token, roomId, data.identityId));
+          return json(res, 200, store.identities.unlink(selected.token, roomId, data.identityId, fence));
         }
         reject(405, "method_not_allowed", "Method not allowed");
       }
@@ -611,10 +611,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "export" && req.method === "GET") {
         // Round-2 #106: JSONL export of the event log (same visibility as
         // the events route — members only). One {sequence, event} per line.
+        // exportEvents is a generator that authenticates lazily, so pull the
+        // first item before committing to a 200: an auth/fence failure then
+        // takes the normal JSON error path instead of an empty 200 body.
+        const lines = store.exportEvents(selected.token, roomId, fence);
+        const first = lines.next();
         res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8",
           "Content-Disposition": `attachment; filename="room-${roomId}-export.jsonl"` });
-        for (const line of store.exportEvents(selected.token, roomId, fence)) {
-          res.write(JSON.stringify(line) + "\n");
+        if (!first.done) {
+          res.write(JSON.stringify(first.value) + "\n");
+          for (const line of lines) res.write(JSON.stringify(line) + "\n");
         }
         return res.end();
       }
@@ -632,8 +638,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
           req.on("error", rejectPromise);
         });
-        const lines = text.split("\n").filter(l => l.trim()).map((l, i) => {
-          try { return JSON.parse(l); } catch { reject(422, "invalid_import", `Line ${i + 1} is not valid JSON`); }
+        // Number lines before dropping blanks so the reported line matches the file.
+        const lines = text.split("\n").map((l, i) => [l, i + 1]).filter(([l]) => l.trim()).map(([l, lineNumber]) => {
+          try { return JSON.parse(l); } catch { reject(422, "invalid_import", `Line ${lineNumber} is not valid JSON`); }
         });
         return json(res, 200, store.importEvents(selected.token, roomId, lines, fence));
       }

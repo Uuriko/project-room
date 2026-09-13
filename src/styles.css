@@ -105,7 +105,7 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .work-link:hover { color: var(--blue); }
 .composer { position: relative; padding: 1rem; background: #0d1117; }
 .mention-list { position: absolute; right: 1rem; bottom: calc(100% - .35rem); left: 1rem; z-index: 5; margin: 0; padding: .25rem; border: 1px solid var(--line); border-radius: .5rem; background: var(--panel-raised); box-shadow: var(--shadow); list-style: none; }
-.mention-option { display: flex; align-items: center; justify-content: space-between; gap: .75rem; width: 100%; min-height: 44px; padding: .4rem .7rem; border: 0; border-radius: .35rem; background: transparent; color: var(--text); text-align: left; }
+.mention-option { display: flex; align-items: center; justify-content: space-between; gap: .75rem; width: 100%; min-height: 44px; padding: .4rem .7rem; border: 0; border-radius: .35rem; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
 .mention-option span { color: var(--muted); font-size: .68rem; }
 .mention-option.active, .mention-option:hover { background: #1d2734; }
 .composer > label { display: block; margin-bottom: .45rem; }
@@ -416,6 +416,11 @@ dialog p { margin: 0; color: var(--muted); }
 .access-help p { color: var(--muted); }
 button, .button, .message-to-work { min-height: 44px; }
 .status { max-width: min(40rem, calc(100vw - 2rem)); overflow-wrap: anywhere; pointer-events: none; }
+/* Error toasts persist: they take pointer events so the text can be selected, copied and dismissed. */
+#status.error { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .9rem; pointer-events: auto; user-select: text; }
+#status.error .status-text { flex: 1 1 14rem; }
+.status-dismiss { flex: none; margin-left: auto; padding: 0 .7rem; border: 1px solid currentColor; border-radius: .35rem; background: transparent; color: inherit; font: inherit; font-size: .74rem; font-weight: 650; cursor: pointer; }
+.status-dismiss:hover { background: rgb(255 255 255 / 8%); }
 .invitation-dialog { width: min(42rem, calc(100vw - 1.5rem)); }
 .invitation-dialog[aria-busy="true"] { cursor: wait; }
 .invitation-boundary { padding: .8rem .9rem; border-left: 3px solid var(--blue); background: #101f36; color: #c8d9f6; }

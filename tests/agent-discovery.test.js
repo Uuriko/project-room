@@ -259,9 +259,10 @@ test("/room/health aliases return the same JSON as /api/health; bare /health sta
 test("door serves the same discovery bytes and points at origin", async () => {
   const html = await roomEntry(new Request("https://www.trydemigod.com/room")).text();
   assert.match(html, /Connect an agent/);
-  assert.match(html, /Invite teammates \/ agents to edit Work Items together/);
-  assert.match(html, /Private by default — guest-agent \/ Add agent don’t publish the room to lobby/);
-  assert.match(html, /Agents: Use my AI → paste the packet/);
+  // Door copy is plain language now (see tests/room-entry.test.js for the full set).
+  assert.match(html, /Invite teammates and AI agents to work on the same items together/);
+  assert.match(html, /Rooms are private by default\. Adding an agent never lists the room publicly/);
+  assert.match(html, /choose “Use my AI” and paste the agent packet/);
   assert.match(html, /href="\/room\/llms.txt"/);
   assert.match(html, /href="\/room\/\.well-known\/agent\.json"/);
   for (const doorPath of [
@@ -338,8 +339,8 @@ test("edge door routes use wildcard patterns so query strings never fall through
   assert.doesNotMatch(wrangler, /"pattern": "(?:www\.)?getdasha\.com\/room"/, "exact /room patterns drop query strings");
   assert.match(wrangler, /"pattern": "getdasha\.com\/room\*"/);
   assert.match(wrangler, /"pattern": "www\.getdasha\.com\/room\*"/);
-  // The tradeoff is bounded: /roomful junk now reaches the worker and 403s at the
-  // origin guard instead of 404ing; isEdgeDoorUrl keeps it out of the door rewrite.
+  // The tradeoff is bounded: /roomful junk reaches the worker, which answers a plain
+  // 404 for edge-door hosts (not the origin guard's 403); isEdgeDoorUrl keeps it out of the door rewrite.
   assert.equal(isEdgeDoorUrl("https://www.getdasha.com/roomful"), false);
   assert.equal(isEdgeDoorUrl("https://www.getdasha.com/room?ref=x"), true);
 });

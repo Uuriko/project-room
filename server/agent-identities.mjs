@@ -43,8 +43,13 @@ export function isIdentitySecret(token) {
 const hash = text => createHash("sha256").update(text).digest("hex");
 const base64url = bytes => Buffer.from(bytes).toString("base64url");
 
+// Identity creation is unauthenticated (an identity alone grants nothing),
+// so the table is bounded like the credentials table in store.mjs: a hard
+// cap checked inside the insert transaction, not just a per-IP rate limit.
+export const IDENTITY_LIMIT = 5000;
+
 export class AgentIdentities {
-  constructor(store) { this.store = store; this.db = store.db; }
+  constructor(store, { identityLimit = IDENTITY_LIMIT } = {}) { this.store = store; this.db = store.db; this.identityLimit = identityLimit; }
 
   // Creates a new global agent identity. The secret is shown once and only
   // its hash is stored. An identity alone grants nothing: a room owner must
@@ -53,6 +58,8 @@ export class AgentIdentities {
     const name = typeof displayName === "string" ? displayName.trim() : "";
     if (!name || name.length > 80) fail(422, "invalid_identity", "displayName must be 1-80 characters");
     return this.store.transaction(() => {
+      const count = this.db.prepare("SELECT count(*) AS n FROM agent_identities").get().n;
+      if (count >= this.identityLimit) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       const identityId = `ai_${base64url(randomBytes(12))}`;
       const secret = `${IDENTITY_SECRET_PREFIX}${base64url(randomBytes(32))}`;
       this.db.prepare("INSERT INTO agent_identities(identity_id,secret_hash,display_name,created_at) VALUES(?,?,?,?)")
@@ -67,8 +74,8 @@ export class AgentIdentities {
 
   // Owner-only: link an identity into a room, creating one member record
   // bound to it. The agent then uses its single identity secret here.
-  link(token, roomId, { identityId, memberId, displayName, permissions }) {
-    const auth = this.store.authenticate(token, roomId);
+  link(token, roomId, { identityId, memberId, displayName, permissions }, expectedSessionBinding = null) {
+    const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
     if (!memberCan(authority, auth.member.id, "manage_members")) fail(403, "access_denied", "Membership administration grant required");
     if (typeof identityId !== "string" || !IDENTITY_ID_PATTERN.test(identityId)) fail(422, "invalid_identity", "identityId is not a valid agent identity");
@@ -77,6 +84,7 @@ export class AgentIdentities {
     const resolvedMemberId = memberId ?? identityId;
     if (!MEMBER_ID_PATTERN.test(resolvedMemberId)) fail(422, "invalid_identity", "memberId must match [A-Za-z0-9][A-Za-z0-9_-]{0,63}");
     if (!Array.isArray(permissions) || !permissions.length) fail(422, "invalid_identity", "permissions are required to link an identity");
+    if (displayName !== undefined && (typeof displayName !== "string" || displayName.length > 80)) fail(422, "invalid_identity", "displayName must be text of at most 80 characters");
     return this.store.transaction(() => {
       const existing = this.db.prepare("SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?").get(roomId, identityId);
       if (existing) fail(409, "identity_already_linked", "This identity is already linked to this room");
@@ -86,16 +94,19 @@ export class AgentIdentities {
         // identity) is reused and reactivated. A foreign member holding the
         // id is a conflict.
         if (roomMember.identityId !== identityId) fail(409, "identity_conflict", "Member id is already taken");
-        if (roomMember.active === false) {
+        // The permissions the owner supplies now win; the stale record's
+        // grants must not come back silently.
+        const samePermissions = JSON.stringify([...roomMember.permissions].sort()) === JSON.stringify([...permissions].sort());
+        if (roomMember.active === false || !samePermissions) {
           this.store.command(token, roomId, { id: randomUUID(), type: "member.access_changed",
-            data: { memberId: resolvedMemberId, expectedMemberRevision: roomMember.revision, permissions: roomMember.permissions, active: true } });
+            data: { memberId: resolvedMemberId, expectedMemberRevision: roomMember.revision, permissions, active: true } }, expectedSessionBinding);
         }
         this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
           .run(roomId, identityId, resolvedMemberId, this.store.now());
         return { roomId, identityId, memberId: resolvedMemberId, relinked: true };
       }
       this.store.command(token, roomId, { id: randomUUID(), type: "member.added",
-        data: { memberId: resolvedMemberId, displayName: displayName?.trim() || identity.displayName, kind: "agent", permissions, identityId } });
+        data: { memberId: resolvedMemberId, displayName: displayName?.trim() || identity.displayName, kind: "agent", permissions, identityId } }, expectedSessionBinding);
       this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
         .run(roomId, identityId, resolvedMemberId, this.store.now());
       return { roomId, identityId, memberId: resolvedMemberId };
@@ -104,8 +115,8 @@ export class AgentIdentities {
 
   // Owner-only: unlink an identity; the room member is deactivated but its
   // history stays in the event log.
-  unlink(token, roomId, identityId) {
-    const auth = this.store.authenticate(token, roomId);
+  unlink(token, roomId, identityId, expectedSessionBinding = null) {
+    const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
     if (!memberCan(authority, auth.member.id, "manage_members")) fail(403, "access_denied", "Membership administration grant required");
     return this.store.transaction(() => {
@@ -114,15 +125,20 @@ export class AgentIdentities {
       const member = this.store.roomAuthority(roomId).members[link.memberId];
       if (member?.active !== false) {
         this.store.command(token, roomId, { id: randomUUID(), type: "member.access_changed",
-          data: { memberId: link.memberId, expectedMemberRevision: member.revision, permissions: member.permissions, active: false } });
+          data: { memberId: link.memberId, expectedMemberRevision: member.revision, permissions: member.permissions, active: false } }, expectedSessionBinding);
       }
       this.db.prepare("DELETE FROM identity_links WHERE room_id=? AND identity_id=?").run(roomId, identityId);
       return { roomId, identityId, memberId: link.memberId, unlinked: true };
     });
   }
 
-  list(token, roomId) {
-    this.store.authenticate(token, roomId);
+  // Owner-only, like the sibling audit lists (agent-invites, agent-connections,
+  // share-links): which identities are plugged into a room is membership
+  // administration data, not something every member should enumerate.
+  list(token, roomId, expectedSessionBinding = null) {
+    const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
+    const authority = this.store.roomAuthority(roomId);
+    if (!memberCan(authority, auth.member.id, "manage_members")) fail(403, "access_denied", "Membership administration grant required");
     return this.db.prepare(`SELECT l.identity_id AS identityId, l.member_id AS memberId, l.linked_at AS linkedAt,
         i.display_name AS identityDisplayName FROM identity_links l
         JOIN agent_identities i ON i.identity_id=l.identity_id WHERE l.room_id=? ORDER BY l.linked_at`).all(roomId);

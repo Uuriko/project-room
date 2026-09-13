@@ -16,7 +16,8 @@ test("room templates catalog (round-2 #115)", () => {
     assert.deepEqual(Object.keys(t.charter).sort(), ["boundaries", "escalation", "outputs", "purpose"]);
     assert.ok(Array.isArray(t.workItems) && t.workItems.length > 0);
     for (const w of t.workItems) {
-      assert.ok(w.title && w.definitionOfDone && ["read", "write"].includes(w.mode));
+      // Starter items are "read": "write" needs a claim plus write_external, which invited humans never hold.
+      assert.ok(w.title && w.definitionOfDone && w.mode === "read");
     }
   }
   assert.deepEqual(roomTemplateIds().sort(), ROOM_TEMPLATES.map(t => t.id).sort());

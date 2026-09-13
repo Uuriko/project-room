@@ -77,7 +77,14 @@ test("legacy work items read as queued; started/status/stop/stopped are exact tr
   assert.equal(item.stop_requested_at, "2026-09-10T21:02:00.000Z");
   applySessionFields(item, { type: SESSION_EVENT_TYPES.STOPPED, at: "2026-09-10T21:03:00.000Z", data: { status: "done" } });
   assert.equal(item.status, SESSION_STATUSES.DONE);
-  assert.throws(() => applySessionFields(item, { type: SESSION_EVENT_TYPES.STARTED, at: "2026-09-10T21:04:00.000Z" }), /Invalid session/);
+  // A finished session may be started again as a retry (attempt 2), so this no longer throws.
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STARTED, actorId: "agent", at: "2026-09-10T21:04:00.000Z" });
+  assert.equal(item.status, SESSION_STATUSES.PROCESSING);
+  assert.equal(item.attempt_count, 2);
+  assert.equal(sessionCommandType({ status: "failed" }, "set_status", "processing"), SESSION_EVENT_TYPES.STARTED);
+  assert.equal(sessionCommandType({ status: "done" }, "set_status", "processing"), SESSION_EVENT_TYPES.STARTED);
+  // Running sessions still cannot be "started" again.
+  assert.throws(() => applySessionFields(item, { type: SESSION_EVENT_TYPES.STARTED, at: "2026-09-10T21:05:00.000Z" }), /Invalid session/);
   assert.equal(sessionCommandType({ status: "queued" }, "set_status", "processing"), SESSION_EVENT_TYPES.STARTED);
   assert.equal(sessionCommandType({ status: "active" }, "request_stop"), SESSION_EVENT_TYPES.STOP_REQUESTED);
   assert.equal(sessionCommandType({ status: "active" }, "set_status", "failed"), SESSION_EVENT_TYPES.STOPPED);
@@ -242,4 +249,29 @@ test("HTTP: second agent gets 409 on a claimed session; owner can override; card
   const after = (await (await request("/api/rooms/commons/work-sessions", { token: agentKey })).json())
     .sessions.find(c => c.workItemId === "session-one");
   assert.equal(after.worker_member_id, "owner");
+});
+
+test("a retry from a terminal status increments attempt_count, resets run fields, keeps the budget and stops at maxAttempts", () => {
+  const item = { id: "retry", title: "R", state: "accepted", revision: 0, accountableMemberId: "agent" };
+  const at = minute => `2026-09-10T21:${String(minute).padStart(2, "0")}:00.000Z`;
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STARTED, actorId: "agent", at: at(0), data: { budget: { maxAttempts: 2 } } });
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STOP_REQUESTED, actorId: "owner", at: at(1) });
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STOPPED, actorId: "agent", at: at(2), data: { status: "failed", spendCents: 40 } });
+  assert.equal(item.attempt_count, 1); assert.equal(item.spend_cents, 40); assert.ok(item.stop_requested_at);
+  // Retry without redeclaring a budget: the earlier budget stays in force.
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STARTED, actorId: "agent-b", at: at(3) });
+  assert.equal(item.status, SESSION_STATUSES.PROCESSING);
+  assert.equal(item.attempt_count, 2);
+  assert.equal(item.worker_member_id, "agent-b");
+  assert.equal(item.started_at, at(3)); assert.equal(item.heartbeat_at, at(3));
+  assert.equal(item.stop_requested_at, null); assert.equal(item.spend_cents, null);
+  assert.deepEqual(item.budget, { maxAttempts: 2 });
+  assert.equal(sessionWorker(item, Date.parse(at(3)) + 1000), "agent-b");
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STOPPED, actorId: "agent-b", at: at(4), data: { status: "done" } });
+  const before = structuredClone(item);
+  assert.throws(() => applySessionFields(item, { type: SESSION_EVENT_TYPES.STARTED, actorId: "agent", at: at(5) }), /attempt 3 exceeds the attempt budget of 2/);
+  assert.deepEqual(item, before, "a refused retry changes nothing");
+  // A retry may declare a wider budget explicitly; a stop requested on the earlier run does not block it.
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STARTED, actorId: "agent", at: at(6), data: { budget: { maxAttempts: 3 } } });
+  assert.equal(item.attempt_count, 3);
 });

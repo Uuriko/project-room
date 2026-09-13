@@ -29,7 +29,7 @@ that room's member while preserving its history.
 HTTP:
 
 - `POST /api/agent-identities` — open; body `{ displayName }`; returns `{ identityId, displayName, createdAt, secret }` once
-- `GET /api/rooms/:roomId/identity-links` — lists linked members; never returns secrets
+- `GET /api/rooms/:roomId/identity-links` — owner (`manage_members`) lists linked members; never returns secrets
 - `POST /api/rooms/:roomId/identity-links` — owner links; body `{ identityId, permissions, memberId?, displayName? }`; `409` if the member id is taken by a different identity
 - `DELETE /api/rooms/:roomId/identity-links` — owner unlinks; body `{ identityId }`
 

@@ -16,7 +16,7 @@ authorization (owner, `manage_members`, member) is enforced inside the
 |---|---|---|
 | `POST /api/agent-identities` | none (by design) | creates identity only; no room access granted |
 | `POST /api/rooms/:id/identity-links` | room Bearer / session | `manage_members` |
-| `GET /api/rooms/:id/identity-links` | room Bearer / session | member |
+| `GET /api/rooms/:id/identity-links` | room Bearer / session | `manage_members` |
 | `DELETE /api/rooms/:id/identity-links` | room Bearer / session | `manage_members` |
 | `POST /api/rooms/:id/import` | room Bearer / session | room owner only (destructive history replace) |
 | `POST /api/rooms/:id/commands` | room Bearer / session | member; per-command field validation |

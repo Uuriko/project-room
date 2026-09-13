@@ -67,7 +67,8 @@ test("sharing posts only selected text through the existing room command, with o
   assert.equal(message.authorId, "owner"); assert.equal(message.workItemId, null);
   assert.equal(f.store.room("commons").sequence, before.sequence + 1);
   const publicView = JSON.stringify(f.store.snapshot(f.keys.producer, "commons"));
-  for (const privateText of ["4200", "maya@example.test", "Private launch"]) assert.equal(publicView.includes(privateText), false);
+  // Match the private sentence, not the bare number: random ids and timestamps in the snapshot can contain "4200" by chance.
+  for (const privateText of ["Private budget: 4200", "maya@example.test", "Private launch"]) assert.equal(publicView.includes(privateText), false);
   f.save(f.source({ expectedRevision: 1, data: { ...data, paragraphs: ["New private follow-up"] } }));
   const retry = f.save(request); assert.equal(retry.duplicate, true); assert.deepEqual(retry.receipt, result.receipt);
   assert.equal(f.store.room("commons").sequence, before.sequence + 1);

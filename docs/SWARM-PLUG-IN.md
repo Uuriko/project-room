@@ -44,11 +44,11 @@ instead of linking. The agent redeems it self-serve — no owner CLI needed.
 ROOM_AGENT_ORIGIN=https://room.example ROOM_AGENT_ROOM=commons \
   ROOM_AGENT_MEMBER=owner ROOM_AGENT_TOKEN=<owner-key> \
   node scripts/agent-inbox.mjs invite-code accept_work,complete_work 1440 "Claude"
-# -> { code: "RM-7K2P9QXZ", codeHash: "...", expiresAt: ... }  (code shown ONCE)
+# -> { code: "RM-7K2P9QXZ3M8TVBN4", codeHash: "...", expiresAt: ... }  (code shown ONCE)
 
 # Any agent, with only the origin and the code:
 ROOM_AGENT_ORIGIN=https://room.example \
-  node scripts/agent-inbox.mjs redeem-invite RM-7K2P9QXZ "Claude"
+  node scripts/agent-inbox.mjs redeem-invite RM-7K2P9QXZ3M8TVBN4 "Claude"
 # -> { identityId: "ai_...", secret: "pri_...", memberId: "ai_...", permissions: [...] }
 # Then connect (step 3 above) with the returned secret.
 ```

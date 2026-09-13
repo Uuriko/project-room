@@ -6,9 +6,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { createHash, scryptSync } from "node:crypto";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+
+const sha256 = text => createHash("sha256").update(text).digest("hex");
+const slowHash = code => scryptSync(code, "project-room-agent-invite-v2", 32, { N: 16384, r: 8, p: 1 }).toString("hex");
 
 const execFileAsync = promisify(execFile);
 // The room server runs on this process's event loop, so the CLI must be
@@ -66,13 +70,77 @@ test("owner mints a one-time code; the raw code is never stored", async t => {
   const { store, origin, ownerKey } = await serve(t);
   const res = await mint(origin, ownerKey, { permissions: ["accept_work", "complete_work"], expiresInMinutes: 60, displayName: "Plug Bot" });
   assert.equal(res.status, 201, JSON.stringify(res.json));
-  assert.match(res.json.code, /^RM-[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/);
+  // v2 codes: 16 symbols from the 32-symbol Crockford alphabet (80 bits).
+  assert.match(res.json.code, /^RM-[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{16}$/);
   assert.match(res.json.codeHash, /^[a-f0-9]{64}$/);
   assert.equal(res.json.roomId, "commons");
   assert.deepEqual(res.json.permissions, ["accept_work", "complete_work"]);
   const row = store.db.prepare("SELECT * FROM agent_invite_codes WHERE code_hash=?").get(res.json.codeHash);
   assert.ok(row, "code row exists");
   assert.ok(!JSON.stringify(row).includes(res.json.code), "raw code appears nowhere in the stored row");
+  // The stored hash is the deterministic slow hash, never a bare sha256 of the code.
+  assert.notEqual(row.code_hash, sha256(res.json.code));
+  assert.equal(row.code_hash, slowHash(res.json.code));
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM agent_invite_codes WHERE code_hash=?").get(sha256(res.json.code)).n, 0);
+});
+
+test("codes are drawn uniformly from the whole alphabet with no modulo bias", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const seen = new Set();
+  for (let i = 0; i < 12; i++) {
+    const res = await mint(origin, ownerKey, { permissions: ["accept_work"] });
+    assert.equal(res.status, 201);
+    for (const symbol of res.json.code.slice(3)) seen.add(symbol);
+  }
+  // 192 symbols from a 32-symbol alphabet: every symbol appears with
+  // overwhelming probability, and none outside the alphabet ever does.
+  for (const symbol of seen) assert.ok("0123456789ABCDEFGHJKMNPQRSTVWXYZ".includes(symbol), symbol);
+  assert.ok(seen.size >= 28, `expected broad alphabet coverage, saw ${seen.size} symbols`);
+});
+
+test("displayName must be text when present: null is rejected, not stored as \"null\"", async t => {
+  const { store, origin, ownerKey } = await serve(t);
+  for (const displayName of [null, 42, ["Bot"], { name: "Bot" }]) {
+    const res = await mint(origin, ownerKey, { permissions: ["accept_work"], displayName });
+    assert.equal(res.status, 422, JSON.stringify(displayName));
+    assert.equal(res.json.error.code, "invalid_invite");
+  }
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM agent_invite_codes WHERE display_name='null'").get().n, 0);
+  assert.equal((await mint(origin, ownerKey, { permissions: ["accept_work"], displayName: "Named" })).status, 201);
+});
+
+test("legacy 8-symbol codes stored as sha256 keep redeeming until they expire", async t => {
+  const { store, origin, ownerKey } = await serve(t);
+  const legacy = "RM-7K2P9QXZ"; // pre-v2 format: 8 symbols, no 0/O/1/I/L
+  const now = Date.now();
+  store.db.prepare(`INSERT INTO agent_invite_codes(code_hash,room_id,created_by,permissions_json,display_name,created_at,expires_at)
+    VALUES(?,?,?,?,?,?,?)`).run(sha256(legacy), "commons", "owner", JSON.stringify(["accept_work"]), "Legacy Bot", now, now + 3600000);
+  // Listed by the same codeHash the row was stored under.
+  const listed = await get(origin, "/api/rooms/commons/agent-invites", ownerKey);
+  assert.ok(listed.json.invites.some(row => row.codeHash === sha256(legacy) && row.status === "active"));
+  const res = await redeem(origin, legacy.toLowerCase(), "Legacy Bot");
+  assert.equal(res.status, 201, JSON.stringify(res.json));
+  assert.deepEqual(res.json.permissions, ["accept_work"]);
+  assert.equal((await redeem(origin, legacy)).status, 409);
+  // A legacy-length code with v2-only symbols is neither format: rejected up front.
+  assert.equal((await redeem(origin, "RM-0000AAAA")).status, 404);
+  // Unknown codes in either format, and lengths that are neither, all fail alike.
+  for (const code of ["RM-AAAAAAAA", "RM-AAAAAAAAAAAAAAAA", "RM-AAAAAAAAAAAA", "RM-AAAAAAAAAAAAAAAAAAAA"]) {
+    const unknown = await redeem(origin, code);
+    assert.equal(unknown.status, 404, code);
+    assert.equal(unknown.json.error.code, "invite_unavailable");
+  }
+  // A new code is stored under its slow hash, so the sha256 lookup never finds it.
+  const minted = await mint(origin, ownerKey, { permissions: ["accept_work"] });
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM agent_invite_codes WHERE code_hash=?").get(sha256(minted.json.code)).n, 0);
+  assert.equal((await redeem(origin, minted.json.code)).status, 201);
+});
+
+test("redeem folds the Crockford confusables so a transcribed code still works", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const minted = await mint(origin, ownerKey, { permissions: ["accept_work"] });
+  const typed = minted.json.code.toLowerCase().replace(/0/g, "o").replace(/1/g, "l");
+  assert.equal((await redeem(origin, typed)).status, 201);
 });
 
 test("minting is owner-only and can never grant administration", async t => {

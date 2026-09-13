@@ -1462,7 +1462,7 @@ export class RoomStore {
     return this.readTransaction(() => {
       this.authenticate(token, roomId, expectedSessionBinding);
       const room = this.room(roomId);
-      const needle = query.toLowerCase();
+      const needle = query.trim().toLowerCase();
       const result = { roomId, query: query.trim(), messages: [], workItems: [] };
       if (kind === "all" || kind === "messages") {
         for (const m of room.state.messages ?? []) {
