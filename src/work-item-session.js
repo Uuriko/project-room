@@ -171,7 +171,9 @@ export function sessionCommandType(item, action, nextStatus) {
   if (action === "request_stop") return SESSION_EVENT_TYPES.STOP_REQUESTED;
   if (action !== "set_status") throw new Error("Choose set_status or request_stop");
   if (!isSessionStatus(nextStatus)) throw new Error("Choose a session status");
-  if (session.status === SESSION_STATUSES.QUEUED && nextStatus === SESSION_STATUSES.PROCESSING) {
+  // A finished (done/failed) session may be started again: that is a retry, so
+  // it goes through session.started and counts another attempt.
+  if ((session.status === SESSION_STATUSES.QUEUED || TERMINAL.has(session.status)) && nextStatus === SESSION_STATUSES.PROCESSING) {
     return SESSION_EVENT_TYPES.STARTED;
   }
   if (TERMINAL.has(nextStatus)) return SESSION_EVENT_TYPES.STOPPED;
@@ -189,16 +191,27 @@ export function applySessionFields(item, incoming) {
   const session = sessionRecord(item);
   const at = incoming.at;
   if (incoming.type === SESSION_EVENT_TYPES.STARTED) {
-    if (session.status !== SESSION_STATUSES.QUEUED || session.stop_requested_at) {
+    // A first start needs a queued session with no stop pending. A session that
+    // already finished (done/failed) may start again as a retry: attempt_count
+    // grows, heartbeat/stop/worker fields reset, and a declared maxAttempts is
+    // enforced here so the budget is unreachable by no path. A retry that
+    // declares no budget keeps the previous one — silence never widens a limit.
+    const retry = TERMINAL.has(session.status);
+    if (!retry && (session.status !== SESSION_STATUSES.QUEUED || session.stop_requested_at)) {
       throw new Error(`Invalid session transition from ${session.status}`);
+    }
+    const budget = incoming.data?.budget == null && retry ? session.budget : validateSessionBudget(incoming.data?.budget);
+    const attempts = session.attempt_count + 1;
+    if (budget?.maxAttempts && attempts > budget.maxAttempts) {
+      throw new Error(`Invalid session retry: attempt ${attempts} exceeds the attempt budget of ${budget.maxAttempts}`);
     }
     item.status = SESSION_STATUSES.PROCESSING;
     item.stop_requested_at = null;
     item.heartbeat_at = at;
     item.worker_member_id = incoming.actorId;
     item.started_at = at;
-    item.attempt_count = session.attempt_count + 1;
-    item.budget = validateSessionBudget(incoming.data?.budget);
+    item.attempt_count = attempts;
+    item.budget = budget;
     item.spend_cents = null;
     return;
   }

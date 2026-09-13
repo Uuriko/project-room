@@ -248,3 +248,21 @@ test("registered help event is replayable and exactly idempotent without changin
   assert.deepEqual(applyEvent(saved, e), saved); assert.deepEqual(f.state, before);
   assert.throws(() => applyEvent(saved, { ...e, data: { ...e.data, scope: "Different" } }), /Conflicting/);
 });
+
+// Presence, delivery preferences and self-description are not consent changes:
+// they must not move member.revision, which pins an open invitation.
+test("status, notification preferences and capabilities leave an open invitation open and member.revision unchanged", () => {
+  const f = fixture(); f.help();
+  assert.equal(f.context().status, "open"); assert.equal(f.state.members.producer.revision, 0);
+  f.send("member.status_updated", "producer", { message: "working the agenda" });
+  assert.equal(f.context().status, "open", "status message must not expire the invitation");
+  f.send("capabilities.advertised", "producer", { capabilities: ["agenda", "drafting"] });
+  assert.equal(f.context().status, "open", "capability advertisement must not expire the invitation");
+  f.send("notifications.preferences_set", "producer", { preferences: { mentions: "none" } });
+  assert.equal(f.context().status, "open", "notification preferences must not expire the invitation");
+  assert.equal(f.state.members.producer.revision, 0);
+  // A concurrent owner access change pinned to the pre-status revision still lands.
+  f.send("member.access_changed", "owner", { memberId: "producer", expectedMemberRevision: 0, active: true, permissions: f.state.members.producer.permissions });
+  assert.equal(f.state.members.producer.revision, 1);
+  assert.equal(f.context().status, "consent_changed", "only an access change moves consent");
+});

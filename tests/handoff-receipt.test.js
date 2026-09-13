@@ -8,6 +8,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { needsAttention } from "../src/work-selectors.js";
 
 test("handoff receipt: recorded without closing work, halt-all gates mutations until owner clears", async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-handoff-receipt-"));
@@ -52,6 +53,20 @@ test("handoff receipt: recorded without closing work, halt-all gates mutations u
   assert.equal(after.handoff.actorId, "producer");
   assert.equal(after.next.action, "triaged_handoff");
   assert.equal(after.next.needsAttention, true);
+  // Owner triage is addressed to the Room owner, so the owner's needs-me view surfaces it and the producer's does not.
+  assert.equal(after.next.memberId, "owner");
+  assert.equal(after.handoff.triageMemberId, "owner");
+  const ownerView = (await owner.orient()).work.find(work => work.id === "handoff-demo");
+  assert.equal(ownerView.next.memberId, "owner");
+  const roomState = store.room("commons").state;
+  assert.deepEqual(needsAttention({ workItems: roomState.workItems, memberId: "owner" }).map(step => [step.workItemId, step.step, step.role]),
+    [["handoff-demo", "triaged_handoff", "owner"]]);
+  assert.deepEqual(needsAttention({ workItems: roomState.workItems, memberId: "producer" }), []);
+  // The compact ?view=work snapshot carries the open handoff too, so the owner's needs-me focus surfaces it.
+  const ownerNeedsMe = await owner.orient({ focus: "needs_me" });
+  assert.ok(ownerNeedsMe.work.some(work => work.id === "handoff-demo" && work.next.memberId === "owner"), "owner needs-me shows the handoff");
+  const producerNeedsMe = await producer.orient({ focus: "needs_me" });
+  assert.equal(producerNeedsMe.work.some(work => work.id === "handoff-demo"), false, "producer needs-me does not");
 
   const halt = await producer.command(command("handoff-2", T.WORK_HANDOFF_RECORDED, {
     workItemId: "handoff-demo", expectedRevision: 3,

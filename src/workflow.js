@@ -91,7 +91,10 @@ export function terminalWork(item) {
 
 // A shared description for people and clients, never a grant or a dispatch command.
 // In-progress work has an actor but does not create another attention request.
-export function nextWorkStep(item, now = Date.now()) {
+// `ownerId` is optional: an open handoff is triage addressed to the Room owner; the
+// handoff record names that member itself, and `ownerId` only covers records that
+// predate the field. Existing callers that omit it keep their previous result.
+export function nextWorkStep(item, now = Date.now(), ownerId = null) {
   const step = (action, label, memberId = null, role = null, needsAttention = false) => ({
     action, label, memberId, role, needsAttention,
     workItemId: item.id, workRevision: item.revision,
@@ -100,7 +103,7 @@ export function nextWorkStep(item, now = Date.now()) {
   });
   const accountable = (action, label, attention = true) => step(action, label, item.accountableMemberId, "accountable", attention);
   if (item.state === S.SUPERSEDED || item.supersededBy) return step("superseded", "Continue in the replacement work item");
-  if (item.handoff?.open) return step("triaged_handoff", "Handoff open - owner triage: reassign, resume or supersede", null, "owner", true);
+  if (item.handoff?.open) return step("triaged_handoff", "Handoff open - owner triage: reassign, resume or supersede", item.handoff.triageMemberId ?? ownerId ?? null, "owner", true);
   if (item.state === S.PROPOSED) return accountable("accept", "Accept the assignment");
   if ([S.ACCEPTED, S.WORKING].includes(item.state) && item.mode === "write"
       && (!activeClaim(item, now) || item.claim.holderId !== item.accountableMemberId)) {

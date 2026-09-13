@@ -77,8 +77,9 @@ test("a member cannot set another member's status; the owner can", async t => {
 test("a revoked member can no longer post a status line, and nobody can set one on a revoked member", async t => {
   const { request, agentKey, ownerKey } = await serve(t);
   assert.equal((await setStatus(request, agentKey, { message: "still here" })).status, 201);
+  // A status line does not move member.revision (only access changes do), so the owner's revoke pins revision 0.
   const revoke = await request("/api/rooms/commons/commands", { method: "POST", token: ownerKey, data: { id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED,
-    data: { memberId: "agent", expectedMemberRevision: 1, permissions: ["accept_work", "complete_work"], active: false } } });
+    data: { memberId: "agent", expectedMemberRevision: 0, permissions: ["accept_work", "complete_work"], active: false } } });
   assert.equal(revoke.status, 201);
   // The revoked key is refused before the reducer; the reducer itself must refuse too, so replayed or
   // owner-issued events cannot keep writing on behalf of a member whose access ended.
