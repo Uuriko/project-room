@@ -3,7 +3,7 @@ import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./cli
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
 import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
-import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription } from "./workflow.js";
+import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation } from "./share-links.js";
 import { installAgentConnections } from "./agent-connections.js";
@@ -2313,6 +2313,7 @@ function readResult(e) {
       fromResults, receipt: { completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion }, reportedById: receipt.reportedById }; resultView = view;
     $("#result-title").textContent = item.title; $("#result-status").textContent = "Loading exact text…"; $("#result-body").textContent = "";
     $("#result-original").hidden = true;
+    const diffBox = $("#result-diff"); diffBox.hidden = true; diffBox.innerHTML = "";
     $("#result-dialog").showModal();
     const owns = () => resultView === view && sameSession(view.generation, view.roomId, view.memberId);
     client.workResult(item.id, { completionEventId: receipt.eventId }).then(value => {
@@ -2324,6 +2325,31 @@ function readResult(e) {
       const original = state.messages.find(original => original.id === message?.replyToId && original.workItemId === item.id && original.proposal);
       view.originalId = original?.id; $("#result-original").hidden = !original;
       view.loaded = true; resultStatus();
+      // F4: a resubmitted result names its previous version; show the changed
+      // bytes and restate that earlier approval never carries over.
+      const previousId = receipt.nativeText.previousCompletionEventId;
+      if (previousId) {
+        client.workResult(item.id, { completionEventId: previousId }).then(previous => {
+          if (!owns() || !previous) return;
+          if (previous.result?.receipt?.eventId !== previousId) throw new Error("Pinned previous version changed");
+          const before = previous.result?.text?.body;
+          if (typeof before !== "string") throw new Error("Previous version has no exact text");
+          const rows = diffResultLines(before, value.result.text.body);
+          const note = "Previous approval never carries over; review the exact new text.";
+          diffBox.innerHTML = rows === null
+            ? `<p class="form-hint"><strong>Resubmitted result.</strong> The previous version differs but is too large to compare line by line. ${esc(note)}</p>`
+            : (() => { const summary = diffResultSummary(rows);
+                const body = rows.length > 200 ? rows.slice(0, 200) : rows;
+                return `<p class="form-hint"><strong>Resubmitted result.</strong> ${summary.removedLines} lines removed, ${summary.addedLines} added (${summary.changedBytes} changed bytes). ${esc(note)}</p>` +
+                  (summary.changedBytes ? `<pre class="result-diff">${body.map(row => `<span class="diff-${row.type}">${esc(row.type === "added" ? "+ " : row.type === "removed" ? "- " : "  ")}${esc(row.text)}</span>`).join("\n")}${rows.length > 200 ? `<span class="form-hint">… ${rows.length - 200} more rows</span>` : ""}</pre>` : `<p class="form-hint">No text changes from the previous version.</p>`);
+              })();
+          diffBox.hidden = false;
+        }).catch(() => {
+          if (!owns()) return;
+          diffBox.innerHTML = `<p class="form-hint"><strong>Resubmitted result.</strong> The earlier version could not be loaded for comparison. Previous approval never carries over; review the exact new text.</p>`;
+          diffBox.hidden = false;
+        });
+      }
     }).catch(() => { if (owns()) { view.error = true; resultStatus(); } });
     return;
   }
