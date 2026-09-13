@@ -2,6 +2,16 @@
 
 ## Latest verified acceptance
 
+- `2bfc108` closes the independent review's extra-connection-fields finding.
+  Disconnect requests now reject unexpected fields and snapshot their intent
+  before asynchronous transport; caller mutation cannot alter the accepted
+  connection/revision receipt. Client, controls and full-path browser checks
+  passed **10/10**. The exact runtime checkpoint passed **1480/1480 Node tests**,
+  zero skipped. Independent review of this fix is requested, not yet received.
+- Independent Grok review passed `627b4db`/`14e8055` integrated messaging
+  controls/acceptance and `07c7d80` opt-in startup. These reviews do not claim
+  live delivery or deployment readiness.
+
 - Fresh focused replay at `5ea28ec`: **35/35 Telegram** and **27/27 messaging**
   checks passed, zero skipped. Both package scripts were executed, including
   desktop/mobile acceptance. No provider network calls or live activation.

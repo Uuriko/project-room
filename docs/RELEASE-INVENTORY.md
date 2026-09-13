@@ -16,7 +16,8 @@ worker), **unknown** (not verified recently enough to claim).
 
 Current integration worktree: `/Users/johnpotter/src/project-room-integration`,
 branch `codex/project-room-integration`, schema/writer version **33**. Runtime
-checkpoint `07c7d80`; latest failure-test checkpoint `5ea28ec`. These are local
+checkpoint `2bfc108` (messaging client hardening on `07c7d80` startup); failure-test
+checkpoint `5ea28ec`. These are local
 checkpoints, not claims about main, CI, a deployed website or enterprise readiness.
 
 | Current capability | Evidence | Remaining boundary |
@@ -32,6 +33,9 @@ checkpoints, not claims about main, CI, a deployed website or enterprise readine
 
 Executed evidence:
 
+- `2bfc108`: **1480/1480** Node tests, zero skipped, and **10/10** focused
+  client/controls/full-path browser checks. Exact row validation and immutable
+  disconnect intent close the independent review's client finding.
 - `bbed875`: **317/317** full scripted Chromium browser tests and **1472/1472**
   Node tests, zero skipped. This is the last full browser checkpoint.
 - `627b4db`: **1474/1474** Node tests after messaging UI integration.
@@ -41,7 +45,8 @@ Executed evidence:
   disconnect, rollback/retry, and incomplete-body timeout.
 - Independent Grok reviews received for Telegram runtime/packaging, Twilio
   private import/registry/webhook, request recovery and compact entry. Later
-  UI/startup reviews are requested; do not assume a queued review passed.
+  UI/startup reviews subsequently passed at `627b4db`/`14e8055` and `07c7d80`.
+  The new `2bfc108` client fix is awaiting independent review.
 
 These checks do not certify hosted operations, physical devices, SSO/SCIM,
 PostgreSQL tenant isolation, retention/backup deletion, or compliance. Detail:
