@@ -2,6 +2,9 @@
 
 ## Latest verified acceptance
 
+- Fresh focused replay at `5ea28ec`: **35/35 Telegram** and **27/27 messaging**
+  checks passed, zero skipped. Both package scripts were executed, including
+  desktop/mobile acceptance. No provider network calls or live activation.
 - Startup/runtime checkpoint `07c7d80` plus the new webhook failure tests passed
   **1479/1479 Node tests**, zero skipped. No runtime code changed during that run.
 - Five webhook checks now explicitly include a failure after journal writes:
@@ -11,7 +14,7 @@
   fault tests, not evidence of production traffic or provider retry guarantees.
 
 - `627b4db`: full Node suite **1474/1474**, zero skipped, after UI integration.
-- `npm run test:messaging`: **22/22** checks pass, including SMS and WhatsApp
+- Earlier `14e8055` messaging checkpoint: **22/22** checks passed, including SMS and WhatsApp
   signed HTTP → encrypted connection registry → private Inbox → browser disconnect
   at 390px and 1280px. Those four full-path checks use real application layers
   and locally signed provider fixtures, not live Twilio accounts or network calls.
@@ -21,8 +24,9 @@
 - Last complete full browser checkpoint remains `bbed875` (**317/317**). Newer
   controls have targeted browser acceptance, not a new complete browser run.
 
-Next highest-value work: secure opt-in host startup with existing private stores;
-document explicit background authority and webhook retry/media policy; live
+Next highest-value work: receive-only background authority and receiving-runtime
+wiring (existing-store account-controls startup is implemented); document
+webhook retry/media policy; live
 provider onboarding only after the separate credential/spending/deployment gates.
 Then replies with clear send confirmation and provider delivery receipts. Slack
 still has signed parsing only; personal Signal/WhatsApp mirroring is not available.
@@ -62,8 +66,8 @@ account, number, background receiver or outbound transport is configured.
 | Service | Verified now | Remaining before usable connection |
 | --- | --- | --- |
 | Telegram bot | Real private receive/import; durable receiver and controls tested in disposable runtimes | Activate private durable runtime, background receiver, replies |
-| SMS | Signed inbound text → private Inbox, duplicate-safe journal and mobile rendering | Messaging account and receiving number, public HTTPS callback, connection registry/controls |
-| WhatsApp Business | Signed inbound text → private Inbox using distinct channel validation | Sender/business onboarding or sandbox, callback and connection lifecycle |
+| SMS | Signed inbound text → private Inbox, encrypted registry, disconnect controls and mobile rendering | Live messaging account/number, HTTPS receiving runtime and explicit background authority |
+| WhatsApp Business | Same durable receive/control layers with distinct channel validation | Sender/business onboarding or sandbox, live callback and explicit background authority |
 | Slack | Signed HTTP Events API verification, workspace/app/channel scoping tested | App installation, scopes and selected conversations, durable ingestion, live callback or separate Socket Mode runtime |
 | Personal Signal/WhatsApp | Not connected | Separate linked-device integration; not equivalent to a business API |
 
@@ -81,6 +85,17 @@ and the required atomic cursor/connection lifecycle work. Do not run it as an
 always-on receiver or represent all personal Telegram messages as connected.
 
 ## Next-service order
+
+Implementation priority now favors finishing **SMS and WhatsApp Business** because
+their shared durable importer, registry, controls and webhook factory already
+exist. This is engineering leverage, not a claim that business onboarding is
+instant. Twilio documents shared incoming-message webhooks for these channels;
+even its WhatsApp sandbox is billed, so a sandbox is not a free-spending exception.
+Sources checked September 12: [messaging webhooks](https://www.twilio.com/docs/usage/webhooks/messaging-webhooks),
+[WhatsApp sandbox](https://www.twilio.com/docs/whatsapp/sandbox).
+
+The earlier candidate ordering below remains useful context, not the current
+implementation queue:
 
 1. **Slack**, if the existing workspace permits installing our own app. Socket
    Mode avoids a public callback for a local pilot, but needs an app-level token

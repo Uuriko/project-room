@@ -14,25 +14,39 @@ worker), **unknown** (not verified recently enough to claim).
 
 ### Current integration checkpoint (September 12, 2026)
 
-The table below is the historical main baseline, not the current integration
-checkout. The integration branch at `c1ff371` uses schema/writer version **33**.
-Local Gmail read-only receiving was verified with 25 messages; local Telegram
-bot receiving was verified with two messages. These are local pilot observations,
-not public deployment claims. Telegram's encrypted durable receiver, connection
-registry, authenticated controls and opt-in startup have 35 targeted checks,
-including mocked-provider full-stack desktop/mobile acceptance. The durable
-receiver has not been activated with live encrypted configuration. SMS/WhatsApp
-and Slack intake boundaries are tested components, not connected services.
+Current integration worktree: `/Users/johnpotter/src/project-room-integration`,
+branch `codex/project-room-integration`, schema/writer version **33**. Runtime
+checkpoint `07c7d80`; latest failure-test checkpoint `5ea28ec`. These are local
+checkpoints, not claims about main, CI, a deployed website or enterprise readiness.
 
-The full Node regression on `c1ff371` exposed runtime-package dependency/import
-allowlist failures. Fixed at **`1f4d7eb`** with exact pinned dependency and module
-entries. The full `node --test` rerun at that revision passed **1,463/1,463**,
-zero skipped, in 28.8 seconds. Cold exact-commit and candidate package checks
-passed as part of that run. This does not include the entire scripted browser
-suite or establish deployment readiness; the targeted Telegram browser checks
-were verified separately at earlier checkpoints.
-See `TELEGRAM-DURABLE-RECEIVER-2026-09-12.md` and
-`MESSAGING-READINESS-2026-09-12.md` for current connector limitations.
+| Current capability | Evidence | Remaining boundary |
+|---|---|---|
+| Gmail read-only private Inbox | Local pilot imported 25 real messages | No new live verification in this inventory pass; not email sending |
+| Telegram bot receive | Local pilot imported 2 real messages; last manual sync 0 new, page not full | Bot-selected chat, not personal Telegram history; durable receiver not activated |
+| Telegram durable receive/control path | Encrypted queue, registry, auth, disconnect, desktop/mobile acceptance; 35 targeted checks | Background receiver/replies/live secure configuration unfinished |
+| SMS/WhatsApp Business receive | Signed HTTP → private journal → UI → persisted disconnect; four real-application-layer desktop/mobile journeys with fixture-signed ingress | No paid provider account, number or live webhook; not personal phone history |
+| Messaging account controls | Compact Connections UI; receipt and stale-account fences; opt-in secure existing-registry startup | Startup exposes controls only, not a receive listener or background grant |
+| Slack | Signed HTTP event parsing with selected-channel boundary | No live installation, durable Inbox adapter or runtime |
+| Sign-in and request recovery | Compact entry, service-error Refresh, large-text wrapping, exact-request retry lock | Chromium evidence is not physical-device or assistive-technology certification |
+| Hosted current integration | Unknown | No deployment/served-byte verification; no release claim |
+
+Executed evidence:
+
+- `bbed875`: **317/317** full scripted Chromium browser tests and **1472/1472**
+  Node tests, zero skipped. This is the last full browser checkpoint.
+- `627b4db`: **1474/1474** Node tests after messaging UI integration.
+- `07c7d80` runtime plus the failure tests committed in `5ea28ec`:
+  **1479/1479** Node tests. No runtime edits during this run. Targeted messaging
+  tests additionally cover mobile and desktop controls, signed delivery,
+  disconnect, rollback/retry, and incomplete-body timeout.
+- Independent Grok reviews received for Telegram runtime/packaging, Twilio
+  private import/registry/webhook, request recovery and compact entry. Later
+  UI/startup reviews are requested; do not assume a queued review passed.
+
+These checks do not certify hosted operations, physical devices, SSO/SCIM,
+PostgreSQL tenant isolation, retention/backup deletion, or compliance. Detail:
+[messaging readiness](MESSAGING-READINESS-2026-09-12.md) and
+[Telegram receiver](TELEGRAM-DURABLE-RECEIVER-2026-09-12.md).
 
 ### Historical main baseline
 
@@ -45,7 +59,11 @@ See `TELEGRAM-DURABLE-RECEIVER-2026-09-12.md` and
 | Browser gates | `npm run test:browser`, 47 scripted checks, green on main | `package.json`, CI |
 | Worker packaging | runtime-package exact allowlist + import-closure gate, green | `tests/runtime-package.test.js` |
 
-## Capability inventory
+## Historical main capability inventory
+
+The following qualified labels describe the recorded main baseline above, not a
+fresh CI verification of the local integration. Use the current table for newly
+implemented connectors and the explicit evidence checkpoints for local readiness.
 
 | Capability | Status | Evidence |
 |---|---|---|
@@ -67,8 +85,8 @@ See `TELEGRAM-DURABLE-RECEIVER-2026-09-12.md` and
 
 ## Rules
 
-1. A capability not listed here, or listed as unknown, is not available - no
-   matter what an older plan or README line says.
+1. A capability not listed here has no availability claim. Unknown means not
+   verified, not proof that it is absent. Local implementation is not live service.
 2. "Live" requires a fresh served-bytes check against the deployed worker;
    CI green alone never establishes live.
 3. Update this file in the same commit that changes any row.
