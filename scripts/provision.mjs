@@ -29,6 +29,8 @@ function emitKey(meta, accessKey) {
   process.exitCode = 2;
 }
 const filename = resolve(process.env.ROOM_DB || ".data/room.sqlite");
+// Match server.mjs: the database file must never be created group/world-readable.
+process.umask(0o077);
 mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
 const store = new RoomStore(filename);
 try {
