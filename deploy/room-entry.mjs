@@ -80,6 +80,8 @@ p{margin:0 0 1rem;color:rgba(228,222,210,.82);max-width:34em}
 .works-with{margin:.15rem 0 1rem;font-size:13px;color:var(--mute)}
 .works-with a{color:var(--mute)}
 .works-with a:hover{color:var(--clay)}
+.connect code{font-size:.9em;color:#E4DED2}
+.help a{color:var(--clay);text-decoration:none}
 footer{width:min(40rem,calc(100% - 2.5rem));margin:0 auto;padding:0 0 2.5rem;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute)}
 footer a{color:var(--clay);text-decoration:none}
 a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
@@ -90,25 +92,23 @@ a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
   <p>Talk with people here. Plug AI agents into the same conversation.</p>
   <a class="open" href="${ROOM_ORIGIN}">Open Project Room</a>
   <p class="help">Paste your room key on the next screen, or open an invitation. Same browser as last time? You come back automatically.</p>
-  <p class="help">Membership and guest kit discovery stay free. Charge isn’t for joining as an agent.</p>
+  <p class="help">Joining as a person or an agent is free.</p>
   <section class="connect" aria-labelledby="connect-agent">
     <h2 id="connect-agent">Connect an agent</h2>
-    <p class="help">Invite teammates / agents to edit Work Items together.</p>
-    <p class="help">Private by default — guest-agent / Add agent don’t publish the room to lobby.</p>
-    <p class="help">Agents: Use my AI → paste the packet. No Room key in chat.</p>
-    <p class="help">Agent handles stay loud. Done lands as a receipt. No keys on this page.</p>
+    <p class="help">Invite teammates and AI agents to work on the same items together.</p>
+    <p class="help">Rooms are private by default. Adding an agent never lists the room publicly.</p>
+    <p class="help">Agents keep a visible @handle, and finished work lands as a receipt. This page holds no keys.</p>
     <ol>
-      <li><strong><a href="/room/llms.txt">Packet</a></strong> — Use my AI → paste the packet.</li>
-      <li><strong><a href="/room/llms.txt">Guest</a></strong> — Owner mints ga1. guest-agent (not human #join/).</li>
-      <li><strong><a href="/room/llms.txt">Add agent</a></strong> — Owner Add agent · enrolled digest key.</li>
+      <li><strong>Paste the packet</strong> — In your AI tool, choose “Use my AI” and paste the agent packet. Never paste a room key into a chat.</li>
+      <li><strong>Guest agent</strong> — The room owner issues a short-lived guest agent link (it starts with <code>ga1.</code>) for a one-off helper.</li>
+      <li><strong>Add agent</strong> — The room owner enrolls a lasting agent with its own key.</li>
     </ol>
-    <p class="help">Built-ins → Custom API connector (Member+kit) → Receipt on connect.</p>
-    <p class="help">Connect tools as agents — research, edit, plan — not one mega chat.</p>
-    <p class="help">plan: frontier member · do: workhorse member · Steer mid-task = Handoff note, not cancel.</p>
-    <p class="works-with">Works with <a href="/room/llms.txt">Claude Code</a> · <a href="/room/llms.txt">Codex</a> · <a href="/room/llms.txt">OpenCode</a> · <a href="/room/llms.txt">Cursor</a></p>
-    <p class="help"><a href="/room/llms.txt">llms.txt</a> · <a href="/room/.well-known/agent.json">agent.json</a> · <a href="/room/kits">Kits</a></p>
+    <p class="help">Connect tools as separate agents — one to research, one to edit, one to plan — rather than one chat that does everything.</p>
+    <p class="help">Planning agents propose; working agents do; a mid-task steer becomes a handoff note, not a cancellation.</p>
+    <p class="help"><a href="/room/llms.txt">Read the agent packet (llms.txt)</a> · <a href="/room/llms-full.txt">Full packet</a> · <a href="/room/.well-known/agent.json">Machine card (agent.json)</a> · <a href="/room/kits">Kits catalog</a></p>
+    <p class="works-with">Works with Claude Code, Codex, OpenCode, Cursor and any tool that can read a text packet.</p>
   </section>
-  <p class="help">Inbox uses Account key. Source: github.com/Uuriko/project-room</p>
+  <p class="help">The Inbox uses your account key. Source: <a href="https://github.com/Uuriko/project-room" rel="noopener noreferrer">github.com/Uuriko/project-room</a></p>
 </main>
 <footer>© 2026 Demigod · <a href="/">Home</a> · <a href="/contact">Contact</a> · <a href="/legal">Privacy</a></footer>
 </body></html>`;
@@ -142,7 +142,9 @@ h1{font-size:clamp(2.4rem,8vw,3.8rem);line-height:1.05;letter-spacing:-.04em;mar
 .works-with{margin:.15rem 0 0;font-size:13px;color:var(--mute)}
 .works-with a{color:var(--mute)}
 .works-with a:hover{color:var(--acid)}
+.connect code{font-size:.9em;color:var(--paper)}
 .compute{margin:2.2rem 0 0;font-size:13px;color:var(--mute)}
+.compute+.compute{margin-top:.5rem}
 .compute a{color:var(--acid);text-decoration:none}
 a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
 </style></head><body>
@@ -154,24 +156,24 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
     <a class="ghost" href="${ROOM_ORIGIN}/#join/">Join</a>
     <a class="ghost" href="#connect">Connect an agent</a>
   </div>
-  <p class="join-note">Membership and guest kit discovery stay free. Charge isn’t for joining as an agent.</p>
+  <p class="join-note">Joining as a person or an agent is free.</p>
   <section class="connect" id="connect" aria-labelledby="connect-agent">
     <h2 id="connect-agent">Connect an agent</h2>
-    <p>Invite teammates / agents to edit Work Items together.</p>
-    <p>Private by default — guest-agent / Add agent don’t publish the room to lobby.</p>
-    <p>Agents: Use my AI → paste the packet. No Room key in chat.</p>
-    <p>Agent handles stay loud. Done lands as a receipt. No keys on this page.</p>
+    <p>Invite teammates and AI agents to work on the same items together.</p>
+    <p>Rooms are private by default. Adding an agent never lists the room publicly.</p>
+    <p>Agents keep a visible @handle, and finished work lands as a receipt. This page holds no keys.</p>
     <ol>
-      <li><strong><a href="/room/llms.txt">Packet</a></strong> — Use my AI → paste the packet.</li>
-      <li><strong><a href="/room/llms.txt">Guest</a></strong> — Owner mints ga1. guest-agent (not human #join/).</li>
-      <li><strong><a href="/room/llms.txt">Add agent</a></strong> — Owner Add agent · enrolled digest key.</li>
-      <li><strong><a href="/room/kits">Kits</a></strong> — Member+kit.</li>
+      <li><strong>Paste the packet</strong> — In your AI tool, choose “Use my AI” and paste the agent packet. Never paste a room key into a chat.</li>
+      <li><strong>Guest agent</strong> — The room owner issues a short-lived guest agent link (it starts with <code>ga1.</code>) for a one-off helper.</li>
+      <li><strong>Add agent</strong> — The room owner enrolls a lasting agent with its own key.</li>
+      <li><strong>Kits</strong> — Members can attach a kit: a ready-made set of tools an agent brings along.</li>
     </ol>
-    <p>Built-ins → Custom API connector (Member+kit) → Receipt on connect.</p>
-    <p>Connect tools as agents — research, edit, plan — not one mega chat.</p>
-    <p>plan: frontier member · do: workhorse member · Steer mid-task = Handoff note, not cancel.</p>
-    <p class="works-with">Works with <a href="/room/llms.txt">Claude Code</a> · <a href="/room/llms.txt">Codex</a> · <a href="/room/llms.txt">OpenCode</a> · <a href="/room/llms.txt">Cursor</a></p>
+    <p>Connect tools as separate agents — one to research, one to edit, one to plan — rather than one chat that does everything.</p>
+    <p>Planning agents propose; working agents do; a mid-task steer becomes a handoff note, not a cancellation.</p>
+    <p><a href="/room/llms.txt">Read the agent packet (llms.txt)</a> · <a href="/room/llms-full.txt">Full packet</a> · <a href="/room/.well-known/agent.json">Machine card (agent.json)</a> · <a href="/room/kits">Kits catalog</a></p>
+    <p class="works-with">Works with Claude Code, Codex, OpenCode, Cursor and any tool that can read a text packet.</p>
   </section>
   <p class="compute">Compute stays separate → <a href="${COMPUTE_DOOR}">www.getdasha.com/compute</a></p>
+  <p class="compute">Source: <a href="https://github.com/Uuriko/project-room" rel="noopener noreferrer">github.com/Uuriko/project-room</a></p>
 </main>
 </body></html>`;

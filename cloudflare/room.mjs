@@ -6,7 +6,7 @@ import { createRoomServer } from '../server/http.mjs';
 import { DurableDatabase, durableStorage } from './storage.mjs';
 import { bootstrapRoom } from './bootstrap.mjs';
 import { maintenanceEnabled, maintenanceResponse } from '../server/maintenance.mjs';
-import { isEdgeDoorUrl } from '../deploy/agent-discovery.mjs';
+import { isEdgeDoorUrl, EDGE_DOOR_HOSTS } from '../deploy/agent-discovery.mjs';
 
 function roomOrigin(env) {
   const origin = new URL(env.ROOM_ORIGIN);
@@ -54,6 +54,11 @@ export default {
     if (isEdgeDoorUrl(request.url)) {
       const inbound = new URL(request.url);
       request = new Request(new URL(inbound.pathname + inbound.search, roomOrigin(env).origin), request);
+    } else if (EDGE_DOOR_HOSTS.includes(new URL(request.url).hostname)) {
+      // The /room* route also catches /rooms, /roommates and similar lookalikes
+      // (an exact pattern would drop /room?ref= query strings). Those are simply
+      // not pages here: answer 404, not the 403 meant for a spoofed Host.
+      return new Response('Not found', { status: 404, headers: { 'Cache-Control': 'no-store' } });
     }
     const url = new URL(request.url);
     // Never derive the trusted origin from a caller-controlled Host header.

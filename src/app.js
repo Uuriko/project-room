@@ -408,35 +408,54 @@ function setComposerError(text) {
   drafts.save(composerKey(), { error: text });
   renderComposerError();
 }
+const noticeText = () => $("#status").querySelector(".status-text")?.textContent ?? $("#status").textContent;
+function resetNotice(status) {
+  status.replaceChildren();
+  status.classList.remove("visible", "error");
+  // One live region: polite status for successes, alert for errors (set before text lands).
+  status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
+}
 function clearNotice() {
   noticeVersion += 1;
   clearTimeout(noticeTimer);
   noticeTimer = null;
-  const status = $("#status");
-  status.textContent = "";
-  status.classList.remove("visible", "error");
+  resetNotice($("#status"));
 }
 function notice(text, error = false) {
   const status = $("#status"), version = ++noticeVersion;
-  clearTimeout(noticeTimer);
+  clearTimeout(noticeTimer); noticeTimer = null;
   const show = () => {
     if (version !== noticeVersion) return;
-    status.textContent = text;
+    status.setAttribute("role", error ? "alert" : "status");
+    status.setAttribute("aria-live", error ? "assertive" : "polite");
+    const body = document.createElement("span");
+    body.className = "status-text"; body.textContent = text;
+    status.replaceChildren(body);
+    if (error) {
+      // Errors stay until dismissed or replaced so they can be read, selected and copied.
+      const dismiss = document.createElement("button");
+      dismiss.type = "button"; dismiss.className = "status-dismiss";
+      dismiss.textContent = "Dismiss"; dismiss.setAttribute("aria-label", "Dismiss error");
+      dismiss.addEventListener("click", () => { if (version === noticeVersion) clearNotice(); });
+      status.append(dismiss);
+    }
     status.classList.add("visible");
     status.classList.toggle("error", error);
-    noticeTimer = setTimeout(() => {
-      if (version !== noticeVersion) return;
-      status.classList.remove("visible", "error");
-      status.textContent = "";
-    }, error ? 10000 : 6000);
+    if (!error) noticeTimer = setTimeout(() => { if (version === noticeVersion) resetNotice(status); }, 6000);
   };
   // Repeated successful actions still deserve one fresh status announcement each.
-  if (status.textContent === text) { status.textContent = ""; queueMicrotask(show); }
+  if (noticeText() === text) { status.replaceChildren(); queueMicrotask(show); }
   else show();
 }
 function handleFailureNotice(error) {
   client.handleFailure(error);
   if (state) notice(requestFailureMessage(error), true);
+}
+// Signed-out load failures: a service outage (5xx) reads differently from a
+// browser that cannot reach the service at all (network error, no status).
+function unreachableRoomMessage(error) {
+  return error?.status >= 500 ? "The room service is unavailable right now. Try refreshing in a moment."
+    : "Can’t reach the room. Check your connection, then try refreshing.";
 }
 let accountRestoreFlight = null;
 function ensureAccountSession() {
@@ -1678,7 +1697,7 @@ $("#refresh-button").addEventListener("click", async () => {
     if (!roomId && client.session) return;
     if (!roomId) {
       const signedOut = [401, 403].includes(error.status);
-      setFormStatus($("#auth-error"), signedOut ? "" : "Can’t reach the room. Try refreshing.", true);
+      setFormStatus($("#auth-error"), signedOut ? "" : unreachableRoomMessage(error), true);
       setConnectionStatus(signedOut ? "Not connected · sign in required" : "Room service unavailable · not connected");
       return;
     }
@@ -1818,9 +1837,11 @@ $("#message-input").addEventListener("select", () => rememberComposerSelection()
 document.addEventListener("selectionchange", () => { if (document.activeElement === $("#message-input")) rememberComposerSelection(); });
 for (const type of ["keyup", "mouseup", "touchend"]) $("#message-input").addEventListener(type, () => rememberComposerSelection({ clearCollapsed: true }));
 function hideMentions() {
-  const list = $("#mention-list");
+  const list = $("#mention-list"), input = $("#message-input");
   if (!list) return;
   list.hidden = true; list.replaceChildren(); mentionIndex = 0;
+  // Closed listbox: the textarea stops pointing at an option that no longer exists.
+  input?.setAttribute("aria-expanded", "false"); input?.removeAttribute("aria-activedescendant");
 }
 function mentionChoices() {
   const input = $("#message-input"), found = mentionQuery(input.value, input.selectionStart);
@@ -1834,7 +1855,12 @@ function renderMentions() {
   if (!matches.length) { hideMentions(); return; }
   mentionIndex = Math.min(Math.max(mentionIndex, 0), matches.length - 1);
   list.hidden = false;
-  list.innerHTML = matches.map((m, i) => `<li><button type="button" class="mention-option${i === mentionIndex ? " active" : ""}" data-mention-id="${esc(m.id)}" aria-selected="${i === mentionIndex}">${esc(m.displayName)} <span>${esc(kindLabel(m.kind))}</span></button></li>`).join("");
+  // Each row is the option itself (role="option" + aria-selected are invalid on a
+  // nested button). Focus stays in the textarea; aria-activedescendant names the row.
+  list.innerHTML = matches.map((m, i) => `<li role="option" id="mention-option-${i}" class="mention-option${i === mentionIndex ? " active" : ""}" data-mention-id="${esc(m.id)}" aria-selected="${i === mentionIndex}">${esc(m.displayName)} <span>${esc(kindLabel(m.kind))}</span></li>`).join("");
+  const input = $("#message-input");
+  input.setAttribute("aria-expanded", "true");
+  input.setAttribute("aria-activedescendant", `mention-option-${mentionIndex}`);
 }
 function applyMentionMember(member) {
   const input = $("#message-input");
@@ -1875,10 +1901,10 @@ $("#message-input").addEventListener("keydown", e => {
   }
 });
 $("#mention-list")?.addEventListener("mousedown", e => {
-  const button = e.target.closest("[data-mention-id]");
-  if (!button) return;
+  const option = e.target.closest("[data-mention-id]");
+  if (!option) return;
   e.preventDefault();
-  applyMentionMember(state.members[button.dataset.mentionId]);
+  applyMentionMember(state.members[option.dataset.mentionId]);
 });
 $("#presence-list").addEventListener("click", e => {
   if (!shouldAddressPresenceClick(e.target)) return;
@@ -2913,7 +2939,7 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
   const requestedRoom = selectedRoomFromLocation();
   setFormStatus($("#auth-error"), signedOut
     ? requestedRoom ? `This account cannot open #${requestedRoom}. Use an account with active membership there.` : ""
-    : "Can’t reach the room. Try refreshing.", true);
+    : unreachableRoomMessage(error), true);
   setConnectionStatus(signedOut ? "Not connected · sign in required" : "Room service unavailable · not connected");
   $("#identity-label").textContent = signedOut ? "Not signed in" : "Session unavailable";
   $("#auth-panel").hidden = false;

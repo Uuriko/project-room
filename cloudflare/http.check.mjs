@@ -45,6 +45,14 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.equal(door.status, 200, await door.clone().text());
     assert.match(door.headers.get('content-type'), /text\/html/);
     assert.match(await door.text(), /Work Items, next actions, receipts/);
+    // Edge-door hosts: /room and /room/* rewrite onto the Room origin; the /room*
+    // route's lookalikes (/rooms, /roommates) are plain 404s, not the spoofed-host 403.
+    const edgeDoor = await mf.dispatchFetch('https://www.getdasha.com/room?ref=x', { headers: { Accept: 'text/html', 'CF-Connecting-IP': '192.0.2.1' } });
+    assert.equal(edgeDoor.status, 200, await edgeDoor.clone().text());
+    assert.match(await edgeDoor.text(), /Work Items, next actions, receipts/);
+    const lookalike = await mf.dispatchFetch('https://www.getdasha.com/rooms', { headers: { 'CF-Connecting-IP': '192.0.2.1' } });
+    assert.equal(lookalike.status, 404);
+    assert.equal(await lookalike.text(), 'Not found');
     const packet = await call('/room/llms.txt');
     assert.equal(packet.status, 200);
     assert.match(packet.headers.get('content-type'), /text\/plain/);
