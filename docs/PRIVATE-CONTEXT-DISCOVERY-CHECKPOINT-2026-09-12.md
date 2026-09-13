@@ -1,5 +1,17 @@
 # Private context discovery checkpoint
 
+## Agent tool checkpoint
+
+Exact `595de93` full Node regression: 1,513/1,513 passed, zero failures or skips, including stdio and cold-package checks.
+
+`595de93` connects server discovery to `RoomAgentClient.privateContexts({before, signal})` and the read-only `room_list_private_context` MCP tool. Listing does not read bodies. An agent explicitly chooses an ID for the existing `room_read_private_context` tool. Neither operation authorizes copying context into room history, sending, or starting work.
+
+The client pins room and recipient, rejects unexpected fields (including body/source metadata), validates at most 25 read-only unexpired entries with descending unique grant IDs, and accepts a continuation only when it identifies the last entry of a full page. Invalid markers are refused before transport. A revoked marker requires restarting discovery, not reusing old authority.
+
+Focused HTTP/client/MCP/stdio checks passed 17/17. Historical package inventory tests retain older tool counts. Independent review requested from Grok. Client discovery is now implemented; automatic notifications, human-facing share pointers, private-only work and large-journal performance remain separate gaps. No live activation.
+
+## Server checkpoint
+
 Exact checkpoint `af2ee88`: full Node regression 1,512/1,512 passed, zero failures or skips. Focused discovery/read/grant checks passed before the owner-revision extension; the final full run includes that extension and corrected fixture.
 
 Runtime `d571177`, test corrections `af2ee88`. The server now supports `GET /api/rooms/:roomId/private-context` for authenticated agent recipients. A response contains up to 25 `{grantId, expiresAt, permissions}` entries, room/viewer metadata, and a `next` share ID or null. It contains no share body, source/account identifiers, sender, subject or Inbox text.
