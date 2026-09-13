@@ -19,7 +19,7 @@ import { sessionRunView } from "./work-item-session.js";
 
 const $ = selector => document.querySelector(selector);
 let providerSettings = null, providerSDK = null, providerLoad = null, providerBusy = false;
-let providerTimer = null, providerJoinRequested = false;
+let providerTimer = null, providerJoinRequested = false, providerLifecycle = 0;
 try { providerJoinRequested = sessionStorage.getItem('pr-provider-join') === '1'; } catch {}
 function providerIntent(value) {
   providerJoinRequested = value;
@@ -52,6 +52,7 @@ async function loadProvider() {
   return providerLoad;
 }
 function providerFailure(error) {
+  providerIntent(false);
   $('#provider-join-status').textContent = error?.message || 'Sign-in unavailable. Try again.';
   $('#provider-join-button').disabled = false;
 }
@@ -76,23 +77,25 @@ async function completeProviderJoin() {
 function scheduleProviderRenewal() {
   clearTimeout(providerTimer);
   if (!accountClient.session?.account?.id.startsWith('idp-')) return;
+  const lifecycle = providerLifecycle;
   providerTimer = setTimeout(async () => {
     const owned = accountClient.session, generation = accountClient.generation;
     try {
       const sdk = await loadProvider(), identity = sdk.session;
       const token = await identity?.getToken();
-      if (!accountClient.owns(generation, owned)) return;
+      if (lifecycle !== providerLifecycle || !accountClient.owns(generation, owned)) return;
       if (!token || identity !== sdk.session) { endAccountAccess(); return; }
       await accountClient.refreshProvider(token);
       if (!accountClient.session) endAccountAccess();
     } catch (error) {
+      if (lifecycle !== providerLifecycle) return;
       if (!accountClient.session) endAccountAccess();
       else if (accountClient.owns(generation, owned) && Date.now() >= owned.expiresAt) endAccountAccess();
-    } finally { scheduleProviderRenewal(); }
+    } finally { if (lifecycle === providerLifecycle) scheduleProviderRenewal(); }
   }, Math.max(5000, Math.min(20000, accountClient.session.expiresAt - Date.now() - 15000)));
 }
 async function signOutProvider() {
-  providerIntent(false); clearTimeout(providerTimer);
+  providerIntent(false); providerLifecycle++; clearTimeout(providerTimer);
   if (providerSettings && accountClient.session?.account?.id.startsWith('idp-')) {
     const sdk = await loadProvider();
     if (sdk.session) await sdk.signOut();
@@ -1863,7 +1866,9 @@ $("#signout-button").addEventListener("click", async () => {
     const operation = ++signoutOperationId;
     signoutLoading = true; $("#signout-button").disabled = true;
     try {
+      const owned = accountClient.session, generation = accountClient.generation;
       await signOutProvider();
+      if (operation !== signoutOperationId || !accountClient.owns(generation, owned)) return;
       const ended = await accountClient.logout();
       if (operation !== signoutOperationId) return;
       if (ended || !accountClient.session) endAccountAccess();
@@ -1888,7 +1893,7 @@ $("#signout-button").addEventListener("click", async () => {
   const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
   const isCurrentOperation = () => operationId === signoutOperationId && sameSession(generation, roomId, memberId);
   signoutLoading = true; $("#signout-button").disabled = true;
-  try { await signOutProvider(); await client.logout(); }
+  try { await signOutProvider(); if (!isCurrentOperation()) return; await client.logout(); }
   catch (error) {
     if (!isCurrentOperation()) return;
     if ([401, 403].includes(error.status)) client.endAccess();

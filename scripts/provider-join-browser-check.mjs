@@ -27,13 +27,26 @@ for (const width of [390, 1280]) test(`Provider Join ${width}: verified Welcome 
     route.request().url().includes('/ui@') ? 'window.__internal_ClerkUICtor = {};' : `
       let listener = () => {};
       window.Clerk = { session: null, load: async () => {}, addListener(fn) { listener = fn; },
+        emit() { listener(); },
         openSignIn() { this.session = { getToken: async () => ${JSON.stringify(token)} }; listener(); },
         closeSignIn() {}, async signOut() { this.session = null; listener(); } };
     ` }));
   await page.goto(`http://127.0.0.1:${server.address().port}/`);
   await page.clock.install();
+  let attempts = 0;
+  await page.route('**/api/provider-session', route => {
+    attempts++;
+    if (attempts === 1) return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Try Join again.' } }) });
+    return route.continue();
+  });
   await page.locator('#provider-join-button').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#key-access').evaluate(el => el.open), false);
+  await page.locator('#provider-join-button').click();
+  await page.getByText('Try Join again.', { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('pr-provider-join')), null);
+  await page.evaluate(() => window.Clerk.emit());
+  await page.clock.fastForward(1000);
+  assert.equal(attempts, 1, 'provider emissions must not repeat a rejected Join');
   await page.locator('#provider-join-button').click();
   await page.locator('#room-title').filter({ hasText: 'Welcome' }).waitFor();
   assert.equal(new URL(page.url()).searchParams.get('room'), 'welcome');
@@ -47,7 +60,22 @@ for (const width of [390, 1280]) test(`Provider Join ${width}: verified Welcome 
   assert.equal((await renewal).status(), 200);
   assert.equal(await page.locator('#message-input').inputValue(), 'Keep this draft');
   await page.locator('#message-input').fill('');
+  let releaseRenewal, renewalCalls = 0;
+  const gate = new Promise(resolve => { releaseRenewal = resolve; });
+  let reachedRenewal;
+  const reached = new Promise(resolve => { reachedRenewal = resolve; });
+  await page.route('**/api/provider-session/refresh', async route => {
+    renewalCalls++;
+    const result = await route.fetch(); reachedRenewal(); await gate;
+    await route.fulfill({ response: result });
+  });
+  await page.clock.fastForward(21000); await reached;
   await page.locator('#signout-button').click();
   await page.locator('#provider-join-button').waitFor({ state: 'visible' });
   assert.equal(await page.evaluate(() => window.Clerk.session), null);
+  const lateResponse = page.waitForResponse(response => response.url().endsWith('/api/provider-session/refresh'));
+  releaseRenewal(); await lateResponse;
+  await page.clock.fastForward(60000);
+  assert.equal(renewalCalls, 1, 'late renewal must not restart the signed-out lifecycle');
+  assert.equal(await page.locator('#provider-join-button').isVisible(), true);
 });

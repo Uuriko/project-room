@@ -131,6 +131,15 @@ Full candidate regression:1305 pass, zero failed/skipped (60753ms); current
 Workers HTTP scenario also passes. Grok independently reports c9d957d client19/19
 and b3728f0 config16/16 plus auth-config HTTP2/2; visible Join review is separate.
 
+Join lifecycle follow-up: rejected Join clears intent so later SDK events cannot
+retry it without another user click. Provider sign-out advances a lifecycle fence;
+late renewals cannot restart its timer or end replacement access. The sign-out
+handlers recheck their original account/room ownership after awaiting the provider
+before issuing local logout. Both390/1280 browser checks now cover rejected Join,
+provider re-emission without a click, explicit retry, draft-preserving renewal,
+and a deliberately delayed renewal arriving after sign-out.
+Regression after lifecycle follow-up:1305 pass, zero failed/skipped (87235ms).
+
 Release copy retained at /Users/johnpotter/src/project-room-release-20260912-c79dfa5.
 It contains generated stamp/assets from the successful dry-run; don't stamp again
 without a fresh clean candidate. Integration .wrangler cache was not removed.
