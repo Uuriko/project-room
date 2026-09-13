@@ -30,7 +30,12 @@ for (const provider of ['sms','whatsapp']) test(`${provider} signed text renders
   await page.getByRole('heading',{name:provider==='sms'?'SMS message':'WhatsApp message',exact:true}).waitFor();
   await page.getByText('Private signed message fixture',{exact:true}).waitFor();
   assert.equal(await page.locator('#inbox-source-label').textContent(),`${provider==='sms'?'SMS':'WhatsApp'} · only you`);
-  assert.equal(await page.locator('#inbox-ask').isVisible(),false);
+  assert.equal(await page.locator('#inbox-ask').isVisible(),true);
+  await page.locator('#inbox-ask').click();await page.locator('#inbox-excerpt-text').waitFor();
+  await page.locator('#inbox-excerpt-text').evaluate(el=>{el.setSelectionRange(0,14);el.dispatchEvent(new Event('select'));});
+  await page.locator('#inbox-share-confirm').click();await page.locator('#inbox-share-dialog').waitFor({state:'hidden'});
+  assert.equal(f.store.room('commons').state.messages.at(-1).body,'Shared message excerpt\n\nPrivate signed');
+  await page.locator('#nav-inbox').click();await page.locator('#inbox-source-body').getByText('Private signed message fixture',{exact:true}).waitFor();
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   const label=provider==='sms'?'SMS':'WhatsApp';
   assert.equal(await page.getByRole('button',{name:`Disconnect ${label}`,exact:true}).count(),0);

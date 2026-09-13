@@ -125,7 +125,7 @@ function validate(request) {
   if (request.action === "source.excerpt" && (!validId(request.roomId) || typeof request.audienceVersion !== "string" || !/^[a-f0-9]{64}$/.test(request.audienceVersion)
     || !exact(request.selection, ["start", "end"]) || !revision(request.selection.start) || !revision(request.selection.end)
     || request.selection.start >= request.selection.end || request.selection.end > 262144))
-    fail(422, "invalid_inbox_share", "Select exact email text and the current room audience.");
+    fail(422, "invalid_inbox_share", "Select exact text and the current room audience.");
 }
 export const inboxAudience = state => Object.values(state.members).filter(m => m.active === true)
   .map(m => ({ memberId: m.id, revision: m.revision })).sort((a, b) => a.memberId.localeCompare(b.memberId));
@@ -133,9 +133,10 @@ const viewer = auth => ({ accountId: auth.account.id, authEpoch: auth.account.au
   sessionBinding: auth.sessionBinding, sessionRevision: auth.sessionRevision });
 const sharedBody = (data, request) => {
   if (request.action === "source.excerpt") {
-    if (data.adapter !== "email" || data.envelope.body.format !== "text") fail(409, "email_sharing_unavailable", "Only plain-text email excerpts can be shared.");
-    const content = emailSelectionText(readEmailEnvelope(data.envelope).body), { start, end } = request.selection;
-    const excerpt = content.slice(start, end), body = "Shared email excerpt\n\n" + excerpt;
+    const message=data.adapter==='message';
+    if (!message&&(data.adapter !== "email" || data.envelope.body.format !== "text")) fail(409, "email_sharing_unavailable", "Only plain-text excerpts can be shared.");
+    const content = message?data.paragraphs[0]:emailSelectionText(readEmailEnvelope(data.envelope).body), { start, end } = request.selection;
+    const excerpt = content.slice(start, end), body = (message?'Shared message excerpt\n\n':"Shared email excerpt\n\n") + excerpt;
     if (end > content.length || !text(excerpt, 4000) || body.length > 4000)
       fail(422, "invalid_inbox_share", "Choose nonempty text up to 4,000 characters including the excerpt label.");
     return body;

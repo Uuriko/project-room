@@ -319,7 +319,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     text("#inbox-subject", d.source.subject || "(No subject)");
     const email = d.source.email;
     text("#inbox-source-label", email ? "Email · only you" : d.source.adapter === 'message' ? `${({telegram:'Telegram',sms:'SMS',whatsapp:'WhatsApp'})[d.source.provider]} · only you` : "Sample message · only you");
-    $("#inbox-ask").hidden = d.source.adapter === 'message' || Boolean(email) && !d.source.capabilities.share && !pendingShare();
+    $("#inbox-ask").hidden = Boolean(email) && !d.source.capabilities.share && !pendingShare();
     $("#inbox-email-details").hidden = !email;
     const metadata = email ? ["Mailbox: " + d.source.recipient,
       ...["to", "cc", "bcc"].filter(k => email[k].length).map(k => (k === "to" ? "To" : k.toUpperCase()) + ": " + email[k].join(", ")),
@@ -501,7 +501,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     text("#inbox-share-boundary", privateShare ? "Only selected recipients and you. Expires in 7 days; copies can’t be recalled."
       : "Selected text becomes room history, including for future members.");
     const count = document.querySelectorAll("#inbox-share-member-list input:checked").length;
-    const hasText = sharing.source.adapter === "email" ? Boolean(sharing.selection) : Boolean($("#inbox-share-paragraphs input:checked"));
+    const hasText = sharing.source.adapter !== "synthetic" ? Boolean(sharing.selection) : Boolean($("#inbox-share-paragraphs input:checked"));
     $("#inbox-share-confirm").disabled = sharingBusy || (!sharing.request && (!hasText || privateShare && (count === 0 || count > 20)));
   }
   $("#inbox-share-scope").addEventListener("change", updateShareChoice);
@@ -532,8 +532,8 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
         input.type = "checkbox"; input.value = index; input.checked = pending?.paragraphs.includes(index) ?? false;
         input.disabled = Boolean(pending); span.textContent = value; label.append(input, span); return label;
       }));
-      if (!pending && source.source.adapter === "email") {
-        if (!source.source.capabilities.share) throw new Error("Sharing unavailable");
+      if (!pending && source.source.adapter !== "synthetic") {
+        if (source.source.adapter==='email'&&!source.source.capabilities.share) throw new Error("Sharing unavailable");
         const selectionOwner = sharing;
         const label = document.createElement("p"), input = document.createElement("textarea"), preview = document.createElement("pre");
         label.id = "inbox-excerpt-label"; label.textContent = "Select text to share";
@@ -551,7 +551,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
         const select = () => {
           if (sharing !== selectionOwner || !owns() || sharing.request || sharingBusy) return;
           const start = input.selectionStart, end = input.selectionEnd, value = input.value.slice(start, end);
-          const body = "Shared email excerpt\n\n" + value;
+          const body = (source.source.adapter==='message'?'Shared message excerpt\n\n':"Shared email excerpt\n\n") + value;
           const valid = Boolean(value.trim()) && value.isWellFormed() && body.length <= 4000;
           sharing.selection = valid ? { start, end } : null;
           preview.textContent = valid ? body : ""; preview.hidden = !valid;
@@ -583,11 +583,11 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     const privateShare = $("#inbox-share-scope").value === "private";
     const memberIds = [...document.querySelectorAll("#inbox-share-member-list input:checked")].map(el => el.value);
     if (!current.request && privateShare && (memberIds.length === 0 || memberIds.length > 20)) return;
-    if (!current.request && current.source.adapter === "email" && !current.selection) return;
-    current.request ??= { action: privateShare ? "source.grant" : current.source.adapter === "email" ? "source.excerpt" : "source.share", requestId: crypto.randomUUID(), sourceId: current.source.id,
+    if (!current.request && current.source.adapter !== "synthetic" && !current.selection) return;
+    current.request ??= { action: privateShare ? "source.grant" : current.source.adapter !== "synthetic" ? "source.excerpt" : "source.share", requestId: crypto.randomUUID(), sourceId: current.source.id,
       ...(privateShare ? { memberIds } : {}),
       sourceRevision: c.sourceRevision, roomId: c.roomId, audienceVersion: c.audienceVersion,
-      ...(current.source.adapter === "email" ? { selection: current.selection }
+      ...(current.source.adapter !== "synthetic" ? { selection: current.selection }
         : { paragraphs: [...document.querySelectorAll("#inbox-share-paragraphs input:checked")].map(el => Number(el.value)) }) };
     const retained = persistShare(current.request); sharingBusy = true; $("#inbox-share-confirm").disabled = true;
     $("#inbox-share-scope").disabled = true;

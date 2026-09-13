@@ -35,8 +35,14 @@ for(const mobile of [false,true])test(`full-stack Telegram Inbox acceptance (${m
   await page.getByRole('button',{name:'Sync Telegram',exact:true}).click();
   await page.getByText('1 message synced.',{exact:true}).waitFor({state:'attached'});
   await page.locator('#inbox-source-body').getByText('Acceptance: shared context stays private until I choose otherwise.',{exact:true}).waitFor();
-  assert.equal(await page.locator('#inbox-ask').isVisible(),false);
+  assert.equal(await page.locator('#inbox-ask').isVisible(),true);
   assert.equal(f.store.room('commons').sequence,before);assert.equal(f.store.inbox.verify().versions,1);
+  await page.locator('#inbox-ask').click();await page.locator('#inbox-excerpt-text').waitFor();
+  assert.equal(await page.locator('#inbox-share-confirm').isDisabled(),true);
+  await page.locator('#inbox-excerpt-text').evaluate(el=>{el.setSelectionRange(0,11);el.dispatchEvent(new Event('select'));});
+  await page.locator('#inbox-share-confirm').click();await page.locator('#inbox-share-dialog').waitFor({state:'hidden'});
+  assert.equal(f.store.room('commons').state.messages.at(-1).body,'Shared message excerpt\n\nAcceptance:');
+  await page.locator('#nav-inbox').click();await page.locator('#inbox-source-body').getByText('Acceptance: shared context stays private until I choose otherwise.',{exact:true}).waitFor();
   // Reopen persistent receiver storage; next browser sync must use saved offset.
   rdb.close();qdb.close();
   assert.equal(readFileSync(registryPath).includes(Buffer.from(token)),false);
