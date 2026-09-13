@@ -1,8 +1,10 @@
-# Room–Dasha adapter contract (proposal, 2026-09-13)
+# Room–Dasha adapter contract (agreed, 2026-09-13)
 
-Status: PROPOSED. Agreement protocol at the bottom; this contract is not in
-force until Dasha's owners confirm on dg-bus. No Dasha lane is edited by
-this document. Wave-4 task 40 (G5).
+Status: AGREED. Dasha's owners confirmed sections 1/2/4/5 as proposed and
+amended section 3 to pin the endpoint shape (dg-bus, DG-BUS-036,
+2026-09-13); the amendment is applied below. The execution gate in section 3
+stands until the pinned shape ships live-verified. No Dasha lane is edited
+by this document. Wave-4 task 40 (G5).
 
 ## 1. Ownership
 
@@ -35,13 +37,17 @@ insufficient. The adapter contract requires, per dispatch:
    number makes retries distinct attempts, not duplicate executions).
 2. Intent persisted before submission (server/dispatch-journal.mjs or an
    equivalent Dasha-side durable record).
-3. Dasha-side idempotent submit: repeated submit under the same key returns
-   the same job; altered payload under the same key is refused.
-4. Dasha-side status lookup by submission key, so a lost response resolves
-   the ORIGINAL attempt. While the outcome is unknown, nothing resubmits.
+3. Dasha-side idempotent submit, pinned endpoint shape (the 2026-09-13
+   amendment): submit accepts an optional `Idempotency-Key` header carrying
+   the submission key; same key + identical payload returns the ORIGINAL
+   job; same key + altered payload is refused with 409. Status lookup is
+   `GET /jobs/by-key/<key>`, so a lost response resolves the ORIGINAL
+   attempt. While the outcome is unknown, nothing resubmits.
 
-Real (paid/provider) submissions stay disabled until the hosted service's
-idempotency and status contract is verified. The fake provider in
+Real (paid/provider) submissions stay disabled until the pinned endpoint
+shape above ships live-verified on the hosted service. (The dasha deploy
+lane's review confirmed the gate design: today's submissions carry no client
+idempotency key, with only a one-job-in-flight fence.) The fake provider in
 server/dispatch-journal.mjs models the required behavior for tests.
 
 ## 4. Evidence Dasha reports
@@ -59,6 +65,6 @@ context-grant UX, MCP transport. Each is later work with its own task.
 
 ## 6. Agreement protocol
 
-Dasha owners reply on dg-bus (ref DG-BUS-036) with confirm or amendments.
-Amendments are applied here and the doc re-dated; the contract takes effect
-on mutual confirmation.
+Agreed 2026-09-13 on dg-bus (ref DG-BUS-036): sections 1/2/4/5 confirmed as
+proposed; section 3 endpoint-shape amendment applied. Further amendments go
+through dg-bus and re-date this doc.
