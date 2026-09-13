@@ -62,7 +62,7 @@ optional.push("server/account-room-create.mjs");
 optional.push("server/provider-config.mjs");
 const allowed = new Set([...required, ...optional]);
 for (const path of ['src/gmail-callback.js', ...['gmail-runtime', 'gmail-connections', 'gmail-oauth', 'gmail-mail-reader', 'gmail-email', 'mail-credential-vault'].map(name => `server/${name}.mjs`)]) allowed.add(path);
-for (const name of ['telegram-runtime','telegram-connection-registry','telegram-connections','telegram-receiver','telegram-inbox-import','telegram-receive-queue','telegram-receive-tick','telegram-bot-reader','twilio-message-reader','twilio-inbox-import','twilio-connection-registry','slack-event-reader']) allowed.add(`server/${name}.mjs`);
+for (const name of ['telegram-runtime','telegram-connection-registry','telegram-connections','telegram-receiver','telegram-inbox-import','telegram-receive-queue','telegram-receive-tick','telegram-bot-reader','twilio-message-reader','twilio-inbox-import','twilio-connection-registry','twilio-webhook','slack-event-reader']) allowed.add(`server/${name}.mjs`);
 const gmailAssets = (assets, files) => files.has('src/gmail-callback.js') ? [...assets, 'src/gmail-callback.js'] : assets;
 function externalDependencies(files) {
   const pkg = JSON.parse(files.get('package.json'));

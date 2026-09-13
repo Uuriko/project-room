@@ -16,6 +16,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/inbox.mjs');
   paths.add('server/twilio-inbox-import.mjs');
   paths.add('server/twilio-connection-registry.mjs');
+  paths.add('server/twilio-webhook.mjs');
   paths.add('server/inbox-outbox.mjs'); paths.add('server/inbox-transport.mjs'); paths.add('server/version.mjs');
   paths.add('scripts/stamp-version.mjs');
   paths.add('server/email-envelope.mjs'); paths.add('server/graph-email.mjs'); paths.add('server/email-import.mjs');

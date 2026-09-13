@@ -97,6 +97,31 @@ encrypted credentials, not provider-side access, and retains already saved messa
 No HTTP webhook, provisioning UI, or live registry has been enabled. Next is the
 bounded webhook host and authenticated connection controls, not a claim of live SMS.
 
+### Bounded webhook factory (not enabled)
+
+`createTwilioWebhookServer` now exercises signed HTTP delivery through the real
+registry and private Inbox transaction. It returns empty TwiML only after import
+or an exact duplicate receipt. It never sends a reply. Unknown paths, methods,
+formats, oversized bodies and exhausted route limits are rejected. Signature,
+authorization and storage failures return a generic non-success response without
+credentials or message text. The fixed callback URL comes from the encrypted
+registry, never the request Host or forwarding headers.
+
+Limits: 100 configured routes, 64 connections, 8 KiB headers, 64 KiB body, five
+seconds for body receipt, and 60 requests/minute/route by default. Limits are
+process-local, not a distributed abuse-control system. A trusted host must supply
+a current account session and locked connection grant. The factory is not wired
+into `server.mjs`, and all HTTP tests run on disposable local databases. TLS,
+provider configuration, deployment-wide rate limits, connection UI, background
+authority and media support remain separate unfinished work. Invalid signed
+content currently receives 503; provider retry/backoff and unsupported-media
+handling need operational disposition before enabling a real webhook.
+
+Fourteen messaging, mobile and cold-package checks passed. See
+[Twilio incoming webhooks](https://www.twilio.com/docs/messaging/guides/webhook-request)
+and [signature security](https://www.twilio.com/docs/usage/webhooks/webhooks-security)
+for the provider contract (rechecked September 12, 2026).
+
 Run `npm run test:messaging` for signed readers, private import and mobile display;
 run `npm run test:telegram` for the Telegram integration. All use disposable
 fixtures except the explicitly reported manual local check.
