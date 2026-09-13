@@ -170,3 +170,64 @@ export function doneChip(item) {
   if (!item || item.state === "superseded" || item.supersededBy) return "";
   return terminalWork(item) ? `<span class="done-chip" title="Finished and verified">✓ Done</span>` : "";
 }
+
+// F3: derived per-item change list from the item's own revision events.
+// Read-time only: the event log is the record; this assigns each revision
+// event the revision it produced (proposal is revision 0) so a viewer holding
+// an older basis can see exactly what changed since. No new event types, so
+// strict replay and historical recovery are unaffected.
+const WORK_REVISION_TYPES_FOR_CHANGES = [
+  T.WORK_ACCEPTED, T.WORK_STARTED, T.WORK_BLOCKED, T.WORK_BLOCKER_RESOLVED,
+  T.WORK_COMPLETED, T.WORK_SUPERSEDED, T.CLAIM_ACQUIRED, T.CLAIM_RELEASED,
+  T.VERIFICATION_RECORDED, T.OWNER_DECISION_RECORDED, T.DECISION_RECORDED,
+  T.SESSION_STARTED, T.SESSION_STATUS_CHANGED, T.SESSION_STOP_REQUESTED, T.SESSION_STOPPED,
+  T.WORK_HANDOFF_RECORDED
+];
+const WORK_CHANGE_TYPES = new Set([T.WORK_PROPOSED, ...WORK_REVISION_TYPES_FOR_CHANGES]);
+export function workItemChanges(events) {
+  if (!Array.isArray(events)) throw new Error("Work history must be a list");
+  const changes = [];
+  let revision = -1;
+  for (const event of events) {
+    if (!event || !WORK_CHANGE_TYPES.has(event.type)) continue;
+    if (event.type === T.WORK_PROPOSED) revision = 0; else revision += 1;
+    const data = event.data ?? {};
+    changes.push({
+      revision,
+      type: event.type,
+      actorId: event.actorId ?? null,
+      at: event.at ?? null,
+      ...(typeof data.reason === "string" && data.reason ? { reason: data.reason } : {}),
+      ...(typeof data.summary === "string" && data.summary ? { summary: data.summary } : {}),
+      ...(typeof data.decision === "string" && data.decision ? { decision: data.decision } : {}),
+      ...(typeof data.status === "string" && data.status ? { status: data.status } : {}),
+      ...(typeof data.result === "string" && data.result ? { result: data.result } : {}),
+      ...(typeof data.supersededBy === "string" && data.supersededBy ? { supersededBy: data.supersededBy } : {}),
+      ...(data.claim && typeof data.claim === "object" ? { claim: { repository: data.claim.repository ?? "", ref: data.claim.ref ?? "" } } : {}),
+      ...(typeof data.repository === "string" && data.repository ? { claim: { repository: data.repository, ref: typeof data.ref === "string" ? data.ref : "" } } : {})
+    });
+  }
+  return changes;
+}
+export function changeDescription(entry) {
+  switch (entry.type) {
+    case T.WORK_PROPOSED: return "Work proposed";
+    case T.WORK_ACCEPTED: return "Accepted";
+    case T.WORK_STARTED: return "Work started";
+    case T.WORK_BLOCKED: return entry.reason ? `Blocked: ${entry.reason}` : "Blocked";
+    case T.WORK_BLOCKER_RESOLVED: return "Blocker resolved";
+    case T.WORK_COMPLETED: return "Completion reported";
+    case T.WORK_SUPERSEDED: return entry.supersededBy ? "Superseded by replacement work" : "Superseded";
+    case T.CLAIM_ACQUIRED: return entry.claim?.repository ? `Scope claimed: ${entry.claim.repository}:${entry.claim.ref}` : "Scope claimed";
+    case T.CLAIM_RELEASED: return "Scope released";
+    case T.VERIFICATION_RECORDED: return entry.result ? `Verification: ${entry.result}` : "Verification recorded";
+    case T.OWNER_DECISION_RECORDED:
+    case T.DECISION_RECORDED: return entry.decision ? `Decision: ${entry.decision}` : "Decision recorded";
+    case T.SESSION_STARTED: return "Native session started";
+    case T.SESSION_STATUS_CHANGED: return entry.status ? `Native session: ${entry.status}` : "Native session updated";
+    case T.SESSION_STOP_REQUESTED: return "Native session stop requested";
+    case T.SESSION_STOPPED: return "Native session stopped";
+    case T.WORK_HANDOFF_RECORDED: return "Handoff recorded";
+    default: return "Updated";
+  }
+}
