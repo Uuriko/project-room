@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { initialRoom } from './bootstrap.mjs';
 import { ServiceError } from './store.mjs';
 import { applyEvent, event, EVENT_TYPES as T } from '../src/events.js';
+import { providerAccountId } from './operator-account-id.mjs';
 
 export const STARTER_ROOM_ID = 'welcome';
 const HOST_ID = 'welcome-host';
@@ -61,7 +62,7 @@ export async function refreshWithProvider(store, { token, verify, issuer, slotTo
   if (claims?.iss !== issuer || !/^user_[A-Za-z0-9]{1,100}$/.test(claims.sub ?? '')
     || !/^sess_[A-Za-z0-9]{1,100}$/.test(claims.sid ?? '')
     || !Number.isSafeInteger(claims.exp) || claims.exp * 1000 <= store.now()) fail(401, 'invalid_provider_identity');
-  const accountId = `idp-${createHash('sha256').update(JSON.stringify([issuer, claims.sub])).digest('hex')}`;
+  const accountId = providerAccountId(issuer, claims.sub);
   const provenance = `clerk:${createHash('sha256').update(issuer).digest('hex')}`;
   return store.transaction(() => {
     const current = store.authenticateAccountSession(slotToken, null, binding);
@@ -91,8 +92,8 @@ export async function loginWithProvider(store, { token, verify, issuer, slotToke
   if (claims?.iss !== issuer || typeof claims.sub !== 'string' || !/^user_[A-Za-z0-9]{1,100}$/.test(claims.sub)
     || typeof claims.sid !== 'string' || !/^sess_[A-Za-z0-9]{1,100}$/.test(claims.sid)
     || !Number.isSafeInteger(claims.exp) || claims.exp * 1000 <= store.now()) fail(401, 'invalid_provider_identity');
-  const digest = createHash('sha256').update(JSON.stringify([issuer, claims.sub])).digest('hex');
-  const accountId = `idp-${digest}`;
+  const accountId = providerAccountId(issuer, claims.sub);
+  const digest = accountId.slice(4);
   let roomId = STARTER_ROOM_ID, memberId = `member-${digest.slice(0, 48)}`;
   const provenance = `clerk:${createHash('sha256').update(issuer).digest('hex')}`;
   return store.transaction(() => {

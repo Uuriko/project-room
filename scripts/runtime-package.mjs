@@ -63,6 +63,7 @@ optional.push("server/clerk-verifier.mjs", "server/provider-onboarding.mjs");
 optional.push("server/account-room-create.mjs");
 optional.push("server/provider-config.mjs");
 optional.push("server/production-gates.mjs");
+optional.push("server/operator-account-id.mjs");
 optional.push('server/twilio-runtime.mjs');
 optional.push('server/messaging-receive-grants.mjs');
 const allowed = new Set([...required, ...optional]);
