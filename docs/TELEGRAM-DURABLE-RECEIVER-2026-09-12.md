@@ -143,3 +143,22 @@ Nine existing Inbox client tests also passed earlier in this checkpoint. Browser
 checks use mocked connection services with the real HTTP/auth/UI layers; live
 Telegram status or automatic receiving is not implied. Secure server bootstrap
 and live activation remain separate, unfinished steps.
+
+## Full-stack browser acceptance
+
+The new `scripts/telegram-inbox-acceptance.mjs` passes at desktop and 390px mobile
+width. Unlike the UI-only fixture, this uses the real encrypted registry, durable
+queue, authorized receiver, HTTP service, private Inbox store and browser UI.
+Only the Telegram network response is mocked. It verifies:
+
+- Browser sign-in → Connections → Sync → actual message text visible privately.
+- Room event sequence unchanged and no room-sharing button for Telegram.
+- Registry and queue closed/reopened from disk; token/body absent as plaintext.
+- Next sync requests offset 10 rather than 0 and creates no duplicate Inbox source.
+- Browser Disconnect persists registry state while retaining the saved message.
+- No browser errors or horizontal overflow in either viewport.
+
+Run the accumulated Telegram regression surface with `npm run test:telegram`.
+This includes Telegram unit/integration checks, compact controls and full-stack
+browser acceptance; Chromium must be available. These are disposable tests, not
+proof of live startup configuration or real continuous provider delivery.
