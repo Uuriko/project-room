@@ -292,6 +292,14 @@ button.source-link { background: none; border: 0; padding: .25rem 0; text-align:
 #room-guide-dismiss { width: auto; }
 #people-hint:empty { display: none; }
 .auth-panel { max-width: 28rem; margin: clamp(1rem, 8vw, 6rem) auto; padding: clamp(1.25rem, 4vw, 2.5rem); }
+#auth-panel { width: min(100% - 2rem, 22rem); margin: clamp(4rem, 20vh, 12rem) auto; border: 0; background: transparent; box-shadow: none; }
+#auth-panel #auth-title { margin: 0; }
+#sign-in-entry { list-style: none; text-align: center; cursor: pointer; }
+#sign-in-entry::-webkit-details-marker { display: none; }
+#key-access[open] > summary { margin-bottom: 1.5rem; }
+#auth-panel:has(#provider-join:not([hidden])) #key-access { margin-top: .75rem; }
+#provider-join-status:empty { display: none; }
+.app-shell:has(#auth-panel:not([hidden])) #refresh-button { display: none; }
 #auth-lead { margin: -0.6rem 0 1.1rem; }
 .auth-kind { display: flex; flex-wrap: wrap; gap: .45rem; margin: 0 0 1rem; }
 .auth-kind .button { flex: 1 1 8rem; width: auto; min-width: 0; }

@@ -1,5 +1,20 @@
 # Gmail pilot connection checkpoint
 
+## Latest local checkpoint
+
+Following John's explicit “go”, a private local pilot was initialized outside the
+repository and started on `http://127.0.0.1:4173`. The account key and separate
+32-byte vault key are owner-only files; Gmail runtime configuration loaded successfully.
+No Google consent has been completed and no messages have been read or sent.
+Chrome automation repeatedly failed to load its request-header policy before sign-in.
+The subsequent request to simplify first paint took priority: the entry screen now
+shows branding and a single Sign in control, with key/invite/help content disclosed
+only on demand. The local host still uses key authentication; this is not a claim of
+working Google account sign-in. Provider-enabled hosts retain their primary Join flow.
+
+The earlier implementation-stage notes below are historical; HTTP, runtime packaging,
+and Inbox controls have since been wired together and tested with synthetic accounts.
+
 ## Verified setup
 
 - Isolated Google Cloud project: `project-room-508502` (Project Room).

@@ -30,13 +30,12 @@
         <details id="connection-details"><summary aria-label="Connection details">Details</summary><p id="connection-explanation">Connecting to room service…</p></details>
       </div>
       <section id="auth-panel" class="auth-panel panel" aria-labelledby="auth-title" hidden>
-        <h1 id="auth-title" tabindex="-1">Welcome.</h1>
+        <h1 id="auth-title" class="sr-only" tabindex="-1">Sign in</h1>
         <div id="provider-join" hidden>
           <button id="provider-join-button" class="button primary" type="button">Join</button>
           <p id="provider-join-status" class="form-hint" role="status"></p>
         </div>
-        <details id="key-access" open><summary>Use a key or invite</summary>
-        <p id="auth-lead" class="form-hint">Paste your room key. Same browser as last time? You may already be in.</p>
+        <details id="key-access"><summary id="sign-in-entry" class="button primary">Sign in</summary>
         <div id="auth-kind" class="auth-kind" role="radiogroup" aria-label="What are you signing in with?">
           <button type="button" id="auth-kind-room" class="button ghost" aria-pressed="true">Room key</button>
           <button type="button" id="auth-kind-account" class="button ghost" aria-pressed="false">Account key</button>
@@ -52,12 +51,12 @@
         </form>
         <label class="invite-paste" for="invite-link">Have an invite?</label>
         <input id="invite-link" type="text" autocomplete="off" spellcheck="false" maxlength="512" placeholder="Paste the invite link">
-        <p id="auth-guest-note" class="form-hint">Guest invites last about eight hours in that browser. Room keys last until they are replaced.</p>
-        <details class="access-help"><summary>Need access?</summary>
+        <details class="access-help"><summary>Help</summary>
+          <p id="auth-lead" class="form-hint">Use a key or an invitation from the room owner.</p>
           <p id="auth-description">Ask the room owner for an invite link or room key.</p>
           <p id="auth-hint" class="form-hint">Keep your key private. Lost guest access? Ask for a new invite.</p>
+          <p id="auth-guest-note" class="form-hint">Guest access lasts about eight hours in that browser.</p>
         </details>
-        <details class="return-help"><summary>Returning to the room?</summary><p>Use the same browser to resume an active session. Members can sign in again with their current key. If guest access has expired, ask the owner for a fresh invitation; joining again creates a new guest identity. Your earlier messages stay in the room.</p></details>
         </details>
       </section>
 

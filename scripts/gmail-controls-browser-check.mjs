@@ -19,6 +19,7 @@ for (const mobile of [false, true]) test(`Gmail connection disclosure, sync and 
   const page = await browser.newPage({ viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 900 } });
   page.setDefaultTimeout(8000); const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}/?room=commons`);
+  await page.locator('#sign-in-entry').click();
   await page.locator('#access-key').fill(key); await page.locator('#auth-form button[type=submit]').click();
   await page.locator('#main').waitFor({ state: 'visible' }); await page.locator('#nav-inbox').click();
   assert.equal(await page.locator('#inbox-gmail-address').isVisible(), false);

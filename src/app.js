@@ -295,7 +295,7 @@ const client = new RoomClient({
       if (!keepAccount || !form.closest("#inbox-panel")) form.reset();
     }
     $("#work-dialog").close();
-    for (const id of ["people-panel", "composer-options", "work-options", "room-about", "connection-details", "rb-history-section", "rb-involving-section"]) $(`#${id}`).open = false;
+    for (const id of ["people-panel", "composer-options", "work-options", "room-about", "connection-details", "rb-history-section", "rb-involving-section", "key-access"]) $(`#${id}`).open = false;
     if ($("#room-guide")) $("#room-guide").hidden = true;
     if ($("#people-hint")) $("#people-hint").textContent = "";
     for (const control of document.querySelectorAll("#auth-form input, #auth-form button")) control.disabled = pendingSignout;
@@ -330,7 +330,7 @@ const client = new RoomClient({
       renderInvitation();
     }
     if (!pendingSignout) queueMicrotask(() => {
-      if (!$("#invitation-dialog").open) $("#access-key").focus({ preventScroll: true });
+      if (!$("#invitation-dialog").open) focusAuthEntry();
     });
   }
 });
@@ -606,14 +606,18 @@ function setInvitationFeedback(text, error = false) {
     });
   }
 }
+function focusAuthEntry() {
+  const selector = $('#key-access').open ? '#access-key' : $('#provider-join').hidden ? '#sign-in-entry' : '#provider-join-button';
+  $(selector).focus({ preventScroll: true });
+}
 function configureAuthPanel(roomId = selectedRoomFromLocation()) {
   const accountMode = accountSignIn();
-  $("#auth-title").textContent = roomId && accountMode ? "Open this room" : "Welcome.";
+  $("#auth-title").textContent = "Sign in";
   $("#access-key-label").textContent = accountMode ? "Account key" : "Room key";
   if ($("#auth-lead")) {
     $("#auth-lead").textContent = accountMode
-      ? roomId ? `Paste the account key that can open #${roomId}. Have a room key? Choose Room key.` : "Paste your account key. Inbox does not need a room."
-      : "Paste your room key. Same browser as last time? You may already be in.";
+      ? "Use your account key for rooms and Inbox."
+      : "Use a room key or invitation from the owner.";
   }
   $("#auth-kind-room")?.setAttribute("aria-pressed", accountMode ? "false" : "true");
   $("#auth-kind-account")?.setAttribute("aria-pressed", accountMode ? "true" : "false");
@@ -624,8 +628,11 @@ function configureAuthPanel(roomId = selectedRoomFromLocation()) {
   $("#auth-hint").textContent = accountMode
     ? roomId ? "Need membership? Ask the room owner. Keep your key private." : "Keep your key private."
     : "Keep your key private. Lost guest access? Ask for a new invite.";
-  $("#auth-form button[type='submit']").textContent = accountMode ? (roomId ? "Open room" : "Sign in") : "Enter room";
+  $("#auth-form button[type='submit']").textContent = "Continue";
 }
+$('#key-access').addEventListener('toggle', () => {
+  if ($('#key-access').open && !$('#auth-panel').hidden) $('#access-key').focus({ preventScroll: true });
+});
 function setAuthKind(kind) {
   authKind = kind === "account" ? "account" : "room";
   try { sessionStorage.setItem("pr-auth-kind", authKind); } catch {}
@@ -964,7 +971,7 @@ async function openAcceptedRoom(roomId, message, { acceptanceConfirmed = true } 
         : "This invitation was already accepted, but the Room could not be loaded. Refresh to try again; no new acceptance is needed.", true);
     setConnectionStatus(acceptanceConfirmed ? "Membership accepted · conversation not loaded" : "Invitation already accepted · Room not loaded");
     $("#auth-panel").hidden = false;
-    queueMicrotask(() => $("#access-key").focus({ preventScroll: true }));
+    queueMicrotask(focusAuthEntry);
   }
 }
 function selectOptions(selector, members, blank) {
@@ -1908,7 +1915,7 @@ $("#signout-button").addEventListener("click", async () => {
         configureAuthPanel();
         const ended = "Session ended; private drafts were cleared.";
         if ($("#auth-error").textContent !== ended) setFormStatus($("#auth-error"), ended, true);
-        if (!$("#invitation-dialog").open) queueMicrotask(() => $("#access-key").focus({ preventScroll: true }));
+        if (!$("#invitation-dialog").open) queueMicrotask(focusAuthEntry);
       }
     }
   }
@@ -3262,6 +3269,8 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
       if (config?.provider === 'clerk') {
         providerSettings = config;
         $('#provider-join').hidden = false; $('#key-access').open = false;
+        $('#sign-in-entry').textContent = 'Other options';
+        $('#sign-in-entry').className = 'text-button';
       }
     } catch { /* Existing key access remains available during config failure. */ }
   }
@@ -3291,7 +3300,7 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
       setConnectionStatus("Not connected · account sign-in required");
       configureAuthPanel();
       $("#auth-panel").hidden = false;
-      if (!$("#invitation-dialog").open) queueMicrotask(() => $("#access-key").focus({ preventScroll: true }));
+      if (!$("#invitation-dialog").open) queueMicrotask(focusAuthEntry);
       return;
     }
     if (!requestedRoom) showAccountWorkspace();
@@ -3312,5 +3321,5 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
   setConnectionStatus(signedOut ? "Not connected · sign in required" : "Room service unavailable · not connected");
   $("#identity-label").textContent = signedOut ? "Not signed in" : "Session unavailable";
   $("#auth-panel").hidden = false;
-  if (!$("#invitation-dialog").open) queueMicrotask(() => $("#access-key").focus({ preventScroll: true }));
+  if (!$("#invitation-dialog").open) queueMicrotask(focusAuthEntry);
 });
