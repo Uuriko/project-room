@@ -645,6 +645,27 @@ async function copyAgentSetup(event) {
 }
 $('#copy-agent-setup').addEventListener('click', copyAgentSetup);
 $('#help-copy-agent-setup').addEventListener('click', copyAgentSetup);
+$('#auth-key-file').addEventListener('change', async event => {
+  const input = event.currentTarget, file = input.files?.[0];
+  if (!file) return;
+  const mode = authKind, accountGeneration = accountClient.generation, roomGeneration = client.generation;
+  const current = () => input.files?.[0] === file && !$('#auth-panel').hidden && mode === authKind
+    && accountGeneration === accountClient.generation && roomGeneration === client.generation;
+  try {
+    if (file.size > 256) throw Error('Choose a Project Room key file.');
+    const value = (await file.text()).trim();
+    if (!current()) return;
+    if (!/^[A-Za-z0-9_-]{43}$/.test(value)) throw Error('Choose a Project Room key file.');
+    $('#access-key').value = value;
+    $('#access-key').type = 'password';
+    $('#access-key-reveal').setAttribute('aria-pressed', 'false');
+    $('#access-key-reveal').textContent = 'Show';
+    setFormStatus($('#auth-error'), '');
+    $('#auth-form button[type="submit"]').focus();
+  } catch {
+    if (current()) { $('#access-key').value = ''; setFormStatus($('#auth-error'), 'Choose a valid Project Room key file.'); }
+  } finally { if (input.files?.[0] === file) input.value = ''; }
+});
 function configureAuthPanel(roomId = selectedRoomFromLocation()) {
   const accountMode = accountSignIn();
   $("#access-key-label").textContent = accountMode ? "Account key" : "Room key";

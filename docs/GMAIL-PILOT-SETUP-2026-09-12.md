@@ -2,6 +2,20 @@
 
 ## Latest local checkpoint
 
+**Live read-only Gmail verified:** the private account was signed in through the new
+bounded key-file input. John completed Google verification and approval in Chrome;
+the callback reported Gmail connected. The first explicit Sync imported 25 real messages.
+Database counts changed from 0 to 25 private Inbox sources while room events stayed at 2.
+No message content or credentials are recorded in this document or the coordination bus.
+No mail was sent. Other messaging platforms remain unconnected.
+
+Live testing found a callback-navigation bug: returning to `/` showed sign-in despite
+an existing account session. The return link now targets `/?account=1#pr-view/inbox`.
+The empty Inbox now offers Connect email rather than falsely claiming connections are
+unavailable; page sync reports the actual imported count and whether more pages remain.
+Production release, background scheduling, large-message fallback and reliable
+revocation/reconnect recovery remain separate unfinished work.
+
 Following John's explicit “go”, a private local pilot was initialized outside the
 repository and started on `http://127.0.0.1:4173`. The account key and separate
 32-byte vault key are owner-only files; Gmail runtime configuration loaded successfully.

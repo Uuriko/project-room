@@ -10,7 +10,7 @@ for (const mobile of [false, true]) test(`Gmail connection disclosure, sync and 
   const key = f.store.issueAccountAccessKey(f.store.accountForMember('commons', 'owner').id);
   const gmailConnections = {
     list: () => [{ connectionId: 'gmail-fixture', mailbox: 'pilot@example.com', state: connected ? 'connected' : 'disconnected' }],
-    sync: () => { calls.push('sync'); return { connectionId: 'gmail-fixture', imported: 0, complete: true }; },
+    sync: () => { calls.push('sync'); return { connectionId: 'gmail-fixture', imported: mobile ? 25 : 0, complete: !mobile }; },
     disconnect: () => { calls.push('disconnect'); connected = false; return { connectionId: 'gmail-fixture', state: 'disconnected', providerRevoked: false }; }
   };
   const server = createRoomServer({ store: f.store, gmailConnections }); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -23,9 +23,9 @@ for (const mobile of [false, true]) test(`Gmail connection disclosure, sync and 
   await page.locator('#access-key').fill(key); await page.locator('#auth-form button[type=submit]').click();
   await page.locator('#main').waitFor({ state: 'visible' }); await page.locator('#nav-inbox').click();
   assert.equal(await page.locator('#inbox-gmail-address').isVisible(), false);
-  await page.locator('#inbox-connections summary').click(); await page.locator('#inbox-gmail-address').waitFor({ state: 'visible' });
+  await page.getByRole('button', { name: 'Connect email', exact: true }).click(); await page.locator('#inbox-gmail-address').waitFor({ state: 'visible' });
   await page.getByRole('button', { name: 'Sync pilot@example.com', exact: true }).click();
-  await page.getByText('Inbox updated.', { exact: true }).waitFor();
+  await page.getByText(mobile ? '25 messages synced. Sync again for more.' : 'Inbox updated.', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Disconnect pilot@example.com', exact: true }).click();
   await page.getByText('Disconnected here. Google revocation unconfirmed.', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Reconnect pilot@example.com', exact: true }).waitFor();

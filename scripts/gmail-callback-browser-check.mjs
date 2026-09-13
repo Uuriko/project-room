@@ -22,6 +22,7 @@ test('browser callback cleans history and completes with strict-cookie session',
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(origin + '/api/inbox/connections/gmail/callback?code=fixture-secret-code&state=fixture-state');
   await page.waitForFunction(() => document.querySelector('#gmail-status')?.textContent.includes('Gmail connected.'));
+  assert.equal(await page.getByRole('link', { name: 'Back to Inbox' }).getAttribute('href'), '/?account=1#pr-view/inbox');
   assert.equal(calls.length, 1); assert.equal(calls[0].session.token, slot.token);
   assert.ok(calls[0].callbackUrl.includes('fixture-secret-code'));
   assert.equal(new URL(page.url()).search, '');

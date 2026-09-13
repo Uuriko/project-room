@@ -54,7 +54,12 @@ for (const mobile of [false, true]) test(`Minimal sign-in and account entry (${m
   await page.locator('#access-key').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#auth-lead').isVisible(), false);
   await page.locator('#auth-kind-account').click();
-  await page.locator('#access-key').fill(key);
+  await page.locator('#auth-key-file').setInputFiles({ name: 'invalid', mimeType: 'text/plain', buffer: Buffer.from('not a credential') });
+  await page.getByText('Choose a valid Project Room key file.', { exact: true }).waitFor();
+  assert.equal(await page.locator('#access-key').inputValue(), '');
+  await page.locator('#auth-key-file').setInputFiles({ name: 'account-key', mimeType: 'text/plain', buffer: Buffer.from(key + '\n') });
+  await page.waitForFunction(() => document.querySelector('#access-key').value.length === 43);
+  assert.equal(await page.locator('#access-key').getAttribute('type'), 'password');
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await page.locator('#main').waitFor({ state: 'visible' });
   page.on('dialog', dialog => dialog.accept());

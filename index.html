@@ -49,6 +49,7 @@
             <input id="access-key" type="password" autocomplete="off" spellcheck="false" required maxlength="128" placeholder="Paste your key" aria-describedby="auth-error">
             <button type="button" id="access-key-reveal" class="button ghost" aria-pressed="false">Show</button>
           </div>
+          <label for="auth-key-file">Open key file<input id="auth-key-file" type="file" aria-describedby="auth-error"></label>
           <button class="button primary" type="submit">Enter room</button>
           <p id="auth-error" class="status form-status" role="alert"></p>
         </form>
@@ -111,7 +112,7 @@
             <div id="inbox-connection-list"></div>
           </details>
           <div id="inbox-list" aria-label="Messages"></div>
-          <p id="inbox-empty" class="form-hint">Sample inbox. Mail connections are not available yet.</p>
+          <div id="inbox-empty"><button id="inbox-connect-empty" class="text-button" type="button">Connect email</button></div>
         </aside>
         <button id="inbox-back" class="text-button inbox-back" type="button">← Inbox</button>
         <article id="inbox-reader" class="inbox-reader" hidden>

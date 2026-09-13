@@ -169,7 +169,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       await loadConnections();
       if (!owns() || capturedOwner !== owner) return;
       text('#inbox-connection-status', action === 'disconnect' ? result.providerRevoked ? 'Disconnected. Saved mail remains.' : 'Disconnected here. Google revocation unconfirmed.'
-        : result.complete ? 'Inbox updated.' : 'Page synced. Sync again for more.');
+        : `${result.imported ? `${result.imported} message${result.imported === 1 ? '' : 's'} synced.` : 'Inbox updated.'}${result.complete ? '' : ' Sync again for more.'}`);
     } catch (error) { if (owns() && capturedOwner === owner) text('#inbox-connection-status', errorText(error)); }
     finally {
       if (owns() && capturedOwner === owner) {
@@ -178,6 +178,10 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     }
   }
   $('#inbox-connections').addEventListener('toggle', () => { if ($('#inbox-connections').open && !connectionBusy) loadConnections(); });
+  $('#inbox-connect-empty').addEventListener('click', () => {
+    $('#inbox-connections').open = true;
+    $('#inbox-connections summary').focus();
+  });
   $('#inbox-gmail-form').addEventListener('submit', event => { event.preventDefault(); connectionAction('start', { mailbox: $('#inbox-gmail-address').value }); });
   async function load() {
     sync(); if (!owns()) return;

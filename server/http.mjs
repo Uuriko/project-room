@@ -325,7 +325,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // to the callback page's same-origin fetch; POST still requires CSRF + state.
         res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        return res.end('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Connect Gmail — Project Room</title><body><main><h1>Connect Gmail</h1><p id="gmail-status" role="status">Finishing connection…</p><a href="/">Back to Project Room</a></main><script src="/src/gmail-callback.js" defer></script></body></html>');
+        return res.end('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Connect Gmail — Project Room</title><body><main><h1>Connect Gmail</h1><p id="gmail-status" role="status">Finishing connection…</p><a href="/?account=1#pr-view/inbox">Back to Inbox</a></main><script src="/src/gmail-callback.js" defer></script></body></html>');
       }
       if (url.pathname === "/api/inbox" || url.pathname.startsWith("/api/inbox/")) {
         // Inbox authority is an account session, never a Room/agent bearer key.
