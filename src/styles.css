@@ -156,6 +156,7 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .receipt p { margin-bottom: .55rem; color: #cce2da; font-size: .77rem; line-height: 1.45; }
 .receipt a { display: inline-block; font-size: .72rem; text-decoration: none; }
 .receipt code { float: right; color: #9bbbae; font-size: .68rem; }
+.loop-warning { margin: .5rem 0 0; padding: .5rem .75rem; border-left: 3px solid var(--amber); background: #241b12; color: #e8caa8; font-size: .75rem; line-height: 1.5; }
 .blocker { margin-top: .8rem; padding: .75rem; border-left: 3px solid var(--amber); background: #241b12; }
 .blocker strong { color: var(--amber); font-size: .72rem; }
 .blocker p { margin: .25rem 0 0; color: #e8caa8; font-size: .75rem; }
