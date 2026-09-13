@@ -15,6 +15,8 @@ import { guestAgentLinkContract } from "./guest-agent-links.mjs";
 import { isSessionStatus, workItemSessionContract } from "../src/work-item-session.js";
 import { openJoinContract, publicMcpCard } from "./open-contract.mjs";
 import { handlePublicMcpMessage, MCP_CORS, MCP_VERSION, mcpOriginAllowed } from "../client/mcp-public.mjs";
+import { createClerkVerifier } from './clerk-verifier.mjs';
+import { loginWithProvider } from './provider-onboarding.mjs';
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -58,7 +60,7 @@ const rateHash = value => createHash("sha256").update(String(value)).digest("hex
 
 export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = 1000, trustedLocalProxy = false,
   loadAsset = path => readFile(new URL(path, assetRoot)), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
-  resolveRequestSignal = () => null, syntheticInboxTransport = null, cookieNamespace = "",
+  resolveRequestSignal = () => null, syntheticInboxTransport = null, cookieNamespace = "", providerAuth = null,
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot" }) {
   if (trustedLocalProxy && !origin?.startsWith("https://")) throw new Error("The deployment proxy requires a fixed HTTPS origin");
   if (typeof cookieNamespace !== "string" || !/^[A-Za-z0-9_-]{0,64}$/.test(cookieNamespace))
@@ -73,6 +75,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     if (url.protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) throw new Error("Non-loopback origins require HTTPS");
   }
   const expectedOrigin = () => origin || `http://127.0.0.1:${server.address().port}`;
+  const providerVerifier = providerAuth ? createClerkVerifier({ ...providerAuth, now: () => store.now() }) : null;
   // Avoid local-instance sign-in collisions; namespacing is not host isolation.
   const scopedCookieName = name => `${expectedOrigin().startsWith("https:") ? "__Host-" : ""}${cookieNamespace ? cookieNamespace + "_" : ""}${name}`;
   const streams = new Set();
@@ -364,6 +367,23 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const token = cookie(req, accountCookieName), binding = accountBinding(req);
         if (url.searchParams.getAll("after").length > 1) reject(422, "invalid_room", "Invalid room continuation");
         return json(res, 200, store.accountRooms(token, binding, { after: url.searchParams.get("after") }));
+      }
+      if (url.pathname === '/api/provider-session' && providerVerifier) {
+        if (req.method !== 'POST') reject(405, 'method_not_allowed', 'Method not allowed');
+        checkOrigin(req, true);
+        if (req.headers.authorization) reject(403, 'account_session_required', 'Use an account browser session');
+        const slotToken = cookie(req, accountCookieName);
+        if (!slotToken) reject(401, 'account_session_required', 'Start an account browser session');
+        const slot = store.accountSessionSlot(slotToken);
+        protectWrite(req, slot, false);
+        rate(`provider-login:${remoteAddress}`, 10);
+        const data = await body(req);
+        if (!exact(data, ['token', 'expectedSessionRevision'])) reject(422, 'invalid_provider_login', 'Invalid sign-in');
+        const oldRoomToken = cookie(req, roomCookieName);
+        const result = await loginWithProvider(store, { token: data.token, verify: providerVerifier, issuer: providerAuth.issuer,
+          slotToken, expectedRevision: data.expectedSessionRevision,
+          revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null });
+        return json(res, 201, { ...accountView(result.session), starterRoomId: result.roomId });
       }
       if (url.pathname === "/api/account-session") {
         const slotToken = cookie(req, accountCookieName);
