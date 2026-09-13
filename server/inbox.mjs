@@ -145,14 +145,35 @@ export class Inbox {
   grantRevoked(accountId, grantId, before = Number.MAX_SAFE_INTEGER) {
     return Boolean(this.db.prepare("SELECT 1 FROM private_inbox_commands WHERE account_id=? AND sequence<? AND json_extract(request_json,'$.action')='grant.revoke' AND json_extract(request_json,'$.grantId')=?").get(accountId, before, grantId));
   }
-  grantReceipt(accountId, request, state, sequence, ownerId, at, journalSequence) {
+  grantReceipt(accountId, request, state, sequence, ownerId, at, journalSequence, historicalMembers = null) {
     if (request.audienceVersion !== digest(inboxAudience(state))) fail(409, "stale_inbox_audience", "Audience changed. Review again.");
     const owner = state.members[ownerId];
     if (!owner?.active || owner.kind !== "human") fail(403, "access_denied", "Current human membership required.");
     const members = request.memberIds.map(id => {
       const member = state.members[id];
       if (!member?.active) fail(409, "stale_inbox_audience", "Audience changed. Review again.");
-      return { memberId: id, revision: member.revision };
+      const result = { memberId: id, revision: member.revision };
+      if (member.kind === "human") {
+        const bound = this.db.prepare("SELECT a.id,a.auth_epoch,a.active FROM member_accounts ma JOIN accounts a ON a.id=ma.account_id WHERE ma.room_id=? AND ma.member_id=?").get(request.roomId, id);
+        if (historicalMembers) {
+          const prior = historicalMembers.find(m => m.memberId === id);
+          // Legacy grants remain replayable, but cannot authorize human reads
+          // without an epoch pin. New sharing creates a fresh explicit grant.
+          if (Object.hasOwn(prior ?? {}, "account")) {
+            const pinned = prior.account;
+            const event = pinned && (pinned.authEpoch === 0
+              ? this.db.prepare("SELECT 1 AS active,created_at AS at FROM accounts WHERE id=?").get(pinned.id)
+              : this.db.prepare("SELECT active,at FROM account_access_events WHERE account_id=? AND auth_epoch=?").get(pinned.id, pinned.authEpoch));
+            if (!exact(pinned, ["id", "authEpoch"]) || !revision(pinned.authEpoch) || bound?.id !== pinned.id || !event?.active || event.at > at)
+              fail(409, "inbox_grant_reconciliation", "Private grant requires reconciliation.");
+            result.account = pinned;
+          }
+        } else {
+          if (!bound?.active) fail(409, "stale_inbox_audience", "Recipient account unavailable. Review again.");
+          result.account = { id: bound.id, authEpoch: bound.auth_epoch };
+        }
+      }
+      return result;
     });
     const body = sharedBody(this.version(accountId, request.sourceId, request.sourceRevision), {
       ...request, action: Object.hasOwn(request, "selection") ? "source.excerpt" : "source.share"
@@ -175,7 +196,9 @@ export class Inbox {
       if (grant.roomId !== roomId || !ownerAccount?.active || ownerAccount.auth_epoch !== row.auth_epoch
         || ownerBinding?.account_id !== row.account_id || !owner?.active || owner.revision !== grant.owner.revision
         || grant.expiresAt <= this.store.now() || this.grantRevoked(row.account_id, grantId)
-        || !isOwner && (!recipient || recipient.revision !== auth.member.revision)) return unavailable();
+        || !isOwner && (!recipient || recipient.revision !== auth.member.revision
+          || auth.member.kind === "human" && (!recipient.account || recipient.account.id !== auth.account?.id
+            || recipient.account.authEpoch !== auth.account?.authEpoch))) return unavailable();
       return { contractVersion: 1, grantId, roomId, body: grant.body, expiresAt: grant.expiresAt,
         permissions: ["read"], viewerId: auth.member.id, viewerSessionBinding: auth.sessionBinding };
     });
@@ -627,7 +650,7 @@ export class Inbox {
         require(prior?.revision === request.sourceRevision && revision(receipt.roomSequence) && receipt.roomSequence > 0);
         const room = this.store.rebuildProjection(request.roomId, receipt.roomSequence);
         const member = this.db.prepare("SELECT member_id FROM member_accounts WHERE room_id=? AND account_id=?").get(request.roomId, row.account_id);
-        Object.assign(expected, this.grantReceipt(row.account_id, request, room.state, room.sequence, member?.member_id, row.at, row.sequence));
+        Object.assign(expected, this.grantReceipt(row.account_id, request, room.state, room.sequence, member?.member_id, row.at, row.sequence, receipt.members));
       } else if (request.action === "grant.revoke") {
         const grant = this.grantRow(request.grantId);
         require(grant && grant.sequence < row.sequence && grant.account_id === row.account_id

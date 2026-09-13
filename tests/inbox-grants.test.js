@@ -120,3 +120,35 @@ test("failed private grant journaling rolls back and never publishes the excerpt
   f.store.db.exec("DROP TRIGGER reject_grant");
   assert.equal(f.apply(request).duplicate, false);
 });
+test("restoring a recipient account requires a fresh grant, even with unchanged room membership", t => {
+  const f = setup(t), request = { ...f.request(), memberIds: ["guest"] }, id = f.apply(request).receipt.grantId;
+  const account = f.store.accountForMember("commons", "guest");
+  assert.ok(f.read(id, "guest"));
+  f.store.changeAccountAccess(account.id, { expectedRevision: 0, active: false, reason: "End access" });
+  assert.throws(() => f.read(id, "guest"), { status: 401 });
+  assert.throws(() => f.apply({ ...request, requestId: randomUUID() }), { code: "stale_inbox_audience" });
+  f.store.changeAccountAccess(account.id, { expectedRevision: 1, active: true, reason: "Restore access" });
+  f.keys.guest = f.store.issueAccessKey("commons", "guest");
+  assert.throws(() => f.read(id, "guest"), { status: 404 });
+  const fresh = f.apply({ ...request, requestId: randomUUID() }).receipt;
+  assert.ok(f.read(fresh.grantId, "guest"));
+  assert.equal(f.store.inbox.verify().sources, 1);
+  f.store.close(); f.store = new RoomStore(join(f.directory, "room.sqlite"));
+  assert.throws(() => f.read(id, "guest"), { status: 404 });
+  assert.ok(f.read(fresh.grantId, "guest"));
+});
+test("legacy human grants replay but fail closed until a fresh epoch-pinned grant", t => {
+  const f = setup(t), request = { ...f.request(), memberIds: ["guest"] }, granted = f.apply(request).receipt;
+  // Reproduce the exact pre-epoch receipt shape in this disposable fixture.
+  const trigger = f.store.db.prepare("SELECT sql FROM sqlite_master WHERE name='private_inbox_commands_no_update'").get().sql;
+  const legacy = structuredClone(granted); delete legacy.members[0].account;
+  f.store.db.exec("DROP TRIGGER private_inbox_commands_no_update");
+  f.store.db.prepare("UPDATE private_inbox_commands SET receipt_json=? WHERE request_id=?").run(JSON.stringify(legacy), request.requestId);
+  f.store.db.exec(trigger);
+  assert.equal(f.store.inbox.verify().sources, 1);
+  f.store.close(); f.store = new RoomStore(join(f.directory, "room.sqlite"));
+  assert.throws(() => f.read(granted.grantId, "guest"), { status: 404 });
+  assert.ok(f.store.inbox.readGrant(f.session.token, "commons", granted.grantId, f.session.sessionBinding));
+  const fresh = f.apply({ ...request, requestId: randomUUID() }).receipt;
+  assert.ok(f.read(fresh.grantId, "guest"));
+});

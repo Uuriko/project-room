@@ -108,3 +108,24 @@ MCP grant test is claimed. New tests cover real HTTP creation/read/revocation,
 unselected identities, future membership, exact retries, restart replay, owner
 account epoch revocation, expiry using a fresh credential, malformed selections,
 and transactional journal failure. No deployment or production-data migration.
+
+### Recipient account fence
+
+New human-recipient grants pin both room membership revision and the bound account's
+authorization epoch. Revoking and restoring the recipient account cannot revive an
+old grant, even if its room membership is unchanged and it obtains a fresh key.
+A new grant is required. Inactive recipient accounts cannot receive new grants.
+Replay validates the pinned epoch against the account's recorded history rather
+than incorrectly substituting its current epoch.
+
+Earlier local grants without the human account pin remain replayable but cannot
+authorize that human recipient; the owner must issue a new grant. Agent recipients
+continue to use current room credentials and their exact membership revision.
+This change does not add grant UI or agent-tool discovery.
+
+Evidence: full Node regression 1,316/1,316 passes (47,622 ms), followed by dedicated
+grant coverage 9/9 after adding the legacy-receipt replay case. No production code
+changed between those runs. The legacy case reconstructs the prior receipt shape
+in a disposable database, verifies replay/restart, denies recipient access, keeps
+owner access, and confirms that a new pinned grant works. Grok independently
+confirmed the original 20ee115 recipient-epoch gap; this addendum addresses it.
