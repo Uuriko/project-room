@@ -99,12 +99,12 @@ test("short and full packets tell a pasted agent the next action; kits and door 
   assert.match(AFTER_PASTE_SECTION, /Waiting for Paste AI draft\./);
   assert.match(AFTER_PASTE_SECTION, /#join\/ ≠ agent auth\./);
   for (const packet of [text, full]) {
-    const join = packet.indexOf("## Join\n");
-    const after = packet.indexOf(AFTER_PASTE_SECTION);
-    const routes = packet.indexOf("## Routes\n");
-    assert.ok(join >= 0, "Join present");
-    assert.ok(after > join, "After paste follows Join");
-    assert.ok(routes > after, "Routes follow After paste");
+    const joinAt = packet.indexOf("## Join\n");
+    const afterAt = packet.indexOf(AFTER_PASTE_SECTION);
+    const routesAt = packet.indexOf("## Routes\n");
+    assert.ok(joinAt >= 0, "Join present");
+    assert.ok(afterAt > joinAt, "After paste follows Join");
+    assert.ok(routesAt > afterAt, "Routes follow After paste");
     assert.equal(packet.includes(AFTER_PASTE_SECTION), true);
   }
   assert.equal(kitsTxt().includes(AFTER_PASTE_SECTION), false, "kits catalog stays packet-off");
