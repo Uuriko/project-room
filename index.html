@@ -193,12 +193,12 @@
                 <ul id="rb-attention-list" class="rb-list"></ul>
                 <button id="rb-show-all" class="text-button" type="button" aria-expanded="false" aria-controls="rb-attention-list" hidden>Show all</button>
                 <details id="rb-involving-section">
-                <summary id="rb-involving-heading">Ongoing</summary>
+                <summary id="rb-involving-heading" class="section-summary"><span class="section-label"><strong>Ongoing</strong></span></summary>
                 <ul id="rb-involving-list" class="rb-list"></ul>
                 </details>
               </section>
               <details id="rb-history-section">
-                <summary id="rb-history-heading">Updates <span id="rb-history-count"></span></summary>
+                <summary id="rb-history-heading" class="section-summary"><span class="section-label"><strong>Updates</strong></span><span id="rb-history-count" class="count-chip"></span></summary>
                 <p id="rb-current-boundary" class="rb-boundary"></p>
                 <p id="rb-history-boundary" class="rb-boundary"></p>
                 <ul id="rb-history-list" class="rb-list rb-history"></ul>
@@ -258,7 +258,7 @@
               </div>
               <ul id="mention-list" class="mention-list" role="listbox" aria-label="People and agents" hidden></ul>
               <p id="composer-status" class="status form-status" role="status"></p>
-              <details id="composer-options" class="conversation-boundaries"><summary>Options</summary>
+              <details id="composer-options" class="conversation-boundaries"><summary class="section-summary"><span class="section-label"><strong>Options</strong></span></summary>
                 <p id="draft-hint" class="form-hint">Enter to send · Shift + Enter for a new line</p>
                 <button id="request-reply" class="button ghost" type="button" hidden>Request a reply</button>
                 <label class="form-hint draft-recovery-toggle"><input id="remember-drafts" type="checkbox" aria-describedby="draft-recovery-status"> Remember drafts</label>
@@ -272,7 +272,7 @@
 
         <aside class="context-rail">
           <details id="people-panel" class="panel presence-panel">
-            <summary id="presence-title">People & agents</summary>
+            <summary id="presence-title" class="section-summary"><span class="section-label"><strong>People & agents</strong></span></summary>
             <button id="connect-agent-button" class="button secondary" type="button" hidden>Add agent</button>
             <p id="people-hint" class="form-hint"></p>
             <div id="presence-list" class="presence-list"></div>
@@ -304,7 +304,7 @@
                 <p>No independent reviewer available. Change the owner or turn off review.</p>
                 <button id="review-settings-button" class="button secondary" type="button">Review settings</button>
               </div>
-              <details id="work-options"><summary>Review & permissions <span id="work-options-summary"></span></summary>
+              <details id="work-options"><summary class="section-summary"><span class="section-label"><strong>Review & permissions</strong></span><span id="work-options-summary" class="summary-note"></span></summary>
               <label>Mode <select id="work-mode-select"><option value="read">Read / think / review</option><option value="write">Authorized external write</option></select></label>
               <fieldset class="work-checks" aria-describedby="work-checks-help">
                 <legend>Required to finish</legend>
@@ -342,12 +342,12 @@
           </section>
 
           <details id="record-panel" class="panel record-panel">
-            <summary class="panel-header">
-              <span><strong id="record-title">History</strong></span>
+            <summary class="panel-header section-summary">
+              <span class="section-label"><strong id="record-title">History</strong></span>
               <span id="event-count" class="count-chip"></span>
             </summary>
             <details id="decision-section">
-              <summary class="panel-header"><span><strong>Decisions</strong></span><span id="decision-count" class="count-chip"></span></summary>
+              <summary class="panel-header section-summary"><span class="section-label"><strong>Decisions</strong></span><span id="decision-count" class="count-chip"></span></summary>
               <ul id="decision-list" class="rb-list"></ul>
             </details>
             <ol id="event-list" class="event-list"></ol>
