@@ -342,14 +342,22 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
           $("#inbox-share-confirm").disabled = !valid;
         };
         for (const event of ["select", "keyup", "mouseup", "touchend"]) input.addEventListener(event, select);
-        $("#inbox-share-paragraphs").replaceChildren(label, input, preview);
+        const all = document.createElement("button");
+        all.type = "button"; all.id = "inbox-excerpt-all"; all.textContent = "All text";
+        all.title = "Select the message text only; attachments and recipients are not included";
+        all.addEventListener("click", () => {
+          if (sharing !== selectionOwner || !owns() || sharing.request || sharingBusy) return;
+          input.focus(); input.setSelectionRange(0, input.value.length); select();
+        });
+        $("#inbox-share-paragraphs").replaceChildren(label, all, input, preview);
       }
       text("#inbox-share-status", pending ? "Share unconfirmed. Retry the original selection." : "");
       $("#inbox-share-confirm").textContent = pending ? "Confirm share" : "Share";
       $("#inbox-share-confirm").disabled = !pending;
     } catch (error) { if (owns() && turn === epoch) text("#inbox-share-status", "Couldn’t load sharing context. Close and try again."); }
   }
-  $("#inbox-share-paragraphs").addEventListener("change", () => {
+  $("#inbox-share-paragraphs").addEventListener("change", event => {
+    if (!event.target.matches('input[type="checkbox"]')) return;
     $("#inbox-share-confirm").disabled = !$("#inbox-share-paragraphs input:checked");
   });
   $("#inbox-share-confirm").addEventListener("click", async () => {
@@ -361,7 +369,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       ...(current.source.adapter === "email" ? { selection: current.selection }
         : { paragraphs: [...document.querySelectorAll("#inbox-share-paragraphs input:checked")].map(el => Number(el.value)) }) };
     const retained = persistShare(current.request); sharingBusy = true; $("#inbox-share-confirm").disabled = true;
-    for (const el of document.querySelectorAll("#inbox-share-paragraphs input, #inbox-share-paragraphs textarea")) el.disabled = true;
+    for (const el of document.querySelectorAll("#inbox-share-paragraphs input, #inbox-share-paragraphs textarea, #inbox-share-paragraphs button")) el.disabled = true;
     text("#inbox-share-status", "Sharing…");
     try {
       const result = await api.apply(current.request); if (!owns() || sharing !== current) return;

@@ -431,6 +431,32 @@ test("opt-in sample mailbox review is usable from account Inbox without entering
   await page.locator("#inbox-reply-confirm").click(); await page.locator("#inbox-reply-status").filter({ hasText: "Reviewed · not sent" }).waitFor();
   assert.equal(await page.locator("#main").isVisible(), false); assert.equal(sample.provider.submits, 0);
 });
+for (const mobile of [false, true]) test(`email all text ${mobile ? "mobile" : "desktop"}: explicit review, exact body and oversized refusal`, { timeout: 40000 }, async t => {
+  const f = await setup(t, mobile), p = f.page, mail = seedEmail(f);
+  const body = "Please review 🪷\n\nThe complete message.";
+  mail.raw.message.body.content = body;
+  const id = mail.importMessage(); await f.inbox(); await f.pick(id);
+  await p.locator("#inbox-ask").click(); await p.locator("#inbox-excerpt-all").waitFor();
+  const before = f.store.room("commons").state.messages.length;
+  assert.equal(await p.locator("#inbox-share-confirm").isEnabled(), false);
+  if (mobile) await p.locator("#inbox-excerpt-all").tap();
+  else { await p.locator("#inbox-excerpt-all").focus(); await p.keyboard.press("Enter"); }
+  assert.equal(await p.locator("#inbox-excerpt-preview").textContent(), "Shared email excerpt\n\n" + body);
+  assert.equal(f.store.room("commons").state.messages.length, before, "selection does not post");
+  await p.locator("#inbox-share-confirm").click(); await p.locator("#inbox-share-dialog").waitFor({ state: "hidden" });
+  const posted = f.store.room("commons").state.messages.at(-1);
+  assert.equal(posted.body, "Shared email excerpt\n\n" + body);
+  assert.doesNotMatch(JSON.stringify(posted), /observer@example.test|brief.txt/);
+  mail.raw.message.body.content = "x".repeat(4000); mail.importMessage();
+  await f.inbox(); await f.pick(id); await p.locator("#inbox-ask").click();
+  await p.locator("#inbox-excerpt-all").click();
+  assert.equal(await p.locator("#inbox-share-confirm").isEnabled(), false);
+  assert.equal(await p.locator("#inbox-excerpt-preview").isVisible(), false);
+  assert.equal(await p.locator("#inbox-share-status").textContent(), "Select a shorter excerpt.");
+  assert.equal(f.store.room("commons").state.messages.length, before + 1);
+  await selectExcerpt(p, "xxx");
+  assert.equal(await p.locator("#inbox-share-confirm").isEnabled(), true);
+});
 async function selectExcerpt(page, value) {
   const field = page.locator("#inbox-excerpt-text"); await field.focus();
   await field.press("ControlOrMeta+A"); await field.press("ArrowLeft");
