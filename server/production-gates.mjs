@@ -17,3 +17,7 @@ export function assertProductionReady(env, origin, { ship = openJoinContract().s
   if (ship !== false) throw new Error('ROOM_PRODUCTION forbids shipping public MCP join');
   return { production: true, providerAuth, operatorAccountId };
 }
+
+export function cloudflareServiceMode(production) {
+  return production ? 'cloudflare-production' : 'cloudflare-staging';
+}

@@ -40,6 +40,22 @@ test('GET /api/open and /api/version on the real HTTP server', async t => {
   const mcpHead = await fetch(origin + '/.well-known/mcp.json', { method: 'HEAD' });
   assert.equal(mcpHead.status, 200);
   assert.equal(await mcpHead.text(), '');
+  const emptyDir = mkdtempSync(join(tmpdir(), 'prod-http-empty-'));
+  const emptyStore = new RoomStore(join(emptyDir, 'room.sqlite'));
+  const emptyServer = createRoomServer({ store: emptyStore, serviceMode: 'cloudflare-staging' });
+  await new Promise(r => emptyServer.listen(0, '127.0.0.1', r));
+  t.after(async () => {
+    emptyServer.closeStreams(); emptyServer.closeAllConnections();
+    await new Promise(r => emptyServer.close(r));
+    emptyStore.close(); rmSync(emptyDir, { recursive: true, force: true });
+  });
+  const emptyOrigin = `http://127.0.0.1:${emptyServer.address().port}`;
+  const emptyOpen = await (await fetch(emptyOrigin + '/api/open')).json();
+  assert.equal(emptyOpen.ship, false);
+  assert.equal(emptyOpen.persistence, 'none');
+  assert.equal((await fetch(emptyOrigin + '/api/ready')).status, 503);
+  const staged = await (await fetch(emptyOrigin + '/api/version')).json();
+  assert.equal(staged.mode, 'cloudflare-staging');
   const prod = readFileSync(new URL('../cloudflare/wrangler.production.jsonc', import.meta.url), 'utf8');
   assert.match(prod, /ROOM_PRODUCTION": "1"/);
   assert.match(prod, /room\.trydemigod\.com/);

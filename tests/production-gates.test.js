@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { generateKeyPairSync } from 'node:crypto';
-import { assertProductionReady } from '../server/production-gates.mjs';
+import { assertProductionReady, cloudflareServiceMode } from '../server/production-gates.mjs';
 
 const issuer = 'https://clerk.example.com', origin = 'https://room.example.com';
 const keys = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -29,4 +30,11 @@ test('ROOM_PRODUCTION=1 requires Clerk, operator idp, and ship:false', () => {
   assert.equal(g.production, true);
   assert.equal(g.operatorAccountId, operator);
   assert.equal(g.providerAuth.issuer, issuer);
+  assert.equal(cloudflareServiceMode(g.production), 'cloudflare-production');
+  assert.equal(cloudflareServiceMode(false), 'cloudflare-staging');
+});
+
+test('Cloudflare Worker wires serviceMode from productionGates.production', () => {
+  const src = readFileSync(new URL('../cloudflare/room.mjs', import.meta.url), 'utf8');
+  assert.match(src, /serviceMode: cloudflareServiceMode\(productionGates\.production\)/);
 });
