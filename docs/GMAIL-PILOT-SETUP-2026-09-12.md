@@ -37,7 +37,7 @@ be silently overwritten. Failed configuration can leave an inert unmatched vault
 revision; reads require a matching active import connection. Cross-database crash
 recovery still needs operational testing, not an atomicity claim.
 
-Still not live: HTTP/CSRF wiring, concise UI, external key provisioning and private
+Still not live: production bootstrap/configuration, concise Inbox UI, external key provisioning and private
 database file permissions, Google-side revocation, durable worker scheduling,
 runtime dependency packaging, and real-user consent/testing. The existing importer’s
 legacy `mode: fixture` marker is not an assertion of live connectivity; it must be
@@ -54,10 +54,15 @@ tombstones reject late refreshes; reconnect requires a newer connection revision
 The module does not itself authorize callers, provision a key, revoke Google grants,
 erase backups, or wire the Inbox. Host lifecycle integration remains required.
 
-1. Add account-authenticated, CSRF-protected start route and callback handler with fresh
-   server-derived account epoch/session/connection revision. Never accept these bindings
-   from browser JSON. Do not log callback query strings; return a clean same-origin redirect
-   with no third-party resources and `no-store`/`no-referrer` headers.
+1. Optional account-authenticated, CSRF-protected start/complete/sync/disconnect routes
+   are implemented under `/api/inbox/connections/gmail/`, activated only when a host
+   supplies `gmailConnections` to `createRoomServer`. A GET callback serves inert HTML
+   without exchanging consent or reflecting query values. Its same-origin script clears
+   the query from browser history, obtains the existing account session, and completes
+   through a CSRF-protected POST. Strict account cookies remain unchanged. A Chromium
+   test verifies callback completion and history cleanup; route tests cover missing
+   authority, cross-origin/CSRF rejection, and sanitized errors. Host bootstrap, Inbox
+   connect controls, and real Google callback acceptance remain to be completed.
 2. Store tokens privately using authenticated encryption with keys outside the database
    and repository. Serialize connection writes; verify epoch/revision again at persistence.
    Implement refresh, disconnect/revocation, restart recovery, and deletion semantics.

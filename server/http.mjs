@@ -25,6 +25,7 @@ const accountCookieName = "account_session";
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 const bindingPattern = /^[a-f0-9]{64}$/;
 const assets = new Map([
+  ["/src/gmail-callback.js", ["src/gmail-callback.js", "text/javascript"]],
   ["/", ["index.html", "text/html"]], ["/index.html", ["index.html", "text/html"]],
   ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js", "agent-connections.js", "return-brief.js", "work-selectors.js", "work-status.js", "work-packet.js", "portable-work.js", "reminders.js", "reminder-time.js", "room-charter.js", "room-instructions.js", "reply-requests.js", "work-help.js", "help-offers.js", "work-item-session.js", "request-run-policy.js", "automation-policy.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
   ...["inbox-client.js", "inbox-ui.js", "inbox-send-ui.js", "room-roster.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
@@ -62,7 +63,7 @@ const rateHash = value => createHash("sha256").update(String(value)).digest("hex
 
 export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = 1000, trustedLocalProxy = false,
   loadAsset = path => readFile(new URL(path, assetRoot)), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
-  resolveRequestSignal = () => null, syntheticInboxTransport = null, cookieNamespace = "", providerAuth = null,
+  resolveRequestSignal = () => null, syntheticInboxTransport = null, cookieNamespace = "", providerAuth = null, gmailConnections = null,
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot" }) {
   if (trustedLocalProxy && !origin?.startsWith("https://")) throw new Error("The deployment proxy requires a fixed HTTPS origin");
   if (typeof cookieNamespace !== "string" || !/^[A-Za-z0-9_-]{0,64}$/.test(cookieNamespace))
@@ -318,11 +319,41 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.writeHead(200, { "Content-Type": `${type}; charset=utf-8` });
         return res.end(req.method === "HEAD" ? undefined : data);
       }
+      if (url.pathname === '/api/inbox/connections/gmail/callback' && req.method === 'GET') {
+        if (!gmailConnections) reject(503, 'gmail_not_configured', 'Email connection is not configured.');
+        // No consent exchange on a cross-site GET. Strict cookies become available
+        // to the callback page's same-origin fetch; POST still requires CSRF + state.
+        res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        return res.end('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Connect Gmail — Project Room</title><body><main><h1>Connect Gmail</h1><p id="gmail-status" role="status">Finishing connection…</p><a href="/">Back to Project Room</a></main><script src="/src/gmail-callback.js" defer></script></body></html>');
+      }
       if (url.pathname === "/api/inbox" || url.pathname.startsWith("/api/inbox/")) {
         // Inbox authority is an account session, never a Room/agent bearer key.
         if (req.headers.authorization) reject(401, "account_session_required", "Use your current account session.");
         const token = cookie(req, accountCookieName), binding = accountBinding(req);
         const auth = store.authenticateAccountSession(token, null, binding);
+        const gmailAction = /^\/api\/inbox\/connections\/gmail\/(start|complete|sync|disconnect)$/.exec(url.pathname);
+        if (gmailAction) {
+          if (!gmailConnections) reject(503, 'gmail_not_configured', 'Email connection is not configured.');
+          if (req.method !== 'POST') reject(405, 'method_not_allowed', 'Use POST.');
+          protectWrite(req, auth, false); rate(`gmail:${auth.account.id}`, 20);
+          const data = await body(req), action = gmailAction[1];
+          const field = action === 'start' ? 'mailbox' : action === 'complete' ? 'callbackUrl' : 'connectionId';
+          if (!exact(data, [field]) || typeof data[field] !== 'string' || data[field].length > (action === 'complete' ? 16384 : 320))
+            reject(422, 'gmail_request_invalid', 'Check the email connection request.');
+          const session = { token, binding };
+          try {
+            const result = action === 'start' ? gmailConnections.begin(session, data.mailbox)
+              : action === 'complete' ? await gmailConnections.complete(session, data.callbackUrl)
+              : action === 'sync' ? await gmailConnections.sync(session, data.connectionId)
+              : gmailConnections.disconnect(session, data.connectionId);
+            return json(res, 200, result);
+          } catch (error) {
+            if (error instanceof ServiceError) throw error;
+            // Provider details and callback codes must not become error output.
+            reject(409, 'gmail_connection_incomplete', 'Email connection could not finish. Reconnect and try again.');
+          }
+        }
         const view = url.searchParams.get("view");
         const replySource = /^\/api\/inbox\/sources\/([^/]{1,384})\/reply-review$/.exec(url.pathname);
         if (replySource && req.method === "GET") {
