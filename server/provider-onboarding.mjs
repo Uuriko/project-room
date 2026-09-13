@@ -37,7 +37,10 @@ const fail = (status, code) => { throw new ServiceError(status, code, 'Sign-in c
 // Renewal keeps browser identity/generation stable without extending any shared
 // credential. No access key is accepted or returned.
 export async function refreshWithProvider(store, { token, verify, issuer, slotToken, binding }) {
-  if (typeof token !== 'string' || !token || token.length > 16384 || typeof verify !== 'function') fail(422, 'invalid_provider_login');
+  if (typeof token !== 'string' || !token || token.length > 16384 || typeof verify !== 'function'
+    || typeof issuer !== 'string' || issuer.length > 256) fail(422, 'invalid_provider_login');
+  try { if (new URL(issuer).origin !== issuer || !issuer.startsWith('https://')) fail(422, 'invalid_provider_login'); }
+  catch { fail(422, 'invalid_provider_login'); }
   const claims = await verify(token);
   if (claims?.iss !== issuer || !/^user_[A-Za-z0-9]{1,100}$/.test(claims.sub ?? '')
     || !/^sess_[A-Za-z0-9]{1,100}$/.test(claims.sid ?? '')

@@ -5,9 +5,11 @@ import { createRoomServer } from "./server/http.mjs";
 import { deploymentConfig } from "./server/deployment.mjs";
 import { createServer } from "node:http";
 import { maintenanceEnabled, maintenanceReply } from "./server/maintenance.mjs";
+import { providerConfig } from './server/provider-config.mjs';
 
 const { host, port, origin, filename, production } = deploymentConfig();
 const paused = maintenanceEnabled(process.env.ROOM_MAINTENANCE);
+const providerAuth = paused ? null : providerConfig(process.env, origin);
 process.umask(0o077);
 let havePilotDb = false;
 try { havePilotDb = statSync(filename).isFile(); }
@@ -25,7 +27,7 @@ const server = paused ? createServer((req, res) => {
     const reply = maintenanceReply(url.pathname);
     res.writeHead(reply.status, reply.headers); res.end(req.method === "HEAD" ? undefined : reply.body);
   } catch { res.writeHead(400, { "Cache-Control": "no-store" }); res.end(); }
-}) : createRoomServer({ store, origin, trustedLocalProxy: production });
+}) : createRoomServer({ store, origin, trustedLocalProxy: production, providerAuth });
 server.listen(port, host, () => console.log(`Project Room ${paused ? "paused" : production ? "invite-only pilot" : "local pilot"}: ${origin}`));
 let closing = false;
 function close() {

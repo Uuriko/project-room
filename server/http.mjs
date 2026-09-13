@@ -17,6 +17,7 @@ import { openJoinContract, publicMcpCard } from "./open-contract.mjs";
 import { handlePublicMcpMessage, MCP_CORS, MCP_VERSION, mcpOriginAllowed } from "../client/mcp-public.mjs";
 import { createClerkVerifier } from './clerk-verifier.mjs';
 import { loginWithProvider, refreshWithProvider } from './provider-onboarding.mjs';
+import { publicProviderConfig } from './provider-config.mjs';
 import { createAccountRoom } from './account-room-create.mjs';
 
 const roomCookieName = "room_session";
@@ -270,6 +271,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname.startsWith("/api/")) res.setHeader("X-Operation-Id", operationId);
       if ((url.pathname === "/api/health" || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode }, req.method === "HEAD");
+      }
+      if (url.pathname === '/api/auth-config' && ['GET', 'HEAD'].includes(req.method)) {
+        return json(res, 200, publicProviderConfig(providerAuth), req.method === 'HEAD');
       }
       if (url.pathname === "/api/version" && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode, sourceRevision: SOURCE_REVISION, buildId: BUILD_ID }, req.method === "HEAD");

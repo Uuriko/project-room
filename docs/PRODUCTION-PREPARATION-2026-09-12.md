@@ -81,6 +81,31 @@ ecafc8a backend checkpoint:13/13. SDK loading, the visible Join control and its
 renewal scheduler are not yet connected; these methods alone are not usable login.
 Full regression after browser-client changes:1302 pass, zero failed/skipped (55262ms).
 
+## Deployment configuration (not enabled live)
+
+Node and Worker entrypoints now accept ROOM_CLERK_ISSUER,
+ROOM_CLERK_PUBLISHABLE_KEY and ROOM_CLERK_PUBLIC_KEY together. All absent keeps
+legacy access; any partial setting fails startup. The publishable key must encode
+the exact HTTPS issuer, the pinned RSA key must validate, and test keys are limited
+to loopback app origins. Authorized parties are the single configured app origin.
+GET /api/auth-config exposes only provider/issuer/publishableKey, with no-store;
+the signing verification key and all other server configuration are excluded.
+The renewal helper also rejects malformed/non-HTTPS issuer configuration directly.
+Same issuer/subject with a different valid provider session ID may renew: identity
+is account-bound, not bound to the first provider session. Provider-side revocation
+is bounded by assertion expiry, not promised instantaneous without a revocation
+feed. Grok's session-ID observation is recorded as this explicit contract, not a
+claim of a verified cross-account bypass.
+
+The SDK integration must follow the provider's current
+[JavaScript quickstart](https://clerk.com/docs/js-frontend/getting-started/quickstart)
+and [CSP requirements](https://clerk.com/docs/guides/secure/best-practices/csp-headers).
+Existing CSP has not yet been broadened and no SDK is loaded by these changes.
+Configuration checkpoint verification:1305 full Node tests pass, zero skips
+(57525ms);5 Worker compatibility/bootstrap/maintenance/HTTP scenarios pass;
+both exact-commit and uncommitted-candidate cold packaging checks pass. These
+checks do not substitute for a real provider browser sign-in journey.
+
 Release copy retained at /Users/johnpotter/src/project-room-release-20260912-c79dfa5.
 It contains generated stamp/assets from the successful dry-run; don't stamp again
 without a fresh clean candidate. Integration .wrangler cache was not removed.

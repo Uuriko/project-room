@@ -48,6 +48,16 @@ test('provider renewal rejects changed identity, logout, stale binding and expir
   }
 });
 
+test('renewal rejects malformed and non-HTTPS issuer configuration before verification', async t => {
+  const f = fixture(t);
+  for (const issuer of ['http://clerk.example.com', 'invalid', 'https://clerk.example.com/path', null]) {
+    let called = false;
+    await assert.rejects(refreshWithProvider(f.store, { ...f.options, issuer,
+      verify: async () => { called = true; return f.claims; } }), { code: 'invalid_provider_login' });
+    assert.equal(called, false);
+  }
+});
+
 test('renewal reclaims expired unreferenced credentials, not credentials of other slots', async t => {
   const f = fixture(t), first = await loginWithProvider(f.store, f.options);
   const start = f.store.now(); let now = start;
@@ -103,10 +113,17 @@ test('revoked account cannot be revived through provider sign-in', async t => {
 test('HTTP provider exchange requires browser CSRF and a signed identity, then opens only its starter room', async t => {
   const f = fixture(t), keys = generateKeyPairSync('rsa', { modulusLength: 2048 });
   const server = createRoomServer({ store: f.store, providerAuth: { issuer: f.options.issuer,
+    publishableKey: 'pk_test_' + Buffer.from('test.clerk.accounts.dev$').toString('base64'),
     publicKey: keys.publicKey.export({ type: 'spki', format: 'pem' }), authorizedParties: ['http://localhost:3000'] } });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   const origin = `http://127.0.0.1:${server.address().port}`;
+  const configResponse = await fetch(origin + '/api/auth-config');
+  const config = await configResponse.json();
+  assert.deepEqual(Object.keys(config).sort(), ['issuer', 'provider', 'publishableKey']);
+  assert.equal(config.provider, 'clerk'); assert.equal(config.issuer, f.options.issuer);
+  assert.match(configResponse.headers.get('cache-control'), /no-store/);
+  assert.equal(await (await fetch(origin + '/api/auth-config', { method: 'HEAD' })).text(), '');
   const bootstrap = await fetch(origin + '/api/account-session'), cookie = bootstrap.headers.get('set-cookie').split(';')[0], slot = await bootstrap.json();
   const now = Math.floor(f.store.now() / 1000);
   const input = [{ alg: 'RS256', typ: 'JWT' }, { ...f.claims, azp: 'http://localhost:3000', iat: now, nbf: now }].map(v => Buffer.from(JSON.stringify(v)).toString('base64url')).join('.');
