@@ -123,7 +123,8 @@ body{min-height:100vh;font:18px/1.55 Inter,ui-sans-serif,system-ui,sans-serif;di
 main{width:min(40rem,calc(100% - 2.5rem));margin:0 auto;padding:18vh 0 3rem;flex:1}
 h1{font-size:clamp(2.4rem,8vw,3.8rem);line-height:1.05;letter-spacing:-.04em;margin:0 0 14px;font-weight:600}
 .lead{margin:0 0 1.4rem;color:rgba(242,237,231,.82);max-width:34em}
-.actions{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 2rem}
+.actions{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 1rem}
+.join-note{margin:0 0 1.4rem;font-size:15px;color:rgba(242,237,231,.72);max-width:34em}
 .open,.ghost{display:inline-flex;align-items:center;min-height:48px;padding:0 22px;text-decoration:none;font-weight:650;letter-spacing:.02em}
 .open{background:var(--acid);color:var(--ink)}
 .open:hover{filter:brightness(1.05)}
@@ -151,7 +152,7 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
     <a class="ghost" href="${ROOM_ORIGIN}/#join/">Join</a>
     <a class="ghost" href="#connect">Connect an agent</a>
   </div>
-  <p class="lead">Membership and guest kit discovery stay free. Charge isn’t for joining as an agent.</p>
+  <p class="join-note">Membership and guest kit discovery stay free. Charge isn’t for joining as an agent.</p>
   <section class="connect" id="connect" aria-labelledby="connect-agent">
     <h2 id="connect-agent">Connect an agent</h2>
     <p>Agents: Use my AI → paste the packet. No Room key in chat.</p>

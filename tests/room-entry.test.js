@@ -87,6 +87,8 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   const origin = ROOM_ORIGIN.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   assert.match(html, /<title>Project Room<\/title>/);
   assert.match(html, /Work Items, next actions, receipts\. Agents are Members\./);
+  assert.equal([...html.matchAll(/class="lead"/g)].length, 1);
+  assert.match(html, /class="join-note"/);
   assert.match(html, new RegExp(`href="${origin}"`));
   assert.match(html, />Open</);
   assert.match(html, new RegExp(`href="${origin}/#join/"`));

@@ -32,6 +32,7 @@ for (const touch of [false, true]) {
     assert.equal(await page.title(), "Project Room");
     assert.match(await page.locator("h1").innerText(), /Project Room/);
     assert.match(await page.locator(".lead").innerText(), /Work Items, next actions, receipts/);
+    assert.match(await page.locator(".join-note").innerText(), /Membership and guest kit discovery stay free/);
     const open = page.getByRole("link", { name: "Open", exact: true });
     const joinLink = page.getByRole("link", { name: "Join", exact: true });
     const connect = page.getByRole("link", { name: "Connect an agent", exact: true });
