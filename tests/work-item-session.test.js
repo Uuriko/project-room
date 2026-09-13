@@ -11,7 +11,7 @@ import { EVENT_TYPES as T, applyEvent, replay } from "../src/events.js";
 import { seedEvents } from "../src/seed.js";
 import { validAgentNext } from "../src/agent-error.mjs";
 import {
-  SESSION_STATUSES, SESSION_EVENT_TYPES, sessionRecord, sessionCommandType, attemptReceipts,
+  SESSION_STATUSES, SESSION_EVENT_TYPES, sessionRecord, sessionCommandType, attemptReceipts, cancellationState,
   listWorkItemSessions, workItemSessionContract, applySessionFields, sessionWorker,
   SESSION_HEARTBEAT_STALE_MS
 } from "../src/work-item-session.js";
@@ -358,6 +358,52 @@ test("G6 output and usage receipts: measured usage stays apart from estimates; i
 
   // The session card surfaces receipts alongside the ledger.
   assert.equal(listWorkItemSessions({ wr: item })[0].receipts.length, 2);
+});
+
+test("G7 meaningful cancellation: stop requested, dispatch disabled, access revoked and runtime stopped stay distinct; silence never means stopped", () => {
+  const at = Date.parse("2026-09-13T04:00:00.000Z");
+  const live = () => { const item = { id: "c", title: "Live", state: "accepted", revision: 0, accountableMemberId: "owner" };
+    applySessionFields(item, { type: SESSION_EVENT_TYPES.STARTED, actorId: "agent", at: "2026-09-13T03:50:00.000Z", data: {} });
+    return item; };
+
+  // stop requested: signal sent, run may still be live - not terminated.
+  const stopping = live();
+  applySessionFields(stopping, { type: SESSION_EVENT_TYPES.STOP_REQUESTED, actorId: "owner", at: "2026-09-13T03:59:00.000Z" });
+  const s1 = cancellationState(stopping, { nowMs: at });
+  assert.deepEqual({ stopRequested: s1.stopRequested, runtimeStopped: s1.runtimeStopped, unresponsive: s1.unresponsive },
+    { stopRequested: true, runtimeStopped: false, unresponsive: false });
+
+  // dispatch disabled: a tripped budget wire forbids further dispatch; still not a stop.
+  const over = live();
+  over.budget = { maxSpendCents: 100 }; over.spend_cents = 150;
+  const s2 = cancellationState(over, { nowMs: at });
+  assert.equal(s2.dispatchDisabled, "maxSpendCents");
+  assert.equal(s2.runtimeStopped, false);
+
+  // access revoked: the worker's membership is inactive while the run shows live.
+  const s3 = cancellationState(live(), { nowMs: at, workerActive: false });
+  assert.equal(s3.accessRevoked, true);
+  assert.equal(s3.runtimeStopped, false);
+
+  // runtime stopped: an actual stop event is the only termination proof.
+  const done = live();
+  applySessionFields(done, { type: SESSION_EVENT_TYPES.STOPPED, actorId: "agent", at: "2026-09-13T03:59:30.000Z", data: { status: "done" } });
+  const s4 = cancellationState(done, { nowMs: at });
+  assert.deepEqual({ stopRequested: s4.stopRequested, dispatchDisabled: s4.dispatchDisabled,
+    accessRevoked: s4.accessRevoked, runtimeStopped: s4.runtimeStopped, unresponsive: s4.unresponsive },
+    { stopRequested: false, dispatchDisabled: null, accessRevoked: false, runtimeStopped: true, unresponsive: false });
+
+  // silence: heartbeat long stale -> unresponsive, NEVER runtimeStopped.
+  const silent = { id: "s", title: "Silent", state: "accepted", revision: 0, accountableMemberId: "owner" };
+  applySessionFields(silent, { type: SESSION_EVENT_TYPES.STARTED, actorId: "agent", at: "2026-09-13T01:00:00.000Z", data: {} });
+  const s5 = cancellationState(silent, { nowMs: at });
+  assert.equal(s5.unresponsive, true);
+  assert.equal(s5.runtimeStopped, false, "silence must never read as termination");
+
+  // the session card carries the derivation
+  const card = listWorkItemSessions({ s: silent }, null, { nowMs: at })[0];
+  assert.equal(card.cancellation.unresponsive, true);
+  assert.equal(card.cancellation.runtimeStopped, false);
 });
 
 test("G1 attempt environment and outputs flow through the session command path", async t => {
