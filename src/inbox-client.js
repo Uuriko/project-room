@@ -40,11 +40,30 @@ function validReplyTarget(a, update = false) {
     && o.to.length + o.cc.length + o.bcc.length > 0 && !o.differences.some(v => ["draft_state", "thread", "from", "sender", "attachments"].includes(v));
   return (!a.canReview || supported) && (!r?.current || a.canReview) && (a.status !== "draft_reviewed" || r !== null);
 }
+const connectionStates = ["active", "disconnected", "reconnect_required"], channels = { email: "Email", telegram: "Telegram" };
+const validConnectionRef = c => c === null || (id(c?.id) && Object.hasOwn(channels, c.channel) && boundedText(c.provider, 64)
+  && connectionStates.includes(c.state) && Object.keys(c).length === 4);
+export function validConnection(c, accountId) {
+  return c?.accountId === accountId && id(c.id) && revision(c.revision) && c.revision > 0 && Object.hasOwn(channels, c.channel)
+    && boundedText(c.provider, 64) && boundedText(c.externalId, 2048) && connectionStates.includes(c.state)
+    && ["kind", "id", "handle", "displayName"].every(k => boundedText(c.identity?.[k], 2048)) && Object.keys(c.identity).length === 4
+    && ["read", "send", "threads", "edit"].every(k => typeof c.capabilities?.[k] === "boolean") && Object.keys(c.capabilities).length === 4
+    && Object.keys(c).length === 9;
+}
 function validSource(source, sourceId, accountId) {
   if (source?.id !== sourceId || !revision(source.revision) || !source.revision) return false;
   if (source.adapter === "synthetic") return ["sender", "recipient", "subject"].every(k => boundedText(source[k], 240))
     && Array.isArray(source.paragraphs) && source.paragraphs.length <= 20 && source.paragraphs.every(p => boundedText(p, 4000));
   const e = source.email, c = source.capabilities;
+  if (source.adapter === "telegram") {
+    const ch = source.channel;
+    return ch?.view === "channel-excerpt-v1" && ch.accountId === accountId && ch.channel === "telegram" && boundedText(ch.provider, 64)
+      && connectionStates.includes(ch.connectionState) && ch.format === "text" && ["message", "edited_message", "channel_post"].includes(ch.kind)
+      && typeof ch.edited === "boolean" && boundedText(ch.chat, 2048) && revision(ch.attachmentCount) && ch.attachmentCount <= 20
+      && ["sender", "recipient", "subject"].every(k => boundedText(source[k], 2048)) && c?.draft === true && c.send === false
+      && Array.isArray(source.paragraphs) && source.paragraphs.length === 1 && boundedText(source.paragraphs[0], 16384) && !source.paragraphs[0].includes("\r")
+      && c.share === Boolean(source.paragraphs[0].trim());
+  }
   return source.adapter === "email" && e?.view === "email-excerpt-v1" && e.accountId === accountId
     && ["text", "html"].includes(e.format) && ["active", "disconnected", "reconnect_required"].includes(e.connectionState)
     && ["sender", "recipient"].every(k => boundedText(source[k], 320)) && boundedText(source.subject, 4096)
@@ -67,13 +86,22 @@ async function validResult(proof, body, version, sourceRevision, roomId, workIte
     && version === (await inboxTextVersion(canonical(proof))).slice(7);
 }
 async function validEnvelope(p, accountId, sourceId) {
-  if (!p || p.adapter !== "synthetic" || p.accountId !== accountId || p.sourceId !== sourceId
+  if (!p || !["synthetic", "telegram"].includes(p.adapter) || p.accountId !== accountId || p.sourceId !== sourceId
     || !revision(p.authEpoch) || ![p.sourceRevision, p.draftRevision].every(n => revision(n) && n > 0)
-    || ![p.from, p.subject].every(v => typeof v === "string" && v.length <= 240)
-    || !Array.isArray(p.to) || p.to.length !== 1 || typeof p.to[0] !== "string" || p.to[0].length > 240
+    || ![p.from, p.subject].every(v => typeof v === "string" && v.length <= 2048)
+    || !Array.isArray(p.to) || p.to.length !== 1 || typeof p.to[0] !== "string" || p.to[0].length > 2048
     || typeof p.body !== "string" || !p.body.trim() || p.body.length > 4000 || !Array.isArray(p.attachments) || p.attachments.length) return false;
-  const envelope = { adapter: p.adapter, accountId: p.accountId, authEpoch: p.authEpoch, sourceId: p.sourceId,
-    sourceRevision: p.sourceRevision, draftRevision: p.draftRevision, from: p.from, to: p.to, subject: p.subject, body: p.body, attachments: p.attachments };
+  const common = { accountId: p.accountId, authEpoch: p.authEpoch, sourceId: p.sourceId, sourceRevision: p.sourceRevision, draftRevision: p.draftRevision };
+  let envelope;
+  if (p.adapter === "synthetic") {
+    if (p.from.length > 240 || p.subject.length > 240 || p.to[0].length > 240) return false;
+    envelope = { adapter: p.adapter, ...common, from: p.from, to: p.to, subject: p.subject, body: p.body, attachments: p.attachments };
+  } else {
+    // Telegram replies name the bot connection and its target chat; field order matches the server preview.
+    const t = p.target;
+    if (p.provider !== "telegram-bot" || p.subject !== "" || !["chatId", "replyToMessageId", "threadId"].every(k => boundedText(t?.[k], 64)) || Object.keys(t).length !== 3) return false;
+    envelope = { adapter: p.adapter, provider: p.provider, ...common, from: p.from, to: p.to, subject: p.subject, body: p.body, attachments: p.attachments, target: t };
+  }
   return p.previewVersion === (await inboxTextVersion(JSON.stringify(envelope))).slice(7);
 }
 async function validSend(send, accountId, sourceId) {
@@ -121,7 +149,16 @@ export class InboxClient {
       throw error;
     }
   }
-  list() { return this.request("?view=email-excerpt-v1", {}, v => Array.isArray(v.sources) && v.sources.every(s => id(s.id) && revision(s.revision) && s.revision > 0 && typeof s.subject === "string")); }
+  list() {
+    return this.request("?view=email-excerpt-v1", {}, v => Array.isArray(v.sources) && v.sources.every(s => id(s.id) && revision(s.revision) && s.revision > 0
+      && typeof s.subject === "string" && ["synthetic", "email", "telegram"].includes(s.adapter) && validConnectionRef(s.connection ?? null)
+      && (s.adapter === "synthetic") === ((s.connection ?? null) === null)));
+  }
+  connections() { return this.request("/connections", {}, v => Array.isArray(v.connections) && v.connections.every(c => validConnection(c, v.viewer.accountId))); }
+  connection(connectionId) {
+    return this.request("/connections/" + encodeURIComponent(connectionId), {}, v => v.connection?.id === connectionId
+      && validConnection(v.connection, v.viewer.accountId) && v.mode === "fixture" && typeof v.webhook === "boolean" && typeof v.syncAvailable === "boolean");
+  }
   read(sourceId) {
     return this.request("/sources/" + encodeURIComponent(sourceId) + "?view=email-excerpt-v1", {}, v => validSource(v.source, sourceId, v.viewer.accountId)
       && (v.draft === null || revision(v.draft?.revision) && v.draft.revision > 0 && revision(v.draft.sourceRevision)

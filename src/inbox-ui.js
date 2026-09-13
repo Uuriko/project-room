@@ -109,13 +109,29 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     $("#choose-room").hidden = !getRoom();
   }
   const errorText = error => error.code === "obsolete_inbox" ? "" : error.status === 404 ? "Message unavailable." : "Couldn’t load inbox. Try again.";
+  const channelLabel = { email: "Email", telegram: "Telegram" };
+  const stateLabel = { active: "connected", disconnected: "disconnected", reconnect_required: "reconnect required" };
+  // One group per connection (email, Telegram, ...) plus the sample messages.
+  const groupLabel = c => c ? `${channelLabel[c.channel] ?? c.channel} · ${stateLabel[c.state] ?? c.state}` : "Sample messages";
   function renderList() {
-    $("#inbox-list").replaceChildren(...rows.map(source => {
-      const button = document.createElement("button"); button.type = "button"; button.className = "inbox-row";
-      button.dataset.sourceId = source.id; button.setAttribute("aria-current", selected === source.id ? "true" : "false");
-      const sender = document.createElement("span"), subject = document.createElement("strong");
-      sender.textContent = source.sender; subject.textContent = source.subject || "(No subject)";
-      button.append(sender, subject); button.addEventListener("click", () => open(source.id)); return button;
+    const groups = new Map();
+    for (const source of rows) {
+      const key = source.connection ? source.connection.channel + ":" + source.connection.id : "sample";
+      if (!groups.has(key)) groups.set(key, { connection: source.connection ?? null, sources: [] });
+      groups.get(key).sources.push(source);
+    }
+    $("#inbox-list").replaceChildren(...[...groups.entries()].map(([key, group], index) => {
+      const section = document.createElement("section"); section.className = "inbox-group"; section.dataset.connectionId = group.connection?.id ?? "";
+      const heading = document.createElement("h2"); heading.className = "inbox-group-label form-hint"; heading.id = "inbox-group-" + index;
+      heading.textContent = groupLabel(group.connection); section.setAttribute("aria-labelledby", heading.id);
+      section.append(heading, ...group.sources.map(source => {
+        const button = document.createElement("button"); button.type = "button"; button.className = "inbox-row";
+        button.dataset.sourceId = source.id; button.setAttribute("aria-current", selected === source.id ? "true" : "false");
+        const sender = document.createElement("span"), subject = document.createElement("strong");
+        sender.textContent = source.sender; subject.textContent = source.subject || "(No subject)";
+        button.append(sender, subject); button.addEventListener("click", () => open(source.id)); return button;
+      }));
+      return section;
     }));
   }
   async function load() {
@@ -152,18 +168,22 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     const d = drafts.get(selected); if (!d || !owns()) return;
     $("#inbox-reader").hidden = false;
     text("#inbox-subject", d.source.subject || "(No subject)");
-    const email = d.source.email;
-    text("#inbox-source-label", email ? "Sample email · only you" : "Sample message · only you");
-    $("#inbox-ask").hidden = Boolean(email) && !d.source.capabilities.share && !pendingShare();
-    $("#inbox-email-details").hidden = !email;
+    const email = d.source.email, channel = d.source.channel;
+    text("#inbox-source-label", email ? "Sample email · only you" : channel ? `Sample ${channelLabel[channel.channel] ?? channel.channel} message · only you` : "Sample message · only you");
+    $("#inbox-ask").hidden = Boolean(email || channel) && !d.source.capabilities.share && !pendingShare();
+    $("#inbox-email-details").hidden = !email && !channel;
     const metadata = email ? ["Mailbox: " + d.source.recipient,
       ...["to", "cc", "bcc"].filter(k => email[k].length).map(k => (k === "to" ? "To" : k.toUpperCase()) + ": " + email[k].join(", ")),
       email.attachmentState === "complete" ? (email.attachmentCount ? `${email.attachmentCount} ${email.attachmentCount === 1 ? "attachment" : "attachments"} · files unavailable` : "No attachments")
         : "Attachments " + (email.attachmentState === "partial" ? "partly listed" : "not loaded") + " · files unavailable",
-      d.source.capabilities.share ? "Sending unavailable" : "Sharing and sending unavailable"] : [];
+      d.source.capabilities.share ? "Sending unavailable" : "Sharing and sending unavailable"]
+      : channel ? ["Bot: " + d.source.recipient, "Chat: " + channel.chat, channel.kind === "channel_post" ? "Channel post" : channel.edited ? "Edited message" : "Message",
+        channel.attachmentCount ? `${channel.attachmentCount} ${channel.attachmentCount === 1 ? "attachment" : "attachments"} · files unavailable` : "No attachments",
+        d.source.capabilities.share ? "Sending unavailable" : "Sharing and sending unavailable"] : [];
     $("#inbox-email-metadata").replaceChildren(...metadata.map(value => { const p = document.createElement("p"); p.textContent = value; return p; }));
-    const notices = email ? [email.connectionState === "disconnected" ? "Disconnected · saved copy" : email.connectionState === "reconnect_required" ? "Reconnect required · saved copy" : "",
-      email.format === "html" ? "HTML preview unavailable." : !d.source.paragraphs[0] ? "No message text." : ""].filter(Boolean) : [];
+    const link = email ?? channel;
+    const notices = link ? [link.connectionState === "disconnected" ? "Disconnected · saved copy" : link.connectionState === "reconnect_required" ? "Reconnect required · saved copy" : "",
+      link.format === "html" ? "HTML preview unavailable." : !d.source.paragraphs[0] ? "No message text." : ""].filter(Boolean) : [];
     text("#inbox-source-notice", notices.join(" · ")); $("#inbox-source-notice").hidden = !notices.length;
     text("#inbox-addresses", d.source.sender + " → " + d.source.recipient);
     $("#inbox-source-body").replaceChildren(...d.source.paragraphs.map(value => { const p = document.createElement("p"); p.textContent = value; return p; }));
@@ -299,7 +319,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   });
   async function ask() {
     if (!owns() || !selected) return;
-    const d = drafts.get(selected); if (d?.source.adapter === "email" && !d.source.capabilities.share && !pendingShare()) return;
+    const d = drafts.get(selected); if (d && d.source.adapter !== "synthetic" && !d.source.capabilities.share && !pendingShare()) return;
     if (!getRoom()) { show("rooms"); return; }
     $("#inbox-share-dialog").showModal(); text("#inbox-share-status", "Loading…");
     $("#inbox-share-confirm").disabled = true; $("#inbox-share-paragraphs").replaceChildren();
@@ -315,7 +335,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
         input.type = "checkbox"; input.value = index; input.checked = pending?.paragraphs.includes(index) ?? false;
         input.disabled = Boolean(pending); span.textContent = value; label.append(input, span); return label;
       }));
-      if (!pending && source.source.adapter === "email") {
+      if (!pending && source.source.adapter !== "synthetic") {
         if (!source.source.capabilities.share) throw new Error("Sharing unavailable");
         const selectionOwner = sharing;
         const label = document.createElement("p"), input = document.createElement("textarea"), preview = document.createElement("pre");
@@ -355,10 +375,10 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   $("#inbox-share-confirm").addEventListener("click", async () => {
     if (!sharing || sharingBusy || !owns()) return;
     const current = sharing, c = current.context;
-    if (!current.request && current.source.adapter === "email" && !current.selection) return;
-    current.request ??= { action: current.source.adapter === "email" ? "source.excerpt" : "source.share", requestId: crypto.randomUUID(), sourceId: current.source.id,
+    if (!current.request && current.source.adapter !== "synthetic" && !current.selection) return;
+    current.request ??= { action: current.source.adapter !== "synthetic" ? "source.excerpt" : "source.share", requestId: crypto.randomUUID(), sourceId: current.source.id,
       sourceRevision: c.sourceRevision, roomId: c.roomId, audienceVersion: c.audienceVersion,
-      ...(current.source.adapter === "email" ? { selection: current.selection }
+      ...(current.source.adapter !== "synthetic" ? { selection: current.selection }
         : { paragraphs: [...document.querySelectorAll("#inbox-share-paragraphs input:checked")].map(el => Number(el.value)) }) };
     const retained = persistShare(current.request); sharingBusy = true; $("#inbox-share-confirm").disabled = true;
     for (const el of document.querySelectorAll("#inbox-share-paragraphs input, #inbox-share-paragraphs textarea")) el.disabled = true;
