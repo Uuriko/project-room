@@ -2,6 +2,12 @@
 
 ## Latest verified acceptance
 
+- Exact `5a6bdc9` full browser suite completed **317/317**, zero skipped.
+  Then `155a33c` fixed the independently confirmed grant-schema preflight gap:
+  malformed tables/constraints and unexpected schema objects are rejected before
+  writes. Exact fixed checkpoint: **1493/1493 Node**, **6/6** background
+  browser/package checks. No live files changed; schema-fix review requested.
+
 - `4ac7bfc`: application entry point supports an explicit loopback webhook port.
   Both listeners must bind before readiness; shutdown and port-conflict cleanup
   pass subprocess tests. Full Node **1491/1491**, runtime/deployment **9/9**, and

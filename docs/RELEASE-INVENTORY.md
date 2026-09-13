@@ -16,17 +16,16 @@ worker), **unknown** (not verified recently enough to claim).
 
 Current integration worktree: `/Users/johnpotter/src/project-room-integration`,
 branch `codex/project-room-integration`, schema/writer version **33**. Runtime
-checkpoint `2bfc108` (messaging client hardening on `07c7d80` startup); failure-test
-checkpoint `5ea28ec`. These are local
+checkpoint `155a33c` (grant schema preflight hardening on the `4ac7bfc` entry point).
+These are local
 checkpoints, not claims about main, CI, a deployed website or enterprise readiness.
 
-`17d9e31` additionally introduces an isolated receive-only grant component, not
-activated in a live runtime. Full Node **1484/1484** passed. Expiry,
-revocation, account-epoch and connection-revision fences are tested; actual
-background Inbox import was subsequently implemented at `1e03023` for signed
-SMS/WhatsApp: **1486/1486** full Node tests and **6/6** focused browser/package
-checks passed. Runtime package now includes 132 files. Consent UI, receiving
-startup and Telegram background import remain unfinished; no live grants. See
+Receive-only grants, signed background SMS/WhatsApp imports, concise consent/stop
+UI and optional loopback startup are implemented. The complete browser → consent
+→ sign-out → signed HTTP delivery → private Inbox → stop journey passes for both
+providers on 390px and 1280px. Runtime package includes 132 files. This remains
+local fixture evidence: no live grants, number, provider callback or receiver was
+enabled. Telegram background import is unfinished. See
 [receive-grant boundary](MESSAGING-RECEIVE-GRANTS-2026-09-12.md).
 
 | Current capability | Evidence | Remaining boundary |
@@ -35,18 +34,27 @@ startup and Telegram background import remain unfinished; no live grants. See
 | Telegram bot receive | Local pilot imported 2 real messages; last manual sync 0 new, page not full | Bot-selected chat, not personal Telegram history; durable receiver not activated |
 | Telegram durable receive/control path | Encrypted queue, registry, auth, disconnect, desktop/mobile acceptance; 35 targeted checks | Background receiver/replies/live secure configuration unfinished |
 | SMS/WhatsApp Business receive | Signed HTTP → private journal → UI → persisted disconnect; four real-application-layer desktop/mobile journeys with fixture-signed ingress | No paid provider account, number or live webhook; not personal phone history |
-| Messaging account controls | Compact Connections UI; receipt and stale-account fences; opt-in secure existing-registry startup | Startup exposes controls only, not a receive listener or background grant |
+| Messaging account controls | Compact consent/stop disclosure, 24h grants, receipt and stale-account fences; existing-store startup with explicit loopback port | No live configuration, public HTTPS proxy or credential onboarding; permission is not proof of live receiving |
 | Slack | Signed HTTP event parsing with selected-channel boundary | No live installation, durable Inbox adapter or runtime |
 | Sign-in and request recovery | Compact entry, service-error Refresh, large-text wrapping, exact-request retry lock | Chromium evidence is not physical-device or assistive-technology certification |
 | Hosted current integration | Unknown | No deployment/served-byte verification; no release claim |
 
 Executed evidence:
 
+- `4ac7bfc`: **1491/1491** full Node tests, **9/9** runtime/deployment checks,
+  **6/6** background browser/package checks. Exact `5a6bdc9` full browser
+  regression completed **317/317**, zero skipped, in 326 seconds. This is the
+  latest full browser checkpoint, before the schema-only runtime fix.
+- `155a33c`: reproduced and fixed same-name malformed grant schemas and
+  unexpected triggers; **11/11** focused schema/grant/runtime checks passed
+  before the final additional name-prefix assertion (schema tests reran 2/2).
+  Exact final checkpoint then passed **1493/1493** full Node tests and **6/6**
+  background browser/package checks, zero skipped.
 - `2bfc108`: **1480/1480** Node tests, zero skipped, and **10/10** focused
   client/controls/full-path browser checks. Exact row validation and immutable
   disconnect intent close the independent review's client finding.
 - `bbed875`: **317/317** full scripted Chromium browser tests and **1472/1472**
-  Node tests, zero skipped. This is the last full browser checkpoint.
+  Node tests, zero skipped. Historical full browser checkpoint.
 - `627b4db`: **1474/1474** Node tests after messaging UI integration.
 - `07c7d80` runtime plus the failure tests committed in `5ea28ec`:
   **1479/1479** Node tests. No runtime edits during this run. Targeted messaging
@@ -55,7 +63,10 @@ Executed evidence:
 - Independent Grok reviews received for Telegram runtime/packaging, Twilio
   private import/registry/webhook, request recovery and compact entry. Later
   UI/startup reviews subsequently passed at `627b4db`/`14e8055` and `07c7d80`.
-  The new `2bfc108` client fix is awaiting independent review.
+  Subsequent independent passes: `2bfc108` client, `17d9e31` grant layer,
+  `cec3879` consent UI, `3bf54df` browser journey, `2d65ee5` background webhook.
+  Integrated import/consent and newer runtime/entry-point review receipts remain
+  pending reconciliation; queued work is not a pass.
 
 These checks do not certify hosted operations, physical devices, SSO/SCIM,
 PostgreSQL tenant isolation, retention/backup deletion, or compliance. Detail:

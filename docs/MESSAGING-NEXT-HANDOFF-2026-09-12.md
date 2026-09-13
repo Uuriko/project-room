@@ -19,6 +19,30 @@ was `bbed875` (317/317); later UI has focused browser checks. See
 
 ## Work in order
 
+### Reconciled next slices after `4ac7bfc`
+
+Receive grants, consent/stop UI, signed background HTTP and default-off loopback
+startup now exist; the sequence below records earlier stages and is not a request
+to rebuild them. Current priority:
+
+1. Broad browser `5a6bdc9` completed 317/317. Same-name malformed grant schema
+   acceptance was independently confirmed, reproduced with red tests, and fixed
+   at `155a33c`. Finish verification/review of the fix and disposition remaining
+   independent-review receipts before a pilot claim.
+2. Extend the existing Telegram queue/receiver to the same receive-only authority
+   model, preserving cursor/lease replay, bot/chat boundaries and stop semantics.
+   Do not equate the existing session-bound manual pilot with background delivery.
+3. Complete the collaboration loop for incoming messages. Current code explicitly
+   hides Ask for `adapter === 'message'` (`src/inbox-ui.js`) and rejects message
+   excerpts (`sharedBody` in `server/inbox.mjs`). Implement selected-text sharing
+   with audience/source-revision confirmation and a durable receipt, then reuse
+   work/result flows. Never grant agents the full private Inbox implicitly.
+4. Resolve production retry/media policy, private-store recovery and live-provider
+   onboarding gates before a separately authorized real pilot. Adding another
+   provider parser is lower priority than completing this useful loop.
+
+### Historical implementation sequence
+
 1. **Receive-only background grant.** An isolated durable implementation exists
    at `17d9e31`; review and integrate it rather than starting another authority
    store. See [boundaries and tests](MESSAGING-RECEIVE-GRANTS-2026-09-12.md).
