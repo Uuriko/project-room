@@ -1,6 +1,6 @@
 import { EVENT_TYPES as T, WORK_STATES as S } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
-import { ReturnBrief } from "./return-brief.js";
+import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
 import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
 import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer } from "./workflow.js";
@@ -2570,6 +2570,7 @@ window.addEventListener("pageshow", e => {
 // through N, and only the explicit button acknowledges - exactly H, never the latest event.
 function loadReturnBrief() { return briefView.refresh(); }
 const roleLabel = role => ({ accountableMemberId: "accountable", verifierMemberId: "verifier", humanDecisionMakerId: "decision maker" }[role] ?? humanize(role));
+const BRIEF_GROUP_LABELS = { outcome: "Results", question: "Asked of you", blocker: "Blockers", decision: "Decisions", other: "Other updates" };
 function briefEventTarget(event) {
   if (event.type === T.MESSAGE_POSTED) return { kind: "message", id: event.data.messageId || event.id };
   if (event.type === T.MESSAGE_REACTION_SET) return { kind: "message", id: event.data.messageId };
@@ -2747,7 +2748,11 @@ function renderReturnBrief() {
   $("#rb-history-boundary").textContent = history.evaluatedThrough === history.cursor
     ? "· nothing new since your marker"
     : `${history.items.length} of ${changes} events · through ${history.evaluatedThrough}`;
-  renderBriefList("#rb-history-list", history.items.map(describeBriefEvent).join("")
+  const historyGroups = groupBriefHistory(history.items, session?.member?.id);
+  renderBriefList("#rb-history-list", (historyGroups.length
+    ? historyGroups.map(([name, items]) =>
+      `<li class="rb-group"><span class="rb-group-label">${esc(BRIEF_GROUP_LABELS[name])} (${items.length})</span><ul class="rb-list rb-group-list">${items.map(describeBriefEvent).join("")}</ul></li>`).join("")
+    : history.items.map(describeBriefEvent).join(""))
     || '<li class="rb-empty">Nothing new since your marker.</li>');
   $("#rb-more-button").hidden = !history.hasMore;
   $("#rb-ack-button").textContent = history.evaluatedThrough === history.cursor ? "Already caught up" : "Mark caught up";
