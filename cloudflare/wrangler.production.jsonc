@@ -2,7 +2,6 @@
   // Production Worker config. No Clerk secrets in git.
   // wrangler secret put ROOM_CLERK_ISSUER / PUBLISHABLE_KEY / PUBLIC_KEY
   // wrangler secret put ROOM_OPERATOR_ACCOUNT_ID
-  // Do not bind this to live schema-26 object a5f2dca.
   "name": "project-room",
   "main": "room.mjs",
   "compatibility_date": "2026-07-30",
