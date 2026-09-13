@@ -86,6 +86,16 @@ fixtures except the explicitly reported manual local check.
 
 ## Verification
 
+Checkpoint `968d639`: full Node suite **1465/1465 passed**, zero skipped;
+messaging mobile/readers/import plus cold packaging **8/8 passed**; selected
+accessibility/account-workspace/results browser checks **17/17 passed**.
+Telegram **35/35 passed** before the additive SMS changes (Telegram import is
+also included in the passing final Node suite). The full scripted browser suite
+has not passed: its old sign-in setup was repaired across the scripts, but only
+the selected browser groups above were reverified. No deployment performed.
+
+Historical reader-only checkpoint:
+
 Ten focused tests passed, covering Telegram plus Twilio/Slack signatures, tampering,
 unknown-field coverage, duplicate parameters, channel/account isolation, expired
 Slack requests, Telegram binding and transactional import rollback. Dependency
