@@ -39,7 +39,11 @@ for (const [name, viewport] of [['desktop', { width: 1440, height: 1000 }], ['mo
     sent.push(command); const response = await route.fetch();
     if (sent.length === 1) await route.abort('failed'); else await route.fulfill({ response });
   });
-  await f.row.getByRole('button', { name: 'Stop run', exact: true }).click();
+  const stopButton = f.row.getByRole('button', { name: 'Stop run', exact: true });
+  assert.equal((await stopButton.innerText()).trim(), '⏹️');
+  assert.match(await stopButton.getAttribute('aria-description'), /may still be running/);
+  const target = await stopButton.boundingBox(); assert.ok(target.width >= 44 && target.height >= 44);
+  await stopButton.click();
   await f.row.getByRole('button', { name: 'Retry stop', exact: true }).click();
   await f.row.getByText('Stop requested', { exact: true }).waitFor();
   await f.page.waitForFunction(() => !document.querySelector('[data-key="question"] [data-message-action="stop-request-run"]'));

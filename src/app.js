@@ -1270,7 +1270,7 @@ function requestControls(message) {
   if (open && (own === request.requesterId || own === state.room.ownerId && session.member.kind === "human")) actions.push(["cancelled", "Cancel request"]);
   const run = requestRunView(state, message.id, own), pending = pendingRunStops.get(message.id);
   const runControl = run ? `<span class="request-run-state" title="Run status does not confirm an answer or approval">${esc(run.label)}</span>${pending?.confirmed ? `<span>Stop recorded</span>` : pending || run.canStop
-    ? `<button type="button" class="message-to-work" data-message-id="${esc(message.id)}" data-message-action="stop-request-run"${pending?.busy ? " disabled" : ""} title="Request a stop; the process may still be running">${pending?.busy ? "Requesting stop…" : pending ? "Retry stop" : "Stop run"}</button>` : ""}${pending?.error ? `<span role="status">Stop not confirmed. Retry the same request.</span>` : ""}` : "";
+    ? `<button type="button" class="message-to-work quick-action" data-message-id="${esc(message.id)}" data-message-action="stop-request-run"${pending?.busy ? " disabled" : ""} aria-label="${pending?.busy ? "Requesting stop…" : pending ? "Retry stop" : "Stop run"}" aria-description="Request a stop; the process may still be running" title="${pending ? 'Retry the same stop request' : 'Stop this run'}; wait for confirmation"><span aria-hidden="true">${pending?.busy ? '⏳' : '⏹️'}</span></button>` : ""}${pending?.error ? `<span role="status">Stop not confirmed. Retry the same request.</span>` : ""}` : "";
   return `<span class="request-state">${esc(status)}</span>${runControl}${actions.map(([kind, label]) =>
     `<button type="button" class="message-to-work" data-message-id="${esc(message.id)}" data-message-action="request-${kind}">${label}</button>`).join("")}`;
 }
@@ -2903,7 +2903,11 @@ function renderAutomations() {
       <p>To ${esc(memberLabel(p.recipientId))}</p><pre class="automation-prompt">${esc(d.prompt)}</pre>
       <p class="form-hint">${Math.ceil(d.maxRuntimeMs / 1000)} seconds · ${d.maxOutputBytes} output bytes per run${d.trigger.kind === 'interval' ? ` · Every ${d.trigger.intervalMs / 60000} minutes, manually dispatched` : ''}</p>
       <p class="form-hint">Creator: ${p.consent.creator ? 'enabled' : 'not enabled'} · Recipient: ${p.consent.recipient ? 'accepted' : 'not accepted'}</p>
-      <div class="automation-actions">${Object.entries({ edit: 'Edit', enable: 'Enable', accept: 'Accept', pause: 'Pause', dispatch: 'Run' }).filter(([key]) => p.actions[key]).map(([key, label]) => `<button type="button" class="button ghost" data-automation-action="${key}">${label}</button>`).join('')}</div>
+      <div class="automation-actions">${Object.entries({ edit: 'Edit', enable: 'Enable', accept: 'Accept', pause: 'Pause', dispatch: 'Run' }).filter(([key]) => p.actions[key]).map(([key, label]) => {
+        const symbol = { pause: '⏸️', dispatch: '▶️' }[key];
+        const hint = key === 'pause' ? 'Pause future runs; current runs continue' : 'Send the approved request once';
+        return `<button type="button" class="button ghost${symbol ? ' quick-action' : ''}" data-automation-action="${key}"${symbol ? ` aria-label="${label}" aria-description="${hint}" title="${label}: ${hint}"` : ''}>${symbol ? `<span aria-hidden="true">${symbol}</span>` : label}</button>`;
+      }).join('')}</div>
       ${p.lastRequestId ? `<button type="button" class="text-button" data-automation-request="${esc(p.lastRequestId)}">Open request</button>` : ''}`);
   } else renderContent('#automation-detail', '');
   const locked = Boolean(automationPending);

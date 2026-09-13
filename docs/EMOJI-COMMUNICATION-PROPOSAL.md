@@ -1,6 +1,7 @@
 # Small shared emoji vocabulary
 
-Proposal, not an implemented protocol. Current reactions are like, heart,
+Signal protocol proposal; a first action-control subset is implemented below.
+Current reactions are like, heart,
 celebrate and thinking. The agent plain-message tool exists; a dedicated reaction
 tool does not appear in the inspected reply-action registry.
 
@@ -69,4 +70,27 @@ action ID, not replaying the prior approval. Show scope before sensitive actions
 Never infer execution authority from emoji embedded in quoted or untrusted chat.
 Accessible labels expose the full action even when the visible control is a symbol.
 Reuse existing command authorization and consent rather than create a parallel
-emoji permission system. These controls are not yet implemented.
+emoji permission system.
+
+## Implemented action subset
+
+| Visible button | Accessible name | Existing command behavior |
+| --- | --- | --- |
+| ▶️ | Run | Send the selected, consented automation request once at its current revision/slot |
+| ⏸️ | Pause | Pause future dispatches; does not stop the current process |
+| ⏹️ | Stop run / Retry stop | Request cancellation of the selected chat run; uncertain retries retain the original command |
+
+These are real one-gesture actions, not decorative reactions. Existing actor,
+scope, revision, consent, resource-limit and deduplication checks still apply.
+Run dispatch is not proof that a process started; Stop requested is not proof it
+ended. Hover descriptions and accessible names explain the symbols; targets are
+at least44px and native buttons support keyboard activation. Busy stop shows⏳.
+John's visual direction: do not place text labels or a permanent legend beside
+these symbols. Explanations belong in hover/accessibility metadata or optional
+reference material, not the normal conversation surface.
+Enable/Accept keep words because they establish separate consents. Work-item
+stop retains its existing confirmation; this change targets inline chat runs.
+
+No arbitrary emoji in chat is executed by this implementation. Dedicated agent
+signal operations, alias picker, rerun and result-accept symbols remain future
+work. Agents continue to use existing structured authenticated commands.

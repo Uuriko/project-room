@@ -798,3 +798,5 @@ summary { overflow-wrap: anywhere; }
 #automations-dialog button { min-height: 44px; }
 #automation-status:empty { display: none; }
 @media (max-width: 600px) { .automation-layout { grid-template-columns: minmax(0, 1fr); } }
+/* Symbol-only actions retain generous targets and native keyboard operation. */
+.quick-action { min-width: 44px; min-height: 44px; font-size: 1.1rem; }
