@@ -62,19 +62,29 @@ optional.push("server/account-room-create.mjs");
 optional.push("server/provider-config.mjs");
 const allowed = new Set([...required, ...optional]);
 for (const path of ['src/gmail-callback.js', ...['gmail-runtime', 'gmail-connections', 'gmail-oauth', 'gmail-mail-reader', 'gmail-email', 'mail-credential-vault'].map(name => `server/${name}.mjs`)]) allowed.add(path);
+for (const name of ['telegram-runtime','telegram-connection-registry','telegram-connections','telegram-receiver','telegram-inbox-import','telegram-receive-queue','telegram-receive-tick','telegram-bot-reader','twilio-message-reader','slack-event-reader']) allowed.add(`server/${name}.mjs`);
 const gmailAssets = (assets, files) => files.has('src/gmail-callback.js') ? [...assets, 'src/gmail-callback.js'] : assets;
 function externalDependencies(files) {
   const pkg = JSON.parse(files.get('package.json'));
   const entries = Object.entries(pkg.dependencies ?? {});
   if (!entries.length) return [];
   const lock = JSON.parse(files.get('package-lock.json'));
-  check(entries.length === 1 && entries[0][0] === 'postal-mime' && entries[0][1] === '3.0.0');
+  check(entries.length >= 1 && entries.length <= 2 && pkg.dependencies['postal-mime'] === '3.0.0'
+    && entries.every(([name,version]) => name === 'postal-mime' && version === '3.0.0' || name === 'twilio' && version === '6.1.1'));
   const locked = lock.packages?.['node_modules/postal-mime'];
   check(lock.packages?.['']?.dependencies?.['postal-mime'] === '3.0.0'
     && locked?.version === '3.0.0' && locked.resolved === 'https://registry.npmjs.org/postal-mime/-/postal-mime-3.0.0.tgz'
     && locked.integrity === 'sha512-Z4a9ar2Bv3YpK3IXag+Yda30k7bMZfpRuUGyqtHnZ2pjHG8Bl62EhZIk4n1dzv00gfzP9g+94e9kd8+XmjVWLA=='
     && !Object.keys(locked.dependencies ?? {}).length);
-  return [{ name: 'postal-mime', version: locked.version, integrity: locked.integrity }];
+  const result = [{ name: 'postal-mime', version: locked.version, integrity: locked.integrity }];
+  if (pkg.dependencies.twilio) {
+    const runtimePackages = Object.fromEntries(Object.entries(lock.packages).filter(([name,value]) => name && !value.dev).sort(([a],[b]) => a.localeCompare(b)));
+    // Pin the complete transitive runtime lock, not only the top-level SDK version.
+    check(sha256(JSON.stringify(runtimePackages)) === 'd311008d796205908b83ea86d026674fde9f57a4028931ece3072e4fa8b3a9c6'
+      && lock.packages[''].dependencies.twilio === '6.1.1');
+    result.push({name:'twilio',version:'6.1.1',integrity:lock.packages['node_modules/twilio'].integrity});
+  }
+  return result;
 }
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 const check = condition => { if (!condition) throw new Error("Runtime package does not match its exact allowlisted contract"); };
@@ -164,7 +174,8 @@ export function verifyRuntimePackage(directory, { expectedCommit } = {}) {
     for (const match of bytes.toString().matchAll(/(?<!["'.])(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)["']([^"']+)["']/g)) {
       const specifier = match[1];
       if (specifier.startsWith("node:") || specifier.startsWith("cloudflare:")) continue;
-      if (specifier === 'postal-mime' && path === 'server/gmail-email.mjs' && dependencies.length === 1) continue;
+      if (specifier === 'postal-mime' && path === 'server/gmail-email.mjs' && dependencies.some(d=>d.name==='postal-mime')) continue;
+      if (specifier === 'twilio' && path === 'server/twilio-message-reader.mjs' && dependencies.some(d=>d.name==='twilio')) continue;
       check(specifier.startsWith(".") && files.has(posix.normalize(posix.join(posix.dirname(path), specifier))));
     }
   }

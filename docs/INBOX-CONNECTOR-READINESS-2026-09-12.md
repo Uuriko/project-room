@@ -1,5 +1,12 @@
 # Inbox connector readiness
 
+> Historical Graph-reader checkpoint below. Later September 12 work verified
+> 25 real Gmail emails and two Telegram bot messages in the local private Inbox.
+> See `GMAIL-PILOT-SETUP-2026-09-12.md`, `TELEGRAM-LOCAL-PILOT-2026-09-12.md`, and
+> `TELEGRAM-DURABLE-RECEIVER-2026-09-12.md`. The fixture-only statements below
+> describe this earlier checkpoint, not present local Gmail capability. None of
+> these results establishes a deployed universal inbox or working outgoing mail.
+
 ## Actual status
 
 Inbox is not yet a live universal inbox. Existing email imports are fixture-mode, real email sends are explicitly unavailable, and the new GraphMailReader is a tested read-only network component, not an installed mailbox connection. No account was linked, no customer email read, and no message sent during this checkpoint. No deployment occurred.

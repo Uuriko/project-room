@@ -12,6 +12,26 @@ worker), **unknown** (not verified recently enough to claim).
 
 ## Runtime baseline
 
+### Current integration checkpoint (September 12, 2026)
+
+The table below is the historical main baseline, not the current integration
+checkout. The integration branch at `c1ff371` uses schema/writer version **33**.
+Local Gmail read-only receiving was verified with 25 messages; local Telegram
+bot receiving was verified with two messages. These are local pilot observations,
+not public deployment claims. Telegram's encrypted durable receiver, connection
+registry, authenticated controls and opt-in startup have 35 targeted checks,
+including mocked-provider full-stack desktop/mobile acceptance. The durable
+receiver has not been activated with live encrypted configuration. SMS/WhatsApp
+and Slack intake boundaries are tested components, not connected services.
+
+The full Node regression on `c1ff371` exposed runtime-package dependency/import
+allowlist failures. These are being repaired with exact pinned dependency and
+module entries; no broad current-release green claim is warranted until rerun.
+See `TELEGRAM-DURABLE-RECEIVER-2026-09-12.md` and
+`MESSAGING-READINESS-2026-09-12.md` for current connector limitations.
+
+### Historical main baseline
+
 | Fact | Value | Source |
 |---|---|---|
 | Baseline commit | `1a24ad1` (main, Sep 12 2026) | git |
