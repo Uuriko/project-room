@@ -738,6 +738,9 @@ function syncComposerChrome() {
   const work = $("#composer-work-button");
   if (work) work.hidden = true;
 }
+function composerPendingLocked() {
+  return Boolean(pendingMessage && (requestMode || pendingMessage.command?.data?.attachmentIds?.length));
+}
 function renderComposerFiles() {
   const host = $('#composer-files'); if (!host) return;
   const focused = host.contains(document.activeElement) ? document.activeElement.closest('[data-upload-id]') : null;
@@ -748,7 +751,7 @@ function renderComposerFiles() {
   $('#message-input').required = Boolean(requestMode) || (!locked && !files.some(item => item.state === 'ready'));
   $('#attach-file').hidden = Boolean(requestMode);
   $('#attach-file').disabled = busy || locked || files.length >= 4;
-  $('#message-input').readOnly = locked;
+  $('#message-input').readOnly = composerPendingLocked();
   const html = files.map(item => {
     const action = ['uploading', 'queued'].includes(item.state) ? 'cancel' : ['ready', 'checking'].includes(item.state) ? 'remove' : 'retry';
     const label = { cancel: 'Cancel', remove: 'Remove', retry: 'Retry' };
@@ -1350,7 +1353,7 @@ function syncRequestComposer() {
   $("#request-refresh").hidden = !request || Boolean(pendingMessage) || requestReading || request.status !== "open";
   $("#request-exit").disabled = busy;
   const input = $("#message-input"), select = $("#message-to-select"), send = $("#message-form button[type=submit]");
-  input.readOnly = Boolean(mode && pendingMessage);
+  input.readOnly = composerPendingLocked();
   input.disabled = busy || requestReading;
   select.disabled = busy || requestReading || Boolean(mode && (mode.kind !== "request" || pendingMessage));
   select.required = mode?.kind === "request";
