@@ -237,6 +237,42 @@ export class Inbox {
         permissions: ["read"], viewerId: auth.member.id, viewerSessionBinding: auth.sessionBinding };
     });
   }
+  listPrivateContexts(token,roomId,binding=null,{before=null}={}) {
+    return this.store.readTransaction(()=>{
+      const auth=this.store.authenticate(token,roomId,binding);
+      if(auth.member.kind!=='agent')fail(403,'agent_required','Use a configured agent to discover private context.');
+      let ceiling=Number.MAX_SAFE_INTEGER;
+      if(before!==null){
+        // The cursor is itself an authorized share, never a global sequence
+        // supplied by the caller. Revoked cursors require a fresh first page.
+        this.readGrant(token,roomId,before,binding);ceiling=this.grantRow(before).sequence;
+      }
+      const state=this.store.room(roomId).state,now=this.store.now();
+      const rows=this.db.prepare(`SELECT g.receipt_json FROM private_inbox_commands g
+        JOIN accounts a ON a.id=g.account_id AND a.active=1 AND a.auth_epoch=g.auth_epoch
+        WHERE g.sequence<? AND json_extract(g.request_json,'$.action')='source.grant'
+          AND json_extract(g.receipt_json,'$.roomId')=? AND json_extract(g.receipt_json,'$.expiresAt')>?
+          AND EXISTS (SELECT 1 FROM json_each(g.receipt_json,'$.members') recipient
+            WHERE json_extract(recipient.value,'$.memberId')=? AND json_extract(recipient.value,'$.revision')=?)
+          AND EXISTS (SELECT 1 FROM member_accounts owner_binding
+            WHERE owner_binding.room_id=? AND owner_binding.member_id=json_extract(g.receipt_json,'$.owner.memberId') AND owner_binding.account_id=g.account_id)
+          AND EXISTS (SELECT 1 FROM json_each(?) owner
+            WHERE owner.key=json_extract(g.receipt_json,'$.owner.memberId') AND json_extract(owner.value,'$.active')=1
+              AND json_extract(owner.value,'$.revision')=json_extract(g.receipt_json,'$.owner.revision'))
+          AND NOT EXISTS (SELECT 1 FROM private_inbox_commands revoked WHERE revoked.account_id=g.account_id
+            AND json_extract(revoked.request_json,'$.action')='grant.revoke'
+            AND json_extract(revoked.request_json,'$.grantId')=json_extract(g.receipt_json,'$.grantId'))
+        ORDER BY g.sequence DESC LIMIT 26`).all(ceiling,roomId,now,auth.member.id,auth.member.revision,roomId,JSON.stringify(state.members));
+      const shares=rows.slice(0,25).map(row=>{
+        const grant=JSON.parse(row.receipt_json);
+        // Reuse the authoritative read check before returning even metadata.
+        const value=this.readGrant(token,roomId,grant.grantId,binding);
+        return {grantId:value.grantId,expiresAt:value.expiresAt,permissions:['read']};
+      });
+      return {contractVersion:1,roomId,viewerId:auth.member.id,viewerSessionBinding:auth.sessionBinding,
+        shares,next:rows.length>25?shares.at(-1).grantId:null};
+    });
+  }
   auth(token, binding, roomId = null) {
     if (typeof binding !== "string" || !/^[a-f0-9]{64}$/.test(binding)) fail(422, "session_binding_required", "Current account session binding required.");
     return this.store.authenticateAccountSession(token, roomId, binding);

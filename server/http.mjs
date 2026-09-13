@@ -687,7 +687,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|automations|events|stream|cursor|return-brief|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|provider-heartbeats|identity-links|agent-invites))?$/.exec(url.pathname);
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
       const attachmentMatch = /^\/api\/rooms\/([^/]{1,384})\/attachments\/([^/]{1,384})(\/status)?$/.exec(url.pathname);
-      const grantMatch = /^\/api\/rooms\/([^/]{1,384})\/private-context\/([^/]{1,384})$/.exec(url.pathname);
+      const grantMatch = /^\/api\/rooms\/([^/]{1,384})\/private-context(?:\/([^/]{1,384}))?$/.exec(url.pathname);
       if (!match && !revokeMatch && !threadMatch && !attachmentMatch && !grantMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? attachmentMatch ?? grantMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
@@ -702,6 +702,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (!["GET", "HEAD"].includes(req.method)) { protectWrite(req, auth, selected.bearer); rate(`write:${auth.credentialHash}`, 60); }
       if (grantMatch) {
         if (req.method !== "GET") reject(405, "method_not_allowed", "Use GET for private context.");
+        if(!grantMatch[2]){
+          if([...url.searchParams.keys()].some(key=>!['auth','before'].includes(key))||['auth','before'].some(key=>url.searchParams.getAll(key).length>1))
+            reject(422,'invalid_inbox_grant','Choose one private context page.');
+          const before=url.searchParams.get('before');
+          if(before!==null&&(before.length>128||!before))reject(422,'invalid_inbox_grant','Choose one private context page.');
+          return json(res,200,store.inbox.listPrivateContexts(selected.token,roomId,fence,{before}));
+        }
         if ([...url.searchParams.keys()].some(key => key !== "auth") || url.searchParams.getAll("auth").length > 1)
           reject(422, "invalid_inbox_grant", "Choose one private context.");
         return json(res, 200, store.inbox.readGrant(selected.token, roomId, pathId(grantMatch[2]), fence));
