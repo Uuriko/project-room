@@ -2,6 +2,12 @@
 
 ## Latest verified acceptance
 
+- `b2bee52`: Telegram receive-only background receiver/importer reuses the
+  encrypted queue with no human login. Focused receiver/import **10/10**, full
+  Node **1497/1497**, existing Telegram browser/package **4/4** pass. Revocation,
+  rollback/replay and narrowed-chat scope are tested. Consent/startup/timer wiring
+  for this variant remains unfinished; no live polling enabled.
+
 - Exact `5a6bdc9` full browser suite completed **317/317**, zero skipped.
   Then `155a33c` fixed the independently confirmed grant-schema preflight gap:
   malformed tables/constraints and unexpected schema objects are rejected before

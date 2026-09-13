@@ -1,5 +1,29 @@
 # Durable receiver checkpoint
 
+## Receive-only background path (`b2bee52`)
+
+The existing encrypted queue/tick now has a background receiver variant using
+the shared receive-only grant store instead of a human session. It holds provider
+registry → grant → RoomStore locks during private import, checks the exact
+connection revision, account epoch and each observation's selected chat, and
+exposes no login or general Inbox credential. Internal prior-version lookup
+supports idempotent replay without returning private history to the caller.
+
+Ten focused receiver/import tests pass: receive after sign-out, revocation during
+a provider fetch prevents staging, failed journal work rolls back and replays
+before a higher offset request, and a narrowed chat scope cannot import an old
+queued page. Existing Telegram desktop/mobile and packaging checks pass 4/4.
+
+No timer, consent UI, grant-store startup or live bot polling is connected to
+this variant yet. A changed grant revision requires a newly resolved binding;
+the old receiver fails rather than silently adopting broader access. Existing
+manual/session-bound behavior is preserved. The following sections describe
+the underlying queue and earlier checkpoints.
+
+Exact `b2bee52` full Node: **1497/1497**, zero skipped. Independent review
+requested. The four existing browser/package checks are not a new full browser
+run or browser consent-to-background-polling qualification.
+
 Implemented a separate encrypted Telegram staging queue and one bounded receive
 cycle. No live account, runtime, database or provider configuration was changed.
 
