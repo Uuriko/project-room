@@ -37,6 +37,6 @@ test('agent discovery pages only current recipient metadata and rejects foreign 
   assert.equal((await(await get()).json()).shares[0].grantId,fresh);
   f.store.now=()=>grant.expiresAt;
   try{const key=f.store.issueAccessKey('commons','producer');assert.deepEqual(f.store.inbox.listPrivateContexts(key,'commons').shares,[]);}finally{f.store.now=now;}
-  f.store.command(f.keys.owner,'commons',{id:randomUUID(),type:'member.access_changed',data:{memberId:'owner',expectedMemberRevision:0,active:true,permissions:[]}});
-  assert.deepEqual(f.store.inbox.listPrivateContexts(f.keys.producer,'commons').shares,[]);
+  f.store.command(f.keys.owner,'commons',{id:randomUUID(),type:'member.access_changed',data:{memberId:'owner',expectedMemberRevision:0,active:true,permissions:['manage_members']}});
+  assert.deepEqual(f.store.inbox.listPrivateContexts(f.store.issueAccessKey('commons','producer'),'commons').shares,[]);
 });
