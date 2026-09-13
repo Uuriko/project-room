@@ -32,10 +32,19 @@ Configuration factory: `server/gmail-runtime.mjs` accepts all three opt-in paths
 symlinked secret files, non-owner/private file modes, wrong redirect URIs, non-private
 vault directories, and existing non-vault database tables. It creates no encryption
 key and makes no network requests. Five tests cover private opening/reopening and
-rejection paths using disposable synthetic credentials. The main server does not call
-this factory yet: the exact-revision packager currently rejects bare package imports
-and does not list the Gmail callback asset. Dependency and asset packaging must be
-updated and cold-start tested before normal startup enables this integration.
+rejection paths using disposable synthetic credentials. The Node server now calls this
+factory only when at least one Gmail configuration variable is supplied, and closes its
+vault on shutdown. Partial configuration fails startup rather than silently disabling it.
+
+Packaging now includes the six Gmail/vault modules and callback asset, while retaining
+historical asset lists for revisions without Gmail. The sole allowed bare import is
+`postal-mime` in the Gmail normalizer; version, registry URL, integrity hash and lack of
+transitive dependencies are verified against the locked declaration. The artifact is a
+source package, not an installed runtime: run `npm ci --omit=dev --ignore-scripts` in a
+separate runtime copy after verifying the source package. Installed `node_modules` are
+not covered by the source-tree verifier. A disposable candidate runtime installed from
+the lock passed module loading, MIME parsing, Node server startup, and disabled-Gmail
+503 behavior outside the development checkout. No private credentials were used.
 
 Lifecycle checkpoint: `server/gmail-connections.mjs` now joins the OAuth boundary,
 credential vault and page reader to the existing account-private Inbox import.

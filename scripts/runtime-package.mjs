@@ -61,6 +61,21 @@ optional.push("server/clerk-verifier.mjs", "server/provider-onboarding.mjs");
 optional.push("server/account-room-create.mjs");
 optional.push("server/provider-config.mjs");
 const allowed = new Set([...required, ...optional]);
+for (const path of ['src/gmail-callback.js', ...['gmail-runtime', 'gmail-connections', 'gmail-oauth', 'gmail-mail-reader', 'gmail-email', 'mail-credential-vault'].map(name => `server/${name}.mjs`)]) allowed.add(path);
+const gmailAssets = (assets, files) => files.has('src/gmail-callback.js') ? [...assets, 'src/gmail-callback.js'] : assets;
+function externalDependencies(files) {
+  const pkg = JSON.parse(files.get('package.json'));
+  const entries = Object.entries(pkg.dependencies ?? {});
+  if (!entries.length) return [];
+  const lock = JSON.parse(files.get('package-lock.json'));
+  check(entries.length === 1 && entries[0][0] === 'postal-mime' && entries[0][1] === '3.0.0');
+  const locked = lock.packages?.['node_modules/postal-mime'];
+  check(lock.packages?.['']?.dependencies?.['postal-mime'] === '3.0.0'
+    && locked?.version === '3.0.0' && locked.resolved === 'https://registry.npmjs.org/postal-mime/-/postal-mime-3.0.0.tgz'
+    && locked.integrity === 'sha512-Z4a9ar2Bv3YpK3IXag+Yda30k7bMZfpRuUGyqtHnZ2pjHG8Bl62EhZIk4n1dzv00gfzP9g+94e9kd8+XmjVWLA=='
+    && !Object.keys(locked.dependencies ?? {}).length);
+  return [{ name: 'postal-mime', version: locked.version, integrity: locked.integrity }];
+}
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 const check = condition => { if (!condition) throw new Error("Runtime package does not match its exact allowlisted contract"); };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -95,6 +110,7 @@ export function createRuntimePackage({ repository, commit, destination }) {
   check(required.every(path => entries.some(entry => entry.path === path)));
   const files = new Map(entries.map(entry => [entry.path, git("cat-file", "blob", entry.object)]));
   const runtime = runtimeMetadata(files);
+  const dependencies = externalDependencies(files);
   check(isAbsolute(destination) && destination === resolve(destination));
   const parent = realpathSync(dirname(destination)), output = join(parent, basename(destination));
   mkdirSync(output, { mode: 0o700 }); // Existing paths are never reused or overwritten.
@@ -102,7 +118,8 @@ export function createRuntimePackage({ repository, commit, destination }) {
     mkdirSync(dirname(join(output, path)), { recursive: true, mode: 0o700 });
     writeFileSync(join(output, path), bytes, { mode: 0o600, flag: "wx" });
   }
-  const manifest = { format: 1, sourceCommit: commit, sourceTree: tree, runtime, publicAssets: assetsFor(runtime.schemaVersion, files.has("src/inbox-ui.js"), files.has("src/inbox-send-ui.js")),
+  const manifest = { format: 1, sourceCommit: commit, sourceTree: tree, runtime, publicAssets: gmailAssets(assetsFor(runtime.schemaVersion, files.has("src/inbox-ui.js"), files.has("src/inbox-send-ui.js")), files),
+    ...(dependencies.length ? { dependencies, dependencyInstallation: 'Required separately with npm ci --omit=dev --ignore-scripts; package verification checks source and lock, not installed modules.' } : {}),
     files: [...files].map(([path, bytes]) => ({ path, bytes: bytes.length, sha256: sha256(bytes) })),
     limitation: "Content consistency only; not trusted provenance, recovery freshness, hosted readiness or publication approval." };
   // Last write is the completion marker. A partial directory is not a package.
@@ -127,7 +144,7 @@ export function verifyRuntimePackage(directory, { expectedCommit } = {}) {
   const raw = readFileSync(join(root, manifestName)), manifest = JSON.parse(raw);
   check(manifest.format === 1 && hashPattern.test(manifest.sourceCommit) && hashPattern.test(manifest.sourceTree)
     && (!expectedCommit || manifest.sourceCommit === expectedCommit) && Array.isArray(manifest.files)
-    && same(manifest.publicAssets, assetsFor(manifest.runtime?.schemaVersion, manifest.files.some(f => f.path === "src/inbox-ui.js"), manifest.files.some(f => f.path === "src/inbox-send-ui.js"))));
+    && same(manifest.publicAssets, gmailAssets(assetsFor(manifest.runtime?.schemaVersion, manifest.files.some(f => f.path === "src/inbox-ui.js"), manifest.files.some(f => f.path === "src/inbox-send-ui.js")), new Set(manifest.files.map(f => f.path)))));
   const listed = manifest.files.map(entry => entry.path);
   check(new Set(listed).size === listed.length && same([...listed].sort(), listed) && required.every(path => listed.includes(path))
     && same(actual.sort(), [...listed, manifestName].sort()));
@@ -137,6 +154,8 @@ export function verifyRuntimePackage(directory, { expectedCommit } = {}) {
     const bytes = readFileSync(join(root, entry.path));
     check(bytes.length === entry.bytes && sha256(bytes) === entry.sha256); files.set(entry.path, bytes);
   }
+  const dependencies = externalDependencies(files);
+  check(same(manifest.dependencies ?? [], dependencies));
   // Check this codebase's literal imports, including dynamic literal imports.
   // This is not a complete JavaScript dependency parser; cold runtime tests and
   // source review remain required, especially if a computed loader is added.
@@ -145,6 +164,7 @@ export function verifyRuntimePackage(directory, { expectedCommit } = {}) {
     for (const match of bytes.toString().matchAll(/(?<!["'.])(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)["']([^"']+)["']/g)) {
       const specifier = match[1];
       if (specifier.startsWith("node:") || specifier.startsWith("cloudflare:")) continue;
+      if (specifier === 'postal-mime' && path === 'server/gmail-email.mjs' && dependencies.length === 1) continue;
       check(specifier.startsWith(".") && files.has(posix.normalize(posix.join(posix.dirname(path), specifier))));
     }
   }

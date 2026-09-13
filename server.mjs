@@ -17,6 +17,13 @@ catch (error) { if (error?.code !== "ENOENT") throw error; }
 if (!paused && production && !havePilotDb) throw new Error("Provision a persistent pilot database before startup");
 if (!paused) mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
 const store = paused ? null : new RoomStore(filename);
+let gmailRuntime = null;
+if (store && ['ROOM_GMAIL_CLIENT_FILE', 'ROOM_GMAIL_KEY_FILE', 'ROOM_GMAIL_VAULT_FILE'].some(name => process.env[name])) {
+  try {
+    const { createGmailRuntime } = await import('./server/gmail-runtime.mjs');
+    gmailRuntime = createGmailRuntime({ store, origin });
+  } catch (error) { store.close(); throw error; }
+}
 if (store && production && !store.db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) { store.close(); throw new Error("Provision a room before deployment"); }
 const server = paused ? createServer((req, res) => {
   try {
@@ -27,14 +34,14 @@ const server = paused ? createServer((req, res) => {
     const reply = maintenanceReply(url.pathname);
     res.writeHead(reply.status, reply.headers); res.end(req.method === "HEAD" ? undefined : reply.body);
   } catch { res.writeHead(400, { "Cache-Control": "no-store" }); res.end(); }
-}) : createRoomServer({ store, origin, trustedLocalProxy: production, providerAuth });
+}) : createRoomServer({ store, origin, trustedLocalProxy: production, providerAuth, gmailConnections: gmailRuntime?.connections });
 server.listen(port, host, () => console.log(`Project Room ${paused ? "paused" : production ? "invite-only pilot" : "local pilot"}: ${origin}`));
 let closing = false;
 function close() {
   if (closing) return;
   closing = true;
   server.closeStreams?.();
-  server.close(() => { store?.close(); process.exit(0); });
+  server.close(() => { gmailRuntime?.close(); store?.close(); process.exit(0); });
   server.closeIdleConnections();
 }
 process.on("SIGINT", close);
