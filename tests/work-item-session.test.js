@@ -68,7 +68,7 @@ test("session contract stays on writer 27 and off Compute / Slack-with-bots / pe
 test("legacy work items read as queued; started/status/stop/stopped are exact transitions", () => {
   const item = { id: "legacy", title: "Old", state: "accepted", revision: 2, accountableMemberId: "agent" };
   assert.deepEqual(sessionRecord(item), { status: "queued", stop_requested_at: null, heartbeat_at: null, worker_member_id: null,
-    started_at: null, attempt_count: 0, budget: null, spend_cents: null });
+    started_at: null, attempt_count: 0, budget: null, spend_cents: null, attempts: [] });
   applySessionFields(item, { type: SESSION_EVENT_TYPES.STARTED, at: "2026-09-10T21:00:00.000Z" });
   assert.equal(item.status, SESSION_STATUSES.PROCESSING);
   applySessionFields(item, { type: SESSION_EVENT_TYPES.STATUS_CHANGED, at: "2026-09-10T21:01:00.000Z", data: { status: "active" } });
@@ -97,7 +97,7 @@ test("seed work keeps assignment state; session defaults do not rewrite history"
   const review = state.workItems["work-spec-review"];
   assert.equal(review.state, "completed");
   assert.deepEqual(sessionRecord(review), { status: "queued", stop_requested_at: null, heartbeat_at: null, worker_member_id: null,
-    started_at: null, attempt_count: 0, budget: null, spend_cents: null });
+    started_at: null, attempt_count: 0, budget: null, spend_cents: null, attempts: [] });
   const next = applyEvent(state, {
     id: "session-seed-start", idempotencyKey: "session-seed-start", roomId: state.room.id,
     type: T.SESSION_STARTED, actorId: "codex", at: "2026-09-10T21:10:00.000Z",
@@ -274,4 +274,69 @@ test("a retry from a terminal status increments attempt_count, resets run fields
   // A retry may declare a wider budget explicitly; a stop requested on the earlier run does not block it.
   applySessionFields(item, { type: SESSION_EVENT_TYPES.STARTED, actorId: "agent", at: at(6), data: { budget: { maxAttempts: 3 } } });
   assert.equal(item.attempt_count, 3);
+});
+
+test("G1 attempt contract: starts record attributable attempts; stops close them with outputs", () => {
+  const item = { id: "w", title: "Attempted", state: "accepted", revision: 3, accountableMemberId: "owner" };
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STARTED, actorId: "agent-a", at: "2026-09-13T10:00:00.000Z",
+    data: { budget: { maxAttempts: 5 }, environment: "local-mac-1" } });
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STOPPED, actorId: "agent-a", at: "2026-09-13T10:20:00.000Z",
+    data: { status: "failed", outputs: ["log:run-1"] } });
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STARTED, actorId: "agent-b", at: "2026-09-13T11:00:00.000Z", data: {} });
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STOPPED, actorId: "agent-b", at: "2026-09-13T11:30:00.000Z",
+    data: { status: "done", outputs: ["msg:result-9", "https://example.invalid/evidence"] } });
+  const ledger = JSON.parse(JSON.stringify(sessionRecord(item).attempts));
+  assert.deepEqual(ledger, [
+    { attempt: 1, performer: "agent-a", startedAt: "2026-09-13T10:00:00.000Z", inputRevision: 3,
+      environment: "local-mac-1", limits: { maxAttempts: 5 }, endedAt: "2026-09-13T10:20:00.000Z",
+      outcome: "failed", outputs: ["log:run-1"] },
+    // A retry that declares no budget keeps the previous limits - recorded as in force.
+    { attempt: 2, performer: "agent-b", startedAt: "2026-09-13T11:00:00.000Z", inputRevision: 3,
+      environment: null, limits: { maxAttempts: 5 }, endedAt: "2026-09-13T11:30:00.000Z",
+      outcome: "done", outputs: ["msg:result-9", "https://example.invalid/evidence"] }
+  ]);
+  assert.equal(item.attempt_count, 2);
+});
+
+test("G1 attempt fields validate; historical events without them replay to nulls", () => {
+  const item = { id: "w2", title: "Old attempt", state: "accepted", revision: 0, accountableMemberId: "owner" };
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STARTED, actorId: "agent", at: "2026-09-01T00:00:00.000Z" });
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STOPPED, actorId: "agent", at: "2026-09-01T01:00:00.000Z", data: { status: "done" } });
+  assert.deepEqual(JSON.parse(JSON.stringify(sessionRecord(item).attempts)),
+    [{ attempt: 1, performer: "agent", startedAt: "2026-09-01T00:00:00.000Z", inputRevision: 0,
+      environment: null, limits: null, endedAt: "2026-09-01T01:00:00.000Z", outcome: "done", outputs: null }]);
+  for (const bad of [42, {}, "", "  ", "x".repeat(201)])
+    assert.throws(() => applySessionFields({ id: "x", state: "accepted", revision: 0 },
+      { type: SESSION_EVENT_TYPES.STARTED, actorId: "a", at: "2026-09-01T00:00:00.000Z", data: { environment: bad } }));
+  for (const bad of [[], ["ok", 5], ["x".repeat(501)], Array(11).fill("ref"), "refs"])
+    assert.throws(() => applySessionFields(
+      { id: "x", state: "accepted", revision: 0, status: "processing", heartbeat_at: "2026-09-01T00:00:00.000Z", attempt_count: 1, attempts: [{ attempt: 1, performer: "a", startedAt: "2026-09-01T00:00:00.000Z", endedAt: null }] },
+      { type: SESSION_EVENT_TYPES.STOPPED, actorId: "a", at: "2026-09-01T01:00:00.000Z", data: { status: "done", outputs: bad } }));
+});
+
+test("G1 attempt environment and outputs flow through the session command path", async t => {
+  const { store, request, ownerKey } = await serve(t);
+  const start = await request("/api/rooms/commons/work-sessions", { method: "POST", token: ownerKey,
+    data: sessionBody({ action: "set_status", status: "processing", environment: "ci-runner-2" }) });
+  assert.equal(start.status, 201);
+  const stopId = randomUUID();
+  const stop = await request("/api/rooms/commons/work-sessions", { method: "POST", token: ownerKey,
+    data: sessionBody({ requestId: stopId, action: "set_status", status: "done", outputs: ["msg:done-1"], expectedRevision: 1 }) });
+  assert.equal(stop.status, 201);
+  const listed = await (await request("/api/rooms/commons/work-sessions", { token: ownerKey })).json();
+  const card = listed.sessions.find(s => s.workItemId === "session-one");
+  assert.deepEqual(card.attempts, [{ attempt: 1, performer: "owner", startedAt: card.attempts[0].startedAt,
+    inputRevision: 0, environment: "ci-runner-2", limits: null, endedAt: card.attempts[0].endedAt,
+    outcome: "done", outputs: ["msg:done-1"] }]);
+  // Wrong placement is rejected.
+  const misplaced = await request("/api/rooms/commons/work-sessions", { method: "POST", token: ownerKey,
+    data: sessionBody({ action: "set_status", status: "processing", outputs: ["msg:x"] }) });
+  assert.equal(misplaced.status, 422);
+  // Idempotent replay of the same request returns the same event; a changed one conflicts.
+  const again = await request("/api/rooms/commons/work-sessions", { method: "POST", token: ownerKey,
+    data: sessionBody({ requestId: stopId, action: "set_status", status: "done", outputs: ["msg:done-1"], expectedRevision: 1 }) });
+  assert.equal(again.status, 200);
+  const conflict = await request("/api/rooms/commons/work-sessions", { method: "POST", token: ownerKey,
+    data: sessionBody({ requestId: stopId, action: "set_status", status: "done", outputs: ["msg:different"], expectedRevision: 1 }) });
+  assert.equal(conflict.status, 409);
 });
