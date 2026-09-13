@@ -26,6 +26,17 @@ The module reads only the mailbox profile after consent, not messages. It grants
 
 ## Required next integration (not complete)
 
+Configuration factory: `server/gmail-runtime.mjs` accepts all three opt-in paths:
+`ROOM_GMAIL_CLIENT_FILE`, `ROOM_GMAIL_KEY_FILE` (32 raw bytes), and
+`ROOM_GMAIL_VAULT_FILE`. It refuses partial configuration, source-tree secrets,
+symlinked secret files, non-owner/private file modes, wrong redirect URIs, non-private
+vault directories, and existing non-vault database tables. It creates no encryption
+key and makes no network requests. Five tests cover private opening/reopening and
+rejection paths using disposable synthetic credentials. The main server does not call
+this factory yet: the exact-revision packager currently rejects bare package imports
+and does not list the Gmail callback asset. Dependency and asset packaging must be
+updated and cold-start tested before normal startup enables this integration.
+
 Lifecycle checkpoint: `server/gmail-connections.mjs` now joins the OAuth boundary,
 credential vault and page reader to the existing account-private Inbox import.
 Tests exercise consent exchange, encrypted storage, reading/import, reconnect,
