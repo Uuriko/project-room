@@ -340,6 +340,27 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             return json(res,200,{contractVersion:1,viewer:inboxViewer,enabled:Boolean(twilioConnections),connections});
           }catch {reject(409,'twilio_connection_incomplete','Messaging connection unavailable.');}
         }
+        if (url.pathname === '/api/inbox/connections/twilio/receiving' && req.method==='GET') {
+          try {
+            const result=twilioConnections?.receivingStatus({token,binding})??{enabled:false,connections:[]};
+            store.authenticateAccountSession(token,null,binding);
+            return json(res,200,{...result,contractVersion:1,viewer:inboxViewer});
+          }catch {reject(409,'receiving_unconfirmed','Receiving status unavailable.');}
+        }
+        const receivingAction=/^\/api\/inbox\/connections\/twilio\/receiving\/(start|stop)$/.exec(url.pathname);
+        if(receivingAction){
+          if(!twilioConnections)reject(503,'twilio_not_configured','Messaging is not configured.');
+          if(req.method!=='POST')reject(405,'method_not_allowed','Use POST.');
+          protectWrite(req,auth,false);rate(`receiving:${auth.account.id}`,20);
+          const data=await body(req),start=receivingAction[1]==='start';
+          const fields=start?['connectionId','expectedRevision','expectedConnectionRevision']:['connectionId','expectedRevision'];
+          if(!exact(data,fields))reject(422,'receiving_invalid','Check the receiving request.');
+          try {
+            const result=start?twilioConnections.startReceiving({token,binding},data):twilioConnections.stopReceiving({token,binding},data);
+            store.authenticateAccountSession(token,null,binding);
+            return json(res,200,{...result,contractVersion:1,viewer:inboxViewer});
+          }catch {reject(409,'receiving_unconfirmed','Action unconfirmed. Refresh and try again.');}
+        }
         if (url.pathname === '/api/inbox/connections/twilio/disconnect') {
           if(!twilioConnections)reject(503,'twilio_not_configured','Messaging is not configured.');
           if(req.method!=='POST')reject(405,'method_not_allowed','Use POST.');

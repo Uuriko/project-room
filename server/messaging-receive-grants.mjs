@@ -54,6 +54,15 @@ export class MessagingReceiveGrants {
     state:r.state,expiresAt:r.expires_at});}
   #append(r){this.#db.prepare('INSERT INTO messaging_receive_grants_v1 VALUES(?,?,?,?,?,?,?,?,?,?)')
     .run(r.account_id,r.connection_id,r.revision,r.auth_epoch,r.provider,r.connection_revision,r.state,r.expires_at,r.at,r.actor_session_revision);return this.#view(r);}
+  status(session,connectionId){
+    if(!id(connectionId))fail();
+    return this.#transaction(()=>{
+      const auth=this.#auth(session),r=this.#row(auth.account.id,connectionId);
+      if(!r)return {connectionId,state:'missing',revision:0,expiresAt:null,connectionRevision:null};
+      return {connectionId,revision:r.revision,expiresAt:r.expires_at,connectionRevision:r.connection_revision,
+        state:r.state==='revoked'?'revoked':r.auth_epoch!==auth.account.authEpoch?'reauthorize':r.expires_at<=this.#store.now()?'expired':'active'};
+    });
+  }
   issue(session,request){
     if(!exact(request,['connectionId','provider','connectionRevision','expectedRevision','expiresAt'])
       ||!id(request.connectionId)||!providers.includes(request.provider)||!revision(request.connectionRevision)||request.connectionRevision<1
