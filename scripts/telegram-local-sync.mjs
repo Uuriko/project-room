@@ -2,7 +2,8 @@
 import { readFileSync, writeFileSync, lstatSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createHash } from 'node:crypto';
+import { importTelegramPage } from '../server/telegram-inbox-import.mjs';
+export { importTelegramPage } from '../server/telegram-inbox-import.mjs';
 import { RoomStore } from '../server/store.mjs';
 import { readTelegramBotPage } from '../server/telegram-bot-reader.mjs';
 
@@ -18,23 +19,6 @@ export function bindingFromPage(page, challenge) {
   const chats = new Set(matches.map(u => u.message.chat.id));
   if (chats.size !== 1) throw new Error('Binding unconfirmed');
   return [...chats][0];
-}
-export function importTelegramPage(store, slot, session, page) {
-  return store.transaction(() => {
-    let imported = 0;
-    for (const o of page.observations) {
-      const row = store.inbox.list(slot.token, session.sessionBinding).sources.find(s => s.id === o.sourceId);
-      const current = row ? store.inbox.read(slot.token, o.sourceId, session.sessionBinding).source : null;
-      if (current && Number(current.providerRevision) >= Number(o.providerRevision)) continue;
-      const data = { adapter: o.adapter, provider: o.provider, accountId: o.accountId, connectionId: o.connectionId,
-        conversationId: o.conversationId, providerMessageId: o.providerMessageId, providerRevision: o.providerRevision,
-        sender: o.sender, recipient: 'Project Room Inbox', subject: 'Telegram message', paragraphs: [o.text] };
-      const requestId = 'tg-' + createHash('sha256').update(`${o.sourceId}:${o.providerRevision}`).digest('hex');
-      store.inbox.importMessage(slot.token, { action: 'message.import', requestId, sourceId: o.sourceId, expectedRevision: row?.revision ?? 0, data }, session.sessionBinding);
-      imported++;
-    }
-    return { imported, skipped: page.skipped.length, acknowledged: false };
-  });
 }
 
 export async function syncLocalTelegram(directory) {

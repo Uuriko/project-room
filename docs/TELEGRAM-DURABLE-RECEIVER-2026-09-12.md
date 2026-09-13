@@ -42,9 +42,9 @@ Remaining before activation:
 - Bind one account and configured chat scope to one bot and one shared queue DB.
   Epoch changes require explicit queue disposition; separate queue files must not
   be configured for the same bot.
-- Wire durable connection lifecycle, revoke/disconnect fences and a commit callback
-  that rechecks authority inside the Inbox transaction. The tick's before/after
-  checks do not replace transaction-time authorization.
+- Wire durable connection lifecycle storage and UI controls into the authorized
+  receiver factory described below. Its synchronous grant reader must use trusted
+  server state and ideally the same RoomStore transaction, never request payloads.
 - Add user-visible retention/capacity status before long-running use.
 - Add supervised scheduling and authenticated UI status/sync/disconnect.
 - Resolve corruption/recovery operator flow, old queue cleanup and key rotation.
@@ -58,3 +58,27 @@ tick checks. New checks use two database handles to test competing owners,
 replacement fencing, lease loss during provider response, and delivered-only
 pruning that preserves pending work. No live staging copies were pruned; tests
 used disposable databases only.
+
+## Authorized runtime integration
+
+`createTelegramReceiver` now connects the durable tick to the real private Inbox
+importer. It captures the connection grant revision/content and rechecks account
+session, auth epoch, connection identity, grant activity, selected chat and lease
+inside the Inbox transaction before every observation and before commit. Changed
+grants require a new receiver instance; queued messages outside the new chat scope
+remain pending instead of silently importing or dropping them.
+
+The importer was moved from the local pilot script into a reusable server module;
+the pilot keeps its old export for existing callers. Even empty/duplicate pages
+now authenticate the session before returning a successful import result.
+
+Sixteen combined runtime/queue/local-pilot/import tests passed for this follow-up.
+Four new runtime tests exercise real disposable RoomStore imports with mocked
+Telegram responses: two successive receives, sign-out during fetch, revocation
+after the first write (whole-page rollback), and a narrowed chat scope during
+pending-page replay. No real provider requests or production data changes occurred.
+
+Still absent: persisted connection lifecycle/configuration and browser controls,
+supervised runtime scheduling, live activation, complete multi-account bot routing,
+and outgoing replies. Current tests use a synchronous in-memory grant reader to
+exercise the boundary; that is not a production connection registry.
