@@ -35,6 +35,32 @@ async function setup(t, mobile = false) {
   return { ...f, page, origin, open, create, config, capture };
 }
 
+for (const mobile of [false, true]) test(`setup presets ${mobile ? "mobile" : "desktop"}: defaults, none, custom and bounded max`, { timeout: 30000 }, async t => {
+  const f = await setup(t, mobile), p = f.page; await f.open();
+  assert.equal(await p.locator("#agent-setup-preset").inputValue(), "moderate");
+  assert.equal(await p.locator("#agent-connect-access").inputValue(), "contribute");
+  for (const [preset, access, expiry] of [["max", "max", "30"], ["low", "chat", "1"], ["moderate", "contribute", "7"]]) {
+    await p.locator("#agent-setup-preset").selectOption(preset);
+    assert.equal(await p.locator("#agent-connect-access").inputValue(), access);
+    assert.equal(await p.locator("#agent-connect-expiry").inputValue(), expiry);
+  }
+  await p.locator("#agent-connect-name").fill("Preset agent");
+  await p.locator("#agent-setup-preset").selectOption("none");
+  assert.equal(await p.locator("#agent-create").isVisible(), false);
+  assert.equal(await p.locator("#agent-key-later").isVisible(), false);
+  await p.locator("#agent-connect-name").press("Enter");
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM agent_connections").get().n, 0);
+  await p.locator("#agent-setup-preset").selectOption("custom");
+  assert.equal(await p.locator("#agent-connect-access").isVisible(), true);
+  await p.locator("#agent-connect-access").selectOption("review");
+  await p.locator("#agent-connect-expiry").selectOption("7");
+  assert.equal(await p.locator("#agent-setup-preset").inputValue(), "custom");
+  await p.locator("#agent-setup-preset").selectOption("max");
+  await p.locator("#agent-create").click(); await p.locator("#agent-setup").waitFor({ state: "visible" });
+  const agent = Object.values(f.store.room("commons").state.members).find(m => m.displayName === "Preset agent");
+  assert.deepEqual(agent.permissions, ["steer", "manage_claims", "accept_work", "complete_work", "verify"]);
+  assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+});
 test("browser owner issues digest-only setup; a real external client imports, reads, rotates and loses access", { timeout: 30000 }, async t => {
   const f = await setup(t), requests = [];
   f.page.on("request", request => { if (request.url().endsWith("/agent-connections") && request.method() === "POST") requests.push(request.postDataJSON()); });

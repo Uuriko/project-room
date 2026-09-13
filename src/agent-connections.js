@@ -29,8 +29,26 @@ export function installAgentConnections({ client, getState }) {
   const ACCESS_HINT = {
     chat: "Can read this room’s history and post messages.",
     contribute: "Can read this room, post messages, and contribute work.",
-    review: "Can read this room, post messages, and review work."
+    review: "Can read this room, post messages, and review work.",
+    max: "Can steer, coordinate claims, contribute and review. Human administration and external writes stay off."
   };
+  const presetHints = { max: "Broad agent access · 30 days", moderate: "Contribute work · 7 days", low: "Read & chat · 1 day",
+    none: "No new room access. Existing connections stay unchanged.", custom: "Choose access, connection and expiry in More." };
+  function markCustom() {
+    $("#agent-setup-preset").value = "custom";
+    $("#agent-preset-hint").textContent = presetHints.custom;
+  }
+  function applyPreset() {
+    if (busy || pending || setup) return;
+    const preset = $("#agent-setup-preset").value;
+    const choices = { max: ["max", "30", "mcp"], moderate: ["contribute", "7", "mcp"], low: ["chat", "1", "mcp"], none: ["chat", "1", "packet"] };
+    if (choices[preset]) {
+      const [access, expiry, route] = choices[preset];
+      $("#agent-connect-access").value = access; $("#agent-connect-expiry").value = expiry; $("#agent-connect-route").value = route;
+    }
+    $("#agent-connect-more").open = preset === "custom";
+    $("#agent-preset-hint").textContent = presetHints[preset]; describeRoute();
+  }
   function currentRoute() {
     const value = $("#agent-connect-route")?.value;
     return value === "packet" || value === "direct" ? value : "mcp";
@@ -61,16 +79,18 @@ export function installAgentConnections({ client, getState }) {
         : "Import, merge MCP from Copy plug-in steps, then room_check_access.";
   }
   function describeRoute() {
+    $("#agent-preset-hint").textContent = presetHints[$("#agent-setup-preset").value];
     const route = currentRoute();
     if ($("#agent-route-hint")) $("#agent-route-hint").textContent = routeHint(route);
     if ($("#agent-packet-today")) $("#agent-packet-today").hidden = route !== "packet";
-    const packet = route === "packet";
+    const noAccess = $("#agent-setup-preset").value === "none";
+    const packet = route === "packet" || noAccess;
     if ($("#agent-create")) $("#agent-create").hidden = packet;
     if ($("#agent-create-note")) {
       $("#agent-create-note").hidden = packet;
       $("#agent-create-note").textContent = "The browser sends only a digest.";
     }
-    if ($("#agent-key-later")) $("#agent-key-later").hidden = !packet;
+    if ($("#agent-key-later")) $("#agent-key-later").hidden = !packet || noAccess;
     if ($("#agent-host-snippets")) $("#agent-host-snippets").hidden = route !== "mcp";
     fillList($("#agent-import-checklist"), setupChecklist({ route, configDir: currentConfigDir() }));
     try {
@@ -84,6 +104,7 @@ export function installAgentConnections({ client, getState }) {
       if ($("#agent-mcp-cli")) $("#agent-mcp-cli").textContent = "";
     }
     describeAccess();
+    if (noAccess) fillList($("#agent-capabilities"), []);
     describeImport();
   }
   async function copyPlain(text, ok) {
@@ -230,6 +251,7 @@ export function installAgentConnections({ client, getState }) {
   }
   async function prepare(action, row) {
     if (!owns() || busy || pending || setup) return;
+    if (action === "create" && $("#agent-setup-preset").value === "none") return;
     busy = true; render();
     const identity = owner, epoch = generation, currentFlow = flow;
     try {
@@ -254,12 +276,15 @@ export function installAgentConnections({ client, getState }) {
   $("#agent-connect-close").addEventListener("click", () => dialog.close());
   dialog.addEventListener("close", conceal);
   form.addEventListener("submit", event => { event.preventDefault(); if (pending) void submit(); else void prepare("create"); });
-  $("#agent-connect-access")?.addEventListener("change", describeAccess);
-  $("#agent-connect-route")?.addEventListener("change", describeRoute);
+  $("#agent-setup-preset").addEventListener("change", applyPreset);
+  $("#agent-connect-access")?.addEventListener("change", () => { markCustom(); describeRoute(); });
+  $("#agent-connect-route")?.addEventListener("change", () => { markCustom(); describeRoute(); });
+  $("#agent-connect-expiry")?.addEventListener("change", () => { markCustom(); describeRoute(); });
   $("#agent-retry").addEventListener("click", () => { void submit(); });
   $("#agent-connect-done").addEventListener("click", () => {
     if (!busy && !copying) {
       forget(); form.reset(); rosterId = null;
+      $("#agent-preset-hint").textContent = presetHints.moderate;
       if ($("#agent-roster-hint")) $("#agent-roster-hint").textContent = "";
       if ($("#agent-import-route")) $("#agent-import-route").textContent = "";
       describeRoute(); status(""); render();
@@ -272,6 +297,7 @@ export function installAgentConnections({ client, getState }) {
       if (!row) return;
       $("#agent-connect-name").value = row.name;
       $("#agent-connect-access").value = row.access;
+      markCustom();
       if ($("#agent-connect-route")) $("#agent-connect-route").value = row.route;
       rosterId = button.dataset.roster;
       describeRoute();

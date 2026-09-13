@@ -490,6 +490,8 @@
         <p id="agent-roster-hint" class="form-hint"></p>
         <p id="agent-packet-today" class="form-hint" hidden>Use my AI, then paste the draft. No key in chat.</p>
         <ul id="agent-capabilities" class="form-hint agent-capabilities"></ul>
+        <label>Setup<select id="agent-setup-preset"><option value="max">Max</option><option value="moderate" selected>Moderate</option><option value="low">Low</option><option value="none">None</option><option value="custom">Custom</option></select></label>
+        <p id="agent-preset-hint" class="form-hint">Contribute work · 7 days</p>
         <details id="agent-connect-more"><summary>More</summary>
           <label>How they connect<select id="agent-connect-route" aria-describedby="agent-route-hint">
             <option value="packet">Chat packet — no Room key</option>
@@ -499,7 +501,7 @@
           <p id="agent-route-hint" class="form-hint"></p>
           <p id="agent-access-hint" class="form-hint"></p>
           <div class="share-settings">
-            <label>Access<select id="agent-connect-access"><option value="chat">Read & chat</option><option value="contribute" selected>Contribute work</option><option value="review">Review work</option></select></label>
+            <label>Access<select id="agent-connect-access"><option value="chat">Read & chat</option><option value="contribute" selected>Contribute work</option><option value="review">Review work</option><option value="max">Max agent access</option></select></label>
             <label>Expires in<select id="agent-connect-expiry"><option value="1">1 day</option><option value="7" selected>7 days</option><option value="30">30 days</option></select></label>
           </div>
         </details>
