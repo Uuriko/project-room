@@ -8,7 +8,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { roomEntry, publicRoomDoorHtml } from "../deploy/room-entry.mjs";
 import {
   agentCard, llmsTxt, llmsFullTxt, kitsTxt, agentCardJson, discoveryDoc, DISCOVERY_PATHS,
-  SHORT_PACKET_FILES, SHORT_PACKET_SYNONYMS, AGENT_CARD_SYNONYMS, HEALTH_ALIAS_PATHS,
+  AFTER_PASTE_SECTION, SHORT_PACKET_FILES, SHORT_PACKET_SYNONYMS, AGENT_CARD_SYNONYMS, HEALTH_ALIAS_PATHS,
   KITS_CATALOG_PATH, KITS_CATALOG_SYNONYMS, KITS_CATALOG_FILES,
   isHealthAliasPath, A2A_PROTOCOL_VERSION, AGENT_CARD_A2A_PATH,
   ROOM_ORIGIN, ROOM_DOOR, ROOM_PUBLIC_WWW, ROOM_PUBLIC_LOBBY, COMPUTE_DOOR, ROOM_DOCS,
@@ -77,6 +77,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.match(full, /\/kits\.txt/);
   assert.equal(FORBIDDEN.test(text), false);
   assert.equal(FORBIDDEN.test(full), false);
+  assert.match(card.skills.find(row => row.id === "packet").description, /After paste/);
   assert.equal(FORBIDDEN.test(kitsTxt()), false);
   assert.equal(FORBIDDEN.test(agentCardJson()), false);
   assert.equal(JSON.parse(agentCardJson()).protocol, "project-room-discovery");
@@ -88,6 +89,30 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(discoveryDoc(AGENT_CARD_A2A_PATH).body, discoveryDoc("/.well-known/agent.json").body);
   assert.equal(discoveryDoc("/room/.well-known/agent-card.json").body, discoveryDoc("/.well-known/agent.json").body);
   assert.equal(discoveryDoc("/project-room/.well-known/agent-card.json").body, discoveryDoc("/.well-known/agent.json").body);
+});
+
+test("short and full packets tell a pasted agent the next action; kits and door stay off", () => {
+  const text = llmsTxt(), full = llmsFullTxt();
+  assert.match(AFTER_PASTE_SECTION, /^## After paste \(you are the agent\)\n/);
+  assert.match(AFTER_PASTE_SECTION, /Human pasted this packet into chat\. No Room key here\./);
+  assert.match(AFTER_PASTE_SECTION, /Do not call room_check_access or orient \(need guest-agent or enrolled-key\)\./);
+  assert.match(AFTER_PASTE_SECTION, /Waiting for Paste AI draft\./);
+  assert.match(AFTER_PASTE_SECTION, /#join\/ ≠ agent auth\./);
+  for (const packet of [text, full]) {
+    const join = packet.indexOf("## Join\n");
+    const after = packet.indexOf(AFTER_PASTE_SECTION);
+    const routes = packet.indexOf("## Routes\n");
+    assert.ok(join >= 0, "Join present");
+    assert.ok(after > join, "After paste follows Join");
+    assert.ok(routes > after, "Routes follow After paste");
+    assert.equal(packet.includes(AFTER_PASTE_SECTION), true);
+  }
+  assert.equal(kitsTxt().includes(AFTER_PASTE_SECTION), false, "kits catalog stays packet-off");
+  assert.equal(kitsTxt().includes("## After paste"), false);
+  const packetSkill = agentCard().skills.find(row => row.id === "packet");
+  assert.match(packetSkill.description, /After paste/);
+  assert.match(packetSkill.description, /three-line reply/);
+  assert.doesNotMatch(agentCardJson(), FORBIDDEN);
 });
 
 test("Room Worker serves llms.txt, llms-full.txt, agent.json and /room aliases", async t => {
