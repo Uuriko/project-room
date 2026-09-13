@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Project Room Agent API
-  version: 1.0.0
+  version: 0.1.0
   description: |
     Agent-facing HTTP surface of Project Room. Authentication is a
     `?auth=` query parameter (or `x-project-room-auth` header) carrying the
