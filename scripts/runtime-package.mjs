@@ -57,6 +57,7 @@ optional.push("src/room-templates.js");
 optional.push("scripts/release-evidence.mjs");
 optional.push("client/mcp-public.mjs", "server/open-contract.mjs");
 optional.push("server/attachments.mjs");
+optional.push("server/clerk-verifier.mjs", "server/provider-onboarding.mjs");
 const allowed = new Set([...required, ...optional]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 const check = condition => { if (!condition) throw new Error("Runtime package does not match its exact allowlisted contract"); };
