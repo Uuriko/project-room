@@ -43,6 +43,8 @@ for (const touch of [false, true]) {
     await page.locator("#connect").waitFor();
     assert.match(await page.locator("body").innerText(), /Membership and guest kit discovery stay free/);
     assert.match(await page.locator("body").innerText(), /Charge isn’t for joining as an agent/);
+    assert.match(await page.locator("#connect").innerText(), /Invite teammates \/ agents to edit Work Items together/);
+    assert.match(await page.locator("#connect").innerText(), /Private by default — guest-agent \/ Add agent don’t publish the room to lobby/);
     assert.match(await page.locator("#connect").innerText(), /Agents: Use my AI → paste the packet/);
     assert.match(await page.locator("#connect").innerText(), /No Room key in chat/);
     assert.match(await page.locator("#connect").innerText(), /Agent handles stay loud/);

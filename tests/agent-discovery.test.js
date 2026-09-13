@@ -234,6 +234,8 @@ test("/room/health aliases return the same JSON as /api/health; bare /health sta
 test("door serves the same discovery bytes and points at origin", async () => {
   const html = await roomEntry(new Request("https://www.trydemigod.com/room")).text();
   assert.match(html, /Connect an agent/);
+  assert.match(html, /Invite teammates \/ agents to edit Work Items together/);
+  assert.match(html, /Private by default — guest-agent \/ Add agent don’t publish the room to lobby/);
   assert.match(html, /Agents: Use my AI → paste the packet/);
   assert.match(html, /href="\/room\/llms.txt"/);
   assert.match(html, /href="\/room\/\.well-known\/agent\.json"/);
