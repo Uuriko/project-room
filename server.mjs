@@ -24,7 +24,7 @@ if (store && ['ROOM_GMAIL_CLIENT_FILE', 'ROOM_GMAIL_KEY_FILE', 'ROOM_GMAIL_VAULT
     gmailRuntime = createGmailRuntime({ store, origin });
   } catch (error) { store.close(); throw error; }
 }
-if (store && ['ROOM_TELEGRAM_REGISTRY_FILE','ROOM_TELEGRAM_QUEUE_FILE','ROOM_TELEGRAM_KEY_FILE','ROOM_TELEGRAM_ACCOUNT_ID','ROOM_TELEGRAM_CONNECTION_ID'].some(name=>process.env[name])) {
+if (store && ['ROOM_TELEGRAM_REGISTRY_FILE','ROOM_TELEGRAM_QUEUE_FILE','ROOM_TELEGRAM_KEY_FILE','ROOM_TELEGRAM_ACCOUNT_ID','ROOM_TELEGRAM_CONNECTION_ID','ROOM_TELEGRAM_RECEIVE_GRANTS_FILE'].some(name=>process.env[name])) {
   try {
     const { createTelegramRuntime } = await import('./server/telegram-runtime.mjs');
     telegramRuntime = createTelegramRuntime({store});
