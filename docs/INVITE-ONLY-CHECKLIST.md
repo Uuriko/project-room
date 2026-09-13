@@ -83,13 +83,19 @@ expiry, revocation, and rate limits.
 - **Incident communication**: via the room itself and the operator's normal
   channels; there is no separate status page (see `docs/PRODUCTION-PLAN.md`
   runbook requirements before any hosted launch).
-- **Backups**: `scripts/backup-room.mjs` is preserved; restore rehearsal is
-  W4-12 (B5), not yet done — restoring a backup must not resurrect revoked
-  credentials as live; that check is tracked there.
+- **Backups**: `scripts/backup-room.mjs` is preserved; restore rehearsal
+  landed in W4-12 (B5) at `713d156b`: `backupRoom` writes a watermark
+  sidecar and `reconcileRestoredAuthority` names every credential, link,
+  connection, and membership withdrawn after the watermark, so a restore
+  cannot silently treat revoked authority as current.
 
 ## Status
 
 - Verified 2026-09-12: items 1–4 against the code at PR #126, with
   `tests/invite-only-boundary.test.js` pinning the unauthenticated inventory.
-- Item 5 is operational (owner-run), not automated; the restore-rehearsal
-  caveat is the one open follow-up.
+- Re-verified 2026-09-13 at `713d156b`: boundary test 3/3 green, rate limits
+  on all capability endpoints confirmed, invite codes remain hash-only;
+  headers verified in `server/http.mjs` (default `X-Robots-Tag: noindex,
+  nofollow`, `Cache-Control: no-store`, `Referrer-Policy: no-referrer`).
+- Item 5 is operational (owner-run), not automated; with B5 landed there are
+  no open follow-ups.
