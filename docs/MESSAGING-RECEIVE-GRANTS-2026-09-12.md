@@ -1,11 +1,26 @@
 # Receive-only background authority: isolated implementation
 
-`server/messaging-receive-grants.mjs` is a new host-only component. It is **not
-wired, packaged for deployment, or enabled for any live account**. It does not
-replace session authorization in the current importers yet.
+`server/messaging-receive-grants.mjs` is a host-only component. At `1e03023` it
+connects to a narrow internal Inbox receive method and a signed SMS/WhatsApp
+background importer. It is included in the exact runtime package (132 files),
+but **no HTTP receiver/startup or live account is enabled**. Telegram and ordinary
+interactive Inbox actions still use their existing session authorization.
 
 Checkpoint `17d9e31`: four focused grant tests and **1484/1484 full Node tests**
 passed, zero skipped. Independent review requested; no new full browser run.
+
+`1e03023`: focused grants/import/package checks passed 10/10 before the final
+additive rollback assertions; both provider tests passed again afterward. The
+new tests verify actual private import after logout, exact duplicate retry,
+signature/destination boundaries, expiry after journal writes rolls back the
+whole import, and grant revocation plus provider disconnect stop future imports.
+An exact in-process lease is valid only during its synchronous callback and
+only for its originating RoomStore; copying or retaining it cannot authorize
+another action. No fake human login or general Inbox credential is minted.
+
+Exact `1e03023` then passed **1486/1486 full Node tests**, zero skipped, plus
+**6/6** existing SMS/WhatsApp desktop/mobile journeys and package checks. This
+does not constitute a new full browser run or a live-provider test.
 
 An authenticated account session can issue a grant for one connection/provider,
 pinned to the connection's exact revision. The host must first verify that
@@ -49,9 +64,9 @@ Before activation:
 
 1. Review this authority component independently and test capacity and all
    provider-registry combinations.
-2. Add a narrow internal receive path to Inbox; do not mint fake human sessions
-   or bypass authentication for ordinary Inbox actions.
-3. Wire the existing Telegram/Twilio receivers to hold all three locks and test
+2. Independently review the new narrow internal receive path before enabling
+   it; keep ordinary Inbox actions authenticated and test cross-account abuse.
+3. Wire the existing Telegram/Twilio HTTP receivers to hold all three locks and test
    true import, restart, revoked/expired grants and account changes end to end.
 4. Build concise consent/status/stop controls with current-session checks and
    a receipt. Provider disconnect must also stop the receiving path.

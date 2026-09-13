@@ -2,6 +2,12 @@
 
 ## Latest verified acceptance
 
+- `1e03023`: signed SMS/WhatsApp background import now uses expiring receive-only
+  grants without a human login. Full Node **1486/1486** and focused existing
+  browser/package **6/6** pass. Revocation, disconnect, escaped/cloned leases,
+  duplicate retries and expiry after journal writes are tested. Consent and
+  receiving startup are not wired; no live background access is enabled.
+
 - `2bfc108` closes the independent review's extra-connection-fields finding.
   Disconnect requests now reject unexpected fields and snapshot their intent
   before asynchronous transport; caller mutation cannot alter the accepted

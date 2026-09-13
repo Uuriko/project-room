@@ -21,9 +21,12 @@ checkpoint `5ea28ec`. These are local
 checkpoints, not claims about main, CI, a deployed website or enterprise readiness.
 
 `17d9e31` additionally introduces an isolated receive-only grant component, not
-wired or packaged for deployment. Full Node **1484/1484** passed. Expiry,
+activated in a live runtime. Full Node **1484/1484** passed. Expiry,
 revocation, account-epoch and connection-revision fences are tested; actual
-background Inbox import, consent UI and startup remain unfinished. See
+background Inbox import was subsequently implemented at `1e03023` for signed
+SMS/WhatsApp: **1486/1486** full Node tests and **6/6** focused browser/package
+checks passed. Runtime package now includes 132 files. Consent UI, receiving
+startup and Telegram background import remain unfinished; no live grants. See
 [receive-grant boundary](MESSAGING-RECEIVE-GRANTS-2026-09-12.md).
 
 | Current capability | Evidence | Remaining boundary |
