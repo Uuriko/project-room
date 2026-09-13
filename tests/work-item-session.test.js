@@ -11,7 +11,7 @@ import { EVENT_TYPES as T, applyEvent, replay } from "../src/events.js";
 import { seedEvents } from "../src/seed.js";
 import { validAgentNext } from "../src/agent-error.mjs";
 import {
-  SESSION_STATUSES, SESSION_EVENT_TYPES, sessionRecord, sessionCommandType,
+  SESSION_STATUSES, SESSION_EVENT_TYPES, sessionRecord, sessionCommandType, attemptReceipts,
   listWorkItemSessions, workItemSessionContract, applySessionFields, sessionWorker,
   SESSION_HEARTBEAT_STALE_MS
 } from "../src/work-item-session.js";
@@ -289,11 +289,11 @@ test("G1 attempt contract: starts record attributable attempts; stops close them
   assert.deepEqual(ledger, [
     { attempt: 1, performer: "agent-a", startedAt: "2026-09-13T10:00:00.000Z", inputRevision: 3,
       environment: "local-mac-1", limits: { maxAttempts: 5 }, endedAt: "2026-09-13T10:20:00.000Z",
-      outcome: "failed", outputs: ["log:run-1"] },
+      outcome: "failed", outputs: ["log:run-1"], usageCents: null },
     // A retry that declares no budget keeps the previous limits - recorded as in force.
     { attempt: 2, performer: "agent-b", startedAt: "2026-09-13T11:00:00.000Z", inputRevision: 3,
       environment: null, limits: { maxAttempts: 5 }, endedAt: "2026-09-13T11:30:00.000Z",
-      outcome: "done", outputs: ["msg:result-9", "https://example.invalid/evidence"] }
+      outcome: "done", outputs: ["msg:result-9", "https://example.invalid/evidence"], usageCents: null }
   ]);
   assert.equal(item.attempt_count, 2);
 });
@@ -304,7 +304,7 @@ test("G1 attempt fields validate; historical events without them replay to nulls
   applySessionFields(item, { type: SESSION_EVENT_TYPES.STOPPED, actorId: "agent", at: "2026-09-01T01:00:00.000Z", data: { status: "done" } });
   assert.deepEqual(JSON.parse(JSON.stringify(sessionRecord(item).attempts)),
     [{ attempt: 1, performer: "agent", startedAt: "2026-09-01T00:00:00.000Z", inputRevision: 0,
-      environment: null, limits: null, endedAt: "2026-09-01T01:00:00.000Z", outcome: "done", outputs: null }]);
+      environment: null, limits: null, endedAt: "2026-09-01T01:00:00.000Z", outcome: "done", outputs: null, usageCents: null }]);
   for (const bad of [42, {}, "", "  ", "x".repeat(201)])
     assert.throws(() => applySessionFields({ id: "x", state: "accepted", revision: 0 },
       { type: SESSION_EVENT_TYPES.STARTED, actorId: "a", at: "2026-09-01T00:00:00.000Z", data: { environment: bad } }));
@@ -321,7 +321,43 @@ test("G1 legacy string outputs (v11-v18 shape) stay valid and record as one refe
     data: { status: "done", outputs: "A reviewed result" } });
   assert.deepEqual(JSON.parse(JSON.stringify(sessionRecord(item).attempts)),
     [{ attempt: 1, performer: "agent", startedAt: "2026-09-01T00:00:00.000Z", inputRevision: 0,
-      environment: null, limits: null, endedAt: "2026-09-01T01:00:00.000Z", outcome: "done", outputs: ["A reviewed result"] }]);
+      environment: null, limits: null, endedAt: "2026-09-01T01:00:00.000Z", outcome: "done", outputs: ["A reviewed result"], usageCents: null }]);
+});
+
+test("G6 output and usage receipts: measured usage stays apart from estimates; incomplete success reads unverified", () => {
+  const item = { id: "wr", title: "Receipted", state: "accepted", revision: 0, accountableMemberId: "owner" };
+  // Attempt 1: done WITH exact outputs and measured usage -> verified success.
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STARTED, actorId: "agent", at: "2026-09-13T00:00:00.000Z",
+    data: { budget: { maxSpendCents: 500 } } });
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STOPPED, actorId: "agent", at: "2026-09-13T00:10:00.000Z",
+    data: { status: "done", outputs: ["msg:result-1"], spendCents: 120 } });
+  // Attempt 2: done but NO outputs recorded -> cannot claim success.
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STARTED, actorId: "agent", at: "2026-09-13T01:00:00.000Z", data: {} });
+  applySessionFields(item, { type: SESSION_EVENT_TYPES.STOPPED, actorId: "agent", at: "2026-09-13T01:10:00.000Z", data: { status: "done" } });
+  const receipts = JSON.parse(JSON.stringify(attemptReceipts(item)));
+  assert.equal(receipts[0].successClaim, "verified");
+  assert.equal(receipts[0].usageCents, 120);        // measured
+  assert.equal(receipts[0].estimateCents, 500);     // estimate, kept separate
+  assert.deepEqual(receipts[0].outputs, ["msg:result-1"]);
+  assert.equal(receipts[1].successClaim, "unverified");
+  assert.equal(receipts[1].outputs, null);
+
+  // Unknown measured usage (spend never reported) also blocks the claim.
+  const unknown = { id: "wu", title: "No spend", state: "accepted", revision: 0, accountableMemberId: "owner" };
+  applySessionFields(unknown, { type: SESSION_EVENT_TYPES.STARTED, actorId: "agent", at: "2026-09-13T02:00:00.000Z", data: {} });
+  applySessionFields(unknown, { type: SESSION_EVENT_TYPES.STOPPED, actorId: "agent", at: "2026-09-13T02:10:00.000Z",
+    data: { status: "done", outputs: ["msg:result-2"] } });
+  assert.equal(attemptReceipts(unknown)[0].successClaim, "unverified");
+  assert.equal(attemptReceipts(unknown)[0].usageCents, null);
+
+  // A failed attempt makes no success claim at all.
+  const failed = { id: "wf", title: "Failed", state: "accepted", revision: 0, accountableMemberId: "owner" };
+  applySessionFields(failed, { type: SESSION_EVENT_TYPES.STARTED, actorId: "agent", at: "2026-09-13T03:00:00.000Z", data: {} });
+  applySessionFields(failed, { type: SESSION_EVENT_TYPES.STOPPED, actorId: "agent", at: "2026-09-13T03:10:00.000Z", data: { status: "failed" } });
+  assert.equal(attemptReceipts(failed)[0].successClaim, "not-claimed");
+
+  // The session card surfaces receipts alongside the ledger.
+  assert.equal(listWorkItemSessions({ wr: item })[0].receipts.length, 2);
 });
 
 test("G1 attempt environment and outputs flow through the session command path", async t => {
@@ -337,7 +373,7 @@ test("G1 attempt environment and outputs flow through the session command path",
   const card = listed.sessions.find(s => s.workItemId === "session-one");
   assert.deepEqual(card.attempts, [{ attempt: 1, performer: "owner", startedAt: card.attempts[0].startedAt,
     inputRevision: 0, environment: "ci-runner-2", limits: null, endedAt: card.attempts[0].endedAt,
-    outcome: "done", outputs: ["msg:done-1"] }]);
+    outcome: "done", outputs: ["msg:done-1"], usageCents: null }]);
   // Wrong placement is rejected.
   const misplaced = await request("/api/rooms/commons/work-sessions", { method: "POST", token: ownerKey,
     data: sessionBody({ action: "set_status", status: "processing", outputs: ["msg:x"] }) });
