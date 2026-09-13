@@ -51,6 +51,33 @@ not implemented; do not silently erase authority history to free space.
 
 ## Transaction boundary and next integration
 
+### Optional existing-store runtime (`9ab0e4e`)
+
+Alongside the four existing Twilio controls variables, a host may supply both
+`ROOM_TWILIO_RECEIVE_GRANTS_FILE` and `ROOM_TWILIO_WEBHOOK_PATH`. Partial receiving
+configuration fails. The grant database must already exist outside the source
+tree, in an owner-private directory, as an owner-private single-link regular
+file; canonical paths and all file-path distinctness checks apply. It must have
+the expected grant table. The webhook path must be `/webhooks/twilio/<id>` and
+match the active encrypted connection's HTTPS URL path without a query string.
+
+The runtime returns `webhook` as an **unstarted** server and wires permission
+controls to the existing grant database. It creates no permission or session,
+makes no provider call, and does not configure a public proxy. `server.mjs` still
+does not call this listener's `listen`; merely setting variables is not a live
+receiving setup. Closing the runtime closes the listener/stores and clears keys.
+
+Each request resolves the current active grant revision against the current
+provider revision, account epoch and expiry, then the importer independently
+reacquires/validates that authority. Consent renewal does not need a server
+rebuild; old or changed bindings still fail. Eight focused tests pass, including
+no grant at startup, manually started disposable HTTP rejection before consent,
+receive/stop/renew, path mismatch, partial config and private-file permissions.
+
+Exact `9ab0e4e`: **1490/1490 full Node tests**, zero skipped, and **6/6**
+background browser/package checks passed. Independent review requested. This
+does not prove production hosting, proxy configuration or physical-device use.
+
 ### Account consent endpoints (`c5a27d9`)
 
 When a host explicitly supplies the receive-grant store to its Twilio connection

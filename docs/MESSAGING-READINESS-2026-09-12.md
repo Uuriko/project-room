@@ -2,6 +2,12 @@
 
 ## Latest verified acceptance
 
+- `9ab0e4e`: optional existing-private-store runtime prepares an unstarted
+  background webhook and permission controls. Partial config, unsafe files and
+  callback mismatch fail; renewed consent resolves without rebuilding. Full
+  Node **1490/1490**, focused runtime/grants **8/8**, browser/package **6/6**
+  pass. The application entry point does not start the listener; no live changes.
+
 - `2d65ee5`: explicit background-grant HTTP route now passes all four complete
   browser consent/sign-out/HTTP delivery/stop journeys. Bad signatures fail,
   duplicates are safe, and stopped grants block HTTP delivery. Full Node
