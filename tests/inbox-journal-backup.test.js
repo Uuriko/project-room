@@ -61,4 +61,26 @@ test('maintenance CLI dump writes the journal file', async t => {
   const dump = dumpInboxFile(sqlite, out);
   assert.equal(dump.format, 'project-room-private-inbox-v1');
   assert.equal(JSON.parse(readFileSync(out, 'utf8')).format, 'project-room-private-inbox-v1');
+  assert.throws(() => dumpInboxFile('relative.sqlite', out), /absolute/);
+});
+
+test('maintenance CLI restore loads dump onto empty inbox tables', async t => {
+  const { dumpInboxFile, restoreInboxFile } = await import('../scripts/maintenance-inbox-backup.mjs');
+  const f = createAcceptanceFixture();
+  const src = join(f.directory, 'room.sqlite');
+  const dumpPath = join(f.directory, 'inbox-dump.json');
+  f.store.close();
+  dumpInboxFile(src, dumpPath);
+  const destDir = mkdtempSync(join(tmpdir(), 'inbox-cli-restore-'));
+  const dest = join(destDir, 'room.sqlite');
+  t.after(() => {
+    rmSync(f.directory, { recursive: true, force: true });
+    rmSync(destDir, { recursive: true, force: true });
+  });
+  const next = new RoomStore(dest);
+  next.close();
+  restoreInboxFile(dest, dumpPath);
+  const check = new RoomStore(dest);
+  t.after(() => check.close());
+  assert.equal(check.db.prepare('SELECT count(*) n FROM private_inbox_commands').get().n, JSON.parse(readFileSync(dumpPath, 'utf8')).tables.private_inbox_commands.length);
 });

@@ -4,7 +4,7 @@ import { RoomStore } from '../server/store.mjs';
 
 // Copy-DB only. Never a public HTTP route.
 export function dumpInboxFile(sqlitePath, outPath) {
-  if (!isAbsolute(resolve(sqlitePath))) throw new Error('SQLite path must be absolute');
+  if (!isAbsolute(sqlitePath)) throw new Error('SQLite path must be absolute');
   const store = new RoomStore(sqlitePath);
   try {
     const dump = store.inbox.dumpJournal();
@@ -14,7 +14,7 @@ export function dumpInboxFile(sqlitePath, outPath) {
 }
 
 export function restoreInboxFile(sqlitePath, inPath) {
-  if (!isAbsolute(resolve(sqlitePath))) throw new Error('SQLite path must be absolute');
+  if (!isAbsolute(sqlitePath)) throw new Error('SQLite path must be absolute');
   const dump = JSON.parse(readFileSync(inPath, 'utf8'));
   const store = new RoomStore(sqlitePath);
   try {
