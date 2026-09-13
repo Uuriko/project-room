@@ -4,7 +4,7 @@ import { importTelegramPage } from './telegram-inbox-import.mjs';
 
 // getGrant MUST synchronously read trusted current connection authority, ideally
 // from the same RoomStore transaction. Never supply browser request data here.
-export function createTelegramReceiver({ store, queue, token, sessionBinding, getGrant, fetchImpl = fetch }) {
+export function createTelegramReceiver({ store, queue, token, sessionBinding, getGrant, withGrant = fn => fn(), fetchImpl = fetch }) {
   const fingerprint = grant => createHash('sha256').update(JSON.stringify(grant)).digest('hex');
   const initial = getGrant();
   if (!initial || typeof initial.then === 'function') throw new Error('telegram_grant_unavailable');
@@ -22,11 +22,11 @@ export function createTelegramReceiver({ store, queue, token, sessionBinding, ge
     async sync() {
       let imported = 0;
       const result = await receiveTelegramTick({ queue, authorize, fetchImpl, commitPage(page, { assertLease }) {
-        const result = importTelegramPage(store,{token},{sessionBinding},page, observation => {
+        const result = withGrant(() => importTelegramPage(store,{token},{sessionBinding},page, observation => {
           assertLease(); const grant = authorize();
           if (observation && (observation.accountId !== grant.accountId || observation.connectionId !== grant.connectionId
             || !grant.chatIds.includes(Number(observation.conversationId)))) throw new Error('telegram_chat_not_authorized');
-        });
+        }));
         imported += result.imported;
         return {committed:true};
       }});

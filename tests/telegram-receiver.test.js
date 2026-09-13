@@ -5,6 +5,7 @@ import { rmSync } from 'node:fs';
 import { createAcceptanceFixture } from '../scripts/acceptance-fixture.mjs';
 import { TelegramReceiveQueue } from '../server/telegram-receive-queue.mjs';
 import { createTelegramReceiver } from '../server/telegram-receiver.mjs';
+import { TelegramConnectionRegistry } from '../server/telegram-connection-registry.mjs';
 
 function fixture(t) {
   const f=createAcceptanceFixture(),db=new DatabaseSync(':memory:');
@@ -24,6 +25,19 @@ test('authorized runtime receives into private Inbox and advances durable offset
   assert.equal((await receiver.sync()).imported,1);assert.equal((await receiver.sync()).imported,0);
   assert.deepEqual(offsets,[0,10]);assert.equal(f.queue.pending().length,0);assert.equal(f.store.inbox.verify().versions,1);
   assert.equal(f.store.room('commons').sequence,before);
+});
+
+test('persisted registry authorizes Inbox delivery and disconnect stops further requests',async t=>{
+  const f=fixture(t),db=new DatabaseSync(':memory:');t.after(()=>db.close());
+  const registry=new TelegramConnectionRegistry({db,key:Buffer.alloc(32,9)});
+  const binding={accountId:f.account.id,connectionId:'telegram-one',authEpoch:f.account.authEpoch};
+  registry.configure({...binding,expectedRevision:0,botId:'123456',token:f.grant.token,chatIds:[44]});
+  let calls=0;
+  const receiver=createTelegramReceiver({...f.args,getGrant:()=>registry.grant(binding),withGrant:fn=>registry.withGrant(binding,fn),
+    fetchImpl:async()=>{calls++;return Response.json({ok:true,result:[f.update(9)]});}});
+  assert.equal((await receiver.sync()).imported,1);
+  registry.disconnect({...binding,expectedRevision:1});
+  await assert.rejects(receiver.sync());assert.equal(calls,1);assert.equal(f.store.inbox.verify().versions,1);
 });
 
 test('account sign-out during provider read prevents staging and import',async t=>{

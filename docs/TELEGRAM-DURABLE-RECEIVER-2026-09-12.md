@@ -80,5 +80,30 @@ pending-page replay. No real provider requests or production data changes occurr
 
 Still absent: persisted connection lifecycle/configuration and browser controls,
 supervised runtime scheduling, live activation, complete multi-account bot routing,
-and outgoing replies. Current tests use a synchronous in-memory grant reader to
-exercise the boundary; that is not a production connection registry.
+and outgoing replies. The original tests used a synchronous in-memory grant reader;
+the following checkpoint adds persistent storage and integration coverage.
+
+## Persistent connection registry
+
+Added a separate SQLite registry with AES-GCM encrypted token/chat configuration,
+revision-checked updates, immutable bot/account binding, unique bot ownership per
+registry database, auth-epoch checks and disconnect tombstones. Disconnect clears
+the stored ciphertext and increments revision; it is a local disconnect, not a
+Telegram token revocation. Physical secure erasure is not claimed.
+
+The receiver accepts a synchronous `withGrant` wrapper. Using the registry wrapper
+holds its write lock throughout the Inbox import, serializing other handles'
+disconnect/configuration writes with that import. Account/session authorization
+is still checked within RoomStore's transaction. Registry, queue and RoomStore
+must be distinct databases, with consistent registry-before-Inbox lock ordering.
+
+Twenty-five targeted messaging tests passed after this integration. New tests
+cover encrypted restart, stale reconnect rejection, cross-account bot conflict,
+wrong-key failure, competing registry writes during import, and a real disposable
+Inbox receive followed by persisted disconnect with no further provider call.
+
+No live credentials were moved into the registry and no live receiver activated.
+Remaining: authenticated API/UI connection controls, secure runtime file bootstrap,
+bot verification at configuration, scheduling, reconnect/queued-data disposition,
+and independent acceptance. Registry calls are host-only APIs, not authorization
+for arbitrary callers. Sharing one bot across multiple accounts is not supported.
