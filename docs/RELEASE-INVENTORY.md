@@ -25,8 +25,12 @@ receiver has not been activated with live encrypted configuration. SMS/WhatsApp
 and Slack intake boundaries are tested components, not connected services.
 
 The full Node regression on `c1ff371` exposed runtime-package dependency/import
-allowlist failures. These are being repaired with exact pinned dependency and
-module entries; no broad current-release green claim is warranted until rerun.
+allowlist failures. Fixed at **`1f4d7eb`** with exact pinned dependency and module
+entries. The full `node --test` rerun at that revision passed **1,463/1,463**,
+zero skipped, in 28.8 seconds. Cold exact-commit and candidate package checks
+passed as part of that run. This does not include the entire scripted browser
+suite or establish deployment readiness; the targeted Telegram browser checks
+were verified separately at earlier checkpoints.
 See `TELEGRAM-DURABLE-RECEIVER-2026-09-12.md` and
 `MESSAGING-READINESS-2026-09-12.md` for current connector limitations.
 
