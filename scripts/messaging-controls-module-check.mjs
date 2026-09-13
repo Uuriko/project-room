@@ -3,6 +3,41 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { chromium } from 'playwright';
 
+for(const width of [390,1280])test(`receiving consent is disclosed, stoppable and owner-fenced at ${width}px`,async t=>{
+  const browser=await chromium.launch({headless:true});t.after(()=>browser.close());
+  const page=await browser.newPage({viewport:{width,height:844}});
+  await page.setContent('<div id="list"></div><p id="status" role="status"></p>');
+  const code=readFileSync(new URL('../src/messaging-connections-ui.js',import.meta.url)).toString('base64');
+  await page.evaluate(async code=>{
+    const {installMessagingConnections}=await import('data:text/javascript;base64,'+code);
+    window.owner='a';window.calls=[];
+    window.permission={provider:'sms',connectionId:'one',state:'missing',revision:0,expectedConnectionRevision:1,expiresAt:null,canStart:true};
+    window.api={twilioStatus:async()=>({connections:[{provider:'sms',connectionId:'one',state:'active',revision:1}]}),
+      receivingStatus:async()=>({enabled:true,connections:[window.permission]}),receivingAction:async(action,data)=>{
+        window.calls.push({action,data});window.permission={...window.permission,revision:data.expectedRevision+1,state:action==='start'?'active':'revoked',expiresAt:Date.now()+86400000};
+      }};
+    window.controls=installMessagingConnections({list:document.querySelector('#list'),status:document.querySelector('#status'),api:window.api,ownerKey:()=>window.owner});
+    await window.controls.load();
+  },code);
+  const allow=page.getByRole('button',{name:'Allow for 24 hours · SMS',exact:true});
+  assert.equal(await allow.isVisible(),false);
+  await page.getByText('Receiving',{exact:true}).click();
+  assert.equal(await page.getByText('Allow incoming messages for 24 hours, even after sign-out. No sending or sharing.',{exact:true}).isVisible(),true);
+  await allow.click();await page.getByText('Receiving allowed for 24 hours.',{exact:true}).waitFor();
+  assert.deepEqual(await page.evaluate(()=>window.calls),[{action:'start',data:{connectionId:'one',expectedRevision:0,expectedConnectionRevision:1}}]);
+  await page.getByText('Receiving',{exact:true}).click();
+  await page.getByRole('button',{name:'Stop receiving · SMS',exact:true}).click();
+  await page.getByText('Receiving stopped. Saved messages remain.',{exact:true}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'Disconnect SMS',exact:true}).count(),1);
+  await page.getByText('Receiving',{exact:true}).click();
+  await page.evaluate(()=>window.owner='b');await allow.click();
+  assert.equal(await page.evaluate(()=>window.calls.length),2);
+  await page.evaluate(()=>{window.owner='a';window.api.receivingAction=async()=>{throw new Error('private detail');};});
+  await allow.click();await page.getByText('Action unconfirmed. Refresh before trying again.',{exact:true}).waitFor();
+  assert.equal(await allow.count(),0);
+  assert.ok(!(await page.locator('body').textContent()).includes('private detail'));
+});
+
 for(const width of [390,1280])test(`compact messaging controls: disconnect and late owner responses at ${width}px`,async t=>{
   const browser=await chromium.launch({headless:true});t.after(()=>browser.close());
   const page=await browser.newPage({viewport:{width,height:844}});
