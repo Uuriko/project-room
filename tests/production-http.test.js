@@ -37,6 +37,9 @@ test('GET /api/open and /api/version on the real HTTP server', async t => {
   const card = await (await fetch(origin + '/.well-known/mcp.json')).json();
   assert.equal(card.ship, false);
   assert.equal((await fetch(origin + '/mcp.json')).status, 200);
+  const mcpHead = await fetch(origin + '/.well-known/mcp.json', { method: 'HEAD' });
+  assert.equal(mcpHead.status, 200);
+  assert.equal(await mcpHead.text(), '');
   const prod = readFileSync(new URL('../cloudflare/wrangler.production.jsonc', import.meta.url), 'utf8');
   assert.match(prod, /ROOM_PRODUCTION": "1"/);
   assert.match(prod, /room\.trydemigod\.com/);
