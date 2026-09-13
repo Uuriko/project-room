@@ -2,6 +2,12 @@
 
 ## Latest verified acceptance
 
+- `2d65ee5`: explicit background-grant HTTP route now passes all four complete
+  browser consent/sign-out/HTTP delivery/stop journeys. Bad signatures fail,
+  duplicates are safe, and stopped grants block HTTP delivery. Full Node
+  **1489/1489**, focused browser/webhook **10/10**, packaging **2/2** pass.
+  Server startup and live provider configuration remain disabled/unconfigured.
+
 - `3bf54df`: **42/42 messaging checks**, including four browser consent →
   sign-out → signed background import → sign-in/private Inbox → stop journeys
   across SMS/WhatsApp and 390px/1280px. Persisted revocation blocks later imports;

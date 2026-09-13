@@ -99,10 +99,23 @@ revokes the grant; subsequent import is rejected, including through a reopened
 grant database. The provider connection remains active, saved text stays readable,
 private journal verification passes, and the room sequence does not change.
 
-`test:messaging` at `3bf54df` passed **42/42**, zero skipped. The new journey uses
-fixture-signed input through the actual importer, not a real provider network
-call or a background HTTP listener. Earlier HTTP webhook tests still use the
-interactive-session importer. Production callback/startup wiring remains a gap.
+`test:messaging` at `3bf54df` passed **42/42**, zero skipped. At that checkpoint
+the journey called the signed importer directly. `2d65ee5` upgrades all four
+journeys to actual loopback HTTP using an explicit background-grant route.
+Tampered signatures fail before import; duplicate delivery returns empty TwiML
+after persistence; Stop causes later HTTP delivery to return non-success.
+Ten focused browser/webhook checks pass. Inputs remain provider fixtures, not
+real Twilio traffic. Production callback/startup wiring remains a gap.
+
+Exact `2d65ee5`: **1489/1489 full Node tests** and **2/2 packaging checks**
+passed, zero skipped. Independent review requested; not a full browser rerun.
+
+Route authority is mutually exclusive: either `getSession`/`withConnection`,
+or `background: { registry, grants, getBinding }`. Mixed/missing configurations
+fail at construction. The host supplies a trusted grant binding; no request
+field selects an account, connection or grant. Bindings are revalidated by the
+registry/grant importer. The factory does not listen or activate itself and
+`server.mjs` does not start this receiver.
 
 The first draft of the new test waited for room chat on sign-in; evidence showed
 the app had correctly restored Inbox instead. The assertion was corrected to
