@@ -35,6 +35,7 @@ export const EVENT_TYPES = Object.freeze({
   CLAIM_RELEASED: "claim.released",
   VERIFICATION_RECORDED: "verification.recorded",
   OWNER_DECISION_RECORDED: "owner.decision_recorded",
+  DECISION_RECORDED: "decision.recorded",
   SESSION_STARTED: SESSION_EVENT_TYPES.STARTED,
   SESSION_STATUS_CHANGED: SESSION_EVENT_TYPES.STATUS_CHANGED,
   SESSION_STOP_REQUESTED: SESSION_EVENT_TYPES.STOP_REQUESTED,
@@ -164,6 +165,7 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.CLAIM_RELEASED]: releaseClaim,
     [EVENT_TYPES.VERIFICATION_RECORDED]: recordVerification,
     [EVENT_TYPES.OWNER_DECISION_RECORDED]: recordOwnerDecision,
+    [EVENT_TYPES.DECISION_RECORDED]: recordDecision,
     [EVENT_TYPES.SESSION_STARTED]: applySession,
     [EVENT_TYPES.SESSION_STATUS_CHANGED]: applySession,
     [EVENT_TYPES.SESSION_STOP_REQUESTED]: applySession,
@@ -744,6 +746,30 @@ function applySession(state, incoming) {
   }
   applySessionFields(item, incoming);
   commitMutation(item, incoming);
+}
+
+
+// Decision register (backlog F2): promoting a conversation point into policy is
+// an explicit, source-backed act. The reducer only validates - the event itself
+// is the record, so replay and the work-item projection are untouched. A
+// suggestion stays a suggestion until a human with the decide permission
+// records it against an exact message.
+function recordDecision(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  requirePermission(state, incoming.actorId, "decide");
+  if (actor.kind !== "human") throw new Error("Only a human member may record a decision");
+  requireFields(incoming.data, ["sourceMessageId", "statement"]);
+  if (!state.messages.some(m => m.id === incoming.data.sourceMessageId)) {
+    throw new Error("Decision must reference a message in this Room");
+  }
+  const statement = String(incoming.data.statement);
+  if (statement !== statement.trim() || statement.length > 500) {
+    throw new Error("Decision statement must be trimmed text up to 500 characters");
+  }
+  if (incoming.data.note !== undefined && incoming.data.note !== null
+    && (typeof incoming.data.note !== "string" || incoming.data.note !== incoming.data.note.trim() || incoming.data.note.length > 500)) {
+    throw new Error("Decision note must be trimmed text up to 500 characters");
+  }
 }
 
 function recordOwnerDecision(state, incoming) {
