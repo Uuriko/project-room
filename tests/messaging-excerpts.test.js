@@ -4,6 +4,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {rmSync} from 'node:fs';
 import {createAcceptanceFixture} from '../scripts/acceptance-fixture.mjs';
 import {auditRecovery} from '../server/recovery.mjs';
+import {prepareInboxResult} from '../scripts/inbox-result-fixture.mjs';
 
 for(const provider of ['telegram','sms','whatsapp'])test(`${provider} shares exact selected text with room or selected agents, never other source fields`,t=>{
   const f=createAcceptanceFixture();t.after(()=>{f.store.close();rmSync(f.directory,{recursive:true,force:true});});
@@ -26,11 +27,23 @@ for(const provider of ['telegram','sms','whatsapp'])test(`${provider} shares exa
   assert.deepEqual(auditRecovery(f.store),before);
   const r=request(),receipt=apply(r),message=f.store.room('commons').state.messages.find(m=>m.id===receipt.receipt.messageId);
   assert.equal(message.body,'Shared message excerpt\n\nKeep 🪷 this');assert.ok(!JSON.stringify(message).includes('PRIVATE'));
-  assert.ok(!JSON.stringify(message).includes(data.subject));assert.ok(!JSON.stringify(message).includes(data.sender));
+  assert.ok(!JSON.stringify(message).includes(data.subject));assert.ok(!message.body.includes(data.sender));
   assert.equal(apply(r).duplicate,true);assert.throws(()=>apply({...r,selection:{start:0,end:4}}),{code:'idempotency_conflict'});
   const sequence=f.store.room('commons').sequence,privateRequest={...request(),action:'source.grant',memberIds:['producer']},grant=apply(privateRequest);
   assert.equal(f.store.room('commons').sequence,sequence);
   assert.equal(f.store.inbox.readGrant(f.keys.producer,'commons',grant.receipt.grantId).body,message.body);
   assert.throws(()=>f.store.inbox.readGrant(f.keys.reviewer,'commons',grant.receipt.grantId),{status:404});
   assert.equal(apply(privateRequest).duplicate,true);assert.ok(auditRecovery(f.store));
+  const result=prepareInboxResult(f,slot.token,auth.sessionBinding,{sourceId,shareReceipt:receipt,ready:false});
+  result.complete();
+  assert.notEqual(result.selected().status,'ready');
+  assert.throws(()=>apply(result.adoption()));
+  result.review();assert.notEqual(result.selected().status,'ready');
+  result.decide();assert.equal(result.selected().status,'ready');
+  const adoption=result.adoption();apply(adoption);assert.equal(apply(adoption).duplicate,true);
+  const saved=f.store.inbox.read(slot.token,sourceId,auth.sessionBinding).draft;
+  assert.equal(saved.body,result.body);assert.equal(saved.origin.unchanged,true);
+  assert.equal(f.store.inbox.sends(slot.token,sourceId,auth.sessionBinding).sends.length,0);
+  assert.throws(()=>f.store.inbox.sendContext(slot.token,sourceId,auth.sessionBinding),{code:'email_sending_unavailable'});
+  assert.ok(auditRecovery(f.store));
 });
