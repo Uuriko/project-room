@@ -89,6 +89,25 @@ browser/package checks** passed, zero skipped. Independent review requested.
 
 ### Locking
 
+### Full browser background journey (`3bf54df`)
+
+Four real-application-layer journeys now pass: SMS and WhatsApp at 390px and
+1280px. Browser consent issues the grant; after browser sign-out, the signed
+background importer saves one private message and deduplicates its retry.
+Signing back in restores the Inbox and displays that message. Browser Stop
+revokes the grant; subsequent import is rejected, including through a reopened
+grant database. The provider connection remains active, saved text stays readable,
+private journal verification passes, and the room sequence does not change.
+
+`test:messaging` at `3bf54df` passed **42/42**, zero skipped. The new journey uses
+fixture-signed input through the actual importer, not a real provider network
+call or a background HTTP listener. Earlier HTTP webhook tests still use the
+interactive-session importer. Production callback/startup wiring remains a gap.
+
+The first draft of the new test waited for room chat on sign-in; evidence showed
+the app had correctly restored Inbox instead. The assertion was corrected to
+wait for authenticated navigation, with no application behavior changed.
+
 Lock order must be provider registry → receive-grant database → RoomStore.
 The callback is synchronous. The current account and grant are checked both
 before and after it, inside the RoomStore transaction, so expiry or authority
@@ -106,8 +125,7 @@ Before activation:
    it; keep ordinary Inbox actions authenticated and test cross-account abuse.
 3. Wire the existing Telegram/Twilio HTTP receivers to hold all three locks and test
    true import, restart, revoked/expired grants and account changes end to end.
-4. Extend the tested consent UI into a full browser → grant → background
-   delivery → stop journey with real application layers. Module browser tests
-   and endpoint/import tests currently prove those boundaries separately.
+4. Preserve the passing browser → grant → signed background importer → stop
+   journey while adding the remaining HTTP/background startup boundary.
 5. Add private existing-file startup validation, packaging, recovery/export
    treatment and explicit operations guidance before a separately approved pilot.

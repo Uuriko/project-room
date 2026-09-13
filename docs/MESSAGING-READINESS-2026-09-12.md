@@ -2,6 +2,12 @@
 
 ## Latest verified acceptance
 
+- `3bf54df`: **42/42 messaging checks**, including four browser consent →
+  sign-out → signed background import → sign-in/private Inbox → stop journeys
+  across SMS/WhatsApp and 390px/1280px. Persisted revocation blocks later imports;
+  provider connection and saved messages remain. No live provider or background
+  HTTP startup was tested or enabled.
+
 - `c5a27d9`: optional account-only receive status/start/stop endpoints. Start is
   fixed to 24 hours and checks current provider/grant revisions; stop blocks
   imports without deleting saved messages or disconnecting the provider. Full
