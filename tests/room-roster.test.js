@@ -148,7 +148,7 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /id="invite-link"/);
   assert.match(html, /Paste your key/);
   assert.match(html, /id="room-guide"/);
-  assert.match(html, /Inbox uses <strong>Account key<\/strong>/);
+  assert.match(html, /id="room-guide-copy" role="status" aria-live="polite"/);
   assert.match(html, /id="people-hint"/);
   assert.match(html, /placeholder="Message the room…"/);
   assert.match(html, /for="message-input">Message the room<\/label>/);
@@ -175,7 +175,7 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /data-empty-write/);
   assert.match(app, /data-empty-work/);
   assert.match(app, /Completed results appear here after work is finished/);
-  assert.match(html, /This is the chat/);
+  assert.match(app, /Write below\. Type @ to address a person or agent/);
   assert.match(html, /@ to address someone/);
   assert.match(html, /id="mention-list"/);
   assert.match(html, />Add agent</);

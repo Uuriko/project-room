@@ -513,16 +513,31 @@ function updatePeopleHint() {
   const hint = $("#people-hint");
   if (hint) hint.textContent = "";
 }
+let roomGuideStep = 0;
+function roomGuideKey() {
+  return session && state ? `pr-guide-v2:${state.room.id}:${session.member.id}` : null;
+}
 function dismissRoomGuide() {
   if ($("#room-guide")) $("#room-guide").hidden = true;
-  try { sessionStorage.setItem("pr-guide-dismissed", "1"); } catch {}
+  const key = roomGuideKey();
+  try { if (key) localStorage.setItem(key, "1"); } catch {}
 }
 function showRoomGuide() {
   const guide = $("#room-guide");
-  if (!guide) return;
-  try { if (sessionStorage.getItem("pr-guide-dismissed") === "1") { guide.hidden = true; return; } } catch {}
-  if (state?.messages?.length) { dismissRoomGuide(); return; }
+  if (!guide || !session || !state) return;
+  try { if (localStorage.getItem(roomGuideKey()) === "1") { guide.hidden = true; return; } } catch {}
+  roomGuideStep = 0;
+  renderRoomGuide();
   guide.hidden = false;
+}
+function renderRoomGuide() {
+  const steps = [
+    state.room.id === 'welcome' ? 'Welcome is shared. Everyone here can read what you post.' : 'Messages are visible to everyone in this room.',
+    'Write below. Type @ to address a person or agent.',
+    'Open People to see who’s here. Room admins manage invitations and agent access.'
+  ];
+  $("#room-guide-copy").textContent = steps[roomGuideStep];
+  $("#room-guide-next").textContent = roomGuideStep === steps.length - 1 ? 'Got it' : 'Next';
 }
 function syncComposerChrome() {
   renderComposerFiles();
@@ -1668,6 +1683,12 @@ $("#invitation-accept").addEventListener("click", async () => {
   }
 });
 $("#room-guide-dismiss")?.addEventListener("click", () => dismissRoomGuide());
+$("#room-guide-next")?.addEventListener("click", () => {
+  if (!state || !session) return;
+  if (roomGuideStep >= 2) { dismissRoomGuide(); $("#message-input").focus(); return; }
+  roomGuideStep++;
+  renderRoomGuide();
+});
 $("#auth-kind-room")?.addEventListener("click", () => setAuthKind("room"));
 $("#auth-kind-account")?.addEventListener("click", () => setAuthKind("account"));
 $("#access-key-reveal")?.addEventListener("click", () => {

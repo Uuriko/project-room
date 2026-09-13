@@ -1,0 +1,30 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { rmSync } from 'node:fs';
+import { chromium } from 'playwright';
+import { createAcceptanceFixture } from './acceptance-fixture.mjs';
+import { createRoomServer } from '../server/http.mjs';
+
+test('mobile first-visit hints advance, dismiss and stay dismissed after reload', async t => {
+  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  page.setDefaultTimeout(8000);
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await page.locator('#access-key').fill(f.keys.owner);
+  await page.getByRole('button', { name: 'Enter room', exact: true }).click();
+  await page.locator('#room-guide').waitFor();
+  assert.match(await page.locator('#room-guide-copy').innerText(), /visible/);
+  await page.locator('#room-guide-next').click();
+  assert.match(await page.locator('#room-guide-copy').innerText(), /Type @/);
+  await page.locator('#room-guide-next').click();
+  assert.equal(await page.locator('#room-guide-next').innerText(), 'Got it');
+  await page.locator('#room-guide-next').click();
+  assert.equal(await page.locator('#room-guide').isVisible(), false);
+  await page.reload(); await page.locator('#main').waitFor();
+  assert.equal(await page.locator('#room-guide').isVisible(), false);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+});

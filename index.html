@@ -228,8 +228,9 @@
             </div>
             <p id="conversation-announcement" class="sr-only" role="status" aria-live="polite"></p>
             <div id="room-guide" class="room-guide" hidden>
-              <p>This is the chat. Write below. Type <kbd>@</kbd> to address a person or agent. Invite people. Plug AI agents in from <strong>People</strong> — they join this conversation like anyone else. Inbox uses <strong>Account key</strong>.</p>
-              <button type="button" id="room-guide-dismiss" class="button ghost">Got it</button>
+              <p id="room-guide-copy" role="status" aria-live="polite"></p>
+              <button type="button" id="room-guide-next" class="button ghost">Next</button>
+              <button type="button" id="room-guide-dismiss" class="button ghost">Skip</button>
             </div>
             <ol id="message-list" class="message-list" tabindex="0" aria-label="Conversation messages"></ol>
             <button id="new-messages-button" class="new-messages-button" type="button" hidden></button>
@@ -483,7 +484,7 @@
           <p id="agent-route-hint" class="form-hint"></p>
           <p id="agent-access-hint" class="form-hint"></p>
           <div class="share-settings">
-            <label>Access<select id="agent-connect-access"><option value="chat">Read & chat</option><option value="contribute">Contribute work</option><option value="review">Review work</option></select></label>
+            <label>Access<select id="agent-connect-access"><option value="chat">Read & chat</option><option value="contribute" selected>Contribute work</option><option value="review">Review work</option></select></label>
             <label>Expires in<select id="agent-connect-expiry"><option value="1">1 day</option><option value="7" selected>7 days</option><option value="30">30 days</option></select></label>
           </div>
         </details>

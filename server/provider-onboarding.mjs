@@ -1,6 +1,37 @@
 import { createHash } from 'node:crypto';
 import { initialRoom } from './bootstrap.mjs';
 import { ServiceError } from './store.mjs';
+import { applyEvent, event, EVENT_TYPES as T } from '../src/events.js';
+
+export const STARTER_ROOM_ID = 'welcome';
+const HOST_ID = 'welcome-host';
+const BOOTSTRAP_ID = 'provider-welcome-v1';
+
+// Server-owned admission, never an HTTP command or a credential for the host.
+// Called inside the account/session transaction so a failed login leaves no join.
+function joinWelcome(store, accountId, memberId, provenance) {
+  if (!store.db.prepare('SELECT 1 FROM rooms WHERE id=?').get(STARTER_ROOM_ID)) {
+    const events = initialRoom(STARTER_ROOM_ID, HOST_ID);
+    events[0].id = BOOTSTRAP_ID;
+    events[0].data.title = 'Welcome';
+    events[0].data.purpose = 'Say hello. Everyone starts here.';
+    events[1].data.displayName = 'Room host';
+    store.initialize(events);
+  }
+  const room = store.room(STARTER_ROOM_ID);
+  const bootstrap = store.db.prepare('SELECT id FROM events WHERE room_id=? AND sequence=1').get(STARTER_ROOM_ID);
+  // Never turn an unrelated existing room into a public room by name alone.
+  if (bootstrap?.id !== BOOTSTRAP_ID || room.state.room.ownerId !== HOST_ID) fail(409, 'provider_room_conflict');
+  if (room.sequence >= 10000 || Object.keys(room.state.members).length >= 100) fail(409, 'pilot_limit');
+  const incoming = event({ type: T.MEMBER_ADDED, roomId: STARTER_ROOM_ID, actorId: HOST_ID,
+    at: new Date(store.now()).toISOString(), data: { memberId, displayName: `Member ${memberId.slice(-6)}`, kind: 'human', permissions: [] } });
+  const next = applyEvent(room.state, incoming);
+  const projection = JSON.stringify({ ...next, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} });
+  if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, 'pilot_limit');
+  store.db.prepare('INSERT INTO events VALUES(?,?,?,?)').run(STARTER_ROOM_ID, room.sequence + 1, incoming.id, JSON.stringify(incoming));
+  store.db.prepare('UPDATE rooms SET sequence=?,projection=? WHERE id=?').run(room.sequence + 1, projection, STARTER_ROOM_ID);
+  store.ensureHumanAccountBinding(STARTER_ROOM_ID, memberId, accountId, provenance);
+}
 
 const fail = (status, code) => { throw new ServiceError(status, code, 'Sign-in could not be completed'); };
 // Called only after server-side provider verification, never with browser profile
@@ -14,7 +45,8 @@ export async function loginWithProvider(store, { token, verify, issuer, slotToke
     || typeof claims.sid !== 'string' || !/^sess_[A-Za-z0-9]{1,100}$/.test(claims.sid)
     || !Number.isSafeInteger(claims.exp) || claims.exp * 1000 <= store.now()) fail(401, 'invalid_provider_identity');
   const digest = createHash('sha256').update(JSON.stringify([issuer, claims.sub])).digest('hex');
-  const accountId = `idp-${digest}`, roomId = `room-${digest}`, memberId = 'owner';
+  const accountId = `idp-${digest}`;
+  let roomId = STARTER_ROOM_ID, memberId = `member-${digest.slice(0, 48)}`;
   const provenance = `clerk:${createHash('sha256').update(issuer).digest('hex')}`;
   return store.transaction(() => {
     // Check the browser generation before provisioning anything. The same check
@@ -25,15 +57,13 @@ export async function loginWithProvider(store, { token, verify, issuer, slotToke
     if (account && (account.origin !== provenance || account.active !== 1)) fail(403, 'provider_account_unavailable');
     if (!account) {
       if (store.db.prepare('SELECT count(*) AS n FROM accounts').get().n >= 10000) fail(409, 'pilot_limit');
-      // A reserved deterministic room collision must not grant access to it.
-      if (store.db.prepare('SELECT 1 FROM rooms WHERE id=?').get(roomId)) fail(409, 'provider_room_conflict');
       store.createAccount(accountId, provenance);
-      const events = initialRoom(roomId, memberId);
-      events[0].data.title = 'My room';
-      events[0].data.purpose = 'A place to start. Invite people or agents when you are ready.';
-      events[1].data.displayName = 'You';
-      store.initialize(events);
-      store.ensureHumanAccountBinding(roomId, memberId, accountId, provenance);
+      joinWelcome(store, accountId, memberId, provenance);
+    } else if (!store.db.prepare('SELECT 1 FROM member_accounts WHERE room_id=? AND account_id=?').get(roomId, accountId)) {
+      // Preserve the private starter room of accounts created before shared
+      // onboarding. Never silently publish their history or recreate membership.
+      roomId = `room-${digest}`;
+      memberId = 'owner';
     }
     // No email-based linking, membership restoration or replacement starter room
     // on later logins. Existing account/room revocation remains authoritative.

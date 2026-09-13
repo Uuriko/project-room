@@ -4,9 +4,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RoomStore } from '../server/store.mjs';
-import { loginWithProvider } from '../server/provider-onboarding.mjs';
+import { loginWithProvider, STARTER_ROOM_ID } from '../server/provider-onboarding.mjs';
+import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
-import { generateKeyPairSync, sign } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), 'provider-onboarding-')), store = new RoomStore(join(directory, 'room.sqlite'));
@@ -17,13 +18,18 @@ function fixture(t) {
   return { store, claims, options, slot };
 }
 
-test('verified first sign-in atomically creates a private starter room, repeated sign-in reuses it', async t => {
+test('verified first sign-in joins Welcome without elevated permissions, repeated sign-in reuses membership', async t => {
   const f = fixture(t), first = await loginWithProvider(f.store, f.options);
-  assert.equal(f.store.room(first.roomId).state.room.title, 'My room');
-  assert.deepEqual(Object.keys(f.store.room(first.roomId).state.members), ['owner']);
+  assert.equal(first.roomId, STARTER_ROOM_ID);
+  assert.equal(f.store.room(first.roomId).state.room.title, 'Welcome');
+  const auth = f.store.authenticateAccountSession(f.slot.token, first.roomId);
+  assert.notEqual(auth.member.id, f.store.room(first.roomId).state.room.ownerId);
+  assert.deepEqual(auth.member.permissions, []);
+  const sequence = f.store.room(first.roomId).sequence;
   const next = await loginWithProvider(f.store, { ...f.options, expectedRevision: 1 });
   assert.equal(next.roomId, first.roomId); assert.equal(next.session.account.id, first.session.account.id);
   assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM rooms').get().n, 1);
+  assert.equal(f.store.room(first.roomId).sequence, sequence);
   assert.equal(next.session.expiresAt <= f.claims.exp * 1000, true);
 });
 
@@ -32,7 +38,8 @@ test('different subjects never link through a matching email', async t => {
   const first = await loginWithProvider(f.store, f.options);
   f.claims.sub = 'user_bob';
   const second = await loginWithProvider(f.store, { ...f.options, expectedRevision: 1 });
-  assert.notEqual(first.roomId, second.roomId); assert.notEqual(first.session.account.id, second.session.account.id);
+  assert.equal(first.roomId, second.roomId); assert.notEqual(first.session.account.id, second.session.account.id);
+  assert.equal(Object.keys(f.store.room(first.roomId).state.members).length, 3);
 });
 
 test('stale browser or invalid assertion does not provision accounts or rooms', async t => {
@@ -68,7 +75,48 @@ test('HTTP provider exchange requires browser CSRF and a signed identity, then o
   const response = await fetch(origin + '/api/provider-session', { ...options, headers: { ...options.headers, 'X-CSRF-Token': slot.csrf } });
   assert.equal(response.status, 201, await response.clone().text());
   const result = await response.json();
-  assert.ok(result.starterRoomId.startsWith('room-'));
-  assert.equal(f.store.authenticateAccountSession(cookie.split('=')[1], result.starterRoomId).member.id, 'owner');
+  assert.equal(result.starterRoomId, STARTER_ROOM_ID);
+  assert.deepEqual(f.store.authenticateAccountSession(cookie.split('=')[1], result.starterRoomId).member.permissions, []);
   assert.equal(JSON.stringify(result).includes(token), false);
+});
+
+test('an unrelated Welcome room cannot be opened through onboarding', async t => {
+  const f = fixture(t);
+  f.store.initialize(initialRoom(STARTER_ROOM_ID));
+  await assert.rejects(loginWithProvider(f.store, f.options), { code: 'provider_room_conflict' });
+  assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM accounts').get().n, 0);
+  assert.equal(f.store.room(STARTER_ROOM_ID).sequence, 2);
+});
+
+test('shared members can chat but cannot grant authority; removed members stay removed', async t => {
+  const f = fixture(t), first = await loginWithProvider(f.store, f.options);
+  const member = f.store.authenticateAccountSession(f.slot.token, first.roomId).member;
+  const key = f.store.issueAccessKey(first.roomId, member.id);
+  f.store.command(key, first.roomId, { id: crypto.randomUUID(), type: 'message.posted', data: { messageId: 'hello', body: 'Hello everyone' } });
+  assert.throws(() => f.store.command(key, first.roomId, { id: crypto.randomUUID(), type: 'member.added',
+    data: { memberId: 'takeover', displayName: 'Agent', kind: 'agent', permissions: ['manage_members'] } }));
+  f.claims.sub = 'user_bob';
+  const second = await loginWithProvider(f.store, { ...f.options, expectedRevision: 1 });
+  assert.equal(f.store.room(second.roomId).state.messages.at(-1).body, 'Hello everyone');
+  // An operator-issued host key is test-only; onboarding never issues one.
+  const hostKey = f.store.issueAccessKey(first.roomId, 'welcome-host');
+  f.store.command(hostKey, first.roomId, { id: crypto.randomUUID(), type: 'member.access_changed',
+    data: { memberId: member.id, expectedMemberRevision: 0, permissions: [], active: false } });
+  f.claims.sub = 'user_alice';
+  await assert.rejects(loginWithProvider(f.store, { ...f.options, expectedRevision: 2 }), { code: 'provider_room_unavailable' });
+});
+
+test('previous private starter rooms remain private and reusable', async t => {
+  const f = fixture(t);
+  const digest = createHash('sha256').update(JSON.stringify([f.options.issuer, f.claims.sub])).digest('hex');
+  const provenance = `clerk:${createHash('sha256').update(f.options.issuer).digest('hex')}`;
+  f.store.createAccount(`idp-${digest}`, provenance);
+  f.store.initialize(initialRoom(`room-${digest}`));
+  f.store.ensureHumanAccountBinding(`room-${digest}`, 'owner', `idp-${digest}`, provenance);
+  const first = await loginWithProvider(f.store, f.options);
+  assert.equal(first.roomId, `room-${digest}`);
+  f.claims.sub = 'user_bob';
+  const second = await loginWithProvider(f.store, { ...f.options, expectedRevision: 1 });
+  assert.equal(second.roomId, STARTER_ROOM_ID);
+  assert.throws(() => f.store.authenticateAccountSession(f.slot.token, first.roomId));
 });
