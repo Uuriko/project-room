@@ -6,7 +6,7 @@ import { ServiceError } from "./store.mjs";
 import { isSend, internalSend, validateSend, sendPreview, transitionSend } from "./inbox-outbox.mjs";
 import { readEmailEnvelope, EmailContractError } from "./email-envelope.mjs";
 import { readChannelEnvelope } from "./channel-adapters/index.mjs";
-import { channels } from "./channel-connection.mjs";
+import { channels, connectionState, profileChannel } from "./channel-connection.mjs";
 import { prepareGraphReplyDraft, buildGraphReplyDraft, classifyGraphReplyCreation, classifyGraphReplyUpdateAcknowledgment, normalizeReplyObservation, prepareGraphReplyUpdate, buildGraphReplyUpdate, compareReplyUpdateEnvelope } from "./graph-reply-draft.mjs";
 import { isReplyAttempt, validateReplyAttempt, transitionReplyAttempt, replyObservationReviewable, isReplyUpdate, transitionReplyUpdate } from "./graph-reply-journal.mjs";
 import { buildUpdateInspection, buildUpdateReview, replyAttemptWithObservation } from "./graph-reply-update-review.mjs";
@@ -30,8 +30,6 @@ const participantLabel = p => p.displayName || p.handle || p.id;
 const summary = d => d.adapter === "email" ? { sender: d.envelope.message.from.address, recipient: d.envelope.connection.identity.address, subject: d.envelope.message.subject }
   : d.adapter === "telegram" ? { sender: participantLabel(d.envelope.message.from), recipient: participantLabel(d.envelope.connection.identity), subject: participantLabel(d.envelope.message.to[0]) }
   : { sender: d.sender, recipient: d.recipient, subject: d.subject };
-const connectionState = (connection, authEpoch) => connection.state === "disconnected" ? "disconnected"
-  : connection.authEpoch !== authEpoch ? "reconnect_required" : "active";
 export const inboxLimits = Object.freeze({ sources: 100, versions: 100, commands: 5000, paragraphs: 20 });
 export const inboxSchema = `
   CREATE TABLE private_inbox_sources (
@@ -154,7 +152,7 @@ export class Inbox {
       const connection = profile => {
         if (!connections.has(profile.id)) {
           const saved = this.store.email.connection(auth.account.id, profile.id);
-          connections.set(profile.id, { id: profile.id, channel: profile.mailboxId === undefined ? profile.channel : "email", provider: profile.provider,
+          connections.set(profile.id, { id: profile.id, channel: profileChannel(profile), provider: profile.provider,
             state: saved ? connectionState(saved, auth.account.authEpoch) : "disconnected" });
         }
         return connections.get(profile.id);

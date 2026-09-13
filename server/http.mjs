@@ -220,7 +220,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       let remoteAddress;
       try { remoteAddress = resolveClientAddress(req); }
       catch { reject(403, "proxy_denied", "Invalid proxy configuration"); }
-      const url = new URL(req.url, expectedOrigin());
+      const url = new URL(req.url, expectedOrigin()), loopback = ["127.0.0.1", "::1"].includes(remoteAddress);
       if (url.pathname.startsWith("/api/")) res.setHeader("X-Operation-Id", operationId);
       if ((url.pathname === "/api/health" || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode }, req.method === "HEAD");
@@ -299,18 +299,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (url.pathname === "/api/inbox" && req.method === "GET") return json(res, 200, store.inbox.list(token, binding, { includeChannels: view !== null }));
         if (url.pathname === connectionRoutes.list && req.method === "GET") return json(res, 200, store.connections.connections(token, binding));
         const connection = routePattern(connectionRoutes.read).exec(url.pathname);
-        if (connection && req.method === "GET") return json(res, 200, { ...store.connections.connectionRecord(token, pathId(connection[1]), binding),
-          syncAvailable: ["127.0.0.1", "::1"].includes(remoteAddress) });
+        if (connection && req.method === "GET") return json(res, 200, { ...store.connections.connectionRecord(token, pathId(connection[1]), binding), syncAvailable: loopback });
         const sync = routePattern(connectionRoutes.sync).exec(url.pathname);
         if (sync && req.method === "POST") {
           protectWrite(req, auth, false); rate(`inbox-sync:${auth.account.id}`, 60);
           // Recorded imports are local-only (like sample sending) and fixture-mode only.
-          if (!["127.0.0.1", "::1"].includes(remoteAddress)) reject(403, "channel_sync_local_only", "Recorded imports are local only.");
-          const data = await body(req);
+          if (!loopback) reject(403, "channel_sync_local_only", "Recorded imports are local only.");
+          const connectionId = pathId(sync[1]), data = await body(req);
           if (!exact(data, ["requestId", "updates"]) || !validId(data.requestId) || !(data.updates === null || Array.isArray(data.updates)))
             reject(422, "invalid_channel_update", "Supply a request ID and recorded updates, or null to import webhook updates.");
-          const result = await syncTelegramConnection({ store, token, binding, connectionId: pathId(sync[1]), requestId: data.requestId, updates: data.updates, webhooks: channelWebhooks });
-          return json(res, result.duplicate ? 200 : 201, { ...store.connections.connectionRecord(token, pathId(sync[1]), binding), receipt: result.receipt, duplicate: result.duplicate, source: result.source });
+          const result = await syncTelegramConnection({ store, token, binding, connectionId, requestId: data.requestId, updates: data.updates, webhooks: channelWebhooks });
+          return json(res, result.duplicate ? 200 : 201, { ...store.connections.connectionRecord(token, connectionId, binding), receipt: result.receipt, duplicate: result.duplicate, source: result.source });
         }
         const source = /^\/api\/inbox\/sources\/([^/]{1,384})(?:\/(share-context|room-results|send-context|sends))?$/.exec(url.pathname);
         if (source && req.method === "GET") {
@@ -335,7 +334,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         if (url.pathname === "/api/inbox/simulation" && req.method === "POST") {
           protectWrite(req, auth, false); rate(`inbox-simulation:${auth.account.id}`, 60);
-          if (!["127.0.0.1", "::1"].includes(remoteAddress)) reject(403, "inbox_simulation_local_only", "Sample sending is local only.");
+          if (!loopback) reject(403, "inbox_simulation_local_only", "Sample sending is local only.");
           if (!syntheticInboxTransport) reject(409, "inbox_simulation_unavailable", "Sample sending is unavailable here.");
           const data = await body(req);
           if (!data || !exact(data, ["action", "sourceId", "sendId"]) || !["dispatch", "reconcile"].includes(data.action)

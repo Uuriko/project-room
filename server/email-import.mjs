@@ -1,7 +1,7 @@
 // Account-owned fixture import for every channel connection (email, Telegram).
 // No OAuth credentials, bot tokens, network driver or send grant.
 import { emailConnection, emailDigest, emailInput, emailOpaqueId, emailText, exactEmailFields } from "./email-envelope.mjs";
-import { channelProfile, isEmailProfile, profileExternalId, toChannelProfile } from "./channel-connection.mjs";
+import { channelProfile, connectionState, isEmailProfile, profileExternalId, toChannelProfile } from "./channel-connection.mjs";
 import { adapterForChannel, readChannelEnvelope } from "./channel-adapters/index.mjs";
 import { validId } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
@@ -141,10 +141,7 @@ export class EmailImport {
     return row ? JSON.parse(row.receipt_json) : null;
   }
   // Generic connection record for any channel; never the stored secret hash or cursors.
-  record(connection, authEpoch) {
-    const state = connection.state === "disconnected" ? "disconnected" : connection.authEpoch !== authEpoch ? "reconnect_required" : "active";
-    return { ...toChannelProfile(connection.profile), state };
-  }
+  record(connection, authEpoch) { return { ...toChannelProfile(connection.profile), state: connectionState(connection, authEpoch) }; }
   connections(token, binding) {
     return this.store.readTransaction(() => {
       const auth = this.store.inbox.auth(token, binding);
