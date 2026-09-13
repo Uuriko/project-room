@@ -380,6 +380,7 @@ export class RoomStore {
       if (version < 8) this.db.exec(reminderSchema);
       if (version < 9) this.db.exec(agentConnectionSchema);
       if (version < 15) this.db.exec(inboxSchema);
+      this.inbox.ensurePrivateContextIndexes();
       if (version < 18) this.db.exec(emailImportSchema);
       if (version < 21 && this.db.prepare("SELECT 1 FROM private_inbox_commands WHERE json_extract(request_json,'$.action') LIKE 'reply.%' OR json_type(receipt_json,'$.attempt') IS NOT NULL LIMIT 1").get())
         throw new Error("Pre-v21 reply history requires operator reconciliation");

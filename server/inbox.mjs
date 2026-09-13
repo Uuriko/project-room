@@ -156,8 +156,18 @@ const replyPreview = (observation, version) => {
     attachmentCount: d.attachmentCount, differences: observation.differences } : null;
 };
 
+export const privateContextIndexes = Object.freeze([
+  `CREATE INDEX IF NOT EXISTS private_inbox_grant_list ON private_inbox_commands(account_id, json_extract(request_json,'$.action'), json_extract(receipt_json,'$.roomId'), sequence DESC)`,
+  `CREATE INDEX IF NOT EXISTS private_inbox_grant_revoke ON private_inbox_commands(account_id, json_extract(request_json,'$.action'), json_extract(request_json,'$.grantId'))`
+]);
+
 export class Inbox {
   constructor(store) { this.store = store; this.db = store.db; }
+  // Additive expression indexes for agent grant discovery. Not a schema-version
+  // bump: IF NOT EXISTS, no table rewrite, writer fence does not cover CREATE INDEX.
+  ensurePrivateContextIndexes() {
+    for (const sql of privateContextIndexes) this.db.exec(sql);
+  }
   grantRow(grantId) {
     const match = typeof grantId === "string" && /^grant-([1-9][0-9]{0,15})-[a-f0-9]{64}$/.exec(grantId);
     if (!match || !Number.isSafeInteger(Number(match[1]))) fail(404, "inbox_grant_not_found", "Private context unavailable.");
@@ -248,6 +258,9 @@ export class Inbox {
         this.readGrant(token,roomId,before,binding);ceiling=this.grantRow(before).sequence;
       }
       const state=this.store.room(roomId).state,now=this.store.now();
+      // Sequence-bounded ORDER BY sequence DESC LIMIT 26 still prefers rowid.
+      // private_inbox_grant_list remains for action+room filters; revoke uses
+      // private_inbox_grant_revoke. Not a throughput SLA.
       const rows=this.db.prepare(`SELECT g.receipt_json FROM private_inbox_commands g
         JOIN accounts a ON a.id=g.account_id AND a.active=1 AND a.auth_epoch=g.auth_epoch
         WHERE g.sequence<? AND json_extract(g.request_json,'$.action')='source.grant'
