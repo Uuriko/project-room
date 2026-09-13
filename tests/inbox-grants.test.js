@@ -152,3 +152,31 @@ test("legacy human grants replay but fail closed until a fresh epoch-pinned gran
   const fresh = f.apply({ ...request, requestId: randomUUID() }).receipt;
   assert.ok(f.read(fresh.grantId, "guest"));
 });
+test("private grant journal never enters room export, events, or diagnostics-export", async t => {
+  const f = setup(t), granted = f.apply(f.request()), id = granted.receipt.grantId;
+  const grants = f.store.db.prepare("SELECT count(*) n FROM private_inbox_commands WHERE json_extract(request_json,'$.action')='source.grant'").get().n;
+  assert.ok(grants >= 1);
+  const server = createRoomServer({ store: f.store });
+  await new Promise(r => server.listen(0, "127.0.0.1", r));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(r => server.close(r)); });
+  const origin = "http://127.0.0.1:" + server.address().port;
+  const headers = { Authorization: "Bearer " + f.keys.owner, Origin: origin };
+  const leak = new RegExp(`${id}|Selected private context|Unselected secret|secret@example|Private subject|private_inbox`);
+  const exported = await fetch(origin + "/api/rooms/commons/export", { headers });
+  assert.equal(exported.status, 200);
+  const ndjson = await exported.text();
+  assert.doesNotMatch(ndjson, leak);
+  assert.equal([...f.store.exportEvents(f.keys.owner, "commons")].some(line => leak.test(JSON.stringify(line))), false);
+  const events = await fetch(origin + "/api/rooms/commons/events?after=0", { headers });
+  assert.equal(events.status, 200);
+  assert.doesNotMatch(JSON.stringify(await events.json()), leak);
+  const diagnostics = await fetch(origin + "/api/rooms/commons/diagnostics-export", { headers });
+  assert.equal(diagnostics.status, 200);
+  assert.doesNotMatch(JSON.stringify(await diagnostics.json()), leak);
+  const imported = await fetch(origin + "/api/rooms/commons/import", {
+    method: "POST", headers: { ...headers, "Content-Type": "application/x-ndjson" }, body: ndjson });
+  assert.equal(imported.status, 409);
+  assert.equal((await imported.json()).error.code, "recovery_requires_maintenance");
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM private_inbox_commands WHERE json_extract(request_json,'$.action')='source.grant'").get().n, grants);
+  assert.ok(f.read(id));
+});
