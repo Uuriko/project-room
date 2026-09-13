@@ -437,6 +437,7 @@ for (const mobile of [false, true]) test(`email all text ${mobile ? "mobile" : "
   mail.raw.message.body.content = body;
   const id = mail.importMessage(); await f.inbox(); await f.pick(id);
   await p.locator("#inbox-ask").click(); await p.locator("#inbox-excerpt-all").waitFor();
+  assert.equal(await p.getByText("Selected text becomes room history, including for future members.", { exact: true }).isVisible(), true);
   const before = f.store.room("commons").state.messages.length;
   assert.equal(await p.locator("#inbox-share-confirm").isEnabled(), false);
   if (mobile) await p.locator("#inbox-excerpt-all").tap();

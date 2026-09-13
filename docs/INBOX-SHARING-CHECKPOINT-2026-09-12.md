@@ -47,3 +47,21 @@ These are local tests with synthetic/recorded mailbox input, not live email deli
 
 No connector, selective-agent privacy, hosted deployment or production readiness is
 claimed by this checkpoint.
+
+## Room-history privacy audit
+
+Follow-up regression tests exercise new human and agent memberships after a share.
+Both can read the existing excerpt through the real room snapshot. Neither receives
+the original private source, sender, subject, unselected paragraph or saved draft.
+A new human's own account session also cannot read the sender's private source.
+An exact share retry after membership changes does not duplicate the post.
+
+Requests with unsupported recipient-selector fields are rejected rather than
+silently treated as room-wide shares. This does not implement selective access.
+The existing share-sheet warning about future members is now asserted visible on
+desktop and mobile; no additional visible copy was necessary.
+
+Evidence: 11/11 inbox tests and 3/3 focused browser checks pass. This confirms the
+room-history boundary, not a fixed-recipient grant. The selected-audience feature
+must use a distinct private read path with revocable, explicit grants; ordinary
+room events are unsuitable storage for that content.

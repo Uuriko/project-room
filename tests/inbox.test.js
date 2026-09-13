@@ -73,6 +73,37 @@ test("sharing posts only selected text through the existing room command, with o
   assert.equal(f.store.room("commons").sequence, before.sequence + 1);
   assert.equal(f.store.inbox.verify().versions, 2);
 });
+test("room sharing includes future members but never grants the private source or draft", t => {
+  const f = fixture(t); f.save(f.source());
+  f.save({ action: "draft.save", requestId: "private-draft", sourceId: "source", sourceRevision: 1, expectedRevision: 0, body: "Unshared draft secret" });
+  const request = f.share(), shared = f.save(request);
+  for (const kind of ["human", "agent"]) {
+    const memberId = `future-${kind}`;
+    f.command("member.added", { memberId, displayName: memberId, kind, permissions: [] });
+    const key = f.store.issueAccessKey("commons", memberId);
+    const visible = JSON.stringify(f.store.snapshot(key, "commons"));
+    assert.ok(visible.includes(data.paragraphs[0]), "room history is available to new members");
+    for (const secret of ["4200", "maya@example.test", "Private launch", "Unshared draft secret"])
+      assert.equal(visible.includes(secret), false);
+    assert.throws(() => f.store.inbox.read(key, "source", f.sessions.owner.sessionBinding), { status: 401 });
+    if (kind === "human") {
+      const account = f.store.accountForMember("commons", memberId);
+      const accountKey = f.store.issueAccountAccessKey(account.id), slot = f.store.createAccountSessionSlot();
+      const session = f.store.loginAccountSession(slot.token, accountKey, 0);
+      assert.throws(() => f.store.inbox.read(slot.token, "source", session.sessionBinding), { status: 404 });
+    }
+  }
+  assert.equal(f.save(request).duplicate, true);
+  assert.equal(f.store.room("commons").state.messages.filter(m => m.id === shared.receipt.messageId).length, 1);
+  assert.equal(f.store.inbox.verify().sources, 1);
+});
+test("room sharing rejects recipient selectors rather than silently exposing selected-agent content", t => {
+  const f = fixture(t); f.save(f.source());
+  const before = f.store.room("commons");
+  for (const field of ["recipients", "agentIds", "audience", "scope"])
+    assert.throws(() => f.save(f.share({ [field]: ["producer"] })), { code: "invalid_inbox_request" });
+  assert.deepEqual(f.store.room("commons"), before);
+});
 test("sharing refuses changed audience and source without posting or consuming a request", t => {
   const f = fixture(t); f.save(f.source()); const request = f.share();
   f.command("member.added", { memberId: "new-person", displayName: "New person", kind: "human", permissions: [] });
