@@ -125,3 +125,39 @@ export class ReturnBrief {
     })();
   }
 }
+
+// Result-first catch-up (backlog C6): frozen history is grouped by outcome,
+// question, blocker and decision instead of raw event volume. Grouping is a
+// view over the same frozen-H window - every item keeps its own record link,
+// so each summary line still opens its exact supporting state.
+import { EVENT_TYPES as T } from "./events.js";
+
+export const BRIEF_HISTORY_GROUPS = Object.freeze(["outcome", "question", "blocker", "decision", "other"]);
+
+export function briefHistoryGroup({ event }, viewerId) {
+  switch (event?.type) {
+    case T.WORK_COMPLETED:
+    case T.WORK_SUPERSEDED:
+    case T.VERIFICATION_RECORDED:
+      return "outcome";
+    case T.MESSAGE_POSTED:
+      return event.data?.toMemberId && event.data.toMemberId === viewerId ? "question" : "other";
+    case T.WORK_BLOCKED:
+    case T.WORK_BLOCKER_RESOLVED:
+      return "blocker";
+    case T.OWNER_DECISION_RECORDED:
+      return "decision";
+    default:
+      return "other";
+  }
+}
+
+// Returns [name, items] pairs in group order, empty groups omitted. A single
+// non-empty "other" group is raw volume with a needless header - render flat.
+export function groupBriefHistory(items, viewerId) {
+  const groups = new Map(BRIEF_HISTORY_GROUPS.map(name => [name, []]));
+  for (const item of items) groups.get(briefHistoryGroup(item, viewerId)).push(item);
+  const used = [...groups.entries()].filter(([, list]) => list.length);
+  if (used.length === 1 && used[0][0] === "other") return [];
+  return used;
+}
