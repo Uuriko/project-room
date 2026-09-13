@@ -2,6 +2,11 @@
 
 ## Latest verified acceptance
 
+- `4ac7bfc`: application entry point supports an explicit loopback webhook port.
+  Both listeners must bind before readiness; shutdown and port-conflict cleanup
+  pass subprocess tests. Full Node **1491/1491**, runtime/deployment **9/9**, and
+  browser/package **6/6** pass. No live environment or permissions were changed.
+
 - `9ab0e4e`: optional existing-private-store runtime prepares an unstarted
   background webhook and permission controls. Partial config, unsafe files and
   callback mismatch fail; renewed consent resolves without rebuilding. Full

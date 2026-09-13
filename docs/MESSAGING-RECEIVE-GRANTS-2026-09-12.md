@@ -1,5 +1,26 @@
 # Receive-only background authority: isolated implementation
 
+## Current entry point (`4ac7bfc`)
+
+The application now starts the optional receiver only when
+`ROOM_TWILIO_WEBHOOK_PORT` is explicitly supplied alongside the existing provider
+configuration, private receive-grant file and exact webhook path. The port must
+be 1024–65535; it binds only to `127.0.0.1`. With no port, the prepared receiver
+does not listen. Maintenance mode does not start provider runtimes.
+
+Both listeners must bind successfully before readiness is printed. Bind failure
+closes the prepared runtimes without claiming success. SIGINT/SIGTERM close the
+receiver, then the application and stores. Subprocess tests verify normal startup,
+an explicit port collision, clean exit and port reuse. This supersedes historical
+statements below that `server.mjs` does not yet start the receiver.
+
+No environment was configured on the live pilot, no process was restarted, no
+private grant created, and no public proxy or provider webhook configured. This
+is implemented opt-in startup, not evidence of live SMS/WhatsApp connectivity.
+
+Exact `4ac7bfc`: **1491/1491 full Node tests**, runtime/deployment **9/9**, and
+background browser/package **6/6** pass. Independent lifecycle review requested.
+
 `server/messaging-receive-grants.mjs` is a host-only component. At `1e03023` it
 connects to a narrow internal Inbox receive method and a signed SMS/WhatsApp
 background importer. It is included in the exact runtime package (132 files),
