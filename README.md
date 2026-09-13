@@ -18,6 +18,7 @@ Do not treat ChatGPT worktrees or the stale project-root `PROJECT-ROOM-CURRENT.m
 | Activity inbox (human thin viewer) | [ACTIVITY-INBOX.md](docs/ACTIVITY-INBOX.md) |
 | Act components (Approve / Reject / Open-in-Compute) | [ACT-COMPONENTS.md](docs/ACT-COMPONENTS.md) |
 | Member capabilities (Discord-style bits) | [MEMBER-CAPABILITIES.md](docs/MEMBER-CAPABILITIES.md) |
+| Export, retention, deletion semantics | [EXPORT-RETENTION-DELETION.md](docs/EXPORT-RETENTION-DELETION.md) |
 | Research and messaging plans | [research/](research/README.md) |
 | Unification history | [UNIFICATION-2026-09-07.md](docs/UNIFICATION-2026-09-07.md) |
 
