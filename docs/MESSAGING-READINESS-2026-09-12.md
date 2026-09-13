@@ -2,6 +2,12 @@
 
 ## Latest verified acceptance
 
+- `c5a27d9`: optional account-only receive status/start/stop endpoints. Start is
+  fixed to 24 hours and checks current provider/grant revisions; stop blocks
+  imports without deleting saved messages or disconnecting the provider. Full
+  Node **1487/1487**, focused grant/control **6/6**, existing browser/package
+  **6/6** pass. UI and live startup remain unwired; review requested.
+
 - `1e03023`: signed SMS/WhatsApp background import now uses expiring receive-only
   grants without a human login. Full Node **1486/1486** and focused existing
   browser/package **6/6** pass. Revocation, disconnect, escaped/cloned leases,

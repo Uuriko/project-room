@@ -51,6 +51,33 @@ not implemented; do not silently erase authority history to free space.
 
 ## Transaction boundary and next integration
 
+### Account consent endpoints (`c5a27d9`)
+
+When a host explicitly supplies the receive-grant store to its Twilio connection
+service, account-only HTTP endpoints support status, start and stop under
+`/api/inbox/connections/twilio/receiving`. Start requires the exact current
+connection and grant revisions; the server fixes the lifetime to 24 hours and
+checks the encrypted provider registry before issuing. Stop revokes only the
+receive grant: the provider connection and saved Inbox messages remain.
+
+Writes require the current account cookie, session binding, CSRF and Origin,
+reject extra fields, and use account-scoped rate limiting. Agent bearer keys and
+foreign accounts cannot operate the controls. Responses omit provider secrets
+and phone numbers. Status describes **permission**, not proof that a live
+receiver is running. A stale provider revision is reported as reauthorization
+needed. An absent grant store leaves the controls disabled.
+
+Six focused grant/control tests pass, including HTTP consent → real signed
+fixture import → HTTP stop → blocked import. No live startup supplies this store
+and no UI button is exposed yet. The next UI must say “Allow receiving for 24
+hours,” disclose continuation after sign-out and offer “Stop receiving.” Do not
+label the permission alone as “Connected” or imply permission to send/share.
+
+Exact `c5a27d9`: **1487/1487 full Node tests** and **6/6 existing messaging
+browser/package checks** passed, zero skipped. Independent review requested.
+
+### Locking
+
 Lock order must be provider registry → receive-grant database → RoomStore.
 The callback is synchronous. The current account and grant are checked both
 before and after it, inside the RoomStore transaction, so expiry or authority
@@ -68,7 +95,8 @@ Before activation:
    it; keep ordinary Inbox actions authenticated and test cross-account abuse.
 3. Wire the existing Telegram/Twilio HTTP receivers to hold all three locks and test
    true import, restart, revoked/expired grants and account changes end to end.
-4. Build concise consent/status/stop controls with current-session checks and
-   a receipt. Provider disconnect must also stop the receiving path.
+4. Connect concise consent/status/stop UI to the tested account endpoints and
+   verify stale-account/uncertain-response behavior. Provider disconnect must
+   also stop the receiving path.
 5. Add private existing-file startup validation, packaging, recovery/export
    treatment and explicit operations guidance before a separately approved pilot.
