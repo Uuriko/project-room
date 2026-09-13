@@ -4,6 +4,14 @@ const id=v=>typeof v==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(v);
 const revision=v=>Number.isSafeInteger(v)&&v>=0&&v<Number.MAX_SAFE_INTEGER-1;
 const fail=()=>{throw new Error('receive_grant_unconfirmed');};
 const providers=['telegram','sms','whatsapp'];
+const activeLeases=new WeakMap();
+// Only the exact object issued within a live synchronous grant callback works.
+// Cloned/JSON descriptors and leases from another RoomStore cannot authorize.
+export function assertReceiveLease(store,lease){
+  const active=lease&&activeLeases.get(lease);
+  if(!active||active.store!==store||!store.db.isTransaction)fail();
+  active.check();return lease;
+}
 export const MAX_RECEIVE_GRANT_MS=30*86400000;
 
 // Host-only authority, NOT a bearer token or an account session. Private metadata
@@ -86,9 +94,12 @@ export class MessagingReceiveGrants {
           ||!account.active||r.auth_epoch!==account.authEpoch)fail();
         return r;
       };
-      const result=fn(this.#view(check()));
-      if(result&&typeof result.then==='function')fail();
-      check();return result;
+      const lease=this.#view(check());activeLeases.set(lease,{store:this.#store,check});
+      try {
+        const result=fn(lease);
+        if(result&&typeof result.then==='function')fail();
+        check();return result;
+      }finally{activeLeases.delete(lease);}
     });
   }
 }

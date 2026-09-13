@@ -15,6 +15,7 @@ const repository = fileURLToPath(new URL("../", import.meta.url));
 const gmailPackageFiles = ['src/gmail-callback.js', ...['gmail-runtime', 'gmail-connections', 'gmail-oauth', 'gmail-mail-reader', 'gmail-email', 'mail-credential-vault'].map(name => `server/${name}.mjs`)];
 gmailPackageFiles.push('src/messaging-connections-client.js','src/messaging-connections-ui.js');
 gmailPackageFiles.push('server/twilio-runtime.mjs');
+gmailPackageFiles.push('server/messaging-receive-grants.mjs');
 gmailPackageFiles.push(...['telegram-runtime','telegram-connection-registry','telegram-connections','telegram-receiver','telegram-inbox-import','telegram-receive-queue','telegram-receive-tick','telegram-bot-reader','twilio-message-reader','twilio-inbox-import','twilio-connection-registry','twilio-webhook','twilio-connections','slack-event-reader'].map(name=>`server/${name}.mjs`));
 
 test("exact-commit runtime package verifies cold, excludes private state and preserves populated committed-schema data", async t => {
@@ -158,7 +159,7 @@ test("uncommitted candidate packages cold in an isolated synthetic commit, inclu
   const directory = mkdtempSync(join(tmpdir(), "room-candidate-package-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const candidate = candidateRuntimeFixture(repository, directory), destination = join(directory, "runtime");
-  const receipt = createRuntimePackage({ ...candidate, destination }); assert.equal(receipt.files, 131);
+  const receipt = createRuntimePackage({ ...candidate, destination }); assert.equal(receipt.files, 132);
   const program = `
     import { handlePublicMcpMessage } from ${JSON.stringify(pathToFileURL(join(destination, "client/mcp-public.mjs")).href)};
     import { openJoinContract } from ${JSON.stringify(pathToFileURL(join(destination, "server/open-contract.mjs")).href)};

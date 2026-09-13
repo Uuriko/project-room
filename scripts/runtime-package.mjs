@@ -63,6 +63,7 @@ optional.push("server/clerk-verifier.mjs", "server/provider-onboarding.mjs");
 optional.push("server/account-room-create.mjs");
 optional.push("server/provider-config.mjs");
 optional.push('server/twilio-runtime.mjs');
+optional.push('server/messaging-receive-grants.mjs');
 const allowed = new Set([...required, ...optional]);
 for (const path of ['src/gmail-callback.js', ...['gmail-runtime', 'gmail-connections', 'gmail-oauth', 'gmail-mail-reader', 'gmail-email', 'mail-credential-vault'].map(name => `server/${name}.mjs`)]) allowed.add(path);
 for (const name of ['telegram-runtime','telegram-connection-registry','telegram-connections','telegram-receiver','telegram-inbox-import','telegram-receive-queue','telegram-receive-tick','telegram-bot-reader','twilio-message-reader','twilio-inbox-import','twilio-connection-registry','twilio-webhook','twilio-connections','slack-event-reader']) allowed.add(`server/${name}.mjs`);

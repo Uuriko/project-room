@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { assertReceiveLease } from './messaging-receive-grants.mjs';
 import { validId, EVENT_TYPES as T, hasConfirmedIndependentPass } from "../src/events.js";
 import { currentApproval } from "../src/workflow.js";
 import { storedText } from "./text-results.mjs";
@@ -575,8 +576,20 @@ export class Inbox {
     return this.apply(token, request, binding, messageAuthority);
   }
   apply(token, request, binding, authority = null) {
+    return this.#apply(token,request,binding,authority);
+  }
+  // Host receiver only: no browser action can acquire an in-process lease.
+  importGrantedMessage(lease,request) {
+    const grant=assertReceiveLease(this.store,lease);
+    if(request?.action!=='message.import'||request.data?.accountId!==grant.accountId
+      ||request.data?.connectionId!==grant.connectionId||request.data?.provider!==grant.provider)
+      fail(403,'message_grant_mismatch','Message outside receiving permission.');
+    const result=this.#apply(null,request,null,messageAuthority,lease);
+    return {receipt:result.receipt,duplicate:result.duplicate};
+  }
+  #apply(token, request, binding, authority = null, lease = null) {
     return this.store.transaction(() => {
-      const auth = this.auth(token, binding); validate(request);
+      const auth = lease ? {account:this.store.account(assertReceiveLease(this.store,lease).accountId)} : this.auth(token, binding); validate(request);
       if (request.action === 'message.import' && authority !== messageAuthority) fail(403, 'message_importer_required', 'Only the configured importer can record messages.');
       if (request.action === 'message.import' && request.data.accountId !== auth.account.id) fail(403, 'message_account_mismatch', 'Message belongs to another account.');
       if (isReplyAttempt(request) && authority !== replyAuthority) fail(403, "reply_driver_required", "Use the configured reply driver.");
