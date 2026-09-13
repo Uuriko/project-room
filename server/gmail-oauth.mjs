@@ -86,6 +86,22 @@ export class GmailOAuth {
     }
   }
 
+  async refresh({ refreshToken, scope }) {
+    if (!opaque(refreshToken) || scope !== GMAIL_READ_SCOPE) fail('gmail_token_invalid');
+    const requestedAt = this.#now();
+    const tokens = await this.#json(tokenEndpoint, {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ client_id: this.#clientId, client_secret: this.#clientSecret,
+        refresh_token: refreshToken, grant_type: 'refresh_token' }).toString()
+    });
+    if (tokens.scope !== undefined && (typeof tokens.scope !== 'string' || tokens.scope.trim() !== GMAIL_READ_SCOPE)) fail('gmail_scope_mismatch');
+    if (!opaque(tokens.access_token) || tokens.refresh_token !== undefined && !opaque(tokens.refresh_token)
+      || typeof tokens.token_type !== 'string' || tokens.token_type.toLowerCase() !== 'bearer' || !Number.isSafeInteger(tokens.expires_in)
+      || tokens.expires_in < 1 || tokens.expires_in > 86400) fail('gmail_token_invalid');
+    return { accessToken: tokens.access_token, refreshToken: tokens.refresh_token ?? refreshToken,
+      scope, expiresAt: requestedAt + tokens.expires_in * 1000 };
+  }
+
   async complete({ callbackUrl, getContext }) {
     let url;
     try { url = new URL(callbackUrl); } catch { fail('gmail_callback_invalid'); }
@@ -120,7 +136,7 @@ export class GmailOAuth {
     });
     const scopes = typeof tokens.scope === 'string' ? tokens.scope.trim().split(/\s+/) : [];
     if (scopes.length !== 1 || scopes[0] !== GMAIL_READ_SCOPE) fail('gmail_scope_mismatch');
-    if (!opaque(tokens.access_token) || !opaque(tokens.refresh_token) || tokens.token_type?.toLowerCase() !== 'bearer'
+    if (!opaque(tokens.access_token) || !opaque(tokens.refresh_token) || typeof tokens.token_type !== 'string' || tokens.token_type.toLowerCase() !== 'bearer'
       || !Number.isSafeInteger(tokens.expires_in) || tokens.expires_in < 1 || tokens.expires_in > 86400)
       fail('gmail_token_invalid');
     await assertContext();

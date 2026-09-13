@@ -9,7 +9,7 @@ const vaultBinding = (profile, epoch) => ({ accountId: profile.accountId, connec
 // Server-side lifecycle. HTTP host must enforce CSRF on mutations and keep OAuth
 // callbacks out of logs. Credentials never appear in public return values.
 export class GmailConnections {
-  #store; #vault; #oauth; #fetch; #pending = new Map();
+  #store; #vault; #oauth; #fetch; #pending = new Map(); #refreshing = new Map();
   constructor({ store, vault, oauth, fetchImpl = fetch }) {
     this.#store = store; this.#vault = vault; this.#oauth = oauth; this.#fetch = fetchImpl;
   }
@@ -78,11 +78,34 @@ export class GmailConnections {
     // stale hydrated content using a freshly observed source revision.
     const heads = new Map(this.#store.db.prepare('SELECT id,revision FROM private_inbox_sources WHERE account_id=?')
       .all(initial.auth.account.id).map(row => [row.id, row.revision]));
-    const authorize = () => {
+    const check = () => {
       const current = this.#current(session, id);
       if (current.connection.profile.revision !== profile.revision || current.auth.account.authEpoch !== initial.auth.account.authEpoch)
         fail('gmail_connection_changed');
-      const { credentials } = this.#vault.read(vaultBinding(profile, current.auth.account.authEpoch));
+      return current;
+    };
+    const authorize = async () => {
+      const current = check();
+      const binding = vaultBinding(profile, current.auth.account.authEpoch);
+      let snapshot = this.#vault.read(binding);
+      if (snapshot.credentials.expiresAt <= this.#store.now() + 60000) {
+        const key = JSON.stringify([binding, snapshot.version]);
+        let renewal = this.#refreshing.get(key);
+        if (!renewal) {
+          if (this.#refreshing.size >= 100) fail('gmail_connection_busy');
+          renewal = (async () => {
+            const credentials = await this.#oauth.refresh({ refreshToken: snapshot.credentials.refreshToken, scope: snapshot.credentials.scope });
+            check();
+            this.#vault.put({ binding, credentials, expectedVersion: snapshot.version });
+          })();
+          this.#refreshing.set(key, renewal);
+        }
+        try { await renewal; }
+        finally { if (this.#refreshing.get(key) === renewal) this.#refreshing.delete(key); }
+        check();
+        snapshot = this.#vault.read(binding);
+      }
+      const { credentials } = snapshot;
       if (credentials.expiresAt <= this.#store.now()) fail('gmail_token_refresh_required');
       return { accessToken: credentials.accessToken, expiresAt: credentials.expiresAt, scope: credentials.scope,
         accountId: profile.accountId, connectionId: id, connectionRevision: profile.revision,
@@ -91,7 +114,7 @@ export class GmailConnections {
     const reader = new GmailMailReader({ connection: profile, authEpoch: initial.auth.account.authEpoch,
       authorize, fetchImpl: this.#fetch, now: () => this.#store.now() });
     const page = await reader.readPage({ pageToken });
-    authorize();
+    await authorize();
     const result = this.#store.email.apply(session.token, { action: 'page.apply', requestId: randomUUID(), connectionId: id,
       connectionRevision: profile.revision, folderId: 'INBOX', expectedRevision: progress.folder?.revision ?? 0,
       expectedCursor: progress.expectedCursor, cursor: JSON.stringify({ pageToken: page.nextPageToken, scan: reset ? randomUUID() : JSON.parse(progress.expectedCursor).scan }),

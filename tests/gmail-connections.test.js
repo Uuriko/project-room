@@ -20,7 +20,7 @@ function fixture(t) {
   const mailbox = 'pilot@example.com'; const calls = [];
   let hook = () => {};
   const fetchImpl = async (url, init) => {
-    calls.push(url); hook(url);
+    calls.push(url); hook(url, init);
     if (url === 'https://oauth2.googleapis.com/token') return Response.json({ access_token: 'access-fixture', refresh_token: 'refresh-fixture',
       token_type: 'Bearer', expires_in: 3600, scope: GMAIL_READ_SCOPE });
     if (url.endsWith('/profile')) return Response.json({ emailAddress: mailbox });
@@ -33,7 +33,14 @@ function fixture(t) {
   const service = new GmailConnections({ store: f.store, vault, oauth, fetchImpl });
   const begin = () => service.begin(session, mailbox);
   const callback = pending => `${redirect}?state=${new URL(pending.authorizationUrl).searchParams.get('state')}&code=fixture-code`;
-  return { ...f, db, account, session, service, begin, callback, calls, hook: value => { hook = value; } };
+  const expire = id => {
+    const profile = f.store.email.connection(account.id, id).profile;
+    const binding = { accountId: account.id, connectionId: id, authEpoch: account.authEpoch,
+      connectionRevision: profile.revision, provider: 'gmail', mailbox };
+    const previous = vault.read(binding);
+    vault.put({ binding, expectedVersion: previous.version, credentials: { ...previous.credentials, expiresAt: f.store.now() - 1 } });
+  };
+  return { ...f, db, account, session, service, begin, callback, calls, expire, hook: value => { hook = value; } };
 }
 
 test('OAuth to encrypted credentials to private Inbox, followed by disconnect', async t => {
@@ -83,4 +90,24 @@ test('concurrent scans cannot overwrite the same page checkpoint', async t => {
   const results = await Promise.allSettled([f.service.sync(f.session, pending.connectionId), f.service.sync(f.session, pending.connectionId)]);
   assert.equal(results.filter(value => value.status === 'fulfilled').length, 1);
   assert.equal(results.find(value => value.status === 'rejected').reason.code, 'stale_email_page');
+});
+
+test('expired credentials renew once for concurrent syncs and remain encrypted', async t => {
+  const f = fixture(t); const pending = f.begin(); await f.service.complete(f.session, f.callback(pending)); f.expire(pending.connectionId);
+  let refreshes = 0;
+  f.hook((url, init) => { if (url === 'https://oauth2.googleapis.com/token' && new URLSearchParams(init.body).get('grant_type') === 'refresh_token') refreshes++; });
+  const results = await Promise.allSettled([f.service.sync(f.session, pending.connectionId), f.service.sync(f.session, pending.connectionId)]);
+  assert.equal(refreshes, 1);
+  assert.equal(results.filter(value => value.status === 'fulfilled').length, 1);
+  assert.equal(f.db.prepare('SELECT version FROM mail_credentials_v1').get().version, 3);
+});
+
+test('disconnect during token renewal cannot restore credentials or read mail', async t => {
+  const f = fixture(t); const pending = f.begin(); await f.service.complete(f.session, f.callback(pending)); f.expire(pending.connectionId);
+  f.hook(url => { if (url === 'https://oauth2.googleapis.com/token') f.service.disconnect(f.session, pending.connectionId); });
+  const before = f.calls.length;
+  await assert.rejects(f.service.sync(f.session, pending.connectionId), { code: 'gmail_read_authorization_required' });
+  assert.equal(f.calls.length, before + 1);
+  const row = f.db.prepare('SELECT state,ciphertext FROM mail_credentials_v1').get();
+  assert.equal(row.state, 'disconnected'); assert.equal(row.ciphertext, null);
 });

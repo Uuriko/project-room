@@ -123,3 +123,20 @@ test('authority changing during profile read prevents returning credentials', as
   await assert.rejects(f.oauth.complete({ callbackUrl: f.callback(f.begin()), getContext: () => ++checks < 3 ? context : { ...context, revision: 2 } }), { code: 'gmail_session_changed' });
   assert.equal(f.calls.length, 2);
 });
+
+test('refresh retains original narrow scope and refresh token when Google omits them', async () => {
+  const f = fixture(() => json({ access_token: 'renewed-token', token_type: 'Bearer', expires_in: 3600 }));
+  const result = await f.oauth.refresh({ refreshToken: 'old-refresh', scope: GMAIL_READ_SCOPE });
+  assert.equal(result.refreshToken, 'old-refresh'); assert.equal(result.scope, GMAIL_READ_SCOPE);
+  assert.equal(new URLSearchParams(f.calls[0].init.body).get('grant_type'), 'refresh_token');
+  assert.equal(f.calls[0].init.redirect, 'error');
+});
+
+test('refresh accepts rotation but rejects broadened or malformed grants', async () => {
+  const f = fixture(() => json({ ...grant, refresh_token: 'rotated-refresh' }));
+  assert.equal((await f.oauth.refresh({ refreshToken: 'old', scope: GMAIL_READ_SCOPE })).refreshToken, 'rotated-refresh');
+  for (const value of [{ ...grant, scope: 'https://mail.google.com/' }, { ...grant, expires_in: -1 }, { ...grant, refresh_token: '' }]) {
+    const bad = fixture(() => json(value));
+    await assert.rejects(bad.oauth.refresh({ refreshToken: 'old', scope: GMAIL_READ_SCOPE }));
+  }
+});

@@ -38,10 +38,13 @@ revision; reads require a matching active import connection. Cross-database cras
 recovery still needs operational testing, not an atomicity claim.
 
 Still not live: HTTP/CSRF wiring, concise UI, external key provisioning and private
-database file permissions, token refresh, Google-side revocation, durable worker scheduling,
+database file permissions, Google-side revocation, durable worker scheduling,
 runtime dependency packaging, and real-user consent/testing. The existing importer’s
 legacy `mode: fixture` marker is not an assertion of live connectivity; it must be
-reconciled before public UI claims. Expired tokens currently fail closed.
+reconciled before public UI claims. Token renewal is implemented with narrow-scope
+validation, refresh-token rotation/preservation, shared in-flight requests and vault
+version checks. Session/connection authority is checked again before saving refreshed
+credentials; disconnect during renewal cannot restore them. Renewal failure fails closed.
 
 Storage checkpoint: `server/mail-credential-vault.mjs` now provides AES-256-GCM
 credential encryption in a separate caller-supplied SQLite database. The key is supplied
