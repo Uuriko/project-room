@@ -3,7 +3,7 @@ import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./cli
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
 import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
-import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary } from "./workflow.js";
+import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation, requestFailureMessage } from "./share-links.js";
 import { installAgentConnections } from "./agent-connections.js";
@@ -2168,6 +2168,14 @@ function openWork(sourceId = null, reuseId = null) {
     $("#work-done-input").value = definition.definitionOfDone;
   }
   $("#work-reuse-hint").hidden = !definition;
+  const recipeSelect = $("#work-recipe-select");
+  if (definition || sourceId) $("#work-recipe-field").hidden = true;
+  else {
+    const recipes = workRecipeOptions(state.workItems);
+    recipeSelect.replaceChildren(new Option("Blank outcome", ""));
+    for (const recipe of recipes) recipeSelect.add(new Option(recipe.title.replace(/\s+/g, " ").slice(0, 80), recipe.workItemId));
+    $("#work-recipe-field").hidden = recipes.length === 0;
+  }
   $("#source-context").textContent = sourceId ? `Source: ${state.messages.find(m => m.id === sourceId)?.body || ""}` : "";
   $("#source-context").hidden = !sourceId; $("#work-title-input").focus();
   syncWorkForm();
@@ -2176,7 +2184,7 @@ function closeWorkForm({ returnFocus = true } = {}) {
   const unconfirmed = workRetryLocked;
   $("#work-dialog").close();
   $("#new-work-form").hidden = true; $("#new-work-form").reset();
-  setWorkRetry(false); $("#work-reuse-hint").hidden = true;
+  setWorkRetry(false); $("#work-reuse-hint").hidden = true; $("#work-recipe-field").hidden = true;
   setFormStatus($("#new-work-status"), "");
   pendingWork = null; workDraftId = null;
   const opener = workFormOpener; workFormOpener = null;
@@ -2199,6 +2207,17 @@ function setWorkRetry(locked) {
   $("#work-retry-hint").hidden = !locked;
   $("#cancel-work-button").textContent = locked ? "Close" : "Cancel";
 }
+$("#work-recipe-select").addEventListener("change", event => {
+  const recipeId = event.target.value;
+  if (!recipeId) { $("#work-title-input").value = ""; $("#work-done-input").value = ""; return; }
+  const item = state?.workItems?.[recipeId];
+  if (!item) return;
+  try {
+    const recipe = reusableWorkDefinition(item);
+    $("#work-title-input").value = recipe.title;
+    $("#work-done-input").value = recipe.definitionOfDone;
+  } catch { /* Definition changed since the list was built; leave the fields as they are. */ }
+});
 $("#new-work-button").addEventListener("click", () => openWork());
 $("#composer-work-button").addEventListener("click", () => openWork());
 $("#review-settings-button").addEventListener("click", () => {
