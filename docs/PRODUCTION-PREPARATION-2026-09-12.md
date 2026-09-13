@@ -140,6 +140,30 @@ provider re-emission without a click, explicit retry, draft-preserving renewal,
 and a deliberately delayed renewal arriving after sign-out.
 Regression after lifecycle follow-up:1305 pass, zero failed/skipped (87235ms).
 
+## Current-schema persisted recovery switch
+
+The local Workers recovery suite now has3 passing scenarios: historical schemas8
+and12 plus current33. Exact33 pair: candidate0db9f41a8f873bc3be759c0391abe0945b9f70e4,
+fallbackb3728f09caeae96fccbec7d29ee54fa3f1e5fb04. Both contain107 allowlisted runtime
+files and28 public assets. They have different HTTP/application behavior, not
+merely different labels. The test seeds4 rooms across31 application tables,
+including a provider-admitted Welcome member, a privately owned room and binary
+attachment data, then switches candidate → paused → fallback → candidate using
+the same persisted disposable Workers object.
+
+Verified: exact application-data digests across each restart, pause blocks reads
+and writes, valid/revoked credentials remain valid/revoked, Welcome permissions
+remain empty, private-room ownership remains exclusive, private-room creation
+retry stays duplicate, historical command/reminder/invitation retries do not
+change rows, and new fallback writes survive return to candidate. Package
+manifests are reverified after the switch. No production data was read or changed.
+
+This is a local workerd compatibility proof, NOT hosted PITR or a backup restore.
+The fallback predates visible provider Join and must not be described as a
+feature-equivalent onboarding experience. Hosted recovery, exact retained release
+artifacts, authentication configuration and an operator drill remain required.
+Never run schema26 code against this schema33 database.
+
 Release copy retained at /Users/johnpotter/src/project-room-release-20260912-c79dfa5.
 It contains generated stamp/assets from the successful dry-run; don't stamp again
 without a fresh clean candidate. Integration .wrangler cache was not removed.
