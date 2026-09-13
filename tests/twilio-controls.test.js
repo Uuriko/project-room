@@ -1,0 +1,43 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { DatabaseSync } from 'node:sqlite';
+import { rmSync } from 'node:fs';
+import { createAcceptanceFixture } from '../scripts/acceptance-fixture.mjs';
+import { createRoomServer } from '../server/http.mjs';
+import { TwilioConnectionRegistry } from '../server/twilio-connection-registry.mjs';
+import { createTwilioConnections } from '../server/twilio-connections.mjs';
+
+test('account-scoped messaging status and disconnect enforce CSRF, revisions and isolation',async t=>{
+  const f=createAcceptanceFixture(),db=new DatabaseSync(':memory:'),registry=new TwilioConnectionRegistry({db,key:Buffer.alloc(32,6)});
+  const account=f.store.accountForMember('commons','owner'),slot=f.store.createAccountSessionSlot();
+  const auth=f.store.loginAccountSession(slot.token,f.store.issueAccountAccessKey(account.id),0);
+  const binding={accountId:account.id,connectionId:'sms-one',authEpoch:0};
+  registry.configure({...binding,expectedRevision:0,accountSid:'AC'+'a'.repeat(32),address:'+14155550100',authToken:'SECRET-SENTINEL',webhookUrl:'https://example.test/inbound'});
+  const connections=createTwilioConnections({store:f.store,registry,connections:[{...binding,provider:'sms'}]});
+  const server=createRoomServer({store:f.store,twilioConnections:connections});await new Promise(r=>server.listen(0,'127.0.0.1',r));
+  t.after(async()=>{server.closeAllConnections();await new Promise(r=>server.close(r));registry.close();db.close();f.store.close();rmSync(f.directory,{recursive:true,force:true});});
+  const origin=`http://127.0.0.1:${server.address().port}`,url=origin+'/api/inbox/connections/twilio';
+  const headers={Cookie:`account_session=${slot.token}`,Origin:origin,'Content-Type':'application/json','X-Session-Binding':auth.sessionBinding,'X-CSRF-Token':auth.csrf};
+  const post=(data={connectionId:'sms-one',expectedRevision:1},h=headers)=>fetch(url+'/disconnect',{method:'POST',headers:h,body:JSON.stringify(data)});
+  const first=await(await fetch(url,{headers})).json();
+  assert.deepEqual(first.connections,[{connectionId:'sms-one',provider:'sms',state:'active',revision:1}]);
+  assert.ok(!JSON.stringify(first).includes('SECRET-SENTINEL'));assert.ok(!JSON.stringify(first).includes('+1415'));
+  for(const changed of [{Cookie:''},{'X-CSRF-Token':''},{Origin:'https://foreign.test'},{'X-Session-Binding':'0'.repeat(64)},{Authorization:`Bearer ${f.keys.owner}`}])
+    assert.ok((await post(undefined,{...headers,...changed})).status>=400);
+  assert.equal((await post({connectionId:'sms-one',expectedRevision:1,authToken:'injected'})).status,422);
+  assert.equal((await post({connectionId:'other',expectedRevision:1})).status,409);
+  assert.equal((await post({connectionId:'sms-one',expectedRevision:2})).status,409);
+  const guest=f.store.accountForMember('commons','guest'),other=f.store.createAccountSessionSlot();
+  const ga=f.store.loginAccountSession(other.token,f.store.issueAccountAccessKey(guest.id),0);
+  const gh={...headers,Cookie:`account_session=${other.token}`,'X-Session-Binding':ga.sessionBinding,'X-CSRF-Token':ga.csrf};
+  assert.deepEqual((await(await fetch(url,{headers:gh})).json()).connections,[]);
+  assert.equal((await post(undefined,gh)).status,409);
+  assert.equal(registry.status(binding).state,'active');
+  const disconnected=await(await post()).json();assert.equal(disconnected.state,'disconnected');assert.equal(disconnected.revision,2);
+  assert.throws(()=>registry.withGrant({...binding,expectedRevision:1},()=>{}));
+  assert.equal((await post()).status,409);
+  connections.disconnect=()=>{throw new Error('SECRET-SENTINEL');};
+  const failed=await post();assert.equal(failed.status,409);assert.ok(!(await failed.text()).includes('SECRET-SENTINEL'));
+  connections.disconnect=()=>{f.store.logoutAccountSession(slot.token,auth.sessionRevision);return {connectionId:'sms-one',revision:99,state:'disconnected'};};
+  const ended=await post();assert.equal(ended.status,409);assert.ok(!(await ended.text()).includes('99'));
+});

@@ -122,6 +122,26 @@ Fourteen messaging, mobile and cold-package checks passed. See
 and [signature security](https://www.twilio.com/docs/usage/webhooks/webhooks-security)
 for the provider contract (rechecked September 12, 2026).
 
+### Account controls
+
+The optional Room server now accepts a trusted `twilioConnections` service for
+account-private status and revision-bound disconnect. Writes require the current
+account cookie, session binding, CSRF token and same-origin checks; room/agent
+bearer credentials do not qualify. Foreign connections and stale revisions fail,
+and status does not return phone numbers, tokens or callback URLs. The service
+is not constructed in production startup; browser controls and secure startup
+configuration are still unfinished. HTTP controls plus cold packaging: 3/3 pass.
+
+### Broader browser regression disposition
+
+The full scripted browser run completed with 300/317 passing, 17 failing. Several
+checks still assume the older expanded sign-in or old copy. A real composer bug
+was also confirmed: attachment rendering overwrote the read-only state of an
+unconfirmed request. `c0df06a` unifies that lock without relaxing retry assertions.
+Do not describe the full browser suite as passing until all failures are resolved
+and an exact candidate is rerun. Remaining groups include quiet-copy, room-door,
+Inbox collaboration setup, email-label expectations and session-focus checks.
+
 Run `npm run test:messaging` for signed readers, private import and mobile display;
 run `npm run test:telegram` for the Telegram integration. All use disposable
 fixtures except the explicitly reported manual local check.
