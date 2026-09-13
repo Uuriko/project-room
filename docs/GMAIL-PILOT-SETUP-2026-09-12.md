@@ -41,9 +41,14 @@ erase backups, or wire the Inbox. Host lifecycle integration remains required.
 2. Store tokens privately using authenticated encryption with keys outside the database
    and repository. Serialize connection writes; verify epoch/revision again at persistence.
    Implement refresh, disconnect/revocation, restart recovery, and deletion semantics.
-3. Implement Gmail normalization and bounded synchronization into the existing account-private
-   Inbox. Current email contract supports Microsoft Graph, not Gmail. Do not disguise Gmail
-   as Graph, reuse fixture send transport, or publish mail into room events.
+3. Gmail normalization now exists in `server/gmail-email.mjs`, using pinned `postal-mime`
+   3.0.0 with a 1 MiB raw-message limit, bounded MIME depth/headers, no inline expansion
+   of attached emails, and no attachment bytes in the resulting envelope. The shared
+   email contract accepts Gmail, while Graph-specific boundaries explicitly reject it.
+   A fixture integration test proves import into private Inbox and draft retention after
+   disconnect without room events. Live network synchronization and its HTTP/UI wiring
+   remain incomplete. Large-message fallback and attachment retrieval remain pending.
+   Never disguise Gmail as Graph, reuse fixture send transport, or publish mail into room events.
 4. Present Google's actual read-only consent screen to John. No broad Gmail modify/delete
    permission is needed for the first reading pilot. Sending requires its own scoped flow,
    exact reviewed recipients/content, and durable outcome/retry handling.
@@ -57,5 +62,7 @@ erase backups, or wire the Inbox. Host lifecycle integration remains required.
 
 - [Google web-server OAuth](https://developers.google.com/identity/protocols/oauth2/web-server)
 - [Gmail scopes](https://developers.google.com/workspace/gmail/api/auth/scopes)
+- [Gmail message resource](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages)
+- [PostalMime parser and security limits](https://github.com/postalsys/postal-mime)
 
 OAuth verification and testing constraints must be rechecked before public release.

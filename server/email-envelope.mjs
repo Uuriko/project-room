@@ -54,7 +54,7 @@ const addresses = value => count(value, emailLimits.recipients).map(emailAddress
 const addressKey = value => { const at = value.address.lastIndexOf("@"); return value.address.slice(0, at) + "@" + value.address.slice(at + 1).toLowerCase(); };
 export function emailConnection(value) {
   requireEmail(exactEmailFields(value, ["accountId", "id", "revision", "provider", "mailboxId", "identity", "aliases"]), "invalid_email_connection");
-  requireEmail(value.provider === "microsoft-graph" && Number.isSafeInteger(value.revision) && value.revision > 0, "invalid_email_connection");
+  requireEmail(["microsoft-graph", "gmail"].includes(value.provider) && Number.isSafeInteger(value.revision) && value.revision > 0, "invalid_email_connection");
   return { accountId: localId(value.accountId), id: localId(value.id), revision: value.revision,
     provider: value.provider, mailboxId: emailOpaqueId(value.mailboxId), identity: emailAddress(value.identity), aliases: addresses(value.aliases) };
 }

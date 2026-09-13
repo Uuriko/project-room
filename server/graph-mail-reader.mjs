@@ -50,6 +50,7 @@ export class GraphMailReader {
   #connection; #authorize; #fetch; #now;
   constructor({ connection, authorize, fetchImpl = globalThis.fetch, now = Date.now }) {
     this.#connection = emailConnection(connection);
+    if (this.#connection.provider !== 'microsoft-graph') fail('invalid_graph_provider');
     if (typeof authorize !== 'function' || typeof fetchImpl !== 'function' || typeof now !== 'function')
       throw new TypeError('Authorization, fetch and clock functions are required');
     this.#authorize = authorize; this.#fetch = fetchImpl; this.#now = now;
