@@ -323,6 +323,20 @@
               </div>
             </form>
             </dialog>
+            <dialog id="decision-dialog" aria-labelledby="decision-title">
+            <form id="decision-form">
+              <h2 id="decision-title">Record decision</h2>
+              <p id="decision-source" class="source-context"></p>
+              <label>Decision <textarea id="decision-statement-input" rows="2" maxlength="500" required></textarea></label>
+              <label>Note (optional) <input id="decision-note-input" maxlength="500"></label>
+              <p class="form-hint">Records a source-backed decision in the room history. A suggestion becomes policy only through this act.</p>
+              <p id="decision-status" class="status form-status" role="alert"></p>
+              <div class="form-actions">
+                <button id="close-decision" class="button ghost" type="button">Cancel</button>
+                <button class="button primary" type="submit">Save decision</button>
+              </div>
+            </form>
+            </dialog>
             <div id="work-list" class="work-list"></div>
             <div id="room-results-list" class="work-list" aria-label="Completed results" hidden></div>
           </section>
@@ -332,6 +346,10 @@
               <span><strong id="record-title">History</strong></span>
               <span id="event-count" class="count-chip"></span>
             </summary>
+            <details id="decision-section">
+              <summary class="panel-header"><span><strong>Decisions</strong></span><span id="decision-count" class="count-chip"></span></summary>
+              <ul id="decision-list" class="rb-list"></ul>
+            </details>
             <ol id="event-list" class="event-list"></ol>
             <p class="prototype-note">Pilot. Chat and members live here. Agents you add are named people in this room, not a hosted AI runtime.</p>
           </details>
