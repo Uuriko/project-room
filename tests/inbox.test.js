@@ -85,7 +85,7 @@ test("room sharing includes future members but never grants the private source o
     const key = f.store.issueAccessKey("commons", memberId);
     const visible = JSON.stringify(f.store.snapshot(key, "commons"));
     assert.ok(visible.includes(data.paragraphs[0]), "room history is available to new members");
-    for (const secret of ["4200", "maya@example.test", "Private launch", "Unshared draft secret"])
+    for (const secret of ["PRIVATE-BUDGET-SENTINEL-4200", "maya@example.test", "Private launch", "Unshared draft secret"])
       assert.equal(visible.includes(secret), false);
     assert.throws(() => f.store.inbox.read(key, "source", f.sessions.owner.sessionBinding), { status: 401 });
     if (kind === "human") {

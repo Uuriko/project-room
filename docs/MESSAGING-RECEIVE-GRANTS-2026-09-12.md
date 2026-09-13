@@ -68,10 +68,21 @@ receiver is running. A stale provider revision is reported as reauthorization
 needed. An absent grant store leaves the controls disabled.
 
 Six focused grant/control tests pass, including HTTP consent → real signed
-fixture import → HTTP stop → blocked import. No live startup supplies this store
-and no UI button is exposed yet. The next UI must say “Allow receiving for 24
-hours,” disclose continuation after sign-out and offer “Stop receiving.” Do not
-label the permission alone as “Connected” or imply permission to send/share.
+fixture import → HTTP stop → blocked import. No live startup supplies this store.
+At `cec3879`, the existing Connections UI adds an optional “Receiving” disclosure
+with “Allow for 24 hours” and “Stop receiving,” explaining continuation after
+sign-out and no send/share access. Permission state is not labeled “Connected.”
+Controls remain absent when the host does not supply the grant store. Thirteen
+focused client/browser checks pass, including narrow/desktop consent, stop,
+stale-account buttons and unconfirmed-action recovery. This is not a real-provider
+or live-startup test.
+
+UI evidence: `cec3879` focused client/browser **13/13** and packaging **2/2**
+passed. Its first full Node run had one ambiguous numeric privacy-marker failure
+in an unrelated Inbox test (isolated rerun 11/11). `bb31e10` replaced that marker
+with a distinctive private fixture value and passed **1488/1488 full Node tests**,
+zero skipped, with the UI runtime unchanged. Whole-snapshot privacy assertions
+remain; the same marker is used for future-member visibility checks as well.
 
 Exact `c5a27d9`: **1487/1487 full Node tests** and **6/6 existing messaging
 browser/package checks** passed, zero skipped. Independent review requested.
@@ -95,8 +106,8 @@ Before activation:
    it; keep ordinary Inbox actions authenticated and test cross-account abuse.
 3. Wire the existing Telegram/Twilio HTTP receivers to hold all three locks and test
    true import, restart, revoked/expired grants and account changes end to end.
-4. Connect concise consent/status/stop UI to the tested account endpoints and
-   verify stale-account/uncertain-response behavior. Provider disconnect must
-   also stop the receiving path.
+4. Extend the tested consent UI into a full browser → grant → background
+   delivery → stop journey with real application layers. Module browser tests
+   and endpoint/import tests currently prove those boundaries separately.
 5. Add private existing-file startup validation, packaging, recovery/export
    treatment and explicit operations guidance before a separately approved pilot.
