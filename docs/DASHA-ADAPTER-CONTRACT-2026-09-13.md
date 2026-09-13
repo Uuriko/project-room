@@ -38,11 +38,14 @@ insufficient. The adapter contract requires, per dispatch:
 2. Intent persisted before submission (server/dispatch-journal.mjs or an
    equivalent Dasha-side durable record).
 3. Dasha-side idempotent submit, pinned endpoint shape (the 2026-09-13
-   amendment): submit accepts an optional `Idempotency-Key` header carrying
-   the submission key; same key + identical payload returns the ORIGINAL
-   job; same key + altered payload is refused with 409. Status lookup is
-   `GET /jobs/by-key/<key>`, so a lost response resolves the ORIGINAL
-   attempt. While the outcome is unknown, nothing resubmits.
+   amendment): `POST /compute/api/v1/chat/completions` and
+   `POST /compute/api/jobs` accept an optional `Idempotency-Key` header
+   (opaque string, <=256 chars; `dasha:<workItemId>:<attempt>` fits as-is),
+   persisted with the job. Same key + identical payload returns the
+   ORIGINAL job (200, existing job id, no new execution); same key +
+   altered payload is refused (409 `idempotency_conflict`). Status by key:
+   `GET /compute/api/jobs/by-key/<key>`, so a lost response resolves the
+   ORIGINAL attempt. While the outcome is unknown, nothing resubmits.
 
 Real (paid/provider) submissions stay disabled until the pinned endpoint
 shape above ships live-verified on the hosted service. (The dasha deploy
