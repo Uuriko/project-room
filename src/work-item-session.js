@@ -93,6 +93,11 @@ export function validateAttemptEnvironment(value) {
 
 export function validateAttemptOutputs(value) {
   if (value === undefined || value === null) return null;
+  // Legacy session stops carried outputs as one free-text string; replay keeps it.
+  if (typeof value === "string") {
+    if (!value.trim() || value.length > 500) throw new Error("Outputs are 1-10 references, each a string of 1-500 characters");
+    return [value];
+  }
   if (!Array.isArray(value) || !value.length || value.length > 10
     || value.some(ref => typeof ref !== "string" || !ref.trim() || ref.length > 500))
     throw new Error("Outputs are 1-10 references, each a string of 1-500 characters");
