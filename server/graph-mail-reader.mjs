@@ -24,6 +24,10 @@ function cursorUrl(value, path) {
   try { url = new URL(value); } catch { fail('invalid_graph_cursor'); }
   if (url.origin !== ORIGIN || url.username || url.password || url.hash || url.pathname !== path)
     fail('invalid_graph_cursor');
+  // Continuation tokens only. $expand/$select/$filter would fetch extra bytes.
+  for (const key of url.searchParams.keys()) {
+    if (key !== '$deltatoken' && key !== '$skiptoken') fail('invalid_graph_cursor');
+  }
   return url.href;
 }
 async function jsonBounded(response) {
@@ -97,7 +101,9 @@ export class GraphMailReader {
     try {
       // Attachments remain explicitly not_loaded; this client does not fetch
       // attachment bytes, remote HTML assets, or URLs embedded in messages.
-      return normalizeGraphEmail(this.#connection, value, { idType: 'immutable' });
+      const envelope = normalizeGraphEmail(this.#connection, value, { idType: 'immutable' });
+      if (envelope.body.format !== 'text') fail('graph_message_unsupported');
+      return envelope;
     } catch { fail('graph_message_unsupported'); }
   }
   async readMessage(messageId) {

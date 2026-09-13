@@ -64,6 +64,18 @@ test('folder page hydrates changes and preserves folder removals without claimin
   assert.equal(page.changes[1].action, 'absent-from-folder');
   assert.equal(page.cursor, cursor); assert.match(page.batchVersion, /^[a-f0-9]{64}$/);
 });
+test('cursor cannot expand attachments or rewrite select on the same path', async () => {
+  const expand = cursor.replace('$deltatoken=opaque', '$expand=attachments&$select=body');
+  const f = fixture([]);
+  await assert.rejects(f.reader.readFolderPage(folder, expand), { code: 'invalid_graph_cursor' });
+  assert.equal(f.calls.length, 0);
+});
+test('HTML bodies are rejected even if Graph ignores Prefer text', async () => {
+  const source = emailContractFixture();
+  const html = { ...source.message, body: { contentType: 'html', content: '<img src=x onerror=alert(1)>' } };
+  const f = fixture([identity, html]);
+  await assert.rejects(f.reader.readMessage(source.message.id), { code: 'graph_message_unsupported' });
+});
 test('cursor cannot redirect a bearer token to a different origin, resource or mailbox', async () => {
   for (const bad of ['https://evil.test/a', cursor.replace('/me/', '/users/other/'),
     cursor.replace('AQMkFixtureInbox%3D', 'other'), cursor + '#fragment',
