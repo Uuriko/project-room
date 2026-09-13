@@ -62,11 +62,17 @@ export class AccountClient {
     }
   }
   async login(accountAccessKey) {
+    return this.loginExchange('/api/account-session', { accountAccessKey });
+  }
+  async loginProvider(token) {
+    return this.loginExchange('/api/provider-session', { token });
+  }
+  async loginExchange(path, credentials) {
     const session = this.currentSession("signing in");
     const generation = ++this.generation;
     try {
-      const loggedIn = await this.request("/api/account-session", { method: "POST", session,
-        data: { accountAccessKey, expectedSessionRevision: session.sessionRevision } });
+      const loggedIn = await this.request(path, { method: "POST", session,
+        data: { ...credentials, expectedSessionRevision: session.sessionRevision } });
       if (!this.owns(generation, session)) return null;
       if (!loggedIn?.authenticated || !loggedIn.account || loggedIn.sessionRevision !== session.sessionRevision + 1) {
         this.invalidate(generation, session);
@@ -91,6 +97,31 @@ export class AccountClient {
     if (!this.owns(generation, session)) return null;
     if (!value?.authenticated || !sameAccountSession(value, session)) { this.invalidate(generation, session); return false; }
     return true; // Keep object identity and generation: Room and Inbox own these.
+  }
+  async refreshProvider(token) {
+    const session = this.currentSession('renewing sign-in', { authenticated: true }), generation = this.generation;
+    try {
+      const refreshed = await this.request('/api/provider-session/refresh', { method: 'POST', session, data: { token } });
+      if (!this.owns(generation, session)) return null;
+      if (!refreshed?.authenticated || !sameAccountSession(refreshed, session)
+        || refreshed.csrf !== session.csrf || !Number.isSafeInteger(refreshed.expiresAt)
+        || !Number.isSafeInteger(refreshed.authenticatedUntil)) {
+        this.invalidate(generation, session);
+        throw accountSessionError('Sign-in renewal could not be confirmed');
+      }
+      // Existing Room/Inbox owners retain this exact object. A late response can
+      // neither switch identity nor move its expiry backward.
+      session.expiresAt = Math.max(session.expiresAt, refreshed.expiresAt);
+      session.authenticatedUntil = Math.max(session.authenticatedUntil, refreshed.authenticatedUntil);
+      return session;
+    } catch (error) {
+      if (!this.owns(generation, session)) return null;
+      // Renewal never switches browser identity. A lost response can therefore
+      // preserve drafts, but confirmed loss of access must invalidate them.
+      if ([401, 403].includes(error.status) || ['session_binding_changed', 'stale_session_revision'].includes(error.code))
+        this.invalidate(generation, session);
+      throw error;
+    }
   }
   async rooms(after = null) {
     const session = this.currentSession("listing rooms", { authenticated: true }), generation = this.generation;

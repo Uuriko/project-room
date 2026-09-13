@@ -72,6 +72,15 @@ Full regression after renewal:1296 tests pass, zero failures/skips (202860ms).
 Grok independently reports ad18f33 private-room/runtime checks5/5; browser checks
 were not repeated by Grok. The live version endpoint still serves a5f2dca.
 
+The browser AccountClient now exposes provider sign-in and renewal. Renewal keeps
+the same account object/generation and monotonically updates expiry; late results
+cannot restore a signed-out/replaced account. Transport failures preserve drafts,
+while confirmed authority loss invalidates ownership.49 focused client, provider,
+attachment, reconnect and cookie checks pass. Grok independently reviewed the
+ecafc8a backend checkpoint:13/13. SDK loading, the visible Join control and its
+renewal scheduler are not yet connected; these methods alone are not usable login.
+Full regression after browser-client changes:1302 pass, zero failed/skipped (55262ms).
+
 Release copy retained at /Users/johnpotter/src/project-room-release-20260912-c79dfa5.
 It contains generated stamp/assets from the successful dry-run; don't stamp again
 without a fresh clean candidate. Integration .wrangler cache was not removed.
