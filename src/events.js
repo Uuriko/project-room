@@ -315,9 +315,11 @@ function changeMemberAccess(state, incoming) {
 // target. Bounded length, no HTML — rendered as text.
 function updateMemberStatus(state, incoming) {
   requireFields(incoming.data, ["message"]);
+  requireMember(state, incoming.actorId);
   const targetId = incoming.data.memberId ?? incoming.actorId;
   const member = Object.hasOwn(state.members, targetId) && state.members[targetId];
   if (!member) throw new Error("Unknown member");
+  if (member.active === false) throw new Error("Member access revoked");
   if (incoming.actorId !== member.id && incoming.actorId !== state.room.ownerId) {
     throw new Error("Members may only set their own status message");
   }
