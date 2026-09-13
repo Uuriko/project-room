@@ -618,7 +618,7 @@ for (const mobile of [false, true]) test(`email reader ${mobile ? "mobile" : "de
   const f = await setup(t, mobile, true), p = f.page, mail = seedEmail(f), before = f.store.room("commons");
   mail.raw.message.body.content = '<img src="https://example.invalid/tracker">\n\nCould we make this simpler?';
   const id = mail.importMessage(); await f.inbox(); await f.pick(id);
-  assert.equal(await p.locator("#inbox-source-label").textContent(), "Sample email · only you");
+  assert.equal(await p.locator("#inbox-source-label").textContent(), "Email · only you");
   assert.equal(await p.locator("#inbox-source-body").textContent(), mail.raw.message.body.content);
   assert.equal(await p.locator("#inbox-source-body img").count(), 0);
   assert.equal(await p.locator("#inbox-ask").isVisible(), true);

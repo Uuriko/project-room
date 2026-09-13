@@ -10,6 +10,7 @@ import { chromium } from "playwright";
 import { createInboxSandbox } from "./inbox-sandbox.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
+import { ensureSignIn } from './browser-signin-helper.mjs';
 
 export async function createInboxCollaborationJourney({ mobile = false } = {}) {
   const sample = await createInboxSandbox(), { store, provider } = sample;
@@ -52,7 +53,7 @@ export async function createInboxCollaborationJourney({ mobile = false } = {}) {
       });
       const p = await context.newPage(); p.setDefaultTimeout(9000);
       p.on("pageerror", error => errors.push(error.message)); p.on("dialog", d => d.accept());
-      await p.goto(url); await p.locator("#access-key").fill(key); await p.locator('#auth-form button[type="submit"]').click();
+      await p.goto(url); await ensureSignIn(p); await p.locator("#access-key").fill(key); await p.locator('#auth-form button[type="submit"]').click();
       return p;
     }
     const capture = async (name, p = page) => {

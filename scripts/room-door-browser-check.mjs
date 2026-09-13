@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { chromium } from "playwright";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { ROOM_ORIGIN, COMPUTE_DOOR } from "../deploy/agent-discovery.mjs";
+import { ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
 
 for (const touch of [false, true]) {
   test(`public /room door ${touch ? "mobile" : "desktop"}: Join + Connect, not the llms packet`, { timeout: 60000 }, async t => {
@@ -31,24 +31,17 @@ for (const touch of [false, true]) {
     await page.goto(`${origin}/room`);
     assert.equal(await page.title(), "Project Room");
     assert.match(await page.locator("h1").innerText(), /Project Room/);
-    assert.match(await page.locator(".lead").innerText(), /Work Items, next actions, receipts/);
-    const open = page.getByRole("link", { name: "Open", exact: true });
+    assert.equal(await page.locator(".lead").innerText(), 'People and agents. One conversation.');
     const joinLink = page.getByRole("link", { name: "Join", exact: true });
-    const connect = page.getByRole("link", { name: "Connect an agent", exact: true });
-    assert.equal(await open.getAttribute("href"), ROOM_ORIGIN);
-    assert.equal(await joinLink.getAttribute("href"), `${ROOM_ORIGIN}/#join/`);
-    assert.equal(await connect.getAttribute("href"), "#connect");
+    const connect = page.locator('summary', {hasText:'Connect an agent'});
+    assert.equal(await joinLink.getAttribute("href"), ROOM_ORIGIN);
+    const guide=page.getByRole('link',{name:'Connection guide',exact:true});
+    assert.equal(await guide.isVisible(),false);
     await connect.click();
-    await page.locator("#connect").waitFor();
-    assert.match(await page.locator("#connect").innerText(), /Agent handles stay loud/);
-    assert.match(await page.locator("#connect").innerText(), /Done lands as a receipt/);
-    assert.equal(await page.locator("#connect a", { hasText: "Packet" }).getAttribute("href"), "/room/llms.txt");
-    assert.equal(await page.locator("#connect a", { hasText: "Kits" }).getAttribute("href"), "/room/kits");
-    assert.equal(await page.locator("#connect a", { hasText: "Claude Code" }).getAttribute("href"), "/room/llms.txt");
-    assert.equal(await page.locator("#connect a", { hasText: "Codex" }).getAttribute("href"), "/room/llms.txt");
-    assert.equal(await page.locator("#connect a", { hasText: "OpenCode" }).getAttribute("href"), "/room/llms.txt");
-    assert.equal(await page.locator("#connect a", { hasText: "Cursor" }).getAttribute("href"), "/room/llms.txt");
-    assert.equal(await page.locator(".compute a").getAttribute("href"), COMPUTE_DOOR);
+    assert.equal(await guide.isVisible(),true);
+    assert.equal(await guide.getAttribute('href'),'/room/llms.txt');
+    await page.locator('summary',{hasText:'Have an invite?'}).click();
+    assert.equal(await page.getByText('Open your invite link to join that room.',{exact:true}).isVisible(),true);
     assert.equal(await page.locator("script").count(), 0);
     assert.doesNotMatch(await page.content(), /# Project Room|Bearer |ROOM_AGENT_TOKEN/i);
     const workspace = await page.request.get(`${origin}/`);

@@ -168,7 +168,7 @@ test("human help expiry retires its label without new events and guest cannot pu
   assert.equal(f.store.room("commons").sequence, sequence); assert.equal((await f.list()).length, 0);
   f.page.on("dialog", dialog => dialog.accept());
   await f.page.getByRole("button", { name: "Sign out", exact: true }).click();
-  await f.page.locator("#access-key").fill(f.keys.guest);
+  await ensureSignIn(f.page); await f.page.locator("#access-key").fill(f.keys.guest);
   await f.page.getByRole("button", { name: "Continue", exact: true }).click();
   await f.page.locator("#main").waitFor({ state: "visible" });
   assert.equal(await f.card.locator("[data-action=help]").count(), 0);
