@@ -63,6 +63,18 @@ export class MessagingReceiveGrants {
         state:r.state==='revoked'?'revoked':r.auth_epoch!==auth.account.authEpoch?'reauthorize':r.expires_at<=this.#store.now()?'expired':'active'};
     });
   }
+  // Host lookup only; the returned descriptor is NOT a lease. The importer must
+  // acquire withGrant again and pin the provider registry revision as usual.
+  currentBinding(scope){
+    if(!exact(scope,['accountId','connectionId','provider','connectionRevision'])||!id(scope.accountId)||!id(scope.connectionId)
+      ||!providers.includes(scope.provider)||!revision(scope.connectionRevision)||scope.connectionRevision<1)fail();
+    return this.#transaction(()=>{
+      const r=this.#row(scope.accountId,scope.connectionId),account=this.#store.account(scope.accountId);
+      if(!r||r.state!=='active'||!account.active||r.auth_epoch!==account.authEpoch||r.provider!==scope.provider
+        ||r.connection_revision!==scope.connectionRevision||r.expires_at<=this.#store.now())fail();
+      return Object.freeze({...scope,revision:r.revision});
+    });
+  }
   issue(session,request){
     if(!exact(request,['connectionId','provider','connectionRevision','expectedRevision','expiresAt'])
       ||!id(request.connectionId)||!providers.includes(request.provider)||!revision(request.connectionRevision)||request.connectionRevision<1
