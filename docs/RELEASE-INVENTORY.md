@@ -20,6 +20,12 @@ checkpoint `2bfc108` (messaging client hardening on `07c7d80` startup); failure-
 checkpoint `5ea28ec`. These are local
 checkpoints, not claims about main, CI, a deployed website or enterprise readiness.
 
+`17d9e31` additionally introduces an isolated receive-only grant component, not
+wired or packaged for deployment. Full Node **1484/1484** passed. Expiry,
+revocation, account-epoch and connection-revision fences are tested; actual
+background Inbox import, consent UI and startup remain unfinished. See
+[receive-grant boundary](MESSAGING-RECEIVE-GRANTS-2026-09-12.md).
+
 | Current capability | Evidence | Remaining boundary |
 |---|---|---|
 | Gmail read-only private Inbox | Local pilot imported 25 real messages | No new live verification in this inventory pass; not email sending |

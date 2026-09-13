@@ -1,6 +1,7 @@
 # Messaging: next delivery handoff
 
-Local checkpoint: runtime `07c7d80`, failure tests `5ea28ec`. This document does
+Local checkpoint: client `2bfc108`, isolated grant layer `17d9e31`; existing
+startup `07c7d80`, failure tests `5ea28ec`. This document does
 not authorize provider setup, spending, publishing, deployment or shared-tree edits.
 Check the bus and board before claiming files. Preserve unrelated dirty files.
 
@@ -18,8 +19,11 @@ was `bbed875` (317/317); later UI has focused browser checks. See
 
 ## Work in order
 
-1. **Receive-only background grant.** Specify account, connection, allowed chats
-   or receiving address, expiry and revoke behavior. Do not manufacture a human
+1. **Receive-only background grant.** An isolated durable implementation exists
+   at `17d9e31`; review and integrate it rather than starting another authority
+   store. See [boundaries and tests](MESSAGING-RECEIVE-GRANTS-2026-09-12.md).
+   It pins account, connection revision, provider, expiry and revocation; the
+   provider registry must additionally bind chats/receiving address. Do not manufacture a human
    login session for a daemon. Receiving must not imply sending, room sharing,
    agent access or permission to fetch arbitrary conversation history. Check the
    existing Claude research request before duplicating it.

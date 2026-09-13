@@ -4,6 +4,9 @@
 wired, packaged for deployment, or enabled for any live account**. It does not
 replace session authorization in the current importers yet.
 
+Checkpoint `17d9e31`: four focused grant tests and **1484/1484 full Node tests**
+passed, zero skipped. Independent review requested; no new full browser run.
+
 An authenticated account session can issue a grant for one connection/provider,
 pinned to the connection's exact revision. The host must first verify that
 connection belongs to the account through its provider registry. The connection
