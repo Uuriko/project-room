@@ -23,6 +23,8 @@ test('ROOM_PRODUCTION=1 requires Clerk, operator idp, and ship:false', () => {
   assert.throws(() => assertProductionReady({ ROOM_PRODUCTION: '1', ...clerk }, origin, { ship: false }));
   assert.throws(() => assertProductionReady({ ROOM_PRODUCTION: '1', ...clerk, ROOM_OPERATOR_ACCOUNT_ID: 'email-john' }, origin, { ship: false }));
   assert.throws(() => assertProductionReady({ ROOM_PRODUCTION: '1', ...clerk, ROOM_OPERATOR_ACCOUNT_ID: operator }, origin, { ship: true }));
+  const testKey = { ...clerk, ROOM_CLERK_PUBLISHABLE_KEY: 'pk_test_' + Buffer.from('clerk.example.com$').toString('base64') };
+  assert.throws(() => assertProductionReady({ ROOM_PRODUCTION: '1', ...testKey, ROOM_OPERATOR_ACCOUNT_ID: operator }, origin, { ship: false }));
   const g = assertProductionReady({ ROOM_PRODUCTION: '1', ...clerk, ROOM_OPERATOR_ACCOUNT_ID: operator }, origin, { ship: false });
   assert.equal(g.production, true);
   assert.equal(g.operatorAccountId, operator);

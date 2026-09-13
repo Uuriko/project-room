@@ -47,4 +47,6 @@ test('private inbox dump restores grants; room export omits them; HTTP import st
     body: JSON.stringify({ events: [] })
   });
   assert.equal(res.status, 409);
+  const body = await res.json();
+  assert.equal(body.error?.code || body.code, 'recovery_requires_maintenance');
 });
