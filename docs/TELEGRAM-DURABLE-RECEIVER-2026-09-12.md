@@ -107,3 +107,22 @@ Remaining: authenticated API/UI connection controls, secure runtime file bootstr
 bot verification at configuration, scheduling, reconnect/queued-data disposition,
 and independent acceptance. Registry calls are host-only APIs, not authorization
 for arbitrary callers. Sharing one bot across multiple accounts is not supported.
+
+## Authenticated connection actions
+
+Added an optional `telegramConnections` HTTP service with account-session-only
+GET status and POST sync/disconnect. Mutations require same-origin protection,
+CSRF, session binding, an exact connection ID and expected revision. Configuration
+and tokens are not accepted from HTTP. Status returns only connection ID, state
+and revision. Provider/internal errors are replaced with generic messages; a final
+session check prevents an obsolete session receiving a successful sync response.
+
+The service wires the registry lock, authorized receiver, private queue and real
+Inbox transaction. Twelve focused HTTP/runtime tests pass, including Telegram's
+status/receive/disconnect flow against disposable stores, request-boundary attacks,
+session change before response, and the four existing Gmail HTTP tests.
+
+The main server entry point still does not configure this optional service. No
+live receiver activation, file bootstrap, scheduling or browser controls happened
+in this checkpoint. Next is the compact Inbox UI and secure host bootstrap with
+explicit queue/registry file ownership, followed by browser/runtime acceptance.

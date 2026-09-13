@@ -63,7 +63,7 @@ const rateHash = value => createHash("sha256").update(String(value)).digest("hex
 
 export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = 1000, trustedLocalProxy = false,
   loadAsset = path => readFile(new URL(path, assetRoot)), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
-  resolveRequestSignal = () => null, syntheticInboxTransport = null, cookieNamespace = "", providerAuth = null, gmailConnections = null,
+  resolveRequestSignal = () => null, syntheticInboxTransport = null, cookieNamespace = "", providerAuth = null, gmailConnections = null, telegramConnections = null,
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot" }) {
   if (trustedLocalProxy && !origin?.startsWith("https://")) throw new Error("The deployment proxy requires a fixed HTTPS origin");
   if (typeof cookieNamespace !== "string" || !/^[A-Za-z0-9_-]{0,64}$/.test(cookieNamespace))
@@ -333,6 +333,25 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const token = cookie(req, accountCookieName), binding = accountBinding(req);
         const auth = store.authenticateAccountSession(token, null, binding);
         const inboxViewer = { accountId: auth.account.id, authEpoch: auth.account.authEpoch, sessionBinding: auth.sessionBinding, sessionRevision: auth.sessionRevision };
+        if (url.pathname === '/api/inbox/connections/telegram' && req.method === 'GET') {
+          try { return json(res,200,{contractVersion:1,viewer:inboxViewer,enabled:Boolean(telegramConnections),connections:telegramConnections?.list({token,binding})??[]}); }
+          catch { reject(409,'telegram_connection_incomplete','Telegram connection unavailable.'); }
+        }
+        const telegramAction = /^\/api\/inbox\/connections\/telegram\/(sync|disconnect)$/.exec(url.pathname);
+        if (telegramAction) {
+          if (!telegramConnections) reject(503,'telegram_not_configured','Telegram is not configured.');
+          if (req.method !== 'POST') reject(405,'method_not_allowed','Use POST.');
+          protectWrite(req,auth,false); rate(`telegram:${auth.account.id}`,20);
+          const data=await body(req);
+          if (!exact(data,['connectionId','expectedRevision']) || typeof data.connectionId!=='string'
+            || !/^[A-Za-z0-9_-]{1,128}$/.test(data.connectionId) || !Number.isSafeInteger(data.expectedRevision) || data.expectedRevision<1)
+            reject(422,'telegram_request_invalid','Check the Telegram connection request.');
+          try {
+            const result=await telegramConnections[telegramAction[1]]({token,binding},data.connectionId,data.expectedRevision);
+            store.authenticateAccountSession(token,null,binding);
+            return json(res,200,{...result,contractVersion:1,viewer:inboxViewer});
+          } catch { reject(409,'telegram_connection_incomplete','Telegram action could not finish. Refresh and try again.'); }
+        }
         if (url.pathname === '/api/inbox/connections/gmail' && req.method === 'GET')
           return json(res, 200, { contractVersion: 1, viewer: inboxViewer, enabled: Boolean(gmailConnections), connections: gmailConnections?.list({ token, binding }) ?? [] });
         const gmailAction = /^\/api\/inbox\/connections\/gmail\/(start|complete|sync|disconnect)$/.exec(url.pathname);
