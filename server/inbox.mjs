@@ -11,6 +11,7 @@ import { buildUpdateInspection, buildUpdateReview, replyAttemptWithObservation }
 
 const transportAuthority = Symbol("private inbox transport");
 const importAuthority = Symbol("private email importer");
+const messageAuthority = Symbol("private message importer");
 const replyAuthority = Symbol("private fixture reply driver");
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -68,6 +69,7 @@ function validate(request) {
   const common = ["requestId", "action", "sourceId"], fields = {
     "source.save": [...common, "expectedRevision", "data"],
     "source.import": [...common, "expectedRevision", "data"],
+    "message.import": [...common, "expectedRevision", "data"],
     "draft.save": [...common, "expectedRevision", "sourceRevision", "body"],
     "draft.adopt": [...common, "expectedRevision", "sourceRevision", "roomId", "workItemId", "shareRequestId", "resultVersion"],
     "source.share": [...common, "sourceRevision", "roomId", "audienceVersion", "paragraphs"],
@@ -76,7 +78,19 @@ function validate(request) {
   if (!fields || !exact(request, fields) || !validId(request.requestId) || !validId(request.sourceId))
     fail(422, "invalid_inbox_request", "Supply an exact inbox operation and stable request ID.");
   if (!isShare(request) && !revision(request.expectedRevision)) fail(422, "invalid_inbox_request", "Current revision required.");
-  if (!["source.save", "source.import"].includes(request.action) && (!revision(request.sourceRevision) || !request.sourceRevision)) fail(422, "invalid_inbox_request", "Source revision required.");
+  if (!["source.save", "source.import", "message.import"].includes(request.action) && (!revision(request.sourceRevision) || !request.sourceRevision)) fail(422, "invalid_inbox_request", "Source revision required.");
+  if (request.action === 'message.import') {
+    const d = request.data;
+    if (!exact(d, ['adapter', 'provider', 'accountId', 'connectionId', 'conversationId', 'providerMessageId', 'providerRevision', 'sender', 'recipient', 'subject', 'paragraphs'])
+      || d.adapter !== 'message' || d.provider !== 'telegram' || ![d.accountId, d.connectionId].every(validId)
+      || ![d.conversationId, d.providerMessageId, d.providerRevision].every(v => typeof v === 'string' && /^-?[0-9]{1,16}$/.test(v) && Number.isSafeInteger(Number(v)))
+      || Number(d.conversationId) === 0 || Number(d.providerMessageId) <= 0 || Number(d.providerRevision) < 0
+      || !['sender', 'recipient', 'subject'].every(k => text(d[k], 240))
+      || !Array.isArray(d.paragraphs) || d.paragraphs.length !== 1 || !text(d.paragraphs[0], 4096))
+      fail(422, 'invalid_message_source', 'Supply a bounded messaging observation.');
+    const identity = 'tg-' + createHash('sha256').update(JSON.stringify([d.accountId, d.connectionId, Number(d.conversationId), Number(d.providerMessageId)])).digest('hex');
+    if (request.sourceId !== identity) fail(422, 'invalid_message_source', 'Message identity mismatch.');
+  }
   if (request.action === "source.import") {
     if (!exact(request.data, ["adapter", "envelope"]) || request.data.adapter !== "email") fail(422, "invalid_inbox_source", "Supply a qualified email observation.");
     let envelope;
@@ -549,9 +563,15 @@ export class Inbox {
     if (!this.db.isTransaction || request?.action !== "source.import") fail(403, "email_importer_required", "Use the transactional email importer.");
     return this.apply(token, request, binding, importAuthority);
   }
+  importMessage(token, request, binding) {
+    if (!this.db.isTransaction || request?.action !== 'message.import') fail(403, 'message_importer_required', 'Use the transactional messaging importer.');
+    return this.apply(token, request, binding, messageAuthority);
+  }
   apply(token, request, binding, authority = null) {
     return this.store.transaction(() => {
       const auth = this.auth(token, binding); validate(request);
+      if (request.action === 'message.import' && authority !== messageAuthority) fail(403, 'message_importer_required', 'Only the configured importer can record messages.');
+      if (request.action === 'message.import' && request.data.accountId !== auth.account.id) fail(403, 'message_account_mismatch', 'Message belongs to another account.');
       if (isReplyAttempt(request) && authority !== replyAuthority) fail(403, "reply_driver_required", "Use the configured reply driver.");
       if (internalSend(request) && authority !== transportAuthority) fail(403, "inbox_transport_required", "Only the configured transport can record this outcome.");
       if (request.action === "source.import" && authority !== importAuthority) fail(403, "email_importer_required", "Only the configured importer can record this source.");
@@ -607,10 +627,12 @@ export class Inbox {
         receipt.send = transitionSend(this.outbox(accountId), request, {
           preview: ["send.reserve", "send.dispatch"].includes(action) ? this.preview(accountId, auth.account.authEpoch, sourceId) : null,
           authEpoch: auth.account.authEpoch, at: now });
-      } else if (["source.save", "source.import"].includes(action)) {
+      } else if (["source.save", "source.import", "message.import"].includes(action)) {
         const previous = this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? AND id=?").get(accountId, sourceId);
         if (previous && this.version(accountId, sourceId, previous.revision).adapter !== request.data.adapter)
           fail(409, "inbox_source_origin_changed", "A source cannot change its channel origin.");
+        if (previous && action === 'message.import' && Number(request.data.providerRevision) <= Number(this.version(accountId, sourceId, previous.revision).providerRevision))
+          fail(409, 'stale_message_source', 'Message update is not newer.');
         if ((previous?.revision ?? 0) !== request.expectedRevision) fail(409, "stale_inbox_source", "Source changed. Review the current version.");
         if ((previous?.revision ?? 0) >= inboxLimits.versions || !previous && this.db.prepare("SELECT count(*) n FROM private_inbox_sources WHERE account_id=?").get(accountId).n >= inboxLimits.sources)
           fail(409, "inbox_limit", "Private inbox pilot capacity reached.");
@@ -726,9 +748,13 @@ export class Inbox {
           ? sendPreview(row.account_id, row.auth_epoch, prior, this.version(row.account_id, request.sourceId, prior.revision), drafts.get(key)) : null;
         expected.send = transitionSend(sends, request, { preview, authEpoch: row.auth_epoch, at: row.at });
         sends.set(expected.send.id, expected.send);
-      } else if (["source.save", "source.import"].includes(request.action)) {
+      } else if (["source.save", "source.import", "message.import"].includes(request.action)) {
         require(request.expectedRevision === (prior?.revision ?? 0));
         if (request.action === "source.import") require(request.data.envelope.connection.accountId === row.account_id);
+        if (request.action === 'message.import') {
+          require(request.data.accountId === row.account_id);
+          if (prior) require(Number(request.data.providerRevision) > Number(this.version(row.account_id, request.sourceId, prior.revision).providerRevision));
+        }
         if (prior) require(this.version(row.account_id, request.sourceId, prior.revision).adapter === request.data.adapter);
         expected.revision = request.expectedRevision + 1;
         require(same(this.version(row.account_id, request.sourceId, expected.revision), request.data));

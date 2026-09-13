@@ -42,6 +42,9 @@ function validReplyTarget(a, update = false) {
 }
 function validSource(source, sourceId, accountId) {
   if (source?.id !== sourceId || !revision(source.revision) || !source.revision) return false;
+  if (source.adapter === 'message') return source.provider === 'telegram' && source.accountId === accountId && id(source.connectionId)
+    && ['sender', 'recipient', 'subject'].every(k => boundedText(source[k], 240))
+    && Array.isArray(source.paragraphs) && source.paragraphs.length === 1 && boundedText(source.paragraphs[0], 4096);
   if (source.adapter === "synthetic") return ["sender", "recipient", "subject"].every(k => boundedText(source[k], 240))
     && Array.isArray(source.paragraphs) && source.paragraphs.length <= 20 && source.paragraphs.every(p => boundedText(p, 4000));
   const e = source.email, c = source.capabilities;

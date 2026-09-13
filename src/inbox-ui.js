@@ -257,8 +257,8 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     $("#inbox-reader").hidden = false;
     text("#inbox-subject", d.source.subject || "(No subject)");
     const email = d.source.email;
-    text("#inbox-source-label", email ? "Email · only you" : "Sample message · only you");
-    $("#inbox-ask").hidden = Boolean(email) && !d.source.capabilities.share && !pendingShare();
+    text("#inbox-source-label", email ? "Email · only you" : d.source.adapter === 'message' ? 'Telegram · only you' : "Sample message · only you");
+    $("#inbox-ask").hidden = d.source.adapter === 'message' || Boolean(email) && !d.source.capabilities.share && !pendingShare();
     $("#inbox-email-details").hidden = !email;
     const metadata = email ? ["Mailbox: " + d.source.recipient,
       ...["to", "cc", "bcc"].filter(k => email[k].length).map(k => (k === "to" ? "To" : k.toUpperCase()) + ": " + email[k].join(", ")),

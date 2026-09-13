@@ -65,7 +65,19 @@ Slack, SMS, WhatsApp or Signal account was connected in this checkpoint.
 Telegram's developer login was opened while considering TDLib; bot-first setup uses
 BotFather instead and does not need the TDLib application credentials yet.
 John completed that developer login. The Project Room / ProjectRoomInbox desktop-app
-form is filled but not submitted; developer credential creation awaits confirmation.
+application was then created after his approval; its configuration page was verified.
+The credentials remain on Telegram's page, not in this repository or the bus.
+Telegram Web has a separate QR/phone login, now open for John to complete to reach BotFather.
+
+Storage checkpoint: trusted `message.import` now records Telegram observations as
+real messaging sources, never synthetic email. Public commands cannot call this importer;
+account identity, message identity, source revision and provider revision are checked.
+Duplicate receipts are stable, drafts are retained across edits, and recovery validates
+the new journal operation. A mocked Telegram-to-real-Inbox test passes, including
+cross-account rejection and unchanged room events. Client reading supports these sources.
+Message sharing and sending remain disabled. This is not a live Telegram connection:
+bot credentials, selected-chat setup, transactional polling checkpoints, expiration policy,
+runtime/HTTP integration and a real receive test still remain.
 
 ## Next implementation gates
 
