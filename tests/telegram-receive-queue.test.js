@@ -13,6 +13,35 @@ import { receiveTelegramTick } from '../server/telegram-receive-tick.mjs';
 const options={key:Buffer.alloc(32,7),accountId:'account',connectionId:'telegram-one',authEpoch:0};
 const page=(id,text='Private message')=>({nextOffset:id+1,observations:[{provider:'telegram',accountId:'account',connectionId:'telegram-one',providerRevision:String(id),text}],skipped:[]});
 
+test('lease excludes another database handle and fences expired owners', t => {
+  const dir=mkdtempSync(join(tmpdir(),'tg-lease-')),path=join(dir,'queue.sqlite');let now=1000;
+  const a=new DatabaseSync(path),b=new DatabaseSync(path);t.after(()=>{a.close();b.close();rmSync(dir,{recursive:true,force:true});});
+  const q1=new TelegramReceiveQueue({db:a,...options,now:()=>now}),q2=new TelegramReceiveQueue({db:b,...options,now:()=>now});
+  const first=q1.acquireLease();assert.throws(()=>q2.acquireLease(),/busy/);
+  now+=60001;const next=q2.acquireLease();assert.ok(next.generation>first.generation);
+  assert.throws(()=>q1.stage(0,page(1),first),/lease_lost/);assert.equal(q1.nextOffset(),0);
+  q1.releaseLease(first);q2.assertLease(next);q2.stage(0,page(1),next);q2.releaseLease(next);
+});
+
+test('pruning keeps undelivered work and frees delivered staging capacity', t => {
+  const db=new DatabaseSync(':memory:');t.after(()=>db.close());const q=new TelegramReceiveQueue({db,...options,maxPages:2});
+  q.stage(0,page(1));q.stage(2,page(2));const [first]=q.pending();
+  assert.equal(q.pruneDelivered(0),0);q.markDelivered(first.startOffset,first.fingerprint);
+  assert.equal(q.pruneDelivered(0),1);assert.equal(q.pending().length,1);assert.equal(q.nextOffset(),3);
+  q.stage(3,page(3));assert.equal(q.pending().length,2);
+});
+
+test('lease loss during fetch prevents page commit and releases only own lease', async t => {
+  const db=new DatabaseSync(':memory:');t.after(()=>db.close());let now=1000;
+  const queue=new TelegramReceiveQueue({db,...options,now:()=>now});
+  const grant={active:true,accountId:'account',connectionId:'telegram-one',authEpoch:0,revision:1,token:'123456:abcdefghijklmnopqrstuvwxyz',chatIds:[44]};
+  let replacement;
+  await assert.rejects(receiveTelegramTick({queue,authorize:()=>grant,commitPage:()=>{throw new Error('must not import');},fetchImpl:async()=>{
+    now+=60001;replacement=queue.acquireLease();return Response.json({ok:true,result:[]});
+  }}));
+  assert.equal(queue.nextOffset(),0);queue.assertLease(replacement);queue.releaseLease(replacement);
+});
+
 test('receive tick replays failed import before advancing provider request', async t => {
   const db=new DatabaseSync(':memory:');t.after(()=>db.close());const queue=new TelegramReceiveQueue({db,...options});
   const grant={active:true,accountId:'account',connectionId:'telegram-one',authEpoch:0,revision:1,token:'123456:abcdefghijklmnopqrstuvwxyz',chatIds:[44]};
