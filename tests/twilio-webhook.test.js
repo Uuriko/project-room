@@ -8,6 +8,19 @@ import { createAcceptanceFixture } from '../scripts/acceptance-fixture.mjs';
 import { TwilioConnectionRegistry } from '../server/twilio-connection-registry.mjs';
 import { createTwilioWebhookServer } from '../server/twilio-webhook.mjs';
 
+test('webhook routes require exactly one explicit authority mode',()=>{
+  const background={registry:{withGrant(){}},grants:{withGrant(){}},getBinding(){}};
+  for(const route of [null,{path:'/webhooks/twilio/one'},
+    {path:'/webhooks/twilio/one',background:null},
+    {path:'/webhooks/twilio/one',background:{...background,getBinding:null}},
+    {path:'/webhooks/twilio/one',background,getSession(){}},
+    {path:'/webhooks/twilio/one',background,withConnection(){}},
+    {path:'/webhooks/twilio/one?extra=1',background}])
+    assert.throws(()=>createTwilioWebhookServer({store:{},routes:[route]}),/invalid_twilio_webhook_config/);
+  const server=createTwilioWebhookServer({store:{},routes:[{path:'/webhooks/twilio/one',background}]});
+  assert.equal(server.listening,false);server.close();
+});
+
 async function fixture(t,limit=60) {
   const f=createAcceptanceFixture(),db=new DatabaseSync(':memory:'),registry=new TwilioConnectionRegistry({db,key:Buffer.alloc(32,7)});
   const account=f.store.accountForMember('commons','owner'),slot=f.store.createAccountSessionSlot();

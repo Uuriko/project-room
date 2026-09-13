@@ -1,18 +1,23 @@
 import { createServer } from 'node:http';
-import { importTwilioMessage } from './twilio-inbox-import.mjs';
+import { importTwilioMessage, importTwilioBackgroundMessage } from './twilio-inbox-import.mjs';
 
 // Dedicated host factory, NOT enabled by server.mjs. TLS/host validation belongs
 // to the deployment proxy. Signatures use the registry URL, never request Host.
 // Route bindings and account sessions are trusted host configuration, not body
-// fields. A current session is required: no implicit background authority.
+// fields. Exactly one explicit mode: current session or background receive grant.
 export function createTwilioWebhookServer({store, routes, now=Date.now, limit=60}) {
   if(!Array.isArray(routes) || !routes.length || routes.length>100 || !Number.isInteger(limit) || limit<1 || limit>600)
     throw new Error('invalid_twilio_webhook_config');
   const bindings=new Map();
   for(const route of routes) {
-    if(!/^\/webhooks\/twilio\/[A-Za-z0-9_-]{1,128}$/.test(route.path) || bindings.has(route.path)
-      || typeof route.withConnection!=='function' || typeof route.getSession!=='function') throw new Error('invalid_twilio_webhook_config');
-    bindings.set(route.path,{...route,window:0,count:0});
+    if(!route||!/^\/webhooks\/twilio\/[A-Za-z0-9_-]{1,128}$/.test(route.path) || bindings.has(route.path))throw new Error('invalid_twilio_webhook_config');
+    const background=route.background;
+    if(background!==undefined){
+      if(!background||typeof background.getBinding!=='function'||typeof background.registry?.withGrant!=='function'
+        ||typeof background.grants?.withGrant!=='function'||route.withConnection!==undefined||route.getSession!==undefined)
+        throw new Error('invalid_twilio_webhook_config');
+    }else if(typeof route.withConnection!=='function'||typeof route.getSession!=='function')throw new Error('invalid_twilio_webhook_config');
+    bindings.set(route.path,{...route,background:background?{...background}:undefined,window:0,count:0});
   }
   const server=createServer({maxHeaderSize:8192,requestTimeout:10000,headersTimeout:10000},(req,res)=>{
     let finished=false,bytes=0;const chunks=[];
@@ -38,9 +43,15 @@ export function createTwilioWebhookServer({store, routes, now=Date.now, limit=60
       if(finished)return;
       try {
         const rawBody=new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks));
-        const {slot,session}=route.getSession();
-        const receipt=importTwilioMessage({store,slot,session,withConnection:route.withConnection,
-          request:{rawBody,contentType:req.headers['content-type'],signature:req.headers['x-twilio-signature']}});
+        const request={rawBody,contentType:req.headers['content-type'],signature:req.headers['x-twilio-signature']};
+        let receipt;
+        if(route.background){
+          const {registry,grants,getBinding}=route.background;
+          receipt=importTwilioBackgroundMessage({store,registry,grants,binding:getBinding(),request});
+        }else{
+          const {slot,session}=route.getSession();
+          receipt=importTwilioMessage({store,slot,session,withConnection:route.withConnection,request});
+        }
         if(!receipt || ![0,1].includes(receipt.imported) || receipt.duplicate!==(receipt.imported===0))throw new Error();
         // Empty TwiML deliberately performs no reply or other outbound action.
         finish(200,'<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
