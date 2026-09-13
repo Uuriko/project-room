@@ -495,6 +495,9 @@ button:disabled { cursor: wait; opacity: .6; }
 .return-brief-body h3 { margin: .75rem 0 .5rem; font-size: 1rem; }
 .return-brief-body details > summary { min-height: 44px; padding: .65rem 0; cursor: pointer; font-size: .875rem; }
 .rb-boundary { display: block; font-size: .75rem; font-weight: 400; color: var(--muted); }
+.rb-group-label { display: block; margin: .5rem 0 .15rem; font-size: .72rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.rb-group:first-child .rb-group-label { margin-top: 0; }
+.rb-group-list { padding-left: .35rem; }
 .rb-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .3rem; }
 .rb-event { font-size: .875rem; line-height: 1.5; overflow-wrap: anywhere; }
 #rb-attention-list .rb-event { display: grid; gap: .15rem; padding-block: .35rem; }
