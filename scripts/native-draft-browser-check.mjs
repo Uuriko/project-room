@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Scripted people and MCP reviewer, isolated local data. No model or provider use.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -31,7 +32,7 @@ async function setup(t, touch = false) {
     page.setDefaultTimeout(8000); page.on("pageerror", e => errors.push(e.message));
     await page.route("**/*", route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
     page.on("request", req => { if (req.method() === "POST" && req.url().endsWith("/commands")) traffic.push(req.postDataJSON()); });
-    await page.goto(origin); await page.locator("#access-key").fill(f.keys[actor]); await page.getByRole("button", { name: "Enter room", exact: true }).click();
+    await page.goto(origin); await ensureSignIn(page); await page.locator("#access-key").fill(f.keys[actor]); await page.getByRole("button", { name: "Continue", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
     const card = page.locator('[data-work-record-id="' + workItemId + '"]');
     const draft = async (native = true, selected = false) => {

@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Simulated human journeys: disposable rooms, no real users or outside requests.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -38,7 +39,7 @@ async function setup(t, { humanWork = false, mobile = false } = {}) {
   await page.goto(origin);
   const login = async (key = f.keys.owner) => {
     await page.locator("#auth-panel").waitFor({ state: "visible" });
-    await page.locator("#access-key").fill(key); await page.getByRole("button", { name: "Enter room", exact: true }).click();
+    await ensureSignIn(page); await page.locator("#access-key").fill(key); await page.getByRole("button", { name: "Continue", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
   };
   await login();

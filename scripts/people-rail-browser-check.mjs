@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 // People rail: factual work labels, no inferred presence, scoped result chips.
 // Real browser + local HTTP service; identities and keys are disposable fixtures.
 import test from "node:test";
@@ -63,8 +64,8 @@ test("People rail omits inferred presence and distinguishes results awaiting rev
   page.on("pageerror", error => errors.push(error.message));
   await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await page.locator("#access-key").fill(owner);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await ensureSignIn(page); await page.locator("#access-key").fill(owner);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
   await page.locator("#people-panel > summary").click();
   const hint = page.locator("#people-hint");

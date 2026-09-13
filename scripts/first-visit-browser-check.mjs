@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { rmSync } from 'node:fs';
@@ -14,8 +15,8 @@ test('mobile first-visit hints advance, dismiss and stay dismissed after reload'
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   page.setDefaultTimeout(8000);
   await page.goto(`http://127.0.0.1:${server.address().port}`);
-  await page.locator('#access-key').fill(f.keys.owner);
-  await page.getByRole('button', { name: 'Enter room', exact: true }).click();
+  await ensureSignIn(page); await page.locator("#access-key").fill(f.keys.owner);
+  await page.getByRole('button', { name: "Continue", exact: true }).click();
   await page.locator('#room-guide').waitFor();
   assert.match(await page.locator('#room-guide-copy').innerText(), /visible/);
   await page.locator('#room-guide-next').click();

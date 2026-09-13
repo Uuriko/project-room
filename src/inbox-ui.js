@@ -300,7 +300,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     $("#inbox-reader").hidden = false;
     text("#inbox-subject", d.source.subject || "(No subject)");
     const email = d.source.email;
-    text("#inbox-source-label", email ? "Email · only you" : d.source.adapter === 'message' ? 'Telegram · only you' : "Sample message · only you");
+    text("#inbox-source-label", email ? "Email · only you" : d.source.adapter === 'message' ? `${({telegram:'Telegram',sms:'SMS',whatsapp:'WhatsApp'})[d.source.provider]} · only you` : "Sample message · only you");
     $("#inbox-ask").hidden = d.source.adapter === 'message' || Boolean(email) && !d.source.capabilities.share && !pendingShare();
     $("#inbox-email-details").hidden = !email;
     const metadata = email ? ["Mailbox: " + d.source.recipient,

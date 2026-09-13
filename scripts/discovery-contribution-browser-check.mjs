@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Scripted MCP participants and simulated people; never invokes a native model.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -66,7 +67,7 @@ for (const touch of [false, true]) test(`discovery to contribution ${touch ? 'to
   const page = await browser.newPage({ viewport: touch ? { width: 390, height: 844 } : { width: 1280, height: 900 },
     isMobile: touch, hasTouch: touch, reducedMotion: 'reduce' });
   page.setDefaultTimeout(8000); page.on('pageerror', error => errors.push(error.message));
-  await page.goto(origin); await page.locator('#access-key').fill(f.keys.owner);
+  await page.goto(origin); await ensureSignIn(page); await page.locator("#access-key").fill(f.keys.owner);
   await page.locator('#auth-form button[type=submit]').click(); await page.locator('#main').waitFor({ state: 'visible' });
   const beforeDiscovery = auditRecovery(f.store).dataSha256;
   await page.locator('#message-search').fill('telescope');

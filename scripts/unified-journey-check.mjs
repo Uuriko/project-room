@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Combined local UI/API journey. Every identity is a synthetic test participant.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -28,8 +29,8 @@ test("unified guest entry, account-bound draft recovery, catch-up and agent hand
   const errors = [];
   owner.on("pageerror", e => errors.push(e.message)); guest.on("pageerror", e => errors.push(e.message));
   await owner.goto(origin);
-  await owner.locator("#access-key").fill(fixture.keys.owner);
-  await owner.getByRole("button", { name: "Enter room", exact: true }).click();
+  await ensureSignIn(owner); await owner.locator("#access-key").fill(fixture.keys.owner);
+  await owner.getByRole("button", { name: "Continue", exact: true }).click();
   await owner.locator("#main").waitFor({ state: "visible" });
 
   await guest.goto(`${origin}/#join/${fixture.links.valid}`);

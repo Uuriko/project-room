@@ -51,7 +51,6 @@
           </div>
           <label for="auth-key-file">Open key file<input id="auth-key-file" type="file" aria-describedby="auth-error"></label>
           <button class="button primary" type="submit">Enter room</button>
-          <p id="auth-error" class="status form-status" role="alert"></p>
         </form>
         <label class="invite-paste" for="invite-link">Have an invite?</label>
         <input id="invite-link" type="text" autocomplete="off" spellcheck="false" maxlength="512" placeholder="Paste the invite link">
@@ -62,6 +61,7 @@
           <p id="auth-guest-note" class="form-hint">Guest access lasts about eight hours in that browser.</p>
         </details>
         </details>
+        <p id="auth-error" class="status form-status" role="alert"></p>
       </section>
 
       <dialog id="project-help" class="project-help" aria-labelledby="project-help-title">

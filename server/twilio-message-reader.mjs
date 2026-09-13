@@ -29,6 +29,6 @@ export function readTwilioMessage({ rawBody, signature, contentType, connection 
     const channel = p.To.startsWith('whatsapp:') ? 'whatsapp' : 'sms';
     return { provider: 'twilio', channel, accountId: c.accountId, connectionId: c.connectionId,
       sourceId: 'tw-' + createHash('sha256').update(JSON.stringify([c.accountId,c.connectionId,c.accountSid,p.MessageSid])).digest('hex'),
-      providerMessageId: p.MessageSid, sender: p.From, recipient: p.To, text: p.Body };
+      providerAccountId: c.accountSid, providerMessageId: p.MessageSid, sender: p.From, recipient: p.To, text: p.Body };
   } catch { throw new Error('twilio_message_unconfirmed'); }
 }

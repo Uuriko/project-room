@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync } from "node:fs";
@@ -24,8 +25,8 @@ for (const touch of [false, true]) {
     page.setDefaultTimeout(8000);
     const errors = []; page.on("pageerror", e => errors.push(e.message));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
-    await page.locator("#access-key").fill(fixture.keys.owner);
-    await page.getByRole("button", { name: "Enter room", exact: true }).click();
+    await ensureSignIn(page); await page.locator("#access-key").fill(fixture.keys.owner);
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
     await page.waitForFunction(() => !document.querySelector("#access-key").disabled);
     for (const id of ["people-panel", "composer-options", "work-options"]) {

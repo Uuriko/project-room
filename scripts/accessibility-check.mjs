@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Cross-session return-brief isolation and bounded accessibility regressions.
 // Real browser + disposable loopback service; no external identity or agent runtime.
 import test from "node:test";
@@ -60,14 +61,14 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   assert.equal(await page.evaluate(() => document.activeElement.id), "auth-title");
 
   // Authentication errors have one local announcement owner, not a duplicate toast.
-  await page.locator("#access-key").fill("invalid-access-key");
-  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await ensureSignIn(page); await page.locator("#access-key").fill("invalid-access-key");
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
   await page.locator("#auth-error").waitFor({ state: "visible" });
   assert.match(await page.locator("#auth-error").textContent(), /Check the access key and try again/);
   assert.equal(await page.locator("#status").textContent(), "", "no duplicate global authentication alert");
 
-  await page.locator("#access-key").fill(owner);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await ensureSignIn(page); await page.locator("#access-key").fill(owner);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
 
   const receipt = page.locator('[data-work-record-id="unknown-producer"] .receipt');
@@ -157,11 +158,11 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   // End the owner session while its newly fetched brief is still in flight.
   await page.locator("#signout-button").click();
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  assert.equal(await page.evaluate(() => document.activeElement.id), "access-key", "access end moves focus to sign-in");
+  assert.equal(await page.evaluate(() => document.activeElement.id), "sign-in-entry", "access end moves focus to visible sign-in");
   assert.match(await page.locator("#auth-error").textContent(), /Session ended; private drafts were cleared/);
   assert.equal(await page.locator("#status").textContent(), "", "sign-out has one local announcement owner");
-  await page.locator("#access-key").fill(maya);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await ensureSignIn(page); await page.locator("#access-key").fill(maya);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
   assert.equal(await page.locator('[data-work-record-id="producer-choice"] [data-action="verify"]').textContent(), "Record independent check", "known distinct producer exposes independent verification");
   assert.equal(await page.locator('[data-work-record-id="producer-unknown-choice"] [data-action="verify"]').textContent(), "Record evidence check", "unknown producer exposes only a non-independent evidence check");

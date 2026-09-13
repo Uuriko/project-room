@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync, readFileSync, statSync } from "node:fs";
@@ -25,8 +26,8 @@ async function setup(t, mobile = false) {
     await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
     f.store.close(); rmSync(f.directory, { recursive: true, force: true }); assert.deepEqual(errors, []); assert.deepEqual(outside, []);
   });
-  await page.goto(origin); await page.locator("#access-key").fill(f.keys.owner);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click(); await page.locator("#main").waitFor({ state: "visible" });
+  await page.goto(origin); await ensureSignIn(page); await page.locator("#access-key").fill(f.keys.owner);
+  await page.getByRole("button", { name: "Continue", exact: true }).click(); await page.locator("#main").waitFor({ state: "visible" });
   await page.locator("#people-panel > summary").click();
   const open = async () => { await page.locator("#connect-agent-button").click(); await page.locator("#agent-connect-dialog").waitFor({ state: "visible" }); };
   const create = async () => { await page.locator("#agent-connect-name").fill("Synthetic Claude"); await page.locator("#agent-create").click(); };

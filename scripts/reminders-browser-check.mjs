@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Simulated human tasks against isolated synthetic data; no real user research.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -24,7 +25,7 @@ for (const mobile of [false, true]) {
     page.on("pageerror", error => errors.push(error.message));
     page.on("request", request => { if (request.method() === "POST" && request.url().endsWith("/reminders")) writes.push(request.postDataJSON()); });
     await page.clock.install({ time: at });
-    await page.goto(origin); await page.locator("#access-key").fill(f.keys.owner); await page.getByRole("button", { name: "Enter room", exact: true }).click();
+    await page.goto(origin); await ensureSignIn(page); await page.locator("#access-key").fill(f.keys.owner); await page.getByRole("button", { name: "Continue", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
     const card = page.locator('[data-work-record-id="test-handoff"]');
     const open = async () => {

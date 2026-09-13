@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Simulated human journeys. Clipboard outcomes are controlled; no user text or
 // system clipboard is read/written and no live service is involved.
 import test from "node:test";
@@ -36,7 +37,7 @@ async function setup(t, mobile = false) {
     } } });
   });
   await page.goto(origin);
-  const login = async () => { await page.locator("#auth-panel").waitFor({ state: "visible" }); await page.locator("#access-key").fill(f.keys.owner); await page.getByRole("button", { name: "Enter room", exact: true }).click(); await page.locator("#main").waitFor({ state: "visible" }); };
+  const login = async () => { await page.locator("#auth-panel").waitFor({ state: "visible" }); await ensureSignIn(page); await page.locator("#access-key").fill(f.keys.owner); await page.getByRole("button", { name: "Continue", exact: true }).click(); await page.locator("#main").waitFor({ state: "visible" }); };
   await login(); posts.length = 0;
   const card = page.locator('[data-work-record-id="test-handoff"]'), dialog = page.locator("#result-copy-dialog"), input = page.locator("#result-copy-preview"), copy = page.locator("#result-copy-button");
   const open = async () => {

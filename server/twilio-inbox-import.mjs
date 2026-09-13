@@ -1,0 +1,23 @@
+import { readTwilioMessage } from './twilio-message-reader.mjs';
+
+// Host-only, receive-only boundary. The host must supply a current account
+// session and hold its connection-registry lock through withConnection().
+// Return success to the provider only AFTER this function returns. There is no
+// public webhook route, background credential, outbound send, or room sharing.
+export function importTwilioMessage({ store, slot, session, withConnection, request }) {
+  if (typeof withConnection !== 'function') throw new Error('twilio_connection_required');
+  return withConnection(connection => store.transaction(() => {
+    store.authenticateAccountSession(slot.token, null, session.sessionBinding);
+    const o = readTwilioMessage({ ...request, connection });
+    const data = { adapter: 'message', provider: o.channel, accountId: o.accountId,
+      connectionId: o.connectionId, providerAccountId: o.providerAccountId,
+      conversationId: JSON.stringify([o.sender, o.recipient]), providerMessageId: o.providerMessageId,
+      providerRevision: '0', sender: o.sender, recipient: o.recipient,
+      subject: o.channel === 'sms' ? 'SMS message' : 'WhatsApp message', paragraphs: [o.text] };
+    // Stable request ID uses the journal's exact-request replay comparison:
+    // same SID+body returns its receipt; same SID with altered text fails.
+    const result = store.inbox.importMessage(slot.token, { action: 'message.import',
+      requestId: o.sourceId, sourceId: o.sourceId, expectedRevision: 0, data }, session.sessionBinding);
+    return { imported: result.duplicate ? 0 : 1, duplicate: result.duplicate === true };
+  }));
+}

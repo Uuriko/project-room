@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync, mkdirSync } from "node:fs";
@@ -15,8 +16,8 @@ async function setup(t, viewport) {
   t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const page = await browser.newPage({ viewport, reducedMotion: "reduce" }), errors = [];
   page.on("pageerror", error => errors.push(error.message)); page.setDefaultTimeout(8000);
-  await page.goto(origin); await page.locator("#access-key").fill(f.keys.owner);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await page.goto(origin); await ensureSignIn(page); await page.locator("#access-key").fill(f.keys.owner);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
   const item = () => f.store.room("commons").state.workItems["test-handoff"];
   const send = (type, data = {}) => f.store.command(f.keys.producer, "commons", { id: crypto.randomUUID(), type,

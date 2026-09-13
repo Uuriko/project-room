@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Real browser + local HTTP service; all identities, messages, and keys are disposable fixtures.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -51,8 +52,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
       await p.goto(origin);
       await p.locator("#auth-panel").waitFor({ state: "visible" });
       assert.equal(await p.locator("#message-list").textContent(), "");
-      await p.locator("#access-key").fill(key);
-      await p.getByRole("button", { name: "Enter room", exact: true }).click();
+      await ensureSignIn(p); await p.locator("#access-key").fill(key);
+      await p.getByRole("button", { name: "Continue", exact: true }).click();
       await p.locator("#main").waitFor({ state: "visible" });
     };
     await login(page, owner); await login(other, human);
@@ -173,8 +174,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await page.locator("#message-list").textContent(), "");
     assert.equal(await page.locator("#search-list").textContent(), "");
     assert.equal(await input.inputValue(), "");
-    await page.locator("#access-key").fill(rotated);
-    await page.getByRole("button", { name: "Enter room", exact: true }).click();
+    await ensureSignIn(page); await page.locator("#access-key").fill(rotated);
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
     assert.equal(await input.inputValue(), "");
     assert.deepEqual(errors, []);
@@ -218,8 +219,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const errors = [];
     page.on("pageerror", error => errors.push(error.message));
     await page.goto(origin);
-    await page.locator("#access-key").fill(human);
-    await page.getByRole("button", { name: "Enter room", exact: true }).click();
+    await ensureSignIn(page); await page.locator("#access-key").fill(human);
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
 
     // The rail entry opens to live current sections and a frozen first page of history.
@@ -323,8 +324,8 @@ for (const outcome of ["success", "failure"]) {
     page.on("pageerror", error => errors.push(error.message));
     const enter = async () => {
       await page.locator("#auth-panel").waitFor({ state: "visible" });
-      await page.locator("#access-key").fill(key);
-      await page.getByRole("button", { name: "Enter room", exact: true }).click();
+      await ensureSignIn(page); await page.locator("#access-key").fill(key);
+      await page.getByRole("button", { name: "Continue", exact: true }).click();
       await page.locator("#main").waitFor({ state: "visible" });
       await page.waitForFunction(() => document.querySelector("#rb-current-boundary").textContent.includes("as of event"));
     };

@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Local qualification of actual packaged runtimes, never live services/models.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -63,7 +64,7 @@ for (const touch of [false, true]) test(`packaged browser fallback ${touch ? 'to
   page.on('dialog', dialog => dialog.accept()); // Explicit synthetic reload/sign-out choices.
   const origin = `http://127.0.0.1:${port}`;
   const enter = async (who = 'owner') => {
-    await page.locator('#access-key').fill(fixture.keys[who]);
+    await ensureSignIn(page); await page.locator("#access-key").fill(fixture.keys[who]);
     await page.locator('#auth-form button[type=submit]').click();
     await page.locator('#main').waitFor({ state: 'visible' });
   };

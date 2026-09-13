@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Synthetic user journeys: no human-study outcomes or production data.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -21,8 +22,8 @@ for (const touch of [false, true]) test(`release polish ${touch ? 'touch' : 'des
   page.setDefaultTimeout(10000);
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}`);
-  await page.locator('#access-key').fill(fixture.keys.owner);
-  await page.getByRole('button', { name: 'Enter room', exact: true }).click();
+  await ensureSignIn(page); await page.locator("#access-key").fill(fixture.keys.owner);
+  await page.getByRole('button', { name: "Continue", exact: true }).click();
   await page.locator('#main').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#clear-search').isVisible(), false);
   const message = page.locator('[data-message-record-id="test-welcome"]');

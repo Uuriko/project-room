@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { rmSync } from 'node:fs';
@@ -16,7 +17,7 @@ for (const width of [390, 1280]) test(`New room ${width}: uncertain response ret
   const page = await browser.newPage({ viewport: { width, height: 900 } }); page.setDefaultTimeout(10000);
   const origin = `http://127.0.0.1:${server.address().port}`;
   await page.goto(origin + '/?account=1');
-  await page.locator('#access-key').fill(key);
+  await ensureSignIn(page); await page.locator("#access-key").fill(key);
   await page.locator('#auth-form button[type="submit"]').click();
   await page.locator('#nav-rooms').click();
   await page.locator('#create-room-name').fill('Our new room');

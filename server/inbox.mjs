@@ -81,14 +81,21 @@ function validate(request) {
   if (!["source.save", "source.import", "message.import"].includes(request.action) && (!revision(request.sourceRevision) || !request.sourceRevision)) fail(422, "invalid_inbox_request", "Source revision required.");
   if (request.action === 'message.import') {
     const d = request.data;
-    if (!exact(d, ['adapter', 'provider', 'accountId', 'connectionId', 'conversationId', 'providerMessageId', 'providerRevision', 'sender', 'recipient', 'subject', 'paragraphs'])
-      || d.adapter !== 'message' || d.provider !== 'telegram' || ![d.accountId, d.connectionId].every(validId)
-      || ![d.conversationId, d.providerMessageId, d.providerRevision].every(v => typeof v === 'string' && /^-?[0-9]{1,16}$/.test(v) && Number.isSafeInteger(Number(v)))
-      || Number(d.conversationId) === 0 || Number(d.providerMessageId) <= 0 || Number(d.providerRevision) < 0
+    const twilio = ['sms', 'whatsapp'].includes(d?.provider);
+    const validProvider = twilio
+      ? /^AC[a-f0-9]{32}$/i.test(d.providerAccountId) && /^SM[a-f0-9]{32}$/i.test(d.providerMessageId)
+        && d.providerRevision === '0' && d.conversationId === JSON.stringify([d.sender, d.recipient])
+        && [d.sender, d.recipient].every(v => typeof v === 'string' && (d.provider === 'sms' ? /^\+[1-9][0-9]{6,14}$/ : /^whatsapp:\+[1-9][0-9]{6,14}$/).test(v))
+      : d?.provider === 'telegram' && [d.conversationId, d.providerMessageId, d.providerRevision].every(v => typeof v === 'string' && /^-?[0-9]{1,16}$/.test(v) && Number.isSafeInteger(Number(v)))
+        && Number(d.conversationId) !== 0 && Number(d.providerMessageId) > 0 && Number(d.providerRevision) >= 0;
+    if (!exact(d, ['adapter', 'provider', 'accountId', 'connectionId', 'conversationId', 'providerMessageId', 'providerRevision', 'sender', 'recipient', 'subject', 'paragraphs', ...(twilio ? ['providerAccountId'] : [])])
+      || d.adapter !== 'message' || !validProvider || ![d.accountId, d.connectionId].every(validId)
       || !['sender', 'recipient', 'subject'].every(k => text(d[k], 240))
       || !Array.isArray(d.paragraphs) || d.paragraphs.length !== 1 || !text(d.paragraphs[0], 4096))
       fail(422, 'invalid_message_source', 'Supply a bounded messaging observation.');
-    const identity = 'tg-' + createHash('sha256').update(JSON.stringify([d.accountId, d.connectionId, Number(d.conversationId), Number(d.providerMessageId)])).digest('hex');
+    const identity = (twilio ? 'tw-' : 'tg-') + createHash('sha256').update(JSON.stringify(twilio
+      ? [d.accountId, d.connectionId, d.providerAccountId, d.providerMessageId]
+      : [d.accountId, d.connectionId, Number(d.conversationId), Number(d.providerMessageId)])).digest('hex');
     if (request.sourceId !== identity) fail(422, 'invalid_message_source', 'Message identity mismatch.');
   }
   if (request.action === "source.import") {

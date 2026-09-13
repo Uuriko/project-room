@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Disposable local participants only; no external runtime or evidence is fetched.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -30,8 +31,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const errors = []; page.on("pageerror", error => errors.push(error.message));
     const login = async (page, key) => {
       await page.goto(origin);
-      await page.locator("#access-key").fill(key);
-      await page.getByRole("button", { name: "Enter room", exact: true }).click();
+      await ensureSignIn(page); await page.locator("#access-key").fill(key);
+      await page.getByRole("button", { name: "Continue", exact: true }).click();
       await page.locator("#main").waitFor({ state: "visible" });
     };
     await login(page, fixture.keys.owner);

@@ -1683,7 +1683,7 @@ async function submit(form, fn, { failureHint } = {}) {
   const current = () => operationId === submitOperationId
     && (form.id === "auth-form" || generation === client.generation);
   form.setAttribute("aria-busy", "true"); controls.forEach(e => e.disabled = true);
-  const local = form.querySelector(".form-status");
+  const local = form.id === 'auth-form' ? $('#auth-error') : form.querySelector(".form-status");
   if (form.id === "message-form") setComposerError("");
   else if (local) setFormStatus(local, "");
   try { await fn(current); }

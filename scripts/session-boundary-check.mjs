@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Browser regressions for session ownership, stale writes, live announcements,
 // and user-controlled record identities. All state and credentials are disposable.
 import test from "node:test";
@@ -52,8 +53,8 @@ async function enterRoom(page, accessKey, expectedIdentity) {
     const button = document.querySelector('#auth-form button[type="submit"]');
     return button && !button.disabled;
   });
-  await page.locator("#access-key").fill(accessKey);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await ensureSignIn(page); await page.locator("#access-key").fill(accessKey);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
   await page.waitForFunction(name => document.querySelector("#identity-label")?.textContent.startsWith(name), expectedIdentity);
 }

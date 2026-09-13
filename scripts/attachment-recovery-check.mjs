@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
@@ -16,8 +17,8 @@ for (const width of [1360, 390]) test(`file recovery and uncertain retry at ${wi
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   await page.goto(`http://127.0.0.1:${server.address().port}`);
-  await page.locator('#access-key').fill(token);
-  await page.getByRole('button', { name: 'Enter room', exact: true }).click();
+  await ensureSignIn(page); await page.locator("#access-key").fill(token);
+  await page.getByRole('button', { name: "Continue", exact: true }).click();
   await page.locator('#main').waitFor({ state: 'visible' });
   await page.locator('#composer-options > summary').click();
   await page.locator('#remember-drafts').check();

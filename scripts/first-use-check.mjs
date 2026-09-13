@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Agent-operated usability regression, not evidence from human participants.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -35,8 +36,8 @@ for (const touch of [false, true]) {
     await owner.locator('#auth-panel').waitFor({ state: 'visible' });
     assert.equal(await owner.locator('#identity-label').textContent(), 'Not signed in');
     assert.equal(await owner.locator('#auth-error').textContent(), '', 'a normal signed-out visit is not an error');
-    await owner.locator('#access-key').fill(ownerKey);
-    await owner.getByRole('button', { name: 'Enter room', exact: true }).click();
+    await ensureSignIn(owner); await owner.locator("#access-key").fill(ownerKey);
+    await owner.getByRole('button', { name: "Continue", exact: true }).click();
     await owner.locator('#main').waitFor({ state: 'visible' });
     await owner.locator('#invite-people-button').click();
     await owner.locator('#share-link-create').click();

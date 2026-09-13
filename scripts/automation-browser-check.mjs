@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, rmSync } from 'node:fs';
@@ -13,7 +14,7 @@ for (const [name, viewport] of [['desktop', { width: 1300, height: 950 }], ['mob
   async function open(key) {
     const context = await browser.newContext({ viewport, reducedMotion: 'reduce' }), page = await context.newPage();
     page.on('pageerror', error => errors.push(error.message)); page.setDefaultTimeout(8000);
-    await page.goto(origin); await page.locator('#access-key').fill(key); await page.getByRole('button', { name: 'Enter room', exact: true }).click();
+    await page.goto(origin); await ensureSignIn(page); await page.locator("#access-key").fill(key); await page.getByRole('button', { name: "Continue", exact: true }).click();
     await page.locator('#main').waitFor(); await page.locator('#room-about > summary').click();
     await page.locator('#automations-open').click(); return page;
   }
@@ -75,8 +76,8 @@ for (const [name, viewport] of [['desktop', { width: 1300, height: 950 }], ['mob
   await page.locator('#access-key').waitFor();
   assert.equal(await page.locator('#automations-dialog').evaluate(el => el.open), false);
   assert.equal(await page.locator('#automation-prompt').inputValue(), '');
-  await page.locator('#access-key').fill(f.keys.guest);
-  await page.getByRole('button', { name: 'Enter room', exact: true }).click();
+  await ensureSignIn(page); await page.locator("#access-key").fill(f.keys.guest);
+  await page.getByRole('button', { name: "Continue", exact: true }).click();
   await page.locator('#main').waitFor();
   if (!await page.locator('#automations-open').isVisible()) await page.locator('#room-about > summary').click();
   await page.locator('#automations-open').click();

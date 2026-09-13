@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Quiet Focus final causal proofs (Codex 5557784549): post-connect stream loss
 // transition, and measurable reflow at 390px and 200%-zoom-equivalent CSS width.
 import test from "node:test";
@@ -26,8 +27,8 @@ async function boot(t, viewport) {
   const origin = `http://127.0.0.1:${server.address().port}`;
   await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await page.locator("#access-key").fill(owner);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await ensureSignIn(page); await page.locator("#access-key").fill(owner);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
   return { store, server, page };
 }

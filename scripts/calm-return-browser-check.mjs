@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Simulated human return journeys, not retention evidence or real user feedback.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -50,8 +51,8 @@ for (const mobile of [false, true]) {
     page.on("pageerror", error => errors.push(error.message));
     page.on("request", request => { if (request.method() !== "GET" && request.url().includes("/api/rooms/")) writes.push(new URL(request.url()).pathname); });
     await page.clock.install({ time: now });
-    await page.goto(origin); await page.locator("#access-key").fill(f.keys.owner);
-    await page.getByRole("button", { name: "Enter room", exact: true }).click();
+    await page.goto(origin); await ensureSignIn(page); await page.locator("#access-key").fill(f.keys.owner);
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
     const panel = page.locator("#return-brief-panel"), summary = panel.locator(":scope > summary");
     const attention = id => page.locator(`#rb-attention-list [data-open-work="${id}"]`);

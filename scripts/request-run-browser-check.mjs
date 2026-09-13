@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { rmSync, mkdirSync } from 'node:fs';
@@ -23,8 +24,8 @@ async function setup(t, viewport, automation = false) {
   } else q = f.store.command(f.keys.owner, 'commons', { id: 'question', type: 'message.posted', data: { messageId: 'question', requestKind: 'reply', toMemberId: 'producer', body: 'Answer this without creating a task' } });
   const page = await browser.newPage({ viewport, reducedMotion: 'reduce' }), errors = [];
   page.on('pageerror', error => errors.push(error.message)); page.setDefaultTimeout(8000);
-  await page.goto(origin); await page.locator('#access-key').fill(f.keys.owner);
-  await page.getByRole('button', { name: 'Enter room', exact: true }).click(); await page.locator('#main').waitFor();
+  await page.goto(origin); await ensureSignIn(page); await page.locator("#access-key").fill(f.keys.owner);
+  await page.getByRole('button', { name: "Continue", exact: true }).click(); await page.locator('#main').waitFor();
   const claim = { id: 'claim', type: 'request_run.claimed', data: { requestMessageId: 'question', expectedRevision: 0, runId: 'run', contextEventId: q.event.id, instructionsRevision: 0, maxRuntimeMs: 10000, maxOutputBytes: 4096 } };
   return { ...f, page, origin, errors, claim, row: page.locator('[data-key="question"]') };
 }
@@ -89,7 +90,7 @@ test('deadline refresh is local and access reset clears uncertain stop state', a
   const rotated = f.store.issueAccessKey('commons', 'owner');
   await f.page.locator('#auth-panel').waitFor({ state: 'visible' });
   await f.page.unroute('**/api/rooms/commons/commands');
-  await f.page.locator('#access-key').fill(rotated); await f.page.getByRole('button', { name: 'Enter room', exact: true }).click();
+  await f.page.locator('#access-key').fill(rotated); await f.page.getByRole('button', { name: "Continue", exact: true }).click();
   await f.row.getByText('Stop requested', { exact: true }).waitFor();
   assert.equal(await f.row.getByRole('button', { name: 'Retry stop', exact: true }).count(), 0);
   assert.deepEqual(f.errors, []);

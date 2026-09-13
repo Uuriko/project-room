@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Simulated human flows in disposable loopback rooms. No external work or evidence is fetched.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -48,7 +49,7 @@ async function setup(t, { action = "complete", mobile = false, live = true } = {
   await page.goto(origin);
   const login = async (role = "owner") => {
     await page.locator("#auth-panel").waitFor({ state: "visible" });
-    await page.locator("#access-key").fill(f.keys[role]); await page.getByRole("button", { name: "Enter room", exact: true }).click();
+    await ensureSignIn(page); await page.locator("#access-key").fill(f.keys[role]); await page.getByRole("button", { name: "Continue", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
   };
   await login(action === "verify" ? "human-reviewer" : "owner");

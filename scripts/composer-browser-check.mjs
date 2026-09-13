@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Synthetic browser fixtures. These checks do not stand in for physical-device or human AT runs.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -36,8 +37,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await page.goto(origin);
     const login = async key => {
       await page.locator("#auth-panel").waitFor({ state: "visible" });
-      await page.locator("#access-key").fill(key);
-      await page.getByRole("button", { name: "Enter room", exact: true }).click();
+      await ensureSignIn(page); await page.locator("#access-key").fill(key);
+      await page.getByRole("button", { name: "Continue", exact: true }).click();
       await page.locator("#main").waitFor({ state: "visible" });
       await page.waitForFunction(() => !document.querySelector("#access-key").disabled);
     };

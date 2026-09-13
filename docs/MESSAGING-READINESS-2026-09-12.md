@@ -2,11 +2,23 @@
 
 ## Current state
 
+Latest checkpoint: Telegram's 35 targeted checks pass, including desktop/mobile
+end-to-end controls and durable recovery. A live manual check returned imported 0,
+pageFull false, without acknowledging updates. Encrypted queue, registry,
+disconnect, HTTP controls and opt-in startup are implemented but not activated in
+the existing local pilot. Continuous delivery and replies remain unfinished.
+
+SMS/WhatsApp now have a host-only signed private Inbox importer, not merely a
+parser. Exact retries return the original receipt; changed content under the same
+MessageSid fails. Account ownership, channel-specific addresses, private storage,
+journal recovery and mobile rendering are tested. No public callback, provider
+account, number, background receiver or outbound transport is configured.
+
 | Service | Verified now | Remaining before usable connection |
 | --- | --- | --- |
-| Telegram bot | Real private receive/import and browser rendering; duplicate-safe manual retry | Durable offset, connection lifecycle, background receiver, replies |
-| SMS | Signed Twilio inbound text verification and normalization tested | Messaging account and receiving number, public HTTPS callback, durable Inbox ingestion, connection controls |
-| WhatsApp Business | Same Twilio signature boundary supports WhatsApp-prefixed addresses | Sender/business onboarding or sandbox, callback and durable ingestion |
+| Telegram bot | Real private receive/import; durable receiver and controls tested in disposable runtimes | Activate private durable runtime, background receiver, replies |
+| SMS | Signed inbound text → private Inbox, duplicate-safe journal and mobile rendering | Messaging account and receiving number, public HTTPS callback, connection registry/controls |
+| WhatsApp Business | Signed inbound text → private Inbox using distinct channel validation | Sender/business onboarding or sandbox, callback and connection lifecycle |
 | Slack | Signed HTTP Events API verification, workspace/app/channel scoping tested | App installation, scopes and selected conversations, durable ingestion, live callback or separate Socket Mode runtime |
 | Personal Signal/WhatsApp | Not connected | Separate linked-device integration; not equivalent to a business API |
 
@@ -58,10 +70,19 @@ unsupported. Do not enable this as a full-fidelity mirror until edit/deletion an
 retention handling exists. Event IDs require durable duplicate suppression. A
 valid signature alone does not authorize room sharing or automated actions.
 
-These modules are **not HTTP routes or Inbox importers**. They intentionally do
+The reader modules are **not HTTP routes or Inbox importers**. They intentionally do
 not fabricate Telegram numeric IDs, silently claim success, or publish messages.
-Next: provider-aware source validation in the private Inbox journal and recovery,
-atomic receipt handling, account-bound connection ownership, then actual runtime.
+`server/twilio-inbox-import.mjs` now supplies provider-aware validation and atomic
+private journal receipts. Its trusted host must hold a synchronous connection
+registry lock through the transaction and provide a current account session.
+It is not exposed through unauthenticated HTTP. Next: persistent connection
+ownership and revocation, rate-limited webhook runtime, then provider onboarding.
+Return provider success only after durable commit; failures must remain retryable.
+There is no SMS/WhatsApp edit support (provider revision is fixed at zero).
+
+Run `npm run test:messaging` for signed readers, private import and mobile display;
+run `npm run test:telegram` for the Telegram integration. All use disposable
+fixtures except the explicitly reported manual local check.
 
 ## Verification
 

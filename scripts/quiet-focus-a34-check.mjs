@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Quiet Focus A3/A4 evidence: keyboard-operable disclosures, usable narrow
 // composer, composer-local send failure with Send-as-retry, and explicit
 // disconnected/reconnecting states. Real browser + local HTTP service;
@@ -34,8 +35,8 @@ test("A3/A4: keyboard disclosures, narrow composer, composer-local failure + ret
   page.on("pageerror", error => errors.push(error.message));
   await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await page.locator("#access-key").fill(owner);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await ensureSignIn(page); await page.locator("#access-key").fill(owner);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
 
   // A3 keyboard: focus a disclosure summary, toggle with Enter; opening must not
@@ -102,8 +103,8 @@ test("A4: a stream that cannot connect is labeled reconnecting, never silently o
   await page.route("**/api/rooms/commons/stream**", route => route.abort("failed"));
   await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await page.locator("#access-key").fill(owner);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await ensureSignIn(page); await page.locator("#access-key").fill(owner);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
   await page.waitForFunction(() => /Reconnecting|interrupted|unavailable/.test(document.querySelector("#connection-status").textContent), null, { timeout: 15000 });
   const statusText = await page.locator("#connection-status").textContent();

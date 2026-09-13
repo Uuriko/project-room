@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, mkdtemp } from 'node:fs/promises';
@@ -22,8 +23,8 @@ for (const mobile of [false, true]) test(`verified file download ${mobile ? 'mob
   const page = await context.newPage(), errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}`);
-  await page.locator('#access-key').fill(token);
-  await page.getByRole('button', { name: 'Enter room', exact: true }).click();
+  await ensureSignIn(page); await page.locator("#access-key").fill(token);
+  await page.getByRole('button', { name: "Continue", exact: true }).click();
   const button = page.getByRole('button', { name: 'Download résumé.html', exact: true });
   await button.waitFor();
   const screenshots = await mkdtemp(join(tmpdir(), 'room-file-ui-'));

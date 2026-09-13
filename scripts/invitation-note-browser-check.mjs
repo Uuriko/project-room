@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Disposable synthetic journeys. These are not retention or human-study evidence.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -32,8 +33,8 @@ async function setup(t, touch = false) {
   const errors = [], requests = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('request', request => requests.push(`${request.url()} ${request.postData() ?? ''}`));
-  await page.goto(origin); await page.locator('#access-key').fill(fixture.keys.owner);
-  await page.getByRole('button', { name: 'Enter room', exact: true }).click();
+  await page.goto(origin); await ensureSignIn(page); await page.locator("#access-key").fill(fixture.keys.owner);
+  await page.getByRole('button', { name: "Continue", exact: true }).click();
   await page.locator('#main').waitFor({ state: 'visible' });
   await page.locator('#invite-people-button').click();
   return { fixture, origin, page, errors, requests };

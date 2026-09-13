@@ -1,3 +1,4 @@
+import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Simulated human browser + real scripted MCP subprocess. No external AI inference.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -39,8 +40,8 @@ for (const mobile of [false, true]) test(`credit question ${mobile ? "mobile" : 
     if (new URL(route.request().url()).origin === owner.origin) return route.continue();
     outside.push(route.request().url()); return route.abort();
   });
-  await page.goto(owner.origin); await page.locator("#access-key").fill(reviewer);
-  await page.getByRole("button", { name: "Enter room", exact: true }).click(); await page.locator("#main").waitFor();
+  await page.goto(owner.origin); await ensureSignIn(page); await page.locator("#access-key").fill(reviewer);
+  await page.getByRole("button", { name: "Continue", exact: true }).click(); await page.locator("#main").waitFor();
   const input = page.locator("#message-input"), card = page.locator('[data-work-record-id="' + workId + '"]');
   await input.fill("Keep ordinary room writing.");
   await page.locator("#composer-options > summary").click(); await page.locator("#remember-drafts").check();
