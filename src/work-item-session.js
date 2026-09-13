@@ -118,7 +118,8 @@ export function attemptLedger(item) {
       limits: a.limits && typeof a.limits === "object" && !Array.isArray(a.limits) ? Object.freeze({ ...a.limits }) : null,
       endedAt: typeof a.endedAt === "string" ? a.endedAt : null,
       outcome: a.outcome === "done" || a.outcome === "failed" ? a.outcome : null,
-      outputs: Array.isArray(a.outputs) ? Object.freeze(a.outputs.filter(o => typeof o === "string")) : null
+      outputs: Array.isArray(a.outputs) ? Object.freeze(a.outputs.filter(o => typeof o === "string")) : null,
+      usageCents: Number.isSafeInteger(a.usageCents) ? a.usageCents : null
     })));
 }
 
@@ -180,7 +181,8 @@ export function sessionCard(item) {
     started_at: session.started_at,
     attempt_count: session.attempt_count,
     spendCents: session.spend_cents ?? "unknown",
-    attempts: session.attempts
+    attempts: session.attempts,
+    receipts: attemptReceipts(item)
   };
 }
 
@@ -191,6 +193,23 @@ export function listWorkItemSessions(workItems, status = null) {
     .map(sessionCard)
     .filter(card => status == null || card.status === status)
     .sort((a, b) => a.workItemId < b.workItemId ? -1 : 1);
+}
+
+// W4-41 G6: output and usage receipts. Exact output references and measured
+// usage are linked per attempt and kept separate from budget estimates. A
+// done attempt with missing artifacts or unknown usage reads as an
+// unverified success - it cannot present as a success claim.
+export function attemptReceipts(item) {
+  const session = sessionRecord(item);
+  return Object.freeze(session.attempts.map(a => Object.freeze({
+    attempt: a.attempt,
+    outcome: a.outcome,
+    outputs: a.outputs, // exact references; null = missing artifacts
+    usageCents: a.usageCents ?? null, // measured at close; null = unknown
+    estimateCents: a.limits?.maxSpendCents ?? null, // the estimate, kept apart from measurement
+    successClaim: a.outcome !== "done" ? "not-claimed"
+      : (Array.isArray(a.outputs) && a.outputs.length > 0 && Number.isSafeInteger(a.usageCents) ? "verified" : "unverified")
+  })));
 }
 
 export function workItemSessionContract() {
@@ -289,11 +308,13 @@ export function applySessionFields(item, incoming) {
     const outputs = validateAttemptOutputs(incoming.data?.outputs);
     const attemptsList = Array.isArray(item.attempts) ? item.attempts : [];
     const openAttempt = attemptsList.findLast(a => a && typeof a === "object" && a.endedAt == null) ?? null;
-    if (openAttempt) { openAttempt.endedAt = at; openAttempt.outcome = next; openAttempt.outputs = outputs; }
     item.stop_requested_at = session.stop_requested_at;
     item.heartbeat_at = at;
     item.worker_member_id = null;
     reportSpend(item, incoming);
+    // G6: capture measured usage at close; a later attempt resets item spend.
+    if (openAttempt) { openAttempt.endedAt = at; openAttempt.outcome = next; openAttempt.outputs = outputs;
+      openAttempt.usageCents = Number.isSafeInteger(item.spend_cents) ? item.spend_cents : null; }
     return;
   }
   throw new Error(`Unsupported event type: ${incoming.type}`);
