@@ -6,7 +6,7 @@ const fail = () => { throw new Error('telegram_connection_unconfirmed'); };
 // Separate private SQLite DB. Host authenticates the account before every call,
 // verifies bot identity with Telegram before configure, and owns DB/key security.
 export class TelegramConnectionRegistry {
-  #db; #key;
+  #db; #key; #closed = false;
   constructor({db,key}) {
     if (!Buffer.isBuffer(key) || key.length !== 32) fail();
     this.#db=db;this.#key=Buffer.from(key);
@@ -16,7 +16,8 @@ export class TelegramConnectionRegistry {
         revision INTEGER NOT NULL, bot_id TEXT NOT NULL UNIQUE, state TEXT NOT NULL CHECK(state IN ('active','disconnected')),
         nonce BLOB, ciphertext BLOB, tag BLOB, PRIMARY KEY(account_id,connection_id));`);
   }
-  #binding(accountId,connectionId,authEpoch) { if(!id(accountId)||!id(connectionId)||!rev(authEpoch))fail(); }
+  #binding(accountId,connectionId,authEpoch) { if(this.#closed||!id(accountId)||!id(connectionId)||!rev(authEpoch))fail(); }
+  close() { this.#closed=true;this.#key.fill(0); }
   #row(accountId,connectionId) { return this.#db.prepare('SELECT * FROM telegram_connections_v1 WHERE account_id=? AND connection_id=?').get(accountId,connectionId); }
   #aad(row) {return Buffer.from(JSON.stringify(['telegram-connection-v1',row.account_id,row.connection_id,row.auth_epoch,row.revision,row.bot_id]));}
   #transaction(fn) {

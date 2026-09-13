@@ -162,3 +162,26 @@ Run the accumulated Telegram regression surface with `npm run test:telegram`.
 This includes Telegram unit/integration checks, compact controls and full-stack
 browser acceptance; Chromium must be available. These are disposable tests, not
 proof of live startup configuration or real continuous provider delivery.
+
+## Opt-in server startup
+
+The server entry point now accepts a fully provisioned private configuration:
+
+- `ROOM_TELEGRAM_REGISTRY_FILE`: existing encrypted registry database.
+- `ROOM_TELEGRAM_QUEUE_FILE`: existing matching receive queue database.
+- `ROOM_TELEGRAM_KEY_FILE`: existing raw 32-byte key used by both stores.
+- `ROOM_TELEGRAM_ACCOUNT_ID` and `ROOM_TELEGRAM_CONNECTION_ID`: exact existing binding.
+
+All file paths must be absolute/canonical, outside the source tree, distinct,
+non-symlink, single-link, owned by the current user, and private to that user.
+Parent directories must also be private. Unknown database tables, missing stores,
+wrong keys, stale epochs and missing bindings fail closed. Runtime startup never
+creates credentials or grants, configures a bot, calls Telegram, or schedules work.
+Shutdown closes both stores and clears runtime key buffers. Disconnected stores
+can reopen for status without reactivating their connection.
+
+Ten runtime/registry tests passed, including the existing Gmail startup tests.
+The live server/environment was not restarted or changed. Activation still needs
+approved provisioning of matching encrypted stores from the verified bot/chat
+binding, followed by real-provider acceptance. The existing plaintext manual-pilot
+file is NOT automatically imported. Background scheduling remains unimplemented.
