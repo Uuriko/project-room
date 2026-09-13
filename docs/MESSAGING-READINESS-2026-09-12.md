@@ -1,7 +1,5 @@
 # Messaging readiness — direct integrations
 
-## Current state
-
 ## Latest verified acceptance
 
 - `627b4db`: full Node suite **1474/1474**, zero skipped, after UI integration.
