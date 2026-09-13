@@ -48,6 +48,7 @@ test('OAuth to encrypted credentials to private Inbox, followed by disconnect', 
   const before = JSON.stringify(f.store.room('commons').state.messages);
   const connected = await f.service.complete(f.session, f.callback(pending));
   assert.equal(connected.state, 'connected');
+  assert.equal(f.service.list(f.session)[0].state, 'connected');
   assert.ok(!JSON.stringify(connected).includes('fixture'));
   const row = f.db.prepare('SELECT * FROM mail_credentials_v1').get();
   assert.ok(!Buffer.from(row.ciphertext).toString().includes('refresh-fixture'));
@@ -58,6 +59,7 @@ test('OAuth to encrypted credentials to private Inbox, followed by disconnect', 
   assert.match(view.source.paragraphs[0], /Private live-shaped note/);
   assert.equal(JSON.stringify(f.store.room('commons').state.messages), before);
   assert.equal(f.service.disconnect(f.session, pending.connectionId).providerRevoked, false);
+  assert.equal(f.service.list(f.session)[0].state, 'disconnected');
   await assert.rejects(f.service.sync(f.session, pending.connectionId), { code: 'gmail_reconnect_required' });
   assert.equal(f.db.prepare('SELECT ciphertext FROM mail_credentials_v1').get().ciphertext, null);
 });

@@ -14,6 +14,17 @@ export class GmailConnections {
     this.#store = store; this.#vault = vault; this.#oauth = oauth; this.#fetch = fetchImpl;
   }
   #auth(session) { return this.#store.inbox.auth(session.token, session.binding); }
+  list(session) {
+    const auth = this.#auth(session);
+    const rows = this.#store.db.prepare("SELECT id FROM private_email_connections WHERE account_id=? AND provider='gmail' ORDER BY id LIMIT 20").all(auth.account.id);
+    return rows.map(row => {
+      const connection = this.#store.email.connection(auth.account.id, row.id), profile = connection.profile;
+      const status = this.#vault.status(vaultBinding(profile, auth.account.authEpoch));
+      const state = connection.state === 'disconnected' ? 'disconnected'
+        : connection.authEpoch === auth.account.authEpoch && status.state === 'active' && status.bindingMatches ? 'connected' : 'reconnect_required';
+      return { connectionId: profile.id, mailbox: profile.mailboxId, state };
+    });
+  }
   #current(session, id) {
     const auth = this.#auth(session);
     const connection = this.#store.email.connection(auth.account.id, id);

@@ -55,7 +55,7 @@ export class MailCredentialVault {
   // Metadata only, including tombstones. Host must authorize the account first.
   status(binding) {
     const row = this.#row(binding);
-    return row ? { version: row.version, state: row.state } : { version: 0, state: 'missing' };
+    return row ? { version: row.version, state: row.state, bindingMatches: row.binding === validateBinding(binding) } : { version: 0, state: 'missing', bindingMatches: false };
   }
   #version(value) { if (!Number.isSafeInteger(value) || value < 0 || value >= Number.MAX_SAFE_INTEGER) fail('mail_credential_version_invalid'); }
 

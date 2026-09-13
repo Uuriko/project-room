@@ -57,7 +57,7 @@ be silently overwritten. Failed configuration can leave an inert unmatched vault
 revision; reads require a matching active import connection. Cross-database crash
 recovery still needs operational testing, not an atomicity claim.
 
-Still not live: production bootstrap/configuration, concise Inbox UI, external key provisioning and private
+Still not live: real configuration, external key provisioning and private
 database file permissions, Google-side revocation, durable worker scheduling,
 runtime dependency packaging, and real-user consent/testing. The existing importer’s
 legacy `mode: fixture` marker is not an assertion of live connectivity; it must be
@@ -65,6 +65,14 @@ reconciled before public UI claims. Token renewal is implemented with narrow-sco
 validation, refresh-token rotation/preservation, shared in-flight requests and vault
 version checks. Session/connection authority is checked again before saving refreshed
 credentials; disconnect during renewal cannot restore them. Renewal failure fails closed.
+
+Inbox controls now live under a collapsed **Connections** disclosure: Gmail address,
+Connect Gmail, account-bound connection status, Sync, Disconnect and Reconnect. No tokens
+are returned to these controls. Status checks include active account epoch and matching
+vault binding, not the legacy fixture marker. Disabled hosts say connections are not
+enabled. Desktop/mobile Chromium tests cover sync/disconnect, no horizontal overflow,
+and sign-out clearing the address/list. Client checks reject foreign OAuth destinations
+and stale account responses. Provider revocation is not claimed by local Disconnect.
 
 Storage checkpoint: `server/mail-credential-vault.mjs` now provides AES-256-GCM
 credential encryption in a separate caller-supplied SQLite database. The key is supplied

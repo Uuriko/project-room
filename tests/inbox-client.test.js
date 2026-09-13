@@ -6,6 +6,13 @@ import { InboxClient, inboxTextVersion } from "../src/inbox-client.js";
 const session = { authenticated: true, account: { id: "owner", authEpoch: 2 }, sessionRevision: 4, sessionBinding: "a".repeat(64), csrf: "csrf" };
 const viewer = { accountId: "owner", authEpoch: 2, sessionRevision: 4, sessionBinding: session.sessionBinding };
 const reply = value => ({ ok: true, json: async () => value });
+test('Gmail controls reject foreign redirects and stale account status', async () => {
+  const base = { contractVersion: 1, viewer, connectionId: 'gmail-test' };
+  for (const authorizationUrl of ['https://evil.example/', 'https://accounts.google.com.evil.example/o/oauth2/v2/auth', 'https://accounts.google.com/other'])
+    await assert.rejects(setup(async () => reply({ ...base, authorizationUrl })).client.gmail('start', { mailbox: 'pilot@example.com' }), { code: 'invalid_inbox_response' });
+  assert.ok(await setup(async () => reply({ ...base, authorizationUrl: 'https://accounts.google.com/o/oauth2/v2/auth?state=fixture' })).client.gmail('start', { mailbox: 'pilot@example.com' }));
+  await assert.rejects(setup(async () => reply({ contractVersion: 1, viewer: { ...viewer, accountId: 'other' }, enabled: true, connections: [] })).client.gmailStatus(), { code: 'obsolete_inbox' });
+});
 test("private grant receipts must confirm exact source, room and recipients", async () => {
   const request = { action: "source.grant", requestId: "grant-request", sourceId: "mail", sourceRevision: 1,
     roomId: "room", audienceVersion: "a".repeat(64), paragraphs: [0], memberIds: ["agent"] };

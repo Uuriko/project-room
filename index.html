@@ -84,6 +84,17 @@
         <aside class="inbox-sidebar">
           <header><h1 id="inbox-heading" tabindex="-1">Inbox</h1><button id="inbox-refresh" class="button ghost icon-button" type="button" aria-label="Refresh inbox">↻</button></header>
           <p id="inbox-status" role="status"></p>
+          <details id="inbox-connections">
+            <summary>Connections</summary>
+            <p id="inbox-connection-status" class="form-hint" role="status"></p>
+            <form id="inbox-gmail-form" hidden>
+              <label for="inbox-gmail-address">Gmail address</label>
+              <input id="inbox-gmail-address" type="email" required autocomplete="email" maxlength="254">
+              <button class="button secondary" type="submit">Connect Gmail</button>
+              <p class="form-hint">Read-only. Messages stay private.</p>
+            </form>
+            <div id="inbox-connection-list"></div>
+          </details>
           <div id="inbox-list" aria-label="Messages"></div>
           <p id="inbox-empty" class="form-hint">Sample inbox. Mail connections are not available yet.</p>
         </aside>

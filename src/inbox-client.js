@@ -121,6 +121,19 @@ export class InboxClient {
       throw error;
     }
   }
+  gmailStatus() { return this.request('/connections/gmail', {}, v => typeof v.enabled === 'boolean' && Array.isArray(v.connections)
+    && v.connections.length <= 20 && v.connections.every(c => id(c.connectionId) && boundedText(c.mailbox, 320)
+      && ['connected', 'disconnected', 'reconnect_required'].includes(c.state))); }
+  gmail(action, data) {
+    if (!['start', 'sync', 'disconnect'].includes(action)) throw fail('invalid_gmail_action', 'Choose a connection action.');
+    return this.request('/connections/gmail/' + action, { method: 'POST', data }, v => {
+      if (!id(v.connectionId)) return false;
+      if (action === 'start') {
+        try { const url = new URL(v.authorizationUrl); return url.origin === 'https://accounts.google.com' && url.pathname === '/o/oauth2/v2/auth' && !url.username && !url.password; } catch { return false; }
+      }
+      return action === 'sync' ? revision(v.imported) && typeof v.complete === 'boolean' : v.state === 'disconnected';
+    });
+  }
   list() { return this.request("?view=email-excerpt-v1", {}, v => Array.isArray(v.sources) && v.sources.every(s => id(s.id) && revision(s.revision) && s.revision > 0 && typeof s.subject === "string")); }
   read(sourceId) {
     return this.request("/sources/" + encodeURIComponent(sourceId) + "?view=email-excerpt-v1", {}, v => validSource(v.source, sourceId, v.viewer.accountId)

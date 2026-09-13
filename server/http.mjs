@@ -332,6 +332,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (req.headers.authorization) reject(401, "account_session_required", "Use your current account session.");
         const token = cookie(req, accountCookieName), binding = accountBinding(req);
         const auth = store.authenticateAccountSession(token, null, binding);
+        const inboxViewer = { accountId: auth.account.id, authEpoch: auth.account.authEpoch, sessionBinding: auth.sessionBinding, sessionRevision: auth.sessionRevision };
+        if (url.pathname === '/api/inbox/connections/gmail' && req.method === 'GET')
+          return json(res, 200, { contractVersion: 1, viewer: inboxViewer, enabled: Boolean(gmailConnections), connections: gmailConnections?.list({ token, binding }) ?? [] });
         const gmailAction = /^\/api\/inbox\/connections\/gmail\/(start|complete|sync|disconnect)$/.exec(url.pathname);
         if (gmailAction) {
           if (!gmailConnections) reject(503, 'gmail_not_configured', 'Email connection is not configured.');
@@ -347,7 +350,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
               : action === 'complete' ? await gmailConnections.complete(session, data.callbackUrl)
               : action === 'sync' ? await gmailConnections.sync(session, data.connectionId)
               : gmailConnections.disconnect(session, data.connectionId);
-            return json(res, 200, result);
+            return json(res, 200, { ...result, contractVersion: 1, viewer: inboxViewer });
           } catch (error) {
             if (error instanceof ServiceError) throw error;
             // Provider details and callback codes must not become error output.

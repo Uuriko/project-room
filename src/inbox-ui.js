@@ -9,6 +9,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   let owner = null, active = false, browsing = false, selected = null, epoch = 0, rows = [], sharing = null, sharingBusy = false, retryShare = null;
   let navigationEpoch = 0;
   let grantsEpoch = 0;
+  let connectionTurn = 0, connectionBusy = false;
   const storageKey = "project-room:pending-private-share:v1";
   const positionKey = "project-room:inbox-position:v1";
   let storage; try { storage = sessionStorage; } catch {}
@@ -82,6 +83,10 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     }
   }
   function reset({ preservePending = false } = {}) {
+    connectionTurn++; connectionBusy = false;
+    $('#inbox-connections').open = false; $('#inbox-gmail-form').reset(); $('#inbox-gmail-form').hidden = true;
+    $('#inbox-connections').querySelectorAll('button').forEach(button => { button.disabled = false; });
+    $('#inbox-connection-list').replaceChildren(); text('#inbox-connection-status', '');
     navigationEpoch++;
     grantsEpoch++; $("#inbox-grant-list").replaceChildren(); $("#inbox-grants").open = false;
     $("#inbox-share-member-list").replaceChildren();
@@ -122,6 +127,58 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       button.append(sender, subject); button.addEventListener("click", () => open(source.id)); return button;
     }));
   }
+  async function loadConnections() {
+    if (!owns()) return;
+    const turn = ++connectionTurn, capturedOwner = owner;
+    text('#inbox-connection-status', 'Loading…');
+    try {
+      const result = await api.gmailStatus();
+      if (!owns() || capturedOwner !== owner || turn !== connectionTurn) return;
+      $('#inbox-gmail-form').hidden = !result.enabled;
+      text('#inbox-connection-status', result.enabled ? '' : 'Email connections aren’t enabled on this server.');
+      $('#inbox-connection-list').replaceChildren(...result.connections.map(connection => {
+        const row = document.createElement('div'), label = document.createElement('p');
+        label.textContent = connection.mailbox + (connection.state === 'connected' ? '' : ' · Reconnect');
+        row.append(label);
+        for (const action of connection.state === 'connected' ? ['sync', 'disconnect'] : ['start']) {
+          const button = document.createElement('button'); button.type = 'button'; button.className = 'text-button';
+          button.textContent = { sync: 'Sync', disconnect: 'Disconnect', start: 'Reconnect' }[action];
+          button.setAttribute('aria-label', button.textContent + ' ' + connection.mailbox);
+          button.addEventListener('click', () => connectionAction(action, action === 'start' ? { mailbox: connection.mailbox } : { connectionId: connection.connectionId }));
+          row.append(button);
+        }
+        return row;
+      }));
+    } catch (error) {
+      if (owns() && capturedOwner === owner && turn === connectionTurn) {
+        $('#inbox-gmail-form').hidden = true; text('#inbox-connection-status', errorText(error));
+      }
+    }
+  }
+  async function connectionAction(action, data) {
+    if (!owns() || connectionBusy) return;
+    const capturedOwner = owner; connectionBusy = true; connectionTurn++;
+    $('#inbox-connections').querySelectorAll('button').forEach(button => { button.disabled = true; });
+    text('#inbox-connection-status', action === 'start' ? 'Opening Google…' : 'Working…');
+    try {
+      const result = await api.gmail(action, data);
+      if (!owns() || capturedOwner !== owner) return;
+      if (action === 'start') { location.assign(result.authorizationUrl); return; }
+      if (action === 'sync') await load();
+      if (!owns() || capturedOwner !== owner) return;
+      await loadConnections();
+      if (!owns() || capturedOwner !== owner) return;
+      text('#inbox-connection-status', action === 'disconnect' ? 'Disconnected here. Saved mail remains.'
+        : result.complete ? 'Inbox updated.' : 'Page synced. Sync again for more.');
+    } catch (error) { if (owns() && capturedOwner === owner) text('#inbox-connection-status', errorText(error)); }
+    finally {
+      if (owns() && capturedOwner === owner) {
+        connectionBusy = false; $('#inbox-connections').querySelectorAll('button').forEach(button => { button.disabled = false; });
+      }
+    }
+  }
+  $('#inbox-connections').addEventListener('toggle', () => { if ($('#inbox-connections').open && !connectionBusy) loadConnections(); });
+  $('#inbox-gmail-form').addEventListener('submit', event => { event.preventDefault(); connectionAction('start', { mailbox: $('#inbox-gmail-address').value }); });
   async function load() {
     sync(); if (!owns()) return;
     show("inbox"); text("#inbox-status", "Loading…");
