@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RoomStore } from '../server/store.mjs';
+import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { openJoinContract } from '../server/open-contract.mjs';
 import { readFileSync } from 'node:fs';
@@ -11,6 +12,7 @@ import { readFileSync } from 'node:fs';
 test('GET /api/open and /api/version on the real HTTP server', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'prod-http-'));
   const store = new RoomStore(join(directory, 'room.sqlite'));
+  store.initialize(initialRoom('commons'));
   const server = createRoomServer({ store });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   t.after(async () => {
@@ -27,6 +29,11 @@ test('GET /api/open and /api/version on the real HTTP server', async t => {
   assert.equal(version.status, 'ok');
   assert.equal(typeof version.sourceRevision, 'string');
   assert.ok(version.sourceRevision.length > 0);
+  const head = await fetch(origin + '/api/open', { method: 'HEAD' });
+  assert.equal(head.status, 200);
+  assert.equal(await head.text(), '');
+  const ready = await (await fetch(origin + '/api/ready')).json();
+  assert.equal(ready.status, 'ready');
   const prod = readFileSync(new URL('../cloudflare/wrangler.production.jsonc', import.meta.url), 'utf8');
   assert.match(prod, /ROOM_PRODUCTION": "1"/);
   assert.match(prod, /room\.trydemigod\.com/);

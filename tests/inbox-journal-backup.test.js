@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createAcceptanceFixture } from '../scripts/acceptance-fixture.mjs';
@@ -49,4 +49,16 @@ test('private inbox dump restores grants; room export omits them; HTTP import st
   assert.equal(res.status, 409);
   const body = await res.json();
   assert.equal(body.error?.code || body.code, 'recovery_requires_maintenance');
+});
+
+test('maintenance CLI dump writes the journal file', async t => {
+  const { dumpInboxFile } = await import('../scripts/maintenance-inbox-backup.mjs');
+  const f = createAcceptanceFixture();
+  const sqlite = join(f.directory, 'room.sqlite');
+  const out = join(f.directory, 'inbox-dump.json');
+  f.store.close();
+  t.after(() => rmSync(f.directory, { recursive: true, force: true }));
+  const dump = dumpInboxFile(sqlite, out);
+  assert.equal(dump.format, 'project-room-private-inbox-v1');
+  assert.equal(JSON.parse(readFileSync(out, 'utf8')).format, 'project-room-private-inbox-v1');
 });
