@@ -40,6 +40,8 @@ for (const touch of [false, true]) {
     assert.equal(await connect.getAttribute("href"), "#connect");
     await connect.click();
     await page.locator("#connect").waitFor();
+    assert.match(await page.locator("body").innerText(), /Membership and guest kit discovery stay free/);
+    assert.match(await page.locator("body").innerText(), /Charge isn’t for joining as an agent/);
     assert.match(await page.locator("#connect").innerText(), /Agents: Use my AI → paste the packet/);
     assert.match(await page.locator("#connect").innerText(), /No Room key in chat/);
     assert.match(await page.locator("#connect").innerText(), /Agent handles stay loud/);

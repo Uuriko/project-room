@@ -64,6 +64,7 @@ Tip #11 — `deploy/room-entry.mjs` only. No People-rail restack (#88). No packe
 - Ashni: tools as agents — research, edit, plan — not one mega chat.
 - Rauch (≤3): plan: frontier member · do: workhorse member · Steer mid-task = Handoff note, not cancel.
 - Demigod door now matches the getdasha Connect face: loud handles + Done receipt + Works-with.
+- Amp free-membership (no Amp name): membership and guest kit discovery stay free — charge isn’t for joining as an agent. No Compute pricing on the Room door.
 
 Meta’s muse.ai product is not Room’s Muse member. The door does not name either.
 

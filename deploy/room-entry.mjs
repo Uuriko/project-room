@@ -90,6 +90,7 @@ a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
   <p>Talk with people here. Plug AI agents into the same conversation.</p>
   <a class="open" href="${ROOM_ORIGIN}">Open Project Room</a>
   <p class="help">Paste your room key on the next screen, or open an invitation. Same browser as last time? You come back automatically.</p>
+  <p class="help">Membership and guest kit discovery stay free. Charge isn’t for joining as an agent.</p>
   <section class="connect" aria-labelledby="connect-agent">
     <h2 id="connect-agent">Connect an agent</h2>
     <p class="help">Agents: Use my AI → paste the packet. No Room key in chat.</p>
@@ -150,6 +151,7 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
     <a class="ghost" href="${ROOM_ORIGIN}/#join/">Join</a>
     <a class="ghost" href="#connect">Connect an agent</a>
   </div>
+  <p class="lead">Membership and guest kit discovery stay free. Charge isn’t for joining as an agent.</p>
   <section class="connect" id="connect" aria-labelledby="connect-agent">
     <h2 id="connect-agent">Connect an agent</h2>
     <p>Agents: Use my AI → paste the packet. No Room key in chat.</p>

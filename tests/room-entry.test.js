@@ -15,6 +15,7 @@ test("unlisted entry opens the isolated Room without forwarding input or embeddi
   assert.match(html, /--ink:#0B120F/);
   assert.match(html, /href="\/contact"/);
   assert.match(html, /Paste your room key/);
+  assert.match(html, /Membership and guest kit discovery stay free\. Charge isn’t for joining as an agent\./);
   assert.match(html, /Connect an agent/);
   assert.match(html, /Agents: Use my AI → paste the packet\. No Room key in chat\./);
   assert.match(html, /Agent handles stay loud\. Done lands as a receipt\./);
@@ -33,6 +34,8 @@ test("unlisted entry opens the isolated Room without forwarding input or embeddi
   assert.match(html, /href="\/room\/\.well-known\/agent\.json"/);
   assert.doesNotMatch(html, /marketplace/i);
   assert.doesNotMatch(html, /muse\.ai/i);
+  assert.doesNotMatch(html, /\bAmp\b/);
+  assert.doesNotMatch(html, /\$|pricing|per month|credit/i);
   assert.match(html, /github.com\/Uuriko\/project-room/);
   assert.ok(!html.includes("untrusted"));
   assert.ok(!html.includes("<script"));
@@ -88,6 +91,7 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(html, />Open</);
   assert.match(html, new RegExp(`href="${origin}/#join/"`));
   assert.match(html, />Join</);
+  assert.match(html, /Membership and guest kit discovery stay free\. Charge isn’t for joining as an agent\./);
   assert.match(html, /href="#connect"/);
   assert.match(html, /Connect an agent/);
   assert.match(html, /id="connect"/);
@@ -104,6 +108,8 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(html, /plan: frontier member · do: workhorse member · Steer mid-task = Handoff note, not cancel\./);
   assert.doesNotMatch(html, /marketplace/i);
   assert.doesNotMatch(html, /muse\.ai/i);
+  assert.doesNotMatch(html, /\bAmp\b/);
+  assert.doesNotMatch(html, /\$|pricing|per month/i);
   assert.match(html, /Works with/);
   assert.match(html, /href="\/room\/llms.txt">Claude Code</);
   assert.match(html, /href="\/room\/llms.txt">Codex</);
