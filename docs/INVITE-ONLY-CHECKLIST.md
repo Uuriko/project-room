@@ -27,9 +27,11 @@ Every `/api/*` route is either open by design (below) or requires a credential
 Each mechanism was checked for: unguessable token, hash-only storage,
 expiry, revocation, and rate limits.
 
-- **Agent invite codes** (`server/agent-invites.mjs`, PR #126): `RM-XXXXXXXX`
-  from 32+ bits of `randomBytes`, Crockford alphabet; SHA-256 hash stored,
-  raw code returned once; single-use compare-and-swap burn; TTL 5 min–30 d
+- **Agent invite codes** (`server/agent-invites.mjs`, PR #126): `RM-` plus
+  16 Crockford base32 symbols (80 bits, rejection-sampled `randomBytes`, no
+  modulo bias); a deterministic scrypt hash (N=16384) is stored, raw code
+  returned once; legacy 8-symbol codes (SHA-256 stored) redeem until they
+  expire; single-use compare-and-swap burn; TTL 5 min–30 d
   (default 24 h); revocable before redemption; issuer authority re-checked at
   redemption; `manage_members`/`decide` can never be granted.
 - **Share links** (`server/share-links.mjs`): client-generated 43-char

@@ -201,10 +201,29 @@ export class RoomAgentClient {
     this.#origin = origin; this.#roomId = roomId; this.#token = token; this.#fetch = fetchImpl;
     this.#memberId = memberId;
   }
+  // Every service request shares one fetch posture: redirects are errors (a
+  // redirect could carry the bearer elsewhere), no ambient credentials, and a
+  // 15s deadline that a caller-supplied signal narrows but never removes.
+  #fetchRaw(path, { method = "GET", headers = {}, body, signal } = {}) {
+    return this.#fetch(`${this.#origin}${path}`, {
+      method, redirect: "error", credentials: "omit", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
+      headers: { Authorization: `Bearer ${this.#token}`, ...headers },
+      ...(body === undefined ? {} : { body })
+    });
+  }
+  // Maps a non-2xx service response to a RoomClientError, keeping the
+  // service's own error code and Retry-After when present.
+  #requestError(response, value, fallback = "Room request failed") {
+    const retry = response.headers?.get("retry-after");
+    const parsed = retry == null ? NaN : /^\d+$/.test(retry) ? Number(retry) * 1000 : Date.parse(retry) - Date.now();
+    return new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? fallback, Number.isFinite(parsed) ? Math.max(0, parsed) : null, {
+      status: value?.status, reason: value?.reason, hint: value?.hint, next: value?.next
+    });
+  }
   async #fetchPath(path, body, signal, helpContext = false, offerContext = false) {
-    const response = await this.#fetch(`${this.#origin}${path}`, {
-      method: body === undefined ? "GET" : "POST", redirect: "error", credentials: "omit", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
-      headers: { Authorization: `Bearer ${this.#token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+    const response = await this.#fetchRaw(path, {
+      method: body === undefined ? "GET" : "POST", signal,
+      headers: { ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         ...(helpContext ? { "X-Project-Room-Help-Context": "1" } : {}),
         ...(offerContext ? { "X-Project-Room-Offer-Context": "1" } : {}) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) })
@@ -214,24 +233,14 @@ export class RoomAgentClient {
       if (response.ok && (error instanceof TypeError || ["AbortError", "TimeoutError"].includes(error.name))) throw error;
       if (response.ok) throw new RoomClientError(response.status, "invalid_response", "Invalid Room response");
     }
-    if (!response.ok) {
-      const retry = response.headers?.get("retry-after");
-      const parsed = retry == null ? NaN : /^\d+$/.test(retry) ? Number(retry) * 1000 : Date.parse(retry) - Date.now();
-      throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room request failed", Number.isFinite(parsed) ? Math.max(0, parsed) : null, {
-        status: value?.status, reason: value?.reason, hint: value?.hint, next: value?.next
-      });
-    }
+    if (!response.ok) throw this.#requestError(response, value);
     return value;
   }
   async #deletePath(path, body, signal) {
-    const response = await this.#fetch(`${this.#origin}${path}`, {
-      method: "DELETE", redirect: "error", credentials: "omit", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
-      headers: { Authorization: `Bearer ${this.#token}`, "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    });
+    const response = await this.#fetchRaw(path, { method: "DELETE", signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     let value;
     try { value = await response.json(); } catch { value = null; }
-    if (!response.ok) throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room request failed");
+    if (!response.ok) throw this.#requestError(response, value);
     return value;
   }
   async #request(suffix = "", body, signal, helpContext = false, offerContext = false) {
@@ -584,22 +593,20 @@ export class RoomAgentClient {
     return this.command({ id: randomUUID(), type: "notifications.preferences_set", data: { preferences } }, { signal });
   }
   // Round-2 #106/#107: export returns NDJSON text; import posts it back.
-  // These bypass #request because the payloads are NDJSON, not JSON.
+  // These bypass #request because the payloads are NDJSON, not JSON, but
+  // share the hardened fetch posture and error mapping of every other path.
   async exportRoom({ signal } = {}) {
-    const response = await this.#fetch(`${this.#origin}/api/rooms/${encodeURIComponent(this.#roomId)}/export`, {
-      headers: { Authorization: `Bearer ${this.#token}` }, signal: signal ?? AbortSignal.timeout(15000)
-    });
-    if (!response.ok) throw new RoomClientError(response.status, "request_failed", "Room export failed");
+    const response = await this.#fetchRaw(`/api/rooms/${encodeURIComponent(this.#roomId)}/export`, { signal });
+    if (!response.ok) throw this.#requestError(response, await response.json().catch(() => null), "Room export failed");
     return response.text();
   }
   async importRoom(ndjson, { signal } = {}) {
     if (typeof ndjson !== "string" || !ndjson.trim()) throw new Error("Import needs NDJSON text");
-    const response = await this.#fetch(`${this.#origin}/api/rooms/${encodeURIComponent(this.#roomId)}/import`, {
-      method: "POST", headers: { Authorization: `Bearer ${this.#token}`, "Content-Type": "application/x-ndjson" },
-      body: ndjson, signal: signal ?? AbortSignal.timeout(15000)
+    const response = await this.#fetchRaw(`/api/rooms/${encodeURIComponent(this.#roomId)}/import`, {
+      method: "POST", signal, headers: { "Content-Type": "application/x-ndjson" }, body: ndjson
     });
     const value = await response.json().catch(() => null);
-    if (!response.ok) throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room import failed");
+    if (!response.ok) throw this.#requestError(response, value, "Room import failed");
     return value;
   }
   capabilities({ search, signal } = {}) {

@@ -8,11 +8,14 @@
 // grant manage_members/decide — rejected at issuance, and re-checked by the
 // member.added event validator for kind:"agent".
 //
-// The code itself is the bearer credential, so only its sha256 hash is
-// stored. Audit is the table: created_by/at, expires_at, redeemed_at/by,
-// revoked_at, all queryable through list().
+// The code itself is the bearer credential, so only a hash of it is stored:
+// a deterministic scrypt (so lookup by hash still works, and no deployment
+// secret is needed) that costs orders of magnitude more per guess than a
+// bare sha256. Codes minted before the v2 format (8 symbols, sha256 stored)
+// keep redeeming until they expire. Audit is the table: created_by/at,
+// expires_at, redeemed_at/by, revoked_at, all queryable through list().
 
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { ServiceError } from "./store.mjs";
 import { applyEvent, event, EVENT_TYPES as T, memberCan, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS } from "../src/events.js";
 import { agentAccessProfiles } from "./agent-connections.mjs";
@@ -23,8 +26,37 @@ const hash = text => createHash("sha256").update(text).digest("hex");
 const compactState = state => ({ ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} });
 
 const CODE_PREFIX = "RM-";
-const CODE_BYTES = 8;
-const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // unambiguous: no 0/O, 1/I/L
+// v2 codes: 16 symbols from a 32-symbol alphabet = 80 bits of entropy.
+// Crockford base32 (no I/L/O/U); redeem() folds the confusable I/L -> 1 and
+// O -> 0 so a transcribed code still works.
+const CODE_LENGTH = 16;
+const CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+// v1 codes (pre-v2 rows, sha256 stored): 8 symbols from a 31-symbol alphabet.
+const LEGACY_CODE_LENGTH = 8;
+const LEGACY_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+const CODE_PATTERN = new RegExp(`^${CODE_PREFIX}(?:[${CODE_ALPHABET}]{${CODE_LENGTH}}|[${LEGACY_CODE_ALPHABET}]{${LEGACY_CODE_LENGTH}})$`);
+const CODE_HASH_SALT = "project-room-agent-invite-v2";
+const CODE_HASH_PARAMS = { N: 16384, r: 8, p: 1 };
+
+// Uniform symbols without modulo bias: a byte is used only when it falls in
+// the largest multiple of the alphabet size, otherwise it is rejected and a
+// fresh byte drawn. (For a 32-symbol alphabet nothing is ever rejected; the
+// guard keeps the sampler correct if the alphabet changes.)
+const randomSymbols = (length, alphabet) => {
+  const limit = Math.floor(256 / alphabet.length) * alphabet.length;
+  let out = "";
+  while (out.length < length) {
+    for (const b of randomBytes(length - out.length)) {
+      if (b < limit && out.length < length) out += alphabet[b % alphabet.length];
+    }
+  }
+  return out;
+};
+// Deterministic slow hash for v2 codes. Legacy 8-symbol codes were stored as
+// bare sha256, so lookup dispatches on the code format.
+const codeHash = code => code.length === CODE_PREFIX.length + LEGACY_CODE_LENGTH
+  ? hash(code)
+  : scryptSync(code, CODE_HASH_SALT, 32, CODE_HASH_PARAMS).toString("hex");
 const NEVER_GRANT = ["manage_members", "decide"];
 const DEFAULT_TTL_MINUTES = 1440; // 24h
 const MIN_TTL_MINUTES = 5;
@@ -103,28 +135,34 @@ export class AgentInvites {
     if (!Number.isInteger(expiresInMinutes) || expiresInMinutes < MIN_TTL_MINUTES || expiresInMinutes > MAX_TTL_MINUTES) {
       fail(422, "invalid_invite_ttl", `expiresInMinutes must be ${MIN_TTL_MINUTES}-${MAX_TTL_MINUTES}`);
     }
-    const name = displayName === undefined ? null : String(displayName).trim();
+    if (displayName !== undefined && typeof displayName !== "string") fail(422, "invalid_invite", "displayName must be text");
+    const name = displayName === undefined ? null : displayName.trim();
     if (name !== null && (!name || name.length > 80)) fail(422, "invalid_invite_name", "displayName must be 1-80 characters");
+    // Generate and hash before taking the write lock: scrypt is deliberately slow.
+    const code = CODE_PREFIX + randomSymbols(CODE_LENGTH, CODE_ALPHABET);
+    const stored = codeHash(code);
     return this.store.transaction(() => {
-      const bytes = randomBytes(CODE_BYTES);
-      const code = CODE_PREFIX + [...bytes].map(b => CODE_ALPHABET[b % CODE_ALPHABET.length]).join("");
       const now = this.store.now();
       const expiresAt = now + expiresInMinutes * 60000;
       this.db.prepare(`INSERT INTO agent_invite_codes(code_hash,room_id,created_by,permissions_json,display_name,created_at,expires_at)
-        VALUES(?,?,?,?,?,?,?)`).run(hash(code), roomId, auth.member.id, JSON.stringify(permissions), name, now, expiresAt);
-      return { code, codeHash: hash(code), roomId, permissions, profile: profileName, displayName: name, createdAt: now, expiresAt };
+        VALUES(?,?,?,?,?,?,?)`).run(stored, roomId, auth.member.id, JSON.stringify(permissions), name, now, expiresAt);
+      return { code, codeHash: stored, roomId, permissions, profile: profileName, displayName: name, createdAt: now, expiresAt };
     });
   }
 
   // Unauthenticated: the code is the bearer credential. Burns the code,
   // mints an identity, and links it as an agent member — all atomically.
   redeem(code, { displayName } = {}) {
-    const normalized = typeof code === "string" ? code.trim().toUpperCase() : "";
-    if (!new RegExp(`^${CODE_PREFIX}[${CODE_ALPHABET}]{${CODE_BYTES}}$`).test(normalized)) {
+    // Legacy codes never contain I/L/O, so folding the confusables is safe
+    // for both formats.
+    const normalized = typeof code === "string" ? code.trim().toUpperCase().replace(/[IL]/g, "1").replace(/O/g, "0") : "";
+    if (!CODE_PATTERN.test(normalized)) {
       fail(404, "invite_unavailable", "Invite code is invalid, expired, or already used");
     }
+    // Hash outside the write transaction: scrypt is deliberately slow.
+    const lookup = codeHash(normalized);
     return this.store.transaction(() => {
-      const row = this.db.prepare("SELECT * FROM agent_invite_codes WHERE code_hash=?").get(hash(normalized));
+      const row = this.db.prepare("SELECT * FROM agent_invite_codes WHERE code_hash=?").get(lookup);
       if (!row) fail(404, "invite_unavailable", "Invite code is invalid, expired, or already used");
       if (row.revoked_at != null) fail(410, "invite_revoked", "Invite code was revoked");
       const now = this.store.now();
@@ -199,7 +237,8 @@ export class AgentInvites {
     });
   }
 
-  // Owner-only: audit view. Raw codes are never stored, so only hashes show.
+  // Owner-only: audit view. Raw codes are never stored, so only hashes show
+  // (codeHash is the stored lookup hash, which is what revoke() takes).
   list(token, roomId) {
     const auth = this.store.authenticate(token, roomId);
     const authority = this.store.roomAuthority(roomId);

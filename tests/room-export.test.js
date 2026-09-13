@@ -8,6 +8,8 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { createServer } from "node:http";
+import { RoomAgentClient } from "../client/room-agent.mjs";
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-export-"));
@@ -35,7 +37,7 @@ async function serve(t) {
       headers: { Origin: origin, Authorization: `Bearer ${token}`, "Content-Type": contentType },
       body
     });
-  return { request, importNdjson, ownerKey, agentKey, store };
+  return { request, importNdjson, ownerKey, agentKey, store, origin };
 }
 
 test("room export streams the full event log as JSONL", async t => {
@@ -152,4 +154,86 @@ test("database failures during import surface as clean invalid_import, not raw e
   res = await importNdjson(ownerKey, dup);
   assert.equal(res.status, 422);
   assert.equal((await res.json()).error.code, "invalid_import");
+});
+
+test("export never answers a 200 with an empty body when the lazy authenticate fails", async t => {
+  const { request, ownerKey, store, origin } = await serve(t);
+  // A stale fence is rejected as a JSON error, not as an empty NDJSON 200.
+  const fenced = await fetch(`${origin}/api/rooms/commons/export`, {
+    headers: { Origin: origin, Authorization: `Bearer ${ownerKey}`, "X-Session-Binding": "f".repeat(64) }
+  });
+  assert.equal(fenced.status, 409);
+  assert.match(fenced.headers.get("content-type"), /application\/json/);
+  assert.equal((await fenced.json()).error.code, "session_binding_changed");
+  // exportEvents authenticates when first iterated. Simulate the key being
+  // rotated between the route's pre-check and that lazy check: the route
+  // must not have committed to a 200 yet.
+  const original = store.exportEvents.bind(store);
+  store.exportEvents = function* rotatedMidRequest(token, roomId, fence) {
+    store.issueAccessKey("commons", "owner"); // revokes ownerKey
+    yield* original(token, roomId, fence);
+  };
+  const stale = await request("/api/rooms/commons/export", { token: ownerKey });
+  assert.equal(stale.status, 401);
+  assert.match(stale.headers.get("content-type"), /application\/json/);
+  assert.equal((await stale.json()).error.code, "unauthenticated");
+});
+
+test("import reports the line number of a corrupt line as it appears in the file, blanks included", async t => {
+  const { request, importNdjson, ownerKey } = await serve(t);
+  const lines = (await (await request("/api/rooms/commons/export", { token: ownerKey })).text()).trim().split("\n");
+  // Line 1 valid, line 2 blank, line 3 whitespace, line 4 valid, line 5 corrupt.
+  const body = [lines[0], "", "   ", lines[1], "not json", ...lines.slice(2)].join("\n") + "\n";
+  const res = await importNdjson(ownerKey, body);
+  assert.equal(res.status, 422);
+  const error = (await res.json()).error;
+  assert.equal(error.code, "invalid_import");
+  assert.match(error.message, /Line 5 /);
+  // Blank lines alone are tolerated: the import still round-trips.
+  const ok = await importNdjson(ownerKey, [lines[0], "", ...lines.slice(1)].join("\n") + "\n\n");
+  assert.equal(ok.status, 200);
+  assert.equal((await ok.json()).imported, lines.length);
+});
+
+test("client exportRoom/importRoom use the hardened fetch posture and keep the service error code", async t => {
+  const config = { origin: "https://room.example", roomId: "commons", token: "T".repeat(43) };
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, options });
+    if (url.endsWith("/export")) return new Response("{\"sequence\":1}\n", { status: 200, headers: { "content-type": "application/x-ndjson" } });
+    return Response.json({ imported: 1, sequence: 1 });
+  };
+  const client = new RoomAgentClient({ ...config, fetchImpl });
+  const caller = new AbortController();
+  assert.equal(await client.exportRoom({ signal: caller.signal }), "{\"sequence\":1}\n");
+  await client.importRoom("{\"sequence\":1}\n", { signal: caller.signal });
+  assert.equal(calls.length, 2);
+  for (const { options } of calls) {
+    assert.equal(options.redirect, "error");
+    assert.equal(options.credentials, "omit");
+    assert.equal(options.headers.Authorization, `Bearer ${config.token}`);
+    // The caller's signal is combined with the 15s deadline, not substituted for it.
+    assert.ok(options.signal instanceof AbortSignal);
+    assert.notEqual(options.signal, caller.signal);
+    assert.equal(options.signal.aborted, false);
+  }
+  assert.equal(calls[1].options.method, "POST");
+  assert.equal(calls[1].options.headers["Content-Type"], "application/x-ndjson");
+  caller.abort();
+  assert.ok(calls.every(({ options }) => options.signal.aborted === true), "combined signal follows the caller's abort");
+  // The service's own error code and message survive, for export as for import.
+  const failing = new RoomAgentClient({ ...config, fetchImpl: async () =>
+    Response.json({ error: { code: "session_binding_changed", message: "Session changed" } }, { status: 409, headers: { "retry-after": "3" } }) });
+  await assert.rejects(failing.exportRoom(), error => error.status === 409 && error.code === "session_binding_changed" && error.message === "Session changed" && error.retryAfterMs === 3000);
+  await assert.rejects(failing.importRoom("{}\n"), error => error.status === 409 && error.code === "session_binding_changed");
+  // A redirect is an error with the real fetch: the bearer never follows a Location header.
+  const leaked = createServer((req, res) => {
+    if (req.url.endsWith("/export") || req.url.endsWith("/import")) { res.writeHead(302, { Location: "/elsewhere" }); return res.end(); }
+    res.writeHead(200, { "Content-Type": "application/json" }); res.end("{\"leaked\":true}");
+  });
+  await new Promise(resolve => leaked.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise(resolve => leaked.close(resolve)));
+  const redirected = new RoomAgentClient({ ...config, origin: `http://127.0.0.1:${leaked.address().port}` });
+  await assert.rejects(redirected.exportRoom());
+  await assert.rejects(redirected.importRoom("{}\n"));
 });

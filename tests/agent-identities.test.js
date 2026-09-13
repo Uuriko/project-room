@@ -189,6 +189,77 @@ test("CLI plug-in loop: a new AI goes from no credential to connected member", a
   assert.notEqual(recheck.status, 0);
 });
 
+test("identity creation is capped: the 5000-row pilot limit is enforced inside the insert transaction", async t => {
+  const { store, origin } = await serve(t);
+  const existing = store.db.prepare("SELECT COUNT(*) AS n FROM agent_identities").get().n;
+  const insert = store.db.prepare("INSERT INTO agent_identities(identity_id,secret_hash,display_name,created_at) VALUES(?,?,?,?)");
+  store.transaction(() => {
+    for (let i = existing; i < 5000; i++) insert.run(`ai_cap${i}`, `cap-hash-${i}`, "Cap", 1);
+  });
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM agent_identities").get().n, 5000);
+  const res = await fetch(`${origin}/api/agent-identities`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin },
+    body: JSON.stringify({ displayName: "One Too Many" })
+  });
+  assert.equal(res.status, 409);
+  const body = await res.json();
+  assert.equal(body.error.code, "pilot_limit");
+  assert.match(body.error.message, /no data was changed/);
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM agent_identities").get().n, 5000);
+  // Invite redemption mints an identity too, so it is bounded by the same cap.
+  const ownerKey = store.issueAccessKey("commons", "owner");
+  const minted = store.invites.create(ownerKey, "commons", { permissions: ["accept_work"] });
+  assert.throws(() => store.invites.redeem(minted.code, { displayName: "Late Bot" }), error => error.status === 409 && error.code === "pilot_limit");
+  // Freeing a slot lets creation resume.
+  store.db.prepare("DELETE FROM agent_identities WHERE identity_id='ai_cap4999'").run();
+  const again = await fetch(`${origin}/api/agent-identities`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin },
+    body: JSON.stringify({ displayName: "Fits Now" })
+  });
+  assert.equal(again.status, 201);
+});
+
+test("identity-link listing is membership administration: agents and plain members get 403", async t => {
+  const { store, origin, ownerCommons } = await serve(t);
+  const { identityId, secret } = await createAgentIdentity(origin, "Listing Bot");
+  const link = await fetch(`${origin}/api/rooms/commons/identity-links`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${ownerCommons}` },
+    body: JSON.stringify({ identityId, permissions: ["accept_work"] })
+  });
+  assert.equal(link.status, 201);
+  const list = token => fetch(`${origin}/api/rooms/commons/identity-links`, { headers: { Origin: origin, Authorization: `Bearer ${token}` } });
+  // The linked agent can use the room but cannot enumerate who else is plugged in.
+  const denied = await list(secret);
+  assert.equal(denied.status, 403);
+  assert.equal((await denied.json()).error.code, "access_denied");
+  // A human member without manage_members is denied too.
+  store.command(ownerCommons, "commons", { id: randomUUID(), type: "member.added",
+    data: { memberId: "reader", displayName: "Reader", kind: "human", permissions: ["steer"] } });
+  const readerKey = store.issueAccessKey("commons", "reader");
+  assert.equal((await list(readerKey)).status, 403);
+  // The owner still sees the audit list.
+  const allowed = await list(ownerCommons);
+  assert.equal(allowed.status, 200);
+  assert.ok((await allowed.json()).links.some(row => row.identityId === identityId));
+});
+
+test("identity link/unlink/list honour the session-binding fence", async t => {
+  const { store, ownerCommons } = await serve(t);
+  const { identityId } = store.identities.create("Fenced Bot");
+  const staleFence = "f".repeat(64);
+  const fenced = error => error.status === 409 && error.code === "session_binding_changed";
+  // A room access key has no session binding, so any expected fence is a mismatch.
+  assert.throws(() => store.identities.list(ownerCommons, "commons", staleFence), fenced);
+  assert.throws(() => store.identities.link(ownerCommons, "commons", { identityId, permissions: ["accept_work"] }, staleFence), fenced);
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM identity_links WHERE identity_id=?").get(identityId).n, 0);
+  store.identities.link(ownerCommons, "commons", { identityId, permissions: ["accept_work"] });
+  assert.throws(() => store.identities.unlink(ownerCommons, "commons", identityId, staleFence), fenced);
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM identity_links WHERE identity_id=?").get(identityId).n, 1);
+  // The default (no fence) keeps working.
+  assert.ok(store.identities.list(ownerCommons, "commons").some(row => row.identityId === identityId));
+  assert.equal(store.identities.unlink(ownerCommons, "commons", identityId).unlinked, true);
+});
+
 test("createAgentIdentity sends no credential and validates the origin", async () => {
   let seen;
   const fetchImpl = async (url, options) => {
