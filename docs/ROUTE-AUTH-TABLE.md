@@ -32,6 +32,7 @@ apply their per-address rate limit before the body is read.
 | `DELETE /api/rooms/:id/agent-invites` | room Bearer / session | `manage_members`; body `{ inviteId }`; `409 invite_ambiguous` if two active rows share a handle |
 | `POST /api/rooms/:id/import` | room Bearer / session | room owner only (destructive history replace) |
 | `POST /api/rooms/:id/commands` | room Bearer / session | member; per-command field validation |
+| `POST /api/rooms/:id/pins` | room Bearer / session | active member; pins or unpins one live message through `store.command` (`message.pinned` / `message.unpinned`), at most 50 pins per room; a deleted message cannot be pinned (`409 message_deleted`) |
 | `POST /api/rooms/:id/cursor` | room Bearer / session | member (own read cursor) |
 | `POST /api/rooms/:id/work-sessions` | room Bearer / session | member |
 | `POST /api/rooms/:id/spend-allowance` | room Bearer / session | room owner only (403 `owner_required` before the command is built); the `room.spend_allowance_set` reducer refuses non-owners on the generic command path as well |
@@ -58,7 +59,7 @@ server request timeout.
 ## Read routes
 
 All `GET` routes under `/api/rooms/:id/*` (snapshot, events, export,
-search, presence, capabilities, onboarding-funnel, provider-heartbeats,
+search, pins, presence, capabilities, onboarding-funnel, provider-heartbeats,
 reminders, agent-connections, share-links, invitations, work-*, reply-*,
 charter, diagnostics, return-brief, thread, spend-allowance) require a room
 credential with member visibility. `GET /api/rooms/:id/spend-allowance` (C3)

@@ -229,21 +229,6 @@ carry the claim, and the remaining tiers stay visibly open.
       }
     },
     {
-      "id": "notification-feed",
-      "claim": "A per-member notification feed derived from the event tail honours notification preferences, deduplicates edits, expires with the read cursor and never grants a wake.",
-      "evidence": {
-        "unit": [
-          "tests/notification-feed.test.js",
-          "tests/notification-preferences.test.js"
-        ],
-        "browser": [
-          "scripts/notification-feed-browser-check.mjs"
-        ],
-        "agent": [],
-        "hosted": []
-      }
-    },
-    {
       "id": "telegram-send-preview",
       "claim": "A saved Telegram reply previews its bot and target chat and dispatches only over a matching fixture transport through the shared send journal.",
       "evidence": {
@@ -252,6 +237,21 @@ carry the claim, and the remaining tiers stay visibly open.
           "tests/inbox-channel-client.test.js"
         ],
         "browser": [],
+        "agent": [],
+        "hosted": []
+      }
+    },
+    {
+      "id": "pinned-messages",
+      "claim": "Any active member can pin or unpin a live message from the keyboard; the Pinned section lists pins in pin order and follows other members' pins live; a deleted message drops out of the pinned list; the pins route re-checks membership on every call and refuses a revoked member.",
+      "evidence": {
+        "unit": [
+          "tests/pinned-messages.test.js",
+          "tests/route-auth-table.test.js"
+        ],
+        "browser": [
+          "scripts/pinned-messages-browser-check.mjs"
+        ],
         "agent": [],
         "hosted": []
       }
@@ -266,21 +266,6 @@ carry the claim, and the remaining tiers stay visibly open.
         ],
         "browser": [
           "scripts/room-policy-browser-check.mjs"
-        ],
-        "agent": [],
-        "hosted": []
-      }
-    },
-    {
-      "id": "room-spend-allowance",
-      "claim": "The room owner can set a spend allowance over a rolling period; a session start that would commit more than the allowance is refused before anything is written, unknown spend never frees allowance, and every member sees allowance, spent, reserved and headroom from the same ledger the server enforces.",
-      "evidence": {
-        "unit": [
-          "tests/spend-allowance.test.js",
-          "tests/route-auth-table.test.js"
-        ],
-        "browser": [
-          "scripts/spend-allowance-browser-check.mjs"
         ],
         "agent": [],
         "hosted": []
@@ -306,9 +291,8 @@ carry the claim, and the remaining tiers stay visibly open.
 | Live Telegram trigger and card | telegram-live, telegram-adapter | inbox-telegram-check | open | open |
 | Telegram send preview | channel-import, inbox-channel-client | open | open | open |
 | Room review policy | work-actions, state-machine-invariants | room-policy-browser-check | open | open |
-| Room spend allowance (owner cap, reserve on start, headroom card) | spend-allowance, route-auth-table | spend-allowance-browser-check | open | open |
+| Pinned messages | pinned-messages, route-auth-table | pinned-messages-browser-check | open | open |
 | Unified inbox UI (list, reply, connections, needs-you, share) | inbox-unified-routes, inbox-channel-client | inbox-unified-check | open | open |
-| Notification feed | notification-feed, notification-preferences | notification-feed-browser-check | open | open |
 
 Follow-up scope: claims made in docs beyond the README list (per-feature
 acceptance docs) can be folded into the same block; the checker format already
