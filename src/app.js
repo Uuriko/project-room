@@ -824,13 +824,13 @@ function recipeChipHtml(r) {
   } else if (r.id === "suggest-next-work") {
     label = `Next step: ${esc(r.outcome.label)}`;
     action = r.outcome.workItemId
-      ? `<button type="button" class="button ghost" data-recipe-action="focus-work" data-work-id="${esc(r.outcome.workItemId)}">Open work</button>`
-      : `<button type="button" class="button ghost" data-recipe-action="open-chat">Open request</button>`;
+      ? `<button type="button" class="button ghost" data-recipe-action="focus-work" data-work-id="${esc(r.outcome.workItemId)}" aria-label="Open suggested work: ${esc(r.outcome.label)}">Open work</button>`
+      : `<button type="button" class="button ghost" data-recipe-action="open-chat" aria-label="Open suggested request: ${esc(r.outcome.label)}">Open request</button>`;
   } else {
     label = `"${esc(r.outcome.title ?? r.outcome.workItemId)}" has waited over a day for review`;
     action = `<button type="button" class="button ghost" data-recipe-action="draft-review" data-work-id="${esc(r.outcome.workItemId)}" data-to="${esc(r.outcome.toMemberId)}">Draft a review request</button>`;
   }
-  return `<div class="recipe-chip" data-recipe-chip="${esc(key)}"><span class="recipe-chip-label"><strong>${esc(meta.title)}</strong> - ${label}</span>${action}<button type="button" class="button ghost" data-recipe-dismiss="${esc(key)}">Dismiss</button></div>`;
+  return `<div class="recipe-chip" data-recipe-chip="${esc(key)}"><span class="recipe-chip-label"><strong>${esc(meta.title)}</strong> - ${label}</span>${action}<button type="button" class="button ghost" data-recipe-dismiss="${esc(key)}" aria-label="Dismiss suggestion: ${esc(meta.title)}">Dismiss</button></div>`;
 }
 function syncRecipeStrip() {
   const strip = $("#recipe-strip");
