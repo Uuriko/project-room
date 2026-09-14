@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { formatShareInvitation, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, reuseVisibleRoom, invitationUnavailableMessage, formatInvitationExpiry } from "../src/share-links.js";
+import { RoomStore } from "../server/store.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
 
 test("invitation note formatting is bounded plain text with an exact URL-only fallback", () => {
   const url = "https://room.example/#join/synthetic";
@@ -13,19 +18,44 @@ test("invitation note formatting is bounded plain text with an exact URL-only fa
   assert.equal(formatShareInvitation("A note", ""), "");
 });
 
-test("expired invitation copy names the room owner and includes the expiry time", () => {
-  const expiresAt = "2026-01-15T18:30:00.000Z";
-  const when = formatInvitationExpiry(expiresAt);
+test("expired invitation copy names the room owner and includes the expiry time", t => {
+  let now = Date.UTC(2026, 0, 15, 17, 30, 0);
+  const directory = mkdtempSync(join(tmpdir(), "invite-expiry-"));
+  const store = new RoomStore(join(directory, "room.sqlite"), { now: () => now });
+  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+  store.initialize(initialRoom());
+  store.bindHumanAccount("commons", "owner", "account-owner");
+  store.createAccount("account-target");
+  const login = id => {
+    const access = store.issueAccountAccessKey(id), slot = store.createAccountSessionSlot();
+    return { token: slot.token, session: store.loginAccountSession(slot.token, access, 0) };
+  };
+  const owner = login("account-owner");
+  login("account-target");
+  const token = randomBytes(32).toString("base64url");
+  const expiresAt = now + 3600000;
+  store.issueInvitation(owner.token, "commons", {
+    requestId: "expiry-copy", token, intendedAccountId: "account-target", intendedMemberId: "target",
+    displayName: "Target", role: "member", expiresAt, expectedIssuerMemberRevision: 0,
+    expectedSessionBinding: owner.session.sessionBinding
+  });
+  now = expiresAt + 1;
+  const preview = store.previewInvitation(token);
+  assert.equal(preview.status, "expired");
+  assert.equal(typeof preview.expiresAt, "number");
+  assert.equal(preview.expiresAt, expiresAt);
+  const when = formatInvitationExpiry(preview.expiresAt);
+  assert.equal(when, formatInvitationExpiry(expiresAt));
   assert.match(when, /2026/);
   assert.equal(
-    invitationUnavailableMessage({ status: "expired", expiresAt }),
+    invitationUnavailableMessage(preview),
     `This invitation expired on ${when}. Ask the room owner for a new one.`
   );
   assert.match(invitationUnavailableMessage({ status: "expired" }), /has expired.*room owner/);
   assert.match(invitationUnavailableMessage({ status: "revoked" }), /revoked.*room owner/);
   assert.match(invitationUnavailableMessage({ status: "accepted" }), /already been accepted/);
   assert.match(invitationUnavailableMessage({ status: "authority_changed" }), /room owner/);
-  assert.doesNotMatch(invitationUnavailableMessage({ status: "expired", expiresAt }), /administrator/);
+  assert.doesNotMatch(invitationUnavailableMessage(preview), /administrator/);
   const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   assert.match(app, /invitationUnavailableMessage\(preview\)/);
   assert.doesNotMatch(app, /Ask a current Room administrator/);

@@ -22,9 +22,9 @@ export function setShareLinkStatus(element, text) {
 const interrupted = error => error?.name === "AbortError" || error?.name === "TimeoutError" || error instanceof TypeError;
 export const canRetryInvitation = error => interrupted(error) || error?.status === 429 || error?.status >= 500;
 export function formatInvitationExpiry(expiresAt) {
-  const ms = Date.parse(expiresAt);
-  if (!Number.isFinite(ms)) return "";
-  return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(ms));
+  const date = new Date(expiresAt);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
 export function invitationUnavailableMessage(preview) {
