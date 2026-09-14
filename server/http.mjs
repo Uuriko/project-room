@@ -666,18 +666,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "export" && req.method === "GET") {
         // Round-2 #106: JSONL export of the event log (same visibility as
         // the events route — members only). One {sequence, event} per line.
-        // exportEvents is a generator that authenticates lazily, so pull the
-        // first item before committing to a 200: an auth/fence failure then
-        // takes the normal JSON error path instead of an empty 200 body.
-        const lines = store.exportEvents(selected.token, roomId, fence);
-        const first = lines.next();
-        res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8",
+        // The log is bounded (10000 events per room, the same bound import
+        // enforces), so the whole export is materialised before any header
+        // is written: an auth, fence or storage failure part-way through
+        // takes the normal JSON error path instead of truncating a 200 body
+        // that would read as a valid, merely shorter, export. Content-Length
+        // lets clients treat a dropped connection as an incomplete download.
+        const lines = [];
+        for (const line of store.exportEvents(selected.token, roomId, fence)) lines.push(JSON.stringify(line) + "\n");
+        const bytes = Buffer.from(lines.join(""), "utf8");
+        res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Content-Length": bytes.length,
           "Content-Disposition": `attachment; filename="room-${roomId}-export.jsonl"` });
-        if (!first.done) {
-          res.write(JSON.stringify(first.value) + "\n");
-          for (const line of lines) res.write(JSON.stringify(line) + "\n");
-        }
-        return res.end();
+        return res.end(bytes);
       }
       if (route === "import" && req.method === "POST") {
         // Round-2 #107: NDJSON import (the #106 export format). Owner-only,
