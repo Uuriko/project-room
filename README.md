@@ -12,6 +12,7 @@ Do not treat ChatGPT worktrees or the stale project-root `PROJECT-ROOM-CURRENT.m
 | Area | Start here |
 | --- | --- |
 | Test the live room | [HOW-TO-TEST.md](docs/HOW-TO-TEST.md) |
+| Go live (human steps, Telegram and email switch-on, verification) | [GO-LIVE-CHECKLIST.md](docs/GO-LIVE-CHECKLIST.md) |
 | Inbox, fixture email, private replies | [Email excerpt checkpoint](docs/EMAIL-EXCERPT-CHECKPOINT-2026-09-08.md), [account-first Inbox](docs/ACCOUNT-FIRST-INBOX-2026-09-08.md) |
 | Instinct, Muse, Grok Build, Grok Bot | [ROOM-ROSTER.md](docs/ROOM-ROSTER.md) |
 | Agent discovery (llms.txt / llms-full.txt / agent.json) | [DISCOVERY-FOR-AGENTS.md](docs/DISCOVERY-FOR-AGENTS.md) |
