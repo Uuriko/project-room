@@ -24,6 +24,17 @@ The event log, projections, work items, inbox connection records
 (`pending_channel_updates`) all live in that same SQLite database
 (`docs/UNIFIED-INBOX.md` "Connection record"; `docs/EMAIL-ROUTING.md` "Worker email() handler").
 
+Message reports (`message_reports`, `server/moderation.mjs`) live in the same
+database but outside the room event log. A report contains the reported
+message id, the reporting member's id, a reason of at most 280 characters of
+plain text and a timestamp; it copies no message body. Only the room owner can
+read reports (`GET /api/rooms/:id/reports`); they are never included in the
+events, stream, snapshot or export routes, so no other member, agent or
+external system receives them or learns who reported. A mute
+(`member.mute_set`) is an ordinary room event on the muter's own member record,
+visible in the shared log like notification preferences, and is a personal
+display preference, not authority (`docs/MODERATION.md`).
+
 ## 2. What is encrypted where
 
 ### In transit

@@ -242,21 +242,6 @@ carry the claim, and the remaining tiers stay visibly open.
       }
     },
     {
-      "id": "pinned-messages",
-      "claim": "Any active member can pin or unpin a live message from the keyboard; the Pinned section lists pins in pin order and follows other members' pins live; a deleted message drops out of the pinned list; the pins route re-checks membership on every call and refuses a revoked member.",
-      "evidence": {
-        "unit": [
-          "tests/pinned-messages.test.js",
-          "tests/route-auth-table.test.js"
-        ],
-        "browser": [
-          "scripts/pinned-messages-browser-check.mjs"
-        ],
-        "agent": [],
-        "hosted": []
-      }
-    },
-    {
       "id": "room-review-policy",
       "claim": "The room owner can make independent review and/or an owner decision mandatory; altered client fields cannot disable a mandatory gate, earlier work keeps its recorded requirements, and the proposer sees the requirement locked with the reason.",
       "evidence": {
@@ -266,6 +251,21 @@ carry the claim, and the remaining tiers stay visibly open.
         ],
         "browser": [
           "scripts/room-policy-browser-check.mjs"
+        ],
+        "agent": [],
+        "hosted": []
+      }
+    },
+    {
+      "id": "report-and-mute",
+      "claim": "Any member can report a message to the room owner with a short reason; only the owner can list reports and see who reported. A member can mute another member or agent for themselves, collapsing that author's messages and keeping them out of their mention feed, and can undo it; nothing leaves the room.",
+      "evidence": {
+        "unit": [
+          "tests/moderation.test.js",
+          "tests/route-auth-table.test.js"
+        ],
+        "browser": [
+          "scripts/moderation-browser-check.mjs"
         ],
         "agent": [],
         "hosted": []
@@ -291,7 +291,7 @@ carry the claim, and the remaining tiers stay visibly open.
 | Live Telegram trigger and card | telegram-live, telegram-adapter | inbox-telegram-check | open | open |
 | Telegram send preview | channel-import, inbox-channel-client | open | open | open |
 | Room review policy | work-actions, state-machine-invariants | room-policy-browser-check | open | open |
-| Pinned messages | pinned-messages, route-auth-table | pinned-messages-browser-check | open | open |
+| Report a message, mute a member | moderation, route-auth-table | moderation-browser-check | open | open |
 | Unified inbox UI (list, reply, connections, needs-you, share) | inbox-unified-routes, inbox-channel-client | inbox-unified-check | open | open |
 
 Follow-up scope: claims made in docs beyond the README list (per-feature

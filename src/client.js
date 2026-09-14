@@ -1,30 +1,6 @@
 import { verifyWorkResult } from "./work-packet.js";
 import { validateCharterRead } from "./room-charter.js";
 
-// C2: the read-only "what this agent can access" preview must describe exactly the
-// selected work the browser asked about and repeat the server's own omission list;
-// anything else is a mismatched response, never a wider or narrower grant.
-export function verifyAccessSummary(value, { roomId, workItemId }) {
-  const invalid = () => { const error = new Error("Access preview does not match the selected work"); error.code = "invalid_response"; return error; };
-  const summary = value?.accessSummary, work = value?.work, conversation = summary?.conversation;
-  if (value?.contractVersion !== 1 || value.roomId !== roomId || work?.id !== workItemId || !Number.isFinite(Date.parse(value.evaluatedAt))
-    || summary?.version !== 1 || summary.membership !== "room") throw invalid();
-  if (!Array.isArray(summary.omitted) || !Array.isArray(value.context?.omitted) || summary.omitted.length !== value.context.omitted.length
-    || summary.omitted.some((entry, index) => typeof entry !== "string" || entry !== value.context.omitted[index])) throw invalid();
-  if (!conversation || !Array.isArray(conversation.sourceMessageIds) || conversation.deliveredByDefault !== false
-    || conversation.sourceMessageIds.some(id => id !== work.sourceMessageId)
-    || (conversation.scope === "none") !== (work.sourceMessageId == null)
-    || !["not_linked", "unavailable", "deleted", "available"].includes(conversation.sourceAvailability)
-    || (conversation.sourceAvailability === "not_linked") !== (work.sourceMessageId == null)) throw invalid();
-  if (!Array.isArray(summary.evidence?.records) || summary.evidence.retrieved !== false
-    || summary.evidence.records.some(entry => !["receipt", "verification", "decision", "handoff"].includes(entry?.record)
-      || (work[entry.record]?.evidenceVersion ?? null) !== entry.evidenceVersion)) throw invalid();
-  if (!summary.budget || typeof summary.budget !== "object" || ["maxRuntimeMs", "maxAttempts", "maxConcurrent", "maxSpendCents", "spendCents"]
-    .some(key => !(summary.budget[key] === "unknown" || Number.isSafeInteger(summary.budget[key])))) throw invalid();
-  if (!Array.isArray(summary.participantIds) || summary.externalExecution !== false || summary.credentials !== "none") throw invalid();
-  return summary;
-}
-
 const accountSessionError = message => {
   const error = new Error(message);
   error.status = 401;
@@ -441,20 +417,20 @@ export class RoomClient {
       throw error;
     }
   }
-  async notifications() {
-    // B4: read-only feed; a 401/403 ends access exactly like the sibling reads.
+  // E4 moderation: POST reports a message (own receipt only); GET lists reports (owner only).
+  async reports(request = null) {
     if (!this.session) return null;
     if (!this.ownsAccountSession()) { this.endAccess(); return null; }
     const generation = this.generation, session = this.session;
     try {
-      const result = await this.request(this.path("/notifications"));
+      const result = await this.request(this.path("/reports"), request ? { method: "POST", data: request } : {});
       if (generation !== this.generation || session !== this.session) return null;
       if (!this.ownsResponse(result, session)) { this.endAccess(); return null; }
       return result;
     } catch (error) {
       if (generation !== this.generation || session !== this.session) return null;
       if (!this.ownsAccountSession()) { this.endAccess(); return null; }
-      if ([401, 403].includes(error.status) || error.code === "session_binding_changed") this.handleFailure(error);
+      if (error.status === 401 || error.code === "session_binding_changed") this.handleFailure(error);
       throw error;
     }
   }
@@ -488,25 +464,6 @@ export class RoomClient {
       await verifyWorkResult(value, { roomId: session.roomId, workItemId, completionEventId, draftMessageId });
       if (generation !== this.generation || session !== this.session) return null;
       if (!this.ownsAccountSession()) { this.endAccess(); return null; }
-      return value;
-    } catch (error) {
-      if (generation !== this.generation || session !== this.session) return null;
-      if (!this.ownsAccountSession()) { this.endAccess(); return null; }
-      if ([401, 403].includes(error.status) || error.code === "session_binding_changed") this.handleFailure(error);
-      throw error;
-    }
-  }
-  // C2: one read-only GET of the selected-work view, used to preview what an agent
-  // can access before a run. It never starts, claims or acknowledges anything.
-  async workContext(workItemId) {
-    if (!this.session) return null;
-    if (!this.ownsAccountSession()) { this.endAccess(); return null; }
-    const generation = this.generation, session = this.session;
-    try {
-      const value = await this.request(this.path(`/work-context?${new URLSearchParams({ workItemId })}`));
-      if (generation !== this.generation || session !== this.session) return null;
-      if (!this.ownsResponse(value, session)) { this.endAccess(); return null; }
-      verifyAccessSummary(value, { roomId: session.roomId, workItemId });
       return value;
     } catch (error) {
       if (generation !== this.generation || session !== this.session) return null;

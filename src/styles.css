@@ -848,7 +848,9 @@ summary { overflow-wrap: anywhere; }
   .inbox-panel.reading .inbox-back { display: block; margin: 1rem 1.25rem 0; text-align: left; }
   .inbox-source-heading { flex-wrap: wrap; }
 }
-.message-tombstone { color: var(--muted); font-style: italic; }
+.message-tombstone, .message-muted { color: var(--muted); font-style: italic; }
+.message.muted .message-avatar { opacity: .5; }
+.mute-toggle { margin-top: .35rem; }
 .work-changes-list { margin: 0.35rem 0 0.55rem; padding: 0.45rem 0.7rem; border-left: 3px solid var(--accent, #4a6fa5); background: var(--panel, rgba(127,127,127,0.06)); border-radius: 0 6px 6px 0; }
 .work-changes-list ul { margin: 0; padding-left: 1.1rem; }
 .work-changes-list li { margin: 0.15rem 0; }

@@ -2,12 +2,15 @@
 
 ## 2026-09-14
 
-- Pinned messages (issue #6 B2): any active member pins or unpins a live
-  message (`message.pinned` / `message.unpinned`, `src/pins.js`), the room
-  keeps at most 50 pins in pin order, a deleted message drops out of the list,
-  and `GET`/`POST /api/rooms/:id/pins` (`server/pins.mjs`) re-check membership
-  per call. The room UI gains a Pin/Unpin control per message and a Pinned
-  section above the conversation (`scripts/pinned-messages-browser-check.mjs`).
+- Moderation (issue #6 E4): any member can report a message to the room owner
+  with a short reason (`POST /api/rooms/:id/reports`); reports are private
+  records the owner alone can list (`GET /api/rooms/:id/reports`, "Reports" in
+  History), never room events, exports or streams. A member can mute another
+  member or agent for themselves (`member.mute_set`, reversible): that author's
+  messages collapse and leave the muter's mention results; nobody else is
+  affected and no authority moves. `docs/MODERATION.md` names the removal,
+  appeal and abuse paths (`server/moderation.mjs`, `tests/moderation.test.js`,
+  `scripts/moderation-browser-check.mjs`).
 
 ## 2026-09-12
 

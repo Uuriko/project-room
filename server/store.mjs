@@ -5,15 +5,14 @@ import {
   INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES,
   MEMBERSHIP_AUTHORITY_POLICY_VERSION, validId, memberCan, ROOM_POLICY_FIELDS
 } from "../src/events.js";
-import { PIN_COMMAND_SHAPES } from "../src/events.js";
 import { buildReturnBrief, resolveHistoryWindow, RETURN_BRIEF_DEFAULT_LIMIT } from "./return-brief.mjs";
-import { enforceSpendAllowance } from "./spend-allowance.mjs";
 import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal } from "./invitation-journal.mjs";
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
 import { STORE_SCHEMA_VERSION, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
 import { ShareLinks, shareLinkSchema } from "./share-links.mjs";
 import { conflictingClaim } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
+import { Moderation, moderationSchema } from "./moderation.mjs";
 import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
@@ -191,17 +190,16 @@ const work = "workItemId expectedRevision";
 const shapes = {
   [T.ROOM_CHARTER_UPDATED]: "expectedRevision purpose outputs boundaries escalation",
   [T.ROOM_POLICY_SET]: ROOM_POLICY_FIELDS.join(" "),
-  [T.ROOM_SPEND_ALLOWANCE_SET]: "allowanceCents periodDays",
   [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId identityId",
   [T.MEMBER_ACCESS_CHANGED]: "memberId expectedMemberRevision permissions active",
   [T.MEMBER_STATUS_UPDATED]: "memberId message",
   [T.NOTIFICATION_PREFERENCES_SET]: "preferences",
+  [T.MEMBER_MUTE_SET]: "memberId muted",
   [T.MESSAGE_POSTED]: `messageId body workItemId replyToId toMemberId packetId basisRevision allowOlderBasis ${REPLY_FIELDS.join(" ")}`,
   [T.MESSAGE_EDITED]: "messageId body expectedMessageRevision",
   [T.MESSAGE_DELETED]: "messageId expectedMessageRevision reason",
   [T.REPLY_REQUEST_CANCELLED]: "requestMessageId expectedRequestRevision reason",
   [T.MESSAGE_REACTION_SET]: "messageId reaction active",
-  ...PIN_COMMAND_SHAPES,
   [T.WORK_PROPOSED]: "workItemId title definitionOfDone accountableMemberId verifierMemberId independentVerificationRequired ownerDecisionRequired humanDecisionMakerId mode sourceMessageId",
   [T.WORK_ACCEPTED]: work,
   [T.WORK_HELP_UPDATED]: `${work} expectedHelpRevision status scope expiresAt`,
@@ -240,7 +238,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (Buffer.byteLength(JSON.stringify(command)) > 16384) fail(413, "too_large", "Command is too large");
@@ -270,6 +268,7 @@ export class RoomStore {
     this.identities = new AgentIdentities(this);
     this.invites = new AgentInvites(this);
     this.reminders = new Reminders(this);
+    this.moderation = new Moderation(this);
     this.wakeQueue = new WakeQueue(this);
     this.attention = new Attention(this);
     this.readOnly = readOnly;
@@ -312,6 +311,7 @@ export class RoomStore {
         // backup taken before it is still a valid v27 file; read-only never
         // migrates, so verify it only when present.
         this.channelUpdates.verifySchema({ allowAbsent: true });
+        this.moderation.verifySchema({ allowAbsent: true }); // E4 message reports: additive at v27 as well.
         return;
       } catch (error) { this.db.close(); throw error; }
     }
@@ -394,6 +394,7 @@ export class RoomStore {
       this.db.exec(attentionSchema);
       // The channel webhook update journal (B20) follows the same additive pattern.
       this.db.exec(channelJournalSchema);
+      this.db.exec(moderationSchema); // Message reports (issue #6 E4): purely additive, same pattern.
       if (version < STORE_SCHEMA_VERSION) this.storagePlatform.installWriterFence(this.db);
       this.storagePlatform.verifyWriterFence(this.db);
       this.verifyInvitationAudit();
@@ -402,6 +403,7 @@ export class RoomStore {
       this.wakeQueue.verifySchema();
       this.wakeQueue.verifyPauseSchema();
       this.attention.verifySchema();
+      this.moderation.verifySchema();
       // A lease whose holder died with the process is expired back to pending
       // here, so a restart preserves the intent exactly once (W4-45 done-when).
       if (!this.readOnly) this.wakeQueue.recover(this.now());
@@ -1743,7 +1745,6 @@ export class RoomStore {
       const cleanup = endingAccess || endingRequest || endingHelp || endingOffer || endingClaim || endingWork || endingSession;
       // At capacity, each remaining membership/request/help/offer/claim and each open work item can still be ended once.
       if ((room.sequence >= 10000 && !cleanup) || (command.type === T.MEMBER_ADDED && Object.keys(room.state.members).length >= 100) || (command.type === T.WORK_PROPOSED && Object.keys(room.state.workItems).length >= 500)) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
-      enforceSpendAllowance(room.state, command, this.now(), fail); // C3: a start that would exceed the room allowance is refused
       const memberAuthorityEvent = [T.MEMBER_ADDED, T.MEMBER_ACCESS_CHANGED].includes(command.type);
       const incoming = event({
         type: command.type, roomId, actorId: auth.member.id, at: new Date(this.now()).toISOString(),

@@ -11,9 +11,9 @@ import { initialRoom } from "../server/bootstrap.mjs";
 // unauthenticated requests. POST /api/agent-identities is intentionally
 // unauthenticated (creating an identity grants no room access).
 const MUTATING_ROOM_ROUTES = [
-  "identity-links", "agent-invites", "import", "commands", "cursor", "work-sessions", "pins",
-  "reminders", "agent-connections", "guest-agent-links", "share-links",
-  "share-links-cancel", "invitations", "spend-allowance",
+  "identity-links", "agent-invites", "import", "commands", "cursor", "work-sessions",
+  "reminders", "reports", "agent-connections", "guest-agent-links", "share-links",
+  "share-links-cancel", "invitations",
 ];
 const REVOKE_ROUTE = "invitations/some-invitation/revoke";
 

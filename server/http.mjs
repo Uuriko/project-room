@@ -15,7 +15,6 @@ import { discoveryDoc, isHealthAliasPath } from "../deploy/agent-discovery.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
 import { guestAgentLinkContract } from "./guest-agent-links.mjs";
 import { isSessionStatus, workItemSessionContract } from "../src/work-item-session.js";
-import { listPins, setPin } from "./pins.mjs";
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -643,7 +642,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["code", "displayName"]) || typeof data.code !== "string" || typeof data.displayName !== "string") reject(422, "invalid_invite", "Invite code and displayName are required");
         return json(res, 201, store.invites.redeem(data.code, { displayName: data.displayName }));
       }
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|provider-heartbeats|identity-links|agent-invites))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -729,12 +728,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const q = url.searchParams.get("q");
         const kind = url.searchParams.get("kind") ?? "all";
         return json(res, 200, store.search(selected.token, roomId, q, kind, fence));
-      }
-      if (route === "pins") {
-        // Issue #6 B2: pinned messages. GET lists the ordered pins; POST pins or unpins one message (server/pins.mjs).
-        if (req.method === "GET") return json(res, 200, listPins(store, selected.token, roomId, fence));
-        if (req.method === "POST") return json(res, 200, setPin(store, selected.token, roomId, await body(req), fence));
-        reject(405, "method_not_allowed", "Method not allowed");
       }
       if (route === "provider-heartbeats" && req.method === "GET") {
         // Round-2 #118: provider heartbeat dashboard.
@@ -861,6 +854,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "reminders" && req.method === "POST") {
         const result = store.reminders.mutate(selected.token, roomId, await body(req), fence);
+        return json(res, result.duplicate ? 200 : 201, result);
+      }
+      // E4 moderation: any member reports a message (own receipt only); the owner alone lists reports.
+      if (route === "reports" && req.method === "GET") return json(res, 200, store.moderation.list(selected.token, roomId, fence));
+      if (route === "reports" && req.method === "POST") {
+        const result = store.moderation.report(selected.token, roomId, await body(req), fence);
         return json(res, result.duplicate ? 200 : 201, result);
       }
       if (route === "share-links" && req.method === "GET") return json(res, 200, store.shareLinks.list(selected.token, roomId, fence));

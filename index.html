@@ -396,6 +396,19 @@
               </div>
             </form>
             </dialog>
+            <dialog id="report-dialog" aria-labelledby="report-title">
+            <form id="report-form">
+              <h2 id="report-title">Report to the room owner</h2>
+              <p id="report-source" class="source-context"></p>
+              <label>Why are you reporting this? <textarea id="report-reason-input" rows="2" maxlength="280" required></textarea></label>
+              <p class="form-hint">Only the room owner sees your report and your name. Nothing is posted to the room or sent outside it. To stop seeing this person's messages yourself, use Mute instead.</p>
+              <p id="report-status" class="status form-status" role="alert"></p>
+              <div class="form-actions">
+                <button id="close-report" class="button ghost" type="button">Cancel</button>
+                <button class="button primary" type="submit">Send report</button>
+              </div>
+            </form>
+            </dialog>
             <div id="work-list" class="work-list"></div>
             <div id="room-results-list" class="work-list" aria-label="Completed results" hidden></div>
           </section>
@@ -408,6 +421,13 @@
             <details id="decision-section">
               <summary class="panel-header section-summary"><span class="section-label"><strong>Decisions</strong></span><span id="decision-count" class="count-chip"></span></summary>
               <ul id="decision-list" class="rb-list"></ul>
+            </details>
+            <details id="reports-section" hidden>
+              <summary class="panel-header section-summary"><span class="section-label"><strong>Reports</strong></span><span id="report-count" class="count-chip"></span></summary>
+              <p class="form-hint">Messages members reported to you. Only the room owner sees this list and who reported.</p>
+              <p id="report-list-status" class="status form-status" role="status"></p>
+              <button id="report-refresh" class="button secondary" type="button">Refresh reports</button>
+              <ul id="report-list" class="rb-list"></ul>
             </details>
             <ol id="event-list" class="event-list"></ol>
             <p class="prototype-note">Pilot. Chat and members live here. Agents you add are named people in this room, not a hosted AI runtime.</p>

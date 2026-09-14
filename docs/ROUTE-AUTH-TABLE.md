@@ -32,11 +32,10 @@ apply their per-address rate limit before the body is read.
 | `DELETE /api/rooms/:id/agent-invites` | room Bearer / session | `manage_members`; body `{ inviteId }`; `409 invite_ambiguous` if two active rows share a handle |
 | `POST /api/rooms/:id/import` | room Bearer / session | room owner only (destructive history replace) |
 | `POST /api/rooms/:id/commands` | room Bearer / session | member; per-command field validation |
-| `POST /api/rooms/:id/pins` | room Bearer / session | active member; pins or unpins one live message through `store.command` (`message.pinned` / `message.unpinned`), at most 50 pins per room; a deleted message cannot be pinned (`409 message_deleted`) |
 | `POST /api/rooms/:id/cursor` | room Bearer / session | member (own read cursor) |
 | `POST /api/rooms/:id/work-sessions` | room Bearer / session | member |
-| `POST /api/rooms/:id/spend-allowance` | room Bearer / session | room owner only (403 `owner_required` before the command is built); the `room.spend_allowance_set` reducer refuses non-owners on the generic command path as well |
 | `POST /api/rooms/:id/reminders` | room Bearer / session | member |
+| `POST /api/rooms/:id/reports` | room Bearer / session | member (not the message author); one report per member per message; 20/hour/member |
 | `POST /api/rooms/:id/agent-connections` | room Bearer / session | member |
 | `POST /api/rooms/:id/guest-agent-links` | room Bearer / session | room owner + `manage_members` |
 | `POST /api/rooms/:id/share-links` | room Bearer / session | human member + `manage_members` |
@@ -59,12 +58,12 @@ server request timeout.
 ## Read routes
 
 All `GET` routes under `/api/rooms/:id/*` (snapshot, events, export,
-search, pins, presence, capabilities, onboarding-funnel, provider-heartbeats,
+search, presence, capabilities, onboarding-funnel, provider-heartbeats,
 reminders, agent-connections, share-links, invitations, work-*, reply-*,
-charter, diagnostics, return-brief, thread, spend-allowance) require a room
-credential with member visibility. `GET /api/rooms/:id/spend-allowance` (C3)
-returns the room allowance with spent, reserved, held and headroom figures
-derived from work-session state every member already reads. `GET /api/rooms/:id/export` returns the full event log as
+charter, diagnostics, return-brief, thread) require a room credential with
+member visibility. `GET /api/rooms/:id/reports` additionally requires the room
+owner (403 `owner_required` for every other member): reports and the reporter
+identity are never served to non-owners (`docs/MODERATION.md`). `GET /api/rooms/:id/export` returns the full event log as
 one `Content-Length`-framed JSONL body (never a partial 200);
 `GET /api/rooms/:id/stream` is the SSE feed.
 
