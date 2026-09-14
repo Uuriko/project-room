@@ -19,7 +19,7 @@ function fixture(t) {
   return { ...f, directory };
 }
 
-test("online capture preserves all 37 tables, identity boundaries and exact retries through recovery and restart", async t => {
+test("online capture preserves all 38 tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t);
   const { identityId } = f.store.identities.create("Recovery agent");
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
@@ -30,10 +30,15 @@ test("online capture preserves all 37 tables, identity boundaries and exact retr
   f.store.wakeQueue.pause(f.keys.owner, "commons", { requestId: "recovery-pause", reason: "inspecting" });
   f.store.command(f.keys.agent, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: "recovery-reported", body: "synthetic message the owner reports" } });
   f.store.moderation.report(f.keys.owner, "commons", { messageId: "recovery-reported", reason: "recovery fixture report" });
+  // The v34 convergence fences room_attachments: seed one staged row so the
+  // capture comparison covers the table (no store API stages attachments yet).
+  f.store.db.prepare(`INSERT INTO room_attachments(room_id,id,uploader_id,filename,media_type,byte_length,sha256,bytes,state,created_at,expires_at,message_id)
+    VALUES('commons','recovery-attachment','recovery-uploader','recovery-note.txt','text/plain',11,?,?,'staged',?, ?,NULL)`)
+    .run("0".repeat(64), Buffer.from("hello world"), f.now(), f.now() + 1000);
   f.cursor = f.store.room("commons").sequence;
   f.store.markCaughtUp(f.keys.owner, "commons", f.cursor);
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 37);
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 38);
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);
@@ -148,7 +153,7 @@ test("v8 readonly verification refuses a v7 marker rather than migrating the bac
   assert.equal(f.store.db.prepare("PRAGMA user_version").get().user_version, 7);
 });
 
-test("read-only open accepts a v28 backup written before the additive wake queue and attention tables", t => {
+test("read-only open accepts a v34 backup written before the additive wake queue and attention tables", t => {
   const f = fixture(t);
   const rooms = f.store.db.prepare("SELECT id,sequence FROM rooms ORDER BY id").all();
   const objects = () => f.store.db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'wake_queue%' OR name LIKE 'private_attention%' ORDER BY name").all().map(row => row.name);
@@ -158,7 +163,7 @@ test("read-only open accepts a v28 backup written before the additive wake queue
   f.store.db.exec("DROP TABLE wake_queue_commands; DROP TABLE private_attention_commands");
   assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /Wake queue schema requires operator reconciliation/);
   f.store.db.exec("DROP TABLE wake_queue; DROP TABLE private_attention_prefs; DROP TABLE wake_queue_pause");
-  assert.deepEqual(objects(), [], "fixture now matches a pre-W4-45 v28 file");
+  assert.deepEqual(objects(), [], "fixture now matches a pre-W4-45 file");
   const older = new RoomStore(f.filename, { readOnly: true, now: f.now });
   try {
     assert.deepEqual(older.db.prepare("SELECT id,sequence FROM rooms ORDER BY id").all(), rooms);
@@ -170,8 +175,8 @@ test("read-only open accepts a v28 backup written before the additive wake queue
   assert.deepEqual(objects(), [], "read-only verification is not migration");
   // Only the additive tables are optional: a wrong schema marker still fails.
   f.store.db.exec("PRAGMA user_version=27");
-  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v28/);
-  f.store.db.exec("PRAGMA user_version=28");
+  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v34/);
+  f.store.db.exec("PRAGMA user_version=34");
   // A writable open recreates the additive tables and then verifies them strictly.
   const upgraded = new RoomStore(f.filename, { now: f.now });
   try {

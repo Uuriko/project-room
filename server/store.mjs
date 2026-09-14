@@ -443,7 +443,9 @@ export class RoomStore {
       this.db.exec(channelJournalSchema);
       this.db.exec(moderationSchema); // Message reports (issue #6 E4): purely additive, same pattern.
       ensureAttachmentSchema(this.db); // Converge the deployed v28-v33 attachment lineage before installing v34 fences.
-      if (version < STORE_SCHEMA_VERSION) this.storagePlatform.installWriterFence(this.db);
+      // Idempotent: recreates fences for tables the additive schemas just
+      // (re)created, and refuses a file whose existing triggers drifted.
+      this.storagePlatform.installWriterFence(this.db);
       this.storagePlatform.verifyWriterFence(this.db);
       this.verifyInvitationAudit();
       this.shareLinks.verify();

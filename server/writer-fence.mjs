@@ -77,7 +77,14 @@ export function verifyWriterFence(db, version = STORE_SCHEMA_VERSION) {
   for (const row of db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v*'").all()) {
     if (expected.get(row.name) !== row.sql) throw new Error("Database writer fence requires operator reconciliation");
   }
+  // The fence guarantees every table present is fenced; a missing table is a
+  // schema-presence concern, not a fence concern. Purely additive tables are
+  // recreated (with their fences) by the writable migration, while read-only
+  // verification reports the specific missing schema instead of the fence.
+  const present = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name));
+  const prefix = `writer_v${version}_`;
   for (const { name, sql } of fenceDefinitions(version)) {
+    if (!present.has(name.slice(prefix.length).replace(/_(insert|update|delete)$/, ""))) continue;
     if (db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?").get(name)?.sql !== sql) {
       throw new Error("Database writer fence requires operator reconciliation");
     }
