@@ -200,6 +200,21 @@ carry the claim, and the remaining tiers stay visibly open.
       }
     },
     {
+      "id": "unified-inbox-ui",
+      "claim": "One Inbox list across email, Telegram and samples with channel badges, channel and connection filters and a grouping toggle; a Telegram reply from the Inbox through the deployment's channel transport (fixture until the bindings are set) with accepted, rejected and unavailable states; connection add, reconnect and remove over owner-authenticated routes; a needs-you marker for messages addressed to the owner; and Telegram excerpt sharing into a room.",
+      "evidence": {
+        "unit": [
+          "tests/inbox-unified-routes.test.js",
+          "tests/inbox-channel-client.test.js"
+        ],
+        "browser": [
+          "scripts/inbox-unified-check.mjs"
+        ],
+        "agent": [],
+        "hosted": []
+      }
+    },
+    {
       "id": "telegram-send-preview",
       "claim": "A saved Telegram reply previews its bot and target chat and dispatches only over a matching fixture transport through the shared send journal.",
       "evidence": {
@@ -230,6 +245,7 @@ carry the claim, and the remaining tiers stay visibly open.
 | Inbox connection routes | channel-import | open | open | open |
 | Live Telegram trigger and card | telegram-live, telegram-adapter | inbox-telegram-check | open | open |
 | Telegram send preview | channel-import, inbox-channel-client | open | open | open |
+| Unified inbox UI (list, reply, connections, needs-you, share) | inbox-unified-routes, inbox-channel-client | inbox-unified-check | open | open |
 
 Follow-up scope: claims made in docs beyond the README list (per-feature
 acceptance docs) can be folded into the same block; the checker format already

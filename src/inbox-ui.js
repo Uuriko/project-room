@@ -23,7 +23,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   const sendUI = installInboxSend({ api, ownerKey: () => owns() ? owner : null, reviewChanges: async () => {
     const id = selected, d = drafts.get(id); if (!d || !owns()) return;
     await review(id, d); if (owns() && selected === id) render();
-  } });
+  }, onChannelSend: () => loadConnections() });
   function persistShare(request = null) {
     // Only operation metadata; never private bodies, addresses, CSRF or access keys.
     retryShare = request;
@@ -86,7 +86,10 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     replyUI.reset({ preservePending });
     api.reset(); owner = null; epoch++; active = false; browsing = false; selected = null; rows = []; sharing = null; sharingBusy = false;
     drafts.clear(); positions.clear(); retryShare = null; if (!preservePending) persistShare();
-    connectionEpoch++; connectionNotes.clear(); $("#inbox-connections").hidden = true; $("#inbox-connections").replaceChildren();
+    connectionEpoch++; connectionNotes.clear(); connectionRecords.clear(); $("#inbox-connections").hidden = true; $("#inbox-connections").replaceChildren();
+    filters = { channel: "all", connection: "all", grouped: true }; $("#inbox-filters").hidden = true; $("#inbox-group-toggle").checked = true;
+    for (const selector of ["#inbox-filter-channel", "#inbox-filter-connection"]) { $(selector).replaceChildren(); $(selector).value = ""; }
+    $("#inbox-connection-form").reset(); $("#inbox-add-connection").open = false; $("#inbox-add-connection").hidden = true; text("#inbox-connection-form-status", ""); text("#inbox-attention-count", "");
     $("#workspace-nav").hidden = true; $("#inbox-panel").hidden = true; $("#inbox-share-dialog").close();
     $("#account-rooms-panel").hidden = true;
     resultPreview = null; resultEpoch++; $("#inbox-result-dialog").close(); $("#inbox-results").hidden = true;
@@ -96,7 +99,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     for (const selector of ["#inbox-list", "#inbox-source-body", "#inbox-subject", "#inbox-addresses", "#inbox-draft-status", "#inbox-status", "#inbox-remote-draft", "#inbox-share-paragraphs", "#inbox-share-audience", "#inbox-share-status"]) $(selector).replaceChildren();
     $("#inbox-draft").value = ""; $("#inbox-reader").hidden = true; $("#inbox-conflict").hidden = true;
     $("#inbox-email-details").hidden = true; $("#inbox-email-details").open = false;
-    $("#inbox-email-metadata").replaceChildren(); text("#inbox-source-notice", ""); $("#inbox-source-notice").hidden = true;
+    $("#inbox-email-metadata").replaceChildren(); text("#inbox-source-notice", ""); $("#inbox-source-notice").hidden = true; $("#inbox-addressed").hidden = true;
   }
   function sync() {
     const next = ownerKey();
@@ -113,31 +116,70 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   const channelLabel = { email: "Email", telegram: "Telegram" };
   const stateLabel = { active: "connected", disconnected: "disconnected", reconnect_required: "reconnect required" };
   // One group per connection (email, Telegram, ...) plus the sample messages.
-  const groupLabel = c => c ? `${channelLabel[c.channel] ?? c.channel} · ${stateLabel[c.state] ?? c.state}` : "Sample messages";
-  function renderList() {
-    const groups = new Map();
-    for (const source of rows) {
-      const key = source.connection ? source.connection.channel + ":" + source.connection.id : "sample";
-      if (!groups.has(key)) groups.set(key, { connection: source.connection ?? null, sources: [] });
-      groups.get(key).sources.push(source);
-    }
-    $("#inbox-list").replaceChildren(...[...groups.entries()].map(([key, group], index) => {
-      const section = document.createElement("section"); section.className = "inbox-group"; section.dataset.connectionId = group.connection?.id ?? "";
-      const heading = document.createElement("h2"); heading.className = "inbox-group-label form-hint"; heading.id = "inbox-group-" + index;
-      heading.textContent = groupLabel(group.connection); section.setAttribute("aria-labelledby", heading.id);
-      section.append(heading, ...group.sources.map(source => {
-        const button = document.createElement("button"); button.type = "button"; button.className = "inbox-row";
-        button.dataset.sourceId = source.id; button.setAttribute("aria-current", selected === source.id ? "true" : "false");
-        const sender = document.createElement("span"), subject = document.createElement("strong");
-        sender.textContent = source.sender; subject.textContent = source.subject || "(No subject)";
-        button.append(sender, subject); button.addEventListener("click", () => open(source.id)); return button;
-      }));
-      return section;
-    }));
+  const groupLabel = c => c ? `${channelLabel[c.channel] ?? c.channel} · ${connectionName(c.id) ?? stateLabel[c.state] ?? c.state}` : "Sample messages";
+  const connectionName = id => { const c = connectionRecords.get(id)?.connection; return c ? (c.identity.displayName || c.identity.handle || c.externalId) : null; };
+  // One list across channels. Filters narrow by channel or connection; grouping
+  // (the default) keeps one section per connection, off gives one flat list.
+  let filters = { channel: "all", connection: "all", grouped: true };
+  const rowChannel = source => source.connection?.channel ?? "sample", rowConnection = source => source.connection?.id ?? "sample";
+  const visibleRows = () => rows.filter(source => (filters.channel === "all" || rowChannel(source) === filters.channel)
+    && (filters.connection === "all" || rowConnection(source) === filters.connection));
+  function renderFilters() {
+    $("#inbox-filters").hidden = rows.length === 0;
+    const option = (value, label) => { const o = document.createElement("option"); o.value = value; o.textContent = label; return o; };
+    const present = new Map(rows.map(source => [rowChannel(source), null]));
+    if (!present.has(filters.channel)) filters.channel = "all";
+    $("#inbox-filter-channel").replaceChildren(option("all", "All channels"), ...[...present.keys()].map(key => option(key, key === "sample" ? "Samples" : channelLabel[key] ?? key)));
+    $("#inbox-filter-channel").value = filters.channel;
+    const connections = new Map();
+    for (const source of rows) if (source.connection && !connections.has(source.connection.id)) connections.set(source.connection.id, source.connection);
+    if (filters.connection !== "all" && filters.connection !== "sample" && !connections.has(filters.connection)) filters.connection = "all";
+    $("#inbox-filter-connection").replaceChildren(option("all", "All connections"),
+      ...[...connections.values()].map(c => option(c.id, `${channelLabel[c.channel] ?? c.channel} · ${connectionName(c.id) ?? c.id}`)),
+      ...(rows.some(source => !source.connection) ? [option("sample", "Sample messages")] : []));
+    $("#inbox-filter-connection").value = filters.connection;
+    $("#inbox-group-toggle").checked = filters.grouped;
   }
+  function row(source) {
+    const button = document.createElement("button"); button.type = "button"; button.className = "inbox-row";
+    button.dataset.sourceId = source.id; button.dataset.channel = rowChannel(source); button.dataset.needsYou = source.needsYou ? "true" : "false";
+    button.setAttribute("aria-current", selected === source.id ? "true" : "false");
+    const meta = document.createElement("span"), sender = document.createElement("span"), badge = document.createElement("span"), subject = document.createElement("strong");
+    meta.className = "inbox-row-meta"; sender.textContent = source.sender; badge.className = "inbox-channel-badge";
+    badge.textContent = source.connection ? channelLabel[source.connection.channel] ?? source.connection.channel : "Sample";
+    meta.append(badge, sender);
+    if (source.needsYou) { const mark = document.createElement("span"); mark.className = "inbox-needs-you"; mark.textContent = "Needs you"; meta.append(mark); }
+    subject.textContent = source.subject || "(No subject)";
+    button.append(meta, subject); button.addEventListener("click", () => open(source.id)); return button;
+  }
+  function renderList() {
+    const visible = visibleRows(), list = $("#inbox-list");
+    if (!filters.grouped) { list.replaceChildren(...visible.map(row)); }
+    else {
+      const groups = new Map();
+      for (const source of visible) {
+        const key = source.connection ? source.connection.channel + ":" + source.connection.id : "sample";
+        if (!groups.has(key)) groups.set(key, { connection: source.connection ?? null, sources: [] });
+        groups.get(key).sources.push(source);
+      }
+      list.replaceChildren(...[...groups.entries()].map(([key, group], index) => {
+        const section = document.createElement("section"); section.className = "inbox-group"; section.dataset.connectionId = group.connection?.id ?? "";
+        const heading = document.createElement("h2"); heading.className = "inbox-group-label form-hint"; heading.id = "inbox-group-" + index;
+        heading.textContent = groupLabel(group.connection); section.setAttribute("aria-labelledby", heading.id);
+        section.append(heading, ...group.sources.map(row));
+        return section;
+      }));
+    }
+    if (rows.length && !visible.length) text("#inbox-status", "No messages match these filters."); else if (rows.length && $("#inbox-status").textContent === "No messages match these filters.") text("#inbox-status", "");
+    const needing = rows.filter(source => source.needsYou).length;
+    text("#inbox-attention-count", needing ? `(${needing} need you)` : "");
+  }
+  $("#inbox-filter-channel").addEventListener("change", () => { filters.channel = $("#inbox-filter-channel").value; if (owns()) renderList(); });
+  $("#inbox-filter-connection").addEventListener("change", () => { filters.connection = $("#inbox-filter-connection").value; if (owns()) renderList(); });
+  $("#inbox-group-toggle").addEventListener("change", () => { filters.grouped = $("#inbox-group-toggle").checked; if (owns()) renderList(); });
   // Connection cards: one per configured connection, with the live Telegram facts
   // (binding state, webhook, last delivery, last send) and the import trigger.
-  let connectionEpoch = 0; const connectionNotes = new Map();
+  let connectionEpoch = 0; const connectionNotes = new Map(), connectionRecords = new Map(), removing = new Set();
   const when = value => value ? new Date(value).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "none yet";
   const liveLines = live => !live ? [] : [
     live.state === "configured" ? "Live: configured" : live.state === "invalid" ? "Live: invalid binding · " + live.invalid.join(", ") : "Live: not configured · set " + live.missing.join(", "),
@@ -145,25 +187,39 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     "Last update received: " + when(live.lastUpdateReceivedAt),
     "Last send: " + (live.lastSendResult ? live.lastSendResult.outcome + (live.lastSendResult.code ? " · " + live.lastSendResult.code : "") + " · " + when(live.lastSendResult.at) : "none yet")
   ];
+  // Email has no live path yet: the mailbox is a recorded fixture until routing lands.
+  const emailLines = record => [record.mode === "fixture" ? "Inbound: fixture mailbox · not yet routed" : "Inbound: routed", "Sending: not available",
+    "Last update received: " + when(record.webhookSetAt ?? null).replace("none yet", "fixture only")];
   function renderConnections(records) {
     const container = $("#inbox-connections");
     container.hidden = !records.length;
+    $("#inbox-add-connection").hidden = false;
     container.replaceChildren(...records.map(record => {
       const c = record.connection, card = document.createElement("article"); card.className = "inbox-connection-card"; card.dataset.connectionId = c.id;
       card.dataset.liveState = record.live?.state ?? "fixture"; card.dataset.connectionState = c.state;
       const heading = document.createElement("h2"); heading.className = "form-hint"; heading.textContent = `${channelLabel[c.channel] ?? c.channel} · ${c.identity.displayName || c.identity.handle || c.externalId}`;
       const status = document.createElement("p"); status.className = "inbox-connection-state"; status.textContent = stateLabel[c.state] ?? c.state;
       const facts = document.createElement("ul"); facts.className = "inbox-connection-facts";
-      for (const line of liveLines(record.live)) { const item = document.createElement("li"); item.textContent = line; facts.append(item); }
+      for (const line of record.live ? liveLines(record.live) : c.channel === "email" ? emailLines(record) : []) { const item = document.createElement("li"); item.textContent = line; facts.append(item); }
       card.append(heading, status, facts);
+      const actions = document.createElement("div"), note = document.createElement("span");
+      actions.className = "inbox-connection-actions"; note.className = "inbox-connection-note"; note.setAttribute("role", "status"); note.textContent = connectionNotes.get(c.id) ?? "";
       if (record.live) {
-        const actions = document.createElement("div"), button = document.createElement("button"), note = document.createElement("span");
-        actions.className = "inbox-connection-actions"; button.type = "button"; button.className = "button ghost"; button.textContent = "Reconnect";
+        const button = document.createElement("button"); button.type = "button"; button.className = "button ghost"; button.textContent = "Reconnect";
         button.setAttribute("aria-label", "Reconnect " + heading.textContent); button.disabled = c.state !== "active";
-        note.className = "inbox-connection-note"; note.setAttribute("role", "status"); note.textContent = connectionNotes.get(c.id) ?? "";
-        button.addEventListener("click", () => reconnect(c.id, button, note));
-        actions.append(button, note); card.append(actions);
+        button.addEventListener("click", () => reconnect(c.id, button, note)); actions.append(button);
       }
+      if (c.state !== "disconnected") {
+        // Two deliberate clicks, no native dialog: Remove, then Confirm remove (or Keep).
+        const remove = document.createElement("button"), keep = document.createElement("button");
+        remove.type = "button"; remove.className = "button ghost"; remove.dataset.remove = c.id;
+        remove.textContent = removing.has(c.id) ? "Confirm remove" : "Remove"; remove.setAttribute("aria-label", (removing.has(c.id) ? "Confirm remove " : "Remove ") + heading.textContent);
+        keep.type = "button"; keep.className = "text-button"; keep.textContent = "Keep"; keep.hidden = !removing.has(c.id);
+        remove.addEventListener("click", () => { if (removing.has(c.id)) disconnect(c, remove, note); else { removing.add(c.id); renderConnections(records); container.querySelector(`[data-connection-id="${c.id}"] [data-remove]`)?.focus(); } });
+        keep.addEventListener("click", () => { removing.delete(c.id); renderConnections(records); container.querySelector(`[data-connection-id="${c.id}"] [data-remove]`)?.focus(); });
+        actions.append(remove, keep);
+      }
+      actions.append(note); card.append(actions);
       return card;
     }));
   }
@@ -174,9 +230,74 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       const listed = await api.connections(); if (!owns() || turn !== connectionEpoch) return;
       const records = [];
       for (const c of listed.connections) { const record = await api.connection(c.id); if (!owns() || turn !== connectionEpoch) return; records.push(record); }
-      renderConnections(records);
+      connectionRecords.clear(); for (const record of records) connectionRecords.set(record.connection.id, record);
+      renderConnections(records); if (rows.length) { renderFilters(); renderList(); }
     } catch { if (owns() && turn === connectionEpoch) renderConnections([]); }
   }
+  async function disconnect(c, button, note) {
+    if (!owns() || button.disabled) return;
+    button.disabled = true; note.textContent = "Removing…";
+    try {
+      await api.applyConnection({ action: "connection.disconnect", requestId: crypto.randomUUID(), connectionId: c.id, expectedRevision: c.revision }); if (!owns()) return;
+      removing.delete(c.id); connectionNotes.set(c.id, "Removed · saved copies stay in the inbox");
+      await loadConnections(); load();
+    } catch (error) {
+      if (!owns()) return;
+      removing.delete(c.id);
+      connectionNotes.set(c.id, error.code === "stale_email_connection" ? "Connection changed elsewhere. Refresh and try again." : error.code === "rate_limited" ? "Too many attempts. Try again in a minute." : "Couldn’t remove. Try again.");
+      await loadConnections();
+    }
+  }
+  // Add connection: a bot record for Telegram (bot id, username, name) or a
+  // fixture mailbox for email (address, name). The owner's session is the authority;
+  // the server validates the profile and refuses another account's id.
+  const idPattern = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
+  function connectionProfile(form, accountId) {
+    const value = name => form.elements[name].value.trim(), channel = value("channel"), id = value("id");
+    if (!idPattern.test(id)) throw new Error("Connection id: letters, digits, . _ : - only.");
+    const existing = connectionRecords.get(id)?.connection ?? null, revision = (existing?.revision ?? 0) + 1;
+    if (existing && existing.channel !== channel) throw new Error("That id belongs to a " + (channelLabel[existing.channel] ?? existing.channel) + " connection.");
+    if (channel === "telegram") {
+      const botId = value("bot-id"), username = value("username").replace(/^@/, ""), displayName = value("name") || username;
+      if (!/^\d{1,20}$/.test(botId)) throw new Error("Bot id: the digits before the colon in the BotFather token.");
+      if (!/^[A-Za-z][A-Za-z0-9_]{3,31}$/.test(username)) throw new Error("Bot username: 4 to 32 letters, digits or underscores.");
+      return { revision, profile: { accountId, id, revision, channel, provider: "telegram-bot", externalId: botId,
+        identity: { kind: "bot", id: botId, handle: "@" + username, displayName }, capabilities: { read: true, send: true, threads: true, edit: true } } };
+    }
+    const address = value("address").toLowerCase(), name = value("name") || address;
+    if (!/^[^\s@]{1,64}@[^\s@]{1,255}$/.test(address) || address.length > 320) throw new Error("Address: one mailbox address.");
+    return { revision, profile: { accountId, id, revision, provider: "microsoft-graph", mailboxId: address, identity: { name, address }, aliases: [] } };
+  }
+  $("#inbox-connection-channel").addEventListener("change", () => {
+    const channel = $("#inbox-connection-channel").value;
+    for (const field of document.querySelectorAll("#inbox-connection-form [data-channel]")) { field.hidden = field.dataset.channel !== channel; for (const input of field.querySelectorAll("input")) input.required = !field.hidden; }
+    $("#inbox-connection-id").value = channel === "telegram" ? "telegram-bot" : "mailbox";
+  });
+  $("#inbox-connection-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    const form = event.currentTarget, submit = form.querySelector("button[type=submit]");
+    if (!owns() || submit.disabled) return;
+    let request;
+    try {
+      const { revision, profile } = connectionProfile(form, account.session.account.id);
+      request = { action: "connection.configure", requestId: crypto.randomUUID(), connectionId: profile.id, expectedRevision: revision - 1, profile };
+    } catch (error) { text("#inbox-connection-form-status", error.message); return; }
+    submit.disabled = true; text("#inbox-connection-form-status", "Adding…");
+    try {
+      const result = await api.applyConnection(request); if (!owns()) return;
+      const c = result.connection;
+      connectionNotes.set(c.id, c.channel === "telegram" ? (result.live?.state === "configured" ? "Added · press Reconnect to register the webhook secret" : "Added · set the Telegram bindings, then Reconnect")
+        : "Added · fixture mailbox, not yet routed");
+      text("#inbox-connection-form-status", "Added " + (c.identity.displayName || c.identity.handle || c.externalId) + ".");
+      form.reset(); $("#inbox-connection-channel").dispatchEvent(new Event("change"));
+      await loadConnections(); $(`.inbox-connection-card[data-connection-id="${c.id}"] h2`)?.scrollIntoView({ block: "nearest" });
+    } catch (error) {
+      if (!owns()) return;
+      text("#inbox-connection-form-status", error.code === "email_mailbox_exists" ? "This account already has a connection for that mailbox or bot."
+        : error.code === "email_mailbox_changed" ? "That id already belongs to a different bot or mailbox." : error.code === "email_connection_limit" ? "Connection limit reached (20)."
+        : error.code === "rate_limited" ? "Too many attempts. Try again in a minute." : error.status && error.status < 500 ? "Not added. Check the fields and try again." : "Not confirmed. Refresh to see whether it was added.");
+    } finally { submit.disabled = false; }
+  });
   async function reconnect(connectionId, button, note) {
     if (!owns() || button.disabled) return;
     button.disabled = true; note.textContent = "Reconnecting…";
@@ -198,7 +319,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     loadConnections();
     try {
       const result = await api.list(); if (!owns() || turn !== epoch) return;
-      rows = result.sources; renderList(); text("#inbox-status", rows.length ? "" : "No messages yet.");
+      rows = result.sources; renderFilters(); renderList(); text("#inbox-status", rows.length ? (visibleRows().length ? "" : "No messages match these filters.") : "No messages yet.");
       $("#inbox-empty").hidden = rows.length > 0;
       if (selected && drafts.has(selected)) { render(); loadResults(selected); return; }
       const pending = pendingShare(), saved = savedPosition();
@@ -226,8 +347,8 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     const d = drafts.get(selected); if (!d || !owns()) return;
     $("#inbox-reader").hidden = false;
     text("#inbox-subject", d.source.subject || "(No subject)");
-    const email = d.source.email, channel = d.source.channel;
-    text("#inbox-source-label", email ? "Sample email · only you" : channel ? `Sample ${channelLabel[channel.channel] ?? channel.channel} message · only you` : "Sample message · only you");
+    const email = d.source.email, channel = d.source.channel, live = connectionRecords.get(rows.find(r => r.id === selected)?.connection?.id)?.live?.state === "configured";
+    text("#inbox-source-label", email ? "Sample email · only you" : channel ? `${live ? "" : "Sample "}${channelLabel[channel.channel] ?? channel.channel} message · only you` : "Sample message · only you");
     $("#inbox-ask").hidden = Boolean(email || channel) && !d.source.capabilities.share && !pendingShare();
     $("#inbox-email-details").hidden = !email && !channel;
     const metadata = email ? ["Mailbox: " + d.source.recipient,
@@ -237,11 +358,12 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       d.source.capabilities.share ? "Sending unavailable" : "Sharing and sending unavailable"]
       : channel ? ["Bot: " + d.source.recipient, "Chat: " + channel.chat, channel.kind === "channel_post" ? "Channel post" : channel.edited ? "Edited message" : "Message",
         channel.attachmentCount ? `${channel.attachmentCount} ${channel.attachmentCount === 1 ? "attachment" : "attachments"} · files unavailable` : "No attachments",
-        d.source.capabilities.share ? "Sending unavailable" : "Sharing and sending unavailable"] : [];
+        (d.source.capabilities.send ? "Replies go through the bot" : "Sending unavailable") + (d.source.capabilities.share ? "" : " · sharing unavailable")] : [];
     $("#inbox-email-metadata").replaceChildren(...metadata.map(value => { const p = document.createElement("p"); p.textContent = value; return p; }));
     const link = email ?? channel;
     const notices = link ? [link.connectionState === "disconnected" ? "Disconnected · saved copy" : link.connectionState === "reconnect_required" ? "Reconnect required · saved copy" : "",
       link.format === "html" ? "HTML preview unavailable." : !d.source.paragraphs[0] ? "No message text." : ""].filter(Boolean) : [];
+    $("#inbox-addressed").hidden = !d.source.needsYou;
     text("#inbox-source-notice", notices.join(" · ")); $("#inbox-source-notice").hidden = !notices.length;
     text("#inbox-addresses", d.source.sender + " → " + d.source.recipient);
     $("#inbox-source-body").replaceChildren(...d.source.paragraphs.map(value => { const p = document.createElement("p"); p.textContent = value; return p; }));
@@ -412,7 +534,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
         const select = () => {
           if (sharing !== selectionOwner || !owns() || sharing.request || sharingBusy) return;
           const start = input.selectionStart, end = input.selectionEnd, value = input.value.slice(start, end);
-          const body = "Shared email excerpt\n\n" + value;
+          const body = (source.source.adapter === "email" ? "Shared email excerpt" : "Shared message excerpt") + "\n\n" + value;
           const valid = Boolean(value.trim()) && value.isWellFormed() && body.length <= 4000;
           sharing.selection = valid ? { start, end } : null;
           preview.textContent = valid ? body : ""; preview.hidden = !valid;
