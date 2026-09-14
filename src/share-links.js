@@ -44,8 +44,14 @@ export function invitationDialogTitle(preview, phase) {
   return "Review this invitation";
 }
 
-export function agentMembershipLimits() {
-  return "Max can invite people, change membership, decide, and write outside the room. Moderate and Low grant less.";
+export function agentMembershipLimits(access) {
+  if (access === "max") {
+    return "This agent can invite people, change membership, decide, and write outside the room.";
+  }
+  if (access === "none") {
+    return "No new room access. Existing connections stay unchanged.";
+  }
+  return "This agent cannot invite people or make room decisions. Choose Max for full room power.";
 }
 
 export function invitationCapabilityLimits(permissions) {
