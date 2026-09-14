@@ -234,6 +234,24 @@ paths:
                   displayName: { type: string }
                   createdAt: { type: string, format: date-time }
                   secret: { type: string, description: "Returned once; store it securely" }
+        '409':
+          description: >-
+            Identity table cap reached (error.code pilot_limit). The 5000-row
+            cap is checked inside the insert transaction, so no row is written;
+            the route is unauthenticated and this cap, not the rate limit, is the
+            hard bound on how many identities can exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+        '429':
+          description: Per-address creation rate limit (error.code rate_limited); retry after a minute
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
   /api/rooms/{roomId}/identity-links:
     get:
       summary: List agent identity links

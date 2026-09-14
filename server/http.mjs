@@ -517,6 +517,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const revokeMatch = /^\/api\/rooms\/([^/]{1,384})\/invitations\/([^/]{1,384})\/revoke$/.exec(url.pathname);
       // Round-2 #101: creating an agent identity is open (an identity alone
       // grants nothing); linking it into a room is owner-only per room.
+      // Because the route is unauthenticated it is bounded twice: the
+      // per-address rate limit here, and the IDENTITY_LIMIT table cap that
+      // store.identities.create enforces inside its insert transaction
+      // (409 pilot_limit, no row written) — like the credentials table.
       if (url.pathname === "/api/agent-identities" && req.method === "POST") {
         const data = await body(req);
         rate(`identity-create:${remoteAddress}`, 30);
