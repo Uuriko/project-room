@@ -16,7 +16,7 @@ import { ShareLinks, shareLinkSchema } from "./share-links.mjs";
 import { conflictingClaim } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
 import { Notifications } from "./notifications.mjs";
-import { Moderation, moderationSchema } from "./moderation.mjs";
+import { Moderation, moderationSchema, mutedMessage } from "./moderation.mjs";
 import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
@@ -1596,17 +1596,20 @@ export class RoomStore {
   }
   // Round-2 #113: full-text search over messages and work items.
   // Substring match, case-insensitive; deleted messages are excluded.
+  // Backlog 11: messages by an author the caller muted (E4) are excluded for
+  // every kind, server-side, so agents and other API readers match the UI.
   search(token, roomId, query, kind = "all", expectedSessionBinding = null) {
     if (typeof query !== "string" || !query.trim() || query.length > 80) fail(422, "invalid_search", "Search is 1 to 80 characters");
     if (!["all", "messages", "work"].includes(kind)) fail(422, "invalid_search", "kind is all, messages, or work");
     return this.readTransaction(() => {
-      this.authenticate(token, roomId, expectedSessionBinding);
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const room = this.room(roomId);
       const needle = query.trim().toLowerCase();
       const result = { roomId, query: query.trim(), messages: [], workItems: [] };
       if (kind === "all" || kind === "messages") {
         for (const m of room.state.messages ?? []) {
           if (m.body == null) continue; // tombstone
+          if (mutedMessage(room.state, auth.member?.id, m)) continue; // muted author (E4)
           if (m.body.toLowerCase().includes(needle)) {
             result.messages.push({ id: m.id, authorId: m.authorId, body: m.body, createdAt: m.createdAt, workItemId: m.workItemId });
           }

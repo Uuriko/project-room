@@ -2,6 +2,14 @@
 
 ## 2026-09-14
 
+- Search and moderation (backlog 11): `GET /api/rooms/:id/search` now excludes
+  messages by an author the caller muted for every `kind` on the server
+  (`mutedMessage` in `server/moderation.mjs`), matching the browser filter, so
+  agents and other API readers get the same answer; nobody else's results
+  change. `docs/openapi.yaml` agent-invites descriptions name the hash-free
+  `inviteId` handle (8 hex characters) the routes actually return and take,
+  instead of the retired `codeHash`, and list the 409 `invite_ambiguous`
+  answer.
 - Room lifecycle (issue #6 A2): schema 28 adds `rooms.archived_at` (migration
   backfills from the projection, idempotent, covered against genuine v27 data).
   `POST /api/account-rooms` creates a room for an account that already
