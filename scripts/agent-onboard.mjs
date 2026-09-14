@@ -45,8 +45,24 @@ export function statePath() {
 
 export function loadState(path = statePath()) {
   if (!existsSync(path)) return { version: VERSION, onboardings: {} };
-  const raw = JSON.parse(readFileSync(path, "utf8"));
-  if (raw.version !== VERSION) throw new Error(`unsupported onboarding state version ${raw.version}`);
+  let raw;
+  try {
+    raw = JSON.parse(readFileSync(path, "utf8"));
+  } catch (err) {
+    throw new Error(
+      `onboarding state file is corrupt: ${path} (${err.message}). ` +
+      `Move it aside or delete it and a fresh state will be created on the next write.`
+    );
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`onboarding state file is corrupt: ${path} (expected a JSON object). Move it aside or delete it to start fresh.`);
+  }
+  if (raw.version !== VERSION) {
+    throw new Error(`unsupported onboarding state version ${raw.version} in ${path} (this tool writes v${VERSION}). Move it aside or delete it to start fresh.`);
+  }
+  if (!raw.onboardings || typeof raw.onboardings !== "object" || Array.isArray(raw.onboardings)) {
+    throw new Error(`onboarding state file is corrupt: ${path} (missing "onboardings" object). Move it aside or delete it to start fresh.`);
+  }
   return raw;
 }
 
@@ -166,7 +182,17 @@ coach and newcomer; the only public artifact is the newcomer's own intro.
   status                                 list all onboardings
 
 Checklist items: ${CHECKLIST.map(i => i.id).join(", ")}
-State: ROOM_ONBOARD_STATE (default ./.room-onboarding.json)`;
+State: ROOM_ONBOARD_STATE (default ./.room-onboarding.json)
+
+Typical session:
+  node scripts/agent-onboard.mjs start newcomer --name "Growth"
+  node scripts/agent-onboard.mjs coach newcomer quill
+  node scripts/agent-onboard.mjs check newcomer lane-tag --value "[Growth]"
+  ... check role, voice, avatar, update-format the same way ...
+  node scripts/agent-onboard.mjs checklist newcomer   # progress + hints
+  node scripts/agent-onboard.mjs intro newcomer       # renders the public intro
+
+Add --dry-run to start/coach/check/intro to preview without writing state.`;
 }
 
 function flagValue(argv, name) {
@@ -176,10 +202,15 @@ function flagValue(argv, name) {
 }
 
 export async function onboardMain(argv) {
+  const dryRun = argv.includes("--dry-run");
+  argv = argv.filter(a => a !== "--dry-run");
   const [cmd, ...rest] = argv;
   if (!cmd || cmd === "--help" || cmd === "help") { console.log(usage()); return; }
   const path = statePath();
-  const state = loadState(path);
+  const liveState = loadState(path);
+  // Dry-run mutates a clone so agents can preview start/coach/check/intro
+  // without touching the state file.
+  const state = dryRun ? JSON.parse(JSON.stringify(liveState)) : liveState;
   let out;
   switch (cmd) {
     case "start": {
@@ -221,7 +252,15 @@ export async function onboardMain(argv) {
     default:
       throw new Error(`unknown command "${cmd}"\n${usage()}`);
   }
-  saveState(state, path);
+  if (dryRun) {
+    if (cmd === "checklist" || cmd === "status") {
+      console.error("agent-onboard: --dry-run has no effect on read-only commands");
+    } else {
+      out = { dryRun: true, notWritten: path, ...out };
+    }
+  } else {
+    saveState(state, path);
+  }
   console.log(JSON.stringify(out, null, 2));
 }
 
