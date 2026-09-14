@@ -103,7 +103,8 @@ accountable agent see the same scope for the same task.
 - `conversation`: `scope` is `linked_source_message` when the task links a
   message and `none` otherwise. `sourceMessageIds` lists the exact linked
   message only when it exists in the room (`sourceAvailability` is `available`,
-  `deleted` for a tombstone whose id is still listed, `unavailable` when the id
+  `deleted` for a tombstone whose id is still listed, `redacted` when the body
+  was purged from the log (issue #6 D6), `unavailable` when the id
   points at nothing, `not_linked` when the task has no source). It is delivered
   only on opt-in (`deliveredByDefault: false`). A message that quotes or
   @mentions the agent, a reply in the thread, or an excerpt imported from a

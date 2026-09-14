@@ -17,9 +17,11 @@ export function storedText(db, state, workItemId, messageId, messageEventId = nu
     : db.prepare("SELECT sequence,id,body FROM events WHERE room_id=? AND json_extract(body,'$.type')='message.posted' AND coalesce(json_extract(body,'$.data.messageId'),id)=?").get(state.room.id, messageId);
   check(row);
   const post = JSON.parse(row.body), message = state.messages.find(message => message.id === messageId);
+  // D6: a redacted result keeps its evidence version — the hash is the content from then on.
+  const redacted = Boolean(message?.redactedAt) && post.data.redacted?.bodySha256 === message.bodySha256 && message.body === null;
   check(message && post.type === "message.posted" && post.roomId === state.room.id && post.id === row.id
     && (post.data.messageId || post.id) === messageId && post.data.workItemId === workItemId && message.workItemId === workItemId
-    && post.data.body === message.body && post.actorId === message.authorId && post.at === message.createdAt
+    && (redacted || post.data.body === message.body) && post.actorId === message.authorId && post.at === message.createdAt
     && (post.data.replyToId || null) === message.replyToId && (post.data.toMemberId || null) === message.toMemberId);
   let proposal = null;
   if (["packetId", "basisRevision", "allowOlderBasis"].some(key => Object.hasOwn(post.data, key))) {
@@ -30,7 +32,7 @@ export function storedText(db, state, workItemId, messageId, messageEventId = nu
   }
   check(isDeepStrictEqual(message.proposal ?? null, proposal));
   return { messageId, messageEventId: post.id, postedById: post.actorId, createdAt: post.at,
-    body: message.body, byteLength: Buffer.byteLength(message.body, "utf8"), evidenceVersion: textVersion(message.body), proposal,
+    body: message.body, byteLength: redacted ? null : Buffer.byteLength(message.body, "utf8"), evidenceVersion: redacted ? `sha256:${message.bodySha256}` : textVersion(message.body), proposal, ...(redacted ? { redactedAt: message.redactedAt } : {}),
     postSequence: row.sequence };
 }
 

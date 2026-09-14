@@ -38,6 +38,17 @@ paths:
         answers 409 room_archived. `member.access_changed` targeted at the
         caller with unchanged permissions and `active: false` is a leave and
         needs no manage_members; the owner cannot leave.
+        Redaction (issue #6 D6): `message.redacted` (data: `messageId`) by the
+        room owner or the message's author purges the text from the log
+        itself — the target's `message.posted` and `message.edited` events are
+        rewritten in the same transaction to `{ redacted: { bodySha256,
+        redactionId } }` and the projection keeps `redactedAt`, `redactedBy`
+        and `bodySha256` (SHA-256 of the last body). Export, import, rebuild
+        and a restored backup reproduce the redaction, never the text;
+        `message.deleted` stays a tombstone that keeps history. A second
+        redaction of the same message appends nothing and answers the first
+        (200, duplicate: true); a redacted message cannot be edited, deleted
+        or pinned.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -2616,7 +2627,7 @@ components:
           description: Client-generated idempotency key (UUID)
         type:
           type: string
-          description: Event type, e.g. message.posted, message.edited, message.deleted, message.pinned, message.unpinned, notifications.preferences_set, capabilities.advertised
+          description: Event type, e.g. message.posted, message.edited, message.deleted, message.redacted, message.pinned, message.unpinned, notifications.preferences_set, capabilities.advertised
         data:
           type: object
           description: Event payload; validated per event type

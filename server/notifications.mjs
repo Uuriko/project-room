@@ -46,7 +46,7 @@ export function deriveNotifications({ events, state, member }) {
     if (event.type === T.MESSAGE_POSTED) {
       const messageId = event.data.messageId || event.id;
       const current = messages.get(messageId);
-      if (current?.deletedAt) continue; // A tombstone hides the item with the body.
+      if (current?.deletedAt || current?.redactedAt) continue; // A tombstone hides the item with the body (deleted or redacted).
       const message = current ?? { id: messageId, body: event.data.body, replyToId: event.data.replyToId || null, toMemberId: event.data.toMemberId || null };
       const addressed = messageAddressesMember(message, member);
       const parent = message.replyToId ? messages.get(message.replyToId) : null;

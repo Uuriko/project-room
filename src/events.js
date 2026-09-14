@@ -21,6 +21,7 @@ export const EVENT_TYPES = Object.freeze({
   MESSAGE_POSTED: "message.posted",
   MESSAGE_EDITED: "message.edited",
   MESSAGE_DELETED: "message.deleted",
+  MESSAGE_REDACTED: "message.redacted", // issue #6 D6: purges the body from the log itself
   REPLY_REQUEST_CANCELLED: REPLY_CANCELLED,
   MESSAGE_REACTION_SET: "message.reaction_set",
   MESSAGE_PINNED: "message.pinned",
@@ -220,6 +221,7 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.MESSAGE_POSTED]: postMessage,
     [EVENT_TYPES.MESSAGE_EDITED]: editMessage,
     [EVENT_TYPES.MESSAGE_DELETED]: deleteMessage,
+    [EVENT_TYPES.MESSAGE_REDACTED]: redactMessage,
     [EVENT_TYPES.REPLY_REQUEST_CANCELLED]: cancelReplyRequest,
     [EVENT_TYPES.MESSAGE_REACTION_SET]: setMessageReaction,
     [EVENT_TYPES.MESSAGE_PINNED]: pinMessage,
@@ -284,7 +286,8 @@ function validateEnvelope(incoming) {
     // Legacy events (v11-v18) used data.outputs as a plain string; keep that shape valid for strict replay.
     if (key === "outputs" && typeof value !== "string" && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !v.trim() || v.length > 512))) throw new Error(`Invalid ${key}`);
     if (key === "preferences" && (Array.isArray(value) || typeof value !== "object" || Object.entries(value).some(([k, v]) => typeof k !== "string" || typeof v !== "string" || k.length > 64 || v.length > 64))) throw new Error(`Invalid ${key}`);
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs"].includes(key)) throw new Error(`Invalid ${key}`);
+    if (key === "redacted") redactedBody(incoming.data); // D6: the record of a rewritten post or edit
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "redacted"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -496,10 +499,11 @@ function requireScopedMemberAdministration(state, actorId, targetId, currentTarg
 
 function postMessage(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
-  requireFields(incoming.data, ["body"]);
+  const redacted = redactedBody(incoming.data); // D6: a rewritten post carries a redaction record instead of text
+  if (!redacted) requireFields(incoming.data, ["body"]);
   const requestMode = prepareReplyPost(state, incoming);
   if (incoming.data.toMemberId) (requestMode === "respond" ? knownMember : requireMember)(state, incoming.data.toMemberId);
-  if (typeof incoming.data.body !== "string") throw new Error("Message body must be text");
+  if (!redacted && typeof incoming.data.body !== "string") throw new Error("Message body must be text");
   if (incoming.data.workItemId) requireWorkItem(state, incoming.data.workItemId);
   const proposal = proposalContext(incoming.data, state.workItems[incoming.data.workItemId]);
   if (incoming.data.replyToId && !state.messages.some(m => m.id === incoming.data.replyToId)) throw new Error("Reply must reference a message in this Room");
@@ -507,7 +511,7 @@ function postMessage(state, incoming) {
   state.messages.push({
     id: incoming.data.messageId || incoming.id,
     authorId: actor.id,
-    body: incoming.data.body,
+    body: redacted ? null : incoming.data.body,
     workItemId: incoming.data.workItemId || null,
     replyToId: incoming.data.replyToId || null,
     toMemberId: incoming.data.toMemberId || null,
@@ -521,6 +525,7 @@ function findEditableMessage(state, incoming) {
   const message = state.messages.find(m => m.id === incoming.data.messageId);
   if (!message) throw new Error("Message not found");
   if (message.deletedAt) throw new Error("Message was deleted");
+  if (message.redactedAt) throw new Error("Message was redacted");
   const actor = requireMember(state, incoming.actorId);
   if (message.authorId !== actor.id && actor.id !== state.room.ownerId) throw new Error("Only the author or the Room owner can change this message");
   if ((message.revision ?? 0) !== incoming.data.expectedMessageRevision) throw new Error("Message changed; refresh before editing");
@@ -529,11 +534,62 @@ function findEditableMessage(state, incoming) {
 
 function editMessage(state, incoming) {
   const { message } = findEditableMessage(state, incoming);
+  // D6: every body-bearing event of a redacted message is rewritten together, so a
+  // redacted edit lands on a body-less message and a text edit never does.
+  if (Boolean(redactedBody(incoming.data)) !== (message.body === null)) throw new Error("Message redaction is incomplete");
+  if (redactedBody(incoming.data)) { message.revision = (message.revision ?? 0) + 1; message.editedAt = incoming.at; return; }
   if (typeof incoming.data.body !== "string" || !incoming.data.body.trim()) throw new Error("Message body must be text");
   message.editHistory = [...(message.editHistory ?? []), { body: message.body, editedAt: incoming.at }];
   message.body = incoming.data.body;
   message.revision = (message.revision ?? 0) + 1;
   message.editedAt = incoming.at;
+}
+
+// Issue #6 D6: redaction is the one deliberate exception to append-only bodies.
+// The event keeps the message's id, sequence and place in the log; the store
+// rewrites the target's post and edits into redaction records (see
+// server/message-redaction.mjs), so replaying the rewritten log reproduces the
+// redaction, never the text. The projection keeps who, when and the SHA-256 of
+// the last body so an export or backup can still be checked against a copy.
+// Hashing itself lives in server/message-redaction.mjs; the reducer only
+// recognises and validates the record.
+export const REDACTION_HASH = /^[0-9a-f]{64}$/;
+
+// The redaction record of a rewritten event, null for an ordinary text event;
+// throws when the record is malformed or sits next to a body.
+export function redactedBody(data) {
+  const record = data?.redacted;
+  if (record === undefined) return null;
+  if (!record || typeof record !== "object" || Array.isArray(record) || Object.keys(record).length !== 2
+    || !REDACTION_HASH.test(record.bodySha256) || !validId(record.redactionId) || Object.hasOwn(data, "body")) throw new Error("Invalid redaction record");
+  return record;
+}
+
+// What a reader sees in place of a body that is no longer there, or null for a
+// live message. A body-less message without a marker is a redacted post seen at
+// a historical boundary before its redaction event.
+export function messageTombstone(message) {
+  if (!message) return null;
+  if (message.redactedAt) return "Message redacted";
+  if (message.deletedAt) return "Message deleted";
+  return message.body == null ? "Message redacted" : null;
+}
+
+function redactMessage(state, incoming) {
+  requireFields(incoming.data, ["messageId", "bodySha256"]);
+  const message = state.messages.find(m => m.id === incoming.data.messageId);
+  if (!message) throw new Error("Message not found");
+  if (message.redactedAt) throw new Error("Message already redacted");
+  const actor = requireMember(state, incoming.actorId);
+  if (message.authorId !== actor.id && actor.id !== state.room.ownerId) throw new Error("Only the author or the Room owner can redact this message");
+  if (!REDACTION_HASH.test(incoming.data.bodySha256)) throw new Error("Redaction requires the SHA-256 of the redacted body");
+  message.body = null;
+  message.editHistory = [];
+  message.redactedAt = incoming.at;
+  message.redactedBy = incoming.actorId;
+  message.bodySha256 = incoming.data.bodySha256;
+  dropPinsForMessage(state, message.id);
+  message.revision = (message.revision ?? 0) + 1;
 }
 
 function deleteMessage(state, incoming) {
@@ -1088,7 +1144,7 @@ function pinMessage(state, incoming) {
   const messageId = pinTarget(incoming);
   const message = state.messages.find(m => m.id === messageId);
   if (!message) throw new Error("Pin must reference a message in this Room");
-  if (message.deletedAt || message.body == null) throw new Error("A deleted message cannot be pinned");
+  if (message.deletedAt || message.redactedAt) throw new Error("A deleted message cannot be pinned"); // D6: a redacted post replays body-less until its redaction event
   state.pins ??= [];
   if (state.pins.some(pin => pin.messageId === messageId)) return; // idempotent
   if (state.pins.length >= PIN_LIMIT) throw new Error(`Pin capacity reached: ${PIN_LIMIT} pinned messages per room; unpin one first`);

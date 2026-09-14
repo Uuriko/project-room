@@ -287,7 +287,7 @@ export function searchMessages(state, query, limit = 50, { viewer = null, mentio
   const parsed = parseSearchQuery(query);
   const term = parsed.term.toLocaleLowerCase();
   const only = Boolean(mentionsOnly || parsed.mentionsOnly);
-  let pool = (state.messages || []).filter(message => !message.deletedAt);
+  let pool = (state.messages || []).filter(message => message.body != null); // deleted and redacted messages leave search
   if (pinnedOnly) { const pins = new Set((state.pins ?? []).map(pin => pin.messageId)); pool = pool.filter(message => pins.has(message.id)); }
   if (only) {
     if (!viewer?.id) return { messages: [], total: 0, mentionsOnly: true };

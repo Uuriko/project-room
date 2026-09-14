@@ -57,6 +57,7 @@ optional.push("src/work-recipes.js");
 optional.push("server/action-classes.mjs");
 optional.push("server/room-lifecycle.mjs");
 optional.push("server/attachment-schema.mjs");
+optional.push("server/message-redaction.mjs");
 optional.push("server/wake-queue.mjs");
 optional.push("server/attention.mjs");
 optional.push("server/moderation.mjs");

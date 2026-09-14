@@ -121,12 +121,18 @@ export function walkExport(rows) {
         break;
       case T.MESSAGE_POSTED: {
         const id = data.messageId || event.id;
-        messages.set(id, { id, authorId: event.actorId, at: event.at, body: data.body, edited: false, deleted: false, deletedAt: null, workItemId: data.workItemId || null, replyToId: data.replyToId || null });
+        // D6: a rewritten post carries a redaction record instead of text; the redaction event below names when.
+        messages.set(id, { id, authorId: event.actorId, at: event.at, body: data.redacted ? null : data.body, edited: false, deleted: false, deletedAt: null, redacted: Boolean(data.redacted), redactedAt: null, workItemId: data.workItemId || null, replyToId: data.replyToId || null });
         break;
       }
       case T.MESSAGE_EDITED: {
         const message = messages.get(data.messageId);
-        if (message && !message.deleted) { message.body = data.body; message.edited = true; }
+        if (message && !message.deleted && !message.redacted) { message.body = data.body; message.edited = true; }
+        break;
+      }
+      case T.MESSAGE_REDACTED: {
+        const message = messages.get(data.messageId);
+        if (message) { message.body = null; message.redacted = true; message.redactedAt = event.at; message.edited = false; }
         break;
       }
       case T.MESSAGE_DELETED: {
@@ -232,7 +238,8 @@ export function renderRoomExportHtml(rows, { roomId, generatedAt = new Date().to
       if (message.workItemId) flags.push(`<span class="flag">work: ${esc(work.get(message.workItemId)?.title ?? message.workItemId)}</span>`);
       if (message.edited) flags.push(`<span class="flag">edited</span>`);
       out.push("<li>", `<div class="head"><span class="author">${esc(name(message.authorId))}</span> <time datetime="${attr(message.at)}">${when(message.at)}</time> ${flags.join(" ")}</div>`);
-      if (message.deleted) out.push(`<p class="body deleted">Message deleted${message.deletedAt ? ` <time datetime="${attr(message.deletedAt)}">${when(message.deletedAt)}</time>` : ""}</p>`);
+      if (message.redacted) out.push(`<p class="body deleted">Message redacted${message.redactedAt ? ` <time datetime="${attr(message.redactedAt)}">${when(message.redactedAt)}</time>` : ""}</p>`);
+      else if (message.deleted) out.push(`<p class="body deleted">Message deleted${message.deletedAt ? ` <time datetime="${attr(message.deletedAt)}">${when(message.deletedAt)}</time>` : ""}</p>`);
       else out.push(`<p class="body">${esc(message.body)}</p>`);
       out.push("</li>");
     }

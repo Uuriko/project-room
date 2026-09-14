@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import { Buffer } from "node:buffer";
-import { validId } from "../src/events.js";
+import { validId, redactedBody } from "../src/events.js";
 import { prepareReplyPost, recordReplyPost, cancelReplyRequest, replyContextOwners, REPLY_CANCELLED } from "../src/reply-requests.js";
 
 export const REPLY_PAGE_LIMIT = 20, REPLY_MAX_PAGE_LIMIT = 50, REPLY_PAGE_BYTES = 65536;
@@ -188,7 +188,8 @@ export function auditReplyRequests(state, history, checkpoint = null) {
     if (e.type === "message.posted") {
       const mode = prepareReplyPost(projected, e), messageId = data.messageId || e.id;
       check(validId(messageId) && !ids.has(messageId)); ids.add(messageId);
-      check(validId(e.actorId) && typeof data.body === "string" && data.body.length <= 4096 && data.body.trim().length > 0);
+      const redacted = redactedBody(data); // D6: a rewritten post carries the hash of its text, not the text
+      check(validId(e.actorId) && (redacted !== null || typeof data.body === "string" && data.body.length <= 4096 && data.body.trim().length > 0));
       for (const key of ["messageId", "workItemId", "replyToId", "toMemberId"]) check(data[key] == null || validId(data[key]));
       check(!data.replyToId || projected.messages.some(message => message.id === data.replyToId));
       if (mode || projected.replyRequests) {
@@ -198,7 +199,7 @@ export function auditReplyRequests(state, history, checkpoint = null) {
           && (mode === "respond" || projected.members[data.toMemberId].active === true));
       }
       if (mode === "respond") check(posts.get(data.contextSequence) === data.contextEventId);
-      projected.messages.push({ id: messageId, authorId: e.actorId, body: data.body,
+      projected.messages.push({ id: messageId, authorId: e.actorId, body: redacted ? null : data.body,
         workItemId: data.workItemId || null, replyToId: data.replyToId || null, toMemberId: data.toMemberId || null, createdAt: e.at });
       recordReplyPost(projected, e, mode); posts.set(row.sequence, e.id);
     }

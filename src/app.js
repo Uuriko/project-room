@@ -1,4 +1,4 @@
-import { EVENT_TYPES as T, WORK_STATES as S, roomPolicy, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy } from "./events.js";
+import { EVENT_TYPES as T, WORK_STATES as S, roomPolicy, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, messageTombstone as tombstone } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
@@ -1122,7 +1122,7 @@ function messageContent(m, cluster = {}, unreadStart = false) {
   // E4 moderation: a muted author's message collapses for the muter alone; Report goes to the owner only.
   const muted = isMutedBy(state, session.member.id, m.authorId), other = m.authorId !== session.member.id;
   const moderation = muted ? `<button class="message-to-work" data-message-action="unmute" data-message-id="${esc(m.id)}" type="button">Unmute ${esc(author.displayName)}</button>`
-    : other ? `${!m.deletedAt ? `<button class="message-to-work" data-message-action="report" data-message-id="${esc(m.id)}" type="button">Report</button>` : ""}${m.authorId !== state.room.ownerId ? `<button class="message-to-work" data-message-action="mute" data-message-id="${esc(m.id)}" type="button">Mute ${esc(author.displayName)}</button>` : ""}` : "";
+    : other ? `${!tombstone(m) ? `<button class="message-to-work" data-message-action="report" data-message-id="${esc(m.id)}" type="button">Report</button>` : ""}${m.authorId !== state.room.ownerId ? `<button class="message-to-work" data-message-action="mute" data-message-id="${esc(m.id)}" type="button">Mute ${esc(author.displayName)}</button>` : ""}` : "";
   const divider = unreadStart || cluster.dayStart
     ? `<div class="chat-divider${unreadStart ? " unread" : ""}" role="separator">${esc([unreadStart ? "New messages" : "", cluster.dayStart ? cluster.dayLabel : ""].filter(Boolean).join(" · "))}</div>`
     : "";
@@ -1138,7 +1138,7 @@ function messageContent(m, cluster = {}, unreadStart = false) {
   const groupedTime = cluster.grouped
     ? `<time class="grouped-time" datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time>`
     : "";
-  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${author.kind === "agent" ? `<span>${esc(kindLabel(author.kind))}</span>` : ""}${isPinned(state, m.id) ? `<span class="pinned-chip">Pinned</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · room-visible</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(parent.body.slice(0,90))}</a>` : ""}</div>${muted ? `<p class="message-body message-muted">Hidden: you muted ${esc(authorLabel)}.</p>` : m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<p class="message-body">${mentionHtml(m.body, Object.values(state.members), esc)}</p>`}<div class="draft-feedback">${muted ? "" : draftFeedbackHTML(m)}</div><div class="reactions" role="group" aria-label="Reactions to message by ${esc(authorLabel)}">${muted ? "" : reactionButtons}</div><div class="message-links">${muted ? moderation : `${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>${doneChip(i)}`).join("")}${!m.deletedAt && m.workItemId && workActions(state.workItems[m.workItemId], state.members[session.member.id]).some(([action]) => action === "complete") ? `<button class="message-to-work" type="button" data-message-action="result" data-message-id="${esc(m.id)}">Save as result</button>` : ""}<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>${!m.deletedAt ? `<button class="message-to-work" data-message-action="pin" data-message-id="${esc(m.id)}" type="button" aria-pressed="${isPinned(state, m.id)}">${isPinned(state, m.id) ? "Unpin" : "Pin"}</button>` : ""}${!currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : ""}${!m.deletedAt && can("steer") && !(m.proposal && m.workItemId) ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : ""}${!m.deletedAt && can("decide") && state.members[session.member.id]?.kind === "human" ? `<button class="message-to-work" data-message-action="decide" data-message-id="${esc(m.id)}" type="button">Record decision</button>` : ""}${moderation}`}</div></div>`;
+  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${author.kind === "agent" ? `<span>${esc(kindLabel(author.kind))}</span>` : ""}${isPinned(state, m.id) ? `<span class="pinned-chip">Pinned</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · room-visible</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${tombstone(parent) ?? esc(parent.body.slice(0,90))}</a>` : ""}</div>${muted ? `<p class="message-body message-muted">Hidden: you muted ${esc(authorLabel)}.</p>` : tombstone(m) ? `<p class="message-body message-tombstone">${tombstone(m)}</p>` : `<p class="message-body">${mentionHtml(m.body, Object.values(state.members), esc)}</p>`}<div class="draft-feedback">${muted ? "" : draftFeedbackHTML(m)}</div><div class="reactions" role="group" aria-label="Reactions to message by ${esc(authorLabel)}">${muted ? "" : reactionButtons}</div><div class="message-links">${muted ? moderation : `${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>${doneChip(i)}`).join("")}${!tombstone(m) && m.workItemId && workActions(state.workItems[m.workItemId], state.members[session.member.id]).some(([action]) => action === "complete") ? `<button class="message-to-work" type="button" data-message-action="result" data-message-id="${esc(m.id)}">Save as result</button>` : ""}<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>${!tombstone(m) ? `<button class="message-to-work" data-message-action="pin" data-message-id="${esc(m.id)}" type="button" aria-pressed="${isPinned(state, m.id)}">${isPinned(state, m.id) ? "Unpin" : "Pin"}</button>` : ""}${!currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : ""}${!tombstone(m) && can("steer") && !(m.proposal && m.workItemId) ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : ""}${!tombstone(m) && can("decide") && state.members[session.member.id]?.kind === "human" ? `<button class="message-to-work" data-message-action="decide" data-message-id="${esc(m.id)}" type="button">Record decision</button>` : ""}${moderation}`}</div></div>`;
 }
 function mentionsFilterOn() {
   return $("#search-mentions")?.getAttribute("aria-pressed") === "true";
@@ -1164,7 +1164,7 @@ function renderSearch(now = Date.now()) {
   const list = $("#search-list"), focused = list.contains(document.activeElement) ? document.activeElement.dataset.searchKey : null;
   const empty = only && !parsed.term ? "No one has @-mentioned you yet." : pinnedOnly && !parsed.term ? "Nothing is pinned yet." : pinnedOnly ? "No pinned messages match." : "No matches. Try a name or another phrase.";
   const html = work.work.map(({ item, excerpt }) => `<li><a href="${esc(workHref(item.id))}" data-open-work="${esc(item.id)}" data-search-key="work:${esc(item.id)}"><strong>${esc(item.title)}</strong><span>${esc(excerpt)}</span><small>Work · ${esc(workStatus(item, now).label)}</small></a></li>`).join("")
-    + result.messages.filter(m => !isMutedBy(state, session?.member?.id, m.authorId)).map(m => `<li><a href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" data-search-key="message:${esc(m.id)}"><strong>${esc(name(m.authorId))}</strong><span>${esc(m.deletedAt ? "Message deleted" : (m.body ?? "").slice(0, 240))}</span><small>${m.replyToId ? "Open thread at this reply" : "Open in room"}</small></a></li>`).join("") || `<li class="empty-note">${empty}</li>`;
+    + result.messages.filter(m => !isMutedBy(state, session?.member?.id, m.authorId)).map(m => `<li><a href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" data-search-key="message:${esc(m.id)}"><strong>${esc(name(m.authorId))}</strong><span>${esc(tombstone(m) ?? (m.body ?? "").slice(0, 240))}</span><small>${m.replyToId ? "Open thread at this reply" : "Open in room"}</small></a></li>`).join("") || `<li class="empty-note">${empty}</li>`;
   if (list._content !== html) { list.innerHTML = html; list._content = html; }
   if (focused) ([...list.querySelectorAll("[data-search-key]")].find(e => e.dataset.searchKey === focused) || $("#message-search")).focus({ preventScroll: true });
 }
@@ -1204,7 +1204,7 @@ function syncRequestComposer() {
   const label = mode?.resultEventId ? "Ask about credit" : mode ? ({ request: "Request a reply", answered: "Answer", declined: "Decline", cancelled: "Cancel request" })[mode.kind] : "";
   const work = mode?.resultEventId && state?.workItems[mode.workItemId];
   const subject = work ? work.title + (work.receipt?.eventId !== mode.resultEventId ? " · Earlier result" : "")
-    : request ? (conversation?.byId.get(request.id)?.deletedAt ? "Message deleted" : (conversation?.byId.get(request.id)?.body ?? "").slice(0, 80)) : "";
+    : request ? (tombstone(conversation?.byId.get(request.id)) ?? (conversation?.byId.get(request.id)?.body ?? "").slice(0, 80)) : "";
   setText("#request-mode-label", requestReading ? "Reading request…" : [label, subject, pendingMessage ? "Retry original" : changed ? "Context changed" : ""].filter(Boolean).join(" · "));
   $("#request-refresh").hidden = !request || Boolean(pendingMessage) || requestReading || request.status !== "open";
   $("#request-exit").disabled = busy;
@@ -2039,7 +2039,7 @@ function updateReply() {
   const author = target ? replyAuthorToAddress(session?.member?.id, state.members[target.authorId]) : null;
   const addressing = Boolean(author && messageMentionsMember($("#message-input").value, author));
   $("#reply-context").textContent = target
-    ? `Replying to ${name(target.authorId)}${addressing ? ` · addressing ${author.displayName}` : ""}: ${target.deletedAt ? "Message deleted" : target.body.slice(0, 100)}`
+    ? `Replying to ${name(target.authorId)}${addressing ? ` · addressing ${author.displayName}` : ""}: ${tombstone(target) ?? target.body.slice(0, 100)}`
     : "";
   const mention = $("#reply-mention");
   mention.hidden = !author;
@@ -2464,7 +2464,7 @@ function openDecision(messageId) {
   if (!message) return;
   decisionSourceId = messageId;
   $("#decision-form").reset();
-  $("#decision-source").textContent = `Source: ${name(message.authorId)}: ${message.deletedAt ? "Message deleted" : message.body.slice(0, 200)}`;
+  $("#decision-source").textContent = `Source: ${name(message.authorId)}: ${tombstone(message) ?? message.body.slice(0, 200)}`;
   setFormStatus($("#decision-status"), "");
   $("#decision-dialog").showModal();
   $("#decision-statement-input").focus();
@@ -2550,7 +2550,7 @@ let reportSourceId = null, reportsFlight = null, reportsSequence = -1, reportsGe
 function openReport(messageId) {
   if (busy) return;
   const message = conversation.byId.get(messageId);
-  if (!message || message.deletedAt || message.authorId === session.member.id) return;
+  if (!message || tombstone(message) || message.authorId === session.member.id) return;
   reportSourceId = messageId;
   $("#report-form").reset();
   $("#report-source").textContent = `Message from ${name(message.authorId)}: ${message.body.slice(0, 200)}`;
@@ -2611,7 +2611,7 @@ function renderReports(reports) {
   setText("#report-count", reports.length ? String(reports.length) : "");
   renderContent("#report-list", reports.map(report => {
     const message = report.message;
-    const excerpt = !message ? "Message no longer in this room" : message.deletedAt ? "Message deleted" : message.body.slice(0, 160);
+    const excerpt = !message ? "Message no longer in this room" : (tombstone(message) ?? message.body.slice(0, 160));
     return `<li data-report-id="${esc(report.id)}"><strong>${esc(report.reason)}</strong> <span class="rb-detail">reported by ${esc(memberLabel(report.reporterId))} · ${esc(time(report.createdAt))}</span><br><a class="source-link" href="${esc(recordHref("message", report.messageId))}" data-open-message="${esc(report.messageId)}">${esc(memberLabel(report.authorId))}: ${esc(excerpt)}</a></li>`;
   }).join("") || '<li class="rb-empty">No reports. Members report a message from its Report action; only you see them here.</li>');
 }

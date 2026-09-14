@@ -9,6 +9,9 @@ const id = value => typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,
 const text = value => typeof value === "string" && value.length <= 4096 && value.trim().length > 0;
 const revision = value => Number.isSafeInteger(value) && value >= 0 && value < Number.MAX_SAFE_INTEGER;
 const requireValid = (valid, message) => { if (!valid) throw new Error(message); };
+// D6: a redacted request or answer keeps its request fields; only the text is gone
+// (the reducer validates the redaction record itself before these rules run).
+const textOrRedacted = data => text(data.body) || (own(data, "redacted") && !own(data, "body"));
 
 // Browser drafts have a separate identity for each explicit mode, even inside
 // one conversation. Keys cannot collide with a canonical message ID.
@@ -81,7 +84,7 @@ export async function confirmsReplyCommand(receipt, command, roomId, memberId) {
 export function replyPostMode(data) {
   const fields = REPLY_FIELDS.filter(key => own(data, key));
   if (!fields.length) return null;
-  requireValid(id(data.messageId) && text(data.body), "Reply requests require an explicit message and text");
+  requireValid(id(data.messageId) && textOrRedacted(data), "Reply requests require an explicit message and text");
   requireValid(!["packetId", "basisRevision", "allowOlderBasis"].some(key => own(data, key)), "Reply requests cannot include proposal fields");
   if (own(data, "requestKind")) {
     requireValid(fields.length === 1 && data.requestKind === "reply" && id(data.toMemberId), "Invalid reply request fields");
@@ -112,7 +115,7 @@ export function prepareReplyPost(state, incoming) {
   const mode = replyPostMode(incoming.data);
   requireValid(mode, "Reply request policy requires explicit request fields");
   const data = incoming.data;
-  const allowed = ["messageId", "body", "workItemId", "replyToId", "toMemberId", "requestPolicyVersion", ...REPLY_FIELDS];
+  const allowed = ["messageId", "body", "redacted", "workItemId", "replyToId", "toMemberId", "requestPolicyVersion", ...REPLY_FIELDS];
   requireValid(Object.keys(data).every(key => allowed.includes(key)), "Unexpected reply request fields");
   if (mode === "open") {
     requireValid(data.toMemberId !== incoming.actorId, "A reply request needs another participant");

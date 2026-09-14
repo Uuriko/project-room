@@ -369,6 +369,21 @@ carry the claim, and the remaining tiers stay visibly open.
       }
     },
     {
+      "id": "message-redaction",
+      "claim": "The owner or the author redacts a message: the text leaves the projection, search, both export formats, an import round-trip and a restored backup, and only its SHA-256 remains for verification; deletion stays a tombstone that keeps history.",
+      "evidence": {
+        "unit": [
+          "tests/message-redaction.test.js",
+          "tests/message-edit-delete.test.js"
+        ],
+        "browser": [
+          "scripts/message-redaction-browser-check.mjs"
+        ],
+        "agent": [],
+        "hosted": []
+      }
+    },
+    {
       "id": "room-spend-allowance",
       "claim": "The room owner can set a spend allowance over a rolling period; a session start that would commit more than the allowance is refused before anything is written, unknown spend never frees allowance, and every member sees allowance, spent, reserved and headroom from the same ledger the server enforces.",
       "evidence": {
@@ -428,6 +443,7 @@ carry the claim, and the remaining tiers stay visibly open.
 | Unified inbox UI (list, reply, connections, needs-you, share) | inbox-unified-routes, inbox-channel-client | inbox-unified-check | open | open |
 | Room lifecycle (create, archive, leave) | room-lifecycle, account-rooms | room-lifecycle-browser-check | open | open |
 | Notification feed | notification-feed, notification-preferences | notification-feed-browser-check | open | open |
+| Message redaction (survives replay, export, import, restore) | message-redaction, message-edit-delete | message-redaction-browser-check | open | open |
 
 Follow-up scope: claims made in docs beyond the README list (per-feature
 acceptance docs) can be folded into the same block; the checker format already

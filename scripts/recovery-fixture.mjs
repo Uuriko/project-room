@@ -163,8 +163,12 @@ export function createRecoveryFixture(filename) {
   replyRequests.push({ action: "reply.review", requestId: "recovery-provider-review", sourceId: replyPlan.sourceId, attemptId: replyPlan.requestId,
     expectedRevision: 3, reviewVersion: replyReceipts.at(-1).attempt.observation.reviewVersion });
   replyReceipts.push(store.inbox.reply(owner.token, replyRequests.at(-1), owner.session.sessionBinding).receipt);
+  // Issue #6 D6: one redacted message, so the capture carries a message_redactions row and rewritten event bodies.
+  const redactedBody = "Synthetic text the owner redacts before capture 🪷";
+  send("commons", keys.owner, T.MESSAGE_POSTED, { messageId: "recovery-redacted", body: redactedBody });
+  const redaction = send("commons", keys.owner, T.MESSAGE_REDACTED, { messageId: "recovery-redacted" });
   const cursor = store.room("commons").sequence; store.markCaughtUp(keys.owner, "commons", cursor);
-  return { store, filename, keys, owner, target, validSession, revokedSession, loggedOut, sharedSession, pending, invitation,
+  return { store, filename, keys, owner, target, validSession, revokedSession, loggedOut, sharedSession, pending, invitation, redactedBody, redaction,
     shareRequest, link, linkToken, guestSlot, guest, joinRequest, reminders, command, commandResult, cursor, inboxRequests, inboxReceipts, inboxDraftBody, transportRequests, transportReceipts, replyRequests, replyReceipts,
     enrollmentToken, enrollmentRequest, enrollment, nativeBody, nativeCommand, nativeCompletion, charterCommand, charterSaved, emailProfile, emailPage, emailEnvelope,
     now: () => now, advance: ms => { now += ms; } };

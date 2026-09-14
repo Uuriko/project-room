@@ -27,7 +27,8 @@ export function nativeTextEvidence(state, work, data) {
     || !Object.hasOwn(data, "producerId") || (data.producerId !== null && !id(data.producerId))
     || !/^sha256:[0-9a-f]{64}$/.test(data.evidenceVersion)) invalid("Choose exact text evidence and its current previous result");
   const message = state.messages.find(message => message.id === data.evidenceMessageId);
-  if (!message || message.workItemId !== work.id || !validResultBody(message.body)) invalid("Choose a well-formed message explicitly linked to this work");
+  // D6: a redacted post replays body-less; its hash stays the evidence version (server/text-results.mjs checks it).
+  if (!message || message.workItemId !== work.id || !(validResultBody(message.body) || (message.body === null && !message.deletedAt))) invalid("Choose a well-formed message explicitly linked to this work");
   return { kind: "room_text", messageId: message.id, messageEventId: data.evidenceMessageEventId,
     previousCompletionEventId: data.previousCompletionEventId, postedById: message.authorId,
     proposal: message.proposal ? structuredClone(message.proposal) : null };

@@ -49,10 +49,72 @@ behaviors marked (pinned).
   the file holds, including that history.
 - Editing keeps prior versions in the room's edit history until the message is
   deleted.
+- Redaction (below) is the one way to take the text itself out of the room's
+  history; use it when deletion's visibility rule is not enough.
 - There is no self-serve room deletion. The owner can archive a room (below),
   which makes it read-only but removes nothing. Removing a room entirely is an
   operator action on the service database and its backups, and exports already
   taken are not recalled.
+
+## Redaction (issue #6 D6)
+
+Redaction removes a message's text from the event log itself, not only from
+the view. It is the one deliberate exception to append-only event bodies, and
+it is designed so that every path that replays history reproduces the
+redaction rather than the text. `tests/message-redaction.test.js` pins the
+behaviours marked (pinned).
+
+- **Who.** The room owner or the message's author posts
+  `{ type: "message.redacted", data: { messageId } }` to
+  `POST /api/rooms/<id>/commands`. Anyone else is refused (pinned). A deleted
+  message can still be redacted; that is the intended way to purge text that
+  deletion only hid.
+- **What changes in the log.** In the same transaction the service appends the
+  `message.redacted` event and rewrites the target's `message.posted` and
+  every `message.edited` event: `data.body` is removed and
+  `data.redacted = { bodySha256, redactionId }` names the SHA-256 (hex) of the
+  removed text and the redaction event's id. Event ids, sequences, actors and
+  timestamps are unchanged, so the log stays dense and every reference to the
+  message (replies, work links, reply requests, decisions) still resolves.
+- **What the room keeps.** The projection keeps the message as a tombstone
+  with `redactedAt`, `redactedBy` and `bodySha256` (the hash of the last body
+  before redaction) and an empty edit history. The room and the readable
+  export show "Message redacted". Search, catch-up, reply previews and
+  decision sources never see the text again (pinned). A redacted message
+  cannot be edited, deleted or pinned; a second redaction appends nothing and
+  answers the first (pinned).
+- **Export, import, rebuild, restore.** The JSONL export carries the rewritten
+  events and the redaction event; importing that file reproduces the
+  redaction, and an import whose file still carries the text of a redacted
+  message is refused (pinned). A projection rebuild replays the rewritten log.
+  A database backup taken after the redaction contains no copy of the text
+  (pinned); a backup taken before it still does, and so does any export taken
+  before it — redaction reaches the service's own storage, not copies already
+  handed out.
+- **Verification.** `SHA-256(original text)` equals the recorded
+  `bodySha256`, so a person holding a copy can prove what was redacted
+  without the service holding it (pinned). A native work result whose
+  message was redacted keeps its evidence version for the same reason: the
+  hash is the content from then on. On every open (writable and read-only)
+  the service checks that no redacted message keeps text in the events, the
+  projection or the retained checkpoint and that the `message_redactions`
+  table and the log agree, and refuses to serve otherwise (schema 29,
+  `server/message-redaction.mjs`).
+- **Limits.** Text already delivered to an agent, a channel or a browser is
+  not recalled. Work-item titles, descriptions, charters and decisions are not
+  messages and have no redaction yet. Removing a whole room or a person's
+  every trace remains the operator action described above.
+
+## Retention policy (stub)
+
+There is no automatic retention or expiry today: a room keeps its history
+until the owner deletes or redacts messages, or the operator removes the room.
+When a policy is introduced it will be recorded per room as an owner decision
+(retention period, what expiry does — redact or remove) and applied by the
+service as redactions, so that the same replay guarantee above holds. A
+preservation hold (a role that suspends expiry and refuses redaction while a
+matter is open) needs the organization boundary and roles from D1 and is
+deferred to it.
 
 ## Privacy-sensitive derivatives, accounted for
 
@@ -142,6 +204,7 @@ are visibility and credential changes, not erasure.
   deleted and edited-away content; the HTML file shows the room as members saw
   it. Share each on that basis.
 - **Before deleting:** deletion hides content from members but does not remove
-  it from exports or backups.
+  it from exports or backups. Redact instead when the text itself must leave
+  the service's history; copies already taken are still not recalled.
 - **Before importing:** import replaces the room's history wholesale with the
   file's contents.

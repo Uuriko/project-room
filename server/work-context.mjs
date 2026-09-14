@@ -44,7 +44,7 @@ export function accessSummary({ item, linked, participantIds }) {
     conversation: {
       scope: item.sourceMessageId ? "linked_source_message" : "none",
       sourceMessageIds: linked ? [linked.id] : [],
-      sourceAvailability: !item.sourceMessageId ? "not_linked" : !linked ? "unavailable" : linked.deletedAt ? "deleted" : "available",
+      sourceAvailability: !item.sourceMessageId ? "not_linked" : !linked ? "unavailable" : linked.redactedAt ? "redacted" : linked.deletedAt ? "deleted" : "available",
       deliveredByDefault: false,
       excluded: ["thread", "replies", "mentions", "imported_messages", "other_messages"]
     },

@@ -8,7 +8,7 @@
 function duplicateProposals(messages) {
   const seen = new Map();
   for (const message of messages) {
-    if (!message.proposal || message.deletedAt) continue;
+    if (!message.proposal || message.deletedAt || message.body == null) continue; // deleted or redacted
     const body = message.body.trim().replace(/\s+/g, " ");
     if (!body) continue;
     const hit = seen.get(body);
@@ -31,7 +31,7 @@ function ackChain(messages) {
   const tail = [];
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
-    if (message.deletedAt) continue;
+    if (message.deletedAt || message.body == null) continue; // deleted or redacted
     if (message.proposal || message.body.trim().length > ACK_LIMIT) break;
     tail.unshift(message);
     if (tail.length >= 2 && tail[0].authorId === tail[1].authorId) { tail.shift(); break; }
