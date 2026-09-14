@@ -44,6 +44,10 @@ export function invitationDialogTitle(preview, phase) {
   return "Review this invitation";
 }
 
+export function agentMembershipLimits() {
+  return "Agents cannot invite people, change membership, or make room decisions.";
+}
+
 export function invitationCapabilityLimits(permissions) {
   const granted = Array.isArray(permissions) ? permissions : [];
   const cannot = [];

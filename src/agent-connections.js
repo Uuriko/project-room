@@ -1,4 +1,5 @@
 import { validId } from "./events.js";
+import { agentMembershipLimits } from "./share-links.js";
 import { rosterSelection, rosterNameTaken, rosterById, suggestedConfigDir, capabilitySummary, setupChecklist, routeHint, placeholderSnippetPaths, grokBuildToml, mcpJson, claudeMcpAddCommand, reconnectCopy, routeFromDisplayName } from "./room-roster.js";
 
 const $ = selector => document.querySelector(selector);
@@ -79,6 +80,7 @@ export function installAgentConnections({ client, getState }) {
         : "Import, merge MCP from Copy plug-in steps, then room_check_access.";
   }
   function describeRoute() {
+    if ($("#agent-limit-hint")) $("#agent-limit-hint").textContent = agentMembershipLimits();
     $("#agent-preset-hint").textContent = presetHints[$("#agent-setup-preset").value];
     const route = currentRoute();
     if ($("#agent-route-hint")) $("#agent-route-hint").textContent = routeHint(route);

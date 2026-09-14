@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { formatShareInvitation, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, reuseVisibleRoom, invitationUnavailableMessage, formatInvitationExpiry, invitationAskWhom, invitationDialogTitle, invitationCapabilityLimits } from "../src/share-links.js";
+import { formatShareInvitation, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, reuseVisibleRoom, invitationUnavailableMessage, formatInvitationExpiry, invitationAskWhom, invitationDialogTitle, invitationCapabilityLimits, agentMembershipLimits } from "../src/share-links.js";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
@@ -65,6 +65,15 @@ test("expired invitation copy names the room owner and includes the expiry time"
   const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   assert.match(app, /invitationUnavailableMessage\(preview\)/);
   assert.doesNotMatch(app, /Ask a current Room administrator/);
+});
+
+test("agent setup copy says agents cannot invite or decide", () => {
+  assert.equal(agentMembershipLimits(), "Agents cannot invite people, change membership, or make room decisions.");
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  assert.match(html, /id="agent-limit-hint"/);
+  assert.match(html, /Agents cannot invite people, change membership, or make room decisions/);
+  const src = readFileSync(new URL("../src/agent-connections.js", import.meta.url), "utf8");
+  assert.match(src, /agentMembershipLimits\(\)/);
 });
 
 test("invitation capability copy names what the membership cannot do", () => {

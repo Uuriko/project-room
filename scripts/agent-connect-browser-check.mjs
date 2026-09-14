@@ -38,6 +38,7 @@ async function setup(t, mobile = false) {
 
 for (const mobile of [false, true]) test(`setup presets ${mobile ? "mobile" : "desktop"}: defaults, none, custom and bounded max`, { timeout: 30000 }, async t => {
   const f = await setup(t, mobile), p = f.page; await f.open();
+  assert.match(await p.locator("#agent-limit-hint").textContent(), /cannot invite people, change membership, or make room decisions/i);
   assert.equal(await p.locator("#agent-setup-preset").inputValue(), "moderate");
   assert.equal(await p.locator("#agent-connect-access").inputValue(), "contribute");
   for (const [preset, access, expiry] of [["max", "max", "30"], ["low", "chat", "1"], ["moderate", "contribute", "7"]]) {
