@@ -157,7 +157,7 @@ export class EmailImport {
       const connection = this.connection(auth.account.id, id);
       if (!connection) fail("channel_connection_not_found", "Connection not found.", 404);
       return { contractVersion: 1, viewer: viewer(auth), connection: this.record(connection, auth.account.authEpoch), mode: connection.mode,
-        webhook: Boolean(connection.webhook) };
+        webhook: Boolean(connection.webhook), webhookSetAt: connection.webhook ? new Date(connection.webhook.updatedAt).toISOString() : null };
     });
   }
   folder(accountId, connectionId, folderId) {
