@@ -581,12 +581,14 @@
         <div class="share-settings"><label>Link expires in<select id="share-link-expiry"><option value="1">1 hour</option><option value="24" selected>24 hours</option><option value="168">7 days</option></select></label>
         <label>Maximum new guests<input id="share-link-limit" type="number" min="1" max="25" value="10" required></label></div>
         </details>
+        <label class="share-purpose">Purpose · optional<select id="share-link-purpose"><option value="">Whole room</option></select></label>
         <button id="share-link-create" class="button primary" type="submit">Create link</button>
       </form>
       <div id="share-link-result" hidden>
         <label for="share-link-url">Ready to share</label><input id="share-link-url" type="text" readonly autocomplete="off" spellcheck="false">
         <button id="share-link-copy" class="button primary" type="button">Copy link</button><button id="share-link-another" class="button ghost" type="button">New link</button>
         <p class="form-hint">Save before closing. This link is shown once.</p>
+        <p id="share-purpose-note" class="form-hint" hidden></p>
         <details id="share-note"><summary>Add a note</summary>
           <label for="share-note-text">Note · optional</label>
           <textarea id="share-note-text" rows="3" maxlength="600" autocomplete="off" spellcheck="false" placeholder="What would you like a hand with?" aria-describedby="share-note-hint"></textarea>
