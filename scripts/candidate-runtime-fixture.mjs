@@ -36,6 +36,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('src/room-templates.js');
   paths.add('server/diagnostics.mjs');
   paths.add('server/wake-queue.mjs');
+  paths.add('server/attention.mjs');
   paths.add('scripts/release-evidence.mjs');
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
   // No private state, credentials, docs or real checkout Git metadata.
