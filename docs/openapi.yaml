@@ -1018,6 +1018,12 @@ paths:
         route; a redelivered update_id is a no-op. Nothing is fetched or sent.
         409 channel_webhook_unavailable when the deployment has no webhook inbox;
         409 channel_webhook_backlog once 500 updates are pending for the connection.
+        The JSON body may be up to 64 KB (a reply embeds the replied-to message;
+        every other route keeps 16 KB), 413 too_large above it. 60 deliveries per
+        minute per verified connection (429 rate_limited, counted after the secret
+        matches and before anything is journaled, so Telegram's shared egress
+        addresses never share one budget), behind a guard of 1200 requests per
+        minute per client address for unverified traffic.
       security: []
       parameters:
         - name: connectionId
@@ -1033,7 +1039,9 @@ paths:
         '202': { description: "{ contractVersion, connectionId, received, pending }; a malformed message-kind update is journaled as failed, not refused" }
         '401': { description: channel_webhook_denied }
         '409': { description: channel_webhook_unavailable or channel_webhook_backlog }
+        '413': { description: too_large (body above 64 KB) }
         '422': { description: invalid_channel_update }
+        '429': { description: rate_limited (60 per minute per verified connection; 1200 per minute per address) }
 components:
   securitySchemes:
     queryAuth:

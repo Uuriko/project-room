@@ -17,7 +17,9 @@ import { validId } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
-export const channelJournalLimits = Object.freeze({ maxAttempts: 5, payloadBytes: 16384, errorChars: 200, batch: 500 });
+// payloadBytes matches the webhook route's body cap (channelSyncLimits.webhookBodyBytes):
+// a reply to a long message arrives with the replied-to message embedded.
+export const channelJournalLimits = Object.freeze({ maxAttempts: 5, payloadBytes: 65536, errorChars: 200, batch: 500 });
 export const channelJournalStatuses = Object.freeze(["pending", "imported", "failed"]);
 export const channelJournalSchema = `
   CREATE TABLE IF NOT EXISTS pending_channel_updates (

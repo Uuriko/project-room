@@ -9,7 +9,12 @@ import { validId } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
-export const channelSyncLimits = Object.freeze({ pageMessages: 50, webhookUpdates: 100, webhookBacklog: 500 });
+// Webhook route limits (server/http.mjs): the JSON body cap is 64 KB because a
+// Telegram Update embeds the whole replied-to message (every other route keeps
+// the 16 KB default); deliveries are counted per verified connection, plus a
+// high per-address guard because Telegram's egress addresses are shared.
+export const channelSyncLimits = Object.freeze({ pageMessages: 50, webhookUpdates: 100, webhookBacklog: 500,
+  webhookBodyBytes: 65536, webhookPerConnection: 60, webhookPerAddress: 1200 });
 // B49 (I3): the owner-chosen webhook secret must carry some entropy. 16-256
 // characters, no whitespace or control characters, at least 6 distinct
 // characters, so an obviously weak value (one repeated character, "abab...")
@@ -107,10 +112,13 @@ export class ChannelWebhookInbox {
   }
   // Match, validate and journal in one store transaction: a delivery is either
   // fully recorded or refused unchanged. A redelivered update id is a no-op.
-  receive({ connectionId, secret, body }) {
+  // `verified` runs once the secret matched and before anything is journaled;
+  // it may throw (the HTTP route counts its per-connection rate limit there).
+  receive({ connectionId, secret, body, verified = null }) {
     return this.#store.transaction(() => {
       const match = this.#match(connectionId, secret);
       if (!match) fail(401, "channel_webhook_denied", "Webhook not accepted.");
+      if (verified) verified({ accountId: match.accountId, connectionId });
       // Telegram posts one Update per request; a replayed batch uses { updates: [...] }.
       const updates = body && typeof body === "object" && !Array.isArray(body) && Object.hasOwn(body, "update_id") ? [body] : body?.updates;
       if (!Array.isArray(updates) || !updates.length || updates.length > channelSyncLimits.webhookUpdates
