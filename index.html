@@ -61,7 +61,7 @@
       </section>
 
       <nav id="workspace-nav" class="workspace-nav" aria-label="Workspace" hidden>
-        <button id="nav-inbox" type="button" aria-current="false">Inbox</button>
+        <button id="nav-inbox" type="button" aria-current="false">Inbox <span id="inbox-attention-count"></span></button>
         <button id="nav-rooms" type="button" aria-current="page">Rooms</button>
         <button id="choose-room" type="button" class="text-button" hidden>Switch room</button>
       </nav>
@@ -77,12 +77,41 @@
         <aside class="inbox-sidebar">
           <header><h1 id="inbox-heading" tabindex="-1">Inbox</h1><button id="inbox-refresh" class="button ghost icon-button" type="button" aria-label="Refresh inbox">↻</button></header>
           <p id="inbox-status" role="status"></p>
+          <div id="inbox-filters" class="inbox-filters" role="group" aria-label="Filter messages" hidden>
+            <label>Channel <select id="inbox-filter-channel"></select></label>
+            <label>Connection <select id="inbox-filter-connection"></select></label>
+            <label class="inbox-filter-toggle"><input id="inbox-group-toggle" type="checkbox" checked> Group by connection</label>
+          </div>
           <div id="inbox-list" aria-label="Messages"></div>
-          <p id="inbox-empty" class="form-hint">Sample inbox. Email and Telegram connections are local fixtures for now; no live messages arrive and nothing is sent.</p>
+          <p id="inbox-empty" class="form-hint">Sample inbox. Add a connection below. Email connections are local fixtures for now, with no real mailbox behind them. Telegram can go live once the deployment's bot token and webhook secret bindings are set; until then nothing arrives and replies stay on this server as samples.</p>
+          <section id="inbox-connections" class="inbox-connections" aria-label="Connections" hidden></section>
+          <details id="inbox-add-connection" class="inbox-add-connection" hidden>
+            <summary>Add connection</summary>
+            <form id="inbox-connection-form" class="inbox-connection-form">
+              <label for="inbox-connection-channel">Channel</label>
+              <select id="inbox-connection-channel" name="channel"><option value="telegram">Telegram bot</option><option value="email">Email mailbox (fixture)</option></select>
+              <label for="inbox-connection-id">Connection id</label>
+              <input id="inbox-connection-id" name="id" type="text" value="telegram-bot" maxlength="128" required autocomplete="off">
+              <div data-channel="telegram">
+                <label for="inbox-connection-bot-id">Bot id</label>
+                <input id="inbox-connection-bot-id" name="bot-id" type="text" inputmode="numeric" maxlength="20" placeholder="digits before the colon in the token" required autocomplete="off">
+                <label for="inbox-connection-username">Bot username</label>
+                <input id="inbox-connection-username" name="username" type="text" maxlength="33" placeholder="your_room_bot" required autocomplete="off">
+              </div>
+              <div data-channel="email" hidden>
+                <label for="inbox-connection-address">Mailbox address</label>
+                <input id="inbox-connection-address" name="address" type="email" maxlength="320" placeholder="you@example.test" autocomplete="off">
+              </div>
+              <label for="inbox-connection-name">Display name <span class="form-hint">(optional)</span></label>
+              <input id="inbox-connection-name" name="name" type="text" maxlength="200" autocomplete="off">
+              <p class="form-hint">Never paste a bot token or a webhook secret here; those are deployment bindings.</p>
+              <div class="inbox-draft-actions"><span id="inbox-connection-form-status" role="status"></span><button class="button secondary" type="submit">Add</button></div>
+            </form>
+          </details>
         </aside>
         <button id="inbox-back" class="text-button inbox-back" type="button">← Inbox</button>
         <article id="inbox-reader" class="inbox-reader" hidden>
-          <header class="inbox-source-heading"><div><span id="inbox-source-label" class="form-hint">Sample message · only you</span><h2 id="inbox-subject"></h2></div><button id="inbox-ask" class="button secondary" type="button">Ask room</button></header>
+          <header class="inbox-source-heading"><div><span id="inbox-source-label" class="form-hint">Sample message · only you</span> <span id="inbox-addressed" class="inbox-needs-you" hidden>Addressed to you</span><h2 id="inbox-subject"></h2></div><button id="inbox-ask" class="button secondary" type="button">Ask room</button></header>
           <p id="inbox-addresses" class="form-hint"></p>
           <details id="inbox-email-details" class="form-hint" hidden><summary>Details</summary><div id="inbox-email-metadata"></div></details>
           <p id="inbox-source-notice" class="form-hint" hidden></p>

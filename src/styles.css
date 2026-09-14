@@ -719,6 +719,29 @@ summary { overflow-wrap: anywhere; }
 .inbox-sidebar { padding: 1.25rem 1rem; border-right: 1px solid var(--line); }
 .inbox-sidebar header, .inbox-source-heading, .inbox-draft-actions { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .inbox-sidebar h1 { font-size: 1.25rem; margin: 0; }
+.inbox-connections { display: grid; gap: .5rem; margin: .75rem .75rem 0; }
+.inbox-connection-card { display: grid; gap: .3rem; padding: .75rem; border: 1px solid var(--line); border-radius: .5rem; }
+.inbox-connection-card h2 { margin: 0; font-size: .75rem; font-weight: 550; letter-spacing: .02em; text-transform: uppercase; }
+.inbox-connection-state { margin: 0; font-size: .8rem; text-transform: capitalize; }
+.inbox-connection-facts { margin: 0; padding: 0; list-style: none; display: grid; gap: .15rem; font-size: .8rem; color: var(--muted); overflow-wrap: anywhere; }
+.inbox-connection-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-top: .25rem; }
+.inbox-connection-note { font-size: .8rem; color: var(--muted); }
+.inbox-filters { display: flex; flex-wrap: wrap; gap: .5rem .9rem; align-items: center; margin: .25rem .75rem .5rem; font-size: .8rem; color: var(--muted); }
+.inbox-filters label { display: inline-flex; align-items: center; gap: .35rem; min-height: 32px; }
+.inbox-filters select { font: inherit; font-size: .8rem; max-width: 12rem; padding: .25rem .35rem; }
+.inbox-filters input[type="checkbox"] { width: 1rem; height: 1rem; min-height: 1rem; margin: 0; }
+.inbox-row-meta { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.inbox-channel-badge, .inbox-needs-you { font-size: .7rem; letter-spacing: .02em; text-transform: uppercase; padding: .05rem .4rem; border-radius: .4rem; border: 1px solid var(--line); color: var(--muted); }
+.inbox-needs-you { border-color: currentColor; color: var(--text); font-weight: 550; }
+#inbox-attention-count:empty { display: none; }
+#inbox-attention-count { font-size: .8rem; color: var(--muted); }
+.inbox-add-connection { margin: .75rem .75rem 0; font-size: .85rem; }
+.inbox-add-connection summary { cursor: pointer; min-height: 32px; display: flex; align-items: center; }
+.inbox-connection-form { display: grid; gap: .4rem; padding: .5rem 0; }
+.inbox-connection-form label { font-weight: 550; font-size: .8rem; }
+.inbox-connection-form input, .inbox-connection-form select { width: 100%; box-sizing: border-box; font: inherit; font-size: .9rem; padding: .45rem .55rem; }
+.inbox-connection-form div[data-channel] { display: grid; gap: .4rem; }
+.inbox-connection-form .form-hint { margin: 0; font-weight: 400; }
 .inbox-group { display: grid; gap: .1rem; }
 .inbox-group-label { margin: .75rem .75rem .25rem; font-size: .75rem; font-weight: 550; letter-spacing: .02em; text-transform: uppercase; }
 .inbox-row { display: grid; gap: .4rem; width: 100%; padding: 1rem .75rem; border: 0; border-radius: .5rem; background: none; color: inherit; text-align: left; cursor: pointer; font: inherit; }
