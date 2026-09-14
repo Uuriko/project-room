@@ -1,9 +1,9 @@
 // Upgrade compatibility fence, not authentication against a database administrator.
 // Older service connections do not register this function, so ordinary writes fail
 // after the schema transaction commits, even if the connection predates migration.
-export const STORE_SCHEMA_VERSION = 28;
+export const STORE_SCHEMA_VERSION = 34;
 export const WRITER_FUNCTION = `project_room_writer_v${STORE_SCHEMA_VERSION}`;
-export const writerVersions = Object.freeze([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28]);
+export const writerVersions = Object.freeze([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34]);
 const v6Tables = ["rooms", "events", "commands", "accounts", "member_accounts", "account_access_events",
   "credentials", "cursors", "projection_checkpoints", "account_credentials", "account_session_slots",
   "membership_invitations", "membership_invitation_events", "membership_invitation_journal"];
@@ -13,21 +13,23 @@ const v14Tables = [...v8Tables, "agent_connections", "agent_connection_operation
 const v17Tables = [...v14Tables, "private_inbox_sources", "private_inbox_versions", "private_inbox_drafts", "private_inbox_commands"];
 const tables = [...v17Tables, "private_email_connections", "private_email_folders", "private_email_commands"];
 const v27Tables = [...tables, "agent_identities", "identity_links"];
-// agent_invite_codes is purely additive at v27 (no data migration, no writer
-// fence impact: pre-invite writers have no code path to the table, and the
-// recovery audit's exact table list is the integrity gate). It is part of the
-// application tables but intentionally not of the fenced v27 table set, so
-// existing v27 stores verify without a schema version bump. wake_queue and
-// wake_queue_commands (W4-45 durable wake queue) and the
-// private_attention_prefs/commands pair (W4-46 quiet hours and digest choice)
-// and pending_channel_updates (B20 durable webhook update journal) follow the
-// same pattern: purely additive at v27, application tables but not fenced.
-// v28 (issue #6 A2 room lifecycle) adds the rooms.archived_at column; the
-// fenced table set is unchanged, so v28 fences the same tables as v27.
-export const applicationTables = Object.freeze([...v27Tables, "agent_invite_codes", "wake_queue", "wake_queue_commands", "private_attention_prefs", "private_attention_commands", "pending_channel_updates", "wake_queue_pause", "message_reports"]);
-export const fenceDefinitions = version => Object.freeze(({ 6: v6Tables, 7: v7Tables, 8: v8Tables, 9: v14Tables, 10: v14Tables, 11: v14Tables, 12: v14Tables, 13: v14Tables, 14: v14Tables, 15: v17Tables, 16: v17Tables, 17: v17Tables, 18: tables, 19: tables, 20: tables, 21: tables, 22: tables, 23: tables, 24: tables, 25: tables, 26: tables, 27: v27Tables, 28: v27Tables })[version].flatMap(table => ["INSERT", "UPDATE", "DELETE"].map(operation => {
+// Two lineages previously reused v28: rebuilt main added rooms.archived_at,
+// while the deployed lineage fenced agent_invite_codes + room_attachments and
+// later advanced to v33. v34 converges them without rewriting either history.
+const deployedV28Tables = [...v27Tables, "agent_invite_codes", "room_attachments"];
+const rebuiltAdditiveTables = ["agent_invite_codes", "wake_queue", "wake_queue_commands", "private_attention_prefs", "private_attention_commands", "pending_channel_updates", "wake_queue_pause", "message_reports"];
+export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);
+const tablesFor = version => version <= 27 ? ({ 6: v6Tables, 7: v7Tables, 8: v8Tables, 9: v14Tables, 10: v14Tables, 11: v14Tables, 12: v14Tables, 13: v14Tables, 14: v14Tables, 15: v17Tables, 16: v17Tables, 17: v17Tables, 18: tables, 19: tables, 20: tables, 21: tables, 22: tables, 23: tables, 24: tables, 25: tables, 26: tables, 27: v27Tables })[version]
+  : version === 28 ? v27Tables : version <= 33 ? deployedV28Tables : applicationTables;
+export const fenceDefinitions = version => Object.freeze(tablesFor(version).flatMap(table => ["INSERT", "UPDATE", "DELETE"].map(operation => {
   const name = `writer_v${version}_${table}_${operation.toLowerCase()}`;
   return Object.freeze({ name, sql: `CREATE TRIGGER ${name} BEFORE ${operation} ON ${table} BEGIN SELECT CASE WHEN project_room_writer_v${version}() IS NOT ${version} THEN RAISE(ABORT,'unsupported database writer') END; END` });
+})));
+// v28's deployed lineage included attachment triggers; accept them as known
+// history while requiring only the rebuilt set when opening a rebuilt v28 DB.
+const deployedV28FenceDefinitions = Object.freeze(deployedV28Tables.flatMap(table => ["INSERT", "UPDATE", "DELETE"].map(operation => {
+  const name = `writer_v28_${table}_${operation.toLowerCase()}`;
+  return Object.freeze({ name, sql: `CREATE TRIGGER ${name} BEFORE ${operation} ON ${table} BEGIN SELECT CASE WHEN project_room_writer_v28() IS NOT 28 THEN RAISE(ABORT,'unsupported database writer') END; END` });
 })));
 export const writerFenceDefinitions = fenceDefinitions(STORE_SCHEMA_VERSION);
 
@@ -54,6 +56,7 @@ export function registerWriter(db) {
   db.function("project_room_writer_v25", () => 25);
   db.function("project_room_writer_v26", () => 26);
   db.function("project_room_writer_v27", () => 27);
+  for (const version of [28, 29, 30, 31, 32, 33]) db.function(`project_room_writer_v${version}`, () => version);
   db.function(WRITER_FUNCTION, () => STORE_SCHEMA_VERSION);
 }
 
@@ -68,7 +71,9 @@ export function installWriterFence(db) {
 }
 
 export function verifyWriterFence(db, version = STORE_SCHEMA_VERSION) {
-  const expected = new Map(writerVersions.filter(v => v <= version).flatMap(fenceDefinitions).map(def => [def.name, def.sql]));
+  const histories = writerVersions.filter(v => v <= version).flatMap(fenceDefinitions);
+  if (version >= 28) histories.push(...deployedV28FenceDefinitions);
+  const expected = new Map(histories.map(def => [def.name, def.sql]));
   for (const row of db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v*'").all()) {
     if (expected.get(row.name) !== row.sql) throw new Error("Database writer fence requires operator reconciliation");
   }
