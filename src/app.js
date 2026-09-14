@@ -5,7 +5,7 @@ import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFe
 import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
 import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
-import { RECIPE_CATALOG, activeRecipes } from "./work-recipes.js";
+import { RECIPE_CATALOG, activeRecipes, previewAllRecipes } from "./work-recipes.js";
 import { attemptReceipts, attemptLedger, cancellationState } from "./work-item-session.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation, requestFailureMessage } from "./share-links.js";
 import { installAgentConnections } from "./agent-connections.js";
@@ -832,6 +832,34 @@ function recipeChipHtml(r) {
   }
   return `<div class="recipe-chip" data-recipe-chip="${esc(key)}"><span class="recipe-chip-label"><strong>${esc(meta.title)}</strong> - ${label}</span>${action}<button type="button" class="button ghost" data-recipe-dismiss="${esc(key)}" aria-label="Dismiss suggestion: ${esc(meta.title)}">Dismiss</button></div>`;
 }
+// W4-47 H6: dry-run preview panel. Lists every catalog recipe with what it
+// reads, its trigger, what it would do, and whether it would fire right now.
+// previewAllRecipes is a pure read over committed state - opening this panel
+// commits nothing, writes nothing and never marks intent handled.
+function recipePreviewLabel(p) {
+  if (!p.firesNow) return "Not firing right now";
+  const o = p.preview;
+  if (o.kind === "catch_up_draft") return "Firing now: would prepare a catch-up draft";
+  if (o.kind === "work_suggestion") return `Firing now: would suggest ${esc(o.label)}`;
+  if (o.kind === "review_request_draft") return `Firing now: would draft a review request for "${esc(o.title ?? o.workItemId)}"`;
+  return "Firing now";
+}
+function recipePreviewHtml(p) {
+  return `<div class="recipe-preview-item"><strong>${esc(p.title)}</strong>`
+    + `<div>Reads: ${esc(p.reads.join("; "))}</div>`
+    + `<div>Trigger: ${esc(p.trigger)}</div>`
+    + `<div>Would do: ${esc(p.outcome)}</div>`
+    + `<div class="recipe-preview-status">${recipePreviewLabel(p)}</div></div>`;
+}
+function syncRecipePreview() {
+  const toggle = $("#recipe-preview-toggle"), panel = $("#recipe-preview");
+  if (!toggle || !panel) return;
+  if (!state || !session) { toggle.hidden = true; panel.hidden = true; panel.replaceChildren(); return; }
+  toggle.hidden = false;
+  if (panel.hidden) return;
+  const previews = previewAllRecipes(state, session.member.id, { now: Date.now(), cursor: roomCursor, sequence: client.sequence });
+  renderContent("#recipe-preview", previews.map(recipePreviewHtml).join(""));
+}
 function syncRecipeStrip() {
   const strip = $("#recipe-strip");
   if (!strip) return;
@@ -848,6 +876,7 @@ function render() {
   syncWorkForm();
   syncActionForm();
   syncRecipeStrip();
+  syncRecipePreview();
   setText("#presence-count", `${active.length} ${active.length === 1 ? "member" : "members"}`);
   renderContent("#member-stack", active.slice(0, 4).map(m => `<div class="member-avatar ${m.kind}" title="${esc(memberLabel(m.id))}" aria-hidden="true"><span>${initials(m.displayName)}</span></div>`).join(""));
   const railCtx = { workItems: state.workItems, messages: state.messages, now: Date.now() };
@@ -1120,6 +1149,12 @@ async function openRequestMode(kind, id) {
   }
 }
 $("#request-reply").addEventListener("click", () => { if (!state || busy || requestReading) return; setRequestMode({ kind: "request" }); });
+$("#recipe-preview-toggle").addEventListener("click", () => {
+  const panel = $("#recipe-preview");
+  if (!panel) return;
+  panel.hidden = !panel.hidden;
+  syncRecipePreview();
+});
 $("#recipe-strip").addEventListener("click", event => {
   const dismissKey = event.target.closest("[data-recipe-dismiss]")?.dataset.recipeDismiss;
   if (dismissKey) { dismissedRecipeChips.add(dismissKey); syncRecipeStrip(); return; }
