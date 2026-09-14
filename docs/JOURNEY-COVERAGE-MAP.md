@@ -135,6 +135,20 @@ carry the claim, and the remaining tiers stay visibly open.
       }
     },
     {
+      "id": "agent-pause-remove",
+      "claim": "The room owner pauses, resumes and removes an agent member from the People panel; a paused agent starts no queued wake, and a removed member's pause row is inert.",
+      "evidence": {
+        "unit": [
+          "tests/wake-pause.test.js"
+        ],
+        "browser": [
+          "scripts/agent-pause-browser-check.mjs"
+        ],
+        "agent": [],
+        "hosted": []
+      }
+    },
+    {
       "id": "agent-presence-status",
       "claim": "Agents see who is around and set a short status message shown on the presence roster.",
       "evidence": {
