@@ -82,6 +82,17 @@ expiry, revocation, and rate limits.
   control — minting/revoking invite codes, links, and invitations; removing
   members; rotating compromised credentials. The audit surface is
   `invite-codes` (CLI) and the room's invitation/link lists.
+- **Periodic access review** (BUILD-01 D4): the owner runs
+  `node scripts/access-review.mjs --db PATH` (read-only store file) or
+  `node scripts/access-review.mjs --origin URL --room ID --key-env NAME`
+  (owner key read from the named environment variable, never from the
+  command line) and files the output with the review ticket. The same report
+  is `GET /api/rooms/:id/access-review` (owner-only, `403 owner_required` for
+  everyone else). It lists active members and grants, guests with expiry and
+  `expired` status, invitation links with remaining joins, agent identities
+  and connections with state, and last activity; removed members are absent
+  and no token, secret or hash appears (`tests/access-review.test.js`).
+  Compare consecutive reports and revoke what is no longer needed.
 - **Compromised capability URL**: revoke the link/invitation/code (all three
   support revocation); for a leaked access key, remove the member and re-issue.
   Capability tokens are single-purpose, so a leak's blast radius is bounded to

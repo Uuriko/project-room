@@ -199,6 +199,18 @@ carry the claim, and the remaining tiers stay visibly open.
       }
     },
     {
+      "id": "owner-access-review",
+      "claim": "An owner-only, read-only access review names members and grants, guests with expiry, links with remaining joins, agent identities and connections with state, and last activity, with no token, secret or hash — identically from the route and the CLI.",
+      "evidence": {
+        "unit": [
+          "tests/access-review.test.js"
+        ],
+        "browser": [],
+        "agent": [],
+        "hosted": []
+      }
+    },
+    {
       "id": "telegram-send-preview",
       "claim": "A saved Telegram reply previews its bot and target chat and dispatches only over a matching fixture transport through the shared send journal.",
       "evidence": {
@@ -227,6 +239,7 @@ carry the claim, and the remaining tiers stay visibly open.
 | Unified inbox connections | channel-connection, channel-import, inbox-channel-client | open | open | open |
 | Telegram fixture import | telegram-adapter, channel-import | open | open | open |
 | Inbox connection routes | channel-import | open | open | open |
+| Owner access review | access-review | open | open | open |
 | Telegram send preview | channel-import, inbox-channel-client | open | open | open |
 
 Follow-up scope: claims made in docs beyond the README list (per-feature
