@@ -51,6 +51,12 @@ async function setup(t, { mobile = false } = {}) {
   const deliver = updates => fetch(origin + "/api/inbox/webhooks/" + telegram.connection.id, { method: "POST", body: JSON.stringify({ updates }),
     headers: { "Content-Type": "application/json", "X-Telegram-Bot-Api-Secret-Token": WEBHOOK_SECRET } });
   const card = id => page.locator(`.inbox-connection-card[data-connection-id="${id}"]`);
+  // Opening the inbox lists the connections and opens the first message, two independent
+  // round trips; on a phone the opened reader covers the sidebar (display: none). Settle both
+  // before touching the sidebar, or a step-back probe passes an instant before the reader
+  // appears and the Reconnect click waits on a card that is attached but never visible.
+  await page.locator("#inbox-reader").waitFor({ state: "visible" });
+  await card(telegram.connection.id).waitFor({ state: "attached" }); await card(email.connection.id).waitFor({ state: "attached" });
   // Two group messages; the second mentions the bot, so it needs the owner.
   const chat = telegram.chat, avery = { id: 5000000001, is_bot: false, first_name: "Avery", last_name: "Quinn" };
   const updates = [telegram.updates[0], { update_id: 900002, message: { message_id: 42, date: 1788948060, chat, from: avery, text: "@fixture_room_bot could you draft the agenda?" } }];
