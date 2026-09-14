@@ -59,8 +59,12 @@ test("A3/A4: keyboard disclosures, narrow composer, composer-local failure + ret
   await input.pressSequentially("line two");
   assert.equal(await input.inputValue(), "line one\nline two", "Shift+Enter inserts a newline");
   await input.press("Control+Enter");
-  await page.getByText("line one", { exact: false }).waitFor();
+  // The stream can deliver the posted message before the command acknowledgement
+  // resolves, so wait for the acknowledgement's effect (an empty composer) instead
+  // of asserting it the instant the text appears.
+  await page.waitForFunction(() => document.querySelector("#message-input").value === "");
   assert.equal(await input.inputValue(), "", "Ctrl+Enter sends and clears after ack");
+  await page.getByText("line one", { exact: false }).waitFor();
 
   // A4: simulated failure leaves the draft intact with the error at the composer; Send retries.
   await page.route("**/api/rooms/commons/commands", route => route.abort("failed"));
@@ -76,8 +80,10 @@ test("A3/A4: keyboard disclosures, narrow composer, composer-local failure + ret
   // Successful retry clears the draft only after acknowledgement.
   await page.unroute("**/api/rooms/commons/commands");
   await page.locator('#message-form button[type="submit"]').click();
-  await page.getByText("send this through an outage", { exact: true }).waitFor();
+  await page.waitForFunction(() => document.querySelector("#message-input").value === "");
   assert.equal(await input.inputValue(), "", "draft clears after ack");
+  await page.getByText("send this through an outage", { exact: true }).waitFor();
+  await composerStatus.waitFor({ state: "hidden" });
   assert.equal(await composerStatus.isVisible(), false, "composer error clears after ack");
 
   assert.deepEqual(errors, []);
