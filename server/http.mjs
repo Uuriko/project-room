@@ -119,12 +119,31 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     const segments = rest.slice(1).split("/").map(segment => /^[a-z][a-z-]{0,40}$/.test(segment) ? segment : ":item");
     return `/api/rooms/:roomId/${segments.join("/")}`;
   }
-  const rates = new Map();
+  // Keys are "<family>:<ip or credential...>". Each family keeps at most
+  // RATE_FAMILY_KEYS live entries; a flood of foreign keys evicts that family's
+  // least recently touched entry instead of refusing every new key, so a busy
+  // minute cannot lock out fresh logins or joins, and one family cannot starve
+  // another. Map insertion order doubles as the recency order.
+  const RATE_FAMILY_KEYS = 2000;
+  const rates = new Map(), rateFamilies = new Map();
+  const rateFamily = id => id.slice(0, id.indexOf(":"));
+  const dropRate = (id, family = rateFamily(id)) => {
+    rates.delete(id);
+    const left = rateFamilies.get(family) - 1;
+    if (left > 0) rateFamilies.set(family, left); else rateFamilies.delete(family);
+  };
   function rate(id, maximum) {
     const now = Date.now();
-    for (const [k, v] of rates) if (v.until <= now) rates.delete(k);
-    if (!rates.has(id) && rates.size >= 2000) reject(429, "rate_limited", "Service is busy; retry later");
-    const entry = rates.get(id) || { n: 0, until: now + 60000 };
+    for (const [k, v] of rates) if (v.until <= now) dropRate(k);
+    const family = rateFamily(id);
+    let entry = rates.get(id);
+    if (entry) rates.delete(id);
+    else {
+      if ((rateFamilies.get(family) ?? 0) >= RATE_FAMILY_KEYS)
+        for (const k of rates.keys()) if (rateFamily(k) === family) { dropRate(k, family); break; }
+      rateFamilies.set(family, (rateFamilies.get(family) ?? 0) + 1);
+      entry = { n: 0, until: now + 60000 };
+    }
     entry.n++;
     rates.set(id, entry);
     if (entry.n > maximum) throw new ServiceError(429, "rate_limited", "Too many requests; retry after a minute",
@@ -590,6 +609,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const revokeMatch = /^\/api\/rooms\/([^/]{1,384})\/invitations\/([^/]{1,384})\/revoke$/.exec(url.pathname);
       // Round-2 #101: creating an agent identity is open (an identity alone
       // grants nothing); linking it into a room is owner-only per room.
+      // Because the route is unauthenticated it is bounded twice: the
+      // per-address rate limit here, and the IDENTITY_LIMIT table cap that
+      // store.identities.create enforces inside its insert transaction
+      // (409 pilot_limit, no row written) — like the credentials table.
       if (url.pathname === "/api/agent-identities" && req.method === "POST") {
         const data = await body(req);
         rate(`identity-create:${remoteAddress}`, 30);
@@ -735,18 +758,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "export" && req.method === "GET") {
         // Round-2 #106: JSONL export of the event log (same visibility as
         // the events route — members only). One {sequence, event} per line.
-        // exportEvents is a generator that authenticates lazily, so pull the
-        // first item before committing to a 200: an auth/fence failure then
-        // takes the normal JSON error path instead of an empty 200 body.
-        const lines = store.exportEvents(selected.token, roomId, fence);
-        const first = lines.next();
-        res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8",
+        // The log is bounded (10000 events per room, the same bound import
+        // enforces), so the whole export is materialised before any header
+        // is written: an auth, fence or storage failure part-way through
+        // takes the normal JSON error path instead of truncating a 200 body
+        // that would read as a valid, merely shorter, export. Content-Length
+        // lets clients treat a dropped connection as an incomplete download.
+        const lines = [];
+        for (const line of store.exportEvents(selected.token, roomId, fence)) lines.push(JSON.stringify(line) + "\n");
+        const bytes = Buffer.from(lines.join(""), "utf8");
+        res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Content-Length": bytes.length,
           "Content-Disposition": `attachment; filename="room-${roomId}-export.jsonl"` });
-        if (!first.done) {
-          res.write(JSON.stringify(first.value) + "\n");
-          for (const line of lines) res.write(JSON.stringify(line) + "\n");
-        }
-        return res.end();
+        return res.end(bytes);
       }
       if (route === "import" && req.method === "POST") {
         // Round-2 #107: NDJSON import (the #106 export format). Owner-only,
@@ -914,5 +937,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   server.headersTimeout = 10000;
   server.keepAliveTimeout = 5000;
   server.closeStreams = () => { for (const { res } of streams) res.end(); };
+  server.rateLimitKeys = () => rates.size;
   return server;
 }

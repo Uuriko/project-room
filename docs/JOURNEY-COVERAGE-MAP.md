@@ -215,6 +215,20 @@ carry the claim, and the remaining tiers stay visibly open.
       }
     },
     {
+      "id": "channel-webhook-journal",
+      "claim": "Verified webhook updates are journaled durably per connection and update id, survive a store reopen, drain in cursor order marking exactly the consumed rows imported, and record bounded failed attempts without blocking neighbours.",
+      "evidence": {
+        "unit": [
+          "tests/channel-journal.test.js",
+          "tests/channel-import.test.js",
+          "tests/recovery.test.js"
+        ],
+        "browser": [],
+        "agent": [],
+        "hosted": []
+      }
+    },
+    {
       "id": "telegram-send-preview",
       "claim": "A saved Telegram reply previews its bot and target chat and dispatches only over a matching fixture transport through the shared send journal.",
       "evidence": {

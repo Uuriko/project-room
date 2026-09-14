@@ -27,6 +27,15 @@ routes (`guest-agent-mint`, `invitation-preview`, `account-slot`). An
 attacker could grow `agent_identities` without bound. Added
 `rate(identity-create:<ip>, 30)`, matching the other open routes.
 
+Follow-up (2026-09-14): a per-address rate limit alone is not a bound on
+table growth (addresses are cheap). `AgentIdentities#create` now also
+enforces `IDENTITY_LIMIT` (5000 rows in total, mirroring the per-room
+credentials cap) inside the insert transaction and fails with `409 pilot_limit`
+without writing a row; invite redemption mints an identity through the
+same method and so shares the cap. `docs/openapi.yaml` lists the 409/422/429
+responses and `tests/agent-identities.test.js` pins both the HTTP contract
+and the constructor's `identityLimit` option.
+
 ### 3. Permission escalation — OK
 
 `link()` passes caller-supplied `permissions` into `member.added`, which

@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RoomStore } from "../server/store.mjs";
+import { RoomStore, ServiceError } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
@@ -40,25 +40,61 @@ async function serve(t) {
   return { request, importNdjson, ownerKey, agentKey, store, origin };
 }
 
-test("room export streams the full event log as JSONL", async t => {
+test("room export returns the full event log as JSONL, framed by Content-Length", async t => {
   const { request, ownerKey, agentKey, store } = await serve(t);
   const res = await request("/api/rooms/commons/export", { token: ownerKey });
   assert.equal(res.status, 200);
   assert.match(res.headers.get("content-type"), /application\/x-ndjson/);
   const ndjson = await res.text();
+  // The body is materialised before the headers go out, so its exact byte
+  // length is declared: fewer bytes than this is an incomplete download,
+  // never a plausible shorter export.
+  assert.equal(Number(res.headers.get("content-length")), Buffer.byteLength(ndjson, "utf8"));
+  assert.ok(ndjson.endsWith("\n"), "a complete export ends with a newline");
   const lines = ndjson.trim().split("\n");
   const events = lines.map(l => JSON.parse(l));
   // Sequences are dense and ordered.
   assert.deepEqual(events.map(e => e.sequence), events.map((_, i) => i + 1));
   assert.ok(events.every(e => e.event && e.event.type && e.event.actorId && e.event.at));
-  // Matches what the events route reports.
+  // Matches what the events route reports: every event, not a prefix.
   const { next } = store.eventsAfter(ownerKey, "commons", 0, 100);
   assert.equal(events.at(-1).sequence, next);
+  assert.equal(events.length, store.room("commons").sequence);
   // A non-member gets nothing.
   assert.equal((await request("/api/rooms/commons/export")).status, 401);
   // Members can export too (same visibility as the events route).
   assert.equal((await request("/api/rooms/commons/export", { token: agentKey })).status, 200);
   return ndjson;
+});
+
+test("an export that fails part-way is a JSON error, never a clean-looking partial file", async t => {
+  const { request, ownerKey, store } = await serve(t);
+  const real = store.exportEvents.bind(store);
+  const full = await (await request("/api/rooms/commons/export", { token: ownerKey })).text();
+  assert.ok(full.split("\n").length > 3, "fixture has enough events to fail part-way through");
+  // Storage gives up after two rows: a plain Error, as a driver would throw.
+  store.exportEvents = function* (...args) {
+    let rows = 0;
+    for (const line of real(...args)) { if (++rows > 2) throw new Error("storage read failed"); yield line; }
+  };
+  const failed = await request("/api/rooms/commons/export", { token: ownerKey });
+  assert.equal(failed.status, 500);
+  assert.match(failed.headers.get("content-type"), /application\/json/);
+  const body = await failed.json();
+  assert.equal(body.error.code, "internal_error");
+  assert.doesNotMatch(JSON.stringify(body), /"sequence":\s*1\b/, "no exported rows leak into the error body");
+  // A service error part-way through keeps its own status and code.
+  store.exportEvents = function* (...args) {
+    for (const line of real(...args)) { yield line; throw new ServiceError(503, "storage_unavailable", "Storage is unavailable"); }
+  };
+  const unavailable = await request("/api/rooms/commons/export", { token: ownerKey });
+  assert.equal(unavailable.status, 503);
+  assert.equal((await unavailable.json()).error.code, "storage_unavailable");
+  // Once storage recovers the export is whole again, byte-exact.
+  store.exportEvents = real;
+  const recovered = await request("/api/rooms/commons/export", { token: ownerKey });
+  assert.equal(recovered.status, 200);
+  assert.equal(await recovered.text(), full);
 });
 
 test("room import round-trips an export (round-2 #107)", async t => {

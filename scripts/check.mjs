@@ -26,5 +26,7 @@ const coverage = spawnSync(process.execPath, ["scripts/journey-coverage.mjs"], {
 if (coverage.status !== 0) process.exit(coverage.status || 1);
 const shadows = spawnSync(process.execPath, ["scripts/check-no-shadow-imports.mjs"], { stdio: "inherit" });
 if (shadows.status !== 0) process.exit(shadows.status || 1);
+const schema = spawnSync(process.execPath, ["scripts/check-schema-version.mjs"], { stdio: "inherit" });
+if (schema.status !== 0) process.exit(schema.status || 1);
 const result = spawnSync(process.execPath, ["--test"], { stdio: "inherit" });
 process.exit(result.status ?? 1);
