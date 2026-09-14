@@ -13,6 +13,12 @@
   the Rooms panel gains a New room form and lists archived rooms as read-only
   entries, never as working buttons; About offers Archive room (owner) and
   Leave room (member). `docs/ROUTE-AUTH-TABLE.md`, `docs/openapi.yaml`.
+- `docs/EXPORT-RETENTION-DELETION.md` "Leaving a room / closing an account"
+  no longer claims there is no self-serve leave: it describes the member's
+  Leave room action (self-targeted `member.access_changed`, no
+  `manage_members`), the unchanged owner removal, owner archive (read-only,
+  409 `room_archived`, nothing removed) and that a member cannot leave an
+  archived room because the archived check runs first. Docs only.
 - Inspectable context (C2): `GET /api/rooms/:roomId/work-context` carries an
   `accessSummary` (conversation scope and source message id, evidence
   references, declared budget, participants and the exact omissions the read
