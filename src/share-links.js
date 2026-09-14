@@ -7,8 +7,6 @@ export function consumeJoinFragment() {
   return { token: tokenPattern.test(value) ? value : null };
 }
 const newToken = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
-const date = value => formatInvitationExpiry(value) || "unknown";
-
 export function formatShareInvitation(note, url) {
   if (typeof note !== "string" || note.length > 600 || !url) return "";
   return note.trim() ? `${note.trim()}\n\n${url}` : url;
@@ -25,6 +23,10 @@ export function formatInvitationExpiry(expiresAt) {
   const date = new Date(expiresAt);
   if (Number.isNaN(date.getTime())) return "";
   return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
+export function formatShareLinkExpiry(value) {
+  return formatInvitationExpiry(value) || "unknown";
 }
 
 export function invitationExpiryDateTime(expiresAt) {
@@ -190,12 +192,12 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     const items = result.links.map(link => {
       const li = document.createElement("li"), text = document.createElement("p");
       li.dataset.linkId = link.id;
-      const description = status => `${link.joins}/${link.maxJoins} guests joined · ${status.replaceAll("_", " ")} · expires ${date(link.expiresAt)}`;
+      const description = status => `${link.joins}/${link.maxJoins} guests joined · ${status.replaceAll("_", " ")} · expires ${formatShareLinkExpiry(link.expiresAt)}`;
       text.textContent = description(link.status);
       li.append(text);
       if (link.status === "active") {
         const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "button ghost";
-        cancel.textContent = "Cancel link"; cancel.setAttribute("aria-label", `Cancel link created ${date(link.createdAt)}`);
+        cancel.textContent = "Cancel link"; cancel.setAttribute("aria-label", `Cancel link created ${formatShareLinkExpiry(link.createdAt)}`);
         cancel.addEventListener("click", async () => {
           if (!managementCurrent(version, generation)) return;
           const heldFocus = document.activeElement === cancel;
@@ -323,7 +325,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       $("#join-link-title").textContent = `Join ${preview.room.title}`;
       $("#join-link-scope").textContent = "Read history and join the conversation. Everyone in the room can read your messages.";
       $("#join-link-permissions").textContent = preview.access;
-      $("#join-link-expiry").textContent = `Invitation expires ${date(preview.link.expiresAt)} · ${preview.link.remainingJoins} guest places left.`;
+      $("#join-link-expiry").textContent = `Invitation expires ${formatShareLinkExpiry(preview.link.expiresAt)} · ${preview.link.remainingJoins} guest places left.`;
       updateSwitchWarning();
       $("#join-link-form").hidden = false; $("#join-link-name").focus();
     } catch (error) {

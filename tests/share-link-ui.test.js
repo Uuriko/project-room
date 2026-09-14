@@ -4,17 +4,21 @@ import { randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { formatShareInvitation, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, reuseVisibleRoom, invitationUnavailableMessage, formatInvitationExpiry, invitationAskWhom, invitationDialogTitle, invitationCapabilityLimits, agentMembershipLimits, invitationExpiryDateTime } from "../src/share-links.js";
+import { formatShareInvitation, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, reuseVisibleRoom, invitationUnavailableMessage, formatInvitationExpiry, invitationAskWhom, invitationDialogTitle, invitationCapabilityLimits, agentMembershipLimits, invitationExpiryDateTime, formatShareLinkExpiry } from "../src/share-links.js";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
 test("share-link expiry labels use the invitation expiry formatter", () => {
-  const src = readFileSync(new URL("../src/share-links.js", import.meta.url), "utf8");
-  assert.match(src, /formatInvitationExpiry\(value\) \|\| "unknown"/);
-  assert.doesNotMatch(src, /toLocaleString/);
-  assert.equal(formatInvitationExpiry("not-a-date"), "");
+  assert.equal(formatShareLinkExpiry("not-a-date"), "unknown");
+  assert.equal(formatShareLinkExpiry(undefined), "unknown");
+  assert.equal(formatShareLinkExpiry(NaN), "unknown");
   const ms = Date.UTC(2026, 0, 15, 18, 30, 0);
-  assert.equal(formatInvitationExpiry(ms), formatInvitationExpiry(new Date(ms)));
+  assert.equal(formatShareLinkExpiry(ms), formatInvitationExpiry(ms));
+  assert.notEqual(formatShareLinkExpiry(ms), "unknown");
+  const src = readFileSync(new URL("../src/share-links.js", import.meta.url), "utf8");
+  assert.match(src, /expires \$\{formatShareLinkExpiry\(link\.expiresAt\)\}/);
+  assert.match(src, /Invitation expires \$\{formatShareLinkExpiry\(preview\.link\.expiresAt\)\}/);
+  assert.doesNotMatch(src, /toLocaleString/);
 });
 
 test("invitation note formatting is bounded plain text with an exact URL-only fallback", () => {
