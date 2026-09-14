@@ -78,25 +78,32 @@ export class ChannelUpdateJournal {
     return counts;
   }
   // Journal verified updates. Idempotent by update id: a row that already
-  // exists in any status is left exactly as it is. The pending backlog after
-  // the write is bounded; a full backlog refuses the whole delivery unchanged.
-  record(accountId, connectionId, updates, { backlog }) {
+  // exists in any status is left exactly as it is. `rejected` maps update ids
+  // the adapter already refused to their contract code; those rows are written
+  // parked ('failed', attempts at the bound) so they never enter the backlog.
+  // The pending backlog after the write is bounded; a full backlog refuses the
+  // whole delivery unchanged.
+  record(accountId, connectionId, updates, { backlog, rejected = new Map() }) {
     scope(accountId, connectionId);
     if (!Array.isArray(updates) || !updates.length) fail(422, "invalid_channel_update", "Supply provider updates.");
     return this.store.transaction(() => {
       const now = this.store.now();
-      const insert = this.db.prepare("INSERT INTO pending_channel_updates (account_id,connection_id,update_id,received_at,payload,status,attempts,last_error,updated_at) VALUES(?,?,?,?,?,'pending',0,NULL,?) ON CONFLICT(account_id,connection_id,update_id) DO NOTHING");
-      let accepted = 0;
+      const insert = this.db.prepare("INSERT INTO pending_channel_updates (account_id,connection_id,update_id,received_at,payload,status,attempts,last_error,updated_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(account_id,connection_id,update_id) DO NOTHING");
+      let accepted = 0, parked = 0;
       for (const update of updates) {
         if (!update || typeof update !== "object" || Array.isArray(update) || !Number.isSafeInteger(update.update_id) || update.update_id < 0)
           fail(422, "invalid_channel_update", "Supply provider update objects.");
         const payload = JSON.stringify(update);
         if (Buffer.byteLength(payload) > channelJournalLimits.payloadBytes) fail(422, "invalid_channel_update", "Update is too large.");
-        accepted += insert.run(accountId, connectionId, update.update_id, now, payload, now).changes;
+        const code = rejected.get(update.update_id);
+        const written = code === undefined
+          ? insert.run(accountId, connectionId, update.update_id, now, payload, "pending", 0, null, now).changes
+          : insert.run(accountId, connectionId, update.update_id, now, payload, "failed", channelJournalLimits.maxAttempts, String(code).slice(0, channelJournalLimits.errorChars), now).changes;
+        accepted += written; if (code !== undefined) parked += written;
       }
       const pending = this.summary(accountId, connectionId).pending;
       if (pending > backlog) fail(409, "channel_webhook_backlog", "Import pending updates before sending more.");
-      return { received: updates.length, accepted, pending };
+      return { received: updates.length, accepted, rejected: parked, pending };
     });
   }
   pending(accountId, connectionId, { limit = null } = {}) {

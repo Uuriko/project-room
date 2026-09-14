@@ -604,7 +604,7 @@ paths:
           application/json:
             schema: { type: object }
       responses:
-        '202': { description: "{ contractVersion, connectionId, received, pending }" }
+        '202': { description: "{ contractVersion, connectionId, received, pending }; a malformed message-kind update is journaled as failed, not refused" }
         '401': { description: channel_webhook_denied }
         '409': { description: channel_webhook_unavailable or channel_webhook_backlog }
         '422': { description: invalid_channel_update }
