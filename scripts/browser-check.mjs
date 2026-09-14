@@ -284,8 +284,24 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     // The explicit ack acknowledges exactly H; reading never did.
     assert.equal(store.snapshot(human, "commons").cursor, 0);
     await page.locator("#rb-ack-button").click();
-    await page.waitForFunction(() => document.querySelector("#rb-history-boundary").textContent.includes("nothing new"));
+    // The saved position is the durable claim. If the room refresh that follows the
+    // save fails (a stream drop or an aborted request on a starved runner - room
+    // refreshes are coalesced, so any in-flight failure rejects this one too), the
+    // brief deliberately stops at "Position saved. Refresh to see the latest changes."
+    // instead of reloading on its own. Waiting only for "nothing new" then stalls for
+    // the whole timeout, which is how this test went red on CI at every budget tried.
+    // Accept that state, prove the save, and take the product's own recovery.
+    await page.waitForFunction(() => document.querySelector("#rb-history-boundary").textContent.includes("nothing new")
+      || document.querySelector("#rb-status").textContent.startsWith("Position saved."));
     assert.equal(store.snapshot(human, "commons").cursor, 60);
+    if (!(await page.locator("#rb-history-boundary").textContent()).includes("nothing new")) {
+      assert.equal(await page.locator("#rb-ack-button").textContent(), "Refresh brief before acknowledging");
+      assert.equal(await page.locator("#rb-ack-button").isDisabled(), true, "no second acknowledgement before the brief is refreshed");
+      await page.waitForFunction(() => /^Connected/.test(document.querySelector("#connection-status").textContent));
+      await page.locator("#rb-refresh-button").click();
+      await page.waitForFunction(() => document.querySelector("#rb-history-boundary").textContent.includes("nothing new"));
+      assert.equal(store.snapshot(human, "commons").cursor, 60, "the explicit refresh reads the saved position; it never acknowledges");
+    }
     await page.locator("#rb-attention-list", { hasText: "Read the briefing" }).waitFor(); // unresolved work survives catch-up
     assert.equal(await page.locator("#rb-ack-button").isDisabled(), true);
     // H+1 stays new: one more event after the ack is the only history item.
