@@ -21,6 +21,24 @@ export function setShareLinkStatus(element, text) {
 
 const interrupted = error => error?.name === "AbortError" || error?.name === "TimeoutError" || error instanceof TypeError;
 export const canRetryInvitation = error => interrupted(error) || error?.status === 429 || error?.status >= 500;
+export function formatInvitationExpiry(expiresAt) {
+  const ms = Date.parse(expiresAt);
+  if (!Number.isFinite(ms)) return "";
+  return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(ms));
+}
+
+export function invitationUnavailableMessage(preview) {
+  if (preview?.status === "expired") {
+    const when = formatInvitationExpiry(preview.expiresAt);
+    return when
+      ? `This invitation expired on ${when}. Ask the room owner for a new one.`
+      : "This invitation has expired. Ask the room owner for a new one.";
+  }
+  if (preview?.status === "revoked") return "This invitation was revoked. Ask the room owner if you still need access.";
+  if (preview?.status === "accepted") return "This invitation has already been accepted. Sign in with an authorized account to open the Room.";
+  return "The inviter’s authority changed. Ask the room owner for a new invitation.";
+}
+
 export function invitationFailureMessage(error) {
   if (interrupted(error)) {
     return "The connection was interrupted. We could not confirm the result. Your entries are kept; try again here to check or finish the same request.";

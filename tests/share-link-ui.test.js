@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatShareInvitation, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, reuseVisibleRoom } from "../src/share-links.js";
+import { readFileSync } from "node:fs";
+import { formatShareInvitation, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, reuseVisibleRoom, invitationUnavailableMessage, formatInvitationExpiry } from "../src/share-links.js";
 
 test("invitation note formatting is bounded plain text with an exact URL-only fallback", () => {
   const url = "https://room.example/#join/synthetic";
@@ -10,6 +11,24 @@ test("invitation note formatting is bounded plain text with an exact URL-only fa
   assert.equal(formatShareInvitation("💡".repeat(300), url), `${"💡".repeat(300)}\n\n${url}`);
   for (const note of ["x".repeat(601), "💡".repeat(301), null]) assert.equal(formatShareInvitation(note, url), "");
   assert.equal(formatShareInvitation("A note", ""), "");
+});
+
+test("expired invitation copy names the room owner and includes the expiry time", () => {
+  const expiresAt = "2026-01-15T18:30:00.000Z";
+  const when = formatInvitationExpiry(expiresAt);
+  assert.match(when, /2026/);
+  assert.equal(
+    invitationUnavailableMessage({ status: "expired", expiresAt }),
+    `This invitation expired on ${when}. Ask the room owner for a new one.`
+  );
+  assert.match(invitationUnavailableMessage({ status: "expired" }), /has expired.*room owner/);
+  assert.match(invitationUnavailableMessage({ status: "revoked" }), /revoked.*room owner/);
+  assert.match(invitationUnavailableMessage({ status: "accepted" }), /already been accepted/);
+  assert.match(invitationUnavailableMessage({ status: "authority_changed" }), /room owner/);
+  assert.doesNotMatch(invitationUnavailableMessage({ status: "expired", expiresAt }), /administrator/);
+  const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(app, /invitationUnavailableMessage\(preview\)/);
+  assert.doesNotMatch(app, /Ask a current Room administrator/);
 });
 
 test("invitation status uses the shared form-status visibility contract", () => {

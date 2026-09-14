@@ -4,7 +4,7 @@ import { ReturnBrief } from "./return-brief.js";
 import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
 import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, memberHandle, memberDoneChip, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
 import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer } from "./workflow.js";
-import { consumeJoinFragment, installShareLinks, canRetryInvitation } from "./share-links.js";
+import { consumeJoinFragment, installShareLinks, canRetryInvitation, invitationUnavailableMessage } from "./share-links.js";
 import { installAgentConnections } from "./agent-connections.js";
 import { installRoomInstructions } from "./room-instructions.js";
 import { installReminders } from "./reminders.js";
@@ -836,7 +836,7 @@ function renderInvitation() {
     $("#invitation-permissions").textContent = preview.permissions.length
       ? preview.permissions.map(humanize).join(", ")
       : "Conversation only";
-    $("#invitation-issuer").textContent = preview.invitedByDisplayName || "Room administrator";
+    $("#invitation-issuer").textContent = preview.invitedByDisplayName || "Room owner";
     const expiry = new Date(preview.expiresAt);
     $("#invitation-expires").dateTime = expiry.toISOString();
     $("#invitation-expires").textContent = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(expiry);
@@ -844,10 +844,7 @@ function renderInvitation() {
   let summary = phase === "terminal" ? "This invitation is unavailable." : "Checking invitation…";
   if (preview && phase !== "terminal") summary = pending
     ? ""
-    : accepted ? "This invitation has already been accepted. Sign in with an authorized account to open the Room."
-      : preview.status === "expired" ? "This invitation has expired. Ask a current Room administrator for a new one."
-        : preview.status === "revoked" ? "This invitation was revoked. Ask a current Room administrator if you still need access."
-          : "The inviter’s authority changed. Ask a current Room administrator for a new invitation.";
+    : invitationUnavailableMessage(preview);
   if (phase === "unknown") summary = "Acceptance has not been confirmed. Check the result before leaving this invitation.";
   if (phase === "preview-failed") summary = "Could not check this invitation.";
   $("#invitation-summary").textContent = summary;
@@ -943,10 +940,7 @@ async function previewCurrentInvitation() {
       ? (accountClient.session?.authenticated ? "ready" : "needs-account") : "terminal";
     setInvitationFeedback(preview.status === "pending"
       ? (accountClient.session?.authenticated ? "Review the exact scope, then accept only if it is right." : "Sign in with the separately provisioned account key to continue.")
-      : preview.status === "accepted" ? "This invitation has already been accepted. Sign in with an authorized account to open the Room."
-        : preview.status === "expired" ? "This invitation has expired. Ask a current Room administrator for a new one."
-          : preview.status === "revoked" ? "This invitation was revoked. Ask a current Room administrator if you still need access."
-            : "The inviter’s authority changed. Ask a current Room administrator for a new invitation.", invitation.phase === "terminal");
+      : invitationUnavailableMessage(preview), invitation.phase === "terminal");
     renderInvitation();
     if (retryHadFocus && [document.body, $("#invitation-retry")].includes(document.activeElement)) {
       const target = invitation.phase === "needs-account" ? "#invitation-account-key"
