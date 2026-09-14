@@ -28,5 +28,9 @@ const shadows = spawnSync(process.execPath, ["scripts/check-no-shadow-imports.mj
 if (shadows.status !== 0) process.exit(shadows.status || 1);
 const schema = spawnSync(process.execPath, ["scripts/check-schema-version.mjs"], { stdio: "inherit" });
 if (schema.status !== 0) process.exit(schema.status || 1);
+// Open-route inventory (B48): every `security: []` route in docs/openapi.yaml
+// is named in docs/ROUTE-AUTH-TABLE.md and docs/INVITE-ONLY-CHECKLIST.md §1.
+const openRoutes = spawnSync(process.execPath, ["scripts/open-routes.mjs", "--check"], { stdio: "inherit" });
+if (openRoutes.status !== 0) process.exit(openRoutes.status || 1);
 const result = spawnSync(process.execPath, ["--test"], { stdio: "inherit" });
 process.exit(result.status ?? 1);
