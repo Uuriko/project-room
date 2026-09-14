@@ -21,11 +21,10 @@ export const ACTION_CLASSES = Object.freeze({
   observe: Object.freeze([]),
   draft: Object.freeze([
     T.NOTIFICATION_PREFERENCES_SET, // personal delivery preferences, viewer-only
-    T.MEMBER_MUTE_SET, // E4: hides an author for the muter alone; grants or removes nothing
   ]),
   act: Object.freeze([
-    T.ROOM_CHARTER_UPDATED, T.ROOM_POLICY_SET, T.MEMBER_ADDED, T.MEMBER_ACCESS_CHANGED, T.MEMBER_STATUS_UPDATED,
-    T.MESSAGE_POSTED, T.MESSAGE_EDITED, T.MESSAGE_DELETED, T.MESSAGE_REACTION_SET, T.MESSAGE_PINNED, T.MESSAGE_UNPINNED,
+    T.ROOM_CHARTER_UPDATED, T.ROOM_POLICY_SET, T.ROOM_ARCHIVED, T.MEMBER_ADDED, T.MEMBER_ACCESS_CHANGED, T.MEMBER_STATUS_UPDATED,
+    T.MESSAGE_POSTED, T.MESSAGE_EDITED, T.MESSAGE_DELETED, T.MESSAGE_REACTION_SET,
     T.REPLY_REQUEST_CANCELLED, HELP_OFFER_OPENED, HELP_OFFER_UPDATED,
     T.WORK_PROPOSED, T.WORK_ACCEPTED, T.WORK_HELP_UPDATED, T.WORK_STARTED, T.WORK_BLOCKED,
     T.WORK_BLOCKER_RESOLVED, T.WORK_COMPLETED, T.WORK_SUPERSEDED, T.WORK_HANDOFF_RECORDED,
@@ -39,7 +38,6 @@ export const ACTION_CLASSES = Object.freeze({
 // Out-of-band command surfaces (server modules that take authenticated
 // commands without appending room events). Same three classes.
 export const SURFACE_CLASSES = Object.freeze({
-  "message-reports": "act",         // server/moderation.mjs: addressed at the room owner about another member's message
   "private-reminders": "draft",      // server/reminders.mjs: per-member schedule records, immutable receipts, no outward effect
   "wake-queue": "draft",
   "attention-delivery": "draft",      // server/attention.mjs: private quiet-hours/digest preferences; delivery views only             // server/wake-queue.mjs: the member's own scheduled intents; effects stay drafts

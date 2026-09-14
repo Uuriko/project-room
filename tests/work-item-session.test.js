@@ -196,7 +196,7 @@ test("strangers cannot mutate; commands are idempotent; writer stays 26", async 
     data: { workItemId: "session-one", expectedRevision: 1, status: "active" }
   });
   assert.equal(viaCommand.event.type, T.SESSION_STATUS_CHANGED);
-  assert.equal(store.storagePlatform.version(store.db), 27);
+  assert.equal(store.storagePlatform.version(store.db), 28);
   assert.equal(store.db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'work_item_session%'").all().length, 0);
 });
 

@@ -148,7 +148,7 @@ test("v8 readonly verification refuses a v7 marker rather than migrating the bac
   assert.equal(f.store.db.prepare("PRAGMA user_version").get().user_version, 7);
 });
 
-test("read-only open accepts a v27 backup written before the additive wake queue and attention tables", t => {
+test("read-only open accepts a v28 backup written before the additive wake queue and attention tables", t => {
   const f = fixture(t);
   const rooms = f.store.db.prepare("SELECT id,sequence FROM rooms ORDER BY id").all();
   const objects = () => f.store.db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'wake_queue%' OR name LIKE 'private_attention%' ORDER BY name").all().map(row => row.name);
@@ -158,7 +158,7 @@ test("read-only open accepts a v27 backup written before the additive wake queue
   f.store.db.exec("DROP TABLE wake_queue_commands; DROP TABLE private_attention_commands");
   assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /Wake queue schema requires operator reconciliation/);
   f.store.db.exec("DROP TABLE wake_queue; DROP TABLE private_attention_prefs; DROP TABLE wake_queue_pause");
-  assert.deepEqual(objects(), [], "fixture now matches a pre-W4-45 v27 file");
+  assert.deepEqual(objects(), [], "fixture now matches a pre-W4-45 v28 file");
   const older = new RoomStore(f.filename, { readOnly: true, now: f.now });
   try {
     assert.deepEqual(older.db.prepare("SELECT id,sequence FROM rooms ORDER BY id").all(), rooms);
@@ -169,9 +169,9 @@ test("read-only open accepts a v27 backup written before the additive wake queue
   } finally { older.close(); }
   assert.deepEqual(objects(), [], "read-only verification is not migration");
   // Only the additive tables are optional: a wrong schema marker still fails.
-  f.store.db.exec("PRAGMA user_version=26");
-  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v27/);
   f.store.db.exec("PRAGMA user_version=27");
+  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v28/);
+  f.store.db.exec("PRAGMA user_version=28");
   // A writable open recreates the additive tables and then verifies them strictly.
   const upgraded = new RoomStore(f.filename, { now: f.now });
   try {

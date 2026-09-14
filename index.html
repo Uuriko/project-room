@@ -72,6 +72,24 @@
         <div id="account-rooms-list"></div>
         <button id="account-rooms-more" class="text-button" type="button" hidden>More</button>
         <p class="form-hint">Join a room through its invitation.</p>
+        <details id="account-room-create" class="account-room-create">
+          <summary>New room</summary>
+          <form id="account-room-form" class="account-room-form" autocomplete="off">
+            <label for="account-room-title">Room name</label>
+            <input id="account-room-title" name="title" type="text" maxlength="120" required>
+            <label for="account-room-purpose">Purpose</label>
+            <textarea id="account-room-purpose" name="purpose" rows="2" maxlength="1000" required></textarea>
+            <label for="account-room-kind">Kind</label>
+            <select id="account-room-kind" name="kind"><option value="personal">Personal</option><option value="organization">Organization</option></select>
+            <label for="account-room-name">Your name in this room</label>
+            <input id="account-room-name" name="displayName" type="text" maxlength="80" required>
+            <div class="account-room-actions">
+              <button id="account-room-submit" class="button" type="submit">Create room</button>
+              <p id="account-room-status" class="status form-status" role="status"></p>
+            </div>
+          </form>
+          <p class="form-hint">Creating a room needs membership administration in one of your rooms. Archived rooms stay readable and exportable.</p>
+        </details>
       </section>
       <section id="inbox-panel" class="inbox-panel" aria-label="Your inbox" hidden>
         <aside class="inbox-sidebar">
@@ -185,7 +203,9 @@
           <header class="room-heading">
             <div>
               <h1 id="room-title" tabindex="-1">Project Room</h1>
-              <details id="room-about" class="room-about"><summary>About</summary><p class="room-purpose"></p><button id="room-instructions-open" class="button ghost" type="button" hidden>Room instructions</button></details>
+              <span id="room-kind-badge" class="room-kind-badge" hidden></span>
+              <details id="room-about" class="room-about"><summary>About</summary><p class="room-purpose"></p><button id="room-instructions-open" class="button ghost" type="button" hidden>Room instructions</button><div class="room-lifecycle-actions"><button id="room-archive-button" class="button ghost" type="button" hidden>Archive room</button><button id="room-leave-button" class="button ghost" type="button" hidden>Leave room</button></div></details>
+              <p id="room-archived-note" class="room-archived-note" role="status" hidden></p>
             </div>
             <div class="room-heading-actions">
               <div class="room-presence-summary">

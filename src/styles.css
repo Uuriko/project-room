@@ -848,9 +848,7 @@ summary { overflow-wrap: anywhere; }
   .inbox-panel.reading .inbox-back { display: block; margin: 1rem 1.25rem 0; text-align: left; }
   .inbox-source-heading { flex-wrap: wrap; }
 }
-.message-tombstone, .message-muted { color: var(--muted); font-style: italic; }
-.message.muted .message-avatar { opacity: .5; }
-.mute-toggle { margin-top: .35rem; }
+.message-tombstone { color: var(--muted); font-style: italic; }
 .work-changes-list { margin: 0.35rem 0 0.55rem; padding: 0.45rem 0.7rem; border-left: 3px solid var(--accent, #4a6fa5); background: var(--panel, rgba(127,127,127,0.06)); border-radius: 0 6px 6px 0; }
 .work-changes-list ul { margin: 0; padding-left: 1.1rem; }
 .work-changes-list li { margin: 0.15rem 0; }
@@ -867,14 +865,18 @@ summary { overflow-wrap: anywhere; }
 .recipe-preview { display: flex; flex-direction: column; gap: 0.6rem; margin: 0.5rem 0; padding: 0.6rem; border: 1px solid var(--line-soft); border-radius: 8px; background: rgb(255 255 255 / 2%); }
 .recipe-preview-item { display: flex; flex-direction: column; gap: 0.2rem; max-width: 100%; overflow-wrap: anywhere; }
 .recipe-preview-item .recipe-preview-status { color: var(--text-dim, inherit); font-style: italic; }
-/* Issue #6 B2: pinned messages */
-.pinned-chip { color: var(--violet); }
-.pinned-panel { margin: 0 1rem .25rem; padding: 0 .75rem; border: 1px solid var(--line-soft); border-radius: .75rem; background: rgb(255 255 255 / 2%); }
-.pinned-panel > .section-summary { min-height: 40px; }
-.pinned-list { list-style: none; margin: 0; padding: 0 0 .6rem; display: grid; gap: .5rem; }
-.pinned-item { display: grid; grid-template-columns: 1fr auto; gap: .1rem .75rem; padding: .5rem .6rem; border: 1px solid var(--line-soft); border-radius: .6rem; }
-.pinned-item .pinned-link { grid-column: 1; font-size: .78rem; }
-.pinned-item .pinned-body { grid-column: 1; margin: 0; color: #dfe5ed; font-size: .9rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
-.pinned-item .pinned-meta { grid-column: 1; color: var(--muted); font-size: .7rem; }
-.pinned-item .text-button { grid-column: 2; grid-row: 1 / span 3; align-self: start; min-height: 44px; font-size: .875rem; }
-@media (max-width: 40rem) { .pinned-panel { margin-inline: .75rem; } }
+
+/* Issue #6 A2: room lifecycle (create, archive, leave) */
+#account-rooms-list .inbox-row small.inbox-row-kind { grid-column: 1; font-size: .75rem; color: var(--muted); }
+#account-rooms-list .inbox-row > span { grid-column: 2; grid-row: 1 / span 2; }
+#account-rooms-list .inbox-row[data-room-archived="true"] strong { color: var(--muted); }
+.account-room-create { margin: .75rem 0 0; font-size: .9rem; }
+.account-room-create summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
+.account-room-form { display: grid; gap: .5rem; margin-top: .5rem; }
+.account-room-form label { font-size: .8rem; color: var(--muted); }
+.account-room-form input, .account-room-form textarea, .account-room-form select { width: 100%; box-sizing: border-box; font: inherit; padding: .5rem; }
+.account-room-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
+.room-kind-badge { display: inline-block; margin: .15rem 0 .35rem; font-size: .7rem; letter-spacing: .02em; text-transform: uppercase; padding: .05rem .4rem; border-radius: .4rem; border: 1px solid var(--line); color: var(--muted); }
+.room-archived-note { margin: .5rem 0 0; padding: .4rem .75rem; border-left: 2px solid currentColor; color: var(--muted); font-size: .875rem; max-width: 46rem; }
+.room-archived #message-form { opacity: .6; }
+.room-lifecycle-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .5rem; }
