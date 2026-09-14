@@ -61,6 +61,15 @@
   appended, 200 when the room was already in the requested state or a
   `requestId` replayed. `docs/openapi.yaml` (`PinResult`),
   `docs/ROUTE-AUTH-TABLE.md`.
+- Route contracts: `GET`/`POST /api/rooms/:id/share-links` and
+  `share-links-cancel` now refuse any bearer key at the router with 403
+  `access_denied`, as `docs/openapi.yaml` and `docs/ROUTE-AUTH-TABLE.md`
+  promised; a signed-in browser session (room-key cookie or account
+  `?auth=account`) plus CSRF administers invitation links, and the docs now
+  name both cookies instead of the account session alone. `GET /api/account-rooms` runs its
+  pure read in a read transaction: it keeps answering while another writer
+  holds the database or on a read-only store, and never counts toward the
+  readiness 503 threshold.
 - Room lifecycle (issue #6 A2): schema 28 adds `rooms.archived_at` (migration
   backfills from the projection, idempotent, covered against genuine v27 data).
   `POST /api/account-rooms` creates a room for an account that already

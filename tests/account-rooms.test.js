@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
+import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
@@ -98,4 +102,34 @@ test("an account creates a room over HTTP with CSRF, opens it through the same s
   const listed = (await result.json()).rooms.map(room => [room.id, room.memberId, room.kind, room.archived]);
   assert.deepEqual(listed, [["commons", "admin", "personal", false], ["room-http", "owner", "personal", true]]);
   result = await fetch(origin + "/api/rooms/room-http/export", { headers: roomHeaders }); assert.equal(result.status, 200, "export stays available");
+});
+
+test("account room discovery is a read: it answers while another writer holds the database and on a read-only store", async t => {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-account-rooms-read-")), filename = join(directory, "room.sqlite");
+  const store = new RoomStore(filename, { storageFailureThreshold: 1 });
+  store.initialize(initialRoom("commons")); store.bindHumanAccount("commons", "owner", "account-owner");
+  const key = store.issueAccountAccessKey("account-owner"), slot = store.createAccountSessionSlot(), session = store.loginAccountSession(slot.token, key, 0);
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
+    store.close(); rmSync(directory, { recursive: true, force: true }); });
+  const origin = "http://127.0.0.1:" + server.address().port;
+  const headers = { Cookie: "account_session=" + slot.token, "X-Session-Binding": session.sessionBinding };
+  // Another connection holds the write lock. A write transaction would wait out
+  // busy_timeout and fail (counting toward readiness); a WAL read proceeds.
+  const reads = t.mock.method(store, "readTransaction");
+  const writer = new DatabaseSync(filename); writer.exec("BEGIN IMMEDIATE");
+  try {
+    const response = await fetch(origin + "/api/account-rooms", { headers });
+    assert.equal(response.status, 200);
+    assert.ok(reads.mock.callCount() >= 1, "discovery runs in a read transaction, never BEGIN IMMEDIATE");
+    assert.deepEqual((await response.json()).rooms.map(room => room.id), ["commons"]);
+    assert.deepEqual(store.storageStatus(), { failures: 0, threshold: 1, unavailable: false }, "the read never counts toward readiness");
+    assert.equal((await fetch(origin + "/api/ready")).status, 200);
+  } finally { writer.exec("ROLLBACK"); writer.close(); }
+  // The same read works on a read-only store, as backups are opened.
+  const readOnly = new RoomStore(filename, { readOnly: true });
+  try {
+    assert.deepEqual(readOnly.accountRooms(slot.token, session.sessionBinding).rooms.map(room => room.id), ["commons"]);
+  } finally { readOnly.close(); }
 });

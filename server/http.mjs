@@ -980,6 +980,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const result = store.moderation.report(selected.token, roomId, await body(req), fence);
         return json(res, result.duplicate ? 200 : 201, result);
       }
+      // Invitation links are administered from a signed-in browser session
+      // (room-key or account cookie) only, never a bearer key: the store-level
+      // administrator() check accepts any human credential, so refuse here.
+      if ((route === "share-links" || route === "share-links-cancel") && selected.bearer) reject(403, "access_denied", "Invitation links require a signed-in browser session");
       if (route === "share-links" && req.method === "GET") return json(res, 200, store.shareLinks.list(selected.token, roomId, fence));
       if (route === "share-links" && req.method === "POST") {
         const data = await body(req);
