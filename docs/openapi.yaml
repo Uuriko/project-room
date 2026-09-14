@@ -587,9 +587,11 @@ paths:
         constant time with the SHA-256 the owner stored through the
         connection.webhook import action; unknown connections and wrong secrets
         share one 401. The body is a single Telegram Update or
-        { updates: [...] }. Accepted updates wait in process memory until the
-        owner imports them through the sync route; nothing is stored or fetched.
-        409 channel_webhook_unavailable when the deployment has no webhook inbox.
+        { updates: [...] }. Accepted updates are journaled durably in the store
+        (pending_channel_updates) until the owner imports them through the sync
+        route; a redelivered update_id is a no-op. Nothing is fetched or sent.
+        409 channel_webhook_unavailable when the deployment has no webhook inbox;
+        409 channel_webhook_backlog once 500 updates are pending for the connection.
       security: []
       parameters:
         - name: connectionId

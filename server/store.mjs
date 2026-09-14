@@ -14,6 +14,7 @@ import { conflictingClaim } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
 import { WakeQueue, wakeQueueSchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
+import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
 import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
 import { workItemChanges } from "../src/workflow.js";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
@@ -273,6 +274,7 @@ export class RoomStore {
     this.inbox = new Inbox(this);
     this.email = new EmailImport(this);
     this.connections = this.email; // Every channel connection (email, Telegram) shares the importer.
+    this.channelUpdates = new ChannelUpdateJournal(this); // B20: durable webhook update journal.
     const version = this.storagePlatform.version(this.db);
     // Supported schema versions are the contiguous range 0..STORE_SCHEMA_VERSION.
     // A hand-maintained list dropped v26 when the version bumped to 27,
@@ -300,6 +302,10 @@ export class RoomStore {
         this.verifyHelpHistory();
         this.inbox.verify();
         this.email.verify();
+        // The webhook update journal (B20) is purely additive at v27, so a
+        // backup taken before it is still a valid v27 file; read-only never
+        // migrates, so verify it only when present.
+        this.channelUpdates.verifySchema({ allowAbsent: true });
         return;
       } catch (error) { this.db.close(); throw error; }
     }
@@ -378,6 +384,8 @@ export class RoomStore {
       this.db.exec(wakeQueueSchema);
       // Attention preferences are purely additive as well (W4-46).
       this.db.exec(attentionSchema);
+      // The channel webhook update journal (B20) follows the same additive pattern.
+      this.db.exec(channelJournalSchema);
       if (version < STORE_SCHEMA_VERSION) this.storagePlatform.installWriterFence(this.db);
       this.storagePlatform.verifyWriterFence(this.db);
       this.verifyInvitationAudit();
@@ -392,6 +400,8 @@ export class RoomStore {
       this.verifyHelpHistory();
       this.inbox.verify();
       this.email.verify();
+      this.channelUpdates.verifySchema();
+      this.channelUpdates.verify();
     }); } catch (error) { this.db.close(); throw error; }
   }
 
