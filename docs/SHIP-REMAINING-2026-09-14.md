@@ -71,6 +71,12 @@ Review later. No `ROOM_TELEGRAM_*` on production.
 
 Loopback drill already passes. Live two-human drill is not a launch blocker.
 
+## How we actually ship (research, 2026-09-14)
+
+Cloudflare: one Worker version per Durable Object; rollback restores **code** not SQLite; PITR rewinds the **same** object ~30 days and does not clone; new classes should use SQLite; staging and production bindings must not share a namespace. In-place `PRAGMA user_version` is the usual schema path **on one object**. A new object is for a new class or a one-time rewrite. MCP 2025-11-25: Origin 403 when present, allow missing Origin, no CORS `*`, unpublished HTTP servers **SHOULD** still require auth on mutating calls. `getByName("one-name")` is a singleton bottleneck (~200–1000 rps); fine for a pilot room, not a scale plan.
+
+Implication: **https://room.trydemigod.com is the ship.** It is already a separate Worker/namespace from schema-26 staging. Do not in-place migrate `project-room-staging`. Do not wait on Tag merge, Telegram, Clerk, or Instinct W4-45. Optional later: application export from staging into a **new** production object. Observability is off on the production wrangler stub; enable only if we want logs, knowing it can restart objects.
+
 ## Execute now
 
 A, then re-verify the live bar. C/E wait. D is Instinct.
