@@ -1139,8 +1139,7 @@ paths:
         route; a redelivered update_id is a no-op. Nothing is fetched or sent.
         409 channel_webhook_unavailable when the deployment has no webhook inbox;
         409 channel_webhook_backlog once 500 updates are pending for the connection.
-      security:
-        - accountSession: []
+      security: []
       parameters:
         - name: connectionId
           in: path
