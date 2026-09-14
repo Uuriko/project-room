@@ -129,7 +129,7 @@ export function installInboxSend({ api, ownerKey, reviewChanges, onChannelSend =
     if (!owner || s.busy || kind === "send" && (!p || !clean())) return;
     s.busy = true; s.note = kind === "check" ? "Checking…" : "Working…"; render();
     $("inbox-send-confirm").disabled = true;
-    let retained = true;
+    let retained = true, outcome = ""; // The note to keep once the journal has been re-read (transport failures only).
     // The outbox transitions are shared; only the driver differs per source kind.
     const drive = async (action, sendId) => {
       const value = channel ? await api.channelSend(action, id, sendId) : await api.simulate(action, id, sendId);
@@ -163,7 +163,7 @@ export function installInboxSend({ api, ownerKey, reviewChanges, onChannelSend =
         }
         const value = await drive("dispatch", send.id);
         if (owner !== ownerKey() || gen !== generation) return;
-        s.sends = value.sends; s.note = value.note;
+        s.sends = value.sends; outcome = value.note;
       } else {
         if (!await load(id)) return;
         if (owner !== ownerKey() || gen !== generation) return;
@@ -171,9 +171,9 @@ export function installInboxSend({ api, ownerKey, reviewChanges, onChannelSend =
         if (!send || !["unknown", "accepted"].includes(send.status)) return;
         const value = await drive("reconcile", send.id);
         if (owner !== ownerKey() || gen !== generation) return;
-        s.sends = value.sends; s.note = value.note;
+        s.sends = value.sends; outcome = value.note;
       }
-      const outcome = s.note; if (id === sourceId) $("inbox-send-dialog").close();
+      s.note = ""; if (id === sourceId) $("inbox-send-dialog").close();
       await load(id); if (owner === ownerKey() && gen === generation) s.note = outcome;
     } catch (error) {
       if (owner !== ownerKey() || gen !== generation) return;
