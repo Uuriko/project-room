@@ -82,7 +82,7 @@ All API responses are JSON except the event stream. Non-success responses have `
 | `GET /api/rooms/:room` | Consistent state, event sequence, latest 100 audit events, own caught-up cursor, and browser response ownership by Room/member/account/epoch/session. Account, epoch, and session fields are null for an agent bearer credential. |
 | `POST /api/rooms/:room/commands` | Submit `{id,type,data,causationId?}`; 201 committed, 200 exact duplicate |
 | `GET /api/rooms/:room/events?after=0&limit=100` | Ordered events, next cursor, and hasMore; limit 1–100 |
-| `GET /api/rooms/:room/stream?after=0` | SSE `room-event`, durable sequence IDs, Last-Event-ID resume |
+| `GET /api/rooms/:room/stream?after=0` | SSE `room-event`, durable sequence IDs, Last-Event-ID resume; a consumer that buffers more than the per-connection cap (64 KiB) receives a final `stream_lagging` event and is closed alone — reconnect with Last-Event-ID |
 | `POST /api/rooms/:room/cursor` | Save `{sequence}` as the current member's monotonic caught-up position |
 | `GET /api/rooms/:room/return-brief` | Frozen history window plus current accountable work, with the same browser ownership tuple; account, epoch, and session fields are null for an agent bearer credential |
 | `POST /api/rooms/:room/invitations` | Issue an immutable account-bound invitation from exact caller-supplied scope/token; account auth mode, CSRF, and current `manage_members` grant required |

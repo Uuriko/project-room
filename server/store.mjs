@@ -41,6 +41,28 @@ import { EmailImport, emailImportSchema } from "./email-import.mjs";
 export class ServiceError extends Error {
   constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
 }
+// Exhausted or unwritable storage (disk full, quota, read-only file or
+// database, I/O errors) is one typed refusal. The failing transaction has
+// already been rolled back, so no partial write exists, and the driver text
+// stays in `cause` on the server: clients see only the stable code.
+export class StorageUnavailableError extends ServiceError {
+  constructor(cause = null) {
+    super(503, "storage_unavailable", "Storage is unavailable; no success is claimed", { "Retry-After": "30" });
+    this.cause = cause;
+  }
+}
+// SQLite primary result codes: READONLY, IOERR, FULL, CANTOPEN (WAL/shm files).
+const storageFailureSqlite = new Set([8, 10, 13, 14]);
+const storageFailureSystem = new Set(["ENOSPC", "EDQUOT", "EROFS", "EIO"]);
+const storageFailureText = /database or disk is full|attempt to write a readonly database|disk I\/O error|unable to open database file|no space left on device|read-only file system/i;
+export function isStorageUnavailable(error) {
+  if (!error || typeof error !== "object") return false;
+  if (error instanceof StorageUnavailableError) return true;
+  if (Number.isInteger(error.errcode) && storageFailureSqlite.has(error.errcode & 0xff)) return true;
+  if (typeof error.code === "string" && storageFailureSystem.has(error.code)) return true;
+  return storageFailureText.test(String(error.errstr ?? error.message ?? ""));
+}
+export const STORAGE_FAILURE_THRESHOLD = 3;
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const hash = text => createHash("sha256").update(text).digest("hex");
 const key = () => randomBytes(32).toString("base64url");
@@ -165,6 +187,7 @@ const nodeStorage = {
   version: db => db.prepare("PRAGMA user_version").get().user_version,
   setVersion: (db, version) => db.exec(`PRAGMA user_version=${version}`),
   hasSchema: db => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' LIMIT 1").get()),
+  changes: db => db.prepare("SELECT total_changes() AS n").get().n,
   configure(db, readOnly) {
     db.exec(readOnly ? "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=3000;"
       : "PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=3000;");
@@ -181,7 +204,12 @@ const nodeStorage = {
       if (readOnly) { db.exec("PRAGMA query_only=ON"); nodeReadTransactions.add(db); }
       const result = fn(); db.exec("COMMIT"); return result;
     }
-    catch (error) { db.exec("ROLLBACK"); throw error; }
+    catch (error) {
+      // SQLITE_FULL and I/O failures already rolled the transaction back;
+      // a second ROLLBACK would replace the real error with "no transaction".
+      if (db.isTransaction) { try { db.exec("ROLLBACK"); } catch { /* already rolled back */ } }
+      throw error;
+    }
     finally { if (readOnly) { nodeReadTransactions.delete(db); db.exec(`PRAGMA query_only=${queryOnly}`); } }
   }
 };
@@ -258,7 +286,12 @@ export function validateCommand(command) {
 }
 
 export class RoomStore {
-  constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage } = {}) {
+  constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD } = {}) {
+    if (!Number.isInteger(storageFailureThreshold) || storageFailureThreshold < 1) throw new Error("Storage failure threshold must be a positive integer");
+    // Consecutive storage refusals; readiness (server/http.mjs) turns 503 at
+    // the threshold and recovers on the next committed write.
+    this.storageFailureThreshold = storageFailureThreshold;
+    this.storageFailures = 0;
     this.now = now;
     this.db = database ?? new DatabaseSync(filename, { readOnly });
     this.storagePlatform = storagePlatform;
@@ -669,10 +702,37 @@ export class RoomStore {
   close() { this.db.close(); }
   transaction(fn) {
     // Nested startup helpers share the outer migration transaction and its rollback.
-    return this.storagePlatform.transaction(this.db, fn, false);
+    const outermost = !this.db.isTransaction;
+    // Only a commit that changed rows proves storage is writable again; an
+    // idempotent replay commits nothing. Measured only while degraded.
+    const before = outermost && this.storageFailures > 0 ? this.storagePlatform.changes?.(this.db) : null;
+    let result;
+    try { result = this.storagePlatform.transaction(this.db, fn, false); }
+    catch (error) { throw this.storageFailure(error, outermost); }
+    if (before !== null && (before === undefined || this.storagePlatform.changes(this.db) !== before)) this.storageRecovered();
+    return result;
   }
   readTransaction(fn) {
-    return this.storagePlatform.transaction(this.db, fn, true);
+    const outermost = !this.db.isTransaction;
+    try { return this.storagePlatform.transaction(this.db, fn, true); }
+    catch (error) { throw this.storageFailure(error, outermost); }
+  }
+  // Maps one storage failure to the typed refusal and counts it. Only the
+  // outermost transaction counts, so one nested failure is one refusal;
+  // server/http.mjs calls this for errors raised outside any transaction.
+  storageFailure(error, outermost = true) {
+    if (!isStorageUnavailable(error)) return error;
+    if (outermost && ++this.storageFailures === this.storageFailureThreshold) {
+      console.warn(`room storage unavailable after ${this.storageFailures} consecutive failures; readiness now 503`);
+    }
+    return error instanceof StorageUnavailableError ? error : new StorageUnavailableError(error);
+  }
+  storageRecovered() {
+    if (this.storageFailures >= this.storageFailureThreshold) console.warn("room storage recovered after a committed write; readiness now 200");
+    this.storageFailures = 0;
+  }
+  storageStatus() {
+    return { failures: this.storageFailures, threshold: this.storageFailureThreshold, unavailable: this.storageFailures >= this.storageFailureThreshold };
   }
   room(roomId) {
     const row = this.db.prepare("SELECT * FROM rooms WHERE id=?").get(roomId);

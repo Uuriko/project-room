@@ -25,7 +25,7 @@ The coarse categories (`errorCategory` in `src/agent-error.mjs`):
 | `conflict` | 409 | The world moved: stale revision, claimed session, duplicate requestId with different input | See below — never silently retry the same input |
 | `input` | 422 | Fields refused: bad shape, bad enum, over limits | Fix the refused fields; keep any earlier uncertain `requestId` |
 | `rate_limited` | 429 | Too fast | Wait for `Retry-After`, retry the exact request |
-| `unavailable` | 503 | Maintenance | Wait; reconcile afterward |
+| `unavailable` | 503 | Maintenance, or `storage_unavailable`: the store refused the write (disk full, read-only or I/O failure) and rolled it back | Wait for `Retry-After`; retry the exact request; reconcile afterward |
 | `internal` | 5xx | Server error; nothing is claimed | Reconcile or retry the exact command |
 
 ## The conflicts that matter most to agents
