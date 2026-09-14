@@ -192,6 +192,34 @@ test("truncation is reported only when the unread tail exceeds the bound, and na
   assert.throws(() => store.notifications.list(agentKey, "commons", null, { tail: 0 }), error => error.status === 422);
 });
 
+test("a muted author's events leave the viewer's feed; unmuting brings them back; the owner cannot be muted", async t => {
+  const { feed, send, ownerKey, mayaKey, agentKey } = await serve(t);
+  send(agentKey, T.MESSAGE_POSTED, { messageId: "agent-hello", body: "Hello room" });
+  send(mayaKey, T.MESSAGE_POSTED, { messageId: "maya-mention", body: "@Test agent from Maya" });
+  send(mayaKey, T.MESSAGE_POSTED, { messageId: "maya-reply", body: "Replying to the agent", replyToId: "agent-hello" });
+  send(ownerKey, T.MESSAGE_POSTED, { messageId: "owner-mention", body: "@Test agent from the owner" });
+  send(ownerKey, T.WORK_PROPOSED, { workItemId: "w1", title: "Maya work", definitionOfDone: "Done", accountableMemberId: "maya", verifierMemberId: "agent", independentVerificationRequired: true, mode: "read" });
+  send(mayaKey, T.WORK_ACCEPTED, { workItemId: "w1", expectedRevision: 0 });
+  let body = (await feed(agentKey)).body;
+  assert.deepEqual(kinds(body), ["work_update:w1", "assignment:w1", "mention:owner-mention", "reply:maya-reply", "mention:maya-mention"]);
+  // The viewer mutes Maya: her mention, reply and work update vanish from this viewer's feed and unread count alone.
+  send(agentKey, T.MEMBER_MUTE_SET, { memberId: "maya", muted: true });
+  body = (await feed(agentKey)).body;
+  assert.deepEqual(kinds(body), ["assignment:w1", "mention:owner-mention"]);
+  assert.equal(body.unread, 2);
+  assert.ok(!body.notifications.some(item => item.actorId === "maya"), "no item from a muted actor");
+  const ownerFeed = (await feed(ownerKey)).body;
+  assert.ok(ownerFeed.notifications.some(item => item.actorId === "maya"), "another member's feed still shows Maya");
+  // Unmute: the feed is computed per read, so the same items return with nothing else changed.
+  send(agentKey, T.MEMBER_MUTE_SET, { memberId: "maya", muted: false });
+  body = (await feed(agentKey)).body;
+  assert.deepEqual(kinds(body), ["work_update:w1", "assignment:w1", "mention:owner-mention", "reply:maya-reply", "mention:maya-mention"]);
+  // The owner can never be muted, so the owner's items are always present.
+  assert.throws(() => send(agentKey, T.MEMBER_MUTE_SET, { memberId: "owner", muted: true }), /owner cannot be muted/);
+  body = (await feed(agentKey)).body;
+  assert.ok(kinds(body).includes("mention:owner-mention"));
+});
+
 test("deriveNotifications is pure: same input, same output, and unknown preferences fall back to defaults", () => {
   const member = { id: "agent", displayName: "Test agent" };
   const state = { messages: [{ id: "m1", authorId: "owner", body: "@Test agent hi" }], workItems: {}, members: {} };

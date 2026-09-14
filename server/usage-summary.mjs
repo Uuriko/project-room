@@ -10,9 +10,15 @@
 // per attempt). A session that never reported spend is counted as
 // unreported and the total stays "unknown" until at least one attempt
 // reports - unknown is never rendered as zero.
+//
+// The room spend allowance ledger (issue #6 C3, server/spend-allowance.mjs)
+// rides along as `spendAllowance` so a member reads allowance, spent,
+// reserved and headroom in one place. Its period is the allowance's own
+// (30 days without one), not `?days=`; GET /spend-allowance stays as is.
 
 import { ServiceError, PILOT_LIMITS } from "./store.mjs";
 import { SESSION_EVENT_TYPES } from "../src/work-item-session.js";
+import { spendAllowanceReport } from "./spend-allowance.mjs";
 
 export const USAGE_DEFAULT_DAYS = 30;
 export const USAGE_MAX_DAYS = 365;
@@ -88,6 +94,7 @@ export function roomUsageSummary(store, token, roomId, { days = USAGE_DEFAULT_DA
       members: { humans, agents, inactive: members.length - active.length, agentIdentities },
       sessions: folded.sessions,
       spend: folded.spend,
+      spendAllowance: spendAllowanceReport(room.state, now),
       caps: {
         members: headroom(members.length, PILOT_LIMITS.membersPerRoom),
         events: headroom(room.sequence, PILOT_LIMITS.eventsPerRoom),

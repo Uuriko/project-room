@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { emailContractFixture } from "../scripts/email-contract-fixture.mjs";
-import { emailLimits, readEmailEnvelope, previewEmailReply, EmailContractError } from "../server/email-envelope.mjs";
+import { emailLimits, emailInput, readEmailEnvelope, previewEmailReply, EmailContractError } from "../server/email-envelope.mjs";
 import { normalizeGraphEmail, graphFolderChanges } from "../server/graph-email.mjs";
 
 const normalize = f => normalizeGraphEmail(f.connection, f.message, f.options);
@@ -200,4 +200,15 @@ test("real-shaped envelopes cannot enter the existing synthetic Inbox or enable 
     expectedRevision: 0, data: normalize(f) }, session.sessionBinding), { code: "invalid_inbox_source" });
   assert.equal(fixture.store.inbox.list(slot.token, session.sessionBinding).sources.length, 0);
   assert.deepEqual(fixture.store.room("commons"), before);
+});
+
+test("emailInput refuses unserialisable values with a contract error, not a ReferenceError", () => {
+  // JSON.stringify throws for BigInt and circular values; the catch branch must
+  // throw the exported EmailContractError (audit S4: a bare re-export alias once
+  // left that name unbound at the throw site).
+  const circular = {}; circular.self = circular;
+  for (const value of [1n, circular]) {
+    assert.throws(() => emailInput(value), error => error instanceof EmailContractError && error.code === "invalid_email");
+  }
+  assert.equal(emailInput({ ok: true }).ok, true);
 });

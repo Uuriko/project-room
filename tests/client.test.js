@@ -225,3 +225,44 @@ test("connected UI hooks exist and demo controls are not exposed", () => {
   assert.doesNotMatch(html, /actor-select|reset-button|4 here now|Simulate actor/);
   assert.match(html, /id="main"[^>]*hidden/);
 });
+
+test("HTML export carries the account headers, hands back a Blob and treats anything but text/html as an error", async () => {
+  const requests = [], html = "<!doctype html><title>Room</title><p>End of export: 3 events rendered, through sequence 3.</p>";
+  const fileResponse = (body, type, status = 200) => ({ ok: status < 400, status, headers: { get: name => name === "content-type" ? type : null },
+    json: async () => JSON.parse(body), blob: async () => new Blob([body], { type }) });
+  const client = new RoomClient({ fetcher: async (url, options) => { requests.push({ url, options }); return fileResponse(html, "text/html; charset=utf-8"); } });
+  client.session = { ...identity(), authMode: "account" };
+  client.accountOwnership = null;
+  client.accountClient = null;
+  // ownsAccountSession() is false without an owning account client: the export must refuse rather than send.
+  await assert.rejects(client.exportHtml(), /Account session changed/);
+  assert.equal(requests.length, 0);
+
+  const roomClient = new RoomClient({ fetcher: async (url, options) => { requests.push({ url, options }); return fileResponse(html, "text/html; charset=utf-8"); } });
+  roomClient.session = identity();
+  const { blob, filename } = await roomClient.exportHtml();
+  assert.equal(filename, "room-commons-export.html");
+  assert.equal(await blob.text(), html);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, "/api/rooms/commons/export?format=html");
+  assert.equal(requests[0].options.method, "GET");
+  assert.equal(requests[0].options.credentials, "same-origin");
+  assert.deepEqual(requests[0].options.headers, {}, "room mode sends no account headers");
+
+  const accountClient = { session: identity(), generation: 0 };
+  const bound = new RoomClient({ accountClient, fetcher: async (url, options) => { requests.push({ url, options }); return fileResponse(html, "text/html; charset=utf-8"); } });
+  bound.session = { ...accountClient.session, authMode: "account" };
+  bound.accountOwnership = { client: accountClient, generation: 0, session: accountClient.session };
+  await bound.exportHtml();
+  assert.deepEqual(requests[1].options.headers, { "X-Project-Room-Auth": "account", "X-Session-Binding": "session-human" });
+
+  const ended = [];
+  const denied = new RoomClient({ onAccessEnded: () => ended.push(true), fetcher: async () => fileResponse(JSON.stringify({ error: { code: "access_denied", message: "Access ended" } }), "application/json", 403) });
+  denied.session = identity();
+  await assert.rejects(denied.exportHtml(), error => error.status === 403 && error.code === "access_denied");
+  assert.equal(ended.length, 1, "a 403 ends the client's access like every other room read");
+
+  const wrong = new RoomClient({ fetcher: async () => fileResponse("{\"sequence\":1}\n", "application/x-ndjson; charset=utf-8") });
+  wrong.session = identity();
+  await assert.rejects(wrong.exportHtml(), error => error.code === "invalid_response");
+});

@@ -121,3 +121,56 @@ test("search skips a muted author's messages for the muter only, across kind=all
   send("guest", T.MEMBER_MUTE_SET, { memberId: "producer", muted: false });
   assert.deepEqual(ids(await search("meeting", "all", "guest")), [fromOwner, fromProducer]);
 });
+
+// Backlog follow-up 8: kind=pinned narrows search to state.pins (issue #6 B2).
+test("kind=pinned searches only pinned messages, follows unpin, and hides a muted author's pin from the muter", async t => {
+  const { store, ownerKey, get, post, propose, remove } = await serve(t);
+  const keys = { owner: ownerKey };
+  const send = (actor, type, data) => store.command(keys[actor], "commons", { id: randomUUID(), type, data });
+  for (const [memberId, kind, permissions] of [["guest", "human", []], ["producer", "agent", ["accept_work"]]]) {
+    send("owner", T.MEMBER_ADDED, { memberId, displayName: `Test ${memberId}`, kind, permissions, ...(kind === "agent" ? { accountableHumanId: "owner" } : {}) });
+    keys[memberId] = store.issueAccessKey("commons", memberId);
+  }
+  const pin = (actor, messageId, pinned) => send(actor, pinned ? T.MESSAGE_PINNED : T.MESSAGE_UNPINNED, { messageId });
+  const search = async (q, kind, actor = "owner") => {
+    const res = await get(`/api/rooms/commons/search?q=${encodeURIComponent(q)}&kind=${kind}`, keys[actor]);
+    assert.equal(res.status, 200);
+    return res.json();
+  };
+
+  const first = post("Meeting room is B-204 from Thursday");
+  const second = post("Meeting notes are in the shared folder");
+  post("Parking code is 4411");
+  propose("Book the meeting room");
+
+  // Nothing pinned yet: the plain search finds both messages; the pinned search finds nothing, and never work.
+  assert.equal((await search("meeting", "messages")).messages.length, 2);
+  assert.deepEqual(await search("meeting", "pinned"), { roomId: "commons", query: "meeting", messages: [], workItems: [] });
+
+  pin("owner", second, true);
+  pin("owner", first, true);
+  // Message order is preserved (not pin order), the term still applies, work stays out.
+  let r = await search("meeting", "pinned");
+  assert.deepEqual(r.messages.map(m => m.id), [first, second]);
+  assert.equal(r.workItems.length, 0);
+  assert.deepEqual((await search("4411", "pinned")).messages, [], "an unpinned match stays out");
+  assert.equal((await search("4411", "messages")).messages.length, 1, "the other kinds are untouched");
+  assert.equal((await search("MEETING", "pinned")).messages.length, 2, "case-insensitive like the other kinds");
+
+  // Unpin removes it from the pinned search only.
+  pin("owner", first, false);
+  assert.deepEqual((await search("meeting", "pinned")).messages.map(m => m.id), [second]);
+  assert.equal((await search("meeting", "messages")).messages.length, 2);
+
+  // A muted author's pinned message stays hidden for the muter and visible to everyone else.
+  const fromProducer = send("producer", T.MESSAGE_POSTED, { messageId: randomUUID(), body: "Meeting agenda from the producer" }).event.data.messageId;
+  pin("producer", fromProducer, true);
+  assert.deepEqual((await search("meeting", "pinned", "guest")).messages.map(m => m.id), [second, fromProducer]);
+  send("guest", T.MEMBER_MUTE_SET, { memberId: "producer", muted: true });
+  assert.deepEqual((await search("meeting", "pinned", "guest")).messages.map(m => m.id), [second], "the muter does not see the muted author's pin");
+  assert.deepEqual((await search("meeting", "pinned", "owner")).messages.map(m => m.id), [second, fromProducer], "other members still do");
+
+  // A deleted pinned message drops out (the reducer drops its pin; the body is a tombstone either way).
+  remove(second);
+  assert.deepEqual((await search("meeting", "pinned")).messages.map(m => m.id), [fromProducer]);
+});

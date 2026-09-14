@@ -7,8 +7,10 @@ Three suites, three commands. Run in this order when iterating.
 Syntax-checks every JS file, runs the journey-coverage gate, the
 no-shadow-imports gate, the route-documentation gate
 (`scripts/route-docs-check.mjs`: every served `/api` route template is in
-`docs/openapi.yaml`), the schema-version gate, then `node --test` (the
-`tests/` suite). This is what the CI `contract` job runs. See
+`docs/openapi.yaml`), the schema-version gate, the lint gate
+(`scripts/lint.mjs`, skipped with a notice when `eslint` is not installed),
+the open-route inventory gate (`scripts/open-routes.mjs --check`), then
+`node --test` (the `tests/` suite). This is what the CI `contract` job runs. See
 [CONTRACT.md](CONTRACT.md).
 
 Run one file: `node --test tests/agent-upgrade.test.js`
@@ -36,6 +38,12 @@ node --test scripts/browser-check.mjs
 Keep `--test-concurrency=1` when running the full suite — the checks bind
 ports and share the display. Evidence artifacts land in `test-results/`
 (uploaded by CI on every run).
+
+Keep `test:browser` in `package.json` in the plain form — `node --test
+--test-concurrency=1 scripts/a-check.mjs scripts/b-check.mjs …` with no
+inline `--test-reporter` flags. `scripts/browser-ci.mjs` reads the file list
+from that script and refuses inline reporters, and
+`tests/report-test-failures.test.js` asserts the plain form.
 
 CI runs `npm run test:browser:ci` instead: the same suite list (read from
 `test:browser`, so there is one source of truth) with the `spec` reporter
@@ -76,8 +84,9 @@ node scripts/check.mjs --fast
 
 `--fast` is not implemented yet — today `npm run check` runs the full
 unit suite too, which is too slow for a hook. Proposed: add a `--fast`
-flag that stops after the three static gates (syntax, journey-coverage,
-shadow-imports) and skips `node --test`. Full suite stays in CI.
+flag that stops after the static gates (syntax, journey-coverage,
+shadow-imports, route docs, schema version, lint, open routes) and skips
+`node --test`. Full suite stays in CI.
 
 `.github/workflows/test.yml`: `contract` (`npm run check`), `browser`
 (`npm run test:browser:ci`, see section 2), `cloudflare` (Worker runtime checks). The

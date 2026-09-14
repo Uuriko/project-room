@@ -64,6 +64,10 @@ test("spend allowance: the owner sets it, the card follows the ledger as a sessi
   // A report within the reservation moves spend from reserved to spent; the stop below the cap frees the rest.
   f.session({ status: "active", spendCents: 500 });
   await page.waitForFunction(() => /\$5\.00 spent · \$15\.00 reserved/.test(document.querySelector("#spend-figures").textContent));
+  // The Usage card carries the same ledger, so a member reads allowance, spent, reserved and headroom beside usage.
+  await page.locator("#usage-panel").evaluate(el => { el.open = true; });
+  await page.locator('#usage-grid [data-usage-allowance="set"]').waitFor();
+  assert.match(await page.locator("#usage-grid dl").nth(2).textContent(), /^Allowance\$50\.00over 30 daysSpent\$5\.00Reserved\$15\.001 liveHeadroom\$30\.00$/);
   f.session({ status: "done", spendCents: 800 });
   await f.summaryIs("$8.00 of $50.00");
   assert.match(await f.figures.textContent(), /^\$8\.00 spent · \$0\.00 reserved by 0 live sessions · \$42\.00 left over 30 days\.$/);

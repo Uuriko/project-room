@@ -6,6 +6,7 @@
 import { EVENT_TYPES as T, defaultNotificationPreferences } from "../src/events.js";
 import { messageAddressesMember } from "../src/conversation.js";
 import { ServiceError } from "./store.mjs";
+import { mutedEvent } from "./moderation.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -39,6 +40,9 @@ export function deriveNotifications({ events, state, member }) {
   for (const row of events) {
     const { event } = row;
     if (event.actorId === member.id) continue; // Your own actions never notify you.
+    // E4: an actor you muted never reaches your feed. Read per request, so
+    // unmuting brings their items back on the next read (the owner cannot be muted).
+    if (mutedEvent(state, member.id, event)) continue;
     if (event.type === T.MESSAGE_POSTED) {
       const messageId = event.data.messageId || event.id;
       const current = messages.get(messageId);

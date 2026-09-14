@@ -1,15 +1,48 @@
 # Changelog
 
+## Unreleased
+
+- Repo hygiene: README no longer cites a stale schema number or a nonexistent
+  root file; the seven dead `test-results/` screenshot links in the 9/7 browser
+  checkpoint docs are annotated as local-only; new `docs/README.md` orients
+  readers across the dated checkpoint archive.
+- Schema lineage: v34 convergence in flight (PR #197) to reunite the repo's v28
+  lineage with the deployed v28–v33 lineage. Schema changes stay frozen until it
+  lands. Hand-resolved merges on 9/14 dropped some wiring; PR #180 restored it.
+
 ## 2026-09-14
 
 - Search and moderation (backlog 11): `GET /api/rooms/:id/search` now excludes
   messages by an author the caller muted for every `kind` on the server
-  (`mutedMessage` in `server/moderation.mjs`), matching the browser filter, so
+  (`mutedEvent` in `server/moderation.mjs`), matching the browser filter, so
   agents and other API readers get the same answer; nobody else's results
   change. `docs/openapi.yaml` agent-invites descriptions name the hash-free
   `inviteId` handle (8 hex characters) the routes actually return and take,
   instead of the retired `codeHash`, and list the 409 `invite_ambiguous`
   answer.
+- Docs: `docs/openapi.yaml` no longer drifts from the served routes. The
+  `queryAuth` scheme describes the `room_session` cookie (with `?auth=account`
+  / `X-Project-Room-Auth: account` as the cookie selector) instead of telling
+  agents to put a private key in the query string, which the server answers
+  422 `invalid_auth_mode`; `GET /events` documents `next`, `hasMore`, 409
+  `cursor_ahead` and 422 `invalid_cursor`; `GET /stream` documents
+  `Last-Event-ID`, `?after=`, `?auth=` and `?binding=`; `GET /return-brief`
+  `limit` allows 100; `GET /agent-pause` lists 404 `member_not_found` and 422
+  `invalid_member`; `POST /cursor` requires `sequence` and lists 422.
+  `docs/SESSION-BUDGETS.md` uses the bearer header in its curl example.
+- Wake queue receipt cap (`wakeQueueLimits.receipts`, 5000 per member and room)
+  now bounds every command that retains a receipt: resume and requeue refuse
+  with `409 wake_limit` at the cap exactly as enqueue does, a pause of an
+  already-paused member refuses too, and a pause that actually stops the
+  member is always admitted (stop always works, adding at most one receipt
+  since the matching resume stays capped); exact retries still return their
+  historical receipt. Previously only enqueue was
+  checked, so repeated `POST /api/rooms/:id/agent-pause` calls (including
+  pausing an already-paused member) could grow the immutable
+  `wake_queue_commands` table without bound. `docs/openapi.yaml` names the 409
+  and clarifies that 201 means the command was recorded (`alreadyPaused` /
+  `wasPaused` say whether the state changed). Tests: `tests/wake-pause.test.js`,
+  `tests/wake-queue.test.js`.
 - Room lifecycle (issue #6 A2): schema 28 adds `rooms.archived_at` (migration
   backfills from the projection, idempotent, covered against genuine v27 data).
   `POST /api/account-rooms` creates a room for an account that already
@@ -21,6 +54,12 @@
   the Rooms panel gains a New room form and lists archived rooms as read-only
   entries, never as working buttons; About offers Archive room (owner) and
   Leave room (member). `docs/ROUTE-AUTH-TABLE.md`, `docs/openapi.yaml`.
+- `docs/EXPORT-RETENTION-DELETION.md` "Leaving a room / closing an account"
+  no longer claims there is no self-serve leave: it describes the member's
+  Leave room action (self-targeted `member.access_changed`, no
+  `manage_members`), the unchanged owner removal, owner archive (read-only,
+  409 `room_archived`, nothing removed) and that a member cannot leave an
+  archived room because the archived check runs first. Docs only.
 - Inspectable context (C2): `GET /api/rooms/:roomId/work-context` carries an
   `accessSummary` (conversation scope and source message id, evidence
   references, declared budget, participants and the exact omissions the read
