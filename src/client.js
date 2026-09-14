@@ -417,6 +417,23 @@ export class RoomClient {
       throw error;
     }
   }
+  // E4 moderation: POST reports a message (own receipt only); GET lists reports (owner only).
+  async reports(request = null) {
+    if (!this.session) return null;
+    if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+    const generation = this.generation, session = this.session;
+    try {
+      const result = await this.request(this.path("/reports"), request ? { method: "POST", data: request } : {});
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsResponse(result, session)) { this.endAccess(); return null; }
+      return result;
+    } catch (error) {
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+      if (error.status === 401 || error.code === "session_binding_changed") this.handleFailure(error);
+      throw error;
+    }
+  }
   async charter(revision) {
     if (!this.session) return null;
     if (!this.ownsAccountSession()) { this.endAccess(); return null; }

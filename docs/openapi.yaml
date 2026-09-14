@@ -529,6 +529,86 @@ paths:
                 sequence: { type: integer }
       responses:
         '200': { description: Cursor stored }
+  /api/rooms/{roomId}/reports:
+    post:
+      summary: Report a message to the room owner
+      description: |
+        Moderation (issue #6 E4). Any active member reports a message written
+        by someone else with a short reason (at most 280 characters of plain
+        text). The report is a private record, not a room event: it never
+        appears in events, stream, snapshot or export, and only the room owner
+        can list it. One report per (reporter, message): repeating it returns
+        the first receipt with `duplicate: true` (200). At most 20 reports per
+        reporter per hour (429 `report_limit`). 422 `invalid_report` for a bad
+        shape or a self-report; 404 `message_not_found` for a message not in
+        this room.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messageId, reason]
+              additionalProperties: false
+              properties:
+                messageId: { type: string }
+                reason: { type: string, minLength: 1, maxLength: 280 }
+      responses:
+        '201':
+          description: Report recorded; the receipt names only the reporter's own report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportReceipt'
+        '200':
+          description: Already reported by this member; the first receipt is returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportReceipt'
+    get:
+      summary: List reports (room owner only)
+      description: |
+        Owner-only read of every report in the room, newest first, with the
+        reporter's member id, the reported message's author and the message as
+        it stands now (body null once deleted; `message` null when the message
+        is no longer in the room). Any other member receives 403
+        `owner_required`; the reporter identity is never served to them.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Reports visible to the owner
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  viewerId: { type: string }
+                  evaluatedAt: { type: integer }
+                  reports:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        messageId: { type: string }
+                        reason: { type: string }
+                        createdAt: { type: integer }
+                        reporterId: { type: string }
+                        authorId: { type: string }
+                        message:
+                          type: [object, 'null']
+                          properties:
+                            authorId: { type: string }
+                            body: { type: [string, 'null'] }
+                            createdAt: { type: string, format: date-time }
+                            deletedAt: { type: [string, 'null'], format: date-time }
+        '403':
+          description: owner_required
   /api/health:
     get:
       summary: Liveness
@@ -1057,6 +1137,21 @@ components:
       required: true
       schema: { type: string }
   schemas:
+    ReportReceipt:
+      type: object
+      description: The reporter's own receipt. It names no other member.
+      properties:
+        roomId: { type: string }
+        viewerId: { type: string }
+        evaluatedAt: { type: integer }
+        duplicate: { type: boolean }
+        report:
+          type: object
+          properties:
+            id: { type: string }
+            messageId: { type: string }
+            reason: { type: string }
+            createdAt: { type: integer }
     ChannelSendDescriptor:
       type: [object, 'null']
       description: Which transport replies to this source go through. Null when the deployment has none (email, samples, disconnected connections).

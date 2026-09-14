@@ -15,6 +15,7 @@ export const EVENT_TYPES = Object.freeze({
   MEMBER_ACCESS_CHANGED: "member.access_changed",
   MEMBER_STATUS_UPDATED: "member.status_updated",
   NOTIFICATION_PREFERENCES_SET: "notifications.preferences_set",
+  MEMBER_MUTE_SET: "member.mute_set",
   MESSAGE_POSTED: "message.posted",
   MESSAGE_EDITED: "message.edited",
   MESSAGE_DELETED: "message.deleted",
@@ -155,6 +156,7 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.MEMBER_ACCESS_CHANGED]: changeMemberAccess,
     [EVENT_TYPES.MEMBER_STATUS_UPDATED]: updateMemberStatus,
     [EVENT_TYPES.NOTIFICATION_PREFERENCES_SET]: setNotificationPreferences,
+    [EVENT_TYPES.MEMBER_MUTE_SET]: setMemberMute,
     [EVENT_TYPES.MESSAGE_POSTED]: postMessage,
     [EVENT_TYPES.MESSAGE_EDITED]: editMessage,
     [EVENT_TYPES.MESSAGE_DELETED]: deleteMessage,
@@ -381,6 +383,33 @@ function setNotificationPreferences(state, incoming) {
 
 function defaultNotificationPreferences() {
   return { mentions: "all", replies: "all", work_updates: "all", announcements: "all" };
+}
+
+// Mute (issue #6 E4): a member hides another member's or agent's messages for
+// themselves. It is a personal preference recorded like notification
+// preferences (member.mute_set on the actor's own member record), never
+// authority: the muted member keeps every permission, nothing is addressed
+// at them, and the choice is reversible with muted:false. Clients collapse a
+// muted author's messages and notification feeds skip them (server/moderation.mjs).
+function setMemberMute(state, incoming) {
+  requireFields(incoming.data, ["memberId", "muted"]);
+  const actor = requireMember(state, incoming.actorId);
+  const target = knownMember(state, incoming.data.memberId);
+  if (typeof incoming.data.muted !== "boolean") throw new Error("Mute requires muted as true or false");
+  if (target.id === actor.id) throw new Error("You cannot mute yourself");
+  if (target.id === state.room.ownerId) throw new Error("The Room owner cannot be muted; the owner is the appeal path for moderation");
+  const muted = new Set(actor.mutedMemberIds ?? []);
+  if (incoming.data.muted) muted.add(target.id); else muted.delete(target.id);
+  // A preference never moves member.revision (which pins open invitations and access changes).
+  if (muted.size) actor.mutedMemberIds = [...muted].sort(); else delete actor.mutedMemberIds;
+}
+
+export function mutedMemberIds(state, viewerId) {
+  return state?.members?.[viewerId]?.mutedMemberIds ?? [];
+}
+
+export function isMutedBy(state, viewerId, authorId) {
+  return viewerId != null && authorId != null && mutedMemberIds(state, viewerId).includes(authorId);
 }
 
 function requireScopedMemberAdministration(state, actorId, targetId, currentTarget, nextPermissions) {

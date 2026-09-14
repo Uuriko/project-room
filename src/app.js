@@ -1,4 +1,4 @@
-import { EVENT_TYPES as T, WORK_STATES as S, roomPolicy } from "./events.js";
+import { EVENT_TYPES as T, WORK_STATES as S, roomPolicy, isMutedBy } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
@@ -890,8 +890,10 @@ function render() {
     const doneChip = done
       ? `<span class="done-chip" title="${esc(done.title)}" data-done-work="${esc(done.workItemId)}">${esc(done.label)}</span>`
       : "";
-    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}" ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(presenceLabel(presence))}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong><span class="sr-only">${esc(presenceLabel(presence))}</span>${doneChip}</div><p class="member-status">${esc(status)}</p><details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p></details></div></div>`;
+    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}" ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(presenceLabel(presence))}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong><span class="sr-only">${esc(presenceLabel(presence))}</span>${doneChip}</div><p class="member-status">${esc(status)}</p><details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${muteControl(m)}</details></div></div>`;
   };
+  // E4: mute is the viewer's own preference; the owner (the appeal path) and yourself are never mutable.
+  const muteControl = m => m.id === session?.member?.id || m.id === state.room.ownerId ? "" : `<button type="button" class="text-button mute-toggle" data-mute-member="${esc(m.id)}" data-muted="${isMutedBy(state, session?.member?.id, m.id)}" aria-pressed="${isMutedBy(state, session?.member?.id, m.id)}">${isMutedBy(state, session?.member?.id, m.id) ? `Unmute ${esc(m.displayName)}` : `Mute ${esc(m.displayName)} for me`}</button>`;
   const byPresence = (a, b) => (a.active === false) - (b.active === false) || a.displayName.localeCompare(b.displayName);
   const people = members.filter(m => m.kind !== "agent").sort(byPresence);
   const agents = members.filter(m => m.kind === "agent").sort(byPresence);
@@ -907,6 +909,7 @@ function render() {
   setText("#room-attention-count", waiting ? `(${waiting} need you)` : "");
   renderMessages();
   syncRequestComposer();
+  syncReports();
   $("#event-count").textContent = `${client.sequence}`;
   renderReturnBrief();
   renderContent("#event-list", [...state.eventLog].reverse().map(e => `<li id="${recordDomId("event", e.id)}" tabindex="-1" data-event-record-id="${esc(e.id)}" data-focus-key="event:${esc(e.id)}"><span>${esc(humanize(e.type))}</span><strong>${esc(memberLabel(e.actorId))}</strong><time datetime="${esc(e.at)}">${esc(time(e.at))}</time><code>${esc(e.id)}</code></li>`).join(""));
@@ -936,7 +939,7 @@ function renderMessages() {
   if (!sameView || nearBottom) unreadAnchorId = null;
   else if (!unreadAnchorId && newMessages[0]) unreadAnchorId = newMessages[0].id;
   const pendingOutgoingId = pendingMessage?.command?.data?.messageId || pendingMessage?.command?.id;
-  const announceCount = newMessages.filter(message => message.id !== pendingOutgoingId && !locallyOwnedMessageIds.has(message.id)).length;
+  const announceCount = newMessages.filter(message => message.id !== pendingOutgoingId && !locallyOwnedMessageIds.has(message.id) && !isMutedBy(state, session?.member?.id, message.authorId)).length;
   newMessages.forEach(message => locallyOwnedMessageIds.delete(message.id));
   setText("#message-count", `${state.messages.length} ${state.messages.length === 1 ? "message" : "messages"}`);
   $("#thread-bar").hidden = !currentThreadId;
@@ -954,7 +957,8 @@ function renderMessages() {
     const node = previous.get(message.id) || document.createElement("li");
     const cluster = messageCluster(messages, index);
     node.id = recordDomId("message", message.id); node.dataset.key = message.id; node.dataset.messageRecordId = message.id;
-    node.className = `message${cluster.grouped ? " grouped" : ""}${session && messageMentionsMember(message.body, session.member) ? " mentioned" : ""}`; node.tabIndex = -1;
+    const muted = isMutedBy(state, session?.member?.id, message.authorId);
+    node.className = `message${cluster.grouped ? " grouped" : ""}${muted ? " muted" : ""}${session && !muted && messageMentionsMember(message.body, session.member) ? " mentioned" : ""}`; node.tabIndex = -1;
     const html = messageContent(message, cluster, message.id === unreadAnchorId);
     if (node._content !== html) {
       if (!node._content || !node.querySelector(".message-body")) node.innerHTML = html;
@@ -1017,6 +1021,10 @@ return `<p class="form-hint"><a class="source-link draft-state" href="${esc(work
 function messageContent(m, cluster = {}, unreadStart = false) {
   const author = state.members[m.authorId];
   const authorLabel = displayName(m.authorId);
+  // E4 moderation: a muted author's message collapses for the muter alone; Report goes to the owner only.
+  const muted = isMutedBy(state, session.member.id, m.authorId), other = m.authorId !== session.member.id;
+  const moderation = muted ? `<button class="message-to-work" data-message-action="unmute" data-message-id="${esc(m.id)}" type="button">Unmute ${esc(author.displayName)}</button>`
+    : other ? `${!m.deletedAt ? `<button class="message-to-work" data-message-action="report" data-message-id="${esc(m.id)}" type="button">Report</button>` : ""}${m.authorId !== state.room.ownerId ? `<button class="message-to-work" data-message-action="mute" data-message-id="${esc(m.id)}" type="button">Mute ${esc(author.displayName)}</button>` : ""}` : "";
   const divider = unreadStart || cluster.dayStart
     ? `<div class="chat-divider${unreadStart ? " unread" : ""}" role="separator">${esc([unreadStart ? "New messages" : "", cluster.dayStart ? cluster.dayLabel : ""].filter(Boolean).join(" · "))}</div>`
     : "";
@@ -1032,7 +1040,7 @@ function messageContent(m, cluster = {}, unreadStart = false) {
   const groupedTime = cluster.grouped
     ? `<time class="grouped-time" datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time>`
     : "";
-  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${author.kind === "agent" ? `<span>${esc(kindLabel(author.kind))}</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · room-visible</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(parent.body.slice(0,90))}</a>` : ""}</div>${m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<p class="message-body">${mentionHtml(m.body, Object.values(state.members), esc)}</p>`}<div class="draft-feedback">${draftFeedbackHTML(m)}</div><div class="reactions" role="group" aria-label="Reactions to message by ${esc(authorLabel)}">${reactionButtons}</div><div class="message-links">${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>${doneChip(i)}`).join("")}${!m.deletedAt && m.workItemId && workActions(state.workItems[m.workItemId], state.members[session.member.id]).some(([action]) => action === "complete") ? `<button class="message-to-work" type="button" data-message-action="result" data-message-id="${esc(m.id)}">Save as result</button>` : ""}<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>${!currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : ""}${!m.deletedAt && can("steer") && !(m.proposal && m.workItemId) ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : ""}${!m.deletedAt && can("decide") && state.members[session.member.id]?.kind === "human" ? `<button class="message-to-work" data-message-action="decide" data-message-id="${esc(m.id)}" type="button">Record decision</button>` : ""}</div></div>`;
+  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${author.kind === "agent" ? `<span>${esc(kindLabel(author.kind))}</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · room-visible</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(parent.body.slice(0,90))}</a>` : ""}</div>${muted ? `<p class="message-body message-muted">Hidden: you muted ${esc(authorLabel)}.</p>` : m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<p class="message-body">${mentionHtml(m.body, Object.values(state.members), esc)}</p>`}<div class="draft-feedback">${muted ? "" : draftFeedbackHTML(m)}</div><div class="reactions" role="group" aria-label="Reactions to message by ${esc(authorLabel)}">${muted ? "" : reactionButtons}</div><div class="message-links">${muted ? moderation : `${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>${doneChip(i)}`).join("")}${!m.deletedAt && m.workItemId && workActions(state.workItems[m.workItemId], state.members[session.member.id]).some(([action]) => action === "complete") ? `<button class="message-to-work" type="button" data-message-action="result" data-message-id="${esc(m.id)}">Save as result</button>` : ""}<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>${!currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : ""}${!m.deletedAt && can("steer") && !(m.proposal && m.workItemId) ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : ""}${!m.deletedAt && can("decide") && state.members[session.member.id]?.kind === "human" ? `<button class="message-to-work" data-message-action="decide" data-message-id="${esc(m.id)}" type="button">Record decision</button>` : ""}${moderation}`}</div></div>`;
 }
 function mentionsFilterOn() {
   return $("#search-mentions")?.getAttribute("aria-pressed") === "true";
@@ -1052,7 +1060,7 @@ function renderSearch(now = Date.now()) {
   const list = $("#search-list"), focused = list.contains(document.activeElement) ? document.activeElement.dataset.searchKey : null;
   const empty = only && !parsed.term ? "No one has @-mentioned you yet." : "No matches. Try a name or another phrase.";
   const html = work.work.map(({ item, excerpt }) => `<li><a href="${esc(workHref(item.id))}" data-open-work="${esc(item.id)}" data-search-key="work:${esc(item.id)}"><strong>${esc(item.title)}</strong><span>${esc(excerpt)}</span><small>Work · ${esc(workStatus(item, now).label)}</small></a></li>`).join("")
-    + result.messages.map(m => `<li><a href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" data-search-key="message:${esc(m.id)}"><strong>${esc(name(m.authorId))}</strong><span>${esc(m.deletedAt ? "Message deleted" : (m.body ?? "").slice(0, 240))}</span><small>${m.replyToId ? "Open thread at this reply" : "Open in room"}</small></a></li>`).join("") || `<li class="empty-note">${empty}</li>`;
+    + result.messages.filter(m => !isMutedBy(state, session?.member?.id, m.authorId)).map(m => `<li><a href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" data-search-key="message:${esc(m.id)}"><strong>${esc(name(m.authorId))}</strong><span>${esc(m.deletedAt ? "Message deleted" : (m.body ?? "").slice(0, 240))}</span><small>${m.replyToId ? "Open thread at this reply" : "Open in room"}</small></a></li>`).join("") || `<li class="empty-note">${empty}</li>`;
   if (list._content !== html) { list.innerHTML = html; list._content = html; }
   if (focused) ([...list.querySelectorAll("[data-search-key]")].find(e => e.dataset.searchKey === focused) || $("#message-search")).focus({ preventScroll: true });
 }
@@ -1875,6 +1883,8 @@ $("#message-list").addEventListener("click", e => {
     if (item && workActions(item, state.members[session.member.id]).some(([action]) => action === "complete")) openWorkAction(item, "complete", id);
   }
   else if (button.dataset.messageAction === "react") setReaction(id, button.dataset.reaction);
+  else if (button.dataset.messageAction === "report") openReport(id);
+  else if (["mute", "unmute"].includes(button.dataset.messageAction)) setMute(conversation.byId.get(id)?.authorId, button.dataset.messageAction === "mute");
   else if (["reply", "thread"].includes(button.dataset.messageAction)) {
     switchThread(conversation.rootById.get(id), button.dataset.messageAction === "reply");
     if (button.dataset.messageAction === "reply") {
@@ -2244,6 +2254,81 @@ $("#decision-form").addEventListener("submit", e => {
     notice("Decision recorded.");
   }, { failureHint: "Decision not saved. Retry the same entry, or close and start again." });
 });
+// Moderation (issue #6 E4): report a message to the room owner; mute an author
+// for yourself. A report is a private record the owner alone can list (no room
+// event, nothing leaves the room); a mute is the viewer's own preference event.
+let reportSourceId = null, reportsFlight = null, reportsSequence = -1, reportsGeneration = -1;
+function openReport(messageId) {
+  if (busy) return;
+  const message = conversation.byId.get(messageId);
+  if (!message || message.deletedAt || message.authorId === session.member.id) return;
+  reportSourceId = messageId;
+  $("#report-form").reset();
+  $("#report-source").textContent = `Message from ${name(message.authorId)}: ${message.body.slice(0, 200)}`;
+  setFormStatus($("#report-status"), "");
+  $("#report-dialog").showModal();
+  $("#report-reason-input").focus();
+}
+$("#close-report").addEventListener("click", () => { if (!busy) $("#report-dialog").close(); });
+$("#report-dialog").addEventListener("cancel", event => { event.preventDefault(); if (!busy) $("#report-dialog").close(); });
+$("#report-form").addEventListener("submit", e => {
+  e.preventDefault();
+  const reason = $("#report-reason-input").value.trim();
+  if (!reason) { setFormStatus($("#report-status"), "Say briefly why you are reporting this message.", true); return; }
+  submit($("#report-form"), async () => {
+    const result = await client.reports({ messageId: reportSourceId, reason });
+    if (!state || !result) return;
+    $("#report-dialog").close();
+    reportSourceId = null;
+    notice(result.duplicate ? "You already reported this message; the room owner has it." : "Report sent to the room owner. Only the owner sees it.");
+  }, { failureHint: "Report not sent. Retry the same reason, or close and start again." });
+});
+async function setMute(memberId, muted) {
+  const target = state?.members[memberId];
+  if (!target || busy || memberId === session.member.id) return;
+  const entry = draftCommand(null, T.MEMBER_MUTE_SET, { memberId, muted });
+  const generation = client.generation;
+  try {
+    await client.send(entry.command);
+    if (generation !== client.generation || !state) return;
+    notice(muted ? `${target.displayName} muted for you. Their messages are hidden here until you unmute; nobody else is affected.` : `${target.displayName} unmuted.`);
+  } catch (error) {
+    if (generation === client.generation && state) notice(`${requestFailureMessage(error)}. Your mute choice was not changed.`, true);
+  }
+}
+$("#presence-list").addEventListener("click", e => {
+  const button = e.target.closest("[data-mute-member]");
+  if (button && state) setMute(button.dataset.muteMember, button.dataset.muted !== "true");
+});
+function syncReports() {
+  const owner = Boolean(state && session && state.room?.ownerId === session.member.id && state.members[session.member.id]?.kind === "human");
+  $("#reports-section").hidden = !owner;
+  if (!owner) { reportsSequence = -1; return; }
+  if ($("#reports-section").open && (reportsSequence !== client.sequence || reportsGeneration !== client.generation)) loadReports();
+}
+function loadReports() {
+  if (reportsFlight) return;
+  const generation = client.generation, sequence = client.sequence;
+  reportsFlight = client.reports().then(result => {
+    if (generation !== client.generation || !state || !result) return;
+    reportsSequence = sequence; reportsGeneration = generation;
+    renderReports(result.reports);
+  }).catch(error => {
+    if (generation === client.generation && state) setFormStatus($("#report-list-status"), `${requestFailureMessage(error)}. Open this section again to retry.`, true);
+  }).finally(() => { reportsFlight = null; });
+}
+function renderReports(reports) {
+  setFormStatus($("#report-list-status"), "");
+  setText("#report-count", reports.length ? String(reports.length) : "");
+  renderContent("#report-list", reports.map(report => {
+    const message = report.message;
+    const excerpt = !message ? "Message no longer in this room" : message.deletedAt ? "Message deleted" : message.body.slice(0, 160);
+    return `<li data-report-id="${esc(report.id)}"><strong>${esc(report.reason)}</strong> <span class="rb-detail">reported by ${esc(memberLabel(report.reporterId))} · ${esc(time(report.createdAt))}</span><br><a class="source-link" href="${esc(recordHref("message", report.messageId))}" data-open-message="${esc(report.messageId)}">${esc(memberLabel(report.authorId))}: ${esc(excerpt)}</a></li>`;
+  }).join("") || '<li class="rb-empty">No reports. Members report a message from its Report action; only you see them here.</li>');
+}
+$("#reports-section").addEventListener("toggle", () => { if ($("#reports-section").open) syncReports(); });
+// Reports append no room event, so a new one does not move the stream; the owner can ask again.
+$("#report-refresh").addEventListener("click", () => { reportsSequence = -1; syncReports(); });
 // Room policy (issue #6 A4): when the owner made review or approval mandatory,
 // the proposer sees the requirement locked on with the reason. The server
 // enforces it regardless of what a client sends; this is only the honest view.

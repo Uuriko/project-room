@@ -23,6 +23,7 @@ authorization (owner, `manage_members`, member) is enforced inside the
 | `POST /api/rooms/:id/cursor` | room Bearer / session | member (own read cursor) |
 | `POST /api/rooms/:id/work-sessions` | room Bearer / session | member |
 | `POST /api/rooms/:id/reminders` | room Bearer / session | member |
+| `POST /api/rooms/:id/reports` | room Bearer / session | member (not the message author); one report per member per message; 20/hour/member |
 | `POST /api/rooms/:id/agent-connections` | room Bearer / session | member |
 | `POST /api/rooms/:id/guest-agent-links` | room Bearer / session | room owner + `manage_members` |
 | `POST /api/rooms/:id/share-links` | room Bearer / session | human member + `manage_members` |
@@ -39,7 +40,9 @@ All `GET` routes under `/api/rooms/:id/*` (snapshot, events, export,
 search, presence, capabilities, onboarding-funnel, provider-heartbeats,
 reminders, agent-connections, share-links, invitations, work-*, reply-*,
 charter, diagnostics, return-brief, thread) require a room credential with
-member visibility. `GET /api/rooms/:id/export` returns the full event log as
+member visibility. `GET /api/rooms/:id/reports` additionally requires the room
+owner (403 `owner_required` for every other member): reports and the reporter
+identity are never served to non-owners (`docs/MODERATION.md`). `GET /api/rooms/:id/export` returns the full event log as
 one `Content-Length`-framed JSONL body (never a partial 200);
 `GET /api/rooms/:id/stream` is the SSE feed.
 

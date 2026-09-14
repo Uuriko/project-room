@@ -19,7 +19,7 @@ function fixture(t) {
   return { ...f, directory };
 }
 
-test("online capture preserves all 36 tables, identity boundaries and exact retries through recovery and restart", async t => {
+test("online capture preserves all 37 tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t);
   const { identityId } = f.store.identities.create("Recovery agent");
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
@@ -28,10 +28,12 @@ test("online capture preserves all 36 tables, identity boundaries and exact retr
   f.store.attention.mutate(f.keys.owner, "commons", { requestId: "recovery-attention", quietStart: 22 * 60, quietEnd: 7 * 60, delivery: "immediate", digestHour: null });
   f.store.channelUpdates.record(f.emailProfile.accountId, f.emailProfile.id, [{ update_id: 1, message: { text: "journaled webhook update" } }], { backlog: 500 });
   f.store.wakeQueue.pause(f.keys.owner, "commons", { requestId: "recovery-pause", reason: "inspecting" });
+  f.store.command(f.keys.agent, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: "recovery-reported", body: "synthetic message the owner reports" } });
+  f.store.moderation.report(f.keys.owner, "commons", { messageId: "recovery-reported", reason: "recovery fixture report" });
   f.cursor = f.store.room("commons").sequence;
   f.store.markCaughtUp(f.keys.owner, "commons", f.cursor);
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 36);
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 37);
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);
