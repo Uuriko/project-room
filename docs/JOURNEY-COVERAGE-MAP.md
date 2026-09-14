@@ -249,6 +249,16 @@ carry the claim, and the remaining tiers stay visibly open.
           "tests/usage.test.js"
         ],
         "browser": [],
+      "id": "room-review-policy",
+      "claim": "The room owner can make independent review and/or an owner decision mandatory; altered client fields cannot disable a mandatory gate, earlier work keeps its recorded requirements, and the proposer sees the requirement locked with the reason.",
+      "evidence": {
+        "unit": [
+          "tests/work-actions.test.js",
+          "tests/state-machine-invariants.test.js"
+        ],
+        "browser": [
+          "scripts/room-policy-browser-check.mjs"
+        ],
         "agent": [],
         "hosted": []
       }
@@ -260,6 +270,7 @@ carry the claim, and the remaining tiers stay visibly open.
 | Claim | Unit/integration | Browser | Actual agent | Hosted |
 | --- | --- | --- | --- | --- |
 | Accounts, invitations, guests | invitations, invitation-http, share-links, account-rooms | invitation-check, quiet-invites-check, invitation-recovery-check | agent onboarding exercise | staging worker README |
+| First-result onboarding (join, contribute, see the outcome) | help-offer-service, work-help-service, help-offer-context | first-result-journey-check | open | open |
 | Conversation, threads, reactions, search | conversation, work-search, work-discussion | browser-check, work-search-browser-check | open | open |
 | Shared work-status model | work-snapshot, work-continuity, agent-handoff | workflow-browser-check, assisted-work-browser-check | agent onboarding exercise | open |
 | Exact-version verification | version, work-actions | room-actions-browser-check | open | open |
@@ -271,6 +282,7 @@ carry the claim, and the remaining tiers stay visibly open.
 | Inbox connection routes | channel-import | open | open | open |
 | Live Telegram trigger and card | telegram-live, telegram-adapter | inbox-telegram-check | open | open |
 | Telegram send preview | channel-import, inbox-channel-client | open | open | open |
+| Room review policy | work-actions, state-machine-invariants | room-policy-browser-check | open | open |
 | Unified inbox UI (list, reply, connections, needs-you, share) | inbox-unified-routes, inbox-channel-client | inbox-unified-check | open | open |
 
 Follow-up scope: claims made in docs beyond the README list (per-feature
