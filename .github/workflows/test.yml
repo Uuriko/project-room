@@ -41,7 +41,12 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - name: Run conversation, composer recovery, Quiet Focus, accessibility, and session browser gates
-        run: npm run test:browser
+        # Same suites as test:browser, plus a junit file under test-results/ for the step below.
+        run: npm run test:browser:ci
+      - name: Report failing browser tests as annotations and job summary
+        # Readable through the GitHub API (check-run annotations, job summary) even when the raw log is not.
+        if: always()
+        run: node scripts/report-test-failures.mjs test-results/browser-junit.xml
       - uses: actions/upload-artifact@v4
         if: always()
         with:
