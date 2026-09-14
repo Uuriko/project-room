@@ -89,7 +89,7 @@ written.
 ```sh
 curl -X POST "$ROOM/api/rooms/commons/spend-allowance" -H "Authorization: Bearer $OWNER_KEY" \
   -H "Content-Type: application/json" -d '{"allowanceCents":5000,"periodDays":30}'
-curl "$ROOM/api/rooms/commons/spend-allowance?auth=$KEY"   # any member
+curl "$ROOM/api/rooms/commons/spend-allowance" -H "Authorization: Bearer $KEY"   # any member
 ```
 
 The set route is owner-only (`403 owner_required` for anyone else); the

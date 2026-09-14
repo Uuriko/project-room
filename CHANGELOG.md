@@ -12,6 +12,16 @@
 
 ## 2026-09-14
 
+- Docs: `docs/openapi.yaml` no longer drifts from the served routes. The
+  `queryAuth` scheme describes the `room_session` cookie (with `?auth=account`
+  / `X-Project-Room-Auth: account` as the cookie selector) instead of telling
+  agents to put a private key in the query string, which the server answers
+  422 `invalid_auth_mode`; `GET /events` documents `next`, `hasMore`, 409
+  `cursor_ahead` and 422 `invalid_cursor`; `GET /stream` documents
+  `Last-Event-ID`, `?after=`, `?auth=` and `?binding=`; `GET /return-brief`
+  `limit` allows 100; `GET /agent-pause` lists 404 `member_not_found` and 422
+  `invalid_member`; `POST /cursor` requires `sequence` and lists 422.
+  `docs/SESSION-BUDGETS.md` uses the bearer header in its curl example.
 - Wake queue receipt cap (`wakeQueueLimits.receipts`, 5000 per member and room)
   now bounds every command that retains a receipt: resume and requeue refuse
   with `409 wake_limit` at the cap exactly as enqueue does, a pause of an
