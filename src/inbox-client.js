@@ -43,6 +43,32 @@ function validReplyTarget(a, update = false) {
 const connectionStates = ["active", "disconnected", "reconnect_required"], channels = { email: "Email", telegram: "Telegram" };
 const validConnectionRef = c => c === null || (id(c?.id) && Object.hasOwn(channels, c.channel) && boundedText(c.provider, 64)
   && connectionStates.includes(c.state) && Object.keys(c).length === 4);
+const isoTime = v => v === null || (typeof v === "string" && v.length <= 40 && Number.isFinite(Date.parse(v)));
+const liveStates = ["not_configured", "invalid", "configured"], webhookStates = ["unset", "set", "matches", "differs"];
+// Live status carries binding names and states only; a value or hash in it is a contract violation.
+export const validLive = live => live === null || (live?.contractVersion === 1 && live.channel === "telegram" && liveStates.includes(live.state)
+  && [live.bindings, live.missing, live.invalid].every(list => Array.isArray(list) && list.length <= 8 && list.every(n => /^[A-Z][A-Z0-9_]{1,63}$/.test(n)))
+  && webhookStates.includes(live.webhook) && isoTime(live.webhookSetAt) && isoTime(live.lastUpdateReceivedAt) && revision(live.receivedUpdates)
+  && (live.lastSendResult === null || (isoTime(live.lastSendResult.at) && ["accepted", "rejected", "failed"].includes(live.lastSendResult.outcome)
+    && (live.lastSendResult.code === null || boundedText(live.lastSendResult.code, 64))))
+  && typeof live.importAvailable === "boolean");
+export const validConnectionRecord = (v, connectionId) => v.connection?.id === connectionId && validConnection(v.connection, v.viewer.accountId)
+  && v.mode === "fixture" && typeof v.webhook === "boolean" && isoTime(v.webhookSetAt ?? null) && typeof v.syncAvailable === "boolean" && validLive(v.live ?? null);
+const validSendResult = r => r === null || (isoTime(r?.at) && ["accepted", "rejected", "failed"].includes(r.outcome) && (r.code === null || boundedText(r.code, 64)));
+// Which transport, if any, this deployment replies through for a channel source: the live
+// provider or the inert fixture. Email has none until an outbound email slice exists.
+const channelSendProviders = ["telegram-bot"];
+export const validChannelSend = c => c === null || (channelSendProviders.includes(c?.provider) && ["fixture", "live"].includes(c.mode) && Object.keys(c).length === 2);
+// The owner's connection commands: add or update a profile, or disconnect. Nothing else travels here.
+export function validConnectionCommand(r) {
+  if (!r || typeof r !== "object" || !id(r.requestId) || !id(r.connectionId) || !revision(r.expectedRevision)) return false;
+  if (r.action === "connection.disconnect") return Object.keys(r).length === 4;
+  if (r.action !== "connection.configure" || Object.keys(r).length !== 5) return false;
+  const p = r.profile;
+  return p?.id === r.connectionId && p.revision === r.expectedRevision + 1 && (Object.hasOwn(p, "mailboxId")
+    ? p.provider === "microsoft-graph" && boundedText(p.mailboxId, 2048) && boundedText(p.identity?.name, 1024) && boundedText(p.identity?.address, 320) && Array.isArray(p.aliases)
+    : validConnection({ ...p, state: "active" }, p.accountId));
+}
 export function validConnection(c, accountId) {
   return c?.accountId === accountId && id(c.id) && revision(c.revision) && c.revision > 0 && Object.hasOwn(channels, c.channel)
     && boundedText(c.provider, 64) && boundedText(c.externalId, 2048) && connectionStates.includes(c.state)
@@ -55,12 +81,15 @@ function validSource(source, sourceId, accountId) {
   if (source.adapter === "synthetic") return ["sender", "recipient", "subject"].every(k => boundedText(source[k], 240))
     && Array.isArray(source.paragraphs) && source.paragraphs.length <= 20 && source.paragraphs.every(p => boundedText(p, 4000));
   const e = source.email, c = source.capabilities;
+  if (typeof source.needsYou !== "boolean") return false;
   if (source.adapter === "telegram") {
     const ch = source.channel;
+    // `send` may be true on an active bot connection; the deployment's transport is negotiated separately.
     return ch?.view === "channel-excerpt-v1" && ch.accountId === accountId && ch.channel === "telegram" && boundedText(ch.provider, 64)
       && connectionStates.includes(ch.connectionState) && ch.format === "text" && ["message", "edited_message", "channel_post"].includes(ch.kind)
       && typeof ch.edited === "boolean" && boundedText(ch.chat, 2048) && revision(ch.attachmentCount) && ch.attachmentCount <= 20
-      && ["sender", "recipient", "subject"].every(k => boundedText(source[k], 2048)) && c?.draft === true && c.send === false
+      && ["sender", "recipient", "subject"].every(k => boundedText(source[k], 2048)) && c?.draft === true && typeof c.send === "boolean"
+      && (!c.send || ch.connectionState === "active")
       && Array.isArray(source.paragraphs) && source.paragraphs.length === 1 && boundedText(source.paragraphs[0], 16384) && !source.paragraphs[0].includes("\r")
       && c.share === Boolean(source.paragraphs[0].trim());
   }
@@ -112,7 +141,7 @@ async function validSend(send, accountId, sourceId) {
     && await validEnvelope(send.envelope, accountId, sourceId);
 }
 async function validSends(v, sourceId) {
-  if (v.sourceId !== sourceId || typeof v.simulationAvailable !== "boolean" || !Array.isArray(v.sends)) return false;
+  if (v.sourceId !== sourceId || typeof v.simulationAvailable !== "boolean" || !Array.isArray(v.sends) || !validChannelSend(v.channelSend ?? null)) return false;
   const seen = new Set();
   for (const send of v.sends) {
     if (!send || seen.has(send.id) || !await validSend(send, v.viewer.accountId, sourceId)) return false;
@@ -152,12 +181,27 @@ export class InboxClient {
   list() {
     return this.request("?view=email-excerpt-v1", {}, v => Array.isArray(v.sources) && v.sources.every(s => id(s.id) && revision(s.revision) && s.revision > 0
       && typeof s.subject === "string" && ["synthetic", "email", "telegram"].includes(s.adapter) && validConnectionRef(s.connection ?? null)
-      && (s.adapter === "synthetic") === ((s.connection ?? null) === null)));
+      && (s.adapter === "synthetic") === ((s.connection ?? null) === null) && typeof s.needsYou === "boolean" && (!s.needsYou || s.adapter !== "synthetic")
+      && ["sender", "recipient"].every(k => typeof s[k] === "string")));
+  }
+  // Owner-managed connection records: add or update a bot/mailbox profile, or disconnect ("Remove").
+  applyConnection(request) {
+    const data = structuredClone(request);
+    if (!validConnectionCommand(data)) return Promise.reject(fail("invalid_channel_connection", "Choose a supported connection command."));
+    return this.request("/connections/commands", { method: "POST", data }, v => validConnectionRecord(v, data.connectionId) && typeof v.duplicate === "boolean"
+      && v.receipt?.requestId === data.requestId && v.receipt.action === data.action && v.receipt.connectionId === data.connectionId
+      && v.receipt.revision === data.expectedRevision + 1 && v.receipt.state === (data.action === "connection.configure" ? "active" : "disconnected"));
   }
   connections() { return this.request("/connections", {}, v => Array.isArray(v.connections) && v.connections.every(c => validConnection(c, v.viewer.accountId))); }
   connection(connectionId) {
-    return this.request("/connections/" + encodeURIComponent(connectionId), {}, v => v.connection?.id === connectionId
-      && validConnection(v.connection, v.viewer.accountId) && v.mode === "fixture" && typeof v.webhook === "boolean" && typeof v.syncAvailable === "boolean");
+    return this.request("/connections/" + encodeURIComponent(connectionId), {}, v => validConnectionRecord(v, connectionId));
+  }
+  // Owner-authenticated live import trigger (re-registers the webhook secret when
+  // the deployment's Telegram bindings are set, then drains verified updates).
+  reconnectConnection(connectionId, requestId) {
+    return this.request("/connections/" + encodeURIComponent(connectionId) + "/reconnect", { method: "POST", data: { requestId } },
+      v => validConnectionRecord(v, connectionId) && typeof v.registered === "boolean" && typeof v.duplicate === "boolean"
+        && (v.imported === null || revision(v.imported)) && [null, "webhook", "journal", "recording"].includes(v.source));
   }
   read(sourceId) {
     return this.request("/sources/" + encodeURIComponent(sourceId) + "?view=email-excerpt-v1", {}, v => validSource(v.source, sourceId, v.viewer.accountId)
@@ -172,8 +216,14 @@ export class InboxClient {
   }
   sendContext(sourceId) {
     return this.request("/sources/" + encodeURIComponent(sourceId) + "/send-context", {}, async v => v.sourceId === sourceId
-      && typeof v.simulationAvailable === "boolean" && v.preview?.authEpoch === v.viewer.authEpoch
+      && typeof v.simulationAvailable === "boolean" && validChannelSend(v.channelSend ?? null) && v.preview?.authEpoch === v.viewer.authEpoch
       && await validEnvelope(v.preview, v.viewer.accountId, sourceId));
+  }
+  // Dispatch or reconcile a queued channel reply through the deployment's transport (live or fixture).
+  channelSend(action, sourceId, sendId) {
+    return this.request("/channel-sends", { method: "POST", data: { action, sourceId, sendId } }, async v =>
+      validChannelSend(v.channelSend) && v.channelSend !== null && await validSends(v, sourceId) && v.send?.id === sendId
+      && await validSend(v.send, v.viewer.accountId, sourceId) && validSendResult(v.lastSendResult ?? null));
   }
   sends(sourceId) { return this.request("/sources/" + encodeURIComponent(sourceId) + "/sends", {}, v => validSends(v, sourceId)); }
   replyReview(sourceId) {

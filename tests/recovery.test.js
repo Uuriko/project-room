@@ -19,17 +19,19 @@ function fixture(t) {
   return { ...f, directory };
 }
 
-test("online capture preserves all 34 tables, identity boundaries and exact retries through recovery and restart", async t => {
+test("online capture preserves all 36 tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t);
   const { identityId } = f.store.identities.create("Recovery agent");
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
   f.store.invites.create(f.keys.owner, "commons", { permissions: ["steer"] });
   f.store.wakeQueue.enqueue(f.keys.owner, "commons", { requestId: "recovery-wake", queueKey: "recipe:recovery", intent: { recipe: "recovery" }, dueAt: f.now(), maxAttempts: 3 });
   f.store.attention.mutate(f.keys.owner, "commons", { requestId: "recovery-attention", quietStart: 22 * 60, quietEnd: 7 * 60, delivery: "immediate", digestHour: null });
+  f.store.channelUpdates.record(f.emailProfile.accountId, f.emailProfile.id, [{ update_id: 1, message: { text: "journaled webhook update" } }], { backlog: 500 });
+  f.store.wakeQueue.pause(f.keys.owner, "commons", { requestId: "recovery-pause", reason: "inspecting" });
   f.cursor = f.store.room("commons").sequence;
   f.store.markCaughtUp(f.keys.owner, "commons", f.cursor);
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 34);
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 36);
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);
@@ -153,7 +155,7 @@ test("read-only open accepts a v27 backup written before the additive wake queue
   // A half-present additive schema is a damaged file, not an older one.
   f.store.db.exec("DROP TABLE wake_queue_commands; DROP TABLE private_attention_commands");
   assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /Wake queue schema requires operator reconciliation/);
-  f.store.db.exec("DROP TABLE wake_queue; DROP TABLE private_attention_prefs");
+  f.store.db.exec("DROP TABLE wake_queue; DROP TABLE private_attention_prefs; DROP TABLE wake_queue_pause");
   assert.deepEqual(objects(), [], "fixture now matches a pre-W4-45 v27 file");
   const older = new RoomStore(f.filename, { readOnly: true, now: f.now });
   try {

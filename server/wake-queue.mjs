@@ -40,6 +40,19 @@ export const wakeQueueSchema = `
   CREATE TRIGGER IF NOT EXISTS wake_queue_commands_no_update BEFORE UPDATE ON wake_queue_commands BEGIN SELECT RAISE(ABORT,'wake queue receipts are immutable'); END;
   CREATE TRIGGER IF NOT EXISTS wake_queue_commands_no_delete BEFORE DELETE ON wake_queue_commands BEGIN SELECT RAISE(ABORT,'wake queue receipts are retained'); END;
 `;
+// W4-48 H7: member-scoped pause over the queue. Pausing stops NEW attempts
+// from starting (due() skips the member's pending wakes); an already-leased
+// attempt is already running and is left to finish - the pause surface keeps
+// the two visibly distinct (the done-when). Purely additive at v27, same
+// pattern as the queue itself.
+export const wakeQueuePauseSchema = `
+  CREATE TABLE IF NOT EXISTS wake_queue_pause (
+    room_id TEXT NOT NULL REFERENCES rooms(id), member_id TEXT NOT NULL,
+    paused_at INTEGER NOT NULL, reason TEXT,
+    PRIMARY KEY(room_id,member_id)
+  );
+`;
+
 const view = row => ({ queueKey: row.queue_key, intent: JSON.parse(row.intent), state: row.state, dueAt: row.due_at,
   attempts: row.attempts, maxAttempts: row.max_attempts, leaseOwner: row.lease_owner, leaseExpiresAt: row.lease_expires_at,
   lastError: row.last_error, createdAt: row.created_at, updatedAt: row.updated_at });
@@ -60,10 +73,34 @@ export class WakeQueue {
     }
     return true;
   }
+  verifyPauseSchema({ allowAbsent = false } = {}) {
+    const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
+    const expected = wakeQueuePauseSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)
+      .map(sql => ({ sql, actual: this.db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(/^CREATE (?:TABLE|INDEX|TRIGGER) (?:IF NOT EXISTS )?([a-z_]+)/.exec(sql.trim())[1])?.sql }));
+    if (allowAbsent && expected.every(({ actual }) => actual === undefined)) return false;
+    for (const { sql, actual } of expected) {
+      if (normalize(actual) !== normalize(sql)) throw new Error("Wake queue pause schema requires operator reconciliation");
+    }
+    return true;
+  }
+  pauseStatus(roomId, memberId) {
+    const row = this.db.prepare("SELECT * FROM wake_queue_pause WHERE room_id=? AND member_id=?").get(roomId, memberId);
+    return row ? { pausedAt: row.paused_at, reason: row.reason } : null;
+  }
+  // The one stop surface: pause state, pending wakes (won't start while
+  // paused), already-running attempts (left to finish), and readable recent
+  // outcomes (done/dead with attempts and the last error).
   current(auth, roomId) {
+    const wakes = this.db.prepare("SELECT * FROM wake_queue WHERE room_id=? AND member_id=? ORDER BY queue_key").all(roomId, auth.member.id).map(view);
     return {
       roomId, viewerId: auth.member.id, evaluatedAt: this.store.now(),
-      wakes: this.db.prepare("SELECT * FROM wake_queue WHERE room_id=? AND member_id=? ORDER BY queue_key").all(roomId, auth.member.id).map(view)
+      pause: this.pauseStatus(roomId, auth.member.id),
+      wakes,
+      pending: wakes.filter(w => w.state === "pending"),
+      running: wakes.filter(w => w.state === "leased"),
+      recentOutcomes: wakes.filter(w => w.state === "done" || w.state === "dead")
+        .sort((a, b) => b.updatedAt - a.updatedAt || (a.queueKey < b.queueKey ? -1 : 1)).slice(0, 10)
+        .map(w => ({ queueKey: w.queueKey, state: w.state, attempts: w.attempts, lastError: w.lastError, at: w.updatedAt }))
     };
   }
   list(token, roomId, binding = null) {
@@ -119,6 +156,41 @@ export class WakeQueue {
       return { ...this.current(auth, roomId), receipt, duplicate: false };
     });
   }
+  // pause/resume are the member's own stop control - draft class: they only
+  // govern when this member's own queued intents may start. Idempotent via the
+  // same commands receipt table as enqueue/requeue.
+  pause(token, roomId, request, binding = null) {
+    return this.store.transaction(() => {
+      const auth = this.store.authenticate(token, roomId, binding);
+      const fields = ["requestId", "reason"];
+      if (!request || Array.isArray(request) || Object.keys(request).length !== fields.length || !fields.every(field => Object.hasOwn(request, field))
+        || !validId(request.requestId) || (request.reason !== null && (typeof request.reason !== "string" || request.reason.length > 200))) fail(422, "invalid_wake_pause", "Supply a request ID and an optional short reason.");
+      const fingerprint = this.receipt(request.requestId, fields, request);
+      const prior = this.priorReceipt(roomId, auth.member.id, request, fingerprint);
+      if (prior) return { ...this.current(auth, roomId), receipt: prior, duplicate: true };
+      const now = this.store.now();
+      const existing = this.pauseStatus(roomId, auth.member.id);
+      if (!existing) this.db.prepare("INSERT INTO wake_queue_pause VALUES(?,?,?,?)").run(roomId, auth.member.id, now, request.reason);
+      const receipt = { requestId: request.requestId, state: "paused", pausedAt: existing ? existing.pausedAt : now, alreadyPaused: Boolean(existing) };
+      this.db.prepare("INSERT INTO wake_queue_commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, request.requestId, fingerprint, JSON.stringify(receipt));
+      return { ...this.current(auth, roomId), receipt, duplicate: false };
+    });
+  }
+  resume(token, roomId, request, binding = null) {
+    return this.store.transaction(() => {
+      const auth = this.store.authenticate(token, roomId, binding);
+      const fields = ["requestId"];
+      if (!request || Array.isArray(request) || Object.keys(request).length !== fields.length || !validId(request.requestId)) fail(422, "invalid_wake_resume", "Supply a request ID.");
+      const fingerprint = this.receipt(request.requestId, fields, request);
+      const prior = this.priorReceipt(roomId, auth.member.id, request, fingerprint);
+      if (prior) return { ...this.current(auth, roomId), receipt: prior, duplicate: true };
+      const existing = this.pauseStatus(roomId, auth.member.id);
+      this.db.prepare("DELETE FROM wake_queue_pause WHERE room_id=? AND member_id=?").run(roomId, auth.member.id);
+      const receipt = { requestId: request.requestId, state: "active", wasPaused: Boolean(existing) };
+      this.db.prepare("INSERT INTO wake_queue_commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, request.requestId, fingerprint, JSON.stringify(receipt));
+      return { ...this.current(auth, roomId), receipt, duplicate: false };
+    });
+  }
   requeue(token, roomId, request, binding = null) {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId, binding);
@@ -140,12 +212,13 @@ export class WakeQueue {
     });
   }
   due(now, limit = 32) {
-    return this.db.prepare("SELECT * FROM wake_queue WHERE state='pending' AND due_at<=? ORDER BY due_at,queue_key LIMIT ?").all(now, limit).map(view);
+    return this.db.prepare("SELECT * FROM wake_queue WHERE state='pending' AND due_at<=? AND NOT EXISTS (SELECT 1 FROM wake_queue_pause p WHERE p.room_id=wake_queue.room_id AND p.member_id=wake_queue.member_id) ORDER BY due_at,queue_key LIMIT ?").all(now, limit).map(view);
   }
   // lease moves one due wake to leased, consuming one attempt. Returns null
   // when the wake is no longer leasable (already leased, completed, dead).
   lease(roomId, memberId, queueKey, owner, now = this.store.now()) {
-    const changed = this.db.prepare("UPDATE wake_queue SET state='leased',attempts=attempts+1,lease_owner=?,lease_expires_at=?,updated_at=? WHERE room_id=? AND member_id=? AND queue_key=? AND state='pending' AND due_at<=?")
+    // Paused members start no new attempts, even by direct lease.
+    const changed = this.db.prepare("UPDATE wake_queue SET state='leased',attempts=attempts+1,lease_owner=?,lease_expires_at=?,updated_at=? WHERE room_id=? AND member_id=? AND queue_key=? AND state='pending' AND due_at<=? AND NOT EXISTS (SELECT 1 FROM wake_queue_pause p WHERE p.room_id=wake_queue.room_id AND p.member_id=wake_queue.member_id)")
       .run(owner, now + wakeQueueLimits.leaseMs, now, roomId, memberId, queueKey, now).changes;
     return changed ? this.db.prepare("SELECT * FROM wake_queue WHERE room_id=? AND member_id=? AND queue_key=?").get(roomId, memberId, queueKey) : null;
   }
