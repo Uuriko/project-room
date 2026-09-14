@@ -4,7 +4,7 @@ import { ReturnBrief } from "./return-brief.js";
 import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
 import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, memberHandle, memberDoneChip, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
 import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer } from "./workflow.js";
-import { consumeJoinFragment, installShareLinks, canRetryInvitation, invitationUnavailableMessage } from "./share-links.js";
+import { consumeJoinFragment, installShareLinks, canRetryInvitation, invitationUnavailableMessage, invitationDialogTitle } from "./share-links.js";
 import { installAgentConnections } from "./agent-connections.js";
 import { installRoomInstructions } from "./room-instructions.js";
 import { installReminders } from "./reminders.js";
@@ -825,6 +825,7 @@ function renderInvitation() {
   const switchingAccount = ["wrong-account", "changed-account"].includes(phase);
   const loading = ["previewing", "authenticating", "accepting", "opening"].includes(phase);
   $("#invitation-dialog").setAttribute("aria-busy", loading ? "true" : "false");
+  $("#invitation-title").textContent = invitationDialogTitle(preview, phase);
   $("#invitation-retry").hidden = phase !== "preview-failed";
   $("#invitation-details").hidden = !preview;
   if (preview) {

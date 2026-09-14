@@ -33,6 +33,17 @@ export function invitationAskWhom(preview) {
   return "the room owner";
 }
 
+export function invitationDialogTitle(preview, phase) {
+  if (phase === "preview-failed") return "Could not check invitation";
+  if (phase === "unknown") return "Check this invitation";
+  if (preview?.status === "expired") return "Invitation expired";
+  if (preview?.status === "revoked") return "Invitation revoked";
+  if (preview?.status === "accepted") return "Invitation already accepted";
+  if (preview?.status === "pending") return "Review this invitation";
+  if (preview) return "Invitation unavailable";
+  return "Review this invitation";
+}
+
 export function invitationUnavailableMessage(preview) {
   const whom = invitationAskWhom(preview);
   if (preview?.status === "expired") {

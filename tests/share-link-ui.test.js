@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { formatShareInvitation, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, reuseVisibleRoom, invitationUnavailableMessage, formatInvitationExpiry, invitationAskWhom } from "../src/share-links.js";
+import { formatShareInvitation, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, reuseVisibleRoom, invitationUnavailableMessage, formatInvitationExpiry, invitationAskWhom, invitationDialogTitle } from "../src/share-links.js";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
@@ -65,6 +65,20 @@ test("expired invitation copy names the room owner and includes the expiry time"
   const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   assert.match(app, /invitationUnavailableMessage\(preview\)/);
   assert.doesNotMatch(app, /Ask a current Room administrator/);
+});
+
+test("invitation dialog title matches preview status and live regions are atomic", () => {
+  assert.equal(invitationDialogTitle({ status: "expired" }, "terminal"), "Invitation expired");
+  assert.equal(invitationDialogTitle({ status: "revoked" }, "terminal"), "Invitation revoked");
+  assert.equal(invitationDialogTitle({ status: "accepted" }, "ready"), "Invitation already accepted");
+  assert.equal(invitationDialogTitle({ status: "pending" }, "ready"), "Review this invitation");
+  assert.equal(invitationDialogTitle({ status: "expired" }, "preview-failed"), "Could not check invitation");
+  assert.equal(invitationDialogTitle(null, "checking"), "Review this invitation");
+  const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(app, /invitationDialogTitle\(preview, phase\)/);
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  assert.match(html, /id="invitation-status"[^>]*aria-atomic="true"/);
+  assert.match(html, /id="invitation-error"[^>]*aria-atomic="true"/);
 });
 
 test("invitation status uses the shared form-status visibility contract", () => {

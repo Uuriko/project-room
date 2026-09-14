@@ -458,8 +458,8 @@
           <p id="invitation-account-warning" class="form-hint" hidden>Switching accounts clears this room’s drafts and forms. Save a copy first.</p>
           <button class="button secondary" type="submit">Sign in to review acceptance</button>
         </form>
-        <p id="invitation-status" class="invitation-feedback" role="status" aria-live="polite"></p>
-        <p id="invitation-error" class="invitation-feedback error" role="alert"></p>
+        <p id="invitation-status" class="invitation-feedback" role="status" aria-live="polite" aria-atomic="true"></p>
+        <p id="invitation-error" class="invitation-feedback error" role="alert" aria-atomic="true"></p>
         <div class="form-actions invitation-actions">
           <button id="invitation-dismiss" class="button ghost" type="button">Not now</button>
           <button id="invitation-retry" class="button primary" type="button" hidden>Retry</button>
