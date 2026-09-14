@@ -1129,7 +1129,7 @@ paths:
   /api/work-item-sessions:
     get:
       summary: Work-item session contract document
-      description: Open (also HEAD): the static contract for work-item sessions (status, schemaBump, writer, fields). Contains no room data.
+      description: "Open (also HEAD): the static contract for work-item sessions (status, schemaBump, writer, fields). Contains no room data."
       security: []
       responses:
         '200': { description: Static contract document }
