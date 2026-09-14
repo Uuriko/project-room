@@ -245,7 +245,11 @@ paths:
   /api/rooms/{roomId}/search:
     get:
       summary: Full-text search over messages and work items
-      description: Case-insensitive substring match. Deleted messages are excluded.
+      description: |
+        Case-insensitive substring match. Deleted messages are excluded.
+        `kind=pinned` searches only messages the room has pinned (issue #6 B2,
+        the `pins` route), in the same order as the other kinds, and skips
+        messages whose author the caller has muted.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: q
@@ -254,7 +258,7 @@ paths:
           schema: { type: string, minLength: 1, maxLength: 80 }
         - name: kind
           in: query
-          schema: { type: string, enum: [all, messages, work], default: all }
+          schema: { type: string, enum: [all, messages, work, pinned], default: all }
       responses:
         '200':
           description: Search results
@@ -476,7 +480,11 @@ paths:
         attempts from starting; an attempt already running finishes. A member
         acts on its own row; the signed-in room owner (manage_members) acts on
         any member's. A removed member's row is inert (409 member_inactive).
-        Idempotent per requestId.
+        Idempotent per requestId: every recorded command retains one receipt.
+        At the member's wake receipt cap a pause that changes state is still
+        recorded (stop always works), while a pause of an already-paused
+        member and every resume answer 409 wake_limit; exact retries still
+        return their receipt.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -492,10 +500,10 @@ paths:
                 requestId: { type: string }
                 reason: { type: [string, "null"], maxLength: 200, description: Required (may be null) when action is pause }
       responses:
-        '201': { description: Pause state changed; body as GET plus receipt }
+        '201': { description: Command recorded; body as GET plus receipt (receipt.alreadyPaused / receipt.wasPaused say whether the state changed) }
         '200': { description: Duplicate requestId; historical receipt }
         '403': { description: owner_required }
-        '409': { description: member_inactive or idempotency_conflict }
+        '409': { description: member_inactive, wake_limit (this member's wake receipts are at capacity) or idempotency_conflict }
         '422': { description: invalid_pause_command }
   /api/rooms/{roomId}/provider-heartbeats:
     get:
@@ -612,7 +620,10 @@ paths:
         sessions, and the bounded pilot caps with remaining headroom. Every
         member can read it - each figure derives from data members already see.
         Unreported spend is "unknown", never zero. Counts only; no member
-        details, credentials or hashes.
+        details, credentials or hashes. The room spend allowance ledger rides
+        along as `spendAllowance` (allowance, spent, reserved, held, headroom
+        over the allowance's own period, 30 days without one) so a member
+        reads it in one place; GET /spend-allowance returns the same figures.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: days
@@ -653,6 +664,8 @@ paths:
                       reportedCents: { oneOf: [{ type: integer }, { type: string, enum: [unknown] }] }
                       sessionsReported: { type: integer }
                       sessionsUnreported: { type: integer }
+                  spendAllowance:
+                    $ref: '#/components/schemas/SpendAllowanceLedger'
                   caps:
                     type: object
                     description: members, events, workItems and projectionBytes, each { used, limit, remaining }.
@@ -724,8 +737,9 @@ paths:
       summary: Owner access review (read-only)
       description: |
         Periodic access-review report for one room: active members and their grants,
-        guests with expiry and status, invitation links with remaining joins, agent
-        identities and connections with state, and last activity per member.
+        guests with expiry and status, invitation links with remaining joins, pending
+        one-time agent invite codes (unredeemed and unrevoked, by hash-free inviteId),
+        agent identities and connections with state, and last activity per member.
         Owner-only (the room owner's account session or room key; other members get
         403 owner_required). Shares the per-credential read allowance of every room
         read. The report never carries a token, secret or hash; removed members are
@@ -753,6 +767,7 @@ paths:
                       members: { type: integer }
                       guests: { type: integer }
                       shareLinks: { type: integer }
+                      pendingInvites: { type: integer }
                       agentIdentities: { type: integer }
                       agentConnections: { type: integer }
                   members:
@@ -802,6 +817,19 @@ paths:
                         joins: { type: integer }
                         remainingJoins: { type: integer }
                         status: { type: string, enum: [active, full, expired, cancelled, authority_changed] }
+                  pendingInvites:
+                    type: array
+                    description: One-time agent invite codes neither redeemed nor revoked; never the code or its stored hash
+                    items:
+                      type: object
+                      properties:
+                        inviteId: { type: string, description: Short hash-free handle that DELETE /agent-invites takes }
+                        displayName: { type: string, nullable: true }
+                        permissions: { type: array, items: { type: string } }
+                        inviterMemberId: { type: string }
+                        createdAt: { type: string, format: date-time }
+                        expiresAt: { type: string, format: date-time }
+                        status: { type: string, enum: [active, expired] }
                   agentIdentities:
                     type: array
                     items:
@@ -2662,10 +2690,16 @@ components:
           type: array
           items: { type: object }
     SpendAllowanceReport:
+      allOf:
+        - type: object
+          properties:
+            roomId: { type: string }
+            evaluatedThrough: { type: integer }
+        - $ref: '#/components/schemas/SpendAllowanceLedger'
+    SpendAllowanceLedger:
+      description: The allowance and its ledger; also nested as spendAllowance in the usage summary.
       type: object
       properties:
-        roomId: { type: string }
-        evaluatedThrough: { type: integer }
         allowance:
           type: [object, 'null']
           properties:

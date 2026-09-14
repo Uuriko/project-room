@@ -5,7 +5,7 @@ import {
   INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES,
   MEMBERSHIP_AUTHORITY_POLICY_VERSION, validId, memberCan, ROOM_POLICY_FIELDS
 } from "../src/events.js";
-import { PIN_COMMAND_SHAPES } from "../src/events.js";
+import { PIN_COMMAND_SHAPES, isPinned } from "../src/events.js";
 import { buildReturnBrief, resolveHistoryWindow, RETURN_BRIEF_DEFAULT_LIMIT } from "./return-brief.mjs";
 import { enforceSpendAllowance } from "./spend-allowance.mjs";
 import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal } from "./invitation-journal.mjs";
@@ -16,7 +16,7 @@ import { ShareLinks, shareLinkSchema } from "./share-links.mjs";
 import { conflictingClaim } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
 import { Notifications } from "./notifications.mjs";
-import { Moderation, moderationSchema } from "./moderation.mjs";
+import { Moderation, moderationSchema, mutedEvent } from "./moderation.mjs";
 import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
@@ -1596,17 +1596,21 @@ export class RoomStore {
   }
   // Round-2 #113: full-text search over messages and work items.
   // Substring match, case-insensitive; deleted messages are excluded.
+  // Backlog follow-up 8: kind=pinned narrows to messages in state.pins (issue
+  // #6 B2), in message order like the other kinds, and skips authors the
+  // caller muted (mutedEvent) so a pinned message stays hidden for its muter.
   search(token, roomId, query, kind = "all", expectedSessionBinding = null) {
     if (typeof query !== "string" || !query.trim() || query.length > 80) fail(422, "invalid_search", "Search is 1 to 80 characters");
-    if (!["all", "messages", "work"].includes(kind)) fail(422, "invalid_search", "kind is all, messages, or work");
+    if (!["all", "messages", "work", "pinned"].includes(kind)) fail(422, "invalid_search", "kind is all, messages, work, or pinned");
     return this.readTransaction(() => {
-      this.authenticate(token, roomId, expectedSessionBinding);
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const room = this.room(roomId);
       const needle = query.trim().toLowerCase();
       const result = { roomId, query: query.trim(), messages: [], workItems: [] };
-      if (kind === "all" || kind === "messages") {
+      if (kind === "all" || kind === "messages" || kind === "pinned") {
         for (const m of room.state.messages ?? []) {
           if (m.body == null) continue; // tombstone
+          if (kind === "pinned" && (!isPinned(room.state, m.id) || mutedEvent(room.state, auth.member?.id, { actorId: m.authorId }))) continue;
           if (m.body.toLowerCase().includes(needle)) {
             result.messages.push({ id: m.id, authorId: m.authorId, body: m.body, createdAt: m.createdAt, workItemId: m.workItemId });
           }

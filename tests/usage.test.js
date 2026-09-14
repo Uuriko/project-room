@@ -157,6 +157,32 @@ test("sessions and spend follow the period; unreported spend is unknown, not zer
   assert.throws(() => parseUsageDays("07"), /days must be/);
 });
 
+test("the spend allowance ledger rides along so allowance, spent, reserved and headroom read in one place", async t => {
+  const { ownerKey, store, cmd, usage, get } = await serve(t);
+  cmd(ownerKey, T.MEMBER_ADDED, { memberId: "agent", displayName: "Agent", kind: "agent", permissions: ["accept_work", "complete_work"] });
+  const agentKey = store.issueAccessKey("commons", "agent");
+  const none = (await usage()).body.spendAllowance;
+  assert.deepEqual([none.allowance, none.headroomCents, none.period.days, none.spentCents], [null, null, 30, 0], "no allowance: null, never zero headroom");
+  cmd(ownerKey, T.ROOM_SPEND_ALLOWANCE_SET, { allowanceCents: 5000, periodDays: 7 });
+  const workItemId = "w-capped";
+  cmd(ownerKey, T.WORK_PROPOSED, { workItemId, title: "Capped run", definitionOfDone: "done", accountableMemberId: "agent", mode: "read" });
+  cmd(agentKey, T.WORK_ACCEPTED, { workItemId, expectedRevision: 0 });
+  const revision = () => store.room("commons").state.workItems[workItemId].revision;
+  store.mutateWorkSession(agentKey, "commons", { requestId: randomUUID(), workItemId, expectedRevision: revision(), action: "set_status", status: "processing", budget: { maxSpendCents: 2000 } });
+  store.mutateWorkSession(agentKey, "commons", { requestId: randomUUID(), workItemId, expectedRevision: revision(), action: "set_status", status: "active", spendCents: 500 });
+  const { body } = await usage("?days=1");
+  const ledger = body.spendAllowance;
+  assert.equal(ledger.allowance.allowanceCents, 5000);
+  assert.deepEqual([ledger.period.days, ledger.spentCents, ledger.reservedCents, ledger.heldCents, ledger.committedCents, ledger.headroomCents, ledger.overCents, ledger.sessions.live],
+    [7, 500, 1500, 0, 2000, 3000, 0, 1]);
+  assert.equal(body.period.days, 1, "the usage period follows ?days=; the ledger keeps the allowance's own period");
+  assert.deepEqual(body.spend, { reportedCents: 500, sessionsReported: 1, sessionsUnreported: 0 }, "the existing spend figures are untouched");
+  // The same figures as the standalone route, so the two reads never disagree.
+  const { roomId, evaluatedThrough, ...standalone } = await (await get("/api/rooms/commons/spend-allowance", ownerKey)).json();
+  assert.equal(roomId, "commons"); assert.equal(typeof evaluatedThrough, "number");
+  assert.deepEqual(ledger, standalone);
+});
+
 test("foldSessionEvents attributes spend per attempt and keeps unknown separate", () => {
   const S = "session.started", C = "session.status_changed", X = "session.stopped";
   const folded = foldSessionEvents([
@@ -194,7 +220,7 @@ test("non-members are refused and the response carries no secrets or hashes", as
   const keys = [];
   (function walk(value) { if (value && typeof value === "object") for (const [k, v] of Object.entries(value)) { keys.push(k); walk(v); } })(body);
   assert.ok(keys.every(k => !/hash|secret|token|key|displayName|memberId|accountId/i.test(k)), `unexpected field among ${keys.join(",")}`);
-  assert.deepEqual(Object.keys(body).sort(), ["caps", "members", "period", "roomId", "sessions", "spend"]);
+  assert.deepEqual(Object.keys(body).sort(), ["caps", "members", "period", "roomId", "sessions", "spend", "spendAllowance"]);
 
   // A linked identity (an agent principal) may read the summary like any member.
   const asIdentity = await get("/api/rooms/commons/usage", identity.secret);

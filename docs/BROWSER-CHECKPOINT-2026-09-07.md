@@ -32,13 +32,13 @@ The UI's “independent pass” label refers to distinct permitted producer/revi
 
 Screenshots are local generated evidence under `test-results/acceptance-2026-09-07/` (ignored by Git). No real credentials are included in the saved screenshots. Two earlier inline captures showed the pre-fix error and management layout; they were not saved as standalone files and are not counted below.
 
-- [Full failed-review page](../test-results/acceptance-2026-09-07/01-failed-review.png)
-- [Blocked work / next actor detail](../test-results/acceptance-2026-09-07/02-failed-review-detail.png)
-- [Corrected result awaiting owner decision](../test-results/acceptance-2026-09-07/03-corrected-awaiting-decision.png)
-- [Fixed visible invitation error](../test-results/acceptance-2026-09-07/04-invitation-error-fixed.png)
-- [Narrow-screen join](../test-results/acceptance-2026-09-07/05-narrow-join.png)
+> Historical note (2026-09-14): the screenshot files were never committed to the repository, so the image links that originally appeared here no longer resolve. The checkpoint text is preserved as written.
 
-![Visible invitation error after the fix](../test-results/acceptance-2026-09-07/04-invitation-error-fixed.png)
+- Full failed-review page (`01-failed-review.png`, not in repo)
+- Blocked work / next actor detail (`02-failed-review-detail.png`, not in repo)
+- Corrected result awaiting owner decision (`03-corrected-awaiting-decision.png`, not in repo)
+- Fixed visible invitation error (`04-invitation-error-fixed.png`, not in repo)
+- Narrow-screen join (`05-narrow-join.png`, not in repo)
 
 ## Resume exactly here
 

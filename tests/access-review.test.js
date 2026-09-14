@@ -1,7 +1,8 @@
 // BUILD-01 D4: periodic access review. Owner-only route and read-only CLI
 // print the same report; the report names members, grants, guests with
-// expiry, links with remaining joins, agent identities and connections with
-// state, and last activity — and never a token, secret or hash.
+// expiry, links with remaining joins, pending one-time agent invite codes,
+// agent identities and connections with state, and last activity — and never
+// a token, secret or hash.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -65,6 +66,10 @@ async function fixture(t) {
   // Guest agent (2 h credential).
   const guestAgentToken = GUEST_AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url");
   const guestAgent = store.guestAgentLinks.mint(ownerKey, "commons", { requestId: randomUUID(), linkToken: guestAgentToken, expectedOwnerRevision: 0, displayName: "Scout" }, null);
+  // One-time agent invite codes: one pending (1 h), one revoked that must be absent.
+  const invite = store.invites.create(ownerKey, "commons", { profile: "chat", expiresInMinutes: 60, displayName: "Scribe" }, null);
+  const revokedInvite = store.invites.create(ownerKey, "commons", { permissions: ["steer"] }, null);
+  store.invites.revoke(ownerKey, "commons", revokedInvite.inviteId, null);
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); rmSync(directory, { recursive: true, force: true }); });
@@ -73,7 +78,7 @@ async function fixture(t) {
     .then(async res => ({ status: res.status, headers: res.headers, json: await res.json().catch(() => null) }));
   const bearer = token => ({ Authorization: `Bearer ${token}` });
   return { store, filename, origin, ownerKey, accountKey, moderatorKey, linkToken, link, guestSlot, guestJoin, agentToken, keyHash, connection,
-    identity, guestAgentToken, guestAgent, get, bearer, advance: ms => { now += ms; } };
+    identity, guestAgentToken, guestAgent, invite, revokedInvite, get, bearer, advance: ms => { now += ms; } };
 }
 
 // Signed-in owner session (account cookie + binding), mirroring a browser login.
@@ -121,13 +126,24 @@ test("owner account session reads the full review; removed members are absent", 
   assert.equal(report.shareLinks[0].remainingJoins, 1);
   assert.equal(report.shareLinks[0].status, "active");
   assert.equal(report.shareLinks[0].issuerMemberId, "owner");
+  // Pending agent invite codes carry the hash-free handle, scope, inviter and
+  // expiry; a revoked code is absent and the raw code never appears.
+  assert.equal(report.pendingInvites.length, 1);
+  const [pending] = report.pendingInvites;
+  assert.equal(pending.inviteId, f.invite.inviteId);
+  assert.match(pending.inviteId, /^[a-f0-9]{8}$/, "the handle is the short inviteId, not a full hash");
+  assert.deepEqual(pending, { inviteId: f.invite.inviteId, displayName: "Scribe", permissions: f.invite.permissions, inviterMemberId: "owner",
+    createdAt: new Date(f.invite.createdAt).toISOString(), expiresAt: new Date(f.invite.expiresAt).toISOString(), status: "active" });
+  assert.equal(Date.parse(pending.expiresAt) - Date.parse(pending.createdAt), 3600000);
+  assert.ok(!JSON.stringify(report).includes(f.revokedInvite.inviteId), "a revoked invite code is not pending");
+  assert.ok(!JSON.stringify(report).includes(f.invite.code), "the raw invite code never appears");
   assert.deepEqual(report.agentIdentities.map(i => [i.identityId, i.memberId, i.memberActive]), [[f.identity.identityId, f.identity.identityId, true]]);
   assert.equal(report.agentConnections.length, 1);
   assert.equal(report.agentConnections[0].memberId, "agent-helper");
   assert.equal(report.agentConnections[0].status, "key_issued");
   assert.equal(report.agentConnections[0].sponsorMemberId, "owner");
   assert.deepEqual(report.agentConnections[0].permissions, ["accept_work", "complete_work"]);
-  assert.deepEqual(report.counts, { members: 4, guests: 2, shareLinks: 1, agentIdentities: 1, agentConnections: 1 });
+  assert.deepEqual(report.counts, { members: 4, guests: 2, shareLinks: 1, pendingInvites: 1, agentIdentities: 1, agentConnections: 1 });
   assert.equal(report.lastActivityAt, [...report.members, ...report.guests].map(m => m.lastActivityAt).filter(Boolean).sort().at(-1));
   // The owner's room key (CLI path) reads the same report.
   const viaKey = await f.get("/api/rooms/commons/access-review", f.bearer(f.ownerKey));
@@ -139,12 +155,14 @@ test("the review contains no token, secret or hash fields or values", async t =>
   const f = await fixture(t);
   const res = await f.get("/api/rooms/commons/access-review", f.bearer(f.ownerKey));
   assert.equal(res.status, 200);
+  assert.equal(res.json.pendingInvites.length, 1, "the pending-invites section is present and covered by the sweep");
   const keys = deepKeys(res.json).map(key => key.toLowerCase());
   for (const banned of BANNED_KEYS) assert.ok(!keys.some(key => key.includes(banned)), `no ${banned}-like key; saw ${keys.filter(key => key.includes(banned))}`);
   const serialized = JSON.stringify(res.json) + renderAccessReview(res.json);
   const hash = value => createHash("sha256").update(value).digest("hex");
   for (const secret of [f.ownerKey, f.accountKey, f.moderatorKey, f.linkToken, hash(f.linkToken), f.agentToken, f.keyHash, f.identity.secret, hash(f.identity.secret),
-    f.guestAgentToken, hash(f.guestAgentToken), f.guestSlot.token, f.guestJoin.session.sessionBinding, f.guestJoin.session.csrf]) {
+    f.guestAgentToken, hash(f.guestAgentToken), f.guestSlot.token, f.guestJoin.session.sessionBinding, f.guestJoin.session.csrf,
+    f.invite.code, hash(f.invite.code), f.revokedInvite.code, hash(f.revokedInvite.code)]) {
     assert.ok(!serialized.includes(secret), "review never carries a credential, hash or binding");
   }
   assert.ok(!/[a-f0-9]{64}/.test(serialized), "no 64-hex digest anywhere in the review");
@@ -178,12 +196,14 @@ test("expired guests, guest agents and links are shown as expired", async t => {
   for (const guest of report.guests) assert.ok(Date.parse(guest.expiresAt) <= Date.parse(report.generatedAt));
   assert.equal(report.shareLinks[0].status, "expired");
   assert.equal(report.shareLinks[0].remainingJoins, 1, "remaining joins are still reported for the record");
+  assert.deepEqual(report.pendingInvites.map(i => [i.inviteId, i.status]), [[f.invite.inviteId, "expired"]], "an unredeemed code that lapsed stays on record as expired");
   assert.equal(report.agentConnections[0].status, "key_issued", "a 24 h connection is still live");
   assert.equal(report.members.find(m => m.memberId === "owner").liveAccessKeys, 1, "a seven-day owner key is still live");
   const text = renderAccessReview(report);
   assert.match(text, /Alice {2}human {2}expired/);
   assert.match(text, /Scout {2}agent {2}expired/);
   assert.match(text, /Share links \(1\):\n {2}\S+ {2}expired {2}joins 1\/2 \(1 remaining\)/);
+  assert.match(text, new RegExp(`Pending agent invites \\(1\\):\\n {2}${f.invite.inviteId} {2}Scribe {2}expired {2}grants: `));
 });
 
 test("the script prints the route's report from the store file and from a running service", async t => {
@@ -209,8 +229,9 @@ test("the script prints the route's report from the store file and from a runnin
   assert.equal(sameClock(text.stdout), sameClock(renderAccessReview(JSON.parse(fromStore.stdout))));
   assert.match(text.stdout, /^Room commons — /);
   assert.match(text.stdout, /Guests \(2\):/);
+  assert.match(text.stdout, new RegExp(`Pending agent invites \\(1\\):\\n {2}${f.invite.inviteId} {2}Scribe {2}active {2}grants: .*issued by owner`));
   for (const output of [fromStore, allRooms, fromService, text]) {
-    for (const secret of [f.ownerKey, f.linkToken, f.agentToken, f.keyHash, f.identity.secret, f.guestAgentToken]) assert.ok(!output.stdout.includes(secret));
+    for (const secret of [f.ownerKey, f.linkToken, f.agentToken, f.keyHash, f.identity.secret, f.guestAgentToken, f.invite.code, f.revokedInvite.code]) assert.ok(!output.stdout.includes(secret));
   }
   // Credentials come from the named variable only, and are never echoed.
   const missing = await run(["--origin", f.origin, "--room", "commons"]);

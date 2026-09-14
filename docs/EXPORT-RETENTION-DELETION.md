@@ -27,7 +27,8 @@ behaviors marked (pinned).
   history, so this format shows the room as members saw it, while the JSONL
   format above remains the complete history. It shares the JSONL route's
   authentication, `Content-Length` framing, memory bound and closing
-  "End of export" marker (pinned).
+  "End of export" marker (pinned). In the room UI, **Export as HTML** in the
+  History panel downloads it for the signed-in member (`room-<id>-export.html`).
 - **Room import (owner only).** `POST /api/rooms/<id>/import` replaces the
   room's history with an export file (8 MB cap; larger restores go through
   database backup).
@@ -48,7 +49,8 @@ behaviors marked (pinned).
   the file holds, including that history.
 - Editing keeps prior versions in the room's edit history until the message is
   deleted.
-- There is no self-serve room deletion. Removing a room entirely is an
+- There is no self-serve room deletion. The owner can archive a room (below),
+  which makes it read-only but removes nothing. Removing a room entirely is an
   operator action on the service database and its backups, and exports already
   taken are not recalled.
 
@@ -67,26 +69,54 @@ behaviors marked (pinned).
 
 ## Leaving a room / closing an account
 
-What the operator and the room owner can do today, as the code stands. There
-is no self-serve "leave room" or "close my account" control in the UI or the
-API; both are done for the person, and both are visibility and credential
-changes, not erasure.
+What a member, the room owner and the operator can do today, as the code
+stands. A member can leave a room themselves and the owner can archive a room;
+closing an account is still done for the person by the operator. All of these
+are visibility and credential changes, not erasure.
 
 - **Take a copy first.** Any active member can download either export format
   before their access ends; after it ends the export routes answer 403 like
   every other room route (pinned).
-- **Leaving a room (owner action).** The room owner, or a member holding
-  `manage_members`, ends a membership by posting a `member.access_changed`
-  command with `active: false` and the member's current `expectedMemberRevision`
-  to `POST /api/rooms/<id>/commands`. In the same transaction the service
-  revokes every room credential issued to that member, drops any agent
-  connections it held and retires its private reminders
+- **Leaving a room (member action).** A human member other than the owner
+  leaves with **Leave room** under About (`#room-leave-button`, `src/app.js`),
+  which posts a `member.access_changed` command on themself to
+  `POST /api/rooms/<id>/commands` with `active: false`, their permissions
+  unchanged and their current `expectedMemberRevision`. A self-targeted
+  command of exactly that shape is a leave request (`isLeaveRequest`,
+  `src/events.js`) and needs no `manage_members`; any other change to a
+  membership still does. Returning afterwards needs a new invitation, or
+  reactivation by someone holding `manage_members` (the same command with
+  `active: true`); a member cannot reactivate themselves. The owner cannot
+  leave: deactivating the owner is refused, and the button is hidden for them.
+- **Ending a membership (owner action).** Unchanged: the room owner, or a
+  member holding `manage_members`, posts the same `member.access_changed`
+  command with `active: false` for another member.
+- **What ending access does, either way.** In the same transaction the
+  service revokes every room credential issued to that member, drops any
+  agent connections it held and retires its private reminders
   (`server/store.mjs`, `command`). The member record stays in the room's
   projection marked inactive; the member's messages, work items and evidence
   stay attributed to their display name in the room and in both export
   formats (the readable export marks the member "access ended"). No key can
-  be issued to an inactive member. The owner cannot deactivate themselves.
-  Reactivation is the same command with `active: true`.
+  be issued to an inactive member, and the export routes answer 403 to them
+  like every other room route.
+- **Archiving a room (owner action).** The owner records `room.archived`
+  (**Archive room** under About, or the command with an optional `reason` of
+  at most 280 characters). From then on the room is read-only: reading, the
+  event stream and both export formats continue for every active member, and
+  every command, import, invitation join and agent join into that room
+  answers 409 `room_archived`. Nothing is removed and no credential is
+  revoked. There is no un-archive event and no self-serve deletion; removing
+  an archived room is the operator action described above.
+- **Leaving an archived room.** Because the archived check runs before the
+  leave check (`refuseArchivedWrite` in `server/store.mjs`, `command`), a
+  member cannot leave an archived room: the command answers 409
+  `room_archived` and the UI says so ("This room is archived; leaving is not
+  recorded"); the Leave room button is hidden once the room is archived.
+  Their membership and credentials stay as they were, and the export routes
+  keep answering them. Take a copy before the owner archives if you want to
+  end your access afterwards; otherwise ending it is an operator action on
+  the service database.
 - **Closing an account (operator action).** There is no HTTP route and no
   script for this yet. The operator runs `store.changeAccountAccess(accountId,
   { expectedRevision, active: false, reason })` from a Node process opened on
@@ -98,7 +128,8 @@ changes, not erasure.
   Every later request authenticating through that account fails closed. The
   same call with `active: true` restores access at the next revision.
 - **What closing does not do.** Room memberships stay in each room's
-  projection (inactive only if the owner also ended them); messages, work and
+  projection (inactive only if the person left or the owner ended them);
+  messages, work and
   evidence stay in the event log and in exports; private reminders are marked
   resolved rather than deleted, and no other row is removed; backups and
   exports already taken are not recalled. Removing a person's data from the service is a

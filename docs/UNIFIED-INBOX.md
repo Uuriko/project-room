@@ -423,16 +423,17 @@ once that file is next edited).
 6. Send a message to the bot's chat. Telegram POSTs to the webhook route,
    which verifies the secret in constant time and holds the update; the card
    shows "Last update received". Press **Reconnect** (or call the trigger) to
-   import it. Until the durable webhook journal lands, held updates live in
-   process memory and the Worker must be started with a `ChannelWebhookInbox`.
+   import it. Accepted updates are journaled durably in `pending_channel_updates`
+   (`server/channel-journal.mjs`); the server must be started with a
+   `ChannelWebhookInbox`, which `cloudflare/room.mjs` does.
 
-### Email setup (fixture today, routed once #144 lands)
+### Email setup (fixture today; #144 merged the parser, routing still pending)
 
 1. In the Inbox, **Add connection**, choose "Email mailbox (fixture)", enter
    the address and a name. The card reads "Inbound: fixture mailbox · not yet
    routed" and "Sending: not available". Recorded fixtures import through
    `scripts/*-contract-fixture.mjs`; nothing polls a mailbox.
-2. When #144 lands: enable Email Routing on the domain (or a subdomain such
+2. To route real mail (#144 is merged: `server/mime-message.mjs`, `server/email-routing-inbound.mjs`; still pending: the Worker `email()` mount in `cloudflare/room.mjs` and the rules below, see [EMAIL-ROUTING.md](EMAIL-ROUTING.md)): enable Email Routing on the domain (or a subdomain such
    as `mail.<domain>`), accept the MX and SPF records Cloudflare adds, add a
    routing rule per address (or the domain catch-all) with the action "Send
    to a Worker" pointing at the room Worker, and agree the address scheme
