@@ -89,7 +89,7 @@ ids stay off that path. Excerpt sharing into a room works like email.
 | --- | --- |
 | `GET /api/inbox/connections` | Generic records for the account's connections |
 | `GET /api/inbox/connections/{id}` | One record plus `mode`, `webhook`, `syncAvailable` |
-| `POST /api/inbox/connections/{id}/sync` | Import one recorded Telegram page `{ requestId, updates }`; `updates: null` drains verified webhook updates. Loopback-only **and** fixture-mode only |
+| `POST /api/inbox/connections/{id}/sync` | Import one recorded Telegram page `{ requestId, updates }` (at most 100 updates); `updates: null` drains verified webhook updates. Each sync consumes at most 50 updates and reports `receipt.complete: false` when more remain, so a larger backlog drains over repeated syncs with fresh request IDs. Loopback-only **and** fixture-mode only |
 | `POST /api/inbox/webhooks/{connectionId}` | Provider callback. `X-Telegram-Bot-Api-Secret-Token` is compared in constant time against the SHA-256 stored by `connection.webhook`; accepted updates wait in memory until the owner syncs. Inert unless the server is started with a `ChannelWebhookInbox` |
 
 `GET /api/inbox?view=…` lists channel sources with a `connection`

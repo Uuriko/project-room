@@ -221,6 +221,27 @@ test("HTTP connection routes, recorded sync and webhook delivery are account, se
   assert.equal(f.list()[0].connection.state, "disconnected");
   assert.deepEqual(f.store.connections.verify(), { connections: 1, folders: 1, sources: 4 });
 });
+test("a webhook backlog larger than one sync page drains in order across retries instead of blocking", async t => {
+  const f = fixture(t); f.configure(f.telegram.connection);
+  const webhooks = new ChannelWebhookInbox(f.store), secret = "fixture-webhook-secret-0123456789";
+  f.apply({ action: "connection.webhook", requestId: "hook", connectionId: f.telegram.connection.id, expectedRevision: 1, secretHash: ChannelWebhookInbox.hash(secret) });
+  // 120 verified updates: 60 messages interleaved with 60 callback queries (skipped, never imported).
+  const update = i => i % 2 ? { update_id: 1000 + i, callback_query: { id: "cb-" + i, data: "ignored" } }
+    : { update_id: 1000 + i, message: { message_id: i, date: 1788948000 + i, chat: f.telegram.chat, from: { id: 5000000001, is_bot: false, first_name: "Avery" }, text: "Update " + i } };
+  const all = Array.from({ length: 120 }, (_, i) => update(i));
+  for (let start = 0; start < all.length; start += 100) webhooks.receive({ connectionId: f.telegram.connection.id, secret, body: { updates: all.slice(start, start + 100) } });
+  assert.equal(webhooks.pending(f.auth.account.id, f.telegram.connection.id).length, 120);
+  const sync = requestId => syncTelegramConnection({ store: f.store, token: f.auth.token, binding: f.auth.sessionBinding, connectionId: f.telegram.connection.id, requestId, updates: null, webhooks });
+  const pages = [];
+  for (let round = 1; webhooks.pending(f.auth.account.id, f.telegram.connection.id).length; round++) {
+    assert.ok(round <= 3, "drains within three pages");
+    const result = await sync("drain-" + round);
+    assert.equal(result.source, "webhook"); pages.push([result.receipt.imports.length, result.request.complete, result.request.cursor]);
+  }
+  assert.deepEqual(pages, [[25, false, "1050"], [25, false, "1100"], [10, true, "1120"]]);
+  assert.equal(f.list().filter(r => r.adapter === "telegram").length, 60);
+  assert.deepEqual(f.store.connections.verify(), { connections: 1, folders: 1, sources: 60 });
+});
 test("the sync helper refuses non-Telegram connections and rejects malformed recordings without side effects", async t => {
   const f = fixture(t); f.configure(f.email.connection); f.configure(f.telegram.connection);
   const before = auditRecovery(f.store);

@@ -113,16 +113,20 @@ export async function syncTelegramConnection({ store, token, binding, connection
   let source = "recording";
   if (updates === null) {
     if (!webhooks) fail(409, "channel_webhook_unavailable", "Webhook delivery is not configured here.");
-    updates = webhooks.pending(captured.connection.profile.accountId, connectionId); source = "webhook";
+    // A backlog above one request's worth stays importable: take the oldest slice.
+    updates = webhooks.pending(captured.connection.profile.accountId, connectionId).slice(0, channelSyncLimits.webhookUpdates); source = "webhook";
   }
   if (!Array.isArray(updates) || updates.length > channelSyncLimits.webhookUpdates) fail(422, "invalid_channel_update", "Supply at most 100 recorded Telegram updates.");
   let reader;
-  try { reader = new telegram.RecordedTelegramBot({ connection: captured.connection.profile, updates, limit: channelSyncLimits.webhookUpdates }); }
+  // The reader pages at the importer's message cap, so one sync never prepares
+  // more sources than page.apply accepts; a partial page reports complete: false.
+  try { reader = new telegram.RecordedTelegramBot({ connection: captured.connection.profile, updates, limit: channelSyncLimits.pageMessages }); }
   catch (error) { if (error?.name !== "EmailContractError") throw error; fail(422, "invalid_channel_update", "Recorded updates could not be confirmed."); }
   let request;
   try { request = await prepareTelegramFixturePage({ store, token, binding, connectionId, reader, requestId }); }
   catch (error) { if (error?.name !== "EmailContractError") throw error; fail(422, "invalid_channel_update", "Recorded updates could not be confirmed."); }
   const result = store.email.apply(token, request, binding);
-  if (source === "webhook" && updates.length) webhooks.acknowledge(captured.connection.profile.accountId, connectionId, updates.at(-1).update_id);
+  // Acknowledge exactly what this page consumed (cursor is the next update id), never updates still waiting.
+  if (source === "webhook" && updates.length) webhooks.acknowledge(captured.connection.profile.accountId, connectionId, Number(request.cursor) - 1);
   return { ...result, source, request };
 }
