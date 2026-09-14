@@ -305,7 +305,7 @@
               <label>Owner <select id="assignee-select" required></select></label>
               <label id="verifier-field">Reviewer <select id="verifier-select" required aria-describedby="reviewer-unavailable"></select></label>
               <div id="reviewer-unavailable" class="reviewer-unavailable" hidden>
-                <p>No independent reviewer available. Change the owner or turn off review.</p>
+                <p id="reviewer-unavailable-text">No independent reviewer available. Change the owner or turn off review.</p>
                 <button id="review-settings-button" class="button secondary" type="button">Review settings</button>
               </div>
               <details id="work-options"><summary class="section-summary"><span class="section-label"><strong>Review & permissions</strong></span><span id="work-options-summary" class="summary-note"></span></summary>
@@ -315,6 +315,7 @@
                 <label class="check-option"><input id="require-verification" type="checkbox" checked><span>Independent review</span></label>
                 <label class="check-option"><input id="require-decision" type="checkbox" checked><span>Owner approval</span></label>
                 <p id="work-checks-help" class="form-hint">Evidence is always required.</p>
+                <p id="work-policy-note" class="form-hint" hidden></p>
               </fieldset>
               </details>
               <p class="form-hint">Creates a record, not permission to act elsewhere.</p>
