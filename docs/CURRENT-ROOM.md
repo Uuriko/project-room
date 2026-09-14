@@ -13,13 +13,19 @@ Do not continue from a ChatGPT worktree or the stale project-root
 | GitHub | https://github.com/Uuriko/project-room |
 | Durable Object | not reset |
 
-Hosted Worker `project-room-staging` was last published 10 September 2026 as
-version `a5f91f99-833c-4ae8-a3a3-3f1920206f52` from GitHub `main` `fce335d`
-(Infer good defaults and hide extra chrome). Packaged browser assets include
-`src/work-item-session.js` in this tree; live Worker assets update on the next
-publish. Durable Object was not reset. Door HTML source is
-`deploy/room-entry.mjs`; live `/room` updates with the next demigod-html
-publish.
+This is the single deployment record. What the repo can prove: the Worker
+source is `cloudflare/` (`wrangler.jsonc`, `room.mjs`), the door HTML source
+is `deploy/room-entry.mjs`, and the CI `cloudflare` job runs the Worker
+runtime checks plus `wrangler deploy --dry-run` on every PR. Nothing in the repo records a real
+publish; the live version and its source commit are owner-to-confirm from the
+Cloudflare dashboard. Last owner-reported publish: 10 September 2026, version
+`a5f91f99-833c-4ae8-a3a3-3f1920206f52` from `main` `fce335d` (Infer good
+defaults and hide extra chrome); Durable Object not reset. (The older
+`cloudflare/README.md` status paragraph — app `fb90a70`, Worker `901be347…`,
+7 September — is the previous acceptance record, superseded here.) Every
+merge since `fce335d` (including the schema 28 store) is in this tree but not
+on the Worker until the next publish; live `/room` updates with the next
+demigod-html publish.
 
 ## GitHub About (John, in the UI)
 
@@ -43,8 +49,8 @@ invitation). Footer **Project Room** on the Demigod home page is the same door.
 | --- | --- | --- |
 | Room chat, work, catch-up | `src/`, `server/` | Live on the isolated Worker |
 | Private Inbox / account home | `src/inbox-*.js`, `server/inbox*.mjs` | In source and on the Worker; open `/?account=1` |
-| Fixture email (Graph-shaped) | `server/email-*.mjs`, `server/graph-*.mjs` | Local/fixture only. No live mailbox or send |
-| Unified inbox / fixture Telegram (Bot API-shaped) | `server/channel-*.mjs`, `server/channel-adapters/`, [UNIFIED-INBOX.md](UNIFIED-INBOX.md) | Local/fixture only. Recorded updates; webhook updates journal durably in `pending_channel_updates` (additive at schema 27); no bot token, webhook registration or send |
+| Fixture email (Graph-shaped) | `server/email-*.mjs`, `server/graph-*.mjs`, `server/email-routing-inbound.mjs` | Local/fixture only. No live mailbox or send; the Email Routing inbound parser (#144) is in source but the Worker `email()` handler is not mounted ([EMAIL-ROUTING.md](EMAIL-ROUTING.md)) |
+| Unified inbox / fixture Telegram (Bot API-shaped) | `server/channel-*.mjs`, `server/channel-adapters/`, [UNIFIED-INBOX.md](UNIFIED-INBOX.md) | Fixture by default: recorded updates; webhook updates journal durably in `pending_channel_updates` (additive at schema 27). Telegram inbound (webhook route, `scripts/telegram-set-webhook.mjs`) and outbound (`sendMessage` via `/api/inbox/channel-sends`) go live once the operator sets `TELEGRAM_BOT_TOKEN` / `TELEGRAM_WEBHOOK_SECRET` ([UNIFIED-INBOX.md §Live Telegram](UNIFIED-INBOX.md#live-telegram-zero-spend)). Email stays fixture-only |
 | Agent connect + MCP | `docs/AGENT-CONNECTION.md`, `scripts/agent-inbox.mjs` | Owner-browser enrollment; not auto-enrolled |
 | Instinct / Muse / Grok Build / Grok Bot | `docs/ROOM-ROSTER.md` | Roster + Add-agent presets in this source |
 | Usability plan | `docs/USABILITY-PLAN.md` | Chat-first + growth slice; mailbox/auto-enroll gated |
