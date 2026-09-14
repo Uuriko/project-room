@@ -27,7 +27,8 @@ behaviors marked (pinned).
   history, so this format shows the room as members saw it, while the JSONL
   format above remains the complete history. It shares the JSONL route's
   authentication, `Content-Length` framing, memory bound and closing
-  "End of export" marker (pinned).
+  "End of export" marker (pinned). In the room UI, **Export as HTML** in the
+  History panel downloads it for the signed-in member (`room-<id>-export.html`).
 - **Room import (owner only).** `POST /api/rooms/<id>/import` replaces the
   room's history with an export file (8 MB cap; larger restores go through
   database backup).
