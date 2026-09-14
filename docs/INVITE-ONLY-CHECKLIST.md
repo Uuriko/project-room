@@ -22,6 +22,17 @@ Every `/api/*` route is either open by design (below) or requires a credential
 | `POST /api/session` | the access key itself | 401 on a wrong key; the key IS the credential |
 | everything else (`/api/rooms/*`, `/api/inbox`, `/api/account-*`) | room credential or account session | 401/422 without one |
 
+`GET /api/rooms/:id/export` is the one room-data route that hands back a whole
+room at once, in two formats behind the same member credential: JSONL (the
+complete history, deleted content included) and `?format=html` (a readable
+page that shows deleted messages as deleted). The HTML is escaped
+value-by-value, contains no script, links only credential-free `https:`
+evidence URLs, and is sent with a `default-src 'none'` Content-Security-Policy
+that pins its single style block by hash and sandboxes the document; both
+formats are buffered and `Content-Length`-framed so a failed export is a JSON
+error, never a shorter file. Semantics and the leave/close procedure:
+`docs/EXPORT-RETENTION-DELETION.md`.
+
 ## 2. Capability URLs — the boundaries behind the unlinked URL
 
 Each mechanism was checked for: unguessable token, hash-only storage,

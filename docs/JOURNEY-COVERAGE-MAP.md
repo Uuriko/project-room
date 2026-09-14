@@ -199,6 +199,18 @@ carry the claim, and the remaining tiers stay visibly open.
       }
     },
     {
+      "id": "room-export-portability",
+      "claim": "Any member can take the room with them: the complete JSONL history or an escaped, script-free HTML page rendered from the same event walk, both Content-Length-framed, both closed to members whose access has ended.",
+      "evidence": {
+        "unit": [
+          "tests/room-export.test.js"
+        ],
+        "browser": [],
+        "agent": [],
+        "hosted": []
+      }
+    },
+    {
       "id": "telegram-send-preview",
       "claim": "A saved Telegram reply previews its bot and target chat and dispatches only over a matching fixture transport through the shared send journal.",
       "evidence": {
@@ -227,6 +239,7 @@ carry the claim, and the remaining tiers stay visibly open.
 | Unified inbox connections | channel-connection, channel-import, inbox-channel-client | open | open | open |
 | Telegram fixture import | telegram-adapter, channel-import | open | open | open |
 | Inbox connection routes | channel-import | open | open | open |
+| Room export portability (JSONL and HTML) | room-export | open | open | open |
 | Telegram send preview | channel-import, inbox-channel-client | open | open | open |
 
 Follow-up scope: claims made in docs beyond the README list (per-feature

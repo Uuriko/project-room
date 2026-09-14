@@ -9,6 +9,7 @@ import { syncTelegramConnection } from "./channel-import.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
+import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { discoveryDoc, isHealthAliasPath } from "../deploy/agent-discovery.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
 import { guestAgentLinkContract } from "./guest-agent-links.mjs";
@@ -672,6 +673,23 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // takes the normal JSON error path instead of truncating a 200 body
         // that would read as a valid, merely shorter, export. Content-Length
         // lets clients treat a dropped connection as an incomplete download.
+        //
+        // BUILD-01 F2: ?format=html renders the same event walk as one
+        // self-contained document for people (server/room-export-html.mjs).
+        // Same auth, same materialise-then-answer rule, same Content-Length
+        // framing; the CSP header pins the document's single style block and
+        // forbids everything else, so a browser that opens it inline runs
+        // nothing.
+        const format = url.searchParams.get("format") ?? "jsonl";
+        if (!["jsonl", "html"].includes(format) || url.searchParams.getAll("format").length > 1) reject(422, "invalid_format", "format is jsonl (default) or html");
+        if (format === "html") {
+          const rows = [...store.exportEvents(selected.token, roomId, fence)];
+          const bytes = Buffer.from(renderRoomExportHtml(rows, { roomId }), "utf8");
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length,
+            "Content-Security-Policy": EXPORT_HTML_CSP,
+            "Content-Disposition": `attachment; filename="room-${roomId}-export.html"` });
+          return res.end(bytes);
+        }
         const lines = [];
         for (const line of store.exportEvents(selected.token, roomId, fence)) lines.push(JSON.stringify(line) + "\n");
         const bytes = Buffer.from(lines.join(""), "utf8");

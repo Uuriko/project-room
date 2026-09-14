@@ -130,22 +130,35 @@ paths:
                               status: { type: string }
   /api/rooms/{roomId}/export:
     get:
-      summary: Export the event log as JSONL
+      summary: Export the event log as JSONL, or as a readable HTML page
       description: >-
-        One {sequence, event} per line, ordered. Same visibility as the events
-        route (members only). The body is materialised in full before the
-        response starts and is framed by Content-Length: a failure while
-        reading history is a JSON error response, never a truncated 200, and a
-        client that receives fewer bytes than Content-Length has an incomplete
-        download, not a shorter export.
+        Default (format=jsonl): one {sequence, event} per line, ordered. Same
+        visibility as the events route (members only). The body is materialised
+        in full before the response starts and is framed by Content-Length: a
+        failure while reading history is a JSON error response, never a
+        truncated 200, and a client that receives fewer bytes than
+        Content-Length has an incomplete download, not a shorter export.
+        format=html renders the same event walk as one self-contained,
+        script-free HTML document for people (members, messages, work items,
+        evidence links; deleted messages shown as deleted without their text),
+        with every value HTML-escaped and a Content-Security-Policy that allows
+        only the document's own fixed style block. Same auth and framing rule.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - name: format
+          in: query
+          description: jsonl (default) or html; anything else is 422 invalid_format
+          schema: { type: string, enum: [jsonl, html], default: jsonl }
       responses:
         '200':
-          description: NDJSON export (Content-Length set; the last byte is a newline)
+          description: NDJSON export (Content-Length set; the last byte is a newline) or, with format=html, the readable page (Content-Length set; ends with an "End of export" marker)
           content:
             application/x-ndjson:
               schema: { type: string }
+            text/html:
+              schema: { type: string }
+        '422':
+          description: Unknown or repeated format
   /api/rooms/{roomId}/import:
     post:
       summary: Import a JSONL event-log export
