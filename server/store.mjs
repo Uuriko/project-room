@@ -187,6 +187,7 @@ const nodeStorage = {
   version: db => db.prepare("PRAGMA user_version").get().user_version,
   setVersion: (db, version) => db.exec(`PRAGMA user_version=${version}`),
   hasSchema: db => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' LIMIT 1").get()),
+  changes: db => db.prepare("SELECT total_changes() AS n").get().n,
   configure(db, readOnly) {
     db.exec(readOnly ? "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=3000;"
       : "PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=3000;");
@@ -701,10 +702,13 @@ export class RoomStore {
   transaction(fn) {
     // Nested startup helpers share the outer migration transaction and its rollback.
     const outermost = !this.db.isTransaction;
+    // Only a commit that changed rows proves storage is writable again; an
+    // idempotent replay commits nothing. Measured only while degraded.
+    const before = outermost && this.storageFailures > 0 ? this.storagePlatform.changes?.(this.db) : null;
     let result;
     try { result = this.storagePlatform.transaction(this.db, fn, false); }
     catch (error) { throw this.storageFailure(error, outermost); }
-    if (outermost) this.storageRecovered();
+    if (before !== null && (before === undefined || this.storagePlatform.changes(this.db) !== before)) this.storageRecovered();
     return result;
   }
   readTransaction(fn) {
@@ -712,8 +716,10 @@ export class RoomStore {
     try { return this.storagePlatform.transaction(this.db, fn, true); }
     catch (error) { throw this.storageFailure(error, outermost); }
   }
-  // Only the outermost transaction counts, so one nested failure is one refusal.
-  storageFailure(error, outermost) {
+  // Maps one storage failure to the typed refusal and counts it. Only the
+  // outermost transaction counts, so one nested failure is one refusal;
+  // server/http.mjs calls this for errors raised outside any transaction.
+  storageFailure(error, outermost = true) {
     if (!isStorageUnavailable(error)) return error;
     if (outermost && ++this.storageFailures === this.storageFailureThreshold) {
       console.warn(`room storage unavailable after ${this.storageFailures} consecutive failures; readiness now 503`);

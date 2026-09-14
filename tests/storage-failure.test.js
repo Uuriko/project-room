@@ -128,6 +128,8 @@ test("an injected SQLITE_FULL rolls the command back, returns 503 storage_unavai
 test("readiness turns 503 after consecutive storage failures and recovers on the next committed write", async t => {
   const { store, owner, request, fill, free, warnings } = await fixture(t, { storageFailureThreshold: 2 });
   assert.equal((await request("/api/ready", { token: null })).status, 200);
+  const replayed = post("committed before the disk filled");
+  assert.equal((await request("/api/rooms/commons/commands", { method: "POST", data: replayed })).status, 201);
   fill();
   const refusals = [];
   for (let attempt = 0; attempt < 24 && refusals.length < 2; attempt++) {
@@ -145,12 +147,35 @@ test("readiness turns 503 after consecutive storage failures and recovers on the
   assert.equal((await request("/api/health", { token: null })).status, 200, "liveness stays up while storage is unavailable");
   assert.equal((await request("/api/rooms/commons")).status, 200, "reads keep working");
   assert.equal(warnings.filter(line => /readiness now 503/.test(line)).length, 1, "one flip line, not one per failure");
+  const duplicate = await request("/api/rooms/commons/commands", { method: "POST", data: replayed });
+  assert.equal(duplicate.status, 200); assert.equal((await duplicate.json()).duplicate, true);
+  assert.deepEqual(store.storageStatus(), { failures: 2, threshold: 2, unavailable: true }, "an idempotent replay commits nothing and proves nothing");
+  assert.equal((await request("/api/ready", { token: null })).status, 503, "a no-op commit does not clear readiness");
   free();
   const recovered = await request("/api/rooms/commons/commands", { method: "POST", data: post("recovered") });
   assert.equal(recovered.status, 201);
   assert.deepEqual(store.storageStatus(), { failures: 0, threshold: 2, unavailable: false });
   assert.equal((await request("/api/ready", { token: null })).status, 200);
   assert.equal(warnings.filter(line => /readiness now 200/.test(line)).length, 1);
+});
+
+test("a storage error raised outside a store transaction takes the typed 503 and counts toward readiness", async t => {
+  const { store, request } = await fixture(t, { storageFailureThreshold: 2 });
+  const driverError = () => Object.assign(new Error("disk I/O error"), { code: "ERR_SQLITE_ERROR", errcode: 10, errstr: "disk I/O error" });
+  t.mock.method(store, "eventsAfter", () => { throw driverError(); });
+  for (const expected of [1, 2]) {
+    const response = await request("/api/rooms/commons/events?after=0");
+    assert.equal(response.status, 503);
+    const text = await response.text();
+    assert.equal(JSON.parse(text).error.code, "storage_unavailable");
+    assert.doesNotMatch(text, /I\/O|SQLITE|ERR_/i);
+    assert.equal(store.storageStatus().failures, expected);
+  }
+  assert.equal((await request("/api/ready", { token: null })).status, 503);
+  const mapped = store.storageFailure(driverError());
+  assert.ok(mapped instanceof StorageUnavailableError); assert.equal(mapped.cause.errcode, 10);
+  assert.equal(store.storageFailure(new Error("boom")).message, "boom", "other errors pass through unchanged");
+  assert.equal(store.storageStatus().failures, 3);
 });
 
 test("nested and read-only transactions count one refusal each and the store stays usable", async t => {

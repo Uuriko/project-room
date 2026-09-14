@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { ServiceError, StorageUnavailableError, isStorageUnavailable } from "./store.mjs";
+import { ServiceError } from "./store.mjs";
 import { clientAddress } from "./deployment.mjs";
 import { validId } from "../src/events.js";
 import { SyntheticInboxTransport } from "./inbox-transport.mjs";
@@ -833,8 +833,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       reject(405, "method_not_allowed", "Method not allowed");
     } catch (caught) {
-      // Storage failures outside a store transaction still map to the typed 503.
-      const error = !(caught instanceof ServiceError) && isStorageUnavailable(caught) ? new StorageUnavailableError(caught) : caught;
+      // Storage failures raised outside a store transaction take the same typed 503 and count toward readiness.
+      const error = caught instanceof ServiceError ? caught : store.storageFailure?.(caught) ?? caught;
       if (res.headersSent) { res.end(); return; }
       if (error.status === 429) res.setHeader("Retry-After", "60");
       if (error.headers && typeof error.headers === "object") {
