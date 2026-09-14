@@ -580,7 +580,10 @@ paths:
         sessions, and the bounded pilot caps with remaining headroom. Every
         member can read it - each figure derives from data members already see.
         Unreported spend is "unknown", never zero. Counts only; no member
-        details, credentials or hashes.
+        details, credentials or hashes. The room spend allowance ledger rides
+        along as `spendAllowance` (allowance, spent, reserved, held, headroom
+        over the allowance's own period, 30 days without one) so a member
+        reads it in one place; GET /spend-allowance returns the same figures.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: days
@@ -621,6 +624,8 @@ paths:
                       reportedCents: { oneOf: [{ type: integer }, { type: string, enum: [unknown] }] }
                       sessionsReported: { type: integer }
                       sessionsUnreported: { type: integer }
+                  spendAllowance:
+                    $ref: '#/components/schemas/SpendAllowanceLedger'
                   caps:
                     type: object
                     description: members, events, workItems and projectionBytes, each { used, limit, remaining }.
@@ -2621,10 +2626,16 @@ components:
           type: array
           items: { type: object }
     SpendAllowanceReport:
+      allOf:
+        - type: object
+          properties:
+            roomId: { type: string }
+            evaluatedThrough: { type: integer }
+        - $ref: '#/components/schemas/SpendAllowanceLedger'
+    SpendAllowanceLedger:
+      description: The allowance and its ledger; also nested as spendAllowance in the usage summary.
       type: object
       properties:
-        roomId: { type: string }
-        evaluatedThrough: { type: integer }
         allowance:
           type: [object, 'null']
           properties:
