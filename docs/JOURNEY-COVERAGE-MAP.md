@@ -199,6 +199,21 @@ carry the claim, and the remaining tiers stay visibly open.
       }
     },
     {
+      "id": "notification-feed",
+      "claim": "A per-member notification feed derived from the event tail honours notification preferences, deduplicates edits, expires with the read cursor and never grants a wake.",
+      "evidence": {
+        "unit": [
+          "tests/notification-feed.test.js",
+          "tests/notification-preferences.test.js"
+        ],
+        "browser": [
+          "scripts/notification-feed-browser-check.mjs"
+        ],
+        "agent": [],
+        "hosted": []
+      }
+    },
+    {
       "id": "telegram-send-preview",
       "claim": "A saved Telegram reply previews its bot and target chat and dispatches only over a matching fixture transport through the shared send journal.",
       "evidence": {
@@ -228,6 +243,7 @@ carry the claim, and the remaining tiers stay visibly open.
 | Telegram fixture import | telegram-adapter, channel-import | open | open | open |
 | Inbox connection routes | channel-import | open | open | open |
 | Telegram send preview | channel-import, inbox-channel-client | open | open | open |
+| Notification feed | notification-feed, notification-preferences | notification-feed-browser-check | open | open |
 
 Follow-up scope: claims made in docs beyond the README list (per-feature
 acceptance docs) can be folded into the same block; the checker format already

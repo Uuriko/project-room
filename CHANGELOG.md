@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-09-14
+
+- Notification feed (issue #6 B4, read model): `GET /api/rooms/:id/notifications`
+  derives mentions, replies, assignments and work updates for the caller from
+  the event tail after their cursor, filtered by `notificationPreferences`;
+  edits never duplicate, `POST /cursor` expires items, ended access returns
+  401/403, and no read grants a wake (`server/notifications.mjs`,
+  `docs/NOTIFICATIONS.md`). The catch-up panel shows an unread badge and a
+  compact list whose "Mark read" moves only the cursor. Push delivery is a
+  follow-up needing VAPID keys.
+
 ## 2026-09-12
 
 - Agent autonomy: `client/room-agent.mjs` + `scripts/agent-inbox.mjs` CLI now wrap

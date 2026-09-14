@@ -349,7 +349,7 @@ function setNotificationPreferences(state, incoming) {
   member.notificationPreferences = { ...(member.notificationPreferences ?? defaultNotificationPreferences()), ...prefs };
 }
 
-function defaultNotificationPreferences() {
+export function defaultNotificationPreferences() {
   return { mentions: "all", replies: "all", work_updates: "all", announcements: "all" };
 }
 

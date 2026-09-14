@@ -37,9 +37,11 @@ unauthenticated by design (invitation token in the body is the credential).
 
 All `GET` routes under `/api/rooms/:id/*` (snapshot, events, export,
 search, presence, capabilities, onboarding-funnel, provider-heartbeats,
-reminders, agent-connections, share-links, invitations, work-*, reply-*,
-charter, diagnostics, return-brief, thread) require a room credential with
-member visibility. `GET /api/rooms/:id/export` returns the full event log as
+reminders, notifications, agent-connections, share-links, invitations,
+work-*, reply-*, charter, diagnostics, return-brief, thread) require a room
+credential with member visibility. `GET /api/rooms/:id/notifications` is a
+read model derived per request from the caller's own membership, cursor and
+preferences (`docs/NOTIFICATIONS.md`); it writes nothing. `GET /api/rooms/:id/export` returns the full event log as
 one `Content-Length`-framed JSONL body (never a partial 200);
 `GET /api/rooms/:id/stream` is the SSE feed.
 

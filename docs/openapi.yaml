@@ -506,6 +506,26 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 50 }
       responses:
         '200': { description: Digest; fetching never acknowledges }
+  /api/rooms/{roomId}/notifications:
+    get:
+      summary: Per-member notification feed (read model)
+      description: |
+        Items derived from the event tail after the caller's own read cursor and
+        filtered by the caller's notificationPreferences (docs/NOTIFICATIONS.md).
+        Kinds: mention, reply, assignment, work_update. One item per
+        (messageId|workItemId, kind); items expire when POST /cursor passes them.
+        Reading writes nothing, enqueues no wake and delivers nothing. Membership is
+        rechecked on every read; ended access returns 401/403 with no items.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200': { description: Feed with unread count, cursor, sequence, basis and items; fetching never acknowledges }
+        '401': { description: Credential expired, revoked or access ended }
+        '403': { description: Membership inactive }
+        '422': { description: invalid_notification_selection (unknown or repeated query key) or invalid_notification_limit }
   /api/rooms/{roomId}/cursor:
     post:
       summary: Move the durable read cursor

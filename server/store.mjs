@@ -12,6 +12,7 @@ import { STORE_SCHEMA_VERSION, registerWriter, installWriterFence, verifyWriterF
 import { ShareLinks, shareLinkSchema } from "./share-links.mjs";
 import { conflictingClaim } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
+import { Notifications } from "./notifications.mjs";
 import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
@@ -265,6 +266,7 @@ export class RoomStore {
     this.identities = new AgentIdentities(this);
     this.invites = new AgentInvites(this);
     this.reminders = new Reminders(this);
+    this.notifications = new Notifications(this);
     this.wakeQueue = new WakeQueue(this);
     this.attention = new Attention(this);
     this.readOnly = readOnly;

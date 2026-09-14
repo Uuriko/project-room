@@ -174,11 +174,18 @@
           <details id="return-brief-panel" class="panel return-brief-panel">
             <summary>
               <span id="return-brief-heading">Catch me up</span>
-              <span class="catchup-signals"><span id="catchup-count"></span><small id="reminder-count" hidden></small></span>
+              <span class="catchup-signals"><span id="catchup-count"></span><small id="notification-count" hidden></small><small id="reminder-count" hidden></small></span>
             </summary>
             <div class="return-brief-body">
               <p id="summary-grid" class="sr-only"></p>
               <p id="rb-status" class="rb-note" role="status" aria-live="polite"></p>
+              <section id="notification-panel" aria-labelledby="notification-heading" hidden>
+                <h3 id="notification-heading">Notifications</h3>
+                <p id="notification-status" class="rb-note" role="status"></p>
+                <ul id="notification-list" class="rb-list notification-list"></ul>
+                <div class="rb-actions"><button id="notification-read-button" class="button secondary" type="button" disabled>Mark read</button></div>
+                <p class="rb-note">Mentions, replies and work that names you, filtered by your notification preferences. Reading runs no one; marking read moves your caught-up marker.</p>
+              </section>
               <section id="reminder-panel" aria-label="Your reminders" hidden>
                 <h3 id="reminder-due-heading">Your reminders</h3>
                 <p id="reminder-load-error" class="rb-note" role="status"></p>
