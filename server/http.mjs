@@ -784,7 +784,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "pins") {
         // Issue #6 B2: pinned messages. GET lists the ordered pins; POST pins or unpins one message (server/pins.mjs).
         if (req.method === "GET") return json(res, 200, listPins(store, selected.token, roomId, fence));
-        if (req.method === "POST") return json(res, 200, setPin(store, selected.token, roomId, await body(req), fence));
+        if (req.method === "POST") {
+          const result = setPin(store, selected.token, roomId, await body(req), fence);
+          return json(res, result.changed ? 201 : 200, result); // 201 when an event was appended, 200 when the room was already in that state or the requestId replayed
+        }
         reject(405, "method_not_allowed", "Method not allowed");
       }
       if (route === "provider-heartbeats" && req.method === "GET") {

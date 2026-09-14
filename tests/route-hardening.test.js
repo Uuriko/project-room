@@ -298,3 +298,37 @@ test("L6: a handle shared by two active rows revokes neither", async t => {
   assert.throws(() => store.invites.revoke(ownerKey, "commons", "ab".repeat(4)), error => error.status === 409 && error.code === "invite_ambiguous");
   assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM agent_invite_codes WHERE revoked_at IS NOT NULL").get().n, 0);
 });
+
+// Review follow-up: the two write paths for a pin answered different statuses
+// for the same refusal (422 through /commands, 409 through /pins). Both are
+// conflicts now, and POST /pins answers 201/200 like every other mutation.
+test("pins: a deleted message is 409 on both write paths, and POST /pins answers 201 then 200", async t => {
+  const f = await serve(t);
+  const live = f.post("keep this"), doomed = f.post("posted in error");
+  f.store.command(f.ownerKey, "commons", { id: randomUUID(), type: T.MESSAGE_DELETED, data: { messageId: doomed, expectedMessageRevision: 0, reason: "cleanup" } });
+
+  const viaPins = await f.request("/api/rooms/commons/pins", { method: "POST", token: f.ownerKey, data: { messageId: doomed, pinned: true } });
+  assert.equal(viaPins.status, 409);
+  assert.equal((await viaPins.json()).error.code, "message_deleted");
+  const viaCommands = await f.request("/api/rooms/commons/commands", { method: "POST", token: f.ownerKey,
+    data: { id: randomUUID(), type: T.MESSAGE_PINNED, data: { messageId: doomed } } });
+  assert.equal(viaCommands.status, 409, "the reducer refusal maps to a conflict, not a field error");
+  const rejected = await viaCommands.json();
+  assert.equal(rejected.error.code, "command_rejected"); assert.match(rejected.error.message, /deleted message cannot be pinned/);
+  assert.deepEqual(f.store.room("commons").state.pins ?? [], [], "neither refusal appended anything");
+
+  // Appended event: 201 with changed: true; already in that state: 200 with changed: false; a replayed requestId: 200.
+  const requestId = randomUUID();
+  const pinned = await f.request("/api/rooms/commons/pins", { method: "POST", token: f.ownerKey, data: { messageId: live, pinned: true, requestId } });
+  assert.equal(pinned.status, 201);
+  const pinnedBody = await pinned.json();
+  assert.equal(pinnedBody.changed, true); assert.equal(pinnedBody.event.duplicate, false);
+  const same = await f.request("/api/rooms/commons/pins", { method: "POST", token: f.ownerKey, data: { messageId: live, pinned: true } });
+  assert.equal(same.status, 200); assert.equal((await same.json()).changed, false);
+  const unpinned = await f.request("/api/rooms/commons/pins", { method: "POST", token: f.ownerKey, data: { messageId: live, pinned: false } });
+  assert.equal(unpinned.status, 201);
+  const replayed = await f.request("/api/rooms/commons/pins", { method: "POST", token: f.ownerKey, data: { messageId: live, pinned: true, requestId } });
+  assert.equal(replayed.status, 200, "an idempotent replay answers 200 like a duplicate command");
+  const replayedBody = await replayed.json();
+  assert.equal(replayedBody.changed, false); assert.equal(replayedBody.event.duplicate, true); assert.equal(replayedBody.event.sequence, pinnedBody.event.sequence);
+});
