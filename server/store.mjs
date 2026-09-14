@@ -20,6 +20,7 @@ import { Moderation, moderationSchema, mutedEvent } from "./moderation.mjs";
 import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
+import { ensureAttachmentSchema, verifyAttachmentSchema } from "./attachment-schema.mjs";
 import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
 import { workItemChanges } from "../src/workflow.js";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
@@ -426,7 +427,7 @@ export class RoomStore {
       if (version < 25 && this.db.prepare("SELECT 1 FROM private_inbox_commands WHERE json_extract(request_json,'$.action') IN ('reply.update.inspected','reply.update.review') OR json_type(receipt_json,'$.update.inspection') IS NOT NULL OR json_type(receipt_json,'$.update.review') IS NOT NULL OR json_type(receipt_json,'$.update.resolvedAt') IS NOT NULL OR json_extract(receipt_json,'$.update.status')='resolved' LIMIT 1").get())
         throw new Error("Pre-v25 reply resolution history requires operator reconciliation");
       if (version < 27) this.migrateAgentIdentitiesV27();
-      if (version < 28) migrateRoomLifecycleV28(this);
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('rooms') WHERE name='archived_at'").get()) migrateRoomLifecycleV28(this);
       // Agent invite codes are purely additive (no data migration, no fence
       // impact), so no schema version bump: IF NOT EXISTS is idempotent here
       // and the v0 block above covers fresh databases.
@@ -441,6 +442,7 @@ export class RoomStore {
       // The channel webhook update journal (B20) follows the same additive pattern.
       this.db.exec(channelJournalSchema);
       this.db.exec(moderationSchema); // Message reports (issue #6 E4): purely additive, same pattern.
+      ensureAttachmentSchema(this.db); // Converge the deployed v28-v33 attachment lineage before installing v34 fences.
       if (version < STORE_SCHEMA_VERSION) this.storagePlatform.installWriterFence(this.db);
       this.storagePlatform.verifyWriterFence(this.db);
       this.verifyInvitationAudit();
@@ -457,6 +459,7 @@ export class RoomStore {
       this.verifyHelpHistory();
       this.inbox.verify();
       this.email.verify();
+      verifyAttachmentSchema(this.db);
       this.channelUpdates.verifySchema();
       this.channelUpdates.verify();
       verifyRoomLifecycle(this);
@@ -1869,4 +1872,4 @@ export class RoomStore {
       return { sequence, event: incoming, duplicate: false };
     });
   }
-}
+          }
