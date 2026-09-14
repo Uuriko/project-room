@@ -61,13 +61,18 @@ export function heldUntil(prefs, at) {
 
 export class Attention {
   constructor(store) { this.store = store; this.db = store.db; }
-  verifySchema() {
+  // Purely additive at v27 (W4-46): a read-only open of an older v27 file may
+  // find none of these objects and must not migrate, so allowAbsent accepts a
+  // wholly missing schema; a partially present one still fails.
+  verifySchema({ allowAbsent = false } = {}) {
     const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
-    for (const sql of attentionSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)) {
-      const name = /^CREATE (?:TABLE|INDEX|TRIGGER) (?:IF NOT EXISTS )?([a-z_]+)/.exec(sql.trim())[1];
-      const actual = this.db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(name)?.sql;
+    const expected = attentionSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)
+      .map(sql => ({ sql, actual: this.db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(/^CREATE (?:TABLE|INDEX|TRIGGER) (?:IF NOT EXISTS )?([a-z_]+)/.exec(sql.trim())[1])?.sql }));
+    if (allowAbsent && expected.every(({ actual }) => actual === undefined)) return false;
+    for (const { sql, actual } of expected) {
       if (normalize(actual) !== normalize(sql)) throw new Error("Attention preference schema requires operator reconciliation");
     }
+    return true;
   }
   prefs(roomId, memberId) {
     return prefsView(this.db.prepare("SELECT * FROM private_attention_prefs WHERE room_id=? AND member_id=?").get(roomId, memberId));
