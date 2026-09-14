@@ -32,6 +32,8 @@ export function ciArgs(script, destination = RESULTS_FILE) {
     "--test",
     "--test-reporter=spec", "--test-reporter-destination=stdout",
     "--test-reporter=junit", `--test-reporter-destination=${destination}`,
+    // #170: per-test ::error annotations and a per-script duration table on GitHub Actions.
+    "--test-reporter=./scripts/browser-ci-reporter.mjs", "--test-reporter-destination=stdout",
     ...words.slice(2),
   ];
 }

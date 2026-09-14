@@ -121,11 +121,12 @@ test("test:browser:ci runs the test:browser suite list with spec + junit reporte
   assert.equal(pkg.scripts["test:browser:ci"], "node scripts/browser-ci.mjs");
   const args = ciArgs(pkg.scripts["test:browser"]);
   const files = pkg.scripts["test:browser"].match(/scripts\/[\w.-]+\.mjs/g);
-  assert.deepEqual(args.slice(0, 6), [
+  assert.deepEqual(args.slice(0, 8), [
     "--test", "--test-reporter=spec", "--test-reporter-destination=stdout",
-    "--test-reporter=junit", `--test-reporter-destination=${RESULTS_FILE}`, "--test-concurrency=1",
+    "--test-reporter=junit", `--test-reporter-destination=${RESULTS_FILE}`,
+    "--test-reporter=./scripts/browser-ci-reporter.mjs", "--test-reporter-destination=stdout", "--test-concurrency=1",
   ]);
-  assert.deepEqual(args.slice(6), files, "every suite wired into test:browser runs in CI too");
+  assert.deepEqual(args.slice(8), files, "every suite wired into test:browser runs in CI too");
   assert.equal(RESULTS_FILE, "test-results/browser-junit.xml", "lives where upload-artifact already looks");
   assert.throws(() => ciArgs("playwright test"), /must start with "node --test"/);
   assert.throws(() => ciArgs("node --test --test-reporter=tap a.mjs"), /already sets --test-reporter/);
