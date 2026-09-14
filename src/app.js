@@ -88,12 +88,19 @@ $('#provider-join-button').addEventListener('click', async () => {
   } catch (error) { providerFailure(error); }
   finally { $('#provider-join-button').disabled = false; }
 });
-$("#skip-link").addEventListener("click", event => {
-  event.preventDefault();
-  const target = !$("#inbox-panel").hidden ? "#inbox-heading"
-    : $("#auth-panel").hidden ? "#connection-status"
+function skipTarget() {
+  return !$("#inbox-panel")?.hidden ? "#inbox-heading"
+    : $("#auth-panel")?.hidden ? "#connection-status"
     : "#auth-title";
-  $(target).focus();
+}
+function skipToContent(event) {
+  event.preventDefault();
+  const node = $(skipTarget());
+  if (node) node.focus();
+}
+$("#skip-link").addEventListener("click", skipToContent);
+$("#skip-link").addEventListener("keydown", event => {
+  if (event.key === "Enter" || event.key === " ") skipToContent(event);
 });
 const setText = (selector, text) => { const node = $(selector); if (node.textContent !== text) node.textContent = text; };
 const invitationTokenPattern = /^[A-Za-z0-9_-]{43}$/;

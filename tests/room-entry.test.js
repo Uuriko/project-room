@@ -11,7 +11,7 @@ test("unlisted entry opens the isolated Room without forwarding input or embeddi
   assert.equal(response.headers.get("X-Robots-Tag"), "noindex, nofollow");
   assert.equal(response.headers.get("Referrer-Policy"), "no-referrer");
   const html = await response.text();
-  assert.match(html, /href="https:\/\/project-room-staging.getdasha.workers.dev"/);
+  assert.match(html, /href="https:\/\/room\.trydemigod\.com"/);
   assert.match(html, /--ink:#0B120F/);
   assert.match(html, /href="\/contact"/);
   assert.match(html, />Join</);
