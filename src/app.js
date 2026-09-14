@@ -1,4 +1,4 @@
-import { EVENT_TYPES as T, WORK_STATES as S, roomPolicy } from "./events.js";
+import { EVENT_TYPES as T, WORK_STATES as S, roomPolicy, roomKind, isRoomArchived } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
@@ -121,6 +121,7 @@ const client = new RoomClient({
     $("#identity-label").title = `${memberLabel(session.member.id)} · ${kindLabel(session.member.kind)}`;
     $("#cursor-label").textContent = `Your caught-up marker: ${snapshot.cursor} · room event ${snapshot.sequence}`;
     render();
+    syncRoomLifecycle();
     shareLinksUI?.sync();
     remindersUI?.sync();
     agentConnectionsUI?.sync();
@@ -172,6 +173,7 @@ const client = new RoomClient({
     if (!keepAccount) clearPrivateWorkspace({ preservePending: leavingPage });
     else inboxUI?.detachRoom();
     workDraftId = null; replyToId = null; workFormEpoch++; setWorkRetry(false);
+    syncRoomLifecycle();
     $("#work-reuse-hint").hidden = true;
     currentThreadId = null; conversation = null; drafts = new ConversationDrafts();
     requestMode = null; requestReading = false; requestEpoch++; syncRequestComposer();
@@ -314,14 +316,21 @@ async function loadAccountRooms(more = false) {
     for (const room of value.rooms) {
       const button = document.createElement("button"); button.type = "button"; button.className = "inbox-row";
       button.dataset.accountRoom = room.id;
+      // Issue #6 A2: an archived room is never presented as a working room; it
+      // opens read only (reading and export stay) and says so before the click.
+      const archived = room.archived === true;
+      button.dataset.roomArchived = archived ? "true" : "false";
       const title = typeof room.title === "string" ? room.title.trim() : "";
       const named = title && title !== room.id;
       const heading = document.createElement("strong");
       heading.textContent = named ? title : room.id;
+      const meta = document.createElement("small");
+      meta.className = "inbox-row-kind";
+      meta.textContent = roomKindLabel(room.kind) + (archived ? " · Archived" : "");
       const action = document.createElement("span");
-      action.textContent = "Open";
-      button.append(heading, action);
-      button.setAttribute("aria-label", `Open ${named ? title : room.id}`);
+      action.textContent = archived ? "Read only" : "Open";
+      button.append(heading, meta, action);
+      button.setAttribute("aria-label", `${archived ? "Read archived room" : "Open"} ${named ? title : room.id}`);
       button.addEventListener("click", () => openAccountRoom(room.id)); $("#account-rooms-list").append(button);
     }
     roomListCursor = value.nextCursor; $("#account-rooms-more").hidden = !roomListCursor;
@@ -349,6 +358,75 @@ async function openAccountRoom(roomId) {
     $("#account-rooms-status").textContent = "Couldn’t open that room. Refresh rooms to retry.";
   }
 }
+// Issue #6 A2: room lifecycle — create (account home), archive (owner), leave (member).
+const roomKindLabel = kind => (kind === "organization" ? "Organization" : "Personal");
+function syncRoomLifecycle() {
+  const room = state?.room ?? null, viewer = state && session ? state.members[session.member.id] : null;
+  const archived = Boolean(state) && isRoomArchived(state);
+  const badge = $("#room-kind-badge");
+  badge.textContent = room ? roomKindLabel(roomKind(room)) : ""; badge.hidden = !room;
+  const note = $("#room-archived-note");
+  note.hidden = !archived;
+  note.textContent = archived ? `Archived ${new Date(room.archivedAt).toLocaleString()}${room.archivedById ? ` by ${displayName(room.archivedById)}` : ""} · read only. Reading and export stay available; nothing new is recorded.` : "";
+  $("#main").classList.toggle("room-archived", archived); // The composer and New work follow in syncRequestComposer and render.
+  const owner = Boolean(viewer) && viewer.kind === "human" && viewer.id === room?.ownerId;
+  $("#room-archive-button").hidden = !viewer || archived || !owner;
+  $("#room-leave-button").hidden = !viewer || archived || owner || viewer.kind !== "human";
+}
+$("#room-archive-button").addEventListener("click", async () => {
+  if (!state || !session || busy) return;
+  if (!window.confirm("Archive this room? Everyone keeps reading and export; nothing new can be recorded, and this cannot be undone here.")) return;
+  const generation = client.generation, roomId = session.roomId, memberId = session.member.id, button = $("#room-archive-button");
+  button.disabled = true;
+  try {
+    await client.send({ id: crypto.randomUUID(), type: T.ROOM_ARCHIVED, data: {} });
+    if (sameSession(generation, roomId, memberId)) notice("Room archived. It is read only now; export stays available.");
+  } catch (error) {
+    if (!sameSession(generation, roomId, memberId)) return;
+    notice(error.code === "room_archived" ? "This room is already archived." : "Couldn’t archive the room. Refresh and try again.", true);
+  } finally { button.disabled = false; }
+});
+$("#room-leave-button").addEventListener("click", async () => {
+  if (!state || !session || busy) return;
+  const member = state.members[session.member.id];
+  if (!member || member.active === false) return;
+  if (!window.confirm("Leave this room? You lose access to it and need a new invitation to return. Your messages stay in the room.")) return;
+  const generation = client.generation, roomId = session.roomId, button = $("#room-leave-button");
+  button.disabled = true;
+  try {
+    await client.send({ id: crypto.randomUUID(), type: T.MEMBER_ACCESS_CHANGED,
+      data: { memberId: member.id, expectedMemberRevision: member.revision, permissions: [...member.permissions], active: false } });
+  } catch (error) {
+    if (!sameSession(generation, roomId, member.id)) return;
+    notice(error.code === "room_archived" ? "This room is archived; leaving is not recorded." : "Couldn’t leave the room. Refresh and try again.", true);
+  } finally { button.disabled = false; }
+});
+$("#account-room-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  const form = $("#account-room-form"), status = $("#account-room-status"), owned = accountClient.session;
+  if (!owned?.authenticated || form.dataset.busy === "true" || invitationIsCommitting() || signoutLoading) return;
+  const title = $("#account-room-title").value.trim(), purpose = $("#account-room-purpose").value.trim(), displayName = $("#account-room-name").value.trim();
+  const kind = $("#account-room-kind").value;
+  if (!title || !purpose || !displayName) { setFormStatus(status, "Room name, purpose and your name are required.", true); return; }
+  // One id per attempt: a retry after a lost response finds the same room instead of creating a twin.
+  const roomId = form.dataset.roomId || (form.dataset.roomId = "room-" + crypto.randomUUID().replaceAll("-", "").slice(0, 12));
+  form.dataset.busy = "true"; $("#account-room-submit").disabled = true; setFormStatus(status, "Creating…");
+  try {
+    const session = accountClient.currentSession("creating a room", { authenticated: true });
+    const result = await accountClient.request("/api/account-rooms", { method: "POST", data: { roomId, title, purpose, kind, displayName }, session });
+    if (accountClient.session !== owned) return;
+    delete form.dataset.roomId; form.reset(); setFormStatus(status, ""); $("#account-room-create").open = false;
+    await openAccountRoom(result.room.id);
+  } catch (error) {
+    if (accountClient.session !== owned) return;
+    if (error.status === 401 || ["session_binding_changed", "account_session_required"].includes(error.code)) { endAccountAccess(); return; }
+    if (error.code === "room_exists") delete form.dataset.roomId; // A lost response created it under another shape; the next attempt gets a fresh id.
+    setFormStatus(status, error.code === "room_creation_denied" ? "Creating a room needs membership administration in one of your rooms."
+      : error.code === "room_exists" ? "A room with that id already exists. Choose Rooms to refresh, then try again."
+      : error.status === 429 ? "Too many rooms just now. Try again in a minute."
+        : error.status === 422 ? "Check the room name, purpose and your name." : "Couldn’t create the room. Try again.", true);
+  } finally { delete form.dataset.busy; $("#account-room-submit").disabled = false; }
+});
 $("#choose-room").addEventListener("click", () => inboxUI.showRoomList());
 $("#account-rooms-more").addEventListener("click", () => loadAccountRooms(true));
 window.addEventListener("focus", () => confirmAccount());
@@ -896,8 +974,9 @@ function render() {
   const people = members.filter(m => m.kind !== "agent").sort(byPresence);
   const agents = members.filter(m => m.kind === "agent").sort(byPresence);
   renderContent("#presence-list", `${people.length ? `<p class="presence-heading">People</p>${people.map(presenceRow).join("")}` : ""}${agents.length ? `<p class="presence-heading">Agents</p>${agents.map(presenceRow).join("")}` : ""}`);
+  const proposing = can("steer") && !isRoomArchived(state); // Issue #6 A2: no new work in an archived room.
   for (const id of ["new-work-button", "composer-work-button"]) {
-    $("#" + id).hidden = !can("steer"); $("#" + id).disabled = !can("steer");
+    $("#" + id).hidden = !proposing; $("#" + id).disabled = !proposing;
   }
   syncComposerChrome();
   const items = Object.values(state.workItems);
@@ -1097,15 +1176,16 @@ function syncRequestComposer() {
   $("#request-refresh").hidden = !request || Boolean(pendingMessage) || requestReading || request.status !== "open";
   $("#request-exit").disabled = busy;
   const input = $("#message-input"), select = $("#message-to-select"), send = $("#message-form button[type=submit]");
+  const archived = Boolean(state) && isRoomArchived(state); // Issue #6 A2: an archived room is read only.
   input.readOnly = Boolean(mode && pendingMessage);
-  input.disabled = busy || requestReading;
+  input.disabled = busy || requestReading || archived;
   select.disabled = busy || requestReading || Boolean(mode && (mode.kind !== "request" || pendingMessage));
   select.required = mode?.kind === "request";
   select.setCustomValidity(mode?.kind === "request" && (!select.value || select.value === session?.member.id) ? "Choose another participant." : "");
-  send.disabled = busy || requestReading || Boolean(request && request.status !== "open" && !pendingMessage);
+  send.disabled = busy || requestReading || archived || Boolean(request && request.status !== "open" && !pendingMessage);
   const action = pendingMessage && mode ? "Retry original" : mode ? mode.kind === "request" ? "Send request" : label : "Send";
   send.setAttribute("aria-label", action); send.title = action;
-  input.placeholder = composerPlaceholder({ workKind: mode?.kind ?? null, inThread: Boolean(currentThreadId) });
+  input.placeholder = archived ? "This room is archived." : composerPlaceholder({ workKind: mode?.kind ?? null, inThread: Boolean(currentThreadId) });
   if (active) $("#reply-bar").hidden = true;
   syncComposerChrome();
 }
@@ -1803,6 +1883,7 @@ $("#refresh-button").addEventListener("click", async () => {
 });
 $("#message-form").addEventListener("submit", e => {
   e.preventDefault(); hideMentions(); if (!state || busy || requestReading) return;
+  if (isRoomArchived(state)) { setComposerError("This room is archived and read only."); return; }
   if (requestMode) { submitRequest(e.currentTarget); return; }
   const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId };
   if (!content.body) return;

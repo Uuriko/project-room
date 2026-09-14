@@ -255,6 +255,21 @@ carry the claim, and the remaining tiers stay visibly open.
         "agent": [],
         "hosted": []
       }
+    },
+    {
+      "id": "room-lifecycle",
+      "claim": "An account that administers membership somewhere creates rooms; the owner archives a room (read only afterwards, reading and export kept) and a member leaves one; the switcher lists archived rooms as read-only entries, never as working buttons.",
+      "evidence": {
+        "unit": [
+          "tests/room-lifecycle.test.js",
+          "tests/account-rooms.test.js"
+        ],
+        "browser": [
+          "scripts/room-lifecycle-browser-check.mjs"
+        ],
+        "agent": [],
+        "hosted": []
+      }
     }
   ]
 }
@@ -277,6 +292,7 @@ carry the claim, and the remaining tiers stay visibly open.
 | Telegram send preview | channel-import, inbox-channel-client | open | open | open |
 | Room review policy | work-actions, state-machine-invariants | room-policy-browser-check | open | open |
 | Unified inbox UI (list, reply, connections, needs-you, share) | inbox-unified-routes, inbox-channel-client | inbox-unified-check | open | open |
+| Room lifecycle (create, archive, leave) | room-lifecycle, account-rooms | room-lifecycle-browser-check | open | open |
 
 Follow-up scope: claims made in docs beyond the README list (per-feature
 acceptance docs) can be folded into the same block; the checker format already

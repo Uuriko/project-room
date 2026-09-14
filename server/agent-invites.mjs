@@ -17,6 +17,7 @@
 
 import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { ServiceError } from "./store.mjs";
+import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { applyEvent, event, EVENT_TYPES as T, memberCan, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS } from "../src/events.js";
 import { agentAccessProfiles } from "./agent-connections.mjs";
 
@@ -209,6 +210,7 @@ export class AgentInvites {
         },
       });
       let state;
+      refuseArchivedWrite(room.state);
       try { state = compactState(applyEvent(room.state, incoming)); }
       catch (error) { fail(409, "invite_rejected", error.message); }
       const projection = JSON.stringify(state);

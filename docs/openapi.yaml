@@ -29,6 +29,12 @@ paths:
         same id with the same input returns the original receipt (200);
         with different input returns 409 idempotency_conflict.
         201 on first commit, 200 on idempotent duplicate.
+        Room lifecycle (issue #6 A2): `room.archived` (data: optional
+        `reason`, 280 characters) is owner-only and makes the room read
+        only — reads, streams and export continue, every later command
+        answers 409 room_archived. `member.access_changed` targeted at the
+        caller with unchanged permissions and `active: false` is a leave and
+        needs no manage_members; the owner cannot leave.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -713,6 +719,61 @@ paths:
         '201': { description: Session view; Set-Cookie room_session }
         '401': { description: Wrong access key }
         '422': { description: invalid_login }
+        '429': { description: rate_limited }
+  /api/account-rooms:
+    get:
+      summary: List the account's current rooms
+      description: |
+        Browser account-session route (account_session cookie plus
+        X-Session-Binding). Bounded pages of the memberships the account holds
+        right now; a left or revoked membership is gone on the next read.
+        Each entry carries `kind` (personal or organization) and
+        `archived` / `archivedAt`; archived rooms stay listed and readable.
+      security:
+        - accountSession: []
+      parameters:
+        - name: after
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: "{ contractVersion: 1, viewer, rooms: [{ id, title, memberId, kind, archived, archivedAt }], nextCursor }"
+        '401': { description: unauthenticated }
+        '422': { description: invalid_room or session_binding_required }
+    post:
+      summary: Create a room for the signed-in account
+      description: |
+        Issue #6 A2. Account-session write (X-CSRF-Token, Origin,
+        X-Session-Binding), 10 per minute per account. The account must hold
+        an active human membership that owns a room or carries manage_members
+        (403 room_creation_denied otherwise; provisional room-key accounts are
+        bound to one room). The caller becomes member `owner` of the new
+        room with every permission. The client-chosen `roomId` is the
+        idempotency key: the same request returns the same room with
+        `duplicate: true`; a different room under that id is 409
+        room_exists. 409 pilot_limit at 100 memberships.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roomId, title, purpose, kind, displayName]
+              properties:
+                roomId: { type: string, maxLength: 64 }
+                title: { type: string, maxLength: 120 }
+                purpose: { type: string, maxLength: 1000 }
+                kind: { type: string, enum: [personal, organization] }
+                displayName: { type: string, maxLength: 80 }
+      responses:
+        '201': { description: "{ contractVersion: 1, viewer, room: { id, title, memberId, kind, archived, archivedAt }, duplicate: false }" }
+        '200': { description: Idempotent replay of the same request (duplicate true) }
+        '403': { description: csrf_denied, origin_denied or room_creation_denied }
+        '409': { description: room_exists or pilot_limit }
+        '422': { description: invalid_room_request }
         '429': { description: rate_limited }
   /api/inbox/connections:
     get:

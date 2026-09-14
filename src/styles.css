@@ -865,3 +865,18 @@ summary { overflow-wrap: anywhere; }
 .recipe-preview { display: flex; flex-direction: column; gap: 0.6rem; margin: 0.5rem 0; padding: 0.6rem; border: 1px solid var(--line-soft); border-radius: 8px; background: rgb(255 255 255 / 2%); }
 .recipe-preview-item { display: flex; flex-direction: column; gap: 0.2rem; max-width: 100%; overflow-wrap: anywhere; }
 .recipe-preview-item .recipe-preview-status { color: var(--text-dim, inherit); font-style: italic; }
+
+/* Issue #6 A2: room lifecycle (create, archive, leave) */
+#account-rooms-list .inbox-row small.inbox-row-kind { grid-column: 1; font-size: .75rem; color: var(--muted); }
+#account-rooms-list .inbox-row > span { grid-column: 2; grid-row: 1 / span 2; }
+#account-rooms-list .inbox-row[data-room-archived="true"] strong { color: var(--muted); }
+.account-room-create { margin: .75rem 0 0; font-size: .9rem; }
+.account-room-create summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
+.account-room-form { display: grid; gap: .5rem; margin-top: .5rem; }
+.account-room-form label { font-size: .8rem; color: var(--muted); }
+.account-room-form input, .account-room-form textarea, .account-room-form select { width: 100%; box-sizing: border-box; font: inherit; padding: .5rem; }
+.account-room-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
+.room-kind-badge { display: inline-block; margin: .15rem 0 .35rem; font-size: .7rem; letter-spacing: .02em; text-transform: uppercase; padding: .05rem .4rem; border-radius: .4rem; border: 1px solid var(--line); color: var(--muted); }
+.room-archived-note { margin: .5rem 0 0; padding: .4rem .75rem; border-left: 2px solid currentColor; color: var(--muted); font-size: .875rem; max-width: 46rem; }
+.room-archived #message-form { opacity: .6; }
+.room-lifecycle-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .5rem; }

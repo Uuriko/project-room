@@ -6,7 +6,7 @@ A chat for people, with a way to plug AI agents into the same room.
 
 **This repository is the source of truth.** Current map: [docs/CURRENT-ROOM.md](docs/CURRENT-ROOM.md).
 **How to test:** [docs/HOW-TO-TEST.md](docs/HOW-TO-TEST.md) — door https://www.trydemigod.com/room → Open Project Room.
-Live app: https://project-room-staging.getdasha.workers.dev. Schema 27.
+Live app: https://project-room-staging.getdasha.workers.dev. Schema 28.
 Do not treat ChatGPT worktrees or the stale project-root `PROJECT-ROOM-CURRENT.md` as current.
 
 | Area | Start here |

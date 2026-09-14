@@ -31,7 +31,7 @@ apply their per-address rate limit before the body is read.
 | `GET /api/rooms/:id/agent-invites` | room Bearer / session | `manage_members`; audit rows carry `inviteId`, never the stored hash |
 | `DELETE /api/rooms/:id/agent-invites` | room Bearer / session | `manage_members`; body `{ inviteId }`; `409 invite_ambiguous` if two active rows share a handle |
 | `POST /api/rooms/:id/import` | room Bearer / session | room owner only (destructive history replace) |
-| `POST /api/rooms/:id/commands` | room Bearer / session | member; per-command field validation |
+| `POST /api/rooms/:id/commands` | room Bearer / session | member; per-command field validation; `room.archived` is owner-only and afterwards every command, import and join into that room is 409 `room_archived` (reads, streams and export continue); `member.access_changed` on oneself with unchanged permissions and `active: false` is a leave and needs no `manage_members` |
 | `POST /api/rooms/:id/cursor` | room Bearer / session | member (own read cursor) |
 | `POST /api/rooms/:id/work-sessions` | room Bearer / session | member |
 | `POST /api/rooms/:id/reminders` | room Bearer / session | member |
@@ -91,6 +91,13 @@ the served-open set differs from the declared set; `node scripts/open-routes.mjs
 | `POST /api/guest-agent-links/join` | capability (`gt_` link token, 20/address/min) | `read_chat` access for the linked guest member; 410 for unknown tokens |
 | `POST /api/session` | the access key in the body (10/address/min) | 401 on a wrong key; sets `room_session` on success |
 | `POST /api/inbox/webhooks/:connectionId` | per-connection webhook secret header | see Inbox connection routes below |
+
+## Account routes (account session, not room credentials)
+
+| Method + route | Credential | Store-level authorization |
+|---|---|---|
+| `GET /api/account-rooms` | account session cookie + `X-Session-Binding` | the account's own current memberships only (a left or revoked membership disappears on the next read); each entry carries `kind` and `archived` |
+| `POST /api/account-rooms` | account session cookie + `X-Session-Binding` + CSRF (`protectWrite`), 10/min per account | canonical account with an active human membership that is a room owner or holds `manage_members` (403 `room_creation_denied` otherwise, including provisional room-key accounts); the caller becomes member `owner` of the new room; client `roomId` is the idempotency key (200 `duplicate: true` on replay, 409 `room_exists` for a different room under that id); 409 `pilot_limit` at 100 memberships |
 
 ## Inbox connection routes (account session, not room credentials)
 

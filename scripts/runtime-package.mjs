@@ -55,6 +55,7 @@ optional.push("scripts/release-evidence.mjs");
 optional.push("src/work-loops.js");
 optional.push("src/work-recipes.js");
 optional.push("server/action-classes.mjs");
+optional.push("server/room-lifecycle.mjs");
 optional.push("server/wake-queue.mjs");
 optional.push("server/attention.mjs");
 optional.push("server/channel-connection.mjs", "server/channel-import.mjs", "server/channel-adapters/index.mjs", "server/channel-adapters/email.mjs", "server/channel-adapters/telegram.mjs");
@@ -71,7 +72,7 @@ function runtimeMetadata(files) {
   const schema = /export const STORE_SCHEMA_VERSION = (\d+);/.exec(files.get("server/writer-fence.mjs").toString());
   const pkg = JSON.parse(files.get("package.json"));
   const config = JSON.parse(files.get("cloudflare/wrangler.jsonc"));
-  check(["8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27"].includes(schema?.[1]) && typeof pkg.engines?.node === "string");
+  check(["8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28"].includes(schema?.[1]) && typeof pkg.engines?.node === "string");
   return { schemaVersion: Number(schema[1]), node: pkg.engines.node, cloudflare: { compatibilityDate: config.compatibility_date,
     compatibilityFlags: config.compatibility_flags, durableObjects: config.durable_objects, migrations: config.migrations } };
 }
