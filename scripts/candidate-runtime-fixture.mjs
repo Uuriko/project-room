@@ -29,6 +29,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/guest-agent-links.mjs');
   paths.add('server/agent-invites.mjs');
   paths.add('src/work-item-session.js');
+  paths.add('src/work-recipes.js');
   paths.add('src/board.js');
   paths.add('src/work-templates.js');
   paths.add('src/room-templates.js');
