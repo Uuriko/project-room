@@ -7,7 +7,13 @@ info:
     `?auth=` query parameter (or `x-project-room-auth` header) carrying the
     member's private key, or a `Bearer <redacted>` for API keys. Every error
     uses the shape documented in docs/ERROR-TAXONOMY.md.
-    This spec covers the agent surface; browser-UI-only routes are omitted.
+    This spec covers the agent surface; browser-UI-only routes are omitted
+    unless they answer without a credential. Every route the server serves
+    anonymously carries `security: []` here: tests/invite-only-boundary.test.js
+    derives the open-route inventory from those entries and
+    `scripts/open-routes.mjs --check` requires docs/ROUTE-AUTH-TABLE.md and
+    docs/INVITE-ONLY-CHECKLIST.md to list each of them. Account-session
+    (browser cookie) routes declare `accountSession`.
 servers:
   - url: https://room.example.com
 security:
@@ -219,6 +225,7 @@ paths:
         Creates a stable cross-room agent identity and returns its secret once
         (pri_...). The secret is stored only as a salted hash; it grants access
         only to rooms the identity is linked into via identity-links.
+      security: []
       requestBody:
         required: true
         content:
@@ -522,6 +529,191 @@ paths:
                 sequence: { type: integer }
       responses:
         '200': { description: Cursor stored }
+  /api/health:
+    get:
+      summary: Liveness
+      description: >-
+        Open (also HEAD). Returns `{ status: "ok", mode }`; operational
+        metadata only. The Public Host aliases are served identically.
+      security: []
+      responses:
+        '200': { description: "{ status: ok, mode }" }
+  /api/version:
+    get:
+      summary: Deployed revision
+      description: Open (also HEAD). `{ status, mode, sourceRevision, buildId }`; no room data.
+      security: []
+      responses:
+        '200': { description: "{ status, mode, sourceRevision, buildId }" }
+  /api/ready:
+    get:
+      summary: Readiness
+      description: Open (also HEAD). 200 `{ status: ready }` once the store answers; 503 `{ status: unavailable }` otherwise.
+      security: []
+      responses:
+        '200': { description: "{ status: ready }" }
+        '503': { description: "{ status: unavailable }" }
+  /api/guest-agent-links:
+    get:
+      summary: Guest-agent link contract document
+      description: >-
+        Open (also HEAD): the static contract for guest-agent credentials
+        (status, kind, permissions, access, ttl). Contains no room data.
+        `POST` on this path mints a link and requires a room credential.
+      security: []
+      responses:
+        '200': { description: Static contract document }
+  /api/work-item-sessions:
+    get:
+      summary: Work-item session contract document
+      description: Open (also HEAD): the static contract for work-item sessions (status, schemaBump, writer, fields). Contains no room data.
+      security: []
+      responses:
+        '200': { description: Static contract document }
+  /api/account-session:
+    get:
+      summary: Browser account-session slot
+      description: >-
+        Open by design: a browser without an `account_session` cookie
+        receives an anonymous slot (Set-Cookie; 20 per address per minute)
+        and `{ authenticated: false, account: null, csrf, sessionBinding }`.
+        The slot grants nothing until `POST` signs in with an account access
+        key; `POST` and `DELETE` require the slot cookie plus CSRF and are
+        browser-only, so they are not documented here.
+      security: []
+      responses:
+        '200': { description: Account session view; never account data for an anonymous caller }
+        '429': { description: rate_limited }
+  /api/agent-invites/redeem:
+    post:
+      summary: Redeem an agent invite code
+      description: >-
+        Open: the invite code is the credential (RM- plus 16 Crockford
+        base32 symbols; only a hash is stored). Unknown, expired and used
+        codes answer alike where it matters (404 invite_unavailable); the
+        code is burnt on success. 20 per address per minute.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, displayName]
+              properties:
+                code: { type: string }
+                displayName: { type: string, maxLength: 80 }
+      responses:
+        '201': { description: Member created; the room credential is returned once }
+        '404': { description: invite_unavailable }
+        '409': { description: invite_already_used, invite_authority_changed or pilot_limit }
+        '410': { description: invite_revoked or invite_expired }
+        '422': { description: invalid_invite or invalid_invite_name }
+        '429': { description: rate_limited }
+  /api/share-links/preview:
+    post:
+      summary: Preview a human invitation link
+      description: >-
+        Open: the link token is the credential. Discloses the room title and
+        access description only, never message bodies, member lists or
+        credentials. 30 per address per minute.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [linkToken]
+              properties:
+                linkToken: { type: string }
+      responses:
+        '200': { description: "{ access, identity, link, room: { id, title } }" }
+        '410': { description: link_unavailable (unknown, expired, cancelled or exhausted) }
+        '422': { description: invalid_link or wrong_link_kind }
+        '429': { description: rate_limited }
+  /api/invitations/preview:
+    post:
+      summary: Preview a membership invitation
+      description: Open; the invitation token is the credential. Room title and role only. 30 per address per minute.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [invitationToken]
+              properties:
+                invitationToken: { type: string }
+      responses:
+        '200': { description: Invitation preview }
+        '404': { description: invitation_not_found }
+        '422': { description: invalid_invitation }
+        '429': { description: rate_limited }
+  /api/guest-agent-links/preview:
+    post:
+      summary: Preview a guest-agent link
+      description: Open; the `gt_` link token is the credential. Room title and access only. 30 per address per minute.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [linkToken]
+              properties:
+                linkToken: { type: string }
+      responses:
+        '200': { description: Link preview }
+        '410': { description: link_unavailable }
+        '422': { description: invalid_link or wrong_link_kind }
+        '429': { description: rate_limited }
+  /api/guest-agent-links/join:
+    post:
+      summary: Join as a guest agent
+      description: >-
+        Open; the `gt_` link token is the credential. Returns the linked guest
+        member's `read_chat` access. 20 per address per minute.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [linkToken]
+              properties:
+                linkToken: { type: string }
+      responses:
+        '200': { description: "{ ...preview, memberId, access: read_chat }" }
+        '410': { description: link_unavailable }
+        '422': { description: invalid_link or wrong_link_kind }
+        '429': { description: rate_limited }
+  /api/session:
+    post:
+      summary: Browser room sign-in
+      description: >-
+        Open: the access key in the body is the credential. Sets the
+        `room_session` cookie on success; 401 on a wrong key. 10 per address
+        per minute. `GET` and `DELETE` on this path require the session (or
+        a bearer key) and are omitted here.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accessKey]
+              properties:
+                accessKey: { type: string }
+      responses:
+        '201': { description: Session view; Set-Cookie room_session }
+        '401': { description: Wrong access key }
+        '422': { description: invalid_login }
+        '429': { description: rate_limited }
   /api/inbox/connections:
     get:
       summary: List the account's channel connections
@@ -530,7 +722,8 @@ paths:
         authenticated by the account_session cookie plus X-Session-Binding,
         never by a room or agent bearer key. Returns the generic connection
         record for every email and Telegram connection the account owns.
-      security: []
+      security:
+        - accountSession: []
       responses:
         '200':
           description: Connection records
@@ -549,7 +742,8 @@ paths:
     get:
       summary: Read one channel connection
       description: Account-session route. 404 channel_connection_not_found for another account's connection.
-      security: []
+      security:
+        - accountSession: []
       parameters:
         - name: id
           in: path
@@ -601,7 +795,8 @@ paths:
 
         Today the drain reads the in-memory webhook inbox; once the durable
         webhook journal lands it drains that instead, unchanged.
-      security: []
+      security:
+        - accountSession: []
       parameters:
         - name: id
           in: path
@@ -653,7 +848,8 @@ paths:
         { requestId, updates }: `updates` is a recorded array of Telegram Update
         objects, or null to import updates the webhook already verified. The
         same requestId returns the journaled receipt (200, duplicate true).
-      security: []
+      security:
+        - accountSession: []
       parameters:
         - name: id
           in: path
@@ -717,6 +913,11 @@ components:
       type: http
       scheme: bearer
       description: "API key as Authorization: Bearer <redacted>"
+    accountSession:
+      type: apiKey
+      in: cookie
+      name: account_session
+      description: Browser account session (plus X-Session-Binding; X-CSRF-Token on writes). Never a room or agent bearer key.
   parameters:
     RoomId:
       name: roomId

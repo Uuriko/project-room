@@ -46,6 +46,27 @@ one `Content-Length`-framed JSONL body (never a partial 200);
 `tests/route-auth-table.test.js` enforces the headline invariant: every
 mutating room route rejects unauthenticated requests.
 
+## Open routes (no credential)
+
+The source of this list is `docs/openapi.yaml`: an operation is open exactly
+when it declares `security: []`. `tests/invite-only-boundary.test.js` probes
+every `/api` route the server can match without a credential and fails when
+the served-open set differs from the declared set; `node scripts/open-routes.mjs
+--check` (part of `npm run check`) fails when this table or
+`docs/INVITE-ONLY-CHECKLIST.md` §1 omits a declared route.
+
+| Method + route | Credential | What it discloses |
+|---|---|---|
+| `GET /api/health`, `GET /api/version`, `GET /api/ready` (and `HEAD`) | none | operational metadata only |
+| `GET /api/guest-agent-links`, `GET /api/work-item-sessions` (and `HEAD`) | none | static contract documents, no room data |
+| `GET /api/account-session` | none (creates an anonymous browser slot; 20/address/min) | `authenticated: false`, a CSRF token and session binding; `POST`/`DELETE` (sign-in/out) need the slot cookie + CSRF |
+| `POST /api/agent-identities` | none (by design) | see Mutating routes above |
+| `POST /api/agent-invites/redeem` | capability (invite code, 20/address/min) | 404 `invite_unavailable` for unknown codes; burns the code on success |
+| `POST /api/share-links/preview`, `POST /api/invitations/preview`, `POST /api/guest-agent-links/preview` | capability (link / invitation token, 30/address/min) | room title + access only; 410 / 404 for unknown tokens |
+| `POST /api/guest-agent-links/join` | capability (`gt_` link token, 20/address/min) | `read_chat` access for the linked guest member; 410 for unknown tokens |
+| `POST /api/session` | the access key in the body (10/address/min) | 401 on a wrong key; sets `room_session` on success |
+| `POST /api/inbox/webhooks/:connectionId` | per-connection webhook secret header | see Inbox connection routes below |
+
 ## Inbox connection routes (account session, not room credentials)
 
 | Method + route | Credential | Store-level authorization |
