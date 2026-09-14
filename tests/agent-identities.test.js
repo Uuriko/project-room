@@ -10,6 +10,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { RoomAgentClient, createAgentIdentity } from "../client/room-agent.mjs";
+import { AgentIdentities, IDENTITY_LIMIT } from "../server/agent-identities.mjs";
 
 const execFileAsync = promisify(execFile);
 // The room server runs on this process's event loop, so the CLI must be
@@ -217,6 +218,38 @@ test("identity creation is capped: the 5000-row pilot limit is enforced inside t
     body: JSON.stringify({ displayName: "Fits Now" })
   });
   assert.equal(again.status, 201);
+});
+
+test("identity cap is enforced by the store, not only the rate limit: under the cap creates exactly one row, at the cap nothing is written", async t => {
+  const { store, origin } = await serve(t);
+  assert.equal(IDENTITY_LIMIT, 5000);
+  // A low limit exercises the same code path the 5000-row default guards.
+  const capped = new AgentIdentities(store, { identityLimit: 2 });
+  const count = () => store.db.prepare("SELECT COUNT(*) AS n FROM agent_identities").get().n;
+  assert.equal(count(), 0, "fresh store");
+  const first = capped.create("Under Cap");
+  assert.equal(count(), 1);
+  assert.equal(capped.get(first.identityId)?.displayName, "Under Cap");
+  capped.create("Fills Cap");
+  assert.equal(count(), 2);
+  assert.throws(() => capped.create("Over Cap"), error => error.status === 409 && error.code === "pilot_limit" && /no data was changed/.test(error.message));
+  assert.equal(count(), 2, "a refused create writes no row");
+  // The default instance still accepts creations (its cap is 5000), and the
+  // HTTP error contract is the documented JSON error body.
+  const res = await fetch(`${origin}/api/agent-identities`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin },
+    body: JSON.stringify({ displayName: "Default Cap" })
+  });
+  assert.equal(res.status, 201);
+  assert.equal(count(), 3);
+  const bad = await fetch(`${origin}/api/agent-identities`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin },
+    body: JSON.stringify({ displayName: "" })
+  });
+  assert.equal(bad.status, 422);
+  assert.match(bad.headers.get("content-type"), /application\/json/);
+  assert.equal((await bad.json()).error.code, "invalid_identity");
+  assert.equal(count(), 3, "a refused create writes no row");
 });
 
 test("identity-link listing is membership administration: agents and plain members get 403", async t => {

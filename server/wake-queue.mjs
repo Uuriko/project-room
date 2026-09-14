@@ -46,13 +46,19 @@ const view = row => ({ queueKey: row.queue_key, intent: JSON.parse(row.intent), 
 
 export class WakeQueue {
   constructor(store) { this.store = store; this.db = store.db; }
-  verifySchema() {
+  // The wake queue is purely additive at v27, so a v27 store written before
+  // W4-45 has none of these objects. A read-only open (backup verification,
+  // invitation audit) must not migrate, so allowAbsent accepts a file where the
+  // whole schema is missing; a partially present schema still fails.
+  verifySchema({ allowAbsent = false } = {}) {
     const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
-    for (const sql of wakeQueueSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)) {
-      const name = /^CREATE (?:TABLE|INDEX|TRIGGER) (?:IF NOT EXISTS )?([a-z_]+)/.exec(sql.trim())[1];
-      const actual = this.db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(name)?.sql;
+    const expected = wakeQueueSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)
+      .map(sql => ({ sql, actual: this.db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(/^CREATE (?:TABLE|INDEX|TRIGGER) (?:IF NOT EXISTS )?([a-z_]+)/.exec(sql.trim())[1])?.sql }));
+    if (allowAbsent && expected.every(({ actual }) => actual === undefined)) return false;
+    for (const { sql, actual } of expected) {
       if (normalize(actual) !== normalize(sql)) throw new Error("Wake queue schema requires operator reconciliation");
     }
+    return true;
   }
   current(auth, roomId) {
     return {
