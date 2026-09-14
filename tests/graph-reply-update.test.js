@@ -31,7 +31,10 @@ test("body-only update preserves original, observed and proposed versions with z
   assert.equal(proposal.connection.revision, 1);
   assert.deepEqual(f.current(JSON.parse(JSON.stringify(proposal))), proposal, "serialized proposals retain every compared field");
   assert.deepEqual(f.attempt(), original); assert.deepEqual(auditRecovery(f.store), before);
-  assert.doesNotMatch(JSON.stringify(proposal), /4200|observer@example.test|internetMessageHeaders|brief.txt/);
+  // Match the private sentence, not the bare number: random ids and digests in the proposal can contain "4200" by chance.
+  const serialized = JSON.stringify(proposal);
+  for (const privateText of ["Private budget: 4200", "observer@example.test", "internetMessageHeaders", "brief.txt"])
+    assert.equal(serialized.includes(privateText), false, `proposal must not expose ${privateText}`);
   mkdirSync("test-results/reply-update-20260908", { recursive: true });
   writeFileSync("test-results/reply-update-20260908/three-versions.json", JSON.stringify(proposal, null, 2) + "\n");
 });
