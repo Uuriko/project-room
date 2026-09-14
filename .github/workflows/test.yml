@@ -18,7 +18,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      - run: npm ci # `npm run check` now includes the lint gate, which needs the eslint devDependency.
       - run: npm run check
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm run lint
   browser:
     runs-on: ubuntu-latest
     steps:
