@@ -39,7 +39,8 @@ All `GET` routes under `/api/rooms/:id/*` (snapshot, events, export,
 search, presence, capabilities, onboarding-funnel, provider-heartbeats,
 reminders, agent-connections, share-links, invitations, work-*, reply-*,
 charter, diagnostics, return-brief, thread) require a room credential with
-member visibility. `GET /api/rooms/:id/export` streams the full event log;
+member visibility. `GET /api/rooms/:id/export` returns the full event log as
+one `Content-Length`-framed JSONL body (never a partial 200);
 `GET /api/rooms/:id/stream` is the SSE feed.
 
 `tests/route-auth-table.test.js` enforces the headline invariant: every

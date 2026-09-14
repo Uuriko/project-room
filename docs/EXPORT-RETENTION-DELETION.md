@@ -6,9 +6,13 @@ behaviors marked (pinned).
 
 ## What can leave a room
 
-- **Room export (any member).** `GET /api/rooms/<id>/export` streams the full
+- **Room export (any member).** `GET /api/rooms/<id>/export` returns the full
   event log as JSONL, one `{sequence, event}` per line. It is the complete
-  history, not the current view.
+  history, not the current view. The body is assembled in full before the
+  response starts and carries a `Content-Length`, so a failure while reading
+  history is a JSON error response rather than a truncated file that looks
+  like a shorter export, and a dropped connection shows up as an incomplete
+  download (pinned).
 - **Room import (owner only).** `POST /api/rooms/<id>/import` replaces the
   room's history with an export file (8 MB cap; larger restores go through
   database backup).
