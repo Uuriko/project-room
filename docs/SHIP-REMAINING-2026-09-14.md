@@ -45,11 +45,17 @@ Tag 15 is a proposal catalog. Apply **only** live strings that already have cont
 
 Sandbox stays draft. No merge.
 
-### C. Schema-26 `a5f2dca` copy-first (needs Cloudflare dashboard)
+### C. Schema-26 data on `project-room-staging` (copy-first; do not deploy 33 there)
 
-This host is a new schema-33 Worker, not `a5f2dca`. PITR clone to a **new** object, then `cutover-copy` (refuses `a5f2dca` in the path), then drill the clone. Never first-write 33 onto the live 26 object.
+`a5f2dca32be0f3ba725608d3c89ce16c635b2c30` is a **git commit SHA** (schema 26), not a Cloudflare object hex. It is what staging still serves:
 
-John: which Worker owns Durable Object `a5f2dca`?
+| Host | Worker | `/api/version` |
+|---|---|---|
+| `https://project-room-staging.getdasha.workers.dev` | `project-room-staging` | `sourceRevision` a5f2dca…, `cloudflare-staging` |
+| `https://www.getdasha.com/room` | same Worker (route) | same |
+| `https://room.trydemigod.com` | `project-room` | schema-33 production (this tree) |
+
+The Durable Object class is `ProjectRoom` on **project-room-staging** (name `invite-only-pilot` in current code). Do **not** `wrangler deploy` this tree to `project-room-staging`. PITR clone that object to a **new** id, then cutover-copy (script refuses paths containing `a5f2dca`). Never first-write schema 33 onto the staging store.
 
 ### D. Instinct W4-45 (not Grok)
 
