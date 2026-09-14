@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { formatShareInvitation, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, reuseVisibleRoom, invitationUnavailableMessage, formatInvitationExpiry } from "../src/share-links.js";
+import { formatShareInvitation, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, reuseVisibleRoom, invitationUnavailableMessage, formatInvitationExpiry, invitationAskWhom } from "../src/share-links.js";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
@@ -56,6 +56,12 @@ test("expired invitation copy names the room owner and includes the expiry time"
   assert.match(invitationUnavailableMessage({ status: "accepted" }), /already been accepted/);
   assert.match(invitationUnavailableMessage({ status: "authority_changed" }), /room owner/);
   assert.doesNotMatch(invitationUnavailableMessage(preview), /administrator/);
+  assert.equal(invitationAskWhom(preview), "the room owner");
+  assert.equal(invitationAskWhom({ invitedByDisplayName: "Maya" }), "Maya");
+  assert.match(
+    invitationUnavailableMessage({ status: "expired", expiresAt: preview.expiresAt, invitedByDisplayName: "Maya" }),
+    /Ask Maya for a new one/
+  );
   const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   assert.match(app, /invitationUnavailableMessage\(preview\)/);
   assert.doesNotMatch(app, /Ask a current Room administrator/);

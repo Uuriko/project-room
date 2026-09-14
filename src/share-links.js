@@ -27,16 +27,23 @@ export function formatInvitationExpiry(expiresAt) {
   return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
+export function invitationAskWhom(preview) {
+  const name = typeof preview?.invitedByDisplayName === "string" ? preview.invitedByDisplayName.trim() : "";
+  if (name && !/^room (owner|administrator)$/i.test(name)) return name;
+  return "the room owner";
+}
+
 export function invitationUnavailableMessage(preview) {
+  const whom = invitationAskWhom(preview);
   if (preview?.status === "expired") {
     const when = formatInvitationExpiry(preview.expiresAt);
     return when
-      ? `This invitation expired on ${when}. Ask the room owner for a new one.`
-      : "This invitation has expired. Ask the room owner for a new one.";
+      ? `This invitation expired on ${when}. Ask ${whom} for a new one.`
+      : `This invitation has expired. Ask ${whom} for a new one.`;
   }
-  if (preview?.status === "revoked") return "This invitation was revoked. Ask the room owner if you still need access.";
+  if (preview?.status === "revoked") return `This invitation was revoked. Ask ${whom} if you still need access.`;
   if (preview?.status === "accepted") return "This invitation has already been accepted. Sign in with an authorized account to open the Room.";
-  return "The inviter’s authority changed. Ask the room owner for a new invitation.";
+  return `The inviter’s authority changed. Ask ${whom} for a new invitation.`;
 }
 
 export function invitationFailureMessage(error) {

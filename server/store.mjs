@@ -984,7 +984,7 @@ export class RoomStore {
         status,
         memberId: row.intended_member_id,
         permissions: JSON.parse(row.intended_permissions_json),
-        invitedByDisplayName: room.members?.[row.issuer_member_id]?.displayName ?? "Room administrator",
+        invitedByDisplayName: room.members?.[row.issuer_member_id]?.displayName ?? "Room owner",
         roomTitle: room.room?.title ?? "Project Room",
         roomPurpose: room.room?.purpose ?? ""
       };
@@ -1066,7 +1066,7 @@ export class RoomStore {
       if (!issuerAccount || issuerAccount.active !== 1 || issuerAccount.auth_epoch !== row.issuer_account_auth_epoch
         || issuerBinding?.account_id !== row.issuer_account_id || !issuerMember || issuerMember.active === false
         || issuerMember.revision !== row.issuer_member_revision || !issuerMember.permissions.includes("manage_members")) {
-        fail(409, "invitation_authority_changed", "Inviter authority changed; ask a current Room administrator for a new invitation");
+        fail(409, "invitation_authority_changed", "Inviter authority changed; ask the room owner for a new invitation");
       }
       if (Object.hasOwn(room.state.members, row.intended_member_id)
         || this.db.prepare("SELECT 1 FROM member_accounts WHERE room_id=? AND (member_id=? OR account_id=?) LIMIT 1").get(row.room_id, row.intended_member_id, row.intended_account_id)) {
