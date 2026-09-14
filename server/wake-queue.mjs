@@ -148,6 +148,15 @@ export class WakeQueue {
     if (prior.fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Request ID already used for a different wake command");
     return JSON.parse(prior.response);
   }
+  // Every command that lands writes one immutable, never-deleted receipt, so
+  // the receipts cap must bound every writer - enqueue, pause, resume and
+  // requeue alike - or the table grows without bound through whichever
+  // command skips the check. Called after the prior-receipt lookup so an
+  // exact retry at the cap still answers with its historical receipt.
+  receiptCapacity(roomId, memberId) {
+    const receipts = this.db.prepare("SELECT count(*) n FROM wake_queue_commands WHERE room_id=? AND member_id=?").get(roomId, memberId).n;
+    if (receipts >= wakeQueueLimits.receipts) fail(409, "wake_limit", "Wake capacity reached.");
+  }
   // enqueue coalesces: one row per queue key. A still-pending wake absorbs the
   // new intent and keeps the earliest due time; a leased one is left alone; a
   // done one starts a fresh cycle; a dead one stays parked until requeue.
@@ -168,9 +177,9 @@ export class WakeQueue {
       if (request.dueAt > now + wakeQueueLimits.horizon) fail(422, "invalid_wake_time", "Choose a due time within one year.");
       const row = this.db.prepare("SELECT * FROM wake_queue WHERE room_id=? AND member_id=? AND queue_key=?").get(roomId, auth.member.id, request.queueKey);
       if (row?.state === "dead") fail(409, "wake_dead", "This wake is parked as dead letters; requeue it explicitly.");
+      this.receiptCapacity(roomId, auth.member.id);
       const active = this.db.prepare("SELECT count(*) n FROM wake_queue WHERE room_id=? AND member_id=? AND state IN ('pending','leased')").get(roomId, auth.member.id).n;
-      const receipts = this.db.prepare("SELECT count(*) n FROM wake_queue_commands WHERE room_id=? AND member_id=?").get(roomId, auth.member.id).n;
-      if (receipts >= wakeQueueLimits.receipts || (!row && active >= wakeQueueLimits.active)) fail(409, "wake_limit", "Wake capacity reached.");
+      if (!row && active >= wakeQueueLimits.active) fail(409, "wake_limit", "Wake capacity reached.");
       let receipt;
       if (row && (row.state === "pending" || row.state === "leased")) {
         if (row.state === "pending") {
@@ -191,7 +200,10 @@ export class WakeQueue {
   }
   // pause/resume are the member's own stop control - draft class: they only
   // govern when this member's own queued intents may start. Idempotent via the
-  // same commands receipt table as enqueue/requeue.
+  // same commands receipt table as enqueue/requeue, and bounded by the same
+  // receipts cap (receiptCapacity) since every landed command retains a row -
+  // except that a state-changing pause is always admitted, so the stop
+  // control works at the cap.
   pause(token, roomId, request, binding = null, { memberId = null } = {}) {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId, binding);
@@ -204,6 +216,11 @@ export class WakeQueue {
       if (prior) return this.outcome(auth, roomId, subject, { receipt: prior, duplicate: true });
       const now = this.store.now();
       const existing = this.pauseStatus(roomId, subject);
+      // Stop always works (the reminders precedent for cancel): a pause that
+      // changes state is admitted even at the receipt cap. That adds at most
+      // one receipt per breach, because the matching resume stays capped and
+      // a no-op re-pause of an already-paused member is refused.
+      if (existing) this.receiptCapacity(roomId, subject);
       if (!existing) this.db.prepare("INSERT INTO wake_queue_pause VALUES(?,?,?,?)").run(roomId, subject, now, request.reason);
       const receipt = { requestId: request.requestId, state: "paused", pausedAt: existing ? existing.pausedAt : now, alreadyPaused: Boolean(existing) };
       this.db.prepare("INSERT INTO wake_queue_commands VALUES(?,?,?,?,?)").run(roomId, subject, request.requestId, fingerprint, JSON.stringify(receipt));
@@ -219,6 +236,7 @@ export class WakeQueue {
       const fingerprint = this.receipt(request.requestId, fields, request);
       const prior = this.priorReceipt(roomId, subject, request, fingerprint);
       if (prior) return this.outcome(auth, roomId, subject, { receipt: prior, duplicate: true });
+      this.receiptCapacity(roomId, subject);
       const existing = this.pauseStatus(roomId, subject);
       this.db.prepare("DELETE FROM wake_queue_pause WHERE room_id=? AND member_id=?").run(roomId, subject);
       const receipt = { requestId: request.requestId, state: "active", wasPaused: Boolean(existing) };
@@ -239,6 +257,7 @@ export class WakeQueue {
       if (request.dueAt > now + wakeQueueLimits.horizon) fail(422, "invalid_wake_time", "Choose a due time within one year.");
       const row = this.db.prepare("SELECT * FROM wake_queue WHERE room_id=? AND member_id=? AND queue_key=?").get(roomId, auth.member.id, request.queueKey);
       if (row?.state !== "dead") fail(409, "wake_not_dead", "Only a dead-lettered wake can be requeued.");
+      this.receiptCapacity(roomId, auth.member.id);
       this.db.prepare("UPDATE wake_queue SET state='pending',due_at=?,attempts=0,lease_owner=NULL,lease_expires_at=NULL,last_error=NULL,updated_at=? WHERE room_id=? AND member_id=? AND queue_key=?")
         .run(request.dueAt, now, roomId, auth.member.id, request.queueKey);
       const receipt = { requestId: request.requestId, queueKey: request.queueKey, state: "pending", coalesced: false, dueAt: request.dueAt };

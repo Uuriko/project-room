@@ -12,6 +12,19 @@
 
 ## 2026-09-14
 
+- Wake queue receipt cap (`wakeQueueLimits.receipts`, 5000 per member and room)
+  now bounds every command that retains a receipt: resume and requeue refuse
+  with `409 wake_limit` at the cap exactly as enqueue does, a pause of an
+  already-paused member refuses too, and a pause that actually stops the
+  member is always admitted (stop always works, adding at most one receipt
+  since the matching resume stays capped); exact retries still return their
+  historical receipt. Previously only enqueue was
+  checked, so repeated `POST /api/rooms/:id/agent-pause` calls (including
+  pausing an already-paused member) could grow the immutable
+  `wake_queue_commands` table without bound. `docs/openapi.yaml` names the 409
+  and clarifies that 201 means the command was recorded (`alreadyPaused` /
+  `wasPaused` say whether the state changed). Tests: `tests/wake-pause.test.js`,
+  `tests/wake-queue.test.js`.
 - Room lifecycle (issue #6 A2): schema 28 adds `rooms.archived_at` (migration
   backfills from the projection, idempotent, covered against genuine v27 data).
   `POST /api/account-rooms` creates a room for an account that already
