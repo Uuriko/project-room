@@ -3,6 +3,7 @@ import { isIP } from 'node:net';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
+import { ChannelWebhookInbox } from '../server/channel-import.mjs';
 import { DurableDatabase, durableStorage } from './storage.mjs';
 import { bootstrapRoom } from './bootstrap.mjs';
 import { maintenanceEnabled, maintenanceResponse } from '../server/maintenance.mjs';
@@ -26,6 +27,9 @@ export class ProjectRoom {
     this.store = new RoomStore(null, { database: new DurableDatabase(ctx.storage), storagePlatform: durableStorage });
     bootstrapRoom(this.store, env);
     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: 'cloudflare-staging',
+      // Verified provider webhook updates are journaled in the Durable Object's
+      // SQLite (pending_channel_updates), so they survive eviction and restart.
+      channelWebhooks: new ChannelWebhookInbox(this.store),
       resolveRequestSignal: () => this.requestSignals.getStore(),
       loadAsset: async path => {
         const response = await env.ASSETS.fetch(new Request(new URL('/' + path, env.ROOM_ORIGIN)));
