@@ -120,12 +120,17 @@ browser shows no send panel for channel sources in this pilot.
 ## Webhook journal lifecycle
 
 1. `receive` matches the connection and secret, validates the Telegram Update
-   shape and journals every update as `pending` in one store transaction.
+   shape and journals every update in one store transaction. A message-kind
+   update the adapter cannot normalize (for example an unsupported chat type) is
+   written straight into `failed` with the contract code as `last_error` and
+   `attempts` at the bound, so it never occupies the pending backlog or a sync
+   attempt; the delivery still answers 202, because a 4xx would only make the
+   provider redeliver the same update and stall its own queue behind it.
    Duplicates (same `update_id`, any status) are not written again.
-2. `sync` with `updates: null` takes the oldest 100 pending rows. An update
-   that cannot be normalized (for example an unsupported chat type) records one
-   failed attempt with the contract code as `last_error`, leaves this page and is
-   offered again next time, so it never blocks the updates around it. After
+2. `sync` with `updates: null` takes the oldest 100 pending rows. As a
+   backstop, a pending update the adapter can no longer normalize records one
+   failed attempt with the contract code, leaves this page and is offered again
+   next time, so it never blocks the updates around it. After
    `channelJournalLimits.maxAttempts` (5) it parks as `failed` and is no longer
    offered; the row keeps its payload and error for a later connection card.
 3. The recorded reader pages the remaining slice at 50 updates. The page apply

@@ -36,7 +36,7 @@ function fixture(t) {
 
 test("journaled webhook updates survive a store reopen, and the drained page marks exactly what it consumed imported", async t => {
   const f = fixture(t);
-  assert.deepEqual(f.receive([f.message(2000), f.message(2001)]), { accountId: f.auth.account.id, connectionId: f.connectionId, received: 2, accepted: 2, pending: 2 });
+  assert.deepEqual(f.receive([f.message(2000), f.message(2001)]), { accountId: f.auth.account.id, connectionId: f.connectionId, received: 2, accepted: 2, rejected: 0, pending: 2 });
   assert.deepEqual(f.webhooks.journal(f.auth.account.id, f.connectionId), { pending: 2, imported: 0, failed: 0 });
   // Restart: a new process sees the same backlog from the store, not from memory.
   const webhooks = f.reopen();
@@ -64,11 +64,11 @@ test("a redelivered update id is a no-op in every status, and the backlog and pa
   const f = fixture(t);
   const first = f.message(2000);
   assert.equal(f.receive([first]).accepted, 1);
-  assert.deepEqual(f.receive([first, f.message(2001)]), { accountId: f.auth.account.id, connectionId: f.connectionId, received: 2, accepted: 1, pending: 2 });
+  assert.deepEqual(f.receive([first, f.message(2001)]), { accountId: f.auth.account.id, connectionId: f.connectionId, received: 2, accepted: 1, rejected: 0, pending: 2 });
   assert.equal(f.rows().length, 2);
   assert.equal((await f.sync()).receipt.imports.length, 2);
   // Redelivery after import: nothing pending again, nothing imported twice.
-  assert.deepEqual(f.receive([first]), { accountId: f.auth.account.id, connectionId: f.connectionId, received: 1, accepted: 0, pending: 0 });
+  assert.deepEqual(f.receive([first]), { accountId: f.auth.account.id, connectionId: f.connectionId, received: 1, accepted: 0, rejected: 0, pending: 0 });
   assert.equal((await f.sync()).receipt.imports.length, 0);
   assert.deepEqual(f.webhooks.journal(f.auth.account.id, f.connectionId), { pending: 0, imported: 2, failed: 0 });
   assert.equal(f.store.inbox.verify().sources, 2);
@@ -89,7 +89,8 @@ test("a redelivered update id is a no-op in every status, and the backlog and pa
 test("an update that cannot be imported records its error and attempt count, parks after the bound, and never blocks its neighbours", async t => {
   const f = fixture(t);
   const poison = f.message(2001, "secret chat", { id: 77, type: "secret" });
-  f.receive([f.message(2000), poison, f.message(2002)]);
+  // Journaled pending behind receive()'s own check (an adapter contract that tightened later): the drain is the backstop.
+  f.store.channelUpdates.record(f.auth.account.id, f.connectionId, [f.message(2000), poison, f.message(2002)], { backlog: 500 });
   const first = await f.sync();
   assert.equal(first.receipt.imports.length, 2, "good updates around the poison import on the first drain");
   assert.deepEqual(f.rows().map(r => [r.update_id, r.status, r.attempts, r.last_error]), [[2000, "imported", 0, null], [2001, "pending", 1, "unsupported_telegram_chat"], [2002, "imported", 0, null]]);
@@ -103,22 +104,32 @@ test("an update that cannot be imported records its error and attempt count, par
   assert.equal((await f.sync()).receipt.imports.length, 0);
   assert.equal(f.rows()[1].attempts, channelJournalLimits.maxAttempts, "attempts stop at the bound");
   assert.equal(f.receive([poison]).accepted, 0, "redelivering a parked update does not revive it");
+  // receive() parks a malformed message-kind update on arrival (202, never 4xx: a refusal would only make the
+  // provider redeliver it), so it never occupies the backlog or a sync attempt; well-formed neighbours stay pending.
+  const early = f.message(2500, "bad chat", { id: 78, type: "secret" });
+  assert.deepEqual(f.receive([f.message(2499), early, { update_id: 2501, callback_query: { id: "cb", data: "skipped" } }]),
+    { accountId: f.auth.account.id, connectionId: f.connectionId, received: 3, accepted: 3, rejected: 1, pending: 2 });
+  assert.deepEqual(f.rows().filter(r => r.update_id >= 2499).map(r => [r.update_id, r.status, r.attempts, r.last_error]),
+    [[2499, "pending", 0, null], [2500, "failed", channelJournalLimits.maxAttempts, "unsupported_telegram_chat"], [2501, "pending", 0, null]]);
+  assert.equal(f.receive([early]).accepted, 0, "a parked arrival is idempotent too");
+  assert.equal((await f.sync()).receipt.imports.length, 1, "the callback query is consumed by the page, not imported");
+  assert.deepEqual(f.webhooks.journal(f.auth.account.id, f.connectionId), { pending: 0, imported: 4, failed: 2 });
   // Journal state survives a restart exactly.
   const before = f.rows(); f.reopen();
   assert.deepEqual(f.rows(), before);
-  assert.deepEqual(f.store.channelUpdates.verify(), { pending: 0, imported: 2, failed: 1 });
+  assert.deepEqual(f.store.channelUpdates.verify(), { pending: 0, imported: 4, failed: 2 });
   // A failure of the page itself counts one attempt on the whole slice, but a state conflict (409) counts nothing.
   f.receive([f.message(4000), f.message(4001)]);
   const apply = f.store.email.apply;
   f.store.email.apply = () => { throw new ServiceError(409, "stale_email_page", "Sync progress changed."); };
   await assert.rejects(f.sync(), { code: "stale_email_page" });
-  assert.deepEqual(f.rows().slice(3).map(r => [r.status, r.attempts, r.last_error]), [["pending", 0, null], ["pending", 0, null]]);
+  assert.deepEqual(f.rows().filter(r => r.update_id >= 4000).map(r => [r.status, r.attempts, r.last_error]), [["pending", 0, null], ["pending", 0, null]]);
   f.store.email.apply = () => { throw new ServiceError(500, "importer_unavailable", "Importer failed."); };
   await assert.rejects(f.sync(), { code: "importer_unavailable" });
-  assert.deepEqual(f.rows().slice(3).map(r => [r.status, r.attempts, r.last_error]), [["pending", 1, "importer_unavailable"], ["pending", 1, "importer_unavailable"]]);
+  assert.deepEqual(f.rows().filter(r => r.update_id >= 4000).map(r => [r.status, r.attempts, r.last_error]), [["pending", 1, "importer_unavailable"], ["pending", 1, "importer_unavailable"]]);
   f.store.email.apply = apply;
   assert.equal((await f.sync()).receipt.imports.length, 2);
-  assert.deepEqual(f.webhooks.journal(f.auth.account.id, f.connectionId), { pending: 0, imported: 4, failed: 1 });
+  assert.deepEqual(f.webhooks.journal(f.auth.account.id, f.connectionId), { pending: 0, imported: 6, failed: 2 });
   assert.doesNotThrow(() => auditRecovery(f.store));
 });
 

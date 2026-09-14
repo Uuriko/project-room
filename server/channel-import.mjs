@@ -72,9 +72,22 @@ export class ChannelWebhookInbox {
     for (const row of this.#store.db.prepare("SELECT account_id,data_json FROM private_email_connections WHERE id=?").all(connectionId)) {
       const connection = JSON.parse(row.data_json), stored = connection.webhook?.secretHash;
       const ok = typeof stored === "string" && stored.length === 64 && timingSafeEqual(Buffer.from(stored, "hex"), presented);
-      if (ok && connection.state === "active" && profileChannel(connection.profile) === "telegram") found = { accountId: row.account_id, connectionId };
+      if (ok && connection.state === "active" && profileChannel(connection.profile) === "telegram") found = { accountId: row.account_id, connectionId, profile: connection.profile };
     }
     return found;
+  }
+  // A message-kind update the Telegram adapter cannot normalize is journaled
+  // straight into 'failed' with the contract code, never 'pending': it must not
+  // occupy the backlog or a sync attempt, and refusing it (4xx) would only make
+  // the provider redeliver it and stall its own queue behind it.
+  static rejected(profile, updates) {
+    const rejected = new Map();
+    for (const update of updates) {
+      if (!telegram.updateKind(update)) continue;
+      try { telegram.normalizeTelegramUpdate(profile, update); }
+      catch (error) { if (error?.name !== "EmailContractError") throw error; rejected.set(update.update_id, String(error.code ?? error.message)); }
+    }
+    return rejected;
   }
   // Match, validate and journal in one store transaction: a delivery is either
   // fully recorded or refused unchanged. A redelivered update id is a no-op.
@@ -88,8 +101,8 @@ export class ChannelWebhookInbox {
         || (body.updates && Object.keys(body).length !== 1)
         || !updates.every(update => update && typeof update === "object" && !Array.isArray(update) && Number.isSafeInteger(update.update_id) && update.update_id >= 0))
         fail(422, "invalid_channel_update", "Supply Telegram Update objects.");
-      const journaled = this.#store.channelUpdates.record(match.accountId, connectionId, updates, { backlog: channelSyncLimits.webhookBacklog });
-      return { accountId: match.accountId, connectionId, received: journaled.received, accepted: journaled.accepted, pending: journaled.pending };
+      const journaled = this.#store.channelUpdates.record(match.accountId, connectionId, updates, { backlog: channelSyncLimits.webhookBacklog, rejected: ChannelWebhookInbox.rejected(match.profile, updates) });
+      return { accountId: match.accountId, connectionId, received: journaled.received, accepted: journaled.accepted, rejected: journaled.rejected, pending: journaled.pending };
     });
   }
   // Oldest pending updates first; `limit` null returns the whole pending backlog.
@@ -123,17 +136,13 @@ export async function syncTelegramConnection({ store, token, binding, connection
   }
   if (!Array.isArray(updates) || updates.length > channelSyncLimits.webhookUpdates) fail(422, "invalid_channel_update", "Supply at most 100 recorded Telegram updates.");
   if (source === "webhook") {
-    // A journaled update that cannot be normalized records one failed attempt
+    // Backstop for a journaled update the adapter can no longer normalize
+    // (receive() already parks those it can see): it records one failed attempt
     // and leaves this page, so it never blocks the updates around it; after the
     // bound it parks as failed. Non-message updates (callback queries) are
     // skipped by the reader and pass through here.
-    const poison = new Map();
-    for (const update of updates) {
-      if (!telegram.updateKind(update)) continue;
-      try { telegram.normalizeTelegramUpdate(captured.connection.profile, update); }
-      catch (error) { if (error?.name !== "EmailContractError") throw error; poison.set(update.update_id, error); }
-    }
-    for (const [updateId, error] of poison) webhooks.fail(accountId, connectionId, [updateId], error);
+    const poison = ChannelWebhookInbox.rejected(captured.connection.profile, updates);
+    for (const [updateId, code] of poison) webhooks.fail(accountId, connectionId, [updateId], code);
     updates = updates.filter(update => !poison.has(update.update_id));
   }
   // A drained slice that still cannot be imported records one attempt on every
