@@ -65,12 +65,16 @@ numbers (~175 ops/sec, pilot caps: 100 members/room, 10k events).
 Proves a live room survives the sqlite backup round-trip (counts + content
 compared after restore).
 
-## Cold start: `node scripts/measure-cold-start.mjs [runs] [--json]`
+## Cold start: `node scripts/measure-cold-start.mjs [phases|constructor] ...`
 
-Times import, fresh store, first request and store reopen under Node (CPU and
-wall) and, when `cloudflare/node_modules` has miniflare, the same requests
-against the real Worker entry (wall). Results and the reading against the
-Worker CPU cap are in [WORKER-LIMITS.md](WORKER-LIMITS.md).
+One script, two subcommands, `--json` for both. `phases [runs] [--no-miniflare]`
+(the default) times import, fresh store, first request and store reopen under
+Node (CPU and wall) and, when `cloudflare/node_modules` has miniflare, the same
+requests against the real Worker entry (wall). `constructor [events] [runs]
+[--help-history]` fills a store with N audit events and times cold `RoomStore`
+constructions of it (min / median / max). Results and the reading against the
+Worker CPU cap are in [WORKER-LIMITS.md](WORKER-LIMITS.md);
+`tests/measure-cold-start.test.js` pins the CLI and both report shapes.
 
 ## Pre-push suggestion
 

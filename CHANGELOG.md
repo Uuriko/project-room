@@ -12,6 +12,16 @@
 
 ## 2026-09-14
 
+- Cold-start measurement folded into one script: `scripts/measure-cold-start.mjs`
+  now has two subcommands, `phases` (the default; PR #160's per-phase first
+  request under Node and miniflare, `--json`, `--no-miniflare`) and
+  `constructor [events] [runs] [--help-history]` (PR #141's constructor timing
+  against an N-event store, min / median / max wall plus CPU), which the
+  hand-resolved merge of #141 had dropped in favour of #160's file.
+  `tests/measure-cold-start.test.js` pins the CLI and both report shapes;
+  `docs/WORKER-LIMITS.md` documents usage and records the 10,000-event
+  constructor numbers re-measured on today's store, `docs/TESTING.md` the
+  subcommands.
 - Search and moderation (backlog 11): `GET /api/rooms/:id/search` now excludes
   messages by an author the caller muted for every `kind` on the server
   (`mutedEvent` in `server/moderation.mjs`), matching the browser filter, so

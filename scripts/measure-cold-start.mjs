@@ -1,25 +1,51 @@
-// Cold-start measurement (re-audit 2026-09-14, M5).
+// Cold-start measurement (re-audit 2026-09-14, M5; folds PR #141 and #160).
 //
 // cloudflare/wrangler.jsonc caps the Worker at `limits.cpu_ms`; the Durable
 // Object's first request evaluates the modules, opens the store (schema
 // verification, provenance and invitation audits) and answers. This script
 // measures those phases so the cap is chosen against a number, not a guess.
+// Results and the reading against the cap live in docs/WORKER-LIMITS.md.
 //
-//   node scripts/measure-cold-start.mjs [runs=3] [--json] [--no-miniflare]
+// Two subcommands, one CLI. `--json` works for both; the report is a table
+// otherwise.
 //
-// Node: each run is a fresh child process that times import of
-// server/store.mjs + server/http.mjs, a fresh store (initialize), listen plus
-// the first /api/health, the first authenticated room snapshot, and reopening
-// the existing database (the constructor path a restarted object takes).
-// CPU is process.cpuUsage() (user + system); wall is performance.now().
+//   node scripts/measure-cold-start.mjs [phases] [runs=3] [--json] [--no-miniflare]
 //
-// miniflare: when cloudflare/node_modules has miniflare and esbuild (pnpm
-// install in cloudflare/), the real cloudflare/room.mjs entry runs in workerd
-// and the same requests are timed from outside. workerd exposes no CPU
-// counter, so those rows are wall time only; `await mf.ready` runs first so
-// the cold row is isolate creation + module evaluation + object constructor,
-// not the workerd process start. Results in docs/WORKER-LIMITS.md.
+// `phases` (the default, from PR #160) answers "what does the first request
+// pay on an empty workspace?". Node: each run is a fresh child process that
+// times import of server/store.mjs + server/http.mjs, a fresh store
+// (initialize), listen plus the first /api/health, the first authenticated
+// room snapshot, and reopening the existing database (the constructor path a
+// restarted object takes). CPU is process.cpuUsage() (user + system); wall is
+// performance.now(); both are medians over the runs. miniflare: when
+// cloudflare/node_modules has miniflare and esbuild (pnpm install in
+// cloudflare/), the real cloudflare/room.mjs entry runs in workerd and the
+// same requests are timed from outside. workerd exposes no CPU counter, so
+// those rows are wall time only; `await mf.ready` runs first so the cold row
+// is isolate creation + module evaluation + object constructor, not the
+// workerd process start. `--no-miniflare` prints the Node rows only.
+//
+//   node scripts/measure-cold-start.mjs constructor [events=10000] [runs=5] [--help-history] [--json]
+//
+// `constructor` (from PR #141) answers "how does the RoomStore constructor
+// grow with the event log?". It builds one database holding `events` audit
+// rows (capped at the 10,000-event pilot limit) with the real server modules,
+// then times `runs` cold constructions of it: schema verification, projection
+// provenance repair, invitation audit and work-help history audit, which is
+// exactly the work a restarted Durable Object does before its first answer.
+// It reports build time plus min / median / max wall and CPU of the
+// constructor and every sample. `--help-history` also opens one help
+// invitation so auditWorkHelp replays every event instead of taking its
+// no-help fast path. Store behaviour is never changed; only milliseconds are
+// reported. The 10,000-event build runs every command through the store and
+// takes a few minutes; the constructor samples are the measurement.
+//
+// Node's node:sqlite file database is the closest local stand-in for the
+// Durable Object SQLite adapter; workerd CPU accounting differs, so treat
+// every number as the shape and lower bound of the hosted cold start, not a
+// certificate.
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -30,8 +56,25 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const args = process.argv.slice(2);
 const flags = new Set(args.filter(a => a.startsWith("--")));
 const childIndex = args.indexOf("--child");
+const SUBCOMMANDS = ["phases", "constructor"];
+const positionals = args.filter(a => !a.startsWith("--"));
+const subcommand = SUBCOMMANDS.includes(positionals[0]) ? positionals.shift() : "phases";
+const JSON_OUTPUT = flags.has("--json");
 const ms = value => Math.round(value * 100) / 100;
 const median = values => { const s = [...values].sort((a, b) => a - b); return s[Math.floor(s.length / 2)]; };
+const summary = values => { const s = [...values].sort((a, b) => a - b); return { min: ms(s[0]), median: ms(s[Math.floor(s.length / 2)]), max: ms(s[s.length - 1]) }; };
+const usage = () => {
+  console.error("Usage: node scripts/measure-cold-start.mjs [phases] [runs>=1] [--json] [--no-miniflare]");
+  console.error("       node scripts/measure-cold-start.mjs constructor [events 2..10000] [runs>=1] [--help-history] [--json]");
+  process.exit(2);
+};
+const knownFlags = new Set(["--json", "--no-miniflare", "--help-history", "--child"]);
+if ([...flags].some(flag => !knownFlags.has(flag))) usage();
+const serverModules = () => Promise.all([
+  import(pathToFileURL(join(root, "server/store.mjs"))),
+  import(pathToFileURL(join(root, "server/bootstrap.mjs"))),
+  import(pathToFileURL(join(root, "src/events.js"))),
+]).then(([{ RoomStore }, { initialRoom }, { EVENT_TYPES }]) => ({ RoomStore, initialRoom, EVENT_TYPES }));
 
 // ---------------------------------------------------------------- Node child
 if (childIndex >= 0) {
@@ -74,12 +117,72 @@ if (childIndex >= 0) {
   process.exit(0);
 }
 
-// ------------------------------------------------------------ Node parent
-const RUNS = Number(args.filter(a => !a.startsWith("--"))[0] ?? 3);
-if (!Number.isInteger(RUNS) || RUNS < 1) {
-  console.error("Usage: node scripts/measure-cold-start.mjs [runs>=1] [--json] [--no-miniflare]");
-  process.exit(2);
+// ------------------------------------------------- constructor subcommand
+if (subcommand === "constructor") {
+  const TARGET = Math.min(Number(positionals[0] ?? 10000), 10000);
+  const RUNS = Number(positionals[1] ?? 5);
+  const HELP_HISTORY = flags.has("--help-history");
+  if (!Number.isInteger(TARGET) || TARGET < 2 || !Number.isInteger(RUNS) || RUNS < 1 || positionals.length > 2 || flags.has("--no-miniflare")) usage();
+  const { RoomStore, initialRoom, EVENT_TYPES: T } = await serverModules();
+  const directory = mkdtempSync(join(tmpdir(), "room-cold-start-"));
+  const file = join(directory, "room.sqlite");
+  try {
+    const buildStart = performance.now();
+    const store = new RoomStore(file);
+    store.initialize(initialRoom()); // room.created + member.added
+    const ownerKey = store.issueAccessKey("commons", "owner");
+    if (HELP_HISTORY) {
+      store.command(ownerKey, "commons", { id: randomUUID(), type: T.WORK_PROPOSED, data: {
+        workItemId: "cold-start-work", title: "Cold-start measurement", definitionOfDone: "Never completed; exists so the help audit replays history",
+        accountableMemberId: "owner", mode: "read" } });
+      store.command(ownerKey, "commons", { id: randomUUID(), type: T.WORK_ACCEPTED, data: { workItemId: "cold-start-work", expectedRevision: 0 } });
+      store.command(ownerKey, "commons", { id: randomUUID(), type: T.WORK_HELP_UPDATED, data: {
+        workItemId: "cold-start-work", expectedRevision: 1, expectedHelpRevision: 0, status: "open",
+        scope: "Synthetic help invitation for measurement only", expiresAt: new Date(Date.now() + 3600000).toISOString() } });
+    }
+    let sequence = store.room("commons").sequence;
+    // One transaction for the whole fill: this measures startup, not insert speed.
+    store.transaction(() => {
+      for (; sequence < TARGET; sequence++) {
+        store.command(ownerKey, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED,
+          data: { messageId: randomUUID(), body: `Synthetic audit event ${sequence + 1} for the cold-start measurement` } });
+      }
+    });
+    const events = store.db.prepare("SELECT count(*) n FROM events").get().n;
+    store.close();
+    const buildMs = ms(performance.now() - buildStart);
+
+    const wallSamples = [], cpuSamples = [];
+    for (let run = 0; run < RUNS; run++) {
+      const cpu = process.cpuUsage(), start = performance.now();
+      const cold = new RoomStore(file); // constructor = the Durable Object cold-start path
+      wallSamples.push(ms(performance.now() - start));
+      const used = process.cpuUsage(cpu);
+      cpuSamples.push(ms((used.user + used.system) / 1000));
+      cold.close();
+    }
+    const note = "Node node:sqlite file database; workerd CPU accounting differs. CPU = process user+system time; wall = elapsed.";
+    const constructorMs = { ...summary(wallSamples), samples: wallSamples };
+    const constructorCpuMs = { ...summary(cpuSamples), samples: cpuSamples };
+    if (JSON_OUTPUT) {
+      console.log(JSON.stringify({ node: process.version, events, helpHistory: HELP_HISTORY, runs: RUNS, buildMs, constructorMs, constructorCpuMs, note }, null, 2));
+    } else {
+      console.log(`Cold-start constructor measurement, ${RUNS} cold construction${RUNS === 1 ? "" : "s"} of a ${events}-event store${HELP_HISTORY ? " with an open help invitation" : ""} (Node ${process.version})`);
+      console.log(`build: ${buildMs} ms wall`);
+      console.log(`${"RoomStore constructor".padEnd(22)} ${"min".padStart(8)} ${"median".padStart(8)} ${"max".padStart(8)}`);
+      for (const [label, stats] of [["CPU ms", constructorCpuMs], ["wall ms", constructorMs]]) {
+        console.log(`${label.padEnd(22)} ${String(stats.min).padStart(8)} ${String(stats.median).padStart(8)} ${String(stats.max).padStart(8)}`);
+      }
+      console.log(`samples (wall ms): ${wallSamples.join(", ")}`);
+      console.log(`note: ${note}`);
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+  process.exit(0);
 }
+
+// ------------------------------------------------------------ Node parent
+const RUNS = Number(positionals[0] ?? 3);
+if (!Number.isInteger(RUNS) || RUNS < 1 || positionals.length > 1 || flags.has("--help-history")) usage();
 const table = [];
 const nodeRuns = [];
 for (let run = 0; run < RUNS; run++) {
@@ -166,7 +269,7 @@ export default entry;
 }
 
 // ----------------------------------------------------------------- report
-if (flags.has("--json")) {
+if (JSON_OUTPUT) {
   console.log(JSON.stringify({ node: process.version, runs: RUNS, statistic: "median", miniflare: miniflareNote, rows: table }, null, 2));
 } else {
   const width = Math.max(...table.map(row => row.phase.length));
