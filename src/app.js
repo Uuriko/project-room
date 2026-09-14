@@ -3047,6 +3047,18 @@ $("#rb-ack-button").addEventListener("click", () => briefView.acknowledge());
 $("#rb-show-all").addEventListener("click", () => { showAllAttention = !showAllAttention; renderReturnBrief(); });
 document.addEventListener("visibilitychange", renderReturnBrief);
 shareLinksUI = installShareLinks({ client, accountClient, getState: () => state, getSession: () => session, setConnectionStatus,
+  listPurposes: () => Object.values(state?.workItems ?? {}).map(item => ({ id: item.id, title: item.title,
+    done: ["complete", "superseded"].includes(nextWorkStep(item).action) })),
+  onJoinedRoom: focus => {
+    if (focus.kind === "work" && state?.workItems[focus.id]) {
+      revealWork(focus.id);
+      notice(`You're here to help with "${state.workItems[focus.id].title}".`);
+    } else if (focus.kind === "message" && conversation.byId.has(focus.id)) {
+      revealMessage(focus.id);
+    } else {
+      notice("The item this invitation pointed to is no longer in this room.");
+    }
+  },
   async openRoom(roomId, roomMode, joinedSession) {
     if (state && session?.roomId === roomId && session.member.id === joinedSession?.member?.id
       && session.account?.id === joinedSession.account?.id && session.sessionBinding === joinedSession.sessionBinding) {
