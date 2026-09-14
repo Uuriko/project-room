@@ -103,6 +103,18 @@ ids stay off that path. Excerpt sharing into a room works like email.
 | `POST /api/inbox/connections/{id}/sync` | Import one recorded Telegram page `{ requestId, updates }` (at most 100 updates); `updates: null` drains the oldest pending journal rows. Each sync consumes at most 50 updates and reports `receipt.complete: false` when more remain, so a larger backlog drains over repeated syncs with fresh request IDs. The page and the acknowledgement of exactly the rows it consumed commit in one transaction. Loopback-only **and** fixture-mode only |
 | `POST /api/inbox/webhooks/{connectionId}` | Provider callback. `X-Telegram-Bot-Api-Secret-Token` is compared in constant time against the SHA-256 stored by `connection.webhook`; accepted updates are journaled durably (`pending_channel_updates`) until the owner syncs, and a redelivered `update_id` is a no-op in every status. At most 500 pending rows per connection (409 `channel_webhook_backlog`, delivery refused unchanged). Inert unless the server is started with a `ChannelWebhookInbox` |
 
+Webhook secret and state (B49). `ChannelWebhookInbox.hash` is the only place a
+plaintext secret enters the server; it accepts 16–256 characters without
+whitespace or control characters and with at least 6 distinct characters (422
+`weak_webhook_secret`), and a presented secret outside that rule is refused
+before any compare. Choose at least 32 random bytes (64 hex characters). A
+delivery is accepted only while the connection is `active` for the account's
+current auth epoch: a `reconnect_required` or `disconnected` connection answers
+401 `channel_webhook_denied` and journals nothing. A retried `sync` with the
+same `requestId` returns the journaled receipt only when it carries the same
+recording (or is a drain, `updates: null`); different `updates` answer 409
+`idempotency_conflict`.
+
 `GET /api/inbox?view=…` lists channel sources with a `connection`
 reference; clients without a negotiated view still see samples only.
 
