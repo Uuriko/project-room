@@ -65,4 +65,4 @@ Phase 0 is unchanged. Project Room and Dasha Compute stay separate products. A l
 
 ## Adjacent contract: Contribution ledger (docs now; derived rollup 0.5+)
 
-Phase 0 is unchanged. Contribution is a read-model over existing completion, verification, decision, and Artifact facts — not a second product or a disconnected scoreboard. v0 of the ledger is visible share weights only; no auto-payout. Message volume is not value. See [CONTRIBUTION-LEDGER](./CONTRIBUTION-LEDGER.md). Designs and fixtures coordinate on [issue #11](https://github.com/Uuriko/project-room/issues/11).
+Phase 0 is unchanged. Contribution is a read-model over existing completion, verification, decision, and Artifact facts — not a second product or a disconnected scoreboard. v0 of the ledger is visible share weights only; no auto-payout. Message volume is not value. See [CONTRIBUTION-LEDGER](./CONTRIBUTION-LEDGER.md) and the isolated [`contribution-rollup`](../contribution-rollup/) module. Designs and fixtures coordinate on [issue #11](https://github.com/Uuriko/project-room/issues/11).
