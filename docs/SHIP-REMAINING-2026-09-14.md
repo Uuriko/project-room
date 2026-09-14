@@ -45,9 +45,9 @@ Tag 15 is a proposal catalog. Apply **only** live strings that already have cont
 
 Sandbox stays draft. No merge.
 
-### C. Schema-26 data on `project-room-staging` (copy-first; do not deploy 33 there)
+### C. Schema-26 data on `project-room-staging` (do not in-place upgrade)
 
-`a5f2dca32be0f3ba725608d3c89ce16c635b2c30` is a **git commit SHA** (schema 26), not a Cloudflare object hex. It is what staging still serves:
+`a5f2dca32be0f3ba725608d3c89ce16c635b2c30` is a **git commit SHA** (schema 26), not a Cloudflare object hex. Staging still serves it:
 
 | Host | Worker | `/api/version` |
 |---|---|---|
@@ -55,7 +55,9 @@ Sandbox stays draft. No merge.
 | `https://www.getdasha.com/room` | same Worker (route) | same |
 | `https://room.trydemigod.com` | `project-room` | schema-33 production (this tree) |
 
-The Durable Object class is `ProjectRoom` on **project-room-staging** (name `invite-only-pilot` in current code). Do **not** `wrangler deploy` this tree to `project-room-staging`. PITR clone that object to a **new** id, then cutover-copy (script refuses paths containing `a5f2dca`). Never first-write schema 33 onto the staging store.
+Cloudflare PITR restores the **same** Durable Object in place (last 30 days). It is **not** a clone-to-new-id API. Copying SQLite between objects is application export/import, not a platform button. Rollback restores **code**, not SQLite. One Worker version is pinned per object.
+
+Do **not** `wrangler deploy` this tree to `project-room-staging`. That would be an in-place 26→33 write. Optional later: export from staging, import into a **new** object, drill, then consider cutover. Not a launch blocker.
 
 ### D. Instinct W4-45 (not Grok)
 
