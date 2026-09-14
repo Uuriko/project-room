@@ -295,3 +295,146 @@ test("F8 semantics: export retains deleted-message history; projection and searc
   assert.equal(events.find(e => e.type === T.MESSAGE_EDITED && e.data.messageId === "m1").data.body, "revised wording");
   assert.equal(events.find(e => e.type === T.MESSAGE_DELETED && e.data.messageId === "m1").data.reason, "Posted in error");
 });
+
+// BUILD-01 F2: the human-readable export.
+import { renderRoomExportHtml, safeEvidenceHref, EXPORT_HTML_CSP } from "../server/room-export-html.mjs";
+
+async function seedReadableRoom(store, ownerKey) {
+  const cmd = (type, data) => store.command(ownerKey, "commons", { id: randomUUID(), type, data });
+  cmd(T.MESSAGE_POSTED, { messageId: "script", body: "<script>alert(1)</script> stays text" });
+  cmd(T.MESSAGE_POSTED, { messageId: "breakout", body: "\" onmouseover=\"alert(2)\" data-x=\"' onfocus='alert(3)" });
+  cmd(T.MESSAGE_POSTED, { messageId: "gone", body: "original secret wording" });
+  cmd(T.MESSAGE_EDITED, { messageId: "gone", body: "revised secret wording", expectedMessageRevision: 0 });
+  cmd(T.MESSAGE_DELETED, { messageId: "gone", expectedMessageRevision: 1, reason: "Posted in error" });
+  cmd(T.WORK_PROPOSED, { workItemId: "w1", title: "Ship <the> thing", definitionOfDone: "Done when \"quoted\" & shipped", accountableMemberId: "owner" });
+  cmd(T.WORK_ACCEPTED, { workItemId: "w1", expectedRevision: 0 });
+  cmd(T.WORK_STARTED, { workItemId: "w1", expectedRevision: 1 });
+  cmd(T.WORK_COMPLETED, { workItemId: "w1", expectedRevision: 2, summary: "Merged the <fix>", nextAction: "Review",
+    evidenceUrl: "https://example.com/pr/1?q=<a>&r=\"b\"", evidenceVersion: "abc123" });
+}
+
+test("HTML export renders the same event walk for people: escaped, tombstoned, framed and sandboxed", async t => {
+  const { request, ownerKey, agentKey, store } = await serve(t);
+  await seedReadableRoom(store, ownerKey);
+  const res = await request("/api/rooms/commons/export?format=html", { token: ownerKey });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type"), /^text\/html; charset=utf-8$/);
+  assert.match(res.headers.get("content-disposition"), /attachment; filename="room-commons-export\.html"/);
+  assert.equal(res.headers.get("x-content-type-options"), "nosniff");
+  const html = await res.text();
+  // Materialised before the headers go out: the declared length is the body's.
+  assert.equal(Number(res.headers.get("content-length")), Buffer.byteLength(html, "utf8"));
+  assert.match(html, /End of export: \d+ events rendered, through sequence \d+\./, "a whole file ends with its closing marker");
+  // The policy is fit for a static document: nothing loads, nothing runs.
+  const csp = res.headers.get("content-security-policy");
+  assert.equal(csp, EXPORT_HTML_CSP);
+  assert.match(csp, /default-src 'none'/);
+  assert.match(csp, /style-src 'sha256-[A-Za-z0-9+/=]+'/);
+  assert.match(csp, /frame-ancestors 'none'/);
+  assert.match(csp, /sandbox/);
+  assert.doesNotMatch(csp, /script-src/);
+  assert.doesNotMatch(csp, /unsafe-inline/);
+  // No script and no inline handler anywhere in the document; the bodies
+  // that tried are plain escaped text.
+  assert.doesNotMatch(html, /<script/i);
+  assert.doesNotMatch(html, /\son[a-z]+\s*=\s*["']/i, "no attribute-breakout reached an attribute");
+  assert.doesNotMatch(html, / style=/i);
+  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt; stays text/);
+  assert.match(html, /&quot; onmouseover=&quot;alert\(2\)&quot; data-x=&quot;&#39; onfocus=&#39;alert\(3\)/);
+  assert.match(html, /Ship &lt;the&gt; thing/);
+  assert.match(html, /Done when &quot;quoted&quot; &amp; shipped/);
+  assert.match(html, /Merged the &lt;fix&gt;/);
+  // The evidence link is the only user-controlled attribute and it is an
+  // escaped, re-validated https URL.
+  assert.match(html, /<a href="https:\/\/example\.com\/pr\/1\?q=%3Ca%3E&amp;r=%22b%22" rel="noopener noreferrer nofollow">/);
+  assert.match(html, /version abc123/);
+  // Tombstoned content is hidden: neither the original nor the edited text,
+  // and no edit history; the slot reads "deleted".
+  assert.doesNotMatch(html, /secret wording/);
+  assert.match(html, /Message deleted/);
+  assert.doesNotMatch(html, /Posted in error/, "the deletion reason is room-internal, not part of the readable copy");
+  // Members and the work item's state are drawn from the walk.
+  assert.match(html, /Room owner/);
+  assert.match(html, /Test agent/);
+  assert.match(html, /<span class="flag">completed<\/span>/);
+  // Same auth as the JSONL format: any member, no one else.
+  assert.equal((await request("/api/rooms/commons/export?format=html", { token: agentKey })).status, 200);
+  assert.equal((await request("/api/rooms/commons/export?format=html")).status, 401);
+  // Unknown or repeated formats are refused as input, not guessed.
+  const bad = await request("/api/rooms/commons/export?format=pdf", { token: ownerKey });
+  assert.equal(bad.status, 422);
+  assert.equal((await bad.json()).error.code, "invalid_format");
+  assert.equal((await request("/api/rooms/commons/export?format=html&format=jsonl", { token: ownerKey })).status, 422);
+});
+
+test("HTML export respects current membership: a removed member gets nothing, the room shows access ended", async t => {
+  const { request, ownerKey, agentKey, store } = await serve(t);
+  await seedReadableRoom(store, ownerKey);
+  assert.equal((await request("/api/rooms/commons/export?format=html", { token: agentKey })).status, 200);
+  assert.equal((await request("/api/rooms/commons/export", { token: agentKey })).status, 200);
+  store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED,
+    data: { memberId: "agent", expectedMemberRevision: 0, permissions: ["accept_work"], active: false } });
+  for (const path of ["/api/rooms/commons/export?format=html", "/api/rooms/commons/export"]) {
+    const denied = await request(path, { token: agentKey });
+    assert.ok([401, 403].includes(denied.status), `${path}: expected 401/403 after removal, got ${denied.status}`);
+    assert.match(denied.headers.get("content-type"), /application\/json/);
+  }
+  const html = await (await request("/api/rooms/commons/export?format=html", { token: ownerKey })).text();
+  assert.match(html, /Test agent <span class="flag">agent<\/span> <span class="flag">access ended<\/span>/);
+});
+
+test("HTML export keeps the JSONL export byte-for-byte and shares its integrity rule", async t => {
+  const { request, ownerKey, store } = await serve(t);
+  await seedReadableRoom(store, ownerKey);
+  const expected = [...store.exportEvents(ownerKey, "commons")].map(line => JSON.stringify(line) + "\n").join("");
+  const plain = await (await request("/api/rooms/commons/export", { token: ownerKey })).text();
+  const explicit = await (await request("/api/rooms/commons/export?format=jsonl", { token: ownerKey })).text();
+  assert.equal(plain, expected);
+  assert.equal(explicit, expected);
+  // A failure part-way through the walk is a JSON error, never a clean-looking partial page.
+  const real = store.exportEvents.bind(store);
+  store.exportEvents = function* (...args) {
+    let rows = 0;
+    for (const line of real(...args)) { if (++rows > 2) throw new Error("storage read failed"); yield line; }
+  };
+  const failed = await request("/api/rooms/commons/export?format=html", { token: ownerKey });
+  assert.equal(failed.status, 500);
+  assert.match(failed.headers.get("content-type"), /application\/json/);
+  assert.equal((await failed.json()).error.code, "internal_error");
+  store.exportEvents = function* (...args) {
+    for (const line of real(...args)) { yield line; throw new ServiceError(503, "storage_unavailable", "Storage is unavailable"); }
+  };
+  const unavailable = await request("/api/rooms/commons/export?format=html", { token: ownerKey });
+  assert.equal(unavailable.status, 503);
+  assert.equal((await unavailable.json()).error.code, "storage_unavailable");
+  store.exportEvents = real;
+  assert.equal((await request("/api/rooms/commons/export?format=html", { token: ownerKey })).status, 200);
+});
+
+test("HTML renderer never links anything but a credential-free https URL and never fails on unknown events", () => {
+  assert.equal(safeEvidenceHref("https://example.com/x"), "https://example.com/x");
+  for (const bad of ["javascript:alert(1)", "data:text/html,hi", "http://example.com/", "https://user:pw@example.com/", "not a url", 42, null]) {
+    assert.equal(safeEvidenceHref(bad), null, String(bad));
+  }
+  const at = "2026-09-14T10:00:00.000Z";
+  const row = (sequence, type, data, actorId = "owner") => ({ sequence, event: { id: `e${sequence}`, roomId: "r", type, actorId, at, data } });
+  const html = renderRoomExportHtml([
+    row(1, T.ROOM_CREATED, { roomId: "r", ownerId: "owner", title: "<Title>", purpose: "Purpose \"quoted\"" }),
+    row(2, T.MEMBER_ADDED, { memberId: "owner", displayName: "Owner <b>", kind: "human", permissions: [] }),
+    row(3, T.WORK_PROPOSED, { workItemId: "w", title: "t", definitionOfDone: "d", accountableMemberId: "owner" }),
+    row(4, T.WORK_COMPLETED, { workItemId: "w", expectedRevision: 0, summary: "s", nextAction: "n", evidenceUrl: "javascript:alert(1)", evidenceVersion: "v" }),
+    row(5, T.WORK_HANDOFF_RECORDED, { workItemId: "w", expectedRevision: 1, doneSummary: "h", nextAction: "n", limitReason: "l", evidenceUrl: "https://example.com/h\" onclick=\"x", evidenceVersion: "v2" }),
+    row(6, "future.event_type", { anything: "<goes>" }),
+    row(7, T.MESSAGE_DELETED, { messageId: "never-posted" }),
+    row(8, T.WORK_BLOCKED, { reason: "no work item id", nextAction: "n" }),
+  ], { roomId: "r", generatedAt: at });
+  assert.match(html, /Work items \(1\)/, "a work event without an id invents no item");
+  assert.match(html, /<title>&lt;Title&gt; — room export<\/title>/);
+  assert.match(html, /Owner &lt;b&gt;/);
+  assert.doesNotMatch(html, /href="javascript:/);
+  assert.match(html, /<code>javascript:alert\(1\)<\/code>/);
+  assert.match(html, /<a href="https:\/\/example\.com\/h%22%20onclick=%22x" rel="noopener noreferrer nofollow">/);
+  assert.doesNotMatch(html, /<goes>/);
+  assert.match(html, /End of export: 8 events rendered, through sequence 8\./);
+  assert.match(html, new RegExp(`<meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; style-src &#39;sha256-`));
+});

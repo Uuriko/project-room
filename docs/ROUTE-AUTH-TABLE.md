@@ -64,7 +64,9 @@ require a room credential with member visibility; `agent-connections`,
 `diagnostics`, `share-links` and `invitations` additionally require the room
 owner's or an administrator's signed-in account session (`?auth=account`),
 never a bearer key. `GET /api/rooms/:id/export` returns the full event log as
-one `Content-Length`-framed JSONL body (never a partial 200);
+one `Content-Length`-framed JSONL body (never a partial 200); with
+`?format=html` it returns the same walk as one escaped, script-free HTML page
+under a `default-src 'none'` Content-Security-Policy, same auth and framing;
 `GET /api/rooms/:id/stream` is the SSE feed.
 
 `tests/route-auth-table.test.js` enforces the headline invariant: every
