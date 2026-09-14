@@ -39,6 +39,7 @@ export const ACTION_CLASSES = Object.freeze({
 // commands without appending room events). Same three classes.
 export const SURFACE_CLASSES = Object.freeze({
   "private-reminders": "draft",      // server/reminders.mjs: per-member schedule records, immutable receipts, no outward effect
+  "wake-queue": "draft",             // server/wake-queue.mjs: the member's own scheduled intents; effects stay drafts
   "inbox-reply-sends": "act",        // server/inbox-transport.mjs: external send authority
   "email-import.mjs": "act",             // server/email-import.mjs: writes imported content into the room
   "share-links": "act",              // server/share-links.mjs: mints access-granting links
