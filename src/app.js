@@ -127,6 +127,7 @@ const client = new RoomClient({
     render();
     shareLinksUI?.sync();
     remindersUI?.sync();
+    syncNotifications();
     agentConnectionsUI?.sync();
     updatePeopleHint();
     if (firstSnapshot) showRoomGuide();
@@ -172,6 +173,7 @@ const client = new RoomClient({
     portableWorkUI?.reset();
     resultCopyUI?.reset();
     remindersUI?.reset();
+    resetNotifications();
     agentConnectionsUI?.reset();
     instructionsUI?.reset();
     if (!keepAccount) clearPrivateWorkspace({ preservePending: leavingPage });
@@ -2934,6 +2936,97 @@ window.addEventListener("pageshow", e => {
 // on open; history stays fixed through the frozen horizon H, the action sections are live
 // through N, and only the explicit button acknowledges - exactly H, never the latest event.
 function loadReturnBrief() { return briefView.refresh(); }
+// Notification feed (B4): items are derived on the server from events after your
+// caught-up marker and filtered by your notification preferences. Fetching never
+// acknowledges; "Mark read" moves the marker to exactly the sequence the list was
+// evaluated through, so items arriving later stay unread.
+let notificationOwner = null, notificationFeed = null, notificationSerial = 0, notificationBusy = false, notificationError = "", notificationTimer = null;
+// New room events are coalesced: the feed refetches at most once per window while the tab is visible.
+const NOTIFICATION_COALESCE_MS = 1500;
+const NOTIFICATION_LABELS = { mention: "mentioned you", reply: "replied to you", assignment: "named you on work", work_update: "updated work you are on" };
+const ownsNotifications = ticket => Boolean(ticket) && notificationOwner === ticket && client.generation === ticket.generation && client.session === ticket.session && client.ownsAccountSession();
+function resetNotifications() {
+  notificationSerial++; notificationOwner = null; notificationFeed = null; notificationBusy = false; notificationError = "";
+  clearTimeout(notificationTimer); notificationTimer = null;
+  $("#notification-count").textContent = ""; $("#notification-count").hidden = true;
+  $("#notification-panel").hidden = true; $("#notification-list").replaceChildren(); delete $("#notification-list")._content;
+  $("#notification-status").textContent = ""; $("#notification-read-button").disabled = true; $("#notification-read-button").textContent = "Mark read";
+}
+function renderNotifications() {
+  const owned = Boolean(state) && ownsNotifications(notificationOwner);
+  const feed = owned ? notificationFeed : null, items = feed?.notifications ?? [], count = feed?.unread ?? 0;
+  const badge = $("#notification-count");
+  badge.textContent = count ? `${count} for you` : ""; badge.hidden = !count;
+  $("#notification-panel").hidden = !owned;
+  setText("#notification-status", notificationError || (feed?.basis?.truncated ? `Showing changes since event ${feed.basis.from}. Older updates are under Updates.` : ""));
+  $("#notification-read-button").disabled = !owned || notificationBusy || !count;
+  $("#notification-read-button").textContent = notificationBusy ? "Marking read…" : "Mark read";
+  renderBriefList("#notification-list", items.map(item => {
+    const target = item.messageId ? { kind: "message", id: item.messageId } : { kind: "work", id: item.workItemId };
+    const detail = item.messageId ? (conversation?.byId.get(item.messageId)?.body ?? "").slice(0, 80) : (state.workItems[item.workItemId]?.title ?? item.workItemId);
+    const label = `${memberLabel(item.actorId)} ${NOTIFICATION_LABELS[item.kind] ?? humanize(item.kind)}${item.changes > 1 ? ` · ${item.changes} changes` : ""}`;
+    return `<li class="rb-event notification-item" data-notification-kind="${esc(item.kind)}"><a class="rb-event-link" href="${esc(recordHref(target.kind, target.id))}" data-open-${target.kind}="${esc(target.id)}" data-brief-key="notification:${esc(item.kind)}:${esc(target.id)}"><span class="rb-actor">${esc(label)}</span><time datetime="${esc(item.at)}">${esc(time(item.at))}</time>${detail ? `<span class="rb-detail">${esc(detail)}</span>` : ""}</a></li>`;
+  }).join("") || (owned && feed && !notificationError ? '<li class="rb-empty">Nothing new for you.</li>' : ""));
+}
+async function loadNotifications() {
+  const ticket = notificationOwner, request = ++notificationSerial;
+  if (!ownsNotifications(ticket)) return;
+  try {
+    const result = await client.notifications();
+    if (!ownsNotifications(ticket) || request !== notificationSerial || !result) return;
+    notificationFeed = result; notificationError = "";
+  } catch {
+    if (!ownsNotifications(ticket) || request !== notificationSerial) return;
+    notificationError = "Notifications could not refresh.";
+  }
+  renderNotifications();
+}
+function scheduleNotifications(delay) {
+  // One pending fetch at a time; an immediate request replaces a coalesced one.
+  if (notificationTimer !== null && delay > 0) return;
+  clearTimeout(notificationTimer);
+  notificationTimer = setTimeout(() => { notificationTimer = null; void loadNotifications(); }, delay);
+}
+function syncNotifications() {
+  if (!client.session || !client.ownsAccountSession() || !state) { resetNotifications(); return; }
+  if (!ownsNotifications(notificationOwner)) { resetNotifications(); notificationOwner = { generation: client.generation, session: client.session, inputs: null, sequence: null }; }
+  // Inputs that change the feed directly refetch at once: your cursor, your membership
+  // revision and your preferences. New room events only coalesce a refetch, and a hidden
+  // tab waits until it is visible again.
+  const me = state.members[session.member.id];
+  const inputs = `${roomCursor}:${me?.revision ?? ""}:${JSON.stringify(me?.notificationPreferences ?? null)}`;
+  if (notificationOwner.inputs !== inputs) { notificationOwner.inputs = inputs; notificationOwner.sequence = client.sequence; scheduleNotifications(0); }
+  else if (notificationOwner.sequence !== client.sequence) {
+    notificationOwner.sequence = client.sequence;
+    if (document.visibilityState === "hidden") notificationOwner.stale = true; else scheduleNotifications(NOTIFICATION_COALESCE_MS);
+  }
+  renderNotifications();
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "hidden" && ownsNotifications(notificationOwner) && notificationOwner.stale) { notificationOwner.stale = false; scheduleNotifications(0); }
+});
+$("#notification-read-button").addEventListener("click", async () => {
+  const ticket = notificationOwner, feed = notificationFeed;
+  if (!ownsNotifications(ticket) || !feed?.unread || notificationBusy) return;
+  notificationBusy = true; renderNotifications();
+  let saved = false;
+  try {
+    const result = await client.caughtUp(feed.sequence); // Exactly what the list was evaluated through.
+    if (!ownsNotifications(ticket) || !result) return;
+    saved = true; roomCursor = Math.max(roomCursor, result.cursor); notificationError = "";
+    await client.refresh();
+    if (!ownsNotifications(ticket)) return;
+    void loadReturnBrief();
+  } catch (error) {
+    if (!ownsNotifications(ticket)) return;
+    // Truthful feedback: a stored marker is never reported as a failed save.
+    if (saved) notice("Marked read. The latest room view could not be refreshed; refresh before relying on this list.", true);
+    else notificationError = "Could not mark read. Try again.";
+    if ([401, 403].includes(error.status)) client.handleFailure(error);
+  } finally {
+    if (ownsNotifications(ticket)) { notificationBusy = false; syncNotifications(); }
+  }
+});
 const roleLabel = role => ({ accountableMemberId: "accountable", verifierMemberId: "verifier", humanDecisionMakerId: "decision maker" }[role] ?? humanize(role));
 const BRIEF_GROUP_LABELS = { outcome: "Results", question: "Asked of you", blocker: "Blockers", decision: "Decisions", other: "Other updates" };
 function briefEventTarget(event) {

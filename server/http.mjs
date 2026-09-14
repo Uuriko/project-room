@@ -15,7 +15,6 @@ import { discoveryDoc, isHealthAliasPath } from "../deploy/agent-discovery.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
 import { guestAgentLinkContract } from "./guest-agent-links.mjs";
 import { isSessionStatus, workItemSessionContract } from "../src/work-item-session.js";
-import { roomUsageSummary, parseUsageDays } from "./usage-summary.mjs";
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -643,7 +642,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["code", "displayName"]) || typeof data.code !== "string" || typeof data.displayName !== "string") reject(422, "invalid_invite", "Invite code and displayName are required");
         return json(res, 201, store.invites.redeem(data.code, { displayName: data.displayName }));
       }
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|provider-heartbeats|identity-links|agent-invites|usage))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|provider-heartbeats|identity-links|agent-invites|notifications))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -729,14 +728,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const q = url.searchParams.get("q");
         const kind = url.searchParams.get("kind") ?? "all";
         return json(res, 200, store.search(selected.token, roomId, q, kind, fence));
-      }
-      if (route === "usage" && req.method === "GET") {
-        // F5: read-only per-room usage summary. Member-visible like the
-        // sibling dashboards: every figure derives from data a member can
-        // already read (membership snapshot, work-session spend, events).
-        const params = url.searchParams;
-        if ([...params.keys()].some(key => !["days", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_usage_period", "Choose an optional number of days only");
-        return json(res, 200, roomUsageSummary(store, selected.token, roomId, { days: parseUsageDays(params.get("days")), expectedSessionBinding: fence }));
       }
       if (route === "provider-heartbeats" && req.method === "GET") {
         // Round-2 #118: provider heartbeat dashboard.
@@ -831,6 +822,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }));
       }
       if (route === "reminders" && req.method === "GET") return json(res, 200, store.reminders.list(selected.token, roomId, fence));
+      if (route === "notifications" && req.method === "GET") {
+        // B4: per-member feed derived from the event tail after the member's cursor. Read model only; the
+        // store method re-authenticates membership, and the read rate limit above already covers it.
+        const params = url.searchParams;
+        if ([...params.keys()].some(key => !["limit", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_notification_selection", "Choose an optional limit only");
+        if (params.has("limit") && !/^[1-9]\d*$/.test(params.get("limit"))) reject(422, "invalid_notification_limit", "Choose a positive limit");
+        return json(res, 200, store.notifications.list(selected.token, roomId, fence, params.has("limit") ? { limit: Number(params.get("limit")) } : {}));
+      }
       if (route === "agent-connections" && req.method === "GET") return json(res, 200, store.agentConnections.list(selected.token, roomId, fence));
       if (route === "diagnostics" && req.method === "GET") {
         store.agentConnections.owner(selected.token, roomId, fence);

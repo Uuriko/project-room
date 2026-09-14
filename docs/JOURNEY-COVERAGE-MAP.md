@@ -229,14 +229,15 @@ carry the claim, and the remaining tiers stay visibly open.
       }
     },
     {
-      "id": "access-preview",
-      "claim": "Before a run, a member can read exactly what an agent's one-task view can access: the linked source message id only (never its thread, quoted mentions or imported excerpts), current evidence versions, the declared budget with unknowns labeled, and the server's own omission list; opening the preview starts and grants nothing.",
+      "id": "notification-feed",
+      "claim": "A per-member notification feed derived from the event tail honours notification preferences, deduplicates edits, expires with the read cursor and never grants a wake.",
       "evidence": {
         "unit": [
-          "tests/work-context.test.js"
+          "tests/notification-feed.test.js",
+          "tests/notification-preferences.test.js"
         ],
         "browser": [
-          "scripts/access-preview-browser-check.mjs"
+          "scripts/notification-feed-browser-check.mjs"
         ],
         "agent": [],
         "hosted": []
@@ -249,18 +250,6 @@ carry the claim, and the remaining tiers stay visibly open.
         "unit": [
           "tests/channel-import.test.js",
           "tests/inbox-channel-client.test.js"
-        ],
-        "browser": [],
-        "agent": [],
-        "hosted": []
-      }
-    },
-    {
-      "id": "room-usage-summary",
-      "claim": "Every member can read a per-room usage summary for a capped period: human seats and agent principals counted separately, sessions started and stopped, spend as reported (unknown, never zero, when unreported) and the store's pilot caps with remaining headroom; non-members are refused and the response carries no secrets or hashes.",
-      "evidence": {
-        "unit": [
-          "tests/usage.test.js"
         ],
         "browser": [],
         "agent": [],
@@ -301,9 +290,9 @@ carry the claim, and the remaining tiers stay visibly open.
 | Inbox connection routes | channel-import | open | open | open |
 | Live Telegram trigger and card | telegram-live, telegram-adapter | inbox-telegram-check | open | open |
 | Telegram send preview | channel-import, inbox-channel-client | open | open | open |
-| What this agent can access (pre-run preview) | work-context | access-preview-browser-check | open | open |
 | Room review policy | work-actions, state-machine-invariants | room-policy-browser-check | open | open |
 | Unified inbox UI (list, reply, connections, needs-you, share) | inbox-unified-routes, inbox-channel-client | inbox-unified-check | open | open |
+| Notification feed | notification-feed, notification-preferences | notification-feed-browser-check | open | open |
 
 Follow-up scope: claims made in docs beyond the README list (per-feature
 acceptance docs) can be folded into the same block; the checker format already

@@ -2,14 +2,14 @@
 
 ## 2026-09-14
 
-- Inspectable context (C2): `GET /api/rooms/:roomId/work-context` carries an
-  `accessSummary` (conversation scope and source message id, evidence
-  references, declared budget, participants and the exact omissions the read
-  already reports); the browser work card gains a read-only "What this agent
-  can access" panel from the same read plus the room roster. Quoted mentions
-  and imported excerpts add nothing; opening the panel starts and grants
-  nothing. Organization allowlists wait on the organization boundary (D1).
-  `docs/WORK-CONTEXT.md` documents the summary.
+- Notification feed (issue #6 B4, read model): `GET /api/rooms/:id/notifications`
+  derives mentions, replies, assignments and work updates for the caller from
+  the event tail after their cursor, filtered by `notificationPreferences`;
+  edits never duplicate, `POST /cursor` expires items, ended access returns
+  401/403, and no read grants a wake (`server/notifications.mjs`,
+  `docs/NOTIFICATIONS.md`). The catch-up panel shows an unread badge and a
+  compact list whose "Mark read" moves only the cursor. Push delivery is a
+  follow-up needing VAPID keys.
 
 ## 2026-09-12
 
