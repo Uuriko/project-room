@@ -64,7 +64,7 @@ test("leased wakes retry with bounded backoff and dead-letter when exhausted", t
 
 test("done-when: a restart preserves intent without duplicate action", t => {
   const f = fixture(t);
-  const enqueued = f.enqueue();
+  f.enqueue();
   const memberId = f.store.authenticate(f.keys.owner, "commons").member.id;
   const owner = randomUUID();
   const leased = f.store.wakeQueue.lease("commons", memberId, "recipe:draft-catch-up", owner);

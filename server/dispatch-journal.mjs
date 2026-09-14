@@ -5,7 +5,7 @@
 // Real provider wiring stays gated on the hosted service's verified
 // server-side idempotency contract (docs/AGENT-BRIDGE-ACCEPTANCE-2026-09-07
 // AC-02); the journal and the guard are provider-agnostic.
-import { appendFileSync, readFileSync, existsSync, renameSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 
 const STATES = Object.freeze(["intended", "dispatched", "unknown", "done", "failed"]);

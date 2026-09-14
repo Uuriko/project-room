@@ -23,7 +23,7 @@ test("proposal is revision 0 and each revision event takes the next revision", (
 test("messages and other non-revision events never appear in the change list", () => {
   const changes = workItemChanges([
     ev(T.WORK_PROPOSED, { workItemId: "w" }),
-    ev(T.MESSAGE_POSTED, { workItemId: "w", body: "chatter", workItemId: "w" }),
+    ev(T.MESSAGE_POSTED, { workItemId: "w", body: "chatter" }),
     ev(T.WORK_BLOCKED, { reason: "keys" }),
     ev(T.MESSAGE_POSTED, { workItemId: "w", body: "more" })
   ]);

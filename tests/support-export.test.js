@@ -3,7 +3,7 @@
 // credentials, hashes, request bodies, message text, or member details.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

@@ -1315,7 +1315,6 @@ function revealLocationHash() {
     break;
   }
 }
-function readyForDecision(i) { return nextWorkStep(i).action === "decide"; }
 function hasIndependentProducer(i) { return hasReportedProducer(i) && i.receipt.producerId !== i.verifierMemberId; }
 function actions(i, scopeOnly = false, now = Date.now()) {
   return workActions(i, state.members[session.member.id], now).filter(([action]) => (action === "release") === scopeOnly).map(([action, label]) => `<button type="button" class="button secondary" data-action="${action}" data-work-id="${esc(i.id)}" data-focus-key="work-action:${esc(i.id)}:${action}"${busy ? " disabled" : ""}>${label}</button>`).join("");
@@ -2733,7 +2732,7 @@ function actionChanged(entry) {
 function syncActionForm() {
   $("#resume-action").hidden = !pendingAction?.uncertain;
   if (!pendingAction || !state || busy) return;
-  const entry = pendingAction, item = state.workItems[entry.workId], changed = actionChanged(entry);
+  const entry = pendingAction, changed = actionChanged(entry);
   const available = actionAvailable(entry), save = $("#action-form button[type='submit']");
   for (const field of $("#action-fields").querySelectorAll("input,textarea,select")) field.disabled = entry.uncertain;
   if (entry.action === "complete") {

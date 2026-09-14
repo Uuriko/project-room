@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { RoomStore } from "../server/store.mjs";
-import { heldUntil } from "../server/attention.mjs";
 import { surfaceClass } from "../server/action-classes.mjs";
 
 const HOUR = 3600000;

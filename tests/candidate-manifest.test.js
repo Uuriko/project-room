@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { buildCandidateManifest, manifestDrift } from "../scripts/candidate-manifest.mjs";
+import { manifestDrift } from "../scripts/candidate-manifest.mjs";
 
 const SCHEMA = "export const STORE_SCHEMA_VERSION = 27;\n";
 const PKG = JSON.stringify({ name: "fake", engines: { node: ">=24.19.0" } });

@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { EVENT_TYPES as T, PERMISSIONS, applyEvent, emptyRoomState, event, replay } from "../src/events.js";
+import { EVENT_TYPES as T, PERMISSIONS, applyEvent, event, replay } from "../src/events.js";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 

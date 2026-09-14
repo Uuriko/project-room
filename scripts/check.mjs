@@ -34,6 +34,12 @@ if (routeDocs.status !== 0) process.exit(routeDocs.status || 1);
 // --- end route documentation gate ---
 const schema = spawnSync(process.execPath, ["scripts/check-schema-version.mjs"], { stdio: "inherit" });
 if (schema.status !== 0) process.exit(schema.status || 1);
+// Lint gate (eslint.config.mjs): correctness-only rules, errors fail, warnings allowed.
+// Skipped with a notice when the eslint devDependency is not installed (no `npm ci`).
+{
+  const lint = spawnSync(process.execPath, ["scripts/lint.mjs", "--skip-if-missing"], { stdio: "inherit" });
+  if (lint.status !== 0) process.exit(lint.status || 1);
+}
 // Open-route inventory (B48): every `security: []` route in docs/openapi.yaml
 // is named in docs/ROUTE-AUTH-TABLE.md and docs/INVITE-ONLY-CHECKLIST.md §1.
 const openRoutes = spawnSync(process.execPath, ["scripts/open-routes.mjs", "--check"], { stdio: "inherit" });

@@ -407,7 +407,7 @@ test("G7 meaningful cancellation: stop requested, dispatch disabled, access revo
 });
 
 test("G1 attempt environment and outputs flow through the session command path", async t => {
-  const { store, request, ownerKey } = await serve(t);
+  const { request, ownerKey } = await serve(t);
   const start = await request("/api/rooms/commons/work-sessions", { method: "POST", token: ownerKey,
     data: sessionBody({ action: "set_status", status: "processing", environment: "ci-runner-2" }) });
   assert.equal(start.status, 201);

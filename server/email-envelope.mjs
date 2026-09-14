@@ -15,7 +15,7 @@ export function emailText(value, max, { empty = false, multiline = false } = {})
 }
 export function emailInput(value) {
   let serialized;
-  try { serialized = JSON.stringify(value); } catch { throw new EmailContractError("invalid_email"); }
+  try { serialized = JSON.stringify(value); } catch { throw new ContractError("invalid_email"); }
   requireEmail(typeof serialized === "string" && Buffer.byteLength(serialized) <= emailLimits.inputBytes, "email_input_limit");
   return value;
 }
