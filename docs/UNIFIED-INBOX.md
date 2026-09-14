@@ -108,7 +108,7 @@ ids stay off that path. Excerpt sharing into a room works like email.
 | `POST /api/inbox/connections/{id}/reconnect` | Owner-authenticated live import trigger (account session, CSRF, 30/min per account) that works from any client, including the hosted Worker. When the Telegram bindings are set it first stores the SHA-256 of `TELEGRAM_WEBHOOK_SECRET` on the connection (`registered: true`), then drains the oldest pending journal rows through the same sync path (`updates: null`). Returns the connection record plus `live` status |
 | `POST /api/inbox/connections/commands` | Owner-managed connection records from the browser: exactly one `connection.configure` (add or update a bot or mailbox profile; the profile's `accountId` must be the caller's) or `connection.disconnect` ("Remove") request as the connections journal takes it. Account session, CSRF, origin, 30/min per account. `connection.webhook` and `page.apply` are refused with 422 `invalid_channel_connection`. Returns the connection record plus `live`, the receipt and `duplicate` |
 | `POST /api/inbox/channel-sends` | Reply from the Inbox: `{ action: "dispatch" \| "reconcile", sourceId, sendId }` drives an attempt the send journal already holds (`send.reserve` over `/api/inbox/commands`) through the deployment's transport for the source's connection. Account session, CSRF, 30/min per account. 409 `channel_sending_unavailable` for email, samples and inactive connections. Returns the send list, the attempt, `channelSend: { provider, mode }` and the connection's `lastSendResult` |
-| `POST /api/inbox/webhooks/{connectionId}` | Provider callback. `X-Telegram-Bot-Api-Secret-Token` is compared in constant time against the SHA-256 stored by `connection.webhook`; accepted updates are journaled durably (`pending_channel_updates`) until the owner syncs, and a redelivered `update_id` is a no-op in every status. At most 500 pending rows per connection (409 `channel_webhook_backlog`, delivery refused unchanged). Inert unless the server is started with a `ChannelWebhookInbox` |
+| `POST /api/inbox/webhooks/{connectionId}` | Provider callback. `X-Telegram-Bot-Api-Secret-Token` is compared in constant time against the SHA-256 stored by `connection.webhook`; accepted updates are journaled durably (`pending_channel_updates`) until the owner syncs, and a redelivered `update_id` is a no-op in every status. At most 500 pending rows per connection (409 `channel_webhook_backlog`, delivery refused unchanged). Body up to 64 KB; 60 deliveries per minute per verified connection behind a 1200 per minute per-address guard (see [Webhook contract](#webhook-contract)). Inert unless the server is started with a `ChannelWebhookInbox` |
 
 `GET /api/inbox/connections/{id}` adds `webhookSetAt` and, for Telegram, a
 `live` block (`state` not_configured / invalid / configured, the binding
@@ -225,8 +225,15 @@ until it is configured again.
   held; 409 `channel_webhook_unavailable` when the deployment has no
   `ChannelWebhookInbox`; 409 `channel_webhook_backlog` when the per-connection
   hold is full (Telegram retries later); 422 `invalid_channel_update` for a
-  body that is not an update; 413 above 16 KB; 120 requests per minute per
-  client address.
+  body that is not an update; 413 `too_large` above 64 KB
+  (`channelSyncLimits.webhookBodyBytes`: a reply embeds the replied-to message,
+  so this route alone is above the 16 KB every other JSON route keeps; the
+  journal's per-update `payloadBytes` matches it); 429 `rate_limited` above 60
+  deliveries per minute per verified connection (`webhookPerConnection`,
+  counted after the secret matches and before anything is journaled, so
+  Telegram's shared egress addresses never share one budget), behind a guard
+  of 1200 requests per minute per client address (`webhookPerAddress`) for
+  unverified traffic.
 - Journaling, not importing: a verified update is written durably to
   `pending_channel_updates` (one row per connection and `update_id`; a
   redelivered id is a no-op; at most 500 pending rows per connection) and

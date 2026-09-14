@@ -5,7 +5,7 @@ import { ServiceError } from "./store.mjs";
 import { clientAddress } from "./deployment.mjs";
 import { validId } from "../src/events.js";
 import { SyntheticInboxTransport, FixtureChannelSender } from "./inbox-transport.mjs";
-import { syncTelegramConnection } from "./channel-import.mjs";
+import { channelSyncLimits, syncTelegramConnection } from "./channel-import.mjs";
 import { telegramConfig, TelegramLiveStatus, telegramLiveView } from "./channel-adapters/telegram-config.mjs";
 import { TelegramTransport } from "./channel-adapters/telegram-transport.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
@@ -64,6 +64,7 @@ const connectionRoutes = Object.freeze({ list: "/api/inbox/connections", read: "
 const channelSendProviders = Object.freeze(["telegram-bot"]);
 const routePattern = template => new RegExp("^" + template.replaceAll("/", "\\/").replace(/\{[A-Za-z]+\}/g, "([^/]{1,384})") + "$");
 const webhookSecretHeader = "x-telegram-bot-api-secret-token";
+const JSON_BODY_BYTES = 16384;
 const rateHash = value => createHash("sha256").update(String(value)).digest("hex");
 // A lagging stream that still has not drained its final event by now is dropped.
 const STREAM_DRAIN_GRACE_MS = 5000;
@@ -232,9 +233,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       req.on("aborted", () => rejectPromise(new ServiceError(400, "aborted", "Request ended early")));
     });
   }
-  async function body(req) {
+  // Every JSON route takes the default limit; a caller passes `limit` only where
+  // the provider's payload is known to be larger (the Telegram webhook embeds
+  // the replied-to message).
+  async function body(req, { limit = JSON_BODY_BYTES } = {}) {
     if (!/^application\/json(?:\s*;|$)/i.test(req.headers["content-type"] || "")) reject(415, "json_required", "Use application/json");
-    const text = await readText(req, 16384, () => new ServiceError(413, "too_large", "Request is too large"));
+    const text = await readText(req, limit, () => new ServiceError(413, "too_large", "Request is too large"));
     try { const value = JSON.parse(text); if (!value || Array.isArray(value) || typeof value !== "object") throw new Error(); return value; }
     catch { reject(400, "invalid_json", "Expected a JSON object"); }
   }
@@ -351,11 +355,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // Provider callbacks carry a per-connection secret, never an account session.
         // Verified updates only wait for the owner's import; nothing is stored here.
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        rate(`inbox-webhook:${remoteAddress}`, 120);
+        // Telegram delivers every bot's updates from a few shared egress addresses,
+        // so the per-address key is only a high guard against unverified floods;
+        // the budget that matters is counted per verified connection, after the
+        // secret matched and before anything is journaled (channelSyncLimits).
+        rate(`inbox-webhook:${remoteAddress}`, channelSyncLimits.webhookPerAddress);
         if (!channelWebhooks) reject(409, "channel_webhook_unavailable", "Webhook delivery is not configured here.");
         const connectionId = pathId(webhook[1]), secret = req.headers[webhookSecretHeader];
         if (typeof secret !== "string") reject(401, "channel_webhook_denied", "Webhook not accepted.");
-        const received = channelWebhooks.receive({ connectionId, secret, body: await body(req) });
+        const received = channelWebhooks.receive({ connectionId, secret, body: await body(req, { limit: channelSyncLimits.webhookBodyBytes }),
+          verified: match => rate(`inbox-webhook-connection:${match.accountId}:${match.connectionId}`, channelSyncLimits.webhookPerConnection) });
         telegramStatus.received(received.accountId, connectionId, { at: store.now(), count: received.received });
         return json(res, 202, { contractVersion: 1, connectionId, received: received.received, pending: received.pending });
       }
