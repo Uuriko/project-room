@@ -5,7 +5,6 @@ import { createRoomServer } from "./server/http.mjs";
 import { deploymentConfig } from "./server/deployment.mjs";
 import { createServer } from "node:http";
 import { maintenanceEnabled, maintenanceReply } from "./server/maintenance.mjs";
-import { providerConfig } from './server/provider-config.mjs';
 import { assertProductionReady } from './server/production-gates.mjs';
 import { openJoinContract } from './server/open-contract.mjs';
 
@@ -13,7 +12,7 @@ const { host, port, origin, filename, production } = deploymentConfig();
 const paused = maintenanceEnabled(process.env.ROOM_MAINTENANCE);
 const productionGates = paused ? { production: false, providerAuth: null, operatorAccountId: null }
   : assertProductionReady(process.env, origin, { ship: openJoinContract().ship });
-const providerAuth = paused ? null : (productionGates.providerAuth || providerConfig(process.env, origin));
+const providerAuth = null;
 process.umask(0o077);
 let havePilotDb = false;
 try { havePilotDb = statSync(filename).isFile(); }

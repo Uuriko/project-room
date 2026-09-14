@@ -1,6 +1,5 @@
 {
-  // Production Worker config. No Clerk secrets in git.
-  // wrangler secret put ROOM_CLERK_ISSUER / PUBLISHABLE_KEY / PUBLIC_KEY
+  // Production Worker config. No identity-provider secrets in git.
   // wrangler secret put ROOM_OPERATOR_ACCOUNT_ID
   "name": "project-room",
   "main": "room.mjs",
@@ -17,7 +16,7 @@
     "ROOM_PRODUCTION": "1"
   },
   "secrets": {
-    "required": ["ROOM_CLERK_ISSUER", "ROOM_CLERK_PUBLISHABLE_KEY", "ROOM_CLERK_PUBLIC_KEY"]
+    "required": ["ROOM_OPERATOR_ACCOUNT_ID"]
   },
   "limits": { "cpu_ms": 50 },
   "observability": { "enabled": false }

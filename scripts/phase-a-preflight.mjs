@@ -12,8 +12,8 @@ export function phaseAPreflight({ env = {}, wranglerPath = join(root, 'cloudflar
   if (ship !== false) throw new Error('Public MCP join must stay ship:false');
   if (openJoinContract().persistence !== 'none') throw new Error('Public MCP persistence must stay none');
   const wrangler = readFileSync(wranglerPath, 'utf8');
-  if (/sk_live|BEGIN PRIVATE KEY|BEGIN RSA PRIVATE KEY|pk_live_/.test(wrangler)) {
-    throw new Error('wrangler.production.jsonc must not contain Clerk secrets');
+  if (/sk_live|BEGIN PRIVATE KEY|BEGIN RSA PRIVATE KEY|pk_live_|ROOM_CLERK/.test(wrangler)) {
+    throw new Error('wrangler.production.jsonc must not contain identity-provider secrets');
   }
   if (!/ROOM_PRODUCTION": "1"/.test(wrangler)) throw new Error('wrangler.production.jsonc must set ROOM_PRODUCTION=1');
   if (!/room\.trydemigod\.com/.test(wrangler)) throw new Error('wrangler.production.jsonc must name room.trydemigod.com');
