@@ -1613,8 +1613,10 @@ async function submit(form, fn, { failureHint } = {}) {
     else notice(text, true);
   }
   finally {
-    if (operationId !== submitOperationId) return;
-    busy = false; releaseSubmission(ticket, { restoreFocus: true }); if (state) render();
+    // No `return` in `finally`: it would swallow anything the catch handler threw.
+    if (operationId === submitOperationId) {
+      busy = false; releaseSubmission(ticket, { restoreFocus: true }); if (state) render();
+    }
   }
 }
 $("#invitation-dismiss").addEventListener("click", () => closeInvitation());

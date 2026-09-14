@@ -43,7 +43,7 @@ Once inside Commons:
 | How-to | Actions (`⌘K` / `Ctrl K`) → How to invite / How to add an agent |
 | Named assistants | Instinct / Muse: Use my AI (key optional under Need a Room key later). Grok Build: Create access. How they connect is under More. |
 | Invite someone | **Invite** in the header |
-| Inbox | **Account key**, then **Inbox**. From a room-key login: Actions → How to open Inbox. Sample mail only; real mailbox is off |
+| Inbox | **Account key**, then **Inbox**. From a room-key login: Actions → How to open Inbox. Sample mail only; real mailbox is off. Telegram: **Add connection**; cards read `Live: not configured` until the operator sets the bot bindings |
 | Rooms list | Account key → **Rooms**. Each titled room shows **Open** |
 | After Create access | One **Copy plug-in steps** (no token). Reveal private setup only if you need the key. |
 
