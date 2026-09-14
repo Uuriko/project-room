@@ -22,7 +22,13 @@ Every `/api/*` route is either open by design (below) or requires a credential
 | `POST /api/session` | the access key itself | 401 on a wrong key; the key IS the credential |
 | `POST /api/inbox/webhooks/:connectionId` | capability (per-connection webhook secret header, constant-time hash compare) | 409 `channel_webhook_unavailable` until a webhook inbox is wired; 401 for unknown connections and wrong secrets alike; holds Telegram updates for the owner's import, discloses nothing |
 | `POST /api/inbox/connections/:id/reconnect` | account session + CSRF (owner of the connection) | 401/422 without a session, 404 for another account's connection; imports already-verified updates and stores only the webhook secret's hash |
-| everything else (`/api/rooms/*`, `/api/inbox`, `/api/account-*`) | room credential or account session | 401/422 without one |
+| `GET /api/account-session` | none | creates an anonymous browser slot (20/address/min) and returns `authenticated: false`, a CSRF token and the session binding; the slot grants nothing until `POST` signs in with an account key (slot cookie + CSRF required) |
+| everything else (`/api/rooms/*`, `/api/inbox`, `/api/account-rooms`, `POST`/`DELETE /api/account-session`) | room credential or account session | 401/422 without one |
+
+The open rows are derived, not hand-kept: `docs/openapi.yaml` marks each open
+operation `security: []`, `tests/invite-only-boundary.test.js` fails when the
+server serves an undeclared route anonymously, and `scripts/open-routes.mjs
+--check` (in `npm run check`) fails when a declared route is missing here.
 
 ## 2. Capability URLs — the boundaries behind the unlinked URL
 
