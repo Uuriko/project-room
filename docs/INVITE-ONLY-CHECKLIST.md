@@ -110,9 +110,11 @@ expiry, revocation, and rate limits.
   command line) and files the output with the review ticket. The same report
   is `GET /api/rooms/:id/access-review` (owner-only, `403 owner_required` for
   everyone else). It lists active members and grants, guests with expiry and
-  `expired` status, invitation links with remaining joins, agent identities
-  and connections with state, and last activity; removed members are absent
-  and no token, secret or hash appears (`tests/access-review.test.js`).
+  `expired` status, invitation links with remaining joins, pending one-time
+  agent invite codes (unredeemed and unrevoked, named by the hash-free
+  `inviteId` that revocation takes), agent identities and connections with
+  state, and last activity; removed members are absent and no token, secret
+  or hash appears (`tests/access-review.test.js`).
   Compare consecutive reports and revoke what is no longer needed.
 - **Compromised capability URL**: revoke the link/invitation/code (all three
   support revocation); for a leaked access key, remove the member and re-issue.
