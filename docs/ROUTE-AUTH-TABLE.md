@@ -70,6 +70,15 @@ one `Content-Length`-framed JSONL body (never a partial 200); with
 under a `default-src 'none'` Content-Security-Policy, same auth and framing;
 `GET /api/rooms/:id/stream` is the SSE feed.
 
+Two read routes are owner-only in the store layer rather than member-visible:
+`GET /api/rooms/:id/diagnostics-export` (sanitized support bundle) and
+`GET /api/rooms/:id/access-review` (BUILD-01 D4: members and grants, guests
+with expiry, links with remaining joins, agent identities and connections,
+last activity; no token, secret or hash fields — `server/access-review.mjs`).
+Both accept the owner's account session or room key so the CLI can pull them
+(`node scripts/access-review.mjs`), and refuse every other member with
+`403 owner_required`.
+
 `tests/route-auth-table.test.js` enforces the headline invariant: every
 mutating room route rejects unauthenticated requests.
 `tests/route-hardening.test.js` pins the funnel notes above (thread route,

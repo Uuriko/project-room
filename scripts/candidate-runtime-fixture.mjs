@@ -35,6 +35,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('src/work-templates.js');
   paths.add('src/room-templates.js');
   paths.add('server/diagnostics.mjs');
+  paths.add('server/access-review.mjs');
   paths.add('server/wake-queue.mjs');
   paths.add('server/attention.mjs');
   paths.add('scripts/release-evidence.mjs');

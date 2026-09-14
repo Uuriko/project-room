@@ -5,17 +5,17 @@ import { ServiceError } from "./store.mjs";
 import { clientAddress } from "./deployment.mjs";
 import { validId } from "../src/events.js";
 import { SyntheticInboxTransport, FixtureChannelSender } from "./inbox-transport.mjs";
-import { channelSyncLimits, syncTelegramConnection } from "./channel-import.mjs";
+import { syncTelegramConnection } from "./channel-import.mjs";
 import { telegramConfig, TelegramLiveStatus, telegramLiveView } from "./channel-adapters/telegram-config.mjs";
 import { TelegramTransport } from "./channel-adapters/telegram-transport.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
-import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { discoveryDoc, isHealthAliasPath } from "../deploy/agent-discovery.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
 import { guestAgentLinkContract } from "./guest-agent-links.mjs";
 import { isSessionStatus, workItemSessionContract } from "../src/work-item-session.js";
+import { accessReviewReport } from "./access-review.mjs";
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -64,12 +64,9 @@ const connectionRoutes = Object.freeze({ list: "/api/inbox/connections", read: "
 const channelSendProviders = Object.freeze(["telegram-bot"]);
 const routePattern = template => new RegExp("^" + template.replaceAll("/", "\\/").replace(/\{[A-Za-z]+\}/g, "([^/]{1,384})") + "$");
 const webhookSecretHeader = "x-telegram-bot-api-secret-token";
-const JSON_BODY_BYTES = 16384;
 const rateHash = value => createHash("sha256").update(String(value)).digest("hex");
-// A lagging stream that still has not drained its final event by now is dropped.
-const STREAM_DRAIN_GRACE_MS = 5000;
 
-export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = 1000, streamQueueCap = 65536, trustedLocalProxy = false,
+export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = 1000, trustedLocalProxy = false,
   loadAsset = path => readFile(new URL(path, assetRoot)), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
   telegram = telegramConfig(), telegramStatus = new TelegramLiveStatus(), channelTransports = null,
@@ -78,7 +75,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // config never holds up startup and the card reports "not configured".
   if (typeof telegram?.configured !== "boolean" || !Array.isArray(telegram.bindings)) throw new Error("Telegram configuration must come from telegramConfig()");
   if (trustedLocalProxy && !origin?.startsWith("https://")) throw new Error("The deployment proxy requires a fixed HTTPS origin");
-  if (!Number.isInteger(streamQueueCap) || streamQueueCap < 1) throw new Error("Stream queue cap must be a positive integer of bytes");
   if (channelTransports !== null && typeof channelTransports !== "function") throw new Error("channelTransports must be a resolver function");
   // One send transport per (provider, account, connection): the live Telegram
   // transport when the bindings are set, otherwise the inert fixture sender. The
@@ -233,16 +229,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       req.on("aborted", () => rejectPromise(new ServiceError(400, "aborted", "Request ended early")));
     });
   }
-  // Every JSON route takes the default limit; a caller passes `limit` only where
-  // the provider's payload is known to be larger (the Telegram webhook embeds
-  // the replied-to message).
-  async function body(req, { limit = JSON_BODY_BYTES } = {}) {
+  async function body(req) {
     if (!/^application\/json(?:\s*;|$)/i.test(req.headers["content-type"] || "")) reject(415, "json_required", "Use application/json");
-    const text = await readText(req, limit, () => new ServiceError(413, "too_large", "Request is too large"));
+    const text = await readText(req, 16384, () => new ServiceError(413, "too_large", "Request is too large"));
     try { const value = JSON.parse(text); if (!value || Array.isArray(value) || typeof value !== "object") throw new Error(); return value; }
     catch { reject(400, "invalid_json", "Expected a JSON object"); }
   }
-  function stream(req, res, token, roomId, after, auth, operationId) {
+  function stream(req, res, token, roomId, after, auth) {
     const binding = auth.sessionBinding;
     store.eventsAfter(token, roomId, after, 100, binding);
     if (streams.size >= 100 || [...streams].filter(item => item.credentialHash === auth.credentialHash).length >= 3) reject(429, "stream_limit", "Close another room connection before opening more");
@@ -256,30 +249,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     const cleanup = () => { clearInterval(timer); streams.delete(entry); signal?.removeEventListener("abort", abort); };
     const end = data => { cleanup(); if (!res.destroyed && !res.writableEnded) res.end(data); };
     const abort = () => end();
-    // Per-connection send queue: a consumer whose unsent bytes exceed the cap
-    // gets one final stream_lagging event and, if it never drains, its socket
-    // dropped. Peers keep their own queues. Reconnecting with Last-Event-ID
-    // resumes from the last event the client actually processed.
-    const lagging = () => res.writableLength > streamQueueCap;
-    const lag = () => {
-      diagnostics.record({ operationId, at: new Date().toISOString(), status: 200, code: "stream_lagging", category: "unavailable", route: "/api/rooms/:roomId/stream", roomId });
-      console.warn(`room diagnostic ${operationId} 200 stream_lagging unavailable /api/rooms/:roomId/stream`);
-      const drop = setTimeout(() => res.destroy(), STREAM_DRAIN_GRACE_MS);
-      drop.unref();
-      res.once("close", () => clearTimeout(drop));
-      end('event: stream_lagging\ndata: {"message":"Client fell behind; reconnect with Last-Event-ID to resume"}\n\n');
-    };
     const pump = () => {
       if (res.destroyed || res.writableEnded) { cleanup(); return; }
       try {
         const batch = store.eventsAfter(token, roomId, cursor, 100, binding);
-        if (!batch.events.length) res.write(": connected transport only\n\n");
+        if (!batch.events.length && !res.write(": connected transport only\n\n")) end();
         for (const item of batch.events) {
-          res.write(`id: ${item.sequence}\nevent: room-event\ndata: ${JSON.stringify(item)}\n\n`);
+          if (!res.write(`id: ${item.sequence}\nevent: room-event\ndata: ${JSON.stringify(item)}\n\n`)) { end(); break; }
           cursor = item.sequence;
-          if (lagging()) break;
         }
-        if (lagging()) lag();
       } catch { end('event: access-ended\ndata: {"message":"Access ended; sign in again"}\n\n'); }
     };
     timer = setInterval(pump, streamInterval);
@@ -313,7 +291,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === "/api/ready" && ["GET", "HEAD"].includes(req.method)) {
         try {
-          if (store.storageStatus?.().unavailable) return json(res, 503, { status: "unavailable", reason: "storage_unavailable" }, req.method === "HEAD");
           if (!store.db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) throw new Error("No room");
           return json(res, 200, { status: "ready" }, req.method === "HEAD");
         } catch { return json(res, 503, { status: "unavailable" }, req.method === "HEAD"); }
@@ -355,16 +332,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // Provider callbacks carry a per-connection secret, never an account session.
         // Verified updates only wait for the owner's import; nothing is stored here.
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        // Telegram delivers every bot's updates from a few shared egress addresses,
-        // so the per-address key is only a high guard against unverified floods;
-        // the budget that matters is counted per verified connection, after the
-        // secret matched and before anything is journaled (channelSyncLimits).
-        rate(`inbox-webhook:${remoteAddress}`, channelSyncLimits.webhookPerAddress);
+        rate(`inbox-webhook:${remoteAddress}`, 120);
         if (!channelWebhooks) reject(409, "channel_webhook_unavailable", "Webhook delivery is not configured here.");
         const connectionId = pathId(webhook[1]), secret = req.headers[webhookSecretHeader];
         if (typeof secret !== "string") reject(401, "channel_webhook_denied", "Webhook not accepted.");
-        const received = channelWebhooks.receive({ connectionId, secret, body: await body(req, { limit: channelSyncLimits.webhookBodyBytes }),
-          verified: match => rate(`inbox-webhook-connection:${match.accountId}:${match.connectionId}`, channelSyncLimits.webhookPerConnection) });
+        const received = channelWebhooks.receive({ connectionId, secret, body: await body(req) });
         telegramStatus.received(received.accountId, connectionId, { at: store.now(), count: received.received });
         return json(res, 202, { contractVersion: 1, connectionId, received: received.received, pending: received.pending });
       }
@@ -671,7 +643,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["code", "displayName"]) || typeof data.code !== "string" || typeof data.displayName !== "string") reject(422, "invalid_invite", "Invite code and displayName are required");
         return json(res, 201, store.invites.redeem(data.code, { displayName: data.displayName }));
       }
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|provider-heartbeats|identity-links|agent-invites|agent-pause))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|provider-heartbeats|identity-links|agent-invites|access-review))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -805,23 +777,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // takes the normal JSON error path instead of truncating a 200 body
         // that would read as a valid, merely shorter, export. Content-Length
         // lets clients treat a dropped connection as an incomplete download.
-        //
-        // BUILD-01 F2: ?format=html renders the same event walk as one
-        // self-contained document for people (server/room-export-html.mjs).
-        // Same auth, same materialise-then-answer rule, same Content-Length
-        // framing; the CSP header pins the document's single style block and
-        // forbids everything else, so a browser that opens it inline runs
-        // nothing.
-        const format = url.searchParams.get("format") ?? "jsonl";
-        if (!["jsonl", "html"].includes(format) || url.searchParams.getAll("format").length > 1) reject(422, "invalid_format", "format is jsonl (default) or html");
-        if (format === "html") {
-          const rows = [...store.exportEvents(selected.token, roomId, fence)];
-          const bytes = Buffer.from(renderRoomExportHtml(rows, { roomId }), "utf8");
-          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length,
-            "Content-Security-Policy": EXPORT_HTML_CSP,
-            "Content-Disposition": `attachment; filename="room-${roomId}-export.html"` });
-          return res.end(bytes);
-        }
         const lines = [];
         for (const line of store.exportEvents(selected.token, roomId, fence)) lines.push(JSON.stringify(line) + "\n");
         const bytes = Buffer.from(lines.join(""), "utf8");
@@ -889,23 +844,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.setHeader("Content-Disposition", `attachment; filename="room-${roomId}-support-export.json"`);
         return json(res, 200, bundle);
       }
-      if (route === "agent-pause" && req.method === "GET") {
-        // C6: wake-pause state for the caller, or (signed-in owner) one named
-        // member plus the room's paused roster. Authorization is store-level.
-        const params = url.searchParams;
-        if ([...params.keys()].some(key => !["memberId", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_pause_selection", "Choose at most one member");
-        return json(res, 200, store.wakeQueue.inspect(selected.token, roomId, { memberId: params.get("memberId") }, fence));
-      }
-      if (route === "agent-pause" && req.method === "POST") {
-        // C6: pause or resume a member's queued wakes (own row, or owner over
-        // another member). Draft class: nothing is sent, launched or spent.
-        const data = await body(req);
-        const fields = data.action === "resume" ? ["action", "memberId", "requestId"] : ["action", "memberId", "requestId", "reason"];
-        if (!["pause", "resume"].includes(data.action) || !exact(data, fields) || typeof data.memberId !== "string") reject(422, "invalid_pause_command", "Supply action (pause or resume), memberId, requestId and, for pause, reason or null");
-        const target = { memberId: data.memberId };
-        const result = data.action === "pause" ? store.wakeQueue.pause(selected.token, roomId, { requestId: data.requestId, reason: data.reason }, fence, target)
-          : store.wakeQueue.resume(selected.token, roomId, { requestId: data.requestId }, fence, target);
-        return json(res, result.duplicate ? 200 : 201, result);
+      if (route === "access-review" && req.method === "GET") {
+        // BUILD-01 D4: owner-only periodic access review; assembly lives in
+        // server/access-review.mjs and is shared with scripts/access-review.mjs.
+        return json(res, 200, accessReviewReport(store, selected.token, roomId, fence));
       }
       if (route === "agent-connections" && req.method === "POST") {
         const result = store.agentConnections.apply(selected.token, roomId, await body(req), fence);
@@ -938,7 +880,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           Number(params.get("after") || 0), Number(params.get("limit") || 100),
           { actor: params.get("actor"), since: params.get("since"), until: params.get("until"), expectedSessionBinding: fence }));
       }
-      if (route === "stream" && req.method === "GET") return stream(req, res, selected.token, roomId, Number(req.headers["last-event-id"] ?? url.searchParams.get("after") ?? 0), auth, operationId);
+      if (route === "stream" && req.method === "GET") return stream(req, res, selected.token, roomId, Number(req.headers["last-event-id"] ?? url.searchParams.get("after") ?? 0), auth);
       if (route === "commands" && req.method === "POST") {
         const result = store.command(selected.token, roomId, await body(req), fence);
         return json(res, result.duplicate ? 200 : 201, result);
@@ -972,9 +914,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, store.revokeInvitation(selected.token, invitationId, { expectedRevision: data.expectedRevision, reason: data.reason, expectedSessionBinding: auth.sessionBinding, expectedRoomId: roomId }));
       }
       reject(405, "method_not_allowed", "Method not allowed");
-    } catch (caught) {
-      // Storage failures raised outside a store transaction take the same typed 503 and count toward readiness.
-      const error = caught instanceof ServiceError ? caught : store.storageFailure?.(caught) ?? caught;
+    } catch (error) {
       if (res.headersSent) { res.end(); return; }
       if (error.status === 429) res.setHeader("Retry-After", "60");
       if (error.headers && typeof error.headers === "object") {
