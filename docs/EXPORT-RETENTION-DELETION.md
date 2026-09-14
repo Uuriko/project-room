@@ -12,7 +12,10 @@ behaviors marked (pinned).
   response starts and carries a `Content-Length`, so a failure while reading
   history is a JSON error response rather than a truncated file that looks
   like a shorter export, and a dropped connection shows up as an incomplete
-  download (pinned).
+  download (pinned). Because the whole file is held in process memory until
+  the response starts, one export costs at most the room log cap (10,000
+  events) in memory per request; it is throttled by the per-credential read
+  rate limit, not by a separate export limit.
 - **Room import (owner only).** `POST /api/rooms/<id>/import` replaces the
   room's history with an export file (8 MB cap; larger restores go through
   database backup).

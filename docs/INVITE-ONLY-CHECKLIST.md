@@ -54,7 +54,14 @@ expiry, revocation, and rate limits.
   rejected across credential tables.
 - **Rate limits** (`server/http.mjs`): preview/join/redeem/login endpoints are
   per-IP (and per-token where it matters) rate-limited, so capability URLs
-  cannot be brute-forced at speed.
+  cannot be brute-forced at speed. Each key gets a fixed allowance per minute,
+  and keys live in a per-family map (`login:`, `join:`, `read:`, ...) capped at
+  2000 live keys per family (`RATE_FAMILY_KEYS`); when a family is full, a new
+  key evicts that family's least recently touched entry rather than being
+  refused. Under a flood of foreign addresses this means a fresh legitimate
+  caller is always admitted, while a key that is being hammered is re-touched
+  on every request and so is never the one evicted — it stays limited until
+  its minute is up.
 
 ## 3. Indexing
 
