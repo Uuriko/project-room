@@ -30,7 +30,7 @@ export function bind({ reader, connection, folderId }) {
       requireContract(hydrated?.status === 200 && hydrated.message?.id === messageId, "email_fixture_hydration_failed");
       return hydrated;
     },
-    async submit() { requireContract(false, "email_sending_unavailable"); },
-    async lookup() { requireContract(false, "email_sending_unavailable"); }
+    async submit() { requireContract(false, "channel_sending_unavailable"); },
+    async lookup() { requireContract(false, "channel_sending_unavailable"); }
   };
 }

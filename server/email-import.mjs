@@ -79,7 +79,7 @@ function plan(request, { accountId, authEpoch, at, connection, folder, source, m
     if ((connection?.profile.revision ?? 0) !== request.expectedRevision) fail("stale_email_connection", "Connection changed. Refresh before editing.");
     let next;
     if (request.action === "connection.configure") {
-      require(request.profile.accountId === accountId, "email_account_mismatch");
+      require(request.profile.accountId === accountId, "channel_account_mismatch");
       if (connection && (connection.profile.provider !== request.profile.provider || profileExternalId(connection.profile) !== profileExternalId(request.profile)))
         fail("email_mailbox_changed", "Use the existing connection only for its original mailbox.");
       if (mailbox && mailbox !== request.connectionId) fail("email_mailbox_exists", "This account already has a connection for that mailbox.");
@@ -88,11 +88,11 @@ function plan(request, { accountId, authEpoch, at, connection, folder, source, m
     } else if (request.action === "connection.webhook") {
       // Only the SHA-256 of the owner-chosen webhook secret is retained. The
       // connection revision does not move: envelopes stay valid.
-      if (!connection) fail("email_connection_not_found", "Connection not found.", 404);
+      if (!connection) fail("channel_connection_not_found", "Connection not found.", 404);
       if (connection.state !== "active" || connection.authEpoch !== authEpoch) fail("email_connection_changed", "Connection changed. Reconnect before configuring a webhook.");
       next = { ...connection, webhook: { secretHash: request.secretHash, updatedAt: at } };
     } else {
-      if (!connection) fail("email_connection_not_found", "Connection not found.", 404);
+      if (!connection) fail("channel_connection_not_found", "Connection not found.", 404);
       next = { ...connection, profile: { ...connection.profile, revision: request.expectedRevision + 1 }, state: "disconnected", updatedAt: at };
     }
     return { connection: next, sources: [], receipt: { ...receipt, revision: next.profile.revision, state: next.state } };
@@ -109,7 +109,7 @@ function plan(request, { accountId, authEpoch, at, connection, folder, source, m
   for (const observation of request.observations) {
     if (observation.kind === "absent") { target.delete(observation.messageId); continue; }
     const envelope = observation.envelope;
-    require(same(envelope.connection, connection.profile) && adapterForChannel(envelope.channel).scope(envelope) === request.folderId, "email_observation_scope_changed");
+    require(same(envelope.connection, connection.profile) && adapterForChannel(envelope.channel).scope(envelope) === request.folderId, "channel_observation_scope_changed");
     const previous = source(envelope.sourceId);
     if ((!legacy || Object.hasOwn(observation, "expectedSourceRevision")) && (previous?.revision ?? 0) !== observation.expectedSourceRevision)
       fail("stale_email_source", "This message changed during import. Fetch it again before retrying.");
@@ -153,9 +153,9 @@ export class EmailImport {
   connectionRecord(token, id, binding) {
     return this.store.readTransaction(() => {
       const auth = this.store.inbox.auth(token, binding);
-      if (!validId(id)) fail("email_connection_not_found", "Connection not found.", 404);
+      if (!validId(id)) fail("channel_connection_not_found", "Connection not found.", 404);
       const connection = this.connection(auth.account.id, id);
-      if (!connection) fail("email_connection_not_found", "Connection not found.", 404);
+      if (!connection) fail("channel_connection_not_found", "Connection not found.", 404);
       return { contractVersion: 1, viewer: viewer(auth), connection: this.record(connection, auth.account.authEpoch), mode: connection.mode,
         webhook: Boolean(connection.webhook) };
     });
@@ -168,7 +168,7 @@ export class EmailImport {
     return this.store.readTransaction(() => {
       require(validId(connectionId)); emailOpaqueId(folderId);
       const auth = this.store.inbox.auth(token, binding), connection = this.connection(auth.account.id, connectionId);
-      if (!connection) fail("email_connection_not_found", "Connection not found.", 404);
+      if (!connection) fail("channel_connection_not_found", "Connection not found.", 404);
       const folder = this.folder(auth.account.id, connectionId, folderId);
       const needsReset = !folder || folder.connectionRevision !== connection.profile.revision;
       const canImport = connection.state === "active" && connection.authEpoch === auth.account.authEpoch;

@@ -106,6 +106,31 @@ provider (`synthetic` for samples, `telegram-bot` for Telegram); the fixture
 sent. The queued / unknown / accepted / rejected journal is unchanged. The
 browser shows no send panel for channel sources in this pilot.
 
+## Status: fixtures only
+
+Every adapter in this tree reads recorded fixtures. There is no live ingestion
+path: no provider is polled, no webhook is registered with a provider, and the
+webhook route only holds updates for a connection the owner has already
+configured with a secret. The Inbox empty state says so in the browser
+("Email and Telegram connections are local fixtures for now; no live messages
+arrive and nothing is sent"). Until a separately authorized live slice exists,
+imported messages arrive only from `scripts/*-contract-fixture.mjs` recordings
+and tests.
+
+## Error codes
+
+Codes that apply to every channel are named `channel_*`:
+`channel_sending_unavailable` (send gate in `inbox-outbox.mjs` and the email
+adapter's `submit`/`lookup`), `channel_sharing_unavailable`,
+`channel_connection_unavailable`, `channel_connection_not_found` (connection
+routes, 404), `channel_importer_required`, `channel_account_mismatch`
+(`connection.configure` and `source.import` observations),
+`channel_observation_scope_changed`, `channel_sync_page_limit` and the
+`channel_webhook_*` / `channel_sync_*` codes in `channel-import.mjs`.
+Codes tied to the Graph email import contract keep their historical `email_*`
+names (folders, cursors, delta pages, reply plans, `email_fixture_*` for the
+recorded mailbox reader) because their payloads are email specific.
+
 ## Adding a platform (Slack, Discord, SMS)
 
 1. Add the provider under its channel in `channelProviders`

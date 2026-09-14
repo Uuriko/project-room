@@ -106,7 +106,7 @@ const viewer = auth => ({ accountId: auth.account.id, authEpoch: auth.account.au
   sessionBinding: auth.sessionBinding, sessionRevision: auth.sessionRevision });
 const sharedBody = (data, request) => {
   if (request.action === "source.excerpt") {
-    if (!channels.includes(data.adapter) || data.envelope.body.format !== "text") fail(409, "email_sharing_unavailable", "Only plain-text excerpts can be shared.");
+    if (!channels.includes(data.adapter) || data.envelope.body.format !== "text") fail(409, "channel_sharing_unavailable", "Only plain-text excerpts can be shared.");
     const content = emailSelectionText(readChannelEnvelope(data.envelope).body), { start, end } = request.selection;
     const excerpt = content.slice(start, end), body = (data.adapter === "email" ? "Shared email excerpt" : "Shared message excerpt") + "\n\n" + excerpt;
     if (end > content.length || !text(excerpt, 4000) || body.length > 4000)
@@ -114,7 +114,7 @@ const sharedBody = (data, request) => {
     return body;
   }
   const indexes = request.paragraphs;
-  if (data.adapter !== "synthetic") fail(409, "email_sharing_unavailable", "Email excerpt sharing is not yet available.");
+  if (data.adapter !== "synthetic") fail(409, "channel_sharing_unavailable", "Excerpt sharing is not yet available for this channel.");
   if (indexes.some(i => !Object.hasOwn(data.paragraphs, i))) fail(422, "invalid_inbox_share", "Selected text does not exist.");
   const body = "Shared sample excerpt\n\n" + indexes.map(i => data.paragraphs[i]).join("\n\n");
   if (body.length > 4000) fail(422, "invalid_inbox_share", "Choose at most 4,000 characters including the excerpt label.");
@@ -181,7 +181,7 @@ export class Inbox {
     const envelope = readEmailEnvelope(value), { message, body, attachments } = envelope;
     const saved = this.db.prepare("SELECT data_json FROM private_email_connections WHERE account_id=? AND id=?")
       .get(auth.account.id, envelope.connection.id);
-    if (!saved || envelope.connection.accountId !== auth.account.id) fail(409, "email_connection_unavailable", "Email connection unavailable.");
+    if (!saved || envelope.connection.accountId !== auth.account.id) fail(409, "channel_connection_unavailable", "Connection unavailable.");
     const connection = JSON.parse(saved.data_json);
     // A bounded, inert reading projection, never a provider/send envelope. Keep
     // cursors, headers, HTML, attachment descriptors and mailbox IDs off this path.
@@ -199,7 +199,7 @@ export class Inbox {
   channelView(auth, row, value, excerptView = false) {
     const envelope = readChannelEnvelope(value), { message, body, attachments, connection: profile } = envelope;
     const saved = this.store.email.connection(auth.account.id, profile.id);
-    if (!saved || profile.accountId !== auth.account.id) fail(409, "email_connection_unavailable", "Connection unavailable.");
+    if (!saved || profile.accountId !== auth.account.id) fail(409, "channel_connection_unavailable", "Connection unavailable.");
     const content = excerptView ? emailSelectionText(body) : body.content;
     return { id: row.id, revision: row.revision, adapter: envelope.channel, ...summary({ adapter: envelope.channel, envelope }),
       paragraphs: [content], capabilities: { draft: true, share: excerptView && Boolean(content.trim()), send: false },
@@ -482,7 +482,7 @@ export class Inbox {
   }
   // Trusted, transaction-bound importer only. Ordinary HTTP commands cannot use it.
   importSource(token, request, binding) {
-    if (!this.db.isTransaction || request?.action !== "source.import") fail(403, "email_importer_required", "Use the transactional email importer.");
+    if (!this.db.isTransaction || request?.action !== "source.import") fail(403, "channel_importer_required", "Use the transactional channel importer.");
     return this.apply(token, request, binding, importAuthority);
   }
   apply(token, request, binding, authority = null) {
@@ -490,9 +490,9 @@ export class Inbox {
       const auth = this.auth(token, binding); validate(request);
       if (isReplyAttempt(request) && authority !== replyAuthority) fail(403, "reply_driver_required", "Use the configured reply driver.");
       if (internalSend(request) && authority !== transportAuthority) fail(403, "inbox_transport_required", "Only the configured transport can record this outcome.");
-      if (request.action === "source.import" && authority !== importAuthority) fail(403, "email_importer_required", "Only the configured importer can record this source.");
+      if (request.action === "source.import" && authority !== importAuthority) fail(403, "channel_importer_required", "Only the configured importer can record this source.");
       if (request.action === "source.import" && request.data.envelope.connection.accountId !== auth.account.id)
-        fail(403, "email_account_mismatch", "Email observation belongs to another account.");
+        fail(403, "channel_account_mismatch", "Observation belongs to another account.");
       if (isShare(request) || request.action === "draft.adopt") this.auth(token, binding, request.roomId);
       const accountId = auth.account.id, fingerprint = digest(request);
       const prior = this.db.prepare("SELECT fingerprint,receipt_json FROM private_inbox_commands WHERE account_id=? AND request_id=?").get(accountId, request.requestId);

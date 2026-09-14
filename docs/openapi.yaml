@@ -524,7 +524,7 @@ paths:
   /api/inbox/connections/{id}:
     get:
       summary: Read one channel connection
-      description: Account-session route. 404 email_connection_not_found for another account's connection.
+      description: Account-session route. 404 channel_connection_not_found for another account's connection.
       security: []
       parameters:
         - name: id
@@ -545,7 +545,7 @@ paths:
                   mode: { type: string, enum: [fixture] }
                   webhook: { type: boolean }
                   syncAvailable: { type: boolean }
-        '404': { description: email_connection_not_found }
+        '404': { description: channel_connection_not_found }
   /api/inbox/connections/{id}/sync:
     post:
       summary: Import one recorded Telegram page

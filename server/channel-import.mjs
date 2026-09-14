@@ -30,7 +30,7 @@ export async function prepareChannelFixturePage({ store, token, binding, connect
   const page = await adapter.changes({ cursor }); guard();
   requireContract(page && Array.isArray(page.changes) && typeof page.cursor === "string" && typeof page.complete === "boolean", "channel_fixture_page_failed");
   const ids = [...new Set(page.changes.map(change => change.messageId))];
-  requireContract(ids.length <= channelSyncLimits.pageMessages, "email_sync_page_limit");
+  requireContract(ids.length <= channelSyncLimits.pageMessages, "channel_sync_page_limit");
   const observations = [];
   for (const messageId of ids) {
     guard();

@@ -34,7 +34,7 @@ export function validateSend(request) {
 export const previewProvider = envelope => envelope.provider ?? envelope.adapter;
 const label = p => p.displayName || p.handle || p.id;
 export function sendPreview(accountId, authEpoch, source, data, draft) {
-  if (!["synthetic", "telegram"].includes(data.adapter)) fail(409, "email_sending_unavailable", "Real email sending is not enabled.");
+  if (!["synthetic", "telegram"].includes(data.adapter)) fail(409, "channel_sending_unavailable", "Sending is not enabled for this channel.");
   if (!draft || !draft.body.trim() || draft.source_revision !== source.revision)
     fail(409, "stale_inbox_reply", "Save a reply to the current source before sending.");
   const common = { accountId, authEpoch, sourceId: source.id, sourceRevision: source.revision, draftRevision: draft.revision };

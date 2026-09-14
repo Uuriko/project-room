@@ -77,7 +77,7 @@ test("a recorded Telegram page imports beside email through the same importer; e
   assert.equal(f.store.inbox.verify().sources, 5);
   f.store.close(); f.store = new RoomStore(f.filename);
   assert.equal(f.apply(second).duplicate, true); assert.equal(f.store.inbox.verify().sources, 5);
-  assert.throws(() => f.inbox({ action: "source.import", requestId: "forged", sourceId: edited.source.id, expectedRevision: 2, data: { adapter: "telegram", envelope: edited.source.envelope } }), { code: "email_importer_required" });
+  assert.throws(() => f.inbox({ action: "source.import", requestId: "forged", sourceId: edited.source.id, expectedRevision: 2, data: { adapter: "telegram", envelope: edited.source.envelope } }), { code: "channel_importer_required" });
   assert.throws(() => f.inbox({ action: "source.import", requestId: "forged", sourceId: edited.source.id, expectedRevision: 2, data: { adapter: "email", envelope: edited.source.envelope } }), { code: "invalid_inbox_source" });
 });
 test("telegram observations are scoped to their connection, account and channel", async t => {
@@ -86,7 +86,7 @@ test("telegram observations are scoped to their connection, account and channel"
   const other = structuredClone(request); other.observations[0].envelope.connection.accountId = f.sessions.guest.account.id;
   assert.throws(() => f.apply(other), { status: 422 });
   const wrongScope = structuredClone(request); wrongScope.folderId = "elsewhere";
-  assert.throws(() => f.apply(wrongScope), { code: "email_observation_scope_changed" });
+  assert.throws(() => f.apply(wrongScope), { code: "channel_observation_scope_changed" });
   const tampered = structuredClone(request); tampered.observations[0].envelope.body.content = "changed";
   assert.throws(() => f.apply(tampered), { status: 422 });
   const relabeled = { ...request, requestId: "relabel", observations: request.observations.map(o => ({ ...o, envelope: { ...o.envelope, channel: "email" } })) };
@@ -128,7 +128,7 @@ test("a saved Telegram reply previews the bot's target chat and sends only over 
   assert.doesNotThrow(() => f.store.inbox.verify());
   const emailSource = (() => { f.configure(f.email.connection); f.apply(f.emailPage()); return f.list().find(r => r.adapter === "email").id; })();
   f.inbox({ action: "draft.save", requestId: "email-draft", sourceId: emailSource, sourceRevision: 1, expectedRevision: 0, body: "Email reply" });
-  assert.throws(() => f.store.inbox.sendContext(f.auth.token, emailSource, f.auth.sessionBinding), { code: "email_sending_unavailable" });
+  assert.throws(() => f.store.inbox.sendContext(f.auth.token, emailSource, f.auth.sessionBinding), { code: "channel_sending_unavailable" });
 });
 test("HTTP connection routes, recorded sync and webhook delivery are account, secret and loopback scoped", async t => {
   const f = fixture(t); f.configure(f.telegram.connection);
@@ -156,7 +156,7 @@ test("HTTP connection routes, recorded sync and webhook delivery are account, se
   value = await response.json(); assert.equal(response.status, 200);
   assert.equal(value.connection.channel, "telegram"); assert.equal(value.mode, "fixture"); assert.equal(value.webhook, true); assert.equal(value.syncAvailable, true);
   response = await fetch(origin + "/api/inbox/connections/" + f.telegram.connection.id, { headers: headers(f.sessions.guest) });
-  assert.equal(response.status, 404); assert.equal((await response.json()).error.code, "email_connection_not_found");
+  assert.equal(response.status, 404); assert.equal((await response.json()).error.code, "channel_connection_not_found");
   response = await fetch(origin + "/api/inbox/connections/nope", { headers: headers(f.auth) }); assert.equal(response.status, 404);
   // Webhook: secret header, then body shape; the account is found from the connection.
   const update = f.telegram.updates[0];
@@ -231,6 +231,6 @@ test("the sync helper refuses non-Telegram connections and rejects malformed rec
   await assert.rejects(syncTelegramConnection({ store: f.store, token: f.auth.token, binding: f.auth.sessionBinding, connectionId: f.telegram.connection.id, requestId: "x", updates: null }),
     { code: "channel_webhook_unavailable" });
   await assert.rejects(syncTelegramConnection({ store: f.store, token: f.auth.token, binding: f.auth.sessionBinding, connectionId: "missing", requestId: "x", updates: [] }),
-    { code: "email_connection_not_found" });
+    { code: "channel_connection_not_found" });
   assert.deepEqual(auditRecovery(f.store), before);
 });
