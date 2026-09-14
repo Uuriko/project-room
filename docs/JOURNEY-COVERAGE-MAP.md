@@ -248,6 +248,7 @@ carry the claim, and the remaining tiers stay visibly open.
 | Claim | Unit/integration | Browser | Actual agent | Hosted |
 | --- | --- | --- | --- | --- |
 | Accounts, invitations, guests | invitations, invitation-http, share-links, account-rooms | invitation-check, quiet-invites-check, invitation-recovery-check | agent onboarding exercise | staging worker README |
+| First-result onboarding (join, contribute, see the outcome) | help-offer-service, work-help-service, help-offer-context | first-result-journey-check | open | open |
 | Conversation, threads, reactions, search | conversation, work-search, work-discussion | browser-check, work-search-browser-check | open | open |
 | Shared work-status model | work-snapshot, work-continuity, agent-handoff | workflow-browser-check, assisted-work-browser-check | agent onboarding exercise | open |
 | Exact-version verification | version, work-actions | room-actions-browser-check | open | open |
