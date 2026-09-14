@@ -35,12 +35,8 @@ apply their per-address rate limit before the body is read.
 | `POST /api/rooms/:id/cursor` | room Bearer / session | member (own read cursor) |
 | `POST /api/rooms/:id/work-sessions` | room Bearer / session | member |
 | `POST /api/rooms/:id/reminders` | room Bearer / session | member |
-<<<<<<< HEAD
 | `POST /api/rooms/:id/agent-connections` | signed-in account session (`?auth=account`) + CSRF | room owner only (`403 owner_required`, bearer keys included) |
-=======
-| `POST /api/rooms/:id/agent-connections` | room Bearer / session | member |
 | `POST /api/rooms/:id/agent-pause` | room Bearer / session | the member itself (own wake-pause row), or the signed-in room owner + `manage_members` for another member; a removed member's row is inspect-only (`409 member_inactive`) |
->>>>>>> pr158
 | `POST /api/rooms/:id/guest-agent-links` | room Bearer / session | room owner + `manage_members` |
 | `POST /api/rooms/:id/share-links` | signed-in account session (`?auth=account`) + CSRF | human member + `manage_members` |
 | `POST /api/rooms/:id/share-links-cancel` | signed-in account session (`?auth=account`) + CSRF | link issuer / `manage_members` |
@@ -64,7 +60,6 @@ server request timeout.
 
 All `GET` routes under `/api/rooms/:id/*` (snapshot, events, export,
 search, presence, capabilities, onboarding-funnel, provider-heartbeats,
-<<<<<<< HEAD
 reminders, agent-invites, work-*, reply-*, charter, return-brief, thread)
 require a room credential with member visibility; `agent-connections`,
 `diagnostics`, `share-links` and `invitations` additionally require the room
@@ -73,12 +68,6 @@ never a bearer key. `GET /api/rooms/:id/export` returns the full event log as
 one `Content-Length`-framed JSONL body (never a partial 200); with
 `?format=html` it returns the same walk as one escaped, script-free HTML page
 under a `default-src 'none'` Content-Security-Policy, same auth and framing;
-=======
-reminders, agent-connections, agent-pause, share-links, invitations, work-*, reply-*,
-charter, diagnostics, return-brief, thread) require a room credential with
-member visibility. `GET /api/rooms/:id/export` returns the full event log as
-one `Content-Length`-framed JSONL body (never a partial 200);
->>>>>>> pr158
 `GET /api/rooms/:id/stream` is the SSE feed.
 
 `tests/route-auth-table.test.js` enforces the headline invariant: every
