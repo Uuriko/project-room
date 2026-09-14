@@ -78,3 +78,11 @@ test("a recorded bot pages getUpdates by offset; the bound adapter hydrates the 
   assert.equal(await adapter.hydrate("-1001000000001:999"), null);
   assert.equal(adapter.sourceId("-1001000000001:41"), telegramSourceId(connection, "-1001000000001:41"));
 });
+test("out-of-range Telegram dates are contract errors, never a RangeError", () => {
+  const { connection, chat, updates } = f();
+  const dated = seconds => ({ update_id: 900101, message: { message_id: 101, date: seconds, chat, from: { id: 5000000001, is_bot: false, first_name: "Avery" }, text: "when?" } });
+  assert.equal(normalizeTelegramUpdate(connection, dated(253402300799)).message.sentAt, "9999-12-31T23:59:59.000Z");
+  for (const seconds of [253402300800, 8640000000001, -1, 1.5, Number.MAX_SAFE_INTEGER])
+    assert.throws(() => normalizeTelegramUpdate(connection, dated(seconds)), { code: "invalid_telegram_update" }, String(seconds));
+  assert.throws(() => normalizeTelegramUpdate(connection, { ...updates[0], message: { ...updates[0].message, edit_date: 8640000000001 } }), { code: "invalid_telegram_update" });
+});

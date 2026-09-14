@@ -1,12 +1,12 @@
 // Contextual private reply controls. Only the explicitly enabled local simulator
 // is exposed; no global composer shortcut can submit an external-style reply.
-export function installInboxSend({ api, ownerKey, reviewChanges }) {
+export function installInboxSend({ api, ownerKey, reviewChanges, onChannelSend = () => {} }) {
   const $ = id => document.getElementById(id), states = new Map();
   const storageKey = "project-room:pending-private-send:v1";
   let storage; try { storage = sessionStorage; } catch {}
   let sourceId = null, draft = null, generation = 0, preview = null, modalTurn = 0;
   const state = id => {
-    if (!states.has(id)) states.set(id, { sends: [], loaded: false, available: false, busy: false, pending: null, uncertain: false, note: "", turn: 0 });
+    if (!states.has(id)) states.set(id, { sends: [], loaded: false, available: false, channelSend: null, busy: false, pending: null, uncertain: false, note: "", turn: 0 });
     return states.get(id);
   };
   function pending() {
@@ -29,13 +29,25 @@ export function installInboxSend({ api, ownerKey, reviewChanges }) {
   const latest = s => s.sends.at(-1);
   const clean = () => draft && !draft.dirty && !draft.busy && !draft.pending && !draft.conflict
     && draft.reviewedSource === draft.source.revision && draft.body.trim();
+  // Samples reply through the local simulator; a Telegram source replies through the
+  // deployment's channel transport (live bot or inert fixture). Email has no send path yet.
+  const sendable = d => Boolean(d) && (d.source.adapter === "synthetic" || (d.source.adapter === "telegram" && d.source.capabilities.send === true));
+  const isChannel = d => Boolean(d) && d.source.adapter !== "synthetic";
+  const live = s => s.channelSend?.mode === "live";
+  const labelsFor = s => live(s)
+    ? { queued: "Reply ready · not sent", unknown: "Outcome unknown · check status", accepted: "Accepted by Telegram · delivery unconfirmed",
+      delivered: "Delivered", rejected: "Rejected by Telegram · not sent", bounced: "Delivery failed", cancelled: "Cancelled · not sent" }
+    : { queued: "Sample reply ready · not sent", unknown: "Sample outcome unknown", accepted: isChannel(draft) ? "Sample accepted · nothing left this server" : "Sample accepted · delivery unconfirmed",
+      delivered: "Sample delivered", rejected: "Sample rejected · not sent", bounced: "Sample delivery failed", cancelled: "Sample cancelled · not sent" };
   function render() {
     if (!sourceId || !ownerKey()) return;
-    if (draft && draft.source.adapter !== "synthetic") {
-      // Channel sources (email, Telegram) have no browser send path in this pilot.
+    if (draft && !sendable(draft)) {
+      // Email (and a bot connection without send capability) has no browser send path.
       $("inbox-send-panel").hidden = true; $("inbox-save").hidden = false; return;
     }
     const s = state(sourceId), send = latest(s), unresolved = send && ["queued", "unknown"].includes(send.status);
+    $("inbox-send-panel").setAttribute("aria-label", live(s) ? "Telegram reply" : isChannel(draft) ? "Sample Telegram reply" : "Sample reply");
+    $("inbox-send-panel").dataset.sendMode = isChannel(draft) ? (s.channelSend?.mode ?? "unavailable") : "simulation";
     const already = send && !["cancelled", "rejected"].includes(send.status)
       && send.envelope.draftRevision === draft?.base?.revision && send.envelope.sourceRevision === draft?.source.revision;
     $("inbox-send-panel").hidden = !s.loaded || (!s.available && !s.sends.length && !s.pending);
@@ -50,15 +62,15 @@ export function installInboxSend({ api, ownerKey, reviewChanges }) {
     $("inbox-send-cancel").disabled = s.busy;
     $("inbox-send-view").hidden = !send || Boolean(unresolved);
     $("inbox-send-view").disabled = s.busy;
-    const labels = { queued: "Sample reply ready · not sent", unknown: "Sample outcome unknown", accepted: "Sample accepted · delivery unconfirmed",
-      delivered: "Sample delivered", rejected: "Sample rejected · not sent", bounced: "Sample delivery failed", cancelled: "Sample cancelled · not sent" };
+    const labels = labelsFor(s);
     const previous = send && (send.envelope.draftRevision !== draft?.base?.revision || send.envelope.body !== draft?.body);
     $("inbox-send-status").textContent = s.note || (s.pending ? "Reply unconfirmed. Check status." : send
       ? previous ? "Previous " + labels[send.status].toLowerCase() : labels[send.status] : "");
   }
   async function load(id) {
     if (!ownerKey()) return;
-    if (id === sourceId && draft && draft.source.adapter !== "synthetic") { render(); return true; }
+    if (id === sourceId && draft && !sendable(draft)) { render(); return true; }
+    const channel = id === sourceId && isChannel(draft);
     const s = state(id), owner = ownerKey(), turn = ++s.turn, gen = generation;
     s.pending ??= pending().find(r => r.sourceId === id) ?? null;
     try {
@@ -66,7 +78,8 @@ export function installInboxSend({ api, ownerKey, reviewChanges }) {
       if (gen !== generation || owner !== ownerKey() || turn !== s.turn) return;
       if (s.sends.some(prior => !value.sends.some(next => next.id === prior.id && next.revision >= prior.revision)))
         throw new Error("Previously recorded reply is missing or older");
-      s.sends = value.sends; s.available = value.simulationAvailable; s.loaded = true; s.uncertain = false; s.note = "";
+      s.sends = value.sends; s.channelSend = value.channelSend ?? null; s.available = channel ? s.channelSend !== null : value.simulationAvailable;
+      s.loaded = true; s.uncertain = false; s.note = "";
     } catch {
       if (gen !== generation || owner !== ownerKey() || turn !== s.turn) return;
       s.loaded = true; s.note = "Couldn’t check replies. Refresh to retry.";
@@ -86,32 +99,46 @@ export function installInboxSend({ api, ownerKey, reviewChanges }) {
     $("inbox-send-confirm").disabled = !canSend;
   }
   async function open(existing = false, readOnly = false) {
-    if (!sourceId || !ownerKey() || (draft && draft.source.adapter !== "synthetic")) return;
-    const id = sourceId, s = state(id), owner = ownerKey(), turn = ++modalTurn;
+    if (!sourceId || !ownerKey() || !sendable(draft)) return;
+    const id = sourceId, s = state(id), owner = ownerKey(), turn = ++modalTurn, channel = isChannel(draft);
     if (s.busy || s.pending || (!existing && !clean())) return;
     preview = null; $("inbox-send-dialog").showModal();
     for (const key of ["inbox-send-addresses", "inbox-send-subject", "inbox-send-body"]) $(key).textContent = "";
+    $("inbox-send-title").textContent = live(s) ? "Reply on Telegram" : channel ? "Sample Telegram reply" : "Sample reply";
+    $("inbox-send-confirm").textContent = live(s) ? "Send to Telegram" : "Send sample";
     $("inbox-send-confirm").hidden = readOnly; $("inbox-send-confirm").disabled = true;
     $("inbox-send-dialog-status").textContent = "Loading…";
     try {
-      const value = existing ? { preview: latest(s).envelope, simulationAvailable: s.available } : await api.sendContext(id);
+      const value = existing ? { preview: latest(s).envelope, simulationAvailable: s.available, channelSend: s.channelSend } : await api.sendContext(id);
       if (owner !== ownerKey() || turn !== modalTurn || id !== sourceId || !$("inbox-send-dialog").open) return;
-      const p = value.preview;
+      const p = value.preview, available = channel ? Boolean(value.channelSend) : value.simulationAvailable;
+      if (channel && !existing) { s.channelSend = value.channelSend ?? null; s.available = available; }
       const unchanged = clean() && draft.base?.revision === p.draftRevision && draft.source.revision === p.sourceRevision && draft.body === p.body;
-      showEnvelope(p, !readOnly && value.simulationAvailable && unchanged);
-      $("inbox-send-dialog-status").textContent = readOnly ? "Previous sample reply" : !value.simulationAvailable ? "Sample sending is unavailable here."
-        : !unchanged ? "Reply changed. Close and review your draft." : "Simulation only · no one will be contacted";
+      showEnvelope(p, !readOnly && available && unchanged);
+      $("inbox-send-dialog-status").textContent = readOnly ? (live(s) ? "Previous Telegram reply" : "Previous sample reply")
+        : !available ? (channel ? "Sending is not available for this channel here." : "Sample sending is unavailable here.")
+        : !unchanged ? "Reply changed. Close and review your draft."
+        : live(s) ? "Sent by the bot into the chat as a reply · Telegram" : channel ? "Sample only · Telegram is not configured here, nothing is sent" : "Simulation only · no one will be contacted";
       if (!existing && !unchanged) await reviewChanges();
     } catch {
       if (owner === ownerKey() && turn === modalTurn) $("inbox-send-dialog-status").textContent = "Couldn’t verify this reply. Close and try again.";
     }
   }
   async function act(kind) {
-    const id = sourceId, s = state(id), owner = ownerKey(), gen = generation, p = preview;
+    const id = sourceId, s = state(id), owner = ownerKey(), gen = generation, p = preview, channel = isChannel(draft);
     if (!owner || s.busy || kind === "send" && (!p || !clean())) return;
     s.busy = true; s.note = kind === "check" ? "Checking…" : "Working…"; render();
     $("inbox-send-confirm").disabled = true;
-    let retained = true;
+    let retained = true, outcome = ""; // The note to keep once the journal has been re-read (transport failures only).
+    // The outbox transitions are shared; only the driver differs per source kind.
+    const drive = async (action, sendId) => {
+      const value = channel ? await api.channelSend(action, id, sendId) : await api.simulate(action, id, sendId);
+      const last = value.lastSendResult;
+      s.channelSend = value.channelSend ?? s.channelSend;
+      if (channel) onChannelSend(); // The connection card's "Last send" line changed.
+      return { sends: value.sends, note: channel && last?.outcome === "failed" && ["queued", "unknown"].includes(value.send.status)
+        ? "Telegram unavailable" + (last.code ? " (" + last.code.replaceAll("_", " ") + ")" : "") + " · outcome unknown. Check status before continuing." : "" };
+    };
     try {
       let send = latest(s);
       if (s.pending) {
@@ -134,26 +161,29 @@ export function installInboxSend({ api, ownerKey, reviewChanges }) {
           if (owner !== ownerKey() || gen !== generation) return;
           retain(id, null); send = value.receipt.send; s.sends.push(send);
         }
-        const value = await api.simulate("dispatch", id, send.id);
+        const value = await drive("dispatch", send.id);
         if (owner !== ownerKey() || gen !== generation) return;
-        s.sends = value.sends;
+        s.sends = value.sends; outcome = value.note;
       } else {
         if (!await load(id)) return;
         if (owner !== ownerKey() || gen !== generation) return;
         send = latest(s);
         if (!send || !["unknown", "accepted"].includes(send.status)) return;
-        const value = await api.simulate("reconcile", id, send.id);
+        const value = await drive("reconcile", send.id);
         if (owner !== ownerKey() || gen !== generation) return;
-        s.sends = value.sends;
+        s.sends = value.sends; outcome = value.note;
       }
       s.note = ""; if (id === sourceId) $("inbox-send-dialog").close();
-      await load(id);
+      await load(id); if (owner === ownerKey() && gen === generation) s.note = outcome;
     } catch (error) {
       if (owner !== ownerKey() || gen !== generation) return;
       if (error.status && error.status < 500) {
         retain(id, null); await load(id);
         s.note = error.code === "stale_inbox_reply" ? latest(s)?.status === "queued"
-          ? "Reply changed. Cancel the pending reply and review again." : "Reply changed. Review your draft again." : "Reply not confirmed. Check its status.";
+          ? "Reply changed. Cancel the pending reply and review again." : "Reply changed. Review your draft again."
+          : error.code === "channel_sending_unavailable" ? "Sending is not available for this channel here. Nothing was sent."
+          : error.code === "channel_connection_unavailable" ? "Telegram refused the bot token. Check the connection; nothing was sent."
+          : "Reply not confirmed. Check its status.";
         if (error.code === "stale_inbox_reply" && sourceId === id) await reviewChanges();
       } else {
         s.uncertain = true;
@@ -181,7 +211,7 @@ export function installInboxSend({ api, ownerKey, reviewChanges }) {
       generation++; modalTurn++; sourceId = null; draft = null; preview = null; states.clear();
       if (!preservePending) try { storage?.removeItem(storageKey); } catch {}
       $("inbox-send-dialog").close(); $("inbox-send-panel").hidden = true;
-      $("inbox-save").hidden = false;
+      $("inbox-save").hidden = false; $("inbox-send-title").textContent = "Sample reply"; $("inbox-send-confirm").textContent = "Send sample";
       for (const id of ["inbox-send-addresses", "inbox-send-subject", "inbox-send-body", "inbox-send-status", "inbox-send-dialog-status"]) $(id).textContent = "";
     },
     hasPending: () => [...states.values()].some(s => s.pending || s.busy)
