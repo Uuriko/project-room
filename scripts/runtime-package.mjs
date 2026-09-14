@@ -56,6 +56,7 @@ optional.push("src/work-loops.js");
 optional.push("src/work-recipes.js");
 optional.push("server/action-classes.mjs");
 optional.push("server/wake-queue.mjs");
+optional.push("server/attention.mjs");
 const allowed = new Set([...required, ...optional]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 const check = condition => { if (!condition) throw new Error("Runtime package does not match its exact allowlisted contract"); };
