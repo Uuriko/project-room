@@ -83,6 +83,10 @@ test("address lists: names, quotes, comments, groups, multiple headers and inval
     { name: "Quinn, Avery", address: "avery@example.test" }, { name: "", address: "lee@example.test" },
     { name: "", address: "sam@example.test" }, { name: "", address: "pat@example.test" }, { name: "", address: "x@y" }]);
   assert.deepEqual(parseAddressList("a@example.test, b@example.test, c@example.test", { max: 2 }).length, 2);
+  const longName = parseAddressList("\"" + "名".repeat(400) + "\" <cjk@example.test>")[0];
+  assert.equal(longName.address, "cjk@example.test"); assert.equal(Buffer.byteLength(longName.name), 1023, "display names are cut at the envelope's 1024-byte cap on a code-point boundary");
+  assert.deepEqual(parseAddressList("<" + "a".repeat(250) + "@" + "b".repeat(80) + ".test>, ok@example.test"), [{ name: "", address: "ok@example.test" }],
+    "an addr-spec over 320 bytes is dropped like any other invalid entry");
   const m = parseMimeMessage(crlf(["From: a@example.test", "To: one@example.test", "To: two@example.test", "Cc: \"Three\" <three@example.test>", "Reply-To: replies@example.test",
     "In-Reply-To: <earlier@example.test>", "References: <start@example.test>", "\t<earlier@example.test>", "", "x"]));
   assert.deepEqual(m.to.map(a => a.address), ["one@example.test", "two@example.test"]); assert.equal(m.cc[0].name, "Three");

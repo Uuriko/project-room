@@ -261,8 +261,10 @@ export function parseMailbox(item) {
     address = item.slice(open + 1, close === -1 ? item.length : close);
   }
   address = stripComments(address).trim();
-  if (!addressPattern.test(address)) return null;
-  return { name: cleanHeaderValue(name).slice(0, 1024), address };
+  // Same byte caps as the envelope (emailAddress): an oversize addr-spec is
+  // dropped like any other invalid entry; an oversize display name is cut.
+  if (!addressPattern.test(address) || Buffer.byteLength(address) > 320) return null;
+  return { name: truncateUtf8(cleanHeaderValue(name), 1024).value, address };
 }
 const messageIdPattern = /<([^<>\s]{1,998})>/g;
 export const parseMessageIds = (value, max = 10) => [...String(value ?? "").matchAll(messageIdPattern)].map(m => "<" + m[1] + ">").slice(-max);

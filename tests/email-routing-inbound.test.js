@@ -88,6 +88,9 @@ test("threading, attachments, html bodies, plus tags and missing headers map ont
     { id: "part-2", kind: "file", name: "", contentType: "image/png", size: 3, inline: true, contentId: "<logo@x>" }] });
   const noFrom = await routeInboundEmail(inbound({ from: "<sender@example.test>", raw: Buffer.from("Subject: envelope sender\r\n\r\nx") }), { lookup });
   assert.deepEqual(noFrom.envelope.message.from, { name: "", address: "sender@example.test" });
+  const oversize = await routeInboundEmail(inbound({ rawOverrides: { from: "\"" + "名".repeat(400) + "\" <avery@example.test>", headers: ["Cc: <" + "c".repeat(300) + "@" + "d".repeat(100) + ".test>, Lee <lee@example.test>"] } }), { lookup });
+  assert.equal(oversize.decision.accept, true, "oversize names are cut and oversize addr-specs dropped instead of rejecting the message");
+  assert.equal(Buffer.byteLength(oversize.envelope.message.from.name), 1023); assert.deepEqual(oversize.envelope.message.cc, [{ name: "Lee", address: "lee@example.test" }]);
   const noSender = await routeInboundEmail(inbound({ from: "", raw: Buffer.from("Subject: bounce\r\n\r\nx") }), { lookup });
   assert.deepEqual(noSender.decision, { accept: false, reason: emailRoutingRejections.malformed }); assert.equal(noSender.code, "email_routing_sender_required");
 });
