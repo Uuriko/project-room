@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Repo hygiene: README no longer cites a stale schema number or a nonexistent
+  root file; the seven dead `test-results/` screenshot links in the 9/7 browser
+  checkpoint docs are annotated as local-only; new `docs/README.md` orients
+  readers across the dated checkpoint archive.
+- Schema lineage: v34 convergence in flight (PR #197) to reunite the repo's v28
+  lineage with the deployed v28–v33 lineage. Schema changes stay frozen until it
+  lands. Hand-resolved merges on 9/14 dropped some wiring; PR #180 restored it.
+
 ## 2026-09-14
 
 - Room lifecycle (issue #6 A2): schema 28 adds `rooms.archived_at` (migration
