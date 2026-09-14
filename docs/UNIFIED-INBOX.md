@@ -37,6 +37,17 @@ keys are rejected, as with every other inbox contract.
   (`store.connections`, an alias of `store.email`). The table name predates
   multi-channel support; `provider` and `mailbox_id` hold the generic
   `provider`/`externalId`, and `channel` lives in `data_json`. No schema bump.
+- Webhook journal: verified provider updates are rows of
+  `pending_channel_updates` (`server/channel-journal.mjs`, `store.channelUpdates`),
+  keyed by (account, connection, provider `update_id`) with `received_at`, the
+  raw `payload`, `status` pending / imported / failed, `attempts` and
+  `last_error`. The table is purely additive at schema 27, exactly like
+  `wake_queue` (W4-45) and the attention tables (W4-46): no data migration, no
+  writer-fence impact (a pre-journal writer has no code path to it) and the
+  recovery audit's exact table list is the integrity gate. A read-only open of a
+  backup taken before the journal still verifies (`verifySchema({ allowAbsent })`,
+  the PR #135 pattern); a writable open adds the table. Nothing in the route
+  touches SQL: `ChannelWebhookInbox` writes only through `store.channelUpdates`.
 
 ## Adapter interface
 
@@ -91,9 +102,9 @@ ids stay off that path. Excerpt sharing into a room works like email.
 | --- | --- |
 | `GET /api/inbox/connections` | Generic records for the account's connections |
 | `GET /api/inbox/connections/{id}` | One record plus `mode`, `webhook`, `syncAvailable` |
-| `POST /api/inbox/connections/{id}/sync` | Import one recorded Telegram page `{ requestId, updates }` (at most 100 updates); `updates: null` drains verified webhook updates. Each sync consumes at most 50 updates and reports `receipt.complete: false` when more remain, so a larger backlog drains over repeated syncs with fresh request IDs. Loopback-only **and** fixture-mode only |
-| `POST /api/inbox/connections/{id}/reconnect` | Owner-authenticated live import trigger (account session, CSRF, 30/min per account) that works from any client, including the hosted Worker. When the Telegram bindings are set it first stores the SHA-256 of `TELEGRAM_WEBHOOK_SECRET` on the connection (`registered: true`), then drains verified webhook updates through the same sync path (`updates: null`). Returns the connection record plus `live` status |
-| `POST /api/inbox/webhooks/{connectionId}` | Provider callback. `X-Telegram-Bot-Api-Secret-Token` is compared in constant time against the SHA-256 stored by `connection.webhook`; accepted updates wait in memory until the owner syncs. Inert unless the server is started with a `ChannelWebhookInbox` |
+| `POST /api/inbox/connections/{id}/sync` | Import one recorded Telegram page `{ requestId, updates }` (at most 100 updates); `updates: null` drains the oldest pending journal rows. Each sync consumes at most 50 updates and reports `receipt.complete: false` when more remain, so a larger backlog drains over repeated syncs with fresh request IDs. The page and the acknowledgement of exactly the rows it consumed commit in one transaction. Loopback-only **and** fixture-mode only |
+| `POST /api/inbox/connections/{id}/reconnect` | Owner-authenticated live import trigger (account session, CSRF, 30/min per account) that works from any client, including the hosted Worker. When the Telegram bindings are set it first stores the SHA-256 of `TELEGRAM_WEBHOOK_SECRET` on the connection (`registered: true`), then drains the oldest pending journal rows through the same sync path (`updates: null`). Returns the connection record plus `live` status |
+| `POST /api/inbox/webhooks/{connectionId}` | Provider callback. `X-Telegram-Bot-Api-Secret-Token` is compared in constant time against the SHA-256 stored by `connection.webhook`; accepted updates are journaled durably (`pending_channel_updates`) until the owner syncs, and a redelivered `update_id` is a no-op in every status. At most 500 pending rows per connection (409 `channel_webhook_backlog`, delivery refused unchanged). Inert unless the server is started with a `ChannelWebhookInbox` |
 
 `GET /api/inbox/connections/{id}` adds `webhookSetAt` and, for Telegram, a
 `live` block (`state` not_configured / invalid / configured, the binding
@@ -137,6 +148,62 @@ forum `message_thread_id`) through an injected `fetch`:
   `Retry-After` when Telegram gave one) and the attempt stays `unknown` in the
   send journal for reconciliation. The token appears only in the request URL
   and is redacted from every error string.
+
+## Webhook journal lifecycle
+
+1. `receive` matches the connection and secret, validates the Telegram Update
+   shape and journals every update in one store transaction. A message-kind
+   update the adapter cannot normalize (for example an unsupported chat type) is
+   written straight into `failed` with the contract code as `last_error` and
+   `attempts` at the bound, so it never occupies the pending backlog or a sync
+   attempt; the delivery still answers 202, because a 4xx would only make the
+   provider redeliver the same update and stall its own queue behind it.
+   Duplicates (same `update_id`, any status) are not written again.
+2. `sync` with `updates: null` takes the oldest 100 pending rows. As a
+   backstop, a pending update the adapter can no longer normalize records one
+   failed attempt with the contract code, leaves this page and is offered again
+   next time, so it never blocks the updates around it. After
+   `channelJournalLimits.maxAttempts` (5) it parks as `failed` and is no longer
+   offered; the row keeps its payload and error for a later connection card.
+3. The recorded reader pages the remaining slice at 50 updates. The page apply
+   and the `imported` mark of exactly the rows below the returned cursor commit
+   together; rows behind the reader's page stay `pending`.
+4. If the page itself fails, every row in the slice records one attempt with the
+   error code (422, 5xx or an unexpected error); authority and state conflicts
+   (401, 403, 404, 409: session, connection changed, stale page) are not the
+   updates' fault and count nothing.
+5. `store.channelUpdates.verify()` (store open and recovery audit) checks that
+   each payload names its key, attempts stay within the bound and only exhausted
+   rows are `failed`.
+
+## Worker mount (proposal for Grok)
+
+`cloudflare/room.mjs` is Grok's area, so this tree does not change it. On the
+Worker the webhook route currently answers 409 `channel_webhook_unavailable`
+because no `ChannelWebhookInbox` is passed to `createRoomServer`. With the
+journal in the store, the mount is one import and one option; the proposal PR
+`claude/build-01-webhook-journal-worker-mount` carries exactly this diff:
+
+```diff
+--- a/cloudflare/room.mjs
++++ b/cloudflare/room.mjs
+@@
+ import { RoomStore } from '../server/store.mjs';
+ import { createRoomServer } from '../server/http.mjs';
++import { ChannelWebhookInbox } from '../server/channel-import.mjs';
+@@
+     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: 'cloudflare-staging',
++      // Verified provider webhook updates are journaled in the Durable Object's
++      // SQLite (pending_channel_updates), so they survive eviction and restart.
++      channelWebhooks: new ChannelWebhookInbox(this.store),
+       resolveRequestSignal: () => this.requestSignals.getStore(),
+```
+
+Nothing else is required for the journal itself. With the mount in place the
+owner drains the journal from anywhere through `POST
+/api/inbox/connections/{id}/reconnect` (the loopback-only `/sync` stays for
+local recordings), and the bot token and `setWebhook` registration follow the
+Live Telegram steps below; the bindings are set by John or Grok, never in code.
 
 ## Status: email is fixture only; Telegram is live once configured
 
@@ -233,7 +300,8 @@ adapter's `submit`/`lookup`), `channel_sharing_unavailable`,
 routes, 404), `channel_importer_required`, `channel_account_mismatch`
 (`connection.configure` and `source.import` observations),
 `channel_observation_scope_changed`, `channel_sync_page_limit` and the
-`channel_webhook_*` / `channel_sync_*` codes in `channel-import.mjs`. The live
+`channel_webhook_*` / `channel_sync_*` codes in `channel-import.mjs`
+(`channel_webhook_backlog` is now the journal's pending bound). The live
 transport reuses `channel_sending_unavailable` (Telegram unreachable, busy or
 not configured) and `channel_connection_unavailable` (bad bot token).
 Codes tied to the Graph email import contract keep their historical `email_*`

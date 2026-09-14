@@ -131,12 +131,18 @@ paths:
   /api/rooms/{roomId}/export:
     get:
       summary: Export the event log as JSONL
-      description: One {sequence, event} per line, ordered. Same visibility as the events route (members only).
+      description: >-
+        One {sequence, event} per line, ordered. Same visibility as the events
+        route (members only). The body is materialised in full before the
+        response starts and is framed by Content-Length: a failure while
+        reading history is a JSON error response, never a truncated 200, and a
+        client that receives fewer bytes than Content-Length has an incomplete
+        download, not a shorter export.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
         '200':
-          description: NDJSON export
+          description: NDJSON export (Content-Length set; the last byte is a newline)
           content:
             application/x-ndjson:
               schema: { type: string }
@@ -234,6 +240,24 @@ paths:
                   displayName: { type: string }
                   createdAt: { type: string, format: date-time }
                   secret: { type: string, description: "Returned once; store it securely" }
+        '409':
+          description: >-
+            Identity table cap reached (error.code pilot_limit). The 5000-row
+            cap is checked inside the insert transaction, so no row is written;
+            the route is unauthenticated and this cap, not the rate limit, is the
+            hard bound on how many identities can exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+        '429':
+          description: Per-address creation rate limit (error.code rate_limited); retry after a minute
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
   /api/rooms/{roomId}/identity-links:
     get:
       summary: List agent identity links
@@ -661,9 +685,11 @@ paths:
         constant time with the SHA-256 the owner stored through the
         connection.webhook import action; unknown connections and wrong secrets
         share one 401. The body is a single Telegram Update or
-        { updates: [...] }. Accepted updates wait in process memory until the
-        owner imports them through the sync route; nothing is stored or fetched.
-        409 channel_webhook_unavailable when the deployment has no webhook inbox.
+        { updates: [...] }. Accepted updates are journaled durably in the store
+        (pending_channel_updates) until the owner imports them through the sync
+        route; a redelivered update_id is a no-op. Nothing is fetched or sent.
+        409 channel_webhook_unavailable when the deployment has no webhook inbox;
+        409 channel_webhook_backlog once 500 updates are pending for the connection.
       security: []
       parameters:
         - name: connectionId
@@ -676,7 +702,7 @@ paths:
           application/json:
             schema: { type: object }
       responses:
-        '202': { description: "{ contractVersion, connectionId, received, pending }" }
+        '202': { description: "{ contractVersion, connectionId, received, pending }; a malformed message-kind update is journaled as failed, not refused" }
         '401': { description: channel_webhook_denied }
         '409': { description: channel_webhook_unavailable or channel_webhook_backlog }
         '422': { description: invalid_channel_update }

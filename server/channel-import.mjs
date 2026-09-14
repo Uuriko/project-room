@@ -57,10 +57,11 @@ export async function prepareTelegramFixturePage({ store, token, binding, connec
   return prepareChannelFixturePage({ store, token, binding, connectionId, folderId: telegramFolderId, adapter, requestId, reset });
 }
 
-// Verified raw updates wait here, in this process only, until the account owner
-// imports them through the recorded-page path. Nothing is persisted or fetched.
+// Verified raw updates are journaled in the store (pending_channel_updates, see
+// channel-journal.mjs) until the account owner imports them through the
+// recorded-page path, so they survive a restart. Nothing is fetched or sent.
 export class ChannelWebhookInbox {
-  #store; #pending = new Map();
+  #store;
   constructor(store) { this.#store = store; }
   static hash(secret) { return createHash("sha256").update(secret).digest("hex"); }
   #match(connectionId, secret) {
@@ -71,30 +72,46 @@ export class ChannelWebhookInbox {
     for (const row of this.#store.db.prepare("SELECT account_id,data_json FROM private_email_connections WHERE id=?").all(connectionId)) {
       const connection = JSON.parse(row.data_json), stored = connection.webhook?.secretHash;
       const ok = typeof stored === "string" && stored.length === 64 && timingSafeEqual(Buffer.from(stored, "hex"), presented);
-      if (ok && connection.state === "active" && profileChannel(connection.profile) === "telegram") found = { accountId: row.account_id, connectionId };
+      if (ok && connection.state === "active" && profileChannel(connection.profile) === "telegram") found = { accountId: row.account_id, connectionId, profile: connection.profile };
     }
     return found;
   }
+  // A message-kind update the Telegram adapter cannot normalize is journaled
+  // straight into 'failed' with the contract code, never 'pending': it must not
+  // occupy the backlog or a sync attempt, and refusing it (4xx) would only make
+  // the provider redeliver it and stall its own queue behind it.
+  static rejected(profile, updates) {
+    const rejected = new Map();
+    for (const update of updates) {
+      if (!telegram.updateKind(update)) continue;
+      try { telegram.normalizeTelegramUpdate(profile, update); }
+      catch (error) { if (error?.name !== "EmailContractError") throw error; rejected.set(update.update_id, String(error.code ?? error.message)); }
+    }
+    return rejected;
+  }
+  // Match, validate and journal in one store transaction: a delivery is either
+  // fully recorded or refused unchanged. A redelivered update id is a no-op.
   receive({ connectionId, secret, body }) {
-    const match = this.#store.readTransaction(() => this.#match(connectionId, secret));
-    if (!match) fail(401, "channel_webhook_denied", "Webhook not accepted.");
-    // Telegram posts one Update per request; a replayed batch uses { updates: [...] }.
-    const updates = body && typeof body === "object" && !Array.isArray(body) && Object.hasOwn(body, "update_id") ? [body] : body?.updates;
-    if (!Array.isArray(updates) || !updates.length || updates.length > channelSyncLimits.webhookUpdates
-      || (body.updates && Object.keys(body).length !== 1)
-      || !updates.every(update => update && typeof update === "object" && !Array.isArray(update) && Number.isSafeInteger(update.update_id) && update.update_id >= 0))
-      fail(422, "invalid_channel_update", "Supply Telegram Update objects.");
-    const key = JSON.stringify([match.accountId, connectionId]), queue = new Map((this.#pending.get(key) ?? []).map(u => [u.update_id, u]));
-    for (const update of updates) queue.set(update.update_id, structuredClone(update));
-    if (queue.size > channelSyncLimits.webhookBacklog) fail(409, "channel_webhook_backlog", "Import pending updates before sending more.");
-    this.#pending.set(key, [...queue.values()].sort((a, b) => a.update_id - b.update_id));
-    return { accountId: match.accountId, connectionId, received: updates.length, pending: queue.size };
+    return this.#store.transaction(() => {
+      const match = this.#match(connectionId, secret);
+      if (!match) fail(401, "channel_webhook_denied", "Webhook not accepted.");
+      // Telegram posts one Update per request; a replayed batch uses { updates: [...] }.
+      const updates = body && typeof body === "object" && !Array.isArray(body) && Object.hasOwn(body, "update_id") ? [body] : body?.updates;
+      if (!Array.isArray(updates) || !updates.length || updates.length > channelSyncLimits.webhookUpdates
+        || (body.updates && Object.keys(body).length !== 1)
+        || !updates.every(update => update && typeof update === "object" && !Array.isArray(update) && Number.isSafeInteger(update.update_id) && update.update_id >= 0))
+        fail(422, "invalid_channel_update", "Supply Telegram Update objects.");
+      const journaled = this.#store.channelUpdates.record(match.accountId, connectionId, updates, { backlog: channelSyncLimits.webhookBacklog, rejected: ChannelWebhookInbox.rejected(match.profile, updates) });
+      return { accountId: match.accountId, connectionId, received: journaled.received, accepted: journaled.accepted, rejected: journaled.rejected, pending: journaled.pending };
+    });
   }
-  pending(accountId, connectionId) { return structuredClone(this.#pending.get(JSON.stringify([accountId, connectionId])) ?? []); }
-  acknowledge(accountId, connectionId, throughUpdateId) {
-    const key = JSON.stringify([accountId, connectionId]), rest = (this.#pending.get(key) ?? []).filter(u => u.update_id > throughUpdateId);
-    if (rest.length) this.#pending.set(key, rest); else this.#pending.delete(key);
-  }
+  // Oldest pending updates first; `limit` null returns the whole pending backlog.
+  pending(accountId, connectionId, { limit = null } = {}) { return this.#store.channelUpdates.pending(accountId, connectionId, { limit }).map(row => row.payload); }
+  journal(accountId, connectionId) { return this.#store.channelUpdates.summary(accountId, connectionId); }
+  // Mark exactly the updates the applied page consumed as imported (caller runs this in the page transaction).
+  acknowledge(accountId, connectionId, updateIds) { return this.#store.channelUpdates.imported(accountId, connectionId, updateIds); }
+  // Record one failed attempt on the slice the importer took; bounded by channelJournalLimits.maxAttempts.
+  fail(accountId, connectionId, updateIds, error) { return this.#store.channelUpdates.failed(accountId, connectionId, updateIds, error); }
 }
 
 // Account-session sync of one recorded Telegram page. `updates` null drains
@@ -110,23 +127,53 @@ export async function syncTelegramConnection({ store, token, binding, connection
     if (prior.action !== "page.apply" || prior.connectionId !== connectionId) fail(409, "idempotency_conflict", "Request ID already used for different import content.");
     return { receipt: prior, duplicate: true, source: "journal", request: null };
   }
+  const accountId = captured.connection.profile.accountId;
   let source = "recording";
   if (updates === null) {
     if (!webhooks) fail(409, "channel_webhook_unavailable", "Webhook delivery is not configured here.");
-    // A backlog above one request's worth stays importable: take the oldest slice.
-    updates = webhooks.pending(captured.connection.profile.accountId, connectionId).slice(0, channelSyncLimits.webhookUpdates); source = "webhook";
+    // A backlog above one request's worth stays importable: take the oldest pending slice.
+    updates = webhooks.pending(accountId, connectionId, { limit: channelSyncLimits.webhookUpdates }); source = "webhook";
   }
   if (!Array.isArray(updates) || updates.length > channelSyncLimits.webhookUpdates) fail(422, "invalid_channel_update", "Supply at most 100 recorded Telegram updates.");
-  let reader;
-  // The reader pages at the importer's message cap, so one sync never prepares
-  // more sources than page.apply accepts; a partial page reports complete: false.
-  try { reader = new telegram.RecordedTelegramBot({ connection: captured.connection.profile, updates, limit: channelSyncLimits.pageMessages }); }
-  catch (error) { if (error?.name !== "EmailContractError") throw error; fail(422, "invalid_channel_update", "Recorded updates could not be confirmed."); }
-  let request;
-  try { request = await prepareTelegramFixturePage({ store, token, binding, connectionId, reader, requestId }); }
-  catch (error) { if (error?.name !== "EmailContractError") throw error; fail(422, "invalid_channel_update", "Recorded updates could not be confirmed."); }
-  const result = store.email.apply(token, request, binding);
-  // Acknowledge exactly what this page consumed (cursor is the next update id), never updates still waiting.
-  if (source === "webhook" && updates.length) webhooks.acknowledge(captured.connection.profile.accountId, connectionId, Number(request.cursor) - 1);
+  if (source === "webhook") {
+    // Backstop for a journaled update the adapter can no longer normalize
+    // (receive() already parks those it can see): it records one failed attempt
+    // and leaves this page, so it never blocks the updates around it; after the
+    // bound it parks as failed. Non-message updates (callback queries) are
+    // skipped by the reader and pass through here.
+    const poison = ChannelWebhookInbox.rejected(captured.connection.profile, updates);
+    for (const [updateId, code] of poison) webhooks.fail(accountId, connectionId, [updateId], code);
+    updates = updates.filter(update => !poison.has(update.update_id));
+  }
+  // A drained slice that still cannot be imported records one attempt on every
+  // row it holds and is offered again until the bound. Only content and
+  // importer faults count (422, 5xx, unexpected errors); authority and state
+  // conflicts (401, 403, 404, 409) are not the updates' fault and count nothing.
+  const journalFailure = error => {
+    const counts = error?.status === undefined || error.status === 422 || error.status >= 500;
+    if (source === "webhook" && updates.length && counts) webhooks.fail(accountId, connectionId, updates.map(update => update.update_id), error);
+    throw error;
+  };
+  let reader, request;
+  try {
+    // The reader pages at the importer's message cap, so one sync never prepares
+    // more sources than page.apply accepts; a partial page reports complete: false.
+    try { reader = new telegram.RecordedTelegramBot({ connection: captured.connection.profile, updates, limit: channelSyncLimits.pageMessages }); }
+    catch (error) { if (error?.name !== "EmailContractError") throw error; fail(422, "invalid_channel_update", "Recorded updates could not be confirmed."); }
+    try { request = await prepareTelegramFixturePage({ store, token, binding, connectionId, reader, requestId }); }
+    catch (error) { if (error?.name !== "EmailContractError") throw error; fail(422, "invalid_channel_update", "Recorded updates could not be confirmed."); }
+  } catch (error) { journalFailure(error); }
+  let result;
+  try {
+    // The page and its acknowledgement commit together: exactly the slice rows
+    // this page consumed (cursor is the next update id) turn imported, never
+    // updates still waiting behind the reader's page.
+    result = store.transaction(() => {
+      const applied = store.email.apply(token, request, binding);
+      const consumed = updates.filter(update => update.update_id < Number(request.cursor)).map(update => update.update_id);
+      if (source === "webhook" && consumed.length) webhooks.acknowledge(accountId, connectionId, consumed);
+      return applied;
+    });
+  } catch (error) { journalFailure(error); }
   return { ...result, source, request };
 }
