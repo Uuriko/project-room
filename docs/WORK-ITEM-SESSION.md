@@ -69,8 +69,10 @@ List/filter returns Room member IDs and work titles only. No people-data
 
 Issue #6 A4. By default a work item is lightweight: the proposer chooses
 `independentVerificationRequired` and `ownerDecisionRequired` per item. The
-room owner can make either mandatory for the whole room with one event on the
-existing `/commands` route (owner only; no new table, no writer bump):
+room owner can make either mandatory for the whole room from the Room
+instructions dialog (**Review policy**, owner only; members see the policy in
+force read only) or with one event on the existing `/commands` route (owner
+only; no new table, no writer bump):
 
 ```json
 { "id": "<uuid>", "type": "room.policy_set",

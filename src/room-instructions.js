@@ -1,10 +1,32 @@
 import { CHARTER_TYPE, CHARTER_FIELDS, charterContext, validateCharterData, confirmsCharter } from "./room-charter.js";
 import { retryUnconfirmed } from "./client.js";
+import { EVENT_TYPES as T, ROOM_POLICY_FIELDS, roomPolicy } from "./events.js";
+
+// Room review policy (issue #6 A4 follow-up): the owner sets it here instead of
+// by hand-written command; everyone else sees the policy in force, read only.
+// One select covers the four states; Apply sends the existing room.policy_set
+// command, so the server rule and the locked new-work checkboxes are unchanged.
+const POLICY_OPTIONS = Object.freeze({ none: [false, false], review: [true, false], decision: [false, true], both: [true, true] });
+const POLICY_LABELS = Object.freeze({
+  none: "Nothing extra is required: each proposer chooses whether an outcome needs independent review or an owner decision.",
+  review: "Independent review is required for every new outcome.",
+  decision: "An owner decision is required for every new outcome.",
+  both: "Independent review and an owner decision are required for every new outcome."
+});
+export function policyKey(policy) {
+  return policy.requireIndependentReview ? (policy.requireOwnerDecision ? "both" : "review") : policy.requireOwnerDecision ? "decision" : "none";
+}
+export function policyCommand(key) {
+  if (!POLICY_OPTIONS[key]) throw new Error("Choose a review policy");
+  return { id: crypto.randomUUID(), type: T.ROOM_POLICY_SET, data: Object.fromEntries(ROOM_POLICY_FIELDS.map((field, i) => [field, POLICY_OPTIONS[key][i]])) };
+}
 
 export function installRoomInstructions({ client, getState, onSaved }) {
   const $ = id => document.getElementById(id), dialog = $("room-instructions-dialog"), form = $("room-instructions-form"), open = $("room-instructions-open");
   const fields = Object.keys(CHARTER_FIELDS), controls = fields.map(key => form.elements.namedItem(key));
   let entry = null, readEpoch = 0;
+  const policyUI = { select: $("room-policy-select"), apply: $("room-policy-apply"), dirty: false, busy: false, pending: null, status: "" };
+  const currentPolicy = () => policyKey(roomPolicy(getState()));
   const current = () => charterContext(getState()?.room);
   const owns = e => e && e === entry && e.session === client.session && e.generation === client.generation && client.ownsAccountSession() && getState();
   const owner = () => { const s = getState(), m = s?.members[client.session?.member.id]; return m?.active === true && m.kind === "human" && m.id === s.room.ownerId; };
@@ -19,11 +41,29 @@ export function installRoomInstructions({ client, getState, onSaved }) {
   }
   function reset() {
     entry = null; readEpoch++; dialog.close(); form.reset(); open.hidden = true;
-    for (const id of ["room-instructions-view", "room-instructions-comparison", "room-instructions-version", "room-instructions-status"]) $(id).replaceChildren();
+    Object.assign(policyUI, { dirty: false, busy: false, pending: null, status: "" }); $("room-policy").hidden = true;
+    for (const id of ["room-instructions-view", "room-instructions-comparison", "room-instructions-version", "room-instructions-status", "room-policy-current", "room-policy-help", "room-policy-status"]) $(id).replaceChildren();
+  }
+  function renderPolicy() {
+    const state = getState(), key = currentPolicy(), stored = state.room.policy, isOwner = owner();
+    $("room-policy").hidden = false; $("room-policy-owner").hidden = !isOwner;
+    const setBy = stored?.revision ? ` Set by ${state.members[stored.setById]?.displayName ?? "the room owner"} (version ${stored.revision}).` : "";
+    text("room-policy-current", `${POLICY_LABELS[key]}${setBy}`);
+    text("room-policy-help", isOwner
+      ? "Applies to outcomes proposed from now on; earlier work keeps its recorded requirements. Proposers see the requirement locked on with the reason."
+      : "Only the room owner can change this.");
+    if (isOwner) {
+      if (!policyUI.dirty && !policyUI.busy) policyUI.select.value = key;
+      policyUI.select.disabled = policyUI.busy || Boolean(entry?.busy);
+      policyUI.apply.disabled = policyUI.busy || Boolean(entry?.busy) || policyUI.select.value === key;
+      policyUI.apply.textContent = policyUI.busy ? "Applying…" : "Apply policy";
+    }
+    text("room-policy-status", policyUI.status);
   }
   function render() {
     if (!getState() || !client.session) return reset();
-    open.hidden = !owner() && current().revision === 0;
+    open.hidden = !owner() && current().revision === 0 && currentPolicy() === "none";
+    renderPolicy();
     open.textContent = entry?.uncertain ? "Instructions · confirm save" : current().revision ? "Room instructions" : "Add instructions";
     if (!entry) return;
     if (!owns(entry)) return reset();
@@ -40,7 +80,7 @@ export function installRoomInstructions({ client, getState, onSaved }) {
     for (const el of controls) el.disabled = e.uncertain || e.busy;
     $("room-instructions-save").disabled = e.busy || !e.uncertain && (changed || e.needsReview || Boolean(e.latest));
     $("room-instructions-save").textContent = e.uncertain ? "Retry original save" : "Save";
-    $("room-instructions-close").disabled = e.busy;
+    $("room-instructions-close").disabled = e.busy || policyUI.busy;
     for (const id of ["instructions-use-latest", "instructions-keep-draft"]) $(id).disabled = e.busy;
     text("room-instructions-version", e.base.revision ? `Version ${e.base.revision} · ${getState().members[e.base.charter.updatedById]?.displayName ?? "Room owner"}` : "Not set");
     const status = e.busy ? "Working…" : e.uncertain ? "Save not confirmed. Retry the original before making changes."
@@ -57,8 +97,9 @@ export function installRoomInstructions({ client, getState, onSaved }) {
     else (entry.editing ? controls[0].disabled ? $("room-instructions-save") : controls[0] : $("room-instructions-close")).focus();
   });
   function close() {
-    if (entry?.busy) return;
+    if (entry?.busy || policyUI.busy) return;
     dialog.close(); readEpoch++;
+    Object.assign(policyUI, { dirty: false, pending: null, status: "" });
     if (!entry?.editing) entry = null;
     if (getState() && !open.hidden) open.focus();
   }
@@ -67,7 +108,7 @@ export function installRoomInstructions({ client, getState, onSaved }) {
   $("room-instructions-edit").addEventListener("click", edit);
   dialog.addEventListener("keydown", e => {
     if (e.key !== "Tab") return;
-    const focusable = [...dialog.querySelectorAll("button,textarea")].filter(el => !el.disabled && !el.closest("[hidden]") && el.getClientRects().length);
+    const focusable = [...dialog.querySelectorAll("button,textarea,select")].filter(el => !el.disabled && !el.closest("[hidden]") && el.getClientRects().length);
     if (!focusable.length) { e.preventDefault(); return; }
     if (e.shiftKey && document.activeElement === focusable[0]) { e.preventDefault(); focusable.at(-1).focus(); }
     else if (!e.shiftKey && document.activeElement === focusable.at(-1)) { e.preventDefault(); focusable[0].focus(); }
@@ -95,6 +136,30 @@ export function installRoomInstructions({ client, getState, onSaved }) {
     e.status = "Review your text, then Save."; render(); controls[0].focus();
   }
   $("instructions-use-latest").addEventListener("click", () => chooseLatest(false));
+  policyUI.select.addEventListener("change", () => {
+    if (!getState()) return;
+    policyUI.dirty = policyUI.select.value !== currentPolicy(); policyUI.status = ""; render();
+  });
+  policyUI.apply.addEventListener("click", async () => {
+    const e = entry, key = policyUI.select.value;
+    if (!owns(e) || !owner() || policyUI.busy || e.busy || key === currentPolicy()) return;
+    // Keep the same command id across network retries so a committed change is not doubled.
+    if (policyUI.pending?.key !== key) policyUI.pending = { key, command: policyCommand(key) };
+    policyUI.busy = true; policyUI.status = ""; render();
+    try {
+      const receipt = await client.send(policyUI.pending.command);
+      if (!owns(e)) return;
+      const currentVerified = client.sequence >= receipt.sequence;
+      policyUI.pending = null; policyUI.dirty = !currentVerified;
+      policyUI.status = currentVerified ? "Review policy saved." : "Review policy saved. Refresh to see the current version.";
+    } catch (error) {
+      if (!owns(e)) return;
+      if (!retryUnconfirmed(error)) policyUI.pending = null;
+      policyUI.status = `Review policy not saved. ${error.message || "Try again."}`;
+    } finally {
+      if (owns(e)) { policyUI.busy = false; render(); if (dialog.open) policyUI.select.focus(); }
+    }
+  });
   $("instructions-keep-draft").addEventListener("click", () => chooseLatest(true));
   form.addEventListener("submit", async event => {
     event.preventDefault(); const e = entry;
