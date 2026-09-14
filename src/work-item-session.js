@@ -347,3 +347,46 @@ export function applySessionFields(item, incoming) {
   }
   throw new Error(`Unsupported event type: ${incoming.type}`);
 }
+
+// Issue #6 C3: the room spend ledger behind a room-level allowance. Derived
+// from the projection alone, so the server check, the read route and the
+// browser card all compute the same figures from the same state.
+//
+// - spentCents is the spend agents reported: measured usage at close for
+//   attempts that closed inside the period, plus the latest cumulative
+//   report of every live session (a live session always counts, however old).
+// - reservedCents is what live sessions may still spend under their declared
+//   maxSpendCents; a live session that declared no cap reserves nothing and
+//   is counted in sessions.unreserved so the gap is visible, never assumed zero.
+// - heldCents keeps the declared cap of every closed attempt in the period
+//   that never reported spend: unknown spend is held at its reservation, so
+//   it can never free allowance for the next start. Attempts with neither a
+//   report nor a cap are counted in sessions.attemptsUnreported and add nothing.
+export function spendLedger(state, { nowMs = Date.now(), periodDays = 30 } = {}) {
+  const since = nowMs - periodDays * 86400000;
+  const ledger = { periodDays, since: new Date(since).toISOString(), until: new Date(nowMs).toISOString(),
+    spentCents: 0, reservedCents: 0, heldCents: 0, committedCents: 0,
+    sessions: { live: 0, unreserved: 0, attemptsCounted: 0, attemptsUnreported: 0, attemptsHeld: 0 } };
+  for (const item of Object.values(state?.workItems ?? {})) {
+    if (!item || typeof item !== "object") continue;
+    const session = sessionRecord(item);
+    for (const attempt of session.attempts) {
+      if (attempt.endedAt === null) continue; // the open attempt is the live session below
+      if (Date.parse(attempt.endedAt) < since) continue;
+      ledger.sessions.attemptsCounted++;
+      if (attempt.usageCents !== null) ledger.spentCents += attempt.usageCents;
+      else if (Number.isSafeInteger(attempt.limits?.maxSpendCents)) { ledger.heldCents += attempt.limits.maxSpendCents; ledger.sessions.attemptsHeld++; }
+      else ledger.sessions.attemptsUnreported++;
+    }
+    if (!RUNNING.has(session.status)) continue;
+    ledger.sessions.live++;
+    ledger.sessions.attemptsCounted++;
+    const reported = session.spend_cents; // a live run that has not reported yet is covered by its reservation
+    if (reported !== null) ledger.spentCents += reported;
+    const cap = session.budget?.maxSpendCents ?? null;
+    if (cap === null) ledger.sessions.unreserved++;
+    else ledger.reservedCents += Math.max(0, cap - (reported ?? 0));
+  }
+  ledger.committedCents = ledger.spentCents + ledger.reservedCents + ledger.heldCents;
+  return ledger;
+}

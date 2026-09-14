@@ -78,3 +78,65 @@ reads `"unknown"`. Exact-object assertions in existing tests were updated
 for the new fields; nothing else about the session lifecycle changed.
 
 Tests: `tests/work-session-budget.test.js` (6/6).
+
+## Room spend allowance (issue #6 C3)
+
+Session budgets bound one run. The **room spend allowance** bounds the room:
+the owner records how much agent sessions may commit over a rolling period,
+and the Room refuses any start that would exceed it before anything is
+written.
+
+```sh
+curl -X POST "$ROOM/api/rooms/commons/spend-allowance" -H "Authorization: Bearer $OWNER_KEY" \
+  -H "Content-Type: application/json" -d '{"allowanceCents":5000,"periodDays":30}'
+curl "$ROOM/api/rooms/commons/spend-allowance?auth=$KEY"   # any member
+```
+
+The set route is owner-only (`403 owner_required` for anyone else); the
+same event, `room.spend_allowance_set`, can be sent on the generic command
+path and the reducer refuses non-owners there too. `allowanceCents` is an
+integer of cents from 0 to 100,000,000 (`0` freezes starts), `periodDays`
+1–365 (default 30). `{"allowanceCents": null}` removes the allowance and
+restores the pre-allowance behaviour. Every change is an event with a
+revision, the setter and the time, and replays with the log.
+
+### The ledger
+
+Derived from the projection alone (`spendLedger` in
+`src/work-item-session.js`), so the server check, the read route and the
+"Agent spend" card compute the same figures:
+
+| Figure | Meaning |
+|---|---|
+| `spentCents` | Spend agents reported: measured usage of attempts that closed in the period, plus the latest cumulative report of every live session. |
+| `reservedCents` | What live sessions may still spend under their declared `maxSpendCents`. A live session always counts, however old. |
+| `heldCents` | The declared cap of every attempt that closed in the period without reporting spend. Unknown spend is held at its reservation, never assumed zero. |
+| `committedCents` | `spent + reserved + held`. |
+| `headroomCents` | `allowance − committed`, floored at 0; `overCents` is the excess, if any. |
+| `sessions` | `live`, `unreserved` (live sessions with no spend cap, only possible for runs started before the allowance), `attemptsCounted`, `attemptsUnreported` (no report and no cap: named, adds nothing), `attemptsHeld`. |
+
+### Enforcement
+
+- **Start.** A `session.started` under an allowance must carry
+  `budget.maxSpendCents` (a retry that declares no budget inherits the
+  item's, as the applier does) — otherwise `422 spend_allowance_budget_required`.
+  If `committed + maxSpendCents > allowance` the start is refused with
+  `409 spend_allowance_exceeded` and the message names spent, reserved,
+  held and what is left. Two claims cannot both reserve the last of the
+  allowance: each start runs inside the write transaction against the
+  ledger that includes the other.
+- **Reports.** A spend report within the reservation changes nothing (the
+  room already allowed it). A report beyond the reservation that would
+  carry the room past the allowance is refused with
+  `409 spend_allowance_exceeded`; on the work-sessions route the session's
+  own `maxSpendCents` trip-wire fires first and force-stops the run.
+- **Stops always land**, even above the cap or the allowance, so actual
+  spend is recorded; a stop below the reservation frees the difference,
+  a stop without a report holds the cap.
+- **Lowering or zeroing** the allowance below what is committed blocks
+  further starts; running sessions keep their reservations (use
+  `request_stop`).
+- A mention, an assignment or a proposal never sets a budget or an
+  allowance; only the owner's explicit event does.
+
+Tests: `tests/spend-allowance.test.js`, `scripts/spend-allowance-browser-check.mjs`.

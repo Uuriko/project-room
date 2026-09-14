@@ -2,14 +2,19 @@
 
 ## 2026-09-14
 
-- Notification feed (issue #6 B4, read model): `GET /api/rooms/:id/notifications`
-  derives mentions, replies, assignments and work updates for the caller from
-  the event tail after their cursor, filtered by `notificationPreferences`;
-  edits never duplicate, `POST /cursor` expires items, ended access returns
-  401/403, and no read grants a wake (`server/notifications.mjs`,
-  `docs/NOTIFICATIONS.md`). The catch-up panel shows an unread badge and a
-  compact list whose "Mark read" moves only the cursor. Push delivery is a
-  follow-up needing VAPID keys.
+- Room spend allowance (issue #6 C3): the owner records `room.spend_allowance_set`
+  (`allowanceCents` over `periodDays`, or null to remove it) through
+  `POST /api/rooms/:id/spend-allowance` (owner-only, 403 for everyone else) or the
+  "Agent spend" card. `store.command()` refuses a `session.started` that would
+  commit more than the allowance (`409 spend_allowance_exceeded`) and one that
+  declares no `maxSpendCents` while an allowance is set
+  (`422 spend_allowance_budget_required`); a live session reserves its declared
+  cap until it stops, a stop below the cap frees the difference, and an attempt
+  that closes without reporting spend holds its cap. `GET /api/rooms/:id/spend-allowance`
+  and the card show allowance, spent, reserved, held and headroom from the same
+  ledger (`spendLedger` in `src/work-item-session.js`). Docs: `docs/SESSION-BUDGETS.md`
+  "Room spend allowance". Tests: `tests/spend-allowance.test.js`,
+  `scripts/spend-allowance-browser-check.mjs`.
 
 ## 2026-09-12
 

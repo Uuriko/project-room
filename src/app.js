@@ -1,4 +1,4 @@
-import { EVENT_TYPES as T, WORK_STATES as S, roomPolicy } from "./events.js";
+import { EVENT_TYPES as T, WORK_STATES as S, roomPolicy, spendAllowance } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
@@ -6,7 +6,7 @@ import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, Draft
 import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
 import { RECIPE_CATALOG, activeRecipes, previewAllRecipes } from "./work-recipes.js";
-import { attemptReceipts, attemptLedger, cancellationState } from "./work-item-session.js";
+import { attemptReceipts, attemptLedger, cancellationState, spendLedger } from "./work-item-session.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation, requestFailureMessage } from "./share-links.js";
 import { installAgentConnections } from "./agent-connections.js";
 import { installRoomInstructions } from "./room-instructions.js";
@@ -924,6 +924,7 @@ function render() {
   setText("#room-attention-count", waiting ? `(${waiting} need you)` : "");
   renderMessages();
   syncRequestComposer();
+  renderSpendAllowance();
   $("#event-count").textContent = `${client.sequence}`;
   renderReturnBrief();
   renderContent("#event-list", [...state.eventLog].reverse().map(e => `<li id="${recordDomId("event", e.id)}" tabindex="-1" data-event-record-id="${esc(e.id)}" data-focus-key="event:${esc(e.id)}"><span>${esc(humanize(e.type))}</span><strong>${esc(memberLabel(e.actorId))}</strong><time datetime="${esc(e.at)}">${esc(time(e.at))}</time><code>${esc(e.id)}</code></li>`).join(""));
@@ -2334,6 +2335,61 @@ $("#decision-form").addEventListener("submit", e => {
     decisionSourceId = null;
     notice("Decision recorded.");
   }, { failureHint: "Decision not saved. Retry the same entry, or close and start again." });
+});
+// Room spend allowance (issue #6 C3): every member sees allowance, spent,
+// reserved, held and headroom from the same ledger the server enforces at
+// session start; only the room owner sees the controls. Unknown spend is
+// named (held, unreported), never rendered as zero.
+const usd = cents => `$${(cents / 100).toFixed(2)}`;
+const countOf = (n, one, many = one + "s") => `${n} ${n === 1 ? one : many}`;
+let spendFormRevision = null;
+function renderSpendAllowance() {
+  const panel = $("#spend-panel");
+  if (!panel || !state?.room) return;
+  const allowance = spendAllowance(state);
+  const ledger = spendLedger(state, { nowMs: Date.now(), periodDays: allowance?.periodDays ?? 30 });
+  const owner = session?.member?.id === state.room.ownerId && state.members[session.member.id]?.kind === "human";
+  const committed = ledger.committedCents;
+  panel.dataset.spendAllowance = !allowance ? "none" : committed > allowance.allowanceCents ? "over" : committed >= allowance.allowanceCents ? "full" : "set";
+  setText("#spend-summary", allowance ? `${usd(committed)} of ${usd(allowance.allowanceCents)}` : "No allowance");
+  const parts = [`${usd(ledger.spentCents)} spent`, `${usd(ledger.reservedCents)} reserved by ${countOf(ledger.sessions.live, "live session")}`];
+  if (ledger.heldCents) parts.push(`${usd(ledger.heldCents)} held for ${countOf(ledger.sessions.attemptsHeld, "unreported attempt")}`);
+  if (ledger.sessions.attemptsUnreported) parts.push(`${countOf(ledger.sessions.attemptsUnreported, "attempt")} with unknown spend`);
+  const period = `over ${countOf(ledger.periodDays, "day")}`;
+  setText("#spend-figures", allowance
+    ? `${parts.join(" · ")} · ${committed > allowance.allowanceCents ? `over by ${usd(committed - allowance.allowanceCents)}` : `${usd(allowance.allowanceCents - committed)} left`} ${period}.`
+    : `${parts.join(" · ")} ${period}. ${owner ? "Set an allowance to cap what agent sessions may commit here." : "The room owner has not set a spend allowance."}`);
+  setText("#spend-note", allowance
+    ? `Sessions must declare their maximum spend to start; the room reserves it until the run stops. Only the room owner can change this.`
+    : "");
+  const form = $("#spend-allowance-form");
+  form.hidden = !owner;
+  $("#spend-allowance-remove").hidden = !owner || !allowance;
+  const revision = allowance?.revision ?? 0;
+  if (owner && spendFormRevision !== revision && !form.contains(document.activeElement)) {
+    spendFormRevision = revision;
+    $("#spend-allowance-input").value = allowance ? (allowance.allowanceCents / 100).toFixed(2) : "";
+    $("#spend-period-input").value = String(allowance?.periodDays ?? 30);
+  }
+}
+function submitSpendAllowance(data, done, failureHint) {
+  const form = $("#spend-allowance-form");
+  let entry;
+  try { entry = draftCommand(null, T.ROOM_SPEND_ALLOWANCE_SET, data); }
+  catch (error) { setFormStatus(form.querySelector(".form-status"), error.message, true); return; }
+  submit(form, async () => { await client.send(entry.command); if (!state) return; notice(done); }, { failureHint });
+}
+$("#spend-allowance-form").addEventListener("submit", e => {
+  e.preventDefault();
+  const dollarsText = $("#spend-allowance-input").value.trim(), periodDays = Number($("#spend-period-input").value);
+  const allowanceCents = Math.round(Number(dollarsText) * 100);
+  if (!dollarsText || !Number.isSafeInteger(allowanceCents) || allowanceCents < 0 || !Number.isSafeInteger(periodDays) || periodDays < 1 || periodDays > 365) {
+    setFormStatus($("#spend-allowance-form .form-status"), "Enter the allowance in dollars (0 or more) and a period of 1 to 365 days.", true); return;
+  }
+  submitSpendAllowance({ allowanceCents, periodDays }, "Spend allowance set.", "Allowance not saved. Retry the same values.");
+});
+$("#spend-allowance-remove").addEventListener("click", () => {
+  submitSpendAllowance({ allowanceCents: null }, "Spend allowance removed.", "Allowance not removed. Retry.");
 });
 // Room policy (issue #6 A4): when the owner made review or approval mandatory,
 // the proposer sees the requirement locked on with the reason. The server

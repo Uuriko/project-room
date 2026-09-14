@@ -866,8 +866,10 @@ summary { overflow-wrap: anywhere; }
 .recipe-preview-item { display: flex; flex-direction: column; gap: 0.2rem; max-width: 100%; overflow-wrap: anywhere; }
 .recipe-preview-item .recipe-preview-status { color: var(--text-dim, inherit); font-style: italic; }
 
-/* B4 notification feed: compact rows inside catch-up; the badge reuses .catchup-signals. */
-.notification-list .rb-event-link { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .1rem .6rem; align-items: baseline; }
-.notification-list .rb-actor { font-weight: 600; }
-.notification-list .rb-detail { grid-column: 1; }
-.notification-list time { grid-column: 2; grid-row: 1 / 3; white-space: nowrap; font-size: .8rem; }
+/* Issue #6 C3: room spend allowance card. */
+.spend-panel .form-hint { margin: 0 1rem .6rem; }
+.spend-allowance-form { display: grid; gap: .5rem; margin: 0 1rem .6rem; }
+.spend-allowance-form label { display: grid; gap: .25rem; font-size: .8rem; color: var(--muted); }
+.spend-allowance-form input { min-height: 40px; padding: .35rem .6rem; border: 1px solid var(--line); border-radius: .6rem; background: var(--panel); color: inherit; font: inherit; }
+.spend-allowance-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.spend-panel[data-spend-allowance="over"] #spend-summary, .spend-panel[data-spend-allowance="full"] #spend-summary { color: var(--warning, #d9a441); }
