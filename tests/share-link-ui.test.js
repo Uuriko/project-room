@@ -8,6 +8,15 @@ import { formatShareInvitation, installShareLinks, setShareLinkStatus, invitatio
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
+test("share-link expiry labels use the invitation expiry formatter", () => {
+  const src = readFileSync(new URL("../src/share-links.js", import.meta.url), "utf8");
+  assert.match(src, /formatInvitationExpiry\(value\) \|\| "unknown"/);
+  assert.doesNotMatch(src, /toLocaleString/);
+  assert.equal(formatInvitationExpiry("not-a-date"), "");
+  const ms = Date.UTC(2026, 0, 15, 18, 30, 0);
+  assert.equal(formatInvitationExpiry(ms), formatInvitationExpiry(new Date(ms)));
+});
+
 test("invitation note formatting is bounded plain text with an exact URL-only fallback", () => {
   const url = "https://room.example/#join/synthetic";
   for (const note of ["", "  ", "\n\t"]) assert.equal(formatShareInvitation(note, url), url);

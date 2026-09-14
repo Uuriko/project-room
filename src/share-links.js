@@ -7,7 +7,7 @@ export function consumeJoinFragment() {
   return { token: tokenPattern.test(value) ? value : null };
 }
 const newToken = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
-const date = value => new Date(value).toLocaleString();
+const date = value => formatInvitationExpiry(value) || "unknown";
 
 export function formatShareInvitation(note, url) {
   if (typeof note !== "string" || note.length > 600 || !url) return "";
