@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { EVENT_TYPES as T, WORK_STATES, applyEvent, replay } from "../src/events.js";
+import { EVENT_TYPES as T, WORK_STATES, applyEvent, replay, roomPolicy } from "../src/events.js";
 import { seedEvents } from "../src/seed.js";
 
 const ROOM = "room-project-room-v0";
@@ -43,9 +43,20 @@ for (let seed = 1; seed <= 16; seed++) test(`seeded work lifecycle preserves rep
     assertInvariants(state, id, revision, history);
   };
   const mutate = (actorId, type, data = {}) => send(actorId, type, { workItemId: id, expectedRevision: revision, ...data });
+  // Even seeds run under a room policy (issue #6 A4) that makes both gates mandatory; the
+  // proposer then claims neither, and the projection must still record both requirements.
+  const policyOn = seed % 2 === 0;
+  if (policyOn) {
+    const policy = { id: `${id}-policy`, idempotencyKey: `${id}-policy-key`, roomId: ROOM, actorId: "potter", type: T.ROOM_POLICY_SET,
+      at: new Date(Date.UTC(2026, 8, 10, 11, 0, 0)).toISOString(), causationId: null, data: { requireIndependentReview: true, requireOwnerDecision: true } };
+    state = applyEvent(state, policy); history.push(policy);
+    assert.deepEqual(roomPolicy(state), { requireIndependentReview: true, requireOwnerDecision: true });
+  }
   send("potter", T.WORK_PROPOSED, { workItemId: id, title: `Random lifecycle ${seed}`, definitionOfDone: "Exact evidence survives replay",
-    accountableMemberId: "codex", verifierMemberId: "instinct", independentVerificationRequired: true,
-    ownerDecisionRequired: true, humanDecisionMakerId: "potter", mode: "read" });
+    accountableMemberId: "codex", verifierMemberId: "instinct", independentVerificationRequired: !policyOn,
+    ownerDecisionRequired: !policyOn, humanDecisionMakerId: "potter", mode: "read" });
+  assert.equal(state.workItems[id].independentVerificationRequired, true, "policy or proposer requires independent review");
+  assert.equal(state.workItems[id].ownerDecisionRequired, true, "policy or proposer requires an owner decision");
 
   for (let step = 0; step < 64; step++) {
     const rejected = { id: `${id}-rejected-${step}`, idempotencyKey: `${id}-rejected-key-${step}`, roomId: ROOM, actorId: "codex",

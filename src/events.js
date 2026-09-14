@@ -9,6 +9,7 @@ import { SESSION_EVENT_TYPES, applySessionFields } from "./work-item-session.js"
 export const EVENT_TYPES = Object.freeze({
   ROOM_CREATED: "room.created",
   ROOM_CHARTER_UPDATED: CHARTER_TYPE,
+  ROOM_POLICY_SET: "room.policy_set",
   MEMBER_ADDED: "member.added",
   MEMBER_JOINED_VIA_INVITATION: "member.joined_via_invitation",
   MEMBER_ACCESS_CHANGED: "member.access_changed",
@@ -42,6 +43,18 @@ export const EVENT_TYPES = Object.freeze({
   SESSION_STOPPED: SESSION_EVENT_TYPES.STOPPED,
   CAPABILITIES_ADVERTISED: "capabilities.advertised"
 });
+
+// Room policy (issue #6 A4): the owner can make independent review and/or an
+// owner decision mandatory for every work item proposed afterwards. The policy
+// is event-sourced (room.policy_set) and lives on the projection; work recorded
+// before a flip keeps the requirements it was recorded with. Off is the default
+// and the pre-policy behaviour: the proposer chooses per item.
+export const ROOM_POLICY_FIELDS = Object.freeze(["requireIndependentReview", "requireOwnerDecision"]);
+
+export function roomPolicy(state) {
+  const stored = state?.room?.policy ?? {};
+  return Object.fromEntries(ROOM_POLICY_FIELDS.map(field => [field, stored[field] === true]));
+}
 
 export const PERMISSIONS = Object.freeze(["steer", "decide", "manage_members", "manage_claims", "accept_work", "complete_work", "verify", "write_external"]);
 
@@ -136,6 +149,7 @@ export function applyEvent(current, incoming) {
   const handlers = {
     [EVENT_TYPES.ROOM_CREATED]: createRoom,
     [EVENT_TYPES.ROOM_CHARTER_UPDATED]: updateCharter,
+    [EVENT_TYPES.ROOM_POLICY_SET]: setRoomPolicy,
     [EVENT_TYPES.MEMBER_ADDED]: addMember,
     [EVENT_TYPES.MEMBER_JOINED_VIA_INVITATION]: joinMemberViaInvitation,
     [EVENT_TYPES.MEMBER_ACCESS_CHANGED]: changeMemberAccess,
@@ -201,7 +215,7 @@ function validateEnvelope(incoming) {
     if (key.endsWith("Id") && !validId(value)) throw new Error(`Invalid ${key}`);
     if (typeof value === "string" && (value.length > 4096 || !value.trim())) throw new Error(`Invalid ${key}`);
     if (["expectedRevision", "expectedMemberRevision"].includes(key) && (!Number.isSafeInteger(value) || value < 0)) throw new Error(`Invalid ${key}`);
-    if (["independentVerificationRequired", "ownerDecisionRequired", "active"].includes(key) && typeof value !== "boolean") throw new Error(`Invalid ${key}`);
+    if (["independentVerificationRequired", "ownerDecisionRequired", "active", ...ROOM_POLICY_FIELDS].includes(key) && typeof value !== "boolean") throw new Error(`Invalid ${key}`);
     if (["permissions", "paths", "checksClaimed", "capabilities"].includes(key) && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !v.trim() || v.length > 512))) throw new Error(`Invalid ${key}`);
     // Legacy events (v11-v18) used data.outputs as a plain string; keep that shape valid for strict replay.
     if (key === "outputs" && typeof value !== "string" && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !v.trim() || v.length > 512))) throw new Error(`Invalid ${key}`);
@@ -222,6 +236,22 @@ function updateCharter(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
   if (actor.kind !== "human" || actor.id !== state.room.ownerId) throw new Error("Only the Room owner may change room instructions");
   state.room.charter = charterFromEvent(incoming, state.room.charter ?? null);
+}
+
+function setRoomPolicy(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.kind !== "human" || actor.id !== state.room.ownerId) throw new Error("Only the Room owner may set room policy");
+  for (const field of ROOM_POLICY_FIELDS) {
+    if (typeof incoming.data[field] !== "boolean") throw new Error(`Room policy requires ${field} as true or false`);
+  }
+  const previous = state.room.policy ?? null;
+  state.room.policy = {
+    requireIndependentReview: incoming.data.requireIndependentReview,
+    requireOwnerDecision: incoming.data.requireOwnerDecision,
+    revision: (previous?.revision ?? 0) + 1,
+    setById: incoming.actorId,
+    setAt: incoming.at
+  };
 }
 
 function addMember(state, incoming) {
@@ -435,14 +465,24 @@ function proposeWork(state, incoming) {
   if (state.workItems[incoming.data.workItemId]) throw new Error("Work Item already exists");
   requireMember(state, incoming.data.accountableMemberId);
   if (incoming.data.mode && !["read", "write"].includes(incoming.data.mode)) throw new Error("Invalid work mode");
-  if (incoming.data.independentVerificationRequired && !incoming.data.verifierMemberId) throw new Error("Independent work requires a verifier");
-  if (incoming.data.ownerDecisionRequired && !incoming.data.humanDecisionMakerId) throw new Error("Owner decision requires a decision-maker");
+  // Room policy overrides the proposer's choice: altered client fields cannot
+  // disable a mandatory gate. The recorded event keeps what the client sent;
+  // the projection (and every replay) applies the policy in force at this point
+  // of the log, so earlier items are untouched by a later flip.
+  const policy = roomPolicy(state);
+  const independentVerificationRequired = policy.requireIndependentReview || incoming.data.independentVerificationRequired === true;
+  const ownerDecisionRequired = policy.requireOwnerDecision || incoming.data.ownerDecisionRequired === true;
+  const humanDecisionMakerId = incoming.data.humanDecisionMakerId || (policy.requireOwnerDecision ? state.room.ownerId : null);
+  if (independentVerificationRequired && !incoming.data.verifierMemberId) {
+    throw new Error(policy.requireIndependentReview ? "Room policy requires independent review: name a verifier" : "Independent work requires a verifier");
+  }
+  if (ownerDecisionRequired && !humanDecisionMakerId) throw new Error("Owner decision requires a decision-maker");
   if (incoming.data.verifierMemberId) requireMember(state, incoming.data.verifierMemberId);
-  if (incoming.data.humanDecisionMakerId) {
-    const decisionMaker = requireMember(state, incoming.data.humanDecisionMakerId);
+  if (humanDecisionMakerId) {
+    const decisionMaker = requireMember(state, humanDecisionMakerId);
     if (decisionMaker.kind !== "human") throw new Error("Decision-maker must be a human member");
   }
-  if (incoming.data.independentVerificationRequired && incoming.data.accountableMemberId === incoming.data.verifierMemberId) {
+  if (independentVerificationRequired && incoming.data.accountableMemberId === incoming.data.verifierMemberId) {
     throw new Error("Independent verification requires a different accountable member and verifier");
   }
   if (incoming.data.sourceMessageId && !state.messages.some((message) => message.id === incoming.data.sourceMessageId)) {
@@ -455,9 +495,9 @@ function proposeWork(state, incoming) {
     definitionOfDone: incoming.data.definitionOfDone,
     accountableMemberId: incoming.data.accountableMemberId,
     verifierMemberId: incoming.data.verifierMemberId || null,
-    independentVerificationRequired: incoming.data.independentVerificationRequired === true,
-    ownerDecisionRequired: incoming.data.ownerDecisionRequired === true,
-    humanDecisionMakerId: incoming.data.humanDecisionMakerId || null,
+    independentVerificationRequired,
+    ownerDecisionRequired,
+    humanDecisionMakerId,
     mode: incoming.data.mode || "read",
     sourceMessageId: incoming.data.sourceMessageId || null,
     // The proposer is the envelope actor alone (disposition 5557850637): replay recovers it
