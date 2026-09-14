@@ -65,6 +65,31 @@ The same Events are accepted on `POST /api/rooms/:room/commands`.
 List/filter returns Room member IDs and work titles only. No people-data
 (no emails, account ids, or display names).
 
+## Room policy: mandatory review and owner decision
+
+Issue #6 A4. By default a work item is lightweight: the proposer chooses
+`independentVerificationRequired` and `ownerDecisionRequired` per item. The
+room owner can make either mandatory for the whole room with one event on the
+existing `/commands` route (owner only; no new table, no writer bump):
+
+```json
+{ "id": "<uuid>", "type": "room.policy_set",
+  "data": { "requireIndependentReview": true, "requireOwnerDecision": true } }
+```
+
+Both fields are required booleans; the projection stores them at
+`room.policy` with `revision`, `setById` and `setAt`. While a flag is on,
+every later `work.proposed` records that requirement regardless of what the
+client sent: altered client fields cannot disable the gate, a proposal without
+a `verifierMemberId` is refused ("Room policy requires independent review"),
+and a missing `humanDecisionMakerId` defaults to the room owner. The event
+keeps the client's fields as sent; the projection and every replay apply the
+policy in force at that point of the log, so items recorded before a flip keep
+their recorded requirements and switching the policy off relaxes nothing that
+was already recorded. The new-work form shows a locked checkbox with the
+reason when the policy applies. Conversation never creates work: messages and
+`work.proposed` remain distinct commands.
+
 ## What this is not
 
 - Not a Slack-with-bots UI or Designer surface.

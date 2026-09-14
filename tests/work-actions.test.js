@@ -90,3 +90,95 @@ test("known business refusals have fixed recovery guidance and never echo servic
   assert.equal(workActionRefusal({ status: 503, code: "private-code" }), null);
   assert.equal(workActionRefusal({ status: 422, code: "unrecognized" }), null);
 });
+
+// Issue #6 A4: a room policy can make independent review and/or an owner
+// decision mandatory. The policy is an owner-only room event applied by the
+// projection, so no client field can disable a mandatory gate and work recorded
+// before a flip keeps exactly what it was recorded with.
+import { rmSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
+import { EVENT_TYPES as T, replay, roomPolicy } from "../src/events.js";
+import { confirmsWorkProposal } from "../src/workflow.js";
+
+function policyFixture(t) {
+  const f = createAcceptanceFixture();
+  t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const send = (actor, type, data) => { const command = { id: randomUUID(), type, data }; return { command, receipt: f.store.command(f.keys[actor], "commons", command) }; };
+  const propose = (actor, workItemId, data) => send(actor, T.WORK_PROPOSED, { workItemId, title: `Outcome ${workItemId}`, definitionOfDone: "Exact result recorded", accountableMemberId: "producer", mode: "read", ...data });
+  const setPolicy = (actor, data) => send(actor, T.ROOM_POLICY_SET, data);
+  const state = () => f.store.room("commons").state;
+  return { ...f, send, propose, setPolicy, state };
+}
+
+test("room policy: altered client fields cannot disable the independent gate or the owner decision", t => {
+  const f = policyFixture(t);
+  assert.deepEqual(roomPolicy(f.state()), { requireIndependentReview: false, requireOwnerDecision: false }, "off is the default");
+  f.setPolicy("owner", { requireIndependentReview: true, requireOwnerDecision: true });
+  assert.deepEqual(roomPolicy(f.state()), { requireIndependentReview: true, requireOwnerDecision: true });
+  assert.equal(f.state().room.policy.revision, 1); assert.equal(f.state().room.policy.setById, "owner");
+  // A client that claims neither requirement still records both; the owner is the default decision-maker.
+  const { command, receipt } = f.propose("owner", "forced", { independentVerificationRequired: false, ownerDecisionRequired: false, verifierMemberId: "reviewer" });
+  const item = f.state().workItems.forced;
+  assert.equal(item.independentVerificationRequired, true); assert.equal(item.ownerDecisionRequired, true);
+  assert.equal(item.verifierMemberId, "reviewer"); assert.equal(item.humanDecisionMakerId, "owner");
+  // The event keeps the client's words and the receipt still confirms the exact command; the projection is the authority.
+  assert.equal(receipt.event.data.independentVerificationRequired, false);
+  assert.equal(confirmsWorkProposal(receipt, command, "commons", "owner"), true);
+  // Without a verifier nothing is recorded and the refusal names the policy.
+  assert.throws(() => f.propose("owner", "no-verifier", { independentVerificationRequired: false, ownerDecisionRequired: false }), { status: 422, code: "command_rejected", message: /Room policy requires independent review/ });
+  assert.equal(f.state().workItems["no-verifier"], undefined);
+  // The gate itself holds downstream: completion without an independent PASS cannot be approved.
+  f.send("producer", T.WORK_ACCEPTED, { workItemId: "forced", expectedRevision: 0 });
+  f.send("producer", T.WORK_COMPLETED, { workItemId: "forced", expectedRevision: 1, summary: "Done", evidenceUrl: "https://example.invalid/result", evidenceVersion: "v1", nextAction: "Review", producerId: "producer" });
+  const completed = f.state().workItems.forced;
+  assert.throws(() => f.send("owner", T.OWNER_DECISION_RECORDED, { workItemId: "forced", expectedRevision: completed.revision, decision: "approved", completionEventId: completed.receipt.eventId, evidenceVersion: "v1", reason: "Looks fine" }), /independent PASS/);
+  assert.equal(f.state().workItems.forced.decision, null);
+});
+
+test("room policy: a casual message never creates work, with the policy off or on", t => {
+  const f = policyFixture(t);
+  const count = () => Object.keys(f.state().workItems).length;
+  const before = count();
+  f.send("owner", T.MESSAGE_POSTED, { body: "Can someone review the agenda and turn it into a task with a reviewer?" });
+  assert.equal(count(), before);
+  f.setPolicy("owner", { requireIndependentReview: true, requireOwnerDecision: false });
+  f.send("owner", T.MESSAGE_POSTED, { body: "Please make this work: review required, owner approval required." });
+  assert.equal(count(), before);
+  assert.equal(f.state().messages.filter(m => m.body?.includes("turn it into a task") || m.body?.includes("make this work")).length, 2, "conversation is recorded as conversation only");
+});
+
+test("room policy: work recorded before a flip keeps its recorded requirements; the flip is event-sourced and replayable", t => {
+  const f = policyFixture(t);
+  f.propose("owner", "light", { independentVerificationRequired: false, ownerDecisionRequired: false });
+  const light = () => f.state().workItems.light;
+  assert.deepEqual([light().independentVerificationRequired, light().ownerDecisionRequired, light().humanDecisionMakerId], [false, false, null]);
+  f.setPolicy("owner", { requireIndependentReview: true, requireOwnerDecision: true });
+  assert.deepEqual([light().independentVerificationRequired, light().ownerDecisionRequired], [false, false], "an earlier item is untouched by a later flip");
+  f.propose("owner", "under", { independentVerificationRequired: false, ownerDecisionRequired: false, verifierMemberId: "reviewer" });
+  f.setPolicy("owner", { requireIndependentReview: false, requireOwnerDecision: false });
+  assert.equal(f.state().room.policy.revision, 2);
+  const under = f.state().workItems.under;
+  assert.deepEqual([under.independentVerificationRequired, under.ownerDecisionRequired], [true, true], "switching the policy off does not relax recorded work");
+  f.propose("owner", "after", { independentVerificationRequired: false, ownerDecisionRequired: false });
+  assert.deepEqual([f.state().workItems.after.independentVerificationRequired, f.state().workItems.after.ownerDecisionRequired], [false, false], "off restores the proposer's choice");
+  const events = [];
+  for (let after = 0; ;) { const page = f.store.eventsAfter(f.keys.owner, "commons", after, 100); events.push(...page.events.map(row => row.event)); if (page.events.length < 100) break; after = page.events.at(-1).sequence; }
+  const replayed = replay(events);
+  for (const id of ["light", "under", "after"]) assert.deepEqual(replayed.workItems[id], f.state().workItems[id], `replay reproduces ${id}`);
+  assert.deepEqual(replayed.room.policy, f.state().room.policy);
+});
+
+test("room policy: only the room owner sets it, and the command shape is strict", t => {
+  const f = policyFixture(t);
+  const on = { requireIndependentReview: true, requireOwnerDecision: true };
+  assert.throws(() => f.setPolicy("guest", on), { status: 422, code: "command_rejected", message: /Only the Room owner may set room policy/ });
+  assert.throws(() => f.setPolicy("reviewer", on), /Only the Room owner may set room policy/);
+  assert.equal(f.state().room.policy, undefined, "a refused policy leaves no trace");
+  assert.throws(() => f.setPolicy("owner", { requireIndependentReview: "yes", requireOwnerDecision: true }), { status: 422, code: "invalid_command", message: /Invalid field: requireIndependentReview/ });
+  assert.throws(() => f.setPolicy("owner", { ...on, expectedRevision: 0 }), { code: "invalid_command", message: /Unexpected field: expectedRevision/ });
+  assert.throws(() => f.setPolicy("owner", { requireIndependentReview: true }), { code: "command_rejected", message: /requireOwnerDecision as true or false/ });
+  assert.equal(f.state().room.policy, undefined);
+  f.setPolicy("owner", on);
+  assert.deepEqual(roomPolicy(f.state()), on);
+});
