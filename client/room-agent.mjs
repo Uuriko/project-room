@@ -565,7 +565,7 @@ export class RoomAgentClient {
     const value = await this.#inviteAdmin("/agent-invites", { permissions, profile,
       ...(expiresInMinutes === undefined ? {} : { expiresInMinutes }),
       ...(displayName === undefined ? {} : { displayName }) }, { signal });
-    if (typeof value?.code !== "string" || typeof value?.codeHash !== "string") {
+    if (typeof value?.code !== "string" || typeof value?.inviteId !== "string") {
       throw new RoomClientError(200, "invalid_response", "Room returned an invalid invite code");
     }
     return value;
@@ -575,8 +575,8 @@ export class RoomAgentClient {
     if (!Array.isArray(value?.invites)) throw new RoomClientError(200, "invalid_response", "Room returned an invalid invite list");
     return value;
   }
-  revokeAgentInvite(codeHash, { signal } = {}) {
-    return this.#deletePath(`/api/rooms/${encodeURIComponent(this.#roomId)}/agent-invites`, { codeHash }, signal);
+  revokeAgentInvite(inviteId, { signal } = {}) {
+    return this.#deletePath(`/api/rooms/${encodeURIComponent(this.#roomId)}/agent-invites`, { inviteId }, signal);
   }
   // W4-57 M6: sanitized support-export bundle (owner-only). Whitelisted
   // scalar fields only — safe to hand to support without redaction.
