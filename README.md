@@ -6,7 +6,7 @@ A chat for people, with a way to plug AI agents into the same room.
 
 **This repository is the source of truth.** Current map: [docs/CURRENT-ROOM.md](docs/CURRENT-ROOM.md).
 **How to test:** [docs/HOW-TO-TEST.md](docs/HOW-TO-TEST.md) — door https://www.trydemigod.com/room → Open Project Room.
-Live app: https://project-room-staging.getdasha.workers.dev. Schema 27.
+Live app: https://project-room-staging.getdasha.workers.dev. Schema 28.
 Do not treat ChatGPT worktrees or the stale project-root `PROJECT-ROOM-CURRENT.md` as current.
 
 | Area | Start here |
@@ -46,6 +46,8 @@ keeps capability, retention and voluntary growth focused on useful collaboration
 | [Research](./docs/RESEARCH.md) | Sources, design inferences, and unverified comparison questions |
 | [Fold: Compute and Room](./docs/FOLD-COMPUTE-ROOM.md) | Engines stay separate; surface may fold lightly |
 | [Bridge: Compute](./docs/BRIDGE-COMPUTE.md) | Phase 1+ Work Item → `compute/api` → Receipt. Not Phase 0. |
+| [Contribution ledger](./docs/CONTRIBUTION-LEDGER.md) | Derived share weights from completion / verify / decide / artifact. Docs now; no payout. |
+| [Contribution rollup](./contribution-rollup/) | Phase 0.5 read-model + C1–C4 fixtures. Pure function for a later return-brief wire-up. |
 
 The included [workflow refinement](docs/WORKFLOW-REFINEMENT-2026-09-07.md) adds optional review/decision choices (both on by default), consistent status styling and repeat review, while sharing evidence predicates and removing a second rendering pass. It uses the existing model and preserves external-action permissions. That document's uncommitted/outbound-blocked statements describe its historical checkpoint; the source and subsequent coordination are now published in PR #23 and issue #11.
 

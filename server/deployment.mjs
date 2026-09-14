@@ -3,6 +3,21 @@ import { isIP } from "node:net";
 
 const loopback = address => ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(address);
 
+// Event-stream pump: every open stream polls committed events once per
+// interval, so delivery latency is roughly uniform on [0, interval] and the
+// cost is one read transaction per stream per interval. 250 ms puts p50
+// delivery near 125 ms at pilot scale (docs/LOAD-TEST-2026-09-14.md). The
+// floor keeps 100 streams under 2,000 reads/s; the ceiling keeps a typo from
+// making streams look dead.
+export const STREAM_INTERVAL_DEFAULT_MS = 250, STREAM_INTERVAL_MIN_MS = 50, STREAM_INTERVAL_MAX_MS = 5000;
+export function streamIntervalConfig(env = process.env) {
+  const raw = env.ROOM_STREAM_INTERVAL_MS;
+  if (raw === undefined || raw === "") return STREAM_INTERVAL_DEFAULT_MS;
+  const value = /^\d+$/.test(String(raw).trim()) ? Number(String(raw).trim()) : NaN;
+  if (!Number.isInteger(value) || value < STREAM_INTERVAL_MIN_MS || value > STREAM_INTERVAL_MAX_MS) throw new Error(`ROOM_STREAM_INTERVAL_MS must be an integer between ${STREAM_INTERVAL_MIN_MS} and ${STREAM_INTERVAL_MAX_MS} milliseconds`);
+  return value;
+}
+
 export function deploymentConfig(env = process.env) {
   const host = env.HOST || "127.0.0.1";
   const port = Number(env.PORT || 4173);
@@ -16,7 +31,7 @@ export function deploymentConfig(env = process.env) {
   if (url.origin !== origin || !["http:", "https:"].includes(url.protocol)) throw new Error("ROOM_ORIGIN must be an exact HTTP(S) origin");
   if (url.protocol !== "https:" && (production || !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))) throw new Error("Deployment requires an HTTPS origin");
   if (production && (!env.ROOM_DB || !isAbsolute(env.ROOM_DB))) throw new Error("Production requires an absolute persistent ROOM_DB path");
-  return { host, port, origin, filename: resolve(env.ROOM_DB || ".data/room.sqlite"), production };
+  return { host, port, origin, filename: resolve(env.ROOM_DB || ".data/room.sqlite"), production, streamInterval: streamIntervalConfig(env) };
 }
 
 // Only the explicitly enabled same-host proxy may supply this header. It must

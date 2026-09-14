@@ -3,6 +3,7 @@ import { applyEvent, validId, INVITATION_ROLE_POLICY_VERSION } from "../src/even
 import { invitationJoinedEvent } from "./invitation-evidence.mjs";
 import { canonicalInvitationData } from "./invitation-journal.mjs";
 import { ServiceError } from "./store.mjs";
+import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { classifyJoinToken } from "./guest-agent-links.mjs";
 
 const hash = value => createHash("sha256").update(value).digest("hex");
@@ -184,6 +185,7 @@ export class ShareLinks {
       let record = this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(invitationId);
       this.store.appendInvitationJournal(record, "issued");
       const incoming = invitationJoinedEvent({ ...record, joined_event_id: randomUUID(), accepted_at: now, redemption_id: redemptionId });
+      refuseArchivedWrite(room.state);
       const state = { ...applyEvent(room.state, incoming), eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
       const projection = JSON.stringify(state), sequence = room.sequence + 1;
       if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, "pilot_limit", "This room has reached its storage limit");

@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { request } from "node:http";
-import { deploymentConfig, clientAddress } from "../server/deployment.mjs";
+import { deploymentConfig, clientAddress, streamIntervalConfig, STREAM_INTERVAL_DEFAULT_MS, STREAM_INTERVAL_MIN_MS, STREAM_INTERVAL_MAX_MS } from "../server/deployment.mjs";
 import { backupRoom } from "../server/backup.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
@@ -18,6 +18,21 @@ test("production is an explicit, persistent, HTTPS, same-host deployment", () =>
   for (const change of [{ ROOM_DEPLOYMENT: "" }, { NODE_ENV: "development" }, { ROOM_DB: "relative.sqlite" }, { ROOM_DB: "" }, { ROOM_ORIGIN: "http://localhost" }, { ROOM_ORIGIN: "https://room.example.com/path" }, { HOST: "0.0.0.0" }, { PORT: "NaN" }]) {
     assert.throws(() => deploymentConfig({ ...production, ...change }));
   }
+});
+
+test("the stream pump interval comes from ROOM_STREAM_INTERVAL_MS, bounded and validated", () => {
+  assert.equal(STREAM_INTERVAL_DEFAULT_MS, 250);
+  assert.equal(streamIntervalConfig({}), STREAM_INTERVAL_DEFAULT_MS);
+  assert.equal(streamIntervalConfig({ ROOM_STREAM_INTERVAL_MS: "" }), STREAM_INTERVAL_DEFAULT_MS);
+  assert.equal(deploymentConfig({}).streamInterval, STREAM_INTERVAL_DEFAULT_MS);
+  assert.equal(deploymentConfig({ ...production, ROOM_STREAM_INTERVAL_MS: "100" }).streamInterval, 100);
+  assert.equal(streamIntervalConfig({ ROOM_STREAM_INTERVAL_MS: String(STREAM_INTERVAL_MIN_MS) }), STREAM_INTERVAL_MIN_MS);
+  assert.equal(streamIntervalConfig({ ROOM_STREAM_INTERVAL_MS: ` ${STREAM_INTERVAL_MAX_MS} ` }), STREAM_INTERVAL_MAX_MS);
+  for (const value of [String(STREAM_INTERVAL_MIN_MS - 1), String(STREAM_INTERVAL_MAX_MS + 1), "0", "-250", "250.5", "1e3", "fast", "NaN", "0x100"]) {
+    assert.throws(() => streamIntervalConfig({ ROOM_STREAM_INTERVAL_MS: value }), /ROOM_STREAM_INTERVAL_MS must be an integer between 50 and 5000/, value);
+    assert.throws(() => deploymentConfig({ ...production, ROOM_STREAM_INTERVAL_MS: value }), /ROOM_STREAM_INTERVAL_MS/, value);
+  }
+  for (const streamInterval of [0, -1, 1.5, "250", null]) assert.throws(() => createRoomServer({ store: {}, streamInterval }), /Stream interval must be a positive integer/);
 });
 
 test("client address comes only from an explicitly trusted loopback proxy", () => {

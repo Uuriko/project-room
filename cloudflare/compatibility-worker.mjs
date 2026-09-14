@@ -37,7 +37,7 @@ export class CompatibilityRoom {
       let rollback = false;
       try {
         storage.transactionSync(() => {
-          sql.exec("INSERT INTO rooms VALUES('rolled-back',0,'{}')");
+          sql.exec("INSERT INTO rooms(id,sequence,projection) VALUES('rolled-back',0,'{}')");
           throw new Error('intentional rollback');
         });
       } catch (error) { rollback = error.message === 'intentional rollback'; }
@@ -45,13 +45,13 @@ export class CompatibilityRoom {
       const foreignKey = check('foreign key', () => sql.exec("INSERT INTO events VALUES('missing-room',1,'orphan-event','{}')").toArray());
       const writeGuard = storage.transactionSync(() => {
         sql.exec('UPDATE room_runtime_version SET version=?', this.env.SCHEMA_VERSION + 1);
-        const result = check('old writer rejection', () => sql.exec("INSERT INTO rooms VALUES('old-writer',0,'{}')").toArray());
+        const result = check('old writer rejection', () => sql.exec("INSERT INTO rooms(id,sequence,projection) VALUES('old-writer',0,'{}')").toArray());
         sql.exec('UPDATE room_runtime_version SET version=?', this.env.SCHEMA_VERSION);
         return result;
       });
       const missingGuard = storage.transactionSync(() => {
         sql.exec('DELETE FROM room_runtime_version');
-        const result = check('missing version rejection', () => sql.exec("INSERT INTO rooms VALUES('missing-version',0,'{}')").toArray());
+        const result = check('missing version rejection', () => sql.exec("INSERT INTO rooms(id,sequence,projection) VALUES('missing-version',0,'{}')").toArray());
         sql.exec('INSERT INTO room_runtime_version VALUES(1,?)', this.env.SCHEMA_VERSION);
         return result;
       });

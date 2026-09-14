@@ -89,7 +89,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
 for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["mobile", { width: 390, height: 844 }]]) {
   test(`room policy dialog ${label}: owner applies the policy with an accessible control, errors stay inline, members see it read only`, { timeout: 60000 }, async t => {
     const f = await setup(t, viewport), { page } = f;
-    const select = page.locator("#room-policy-select"), apply = page.locator("#room-policy-apply"), status = page.locator("#room-policy-status"), current = page.locator("#room-policy-current");
+    const select = page.locator("#room-policy-select"), apply = page.locator("#room-policy-apply"), current = page.locator("#room-policy-current");
     await f.openDialog(page);
     // Default: policy off, nothing to apply, the control is labelled and explained.
     assert.equal(await select.inputValue(), "none"); assert.equal(await apply.isDisabled(), true);

@@ -72,7 +72,7 @@ function rawRequest(origin, { method, path, headers, body = "", contentLength = 
 const status = raw => Number(/^HTTP\/1\.1 (\d{3})/.exec(raw.response ?? "")?.[1]);
 
 test("L1: the thread route runs through the shared room funnel", async t => {
-  const { origin, request, ownerKey, accountKey, post } = await serve(t);
+  const { request, ownerKey, accountKey, post } = await serve(t);
   const root = post("root");
   post("reply", root);
   const ok = await request(`/api/rooms/commons/messages/${root}/thread`, { token: ownerKey });
@@ -106,7 +106,7 @@ test("L1: the thread route runs through the shared room funnel", async t => {
 });
 
 test("L1: thread reads share the per-credential read rate limit", async t => {
-  const { origin, request, ownerKey, post } = await serve(t);
+  const { request, ownerKey, post } = await serve(t);
   const root = post("root");
   let limited = null;
   for (let index = 0; index < 601 && limited === null; index += 1) {

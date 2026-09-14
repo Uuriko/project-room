@@ -11,6 +11,7 @@ export const EVENT_TYPES = Object.freeze({
   ROOM_CHARTER_UPDATED: CHARTER_TYPE,
   ROOM_POLICY_SET: "room.policy_set",
   ROOM_SPEND_ALLOWANCE_SET: "room.spend_allowance_set",
+  ROOM_ARCHIVED: "room.archived",
   MEMBER_ADDED: "member.added",
   MEMBER_JOINED_VIA_INVITATION: "member.joined_via_invitation",
   MEMBER_ACCESS_CHANGED: "member.access_changed",
@@ -58,6 +59,23 @@ export const ROOM_POLICY_FIELDS = Object.freeze(["requireIndependentReview", "re
 export function roomPolicy(state) {
   const stored = state?.room?.policy ?? {};
   return Object.fromEntries(ROOM_POLICY_FIELDS.map(field => [field, stored[field] === true]));
+}
+
+// Room lifecycle (issue #6 A2). `kind` is a creation-time attribute: the
+// personal / organization badge until a real organization model (D1) exists;
+// rooms created before it read as personal. Archive is an owner-only event
+// (room.archived) that turns the room read-only: reads, streams and export
+// continue, and no further event of any type is accepted for that room. A
+// member leaves by ending their own access (member.access_changed on
+// themself, permissions unchanged, active false) without needing
+// manage_members; the owner cannot leave.
+export const ROOM_KINDS = Object.freeze(["personal", "organization"]);
+export const roomKind = room => (ROOM_KINDS.includes(room?.kind) ? room.kind : "personal");
+export const isRoomArchived = state => typeof state?.room?.archivedAt === "string";
+export function isLeaveRequest(state, incoming) {
+  const member = Object.hasOwn(state.members, String(incoming.data?.memberId)) && state.members[incoming.data.memberId];
+  return Boolean(member) && incoming.actorId === member.id && member.active === true && incoming.data.active === false
+    && Array.isArray(incoming.data.permissions) && JSON.stringify(incoming.data.permissions) === JSON.stringify(member.permissions);
 }
 
 // Room spend allowance (issue #6 C3): the owner can cap what agent sessions
@@ -184,6 +202,7 @@ export function applyEvent(current, incoming) {
   if (incoming.type !== EVENT_TYPES.ROOM_CREATED) {
     if (!state.room) throw new Error("Room must be created before other events");
     if (incoming.roomId !== state.room.id) throw new Error("Event belongs to a different Room");
+    if (isRoomArchived(state)) throw new Error("Room is archived");
   }
 
   const handlers = {
@@ -191,6 +210,7 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.ROOM_CHARTER_UPDATED]: updateCharter,
     [EVENT_TYPES.ROOM_POLICY_SET]: setRoomPolicy,
     [EVENT_TYPES.ROOM_SPEND_ALLOWANCE_SET]: setSpendAllowance,
+    [EVENT_TYPES.ROOM_ARCHIVED]: archiveRoom,
     [EVENT_TYPES.MEMBER_ADDED]: addMember,
     [EVENT_TYPES.MEMBER_JOINED_VIA_INVITATION]: joinMemberViaInvitation,
     [EVENT_TYPES.MEMBER_ACCESS_CHANGED]: changeMemberAccess,
@@ -271,6 +291,7 @@ function validateEnvelope(incoming) {
 function createRoom(state, incoming) {
   if (state.room) throw new Error("Room already exists");
   requireFields(incoming.data, ["roomId", "title", "purpose", "ownerId"]);
+  if (incoming.data.kind !== undefined && !ROOM_KINDS.includes(incoming.data.kind)) throw new Error("Room kind must be personal or organization");
   if (incoming.roomId !== incoming.data.roomId) throw new Error("Room event id mismatch");
   if (incoming.actorId !== incoming.data.ownerId) throw new Error("Room must be created by its owner");
   state.room = { id: incoming.data.roomId, ...incoming.data, createdAt: incoming.at };
@@ -296,6 +317,15 @@ function setRoomPolicy(state, incoming) {
     setById: incoming.actorId,
     setAt: incoming.at
   };
+}
+
+function archiveRoom(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.kind !== "human" || actor.id !== state.room.ownerId) throw new Error("Only the Room owner may archive the room");
+  if (incoming.data.reason != null && (typeof incoming.data.reason !== "string" || incoming.data.reason.length > 280)) throw new Error("Archive reason must be 280 characters or fewer");
+  state.room.archivedAt = incoming.at;
+  state.room.archivedById = incoming.actorId;
+  if (incoming.data.reason) state.room.archiveReason = incoming.data.reason;
 }
 
 function addMember(state, incoming) {
@@ -369,7 +399,7 @@ function validatePermissions(permissions, kind) {
 }
 
 function changeMemberAccess(state, incoming) {
-  requirePermission(state, incoming.actorId, "manage_members");
+  if (!isLeaveRequest(state, incoming)) requirePermission(state, incoming.actorId, "manage_members");
   requireFields(incoming.data, ["memberId", "expectedMemberRevision", "permissions", "active"]);
   const member = Object.hasOwn(state.members, incoming.data.memberId) && state.members[incoming.data.memberId];
   if (!member) throw new Error("Unknown member");

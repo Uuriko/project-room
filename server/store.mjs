@@ -5,13 +5,17 @@ import {
   INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES,
   MEMBERSHIP_AUTHORITY_POLICY_VERSION, validId, memberCan, ROOM_POLICY_FIELDS
 } from "../src/events.js";
+import { PIN_COMMAND_SHAPES } from "../src/events.js";
 import { buildReturnBrief, resolveHistoryWindow, RETURN_BRIEF_DEFAULT_LIMIT } from "./return-brief.mjs";
+import { enforceSpendAllowance } from "./spend-allowance.mjs";
 import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal } from "./invitation-journal.mjs";
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
 import { STORE_SCHEMA_VERSION, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
+import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
 import { ShareLinks, shareLinkSchema } from "./share-links.mjs";
 import { conflictingClaim } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
+import { Notifications } from "./notifications.mjs";
 import { Moderation, moderationSchema } from "./moderation.mjs";
 import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
@@ -42,11 +46,36 @@ import { EmailImport, emailImportSchema } from "./email-import.mjs";
 export class ServiceError extends Error {
   constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
 }
+// Exhausted or unwritable storage (disk full, quota, read-only file or
+// database, I/O errors) is one typed refusal. The failing transaction has
+// already been rolled back, so no partial write exists, and the driver text
+// stays in `cause` on the server: clients see only the stable code.
+export class StorageUnavailableError extends ServiceError {
+  constructor(cause = null) {
+    super(503, "storage_unavailable", "Storage is unavailable; no success is claimed", { "Retry-After": "30" });
+    this.cause = cause;
+  }
+}
+// SQLite primary result codes: READONLY, IOERR, FULL, CANTOPEN (WAL/shm files).
+const storageFailureSqlite = new Set([8, 10, 13, 14]);
+const storageFailureSystem = new Set(["ENOSPC", "EDQUOT", "EROFS", "EIO"]);
+const storageFailureText = /database or disk is full|attempt to write a readonly database|disk I\/O error|unable to open database file|no space left on device|read-only file system/i;
+export function isStorageUnavailable(error) {
+  if (!error || typeof error !== "object") return false;
+  if (error instanceof StorageUnavailableError) return true;
+  if (Number.isInteger(error.errcode) && storageFailureSqlite.has(error.errcode & 0xff)) return true;
+  if (typeof error.code === "string" && storageFailureSystem.has(error.code)) return true;
+  return storageFailureText.test(String(error.errstr ?? error.message ?? ""));
+}
+export const STORAGE_FAILURE_THRESHOLD = 3;
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
+// F5: the bounded pilot caps in one place. The room write paths below enforce
+// them; server/usage-summary.mjs reports them with the remaining headroom.
+export const PILOT_LIMITS = Object.freeze({ eventsPerRoom: 10000, membersPerRoom: 100, workItemsPerRoom: 500, projectionBytes: 4 * 1024 * 1024 });
 const hash = text => createHash("sha256").update(text).digest("hex");
 const key = () => randomBytes(32).toString("base64url");
 const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(",")}]` : value && typeof value === "object" ? `{${Object.keys(value).sort().map(k => `${JSON.stringify(k)}:${canonical(value[k])}`).join(",")}}` : JSON.stringify(value);
-const provisionalAccountPrefix = "acct-legacy-";
+export const provisionalAccountPrefix = "acct-legacy-";
 const provisionalAccountId = (roomId, memberId) => `${provisionalAccountPrefix}${hash(`${roomId}\0${memberId}`).slice(0, 32)}`;
 const accountView = row => row ? { id: row.id, active: Boolean(row.active), revision: row.revision, authEpoch: row.auth_epoch } : null;
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
@@ -166,6 +195,7 @@ const nodeStorage = {
   version: db => db.prepare("PRAGMA user_version").get().user_version,
   setVersion: (db, version) => db.exec(`PRAGMA user_version=${version}`),
   hasSchema: db => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' LIMIT 1").get()),
+  changes: db => db.prepare("SELECT total_changes() AS n").get().n,
   configure(db, readOnly) {
     db.exec(readOnly ? "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=3000;"
       : "PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=3000;");
@@ -182,7 +212,12 @@ const nodeStorage = {
       if (readOnly) { db.exec("PRAGMA query_only=ON"); nodeReadTransactions.add(db); }
       const result = fn(); db.exec("COMMIT"); return result;
     }
-    catch (error) { db.exec("ROLLBACK"); throw error; }
+    catch (error) {
+      // SQLITE_FULL and I/O failures already rolled the transaction back;
+      // a second ROLLBACK would replace the real error with "no transaction".
+      if (db.isTransaction) { try { db.exec("ROLLBACK"); } catch { /* already rolled back */ } }
+      throw error;
+    }
     finally { if (readOnly) { nodeReadTransactions.delete(db); db.exec(`PRAGMA query_only=${queryOnly}`); } }
   }
 };
@@ -190,6 +225,8 @@ const work = "workItemId expectedRevision";
 const shapes = {
   [T.ROOM_CHARTER_UPDATED]: "expectedRevision purpose outputs boundaries escalation",
   [T.ROOM_POLICY_SET]: ROOM_POLICY_FIELDS.join(" "),
+  [T.ROOM_SPEND_ALLOWANCE_SET]: "allowanceCents periodDays",
+  [T.ROOM_ARCHIVED]: "reason",
   [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId identityId",
   [T.MEMBER_ACCESS_CHANGED]: "memberId expectedMemberRevision permissions active",
   [T.MEMBER_STATUS_UPDATED]: "memberId message",
@@ -200,6 +237,7 @@ const shapes = {
   [T.MESSAGE_DELETED]: "messageId expectedMessageRevision reason",
   [T.REPLY_REQUEST_CANCELLED]: "requestMessageId expectedRequestRevision reason",
   [T.MESSAGE_REACTION_SET]: "messageId reaction active",
+  ...PIN_COMMAND_SHAPES,
   [T.WORK_PROPOSED]: "workItemId title definitionOfDone accountableMemberId verifierMemberId independentVerificationRequired ownerDecisionRequired humanDecisionMakerId mode sourceMessageId",
   [T.WORK_ACCEPTED]: work,
   [T.WORK_HELP_UPDATED]: `${work} expectedHelpRevision status scope expiresAt`,
@@ -238,7 +276,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (Buffer.byteLength(JSON.stringify(command)) > 16384) fail(413, "too_large", "Command is too large");
@@ -260,7 +298,12 @@ export function validateCommand(command) {
 }
 
 export class RoomStore {
-  constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage } = {}) {
+  constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD } = {}) {
+    if (!Number.isInteger(storageFailureThreshold) || storageFailureThreshold < 1) throw new Error("Storage failure threshold must be a positive integer");
+    // Consecutive storage refusals; readiness (server/http.mjs) turns 503 at
+    // the threshold and recovers on the next committed write.
+    this.storageFailureThreshold = storageFailureThreshold;
+    this.storageFailures = 0;
     this.now = now;
     this.db = database ?? new DatabaseSync(filename, { readOnly });
     this.storagePlatform = storagePlatform;
@@ -268,6 +311,7 @@ export class RoomStore {
     this.identities = new AgentIdentities(this);
     this.invites = new AgentInvites(this);
     this.reminders = new Reminders(this);
+    this.notifications = new Notifications(this);
     this.moderation = new Moderation(this);
     this.wakeQueue = new WakeQueue(this);
     this.attention = new Attention(this);
@@ -311,6 +355,7 @@ export class RoomStore {
         // backup taken before it is still a valid v27 file; read-only never
         // migrates, so verify it only when present.
         this.channelUpdates.verifySchema({ allowAbsent: true });
+        verifyRoomLifecycle(this);
         this.moderation.verifySchema({ allowAbsent: true }); // E4 message reports: additive at v27 as well.
         return;
       } catch (error) { this.db.close(); throw error; }
@@ -340,7 +385,7 @@ export class RoomStore {
         || this.db.prepare("SELECT 1 FROM events WHERE json_extract(body,'$.type') IN ('work.help_offer_opened','work.help_offer_updated') LIMIT 1").get()) throw new Error("Legacy help offer field requires operator reconciliation");
     }
     if (version === 0) { this.db.exec(`
-      CREATE TABLE rooms (id TEXT PRIMARY KEY, sequence INTEGER NOT NULL, projection TEXT NOT NULL);
+      CREATE TABLE rooms (id TEXT PRIMARY KEY, sequence INTEGER NOT NULL, projection TEXT NOT NULL, archived_at TEXT);
       CREATE TABLE events (room_id TEXT NOT NULL REFERENCES rooms(id), sequence INTEGER NOT NULL, id TEXT NOT NULL UNIQUE, body TEXT NOT NULL, PRIMARY KEY(room_id, sequence));
       CREATE TABLE commands (room_id TEXT NOT NULL REFERENCES rooms(id), actor_id TEXT NOT NULL, id TEXT NOT NULL, fingerprint TEXT NOT NULL, sequence INTEGER NOT NULL, PRIMARY KEY(room_id, actor_id, id), FOREIGN KEY(room_id, sequence) REFERENCES events(room_id, sequence));
       CREATE TABLE accounts (id TEXT PRIMARY KEY, active INTEGER NOT NULL CHECK(active IN (0,1)), revision INTEGER NOT NULL, auth_epoch INTEGER NOT NULL, origin TEXT NOT NULL, created_at INTEGER NOT NULL);
@@ -381,6 +426,7 @@ export class RoomStore {
       if (version < 25 && this.db.prepare("SELECT 1 FROM private_inbox_commands WHERE json_extract(request_json,'$.action') IN ('reply.update.inspected','reply.update.review') OR json_type(receipt_json,'$.update.inspection') IS NOT NULL OR json_type(receipt_json,'$.update.review') IS NOT NULL OR json_type(receipt_json,'$.update.resolvedAt') IS NOT NULL OR json_extract(receipt_json,'$.update.status')='resolved' LIMIT 1").get())
         throw new Error("Pre-v25 reply resolution history requires operator reconciliation");
       if (version < 27) this.migrateAgentIdentitiesV27();
+      if (version < 28) migrateRoomLifecycleV28(this);
       // Agent invite codes are purely additive (no data migration, no fence
       // impact), so no schema version bump: IF NOT EXISTS is idempotent here
       // and the v0 block above covers fresh databases.
@@ -413,6 +459,7 @@ export class RoomStore {
       this.email.verify();
       this.channelUpdates.verifySchema();
       this.channelUpdates.verify();
+      verifyRoomLifecycle(this);
     }); } catch (error) { this.db.close(); throw error; }
   }
 
@@ -675,10 +722,37 @@ export class RoomStore {
   close() { this.db.close(); }
   transaction(fn) {
     // Nested startup helpers share the outer migration transaction and its rollback.
-    return this.storagePlatform.transaction(this.db, fn, false);
+    const outermost = !this.db.isTransaction;
+    // Only a commit that changed rows proves storage is writable again; an
+    // idempotent replay commits nothing. Measured only while degraded.
+    const before = outermost && this.storageFailures > 0 ? this.storagePlatform.changes?.(this.db) : null;
+    let result;
+    try { result = this.storagePlatform.transaction(this.db, fn, false); }
+    catch (error) { throw this.storageFailure(error, outermost); }
+    if (before !== null && (before === undefined || this.storagePlatform.changes(this.db) !== before)) this.storageRecovered();
+    return result;
   }
   readTransaction(fn) {
-    return this.storagePlatform.transaction(this.db, fn, true);
+    const outermost = !this.db.isTransaction;
+    try { return this.storagePlatform.transaction(this.db, fn, true); }
+    catch (error) { throw this.storageFailure(error, outermost); }
+  }
+  // Maps one storage failure to the typed refusal and counts it. Only the
+  // outermost transaction counts, so one nested failure is one refusal;
+  // server/http.mjs calls this for errors raised outside any transaction.
+  storageFailure(error, outermost = true) {
+    if (!isStorageUnavailable(error)) return error;
+    if (outermost && ++this.storageFailures === this.storageFailureThreshold) {
+      console.warn(`room storage unavailable after ${this.storageFailures} consecutive failures; readiness now 503`);
+    }
+    return error instanceof StorageUnavailableError ? error : new StorageUnavailableError(error);
+  }
+  storageRecovered() {
+    if (this.storageFailures >= this.storageFailureThreshold) console.warn("room storage recovered after a committed write; readiness now 200");
+    this.storageFailures = 0;
+  }
+  storageStatus() {
+    return { failures: this.storageFailures, threshold: this.storageFailureThreshold, unavailable: this.storageFailures >= this.storageFailureThreshold };
   }
   room(roomId) {
     const row = this.db.prepare("SELECT * FROM rooms WHERE id=?").get(roomId);
@@ -714,7 +788,7 @@ export class RoomStore {
   initialize(events) {
     return this.transaction(() => {
       const state = events.reduce(applyEvent, emptyRoomState());
-      this.db.prepare("INSERT INTO rooms VALUES(?,?,?)").run(state.room.id, events.length, JSON.stringify(compact(state)));
+      this.db.prepare("INSERT INTO rooms(id,sequence,projection,archived_at) VALUES(?,?,?,?)").run(state.room.id, events.length, JSON.stringify(compact(state)), archivedAtOf(state));
       const insert = this.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
       events.forEach((e, i) => insert.run(state.room.id, i + 1, e.id, JSON.stringify(e)));
       return state.room.id;
@@ -871,8 +945,7 @@ export class RoomStore {
       for (const row of rows.slice(0, 50)) {
         try {
           const access = this.authenticateAccountSession(token, row.room_id, binding);
-          const room = this.db.prepare("SELECT json_extract(projection,'$.room.title') AS title FROM rooms WHERE id=?").get(row.room_id);
-          rooms.push({ id: row.room_id, title: room.title, memberId: access.member.id });
+          rooms.push(accountRoomEntry(this.db.prepare(ACCOUNT_ROOM_SELECT).get(row.room_id), access.member.id));
         } catch (error) { if (error.status !== 403) throw error; }
       }
       return { contractVersion: 1, viewer: { accountId: auth.account.id, authEpoch: auth.account.authEpoch,
@@ -880,6 +953,7 @@ export class RoomStore {
         rooms, nextCursor: rows.length > 50 ? rows[49].room_id : null };
     });
   }
+  createAccountRoom(token, binding, request) { return createAccountRoom(this, token, binding, request); }
   ensureHumanAccountBinding(roomId, memberId, requestedAccountId = null, origin = "local-provisioning") {
     const members = this.room(roomId).state.members;
     const member = validId(memberId) && Object.hasOwn(members, memberId) && members[memberId];
@@ -1082,13 +1156,14 @@ export class RoomStore {
       if (!rolePermissions || permissions.length !== rolePermissions.length || permissions.some((permission, index) => permission !== rolePermissions[index])) {
         fail(409, "invitation_scope_invalid", "Stored invitation grants no longer match its immutable role policy");
       }
-      if (room.sequence >= 10000 || Object.keys(room.state.members).length >= 100) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
+      if (room.sequence >= PILOT_LIMITS.eventsPerRoom || Object.keys(room.state.members).length >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
+      refuseArchivedWrite(room.state);
       const incoming = invitationJoinedEvent({ ...row, joined_event_id: randomUUID(), accepted_at: now, redemption_id: redemptionId });
       let state;
       try { state = compact(applyEvent(room.state, incoming)); }
       catch (error) { fail(409, "invitation_rejected", error.message); }
       const projection = JSON.stringify(state);
-      if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
       const sequence = room.sequence + 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
@@ -1465,6 +1540,7 @@ export class RoomStore {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const { ownerId } = this.roomAuthority(roomId);
       if (auth.member.id !== ownerId) fail(403, "owner_required", "Only the room owner can import history");
+      refuseArchivedWrite(this.room(roomId).state);
       if (!Array.isArray(lines) || !lines.length || lines.length > 10000) fail(422, "invalid_import", "Import is 1 to 10000 event lines");
       const events = lines.map((line, i) => {
         if (!line || typeof line !== "object" || line.sequence !== i + 1) fail(422, "invalid_import", `Line ${i + 1} breaks the event sequence`);
@@ -1490,7 +1566,7 @@ export class RoomStore {
       this.db.prepare("DELETE FROM events WHERE room_id=?").run(roomId);
       const insert = this.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
       events.forEach((e, i) => insert.run(roomId, i + 1, e.id, JSON.stringify(e)));
-      this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(events.length, JSON.stringify(state), roomId);
+      this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(events.length, JSON.stringify(state), archivedAtOf(state), roomId);
       this.db.prepare("INSERT INTO projection_checkpoints(room_id,sequence,projection) VALUES(?,?,?)").run(roomId, events.length, JSON.stringify(state));
       return { imported: events.length, sequence: events.length };
     });
@@ -1718,6 +1794,7 @@ export class RoomStore {
       }
       if (command.causationId && !this.db.prepare("SELECT 1 FROM events WHERE room_id=? AND id=?").get(roomId, command.causationId)) fail(422, "invalid_cause", "Causation event must exist in this room");
       const room = this.room(roomId);
+      refuseArchivedWrite(room.state);
       const target = room.state.members[command.data.memberId];
       const endingAccess = command.type === T.MEMBER_ACCESS_CHANGED && target?.active === true && command.data.active === false
         && canonical(target.permissions) === canonical(command.data.permissions);
@@ -1742,9 +1819,10 @@ export class RoomStore {
         || (command.type === T.WORK_SUPERSEDED && workItem != null && workItem.state !== WORK_STATES.SUPERSEDED && !workItem.supersededBy);
       const endingSession = [T.SESSION_STOP_REQUESTED, T.SESSION_STOPPED].includes(command.type)
         && workItem != null && !isTerminalSession(sessionRecord(workItem).status);
-      const cleanup = endingAccess || endingRequest || endingHelp || endingOffer || endingClaim || endingWork || endingSession;
+      const cleanup = endingAccess || endingRequest || endingHelp || endingOffer || endingClaim || endingWork || endingSession || command.type === T.ROOM_ARCHIVED;
       // At capacity, each remaining membership/request/help/offer/claim and each open work item can still be ended once.
-      if ((room.sequence >= 10000 && !cleanup) || (command.type === T.MEMBER_ADDED && Object.keys(room.state.members).length >= 100) || (command.type === T.WORK_PROPOSED && Object.keys(room.state.workItems).length >= 500)) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
+      if ((room.sequence >= PILOT_LIMITS.eventsPerRoom && !cleanup) || (command.type === T.MEMBER_ADDED && Object.keys(room.state.members).length >= PILOT_LIMITS.membersPerRoom) || (command.type === T.WORK_PROPOSED && Object.keys(room.state.workItems).length >= PILOT_LIMITS.workItemsPerRoom)) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
+      enforceSpendAllowance(room.state, command, this.now(), fail); // C3: a start that would exceed the room allowance is refused
       const memberAuthorityEvent = [T.MEMBER_ADDED, T.MEMBER_ACCESS_CHANGED].includes(command.type);
       const incoming = event({
         type: command.type, roomId, actorId: auth.member.id, at: new Date(this.now()).toISOString(),
@@ -1769,11 +1847,11 @@ export class RoomStore {
         if (conflict) fail(409, "claim_conflict", `Scope is reserved by work ${conflict.id}. Coordinate or release that reservation first; no new claim was saved.`);
       }
       const projection = JSON.stringify(state);
-      if (Buffer.byteLength(projection) > 4 * 1024 * 1024 && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
       const sequence = room.sequence + 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("INSERT INTO commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, command.id, fingerprint, sequence);
-      this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
+      this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(sequence, projection, archivedAtOf(state), roomId);
       if (command.data.workItemId) this.reminders.resolveWork(roomId, state.workItems[command.data.workItemId]);
       if (command.type === T.MEMBER_ACCESS_CHANGED) this.agentConnections.revokeMember(roomId, command.data.memberId);
       if (command.type === T.MEMBER_ACCESS_CHANGED && command.data.active === false) {
