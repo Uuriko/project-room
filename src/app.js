@@ -5,6 +5,7 @@ import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFe
 import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
 import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
+import { RECIPE_CATALOG, activeRecipes } from "./work-recipes.js";
 import { attemptReceipts, attemptLedger, cancellationState } from "./work-item-session.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation, requestFailureMessage } from "./share-links.js";
 import { installAgentConnections } from "./agent-connections.js";
@@ -808,12 +809,45 @@ function renderContent(selector, html) {
   container.innerHTML = html; container._content = html;
   restoreDisclosures(container, saved);
 }
+// W4-43 H1: the three starter recipes surface as dismissible suggestion chips.
+// Triggers and outcomes are derived in src/work-recipes.js from committed
+// state; chips only open existing surfaces or prefill a draft - they never
+// send, launch or spend on the member's behalf.
+const dismissedRecipeChips = new Set();
+const recipeChipKey = r => `${r.id}:${r.outcome.workItemId ?? r.outcome.requestId ?? ""}`;
+function recipeChipHtml(r) {
+  const meta = RECIPE_CATALOG.find(c => c.id === r.id), key = recipeChipKey(r);
+  let label, action;
+  if (r.id === "draft-catch-up") {
+    label = `${r.trigger.unseen} new ${r.trigger.unseen === 1 ? "event" : "events"} since your caught-up marker`;
+    action = `<button type="button" class="button ghost" data-recipe-action="open-catch-up">Open catch-up draft</button>`;
+  } else if (r.id === "suggest-next-work") {
+    label = `Next step: ${esc(r.outcome.label)}`;
+    action = r.outcome.workItemId
+      ? `<button type="button" class="button ghost" data-recipe-action="focus-work" data-work-id="${esc(r.outcome.workItemId)}">Open work</button>`
+      : `<button type="button" class="button ghost" data-recipe-action="open-chat">Open request</button>`;
+  } else {
+    label = `"${esc(r.outcome.title ?? r.outcome.workItemId)}" has waited over a day for review`;
+    action = `<button type="button" class="button ghost" data-recipe-action="draft-review" data-work-id="${esc(r.outcome.workItemId)}" data-to="${esc(r.outcome.toMemberId)}">Draft a review request</button>`;
+  }
+  return `<div class="recipe-chip" data-recipe-chip="${esc(key)}"><span class="recipe-chip-label"><strong>${esc(meta.title)}</strong> - ${label}</span>${action}<button type="button" class="button ghost" data-recipe-dismiss="${esc(key)}">Dismiss</button></div>`;
+}
+function syncRecipeStrip() {
+  const strip = $("#recipe-strip");
+  if (!strip) return;
+  if (!state || !session) { strip.hidden = true; strip.replaceChildren(); return; }
+  const recipes = activeRecipes(state, session.member.id, { now: Date.now(), cursor: roomCursor, sequence: client.sequence })
+    .filter(r => !dismissedRecipeChips.has(recipeChipKey(r)));
+  strip.hidden = recipes.length === 0;
+  renderContent("#recipe-strip", recipes.map(recipeChipHtml).join(""));
+}
 function render() {
   conversation = conversationIndex(state.messages);
   const members = Object.values(state.members), active = members.filter(m => m.active !== false);
   selectOptions("#message-to-select", active, "Everyone");
   syncWorkForm();
   syncActionForm();
+  syncRecipeStrip();
   setText("#presence-count", `${active.length} ${active.length === 1 ? "member" : "members"}`);
   renderContent("#member-stack", active.slice(0, 4).map(m => `<div class="member-avatar ${m.kind}" title="${esc(memberLabel(m.id))}" aria-hidden="true"><span>${initials(m.displayName)}</span></div>`).join(""));
   const railCtx = { workItems: state.workItems, messages: state.messages, now: Date.now() };
@@ -1086,6 +1120,26 @@ async function openRequestMode(kind, id) {
   }
 }
 $("#request-reply").addEventListener("click", () => { if (!state || busy || requestReading) return; setRequestMode({ kind: "request" }); });
+$("#recipe-strip").addEventListener("click", event => {
+  const dismissKey = event.target.closest("[data-recipe-dismiss]")?.dataset.recipeDismiss;
+  if (dismissKey) { dismissedRecipeChips.add(dismissKey); syncRecipeStrip(); return; }
+  const control = event.target.closest("[data-recipe-action]");
+  if (!control) return;
+  const action = control.dataset.recipeAction;
+  if (action === "open-catch-up") document.querySelector('[data-room-section="catch-up"]')?.click();
+  if (action === "open-chat") document.querySelector('[data-room-section="chat"]')?.click();
+  if (action === "focus-work") {
+    document.querySelector('[data-room-section="work"]')?.click();
+    const card = document.getElementById(workDomId(control.dataset.workId));
+    card?.scrollIntoView({ block: "nearest", behavior: "instant" }); card?.focus({ preventScroll: true });
+  }
+  if (action === "draft-review") {
+    const item = state?.workItems?.[control.dataset.workId];
+    if (!item) return;
+    document.querySelector('[data-room-section="chat"]')?.click();
+    setRequestMode({ kind: "request" }, { body: `Could you review "${item.title ?? control.dataset.workId}"? The result has been waiting for verification.`, toMemberId: control.dataset.to });
+  }
+});
 document.addEventListener("click", event => {
   const resume = event.target.closest("[data-resume-credit]");
   if (resume && state && !busy && !requestReading) {
