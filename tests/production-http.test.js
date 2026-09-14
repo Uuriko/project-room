@@ -83,3 +83,9 @@ test('Room client does not load an identity-provider browser SDK', () => {
   const src = readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
   assert.doesNotMatch(src, /clerk\.browser\.js|@clerk\/clerk-js|@clerk\/ui/);
 });
+
+test('sign-in help does not call the live host a local pilot', () => {
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  assert.match(html, /Never paste a human account key into an agent chat/);
+  assert.doesNotMatch(html, /This local pilot uses/);
+});

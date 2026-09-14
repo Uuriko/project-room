@@ -1,73 +1,68 @@
-# Remaining ship — 2026-09-14
+# Remaining ship — 2026-09-14 (updated)
 
-Goal: keep **https://room.trydemigod.com** production-live, unpublished walk-in, local operator, no Clerk, and take **useful** work from other agents only when it does not break those gates.
+Live origin is already production. This is what is left, what stays off, and who owns each slice.
 
-## Already live (do not undo)
+## Live bar (must still hold after every change)
 
-| Check | Expected |
+| Check | Required |
 |---|---|
-| `GET /api/version` | `mode: cloudflare-production` |
+| `GET https://room.trydemigod.com/api/version` | `mode: cloudflare-production` |
 | `GET /api/open` | `ship: false`, `persistence: none` |
 | `GET /api/auth-config` | `provider: null` |
 | `GET /api/ready` | 200 |
-| Worker secrets | `ROOM_OPERATOR_ACCOUNT_ID` only (`c6a94a`) |
-| Schema-26 object `a5f2dca` | not bound to this Worker |
+| Worker secrets | `ROOM_OPERATOR_ACCOUNT_ID` only |
+| Occupancy | Do not edit `.gitignore`, `.wrangler/`, `docs/*RESEARCH*` |
+| Instinct | Off W4-45 durable wake queue (`Uuriko/project-room#11`) |
 
-Occupancy: do not edit `.gitignore`, `.wrangler/`, or `docs/*RESEARCH*`. DIE / Desk / Dasha stay other trees.
+## Done
 
-## Do not ship (explicit)
+- Clerk off the Worker and off the Room client SDK
+- Local operator (Welcome member `c6a94a`)
+- GitHub login; live status on #11
+- Tag PR #3 read; sandbox not merged
+- John confirmed invite works
 
-- Public MCP `ship: true` / persist `oa1.`
-- Gmail, Telegram, Twilio env or live adapters
-- Clerk CLI / dashboard / `clerk init` / Next.js Clerk SDK
-- First schema-33 write onto live object `a5f2dca`
-- Merging Tag sandbox into Room source as a second product
-- Dual-binding staging `getdasha.com/room` and production to one Durable Object
+## Do not ship
 
-## Phase 0 — Verify live (Grok)
+- `ship: true` / persist `oa1.`
+- Gmail, Telegram, Twilio on the live Worker
+- Clerk CLI / `clerk init`
+- First schema-33 write onto `a5f2dca`
+- Merge Tag `project-room-lab/` into Room source
+- Instinct W4-45 wake queue
 
-Refresh the four GETs above after every deploy. Hosted drill and phase-a-preflight stay local. Two-human **hosted** drill on the live origin still needs a second human; not a launch blocker.
+## Remaining slices
 
-## Phase 1 — Tag useful copy (Grok, after GitHub read)
+### A. Wording-only Join/invite help (Grok, this pass)
 
-Tag ACK: sandbox `demigod-labs/claude-tag-sandbox` PR #3, wording-only journeys/copy. That repo is **private (404 without `gh`)**.
+Tag 15 is a proposal catalog. Apply **only** live strings that already have controls:
 
-When `gh` can read it:
+- Drop “local pilot” from `#project-help-signin`
+- Keep: key or invitation; never paste a human account key into an agent chat
+- Do not dump the 60-string catalog
 
-1. Pull PR #3. Take **user-visible copy only** (Join, invite, help, empty states).
-2. Apply into `index.html` / `src/app.js` in **this** tree. No sandbox merge, no new product.
-3. Keep tests that assert Join / invite still passing.
-4. Do not take Tag “38 section 5” as live-system claims.
+### B. Tag copy beyond that (blocked unless Tag names 2–3 more strings)
 
-Until `gh auth login`: skip. Do not invent Tag copy.
+Sandbox stays draft. No merge.
 
-## Phase 2 — GitHub coordination (needs John)
+### C. Schema-26 `a5f2dca` copy-first (needs Cloudflare dashboard)
 
-`gh` is not logged in. Instinct mailbox is `Uuriko/project-room#11`.
+This host is a new schema-33 Worker, not `a5f2dca`. PITR clone to a **new** object, then `cutover-copy` (refuses `a5f2dca` in the path), then drill the clone. Never first-write 33 onto the live 26 object.
 
-John: `gh auth login` in this environment. Then Grok comments live status on #11 (no secrets). Codex is offline; do not wait.
+John: which Worker owns Durable Object `a5f2dca`?
 
-## Phase 3 — Schema-26 data (`a5f2dca`) copy-first (Grok + Cloudflare dashboard)
+### D. Instinct W4-45 (not Grok)
 
-Live historical object is schema **26**. This host is a **new empty schema-33** Worker. Rollback restores code, not SQLite.
+Durable wake queue. Grok stays off.
 
-1. In Cloudflare dashboard: find the Worker that owns object id `a5f2dca`. Enable SQLite DO PITR (last 30 days).
-2. Clone to a **new** object id. Never point this tree at `a5f2dca`.
-3. `scripts/cutover-copy.mjs` refuses any path containing `a5f2dca`.
-4. Run hosted drill on the **clone**. Only then consider a later cutover.
+### E. Claude PR #133 Telegram (not live)
 
-This phase needs dashboard PITR. CLI cannot name that object from this Worker.
+Review later. No `ROOM_TELEGRAM_*` on production.
 
-## Phase 4 — Claude PR #133 Telegram inbox (do not enable live)
+### F. Two-human hosted drill on the live origin (optional)
 
-Useful later. Keep off production. No `ROOM_TELEGRAM_*` on the live Worker. Review only if John wants messaging after launch.
+Loopback drill already passes. Live two-human drill is not a launch blocker.
 
-## Phase 5 — Confirm operator UX (John, 30 seconds)
+## Execute now
 
-Refresh https://room.trydemigod.com. You should still be **Member c6a94a** with invite / Add agent. If not, say so.
-
-## Order
-
-0 → 5 (John glance) → 2 when `gh` exists → 1 Tag copy → 3 PITR clone when dashboard object is identified → 4 never unless asked.
-
-Done when: live checks still hold, Tag copy is either applied or still blocked on `gh`, `a5f2dca` untouched, messaging off, ship false.
+A, then re-verify the live bar. C/E wait. D is Instinct.
