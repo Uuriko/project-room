@@ -194,10 +194,10 @@ const client = new RoomClient({
     $("#auth-panel").setAttribute("aria-busy", pendingSignout ? "true" : "false");
     $("#identity-label").textContent = "Not signed in";
     $("#identity-label").removeAttribute("title");
-    for (const id of ["message-list", "work-list", "event-list", "presence-list", "member-stack", "summary-grid", "reply-context", "source-context", "action-context", "action-fields", "cursor-label", "presence-count", "message-count", "event-count", "rb-attention-list", "rb-involving-list", "rb-history-list", "decision-list", "usage-grid", "usage-period", "usage-status"]) {
+    for (const id of ["message-list", "work-list", "event-list", "presence-list", "member-stack", "summary-grid", "reply-context", "source-context", "action-context", "action-fields", "cursor-label", "presence-count", "message-count", "event-count", "rb-attention-list", "rb-involving-list", "rb-history-list", "decision-list", "usage-grid", "usage-period", "usage-status", "record-export-status"]) {
       const node = $(`#${id}`); node.replaceChildren(); delete node._content;
     }
-    $("#usage-refresh").hidden = true;
+    $("#usage-refresh").hidden = true; $("#record-export-html").disabled = false; exportRequest += 1;
     for (const id of ["message-to-select", "assignee-select", "verifier-select"]) { $(`#${id}`).replaceChildren(); delete $(`#${id}`).dataset.signature; }
     for (const form of document.querySelectorAll("form")) {
       if (!keepAccount || !form.closest("#inbox-panel")) form.reset();
@@ -3538,6 +3538,28 @@ async function loadUsage() {
 }
 $("#usage-panel").addEventListener("toggle", e => { if (e.currentTarget.open) loadUsage(); });
 $("#usage-refresh").addEventListener("click", () => loadUsage());
+// BUILD-01 F2 follow-up: any member can take the readable export with them.
+// The client fetches it with the room headers and the page hands the file to
+// the browser; the server decides who may export (the same check as JSONL).
+let exportRequest = 0;
+async function exportRoomHtml() {
+  if (!state || !client.session) return;
+  const request = ++exportRequest, button = $("#record-export-html"), status = $("#record-export-status");
+  button.disabled = true; status.textContent = "Preparing the export…";
+  try {
+    const { blob, filename } = await client.exportHtml();
+    if (request !== exportRequest || !state) return;
+    const url = URL.createObjectURL(blob), link = document.createElement("a");
+    link.href = url; link.download = filename; link.hidden = true;
+    document.body.append(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    status.textContent = `Download started: ${filename}. Deleted messages appear as deleted, as members saw them.`;
+  } catch (error) {
+    if (request !== exportRequest || !state) return;
+    status.textContent = error.status === 429 ? "Export is rate limited; try again in a minute." : "The export could not be prepared. Try again.";
+  } finally { if (request === exportRequest) button.disabled = false; }
+}
+$("#record-export-html").addEventListener("click", () => exportRoomHtml());
 $("#room-navigation").addEventListener("click", e => {
   const section = e.target.closest("[data-room-section]")?.dataset.roomSection;
   if (!section || !state || busy) return;

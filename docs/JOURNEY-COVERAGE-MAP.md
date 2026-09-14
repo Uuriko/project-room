@@ -247,9 +247,12 @@ carry the claim, and the remaining tiers stay visibly open.
       "claim": "Any member can take the room with them: the complete JSONL history or an escaped, script-free HTML page rendered from the same event walk, both Content-Length-framed, both closed to members whose access has ended.",
       "evidence": {
         "unit": [
-          "tests/room-export.test.js"
+          "tests/room-export.test.js",
+          "tests/client.test.js"
         ],
-        "browser": [],
+        "browser": [
+          "scripts/room-export-browser-check.mjs"
+        ],
         "agent": [],
         "hosted": []
       }
@@ -413,7 +416,7 @@ carry the claim, and the remaining tiers stay visibly open.
 | Unified inbox connections | channel-connection, channel-import, inbox-channel-client | open | open | open |
 | Telegram fixture import | telegram-adapter, channel-import | open | open | open |
 | Inbox connection routes | channel-import | open | open | open |
-| Room export portability (JSONL and HTML) | room-export | open | open | open |
+| Room export portability (JSONL and HTML) | room-export, room-client | room-export-browser-check | open | open |
 | Owner access review | access-review | open | open | open |
 | Live Telegram trigger and card | telegram-live, telegram-adapter | inbox-telegram-check | open | open |
 | Telegram send preview | channel-import, inbox-channel-client | open | open | open |
