@@ -620,6 +620,136 @@ paths:
         '409': { description: channel_sync_unsupported (not a Telegram connection) or channel_webhook_unavailable (nothing to register and no webhook inbox) }
         '422': { description: invalid_channel_update (body shape) }
         '429': { description: rate_limited }
+  /api/inbox/connections/commands:
+    post:
+      summary: Add, update or remove one of the account's channel connections
+      description: |
+        Unified inbox UI (docs/UNIFIED-INBOX.md, "Connection lifecycle").
+        Account-session route with CSRF and origin checks (`protectWrite`),
+        30 requests per minute per account, works off loopback. The body is
+        exactly one connections-journal request: `connection.configure` (add
+        a Telegram bot or fixture mailbox profile, or update / re-activate an
+        existing one; `profile.accountId` must be the caller's account) or
+        `connection.disconnect` ("Remove": the record stays, state becomes
+        disconnected, saved copies remain readable). `connection.webhook` and
+        `page.apply` are refused: webhook hashes come from the deployment's
+        bindings via the reconnect route, imports from the import authority.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [action, requestId, connectionId, expectedRevision, profile]
+                  properties:
+                    action: { type: string, enum: [connection.configure] }
+                    requestId: { type: string }
+                    connectionId: { type: string }
+                    expectedRevision: { type: integer, minimum: 0, description: Current record revision (0 to add) }
+                    profile:
+                      description: Generic ChannelConnection without `state` at revision expectedRevision + 1, or the Graph-shaped email profile (accountId, id, revision, provider microsoft-graph, mailboxId, identity {name, address}, aliases)
+                      type: object
+                - type: object
+                  required: [action, requestId, connectionId, expectedRevision]
+                  properties:
+                    action: { type: string, enum: [connection.disconnect] }
+                    requestId: { type: string }
+                    connectionId: { type: string }
+                    expectedRevision: { type: integer, minimum: 1 }
+      responses:
+        '201':
+          description: Applied. The connection record as GET /api/inbox/connections/{id} returns it (with `live`), plus the receipt.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contractVersion: { type: integer, enum: [1] }
+                  viewer: { type: object }
+                  connection: { $ref: '#/components/schemas/ChannelConnection' }
+                  mode: { type: string, enum: [fixture] }
+                  webhook: { type: boolean }
+                  webhookSetAt: { type: [string, 'null'], format: date-time }
+                  syncAvailable: { type: boolean }
+                  live:
+                    oneOf:
+                      - { type: 'null' }
+                      - $ref: '#/components/schemas/TelegramLiveStatus'
+                  receipt:
+                    type: object
+                    properties:
+                      requestId: { type: string }
+                      action: { type: string, enum: [connection.configure, connection.disconnect] }
+                      connectionId: { type: string }
+                      revision: { type: integer }
+                      state: { type: string, enum: [active, disconnected] }
+                  duplicate: { type: boolean }
+        '200': { description: The same requestId was applied before (duplicate true) }
+        '401': { description: account_session_required }
+        '403': { description: csrf_denied or origin_denied }
+        '404': { description: channel_connection_not_found (disconnecting another account's or an unknown connection) }
+        '409': { description: stale_email_connection (revision moved), email_mailbox_exists, email_mailbox_changed, email_connection_limit, idempotency_conflict }
+        '422': { description: invalid_channel_connection (not configure/disconnect), channel_account_mismatch (profile for another account), invalid_email_import (profile shape) }
+        '429': { description: rate_limited }
+  /api/inbox/channel-sends:
+    post:
+      summary: Dispatch or reconcile a queued Inbox reply through the channel transport
+      description: |
+        Reply from the Inbox (docs/UNIFIED-INBOX.md, "Send"). Account-session
+        route with CSRF (`protectWrite`), 30 per minute per account. The
+        attempt must already exist in the send journal (`send.reserve` over
+        POST /api/inbox/commands). The server picks the transport for the
+        source's connection: the live Telegram `sendMessage` transport when
+        TELEGRAM_BOT_TOKEN and TELEGRAM_WEBHOOK_SECRET are set, otherwise an
+        inert fixture sender that answers "accepted" without leaving the
+        process. `dispatch` moves queued -> unknown -> accepted | rejected
+        (or leaves unknown when Telegram is unreachable); `reconcile` replays
+        the recorded receipt for an unknown or accepted attempt. Email sources,
+        samples and disconnected connections have no transport. The same
+        `channelSend` descriptor (and `simulationAvailable`) is returned by
+        GET /api/inbox/sources/{id}/sends and /send-context so the browser
+        knows which transport, if any, applies before it offers a reply.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, sourceId, sendId]
+              properties:
+                action: { type: string, enum: [dispatch, reconcile] }
+                sourceId: { type: string }
+                sendId: { type: string }
+      responses:
+        '200':
+          description: The source's send list, the attempt, the transport descriptor and the connection's last send result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contractVersion: { type: integer, enum: [1] }
+                  viewer: { type: object }
+                  sourceId: { type: string }
+                  sends: { type: array, items: { type: object, description: Send journal entry (id, sourceId, revision, status, envelope, providerId, createdAt, updatedAt) } }
+                  send: { type: object, description: The attempt after this call }
+                  simulationAvailable: { type: boolean }
+                  channelSend: { $ref: '#/components/schemas/ChannelSendDescriptor' }
+                  lastSendResult:
+                    type: [object, 'null']
+                    properties:
+                      at: { type: string, format: date-time }
+                      outcome: { type: string, enum: [accepted, rejected, failed] }
+                      code: { type: [string, 'null'], description: fixture, network, rate_limited, server_error, unauthorized or the slugged Telegram description }
+        '401': { description: account_session_required }
+        '403': { description: csrf_denied or origin_denied }
+        '404': { description: inbox_source_not_found or inbox_send_not_found }
+        '409': { description: channel_sending_unavailable (no transport for this source), channel_connection_unavailable (Telegram refused the bot token), inbox_transport_mismatch }
+        '422': { description: invalid_inbox_send }
+        '429': { description: rate_limited }
   /api/inbox/connections/{id}/sync:
     post:
       summary: Import one recorded Telegram page
@@ -698,6 +828,13 @@ components:
       required: true
       schema: { type: string }
   schemas:
+    ChannelSendDescriptor:
+      type: [object, 'null']
+      description: Which transport replies to this source go through. Null when the deployment has none (email, samples, disconnected connections).
+      required: [provider, mode]
+      properties:
+        provider: { type: string, enum: [telegram-bot] }
+        mode: { type: string, enum: [live, fixture], description: live once the Telegram bindings are set; fixture answers locally and sends nothing }
     TelegramLiveStatus:
       type: object
       description: Live Telegram facts for the connection card. Binding names and states only; never values or hashes.
