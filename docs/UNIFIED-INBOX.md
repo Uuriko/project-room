@@ -8,7 +8,9 @@ this tree. Telegram has a live path (webhook in, `sendMessage` out, a reply box
 in the Inbox) that is inert until a person sets two deployment bindings; no
 token or secret is in code, tests, docs or journals. See
 [Live Telegram](#live-telegram-zero-spend) and
-[Fixture versus live](#fixture-versus-live) below. A live email provider still
+[Fixture versus live](#fixture-versus-live) below. The ordered human steps to switch
+Telegram and email on in production, and the checks that prove they are
+live, are in [GO-LIVE-CHECKLIST.md](GO-LIVE-CHECKLIST.md). A live email provider still
 needs its own reviewed slice and separate authorization, exactly as
 [CURRENT-ROOM.md](CURRENT-ROOM.md) says for a real mailbox.
 
