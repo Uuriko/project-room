@@ -135,6 +135,20 @@ carry the claim, and the remaining tiers stay visibly open.
       }
     },
     {
+      "id": "agent-pause-remove",
+      "claim": "The room owner pauses, resumes and removes an agent member from the People panel; a paused agent starts no queued wake, and a removed member's pause row is inert.",
+      "evidence": {
+        "unit": [
+          "tests/wake-pause.test.js"
+        ],
+        "browser": [
+          "scripts/agent-pause-browser-check.mjs"
+        ],
+        "agent": [],
+        "hosted": []
+      }
+    },
+    {
       "id": "agent-presence-status",
       "claim": "Agents see who is around and set a short status message shown on the presence roster.",
       "evidence": {
@@ -229,6 +243,59 @@ carry the claim, and the remaining tiers stay visibly open.
       }
     },
     {
+      "id": "room-export-portability",
+      "claim": "Any member can take the room with them: the complete JSONL history or an escaped, script-free HTML page rendered from the same event walk, both Content-Length-framed, both closed to members whose access has ended.",
+      "evidence": {
+        "unit": [
+          "tests/room-export.test.js"
+        ],
+        "browser": [],
+        "agent": [],
+        "hosted": []
+      }
+    },
+    {
+      "id": "owner-access-review",
+      "claim": "An owner-only, read-only access review names members and grants, guests with expiry, links with remaining joins, agent identities and connections with state, and last activity, with no token, secret or hash — identically from the route and the CLI.",
+      "evidence": {
+        "unit": [
+          "tests/access-review.test.js"
+        ],
+        "browser": [],
+        "agent": [],
+        "hosted": []
+      }
+    },
+    {
+      "id": "access-preview",
+      "claim": "Before a run, a member can read exactly what an agent's one-task view can access: the linked source message id only (never its thread, quoted mentions or imported excerpts), current evidence versions, the declared budget with unknowns labeled, and the server's own omission list; opening the preview starts and grants nothing.",
+      "evidence": {
+        "unit": [
+          "tests/work-context.test.js"
+        ],
+        "browser": [
+          "scripts/access-preview-browser-check.mjs"
+        ],
+        "agent": [],
+        "hosted": []
+      }
+    },
+    {
+      "id": "notification-feed",
+      "claim": "A per-member notification feed derived from the event tail honours notification preferences, deduplicates edits, expires with the read cursor and never grants a wake.",
+      "evidence": {
+        "unit": [
+          "tests/notification-feed.test.js",
+          "tests/notification-preferences.test.js"
+        ],
+        "browser": [
+          "scripts/notification-feed-browser-check.mjs"
+        ],
+        "agent": [],
+        "hosted": []
+      }
+    },
+    {
       "id": "telegram-send-preview",
       "claim": "A saved Telegram reply previews its bot and target chat and dispatches only over a matching fixture transport through the shared send journal.",
       "evidence": {
@@ -242,8 +309,35 @@ carry the claim, and the remaining tiers stay visibly open.
       }
     },
     {
+      "id": "room-usage-summary",
+      "claim": "Every member can read a per-room usage summary for a capped period: human seats and agent principals counted separately, sessions started and stopped, spend as reported (unknown, never zero, when unreported) and the store's pilot caps with remaining headroom; non-members are refused and the response carries no secrets or hashes.",
+      "evidence": {
+        "unit": [
+          "tests/usage.test.js"
+        ],
+        "browser": [],
+        "agent": [],
+        "hosted": []
+      }
+    },
+    {
+      "id": "pinned-messages",
+      "claim": "Any active member can pin or unpin a live message from the keyboard; the Pinned section lists pins in pin order and follows other members' pins live; a deleted message drops out of the pinned list; the pins route re-checks membership on every call and refuses a revoked member.",
+      "evidence": {
+        "unit": [
+          "tests/pinned-messages.test.js",
+          "tests/route-auth-table.test.js"
+        ],
+        "browser": [
+          "scripts/pinned-messages-browser-check.mjs"
+        ],
+        "agent": [],
+        "hosted": []
+      }
+    },
+    {
       "id": "room-review-policy",
-      "claim": "The room owner can make independent review and/or an owner decision mandatory; altered client fields cannot disable a mandatory gate, earlier work keeps its recorded requirements, and the proposer sees the requirement locked with the reason.",
+      "claim": "The room owner can make independent review and/or an owner decision mandatory from the Room instructions dialog (members see the policy read only); altered client fields cannot disable a mandatory gate, earlier work keeps its recorded requirements, and the proposer sees the requirement locked with the reason.",
       "evidence": {
         "unit": [
           "tests/work-actions.test.js",
@@ -270,6 +364,36 @@ carry the claim, and the remaining tiers stay visibly open.
         "agent": [],
         "hosted": []
       }
+    },
+    {
+      "id": "room-spend-allowance",
+      "claim": "The room owner can set a spend allowance over a rolling period; a session start that would commit more than the allowance is refused before anything is written, unknown spend never frees allowance, and every member sees allowance, spent, reserved and headroom from the same ledger the server enforces.",
+      "evidence": {
+        "unit": [
+          "tests/spend-allowance.test.js",
+          "tests/route-auth-table.test.js"
+        ],
+        "browser": [
+          "scripts/spend-allowance-browser-check.mjs"
+        ],
+        "agent": [],
+        "hosted": []
+      }
+    },
+    {
+      "id": "report-and-mute",
+      "claim": "Any member can report a message to the room owner with a short reason; only the owner can list reports and see who reported. A member can mute another member or agent for themselves, collapsing that author's messages and keeping them out of their mention feed, and can undo it; nothing leaves the room.",
+      "evidence": {
+        "unit": [
+          "tests/moderation.test.js",
+          "tests/route-auth-table.test.js"
+        ],
+        "browser": [
+          "scripts/moderation-browser-check.mjs"
+        ],
+        "agent": [],
+        "hosted": []
+      }
     }
   ]
 }
@@ -279,6 +403,7 @@ carry the claim, and the remaining tiers stay visibly open.
 | --- | --- | --- | --- | --- |
 | Accounts, invitations, guests | invitations, invitation-http, share-links, account-rooms | invitation-check, quiet-invites-check, invitation-recovery-check | agent onboarding exercise | staging worker README |
 | First-result onboarding (join, contribute, see the outcome) | help-offer-service, work-help-service, help-offer-context | first-result-journey-check | open | open |
+| Invite for a purpose (deep-link the invited question or result) | share-link-service, join-link-dialog | purpose-invite-check | open | open |
 | Conversation, threads, reactions, search | conversation, work-search, work-discussion | browser-check, work-search-browser-check | open | open |
 | Shared work-status model | work-snapshot, work-continuity, agent-handoff | workflow-browser-check, assisted-work-browser-check | agent onboarding exercise | open |
 | Exact-version verification | version, work-actions | room-actions-browser-check | open | open |
@@ -288,11 +413,18 @@ carry the claim, and the remaining tiers stay visibly open.
 | Unified inbox connections | channel-connection, channel-import, inbox-channel-client | open | open | open |
 | Telegram fixture import | telegram-adapter, channel-import | open | open | open |
 | Inbox connection routes | channel-import | open | open | open |
+| Room export portability (JSONL and HTML) | room-export | open | open | open |
+| Owner access review | access-review | open | open | open |
 | Live Telegram trigger and card | telegram-live, telegram-adapter | inbox-telegram-check | open | open |
 | Telegram send preview | channel-import, inbox-channel-client | open | open | open |
+| What this agent can access (pre-run preview) | work-context | access-preview-browser-check | open | open |
 | Room review policy | work-actions, state-machine-invariants | room-policy-browser-check | open | open |
+| Room spend allowance (owner cap, reserve on start, headroom card) | spend-allowance, route-auth-table | spend-allowance-browser-check | open | open |
+| Pinned messages | pinned-messages, route-auth-table | pinned-messages-browser-check | open | open |
+| Report a message, mute a member | moderation, route-auth-table | moderation-browser-check | open | open |
 | Unified inbox UI (list, reply, connections, needs-you, share) | inbox-unified-routes, inbox-channel-client | inbox-unified-check | open | open |
 | Room lifecycle (create, archive, leave) | room-lifecycle, account-rooms | room-lifecycle-browser-check | open | open |
+| Notification feed | notification-feed, notification-preferences | notification-feed-browser-check | open | open |
 
 Follow-up scope: claims made in docs beyond the README list (per-feature
 acceptance docs) can be folded into the same block; the checker format already

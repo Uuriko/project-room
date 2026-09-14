@@ -39,8 +39,8 @@ test("a documented path the server no longer serves fails", () => {
 });
 
 test("account routes must declare their scheme instead of inheriting the room default", () => {
-  const inherited = openapi.replace("  /api/account-rooms:\n    get:\n      summary: Rooms the signed-in account belongs to\n      description: >-\n        Account-session read (`account_session` cookie plus\n        `X-Session-Binding`). Lists up to 50 rooms the account has an active\n        membership in, with `nextCursor` for the next page (`?after=<roomId>`).\n        Rooms the account can no longer open are skipped, not disclosed.\n      security:\n        - accountSession: []\n",
-    "  /api/account-rooms:\n    get:\n      summary: Rooms the signed-in account belongs to\n");
+  const inherited = openapi.replace("  /api/account-rooms:\n    get:\n      summary: List the account's current rooms\n      description: |\n        Browser account-session route (account_session cookie plus\n        X-Session-Binding). Bounded pages of the memberships the account holds\n        right now; a left or revoked membership is gone on the next read.\n        Each entry carries `kind` (personal or organization) and\n        `archived` / `archivedAt`; archived rooms stay listed and readable.\n      security:\n        - accountSession: []\n",
+    "  /api/account-rooms:\n    get:\n      summary: List the account's current rooms\n");
   assert.notEqual(inherited, openapi, "fixture edit applied");
   const { failures } = routeDocsDrift({ http, openapi: inherited });
   assert.deepEqual(failures, ["GET /api/account-rooms inherits the room-credential default; account routes must declare accountSession or security: []"]);

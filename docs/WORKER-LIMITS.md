@@ -1,11 +1,15 @@
 # Worker CPU limit and cold start
 
-`cloudflare/wrangler.jsonc` sets `"limits": { "cpu_ms": 50 }`: every Worker
-invocation, including the Durable Object's first request after an isolate
-restart, has 50 ms of CPU. The re-audit of 2026-09-14 (M5) found that number
-unmeasured. `scripts/measure-cold-start.mjs` measures the phases that first
-request pays; this page records the result so the cap (and PR #141's proposal
-to raise it to 1000 ms) can be decided against a number.
+`cloudflare/wrangler.jsonc` sets `"limits": { "cpu_ms": 1000 }` and
+`"observability": { "enabled": true, "head_sampling_rate": 1 }` (PR #141,
+merged 2026-09-14; before it the cap was 50 ms and Workers Logs were off):
+every Worker invocation, including the Durable Object's first request after
+an isolate restart, has 1000 ms of CPU. The re-audit of 2026-09-14 (M5) found
+the earlier 50 ms number unmeasured. `scripts/measure-cold-start.mjs` measures
+the phases that first request pays; this page records the result so the cap
+was decided against a number, and so a later change can be too. The
+`limits` key is honoured only on the Paid plan's Standard usage model
+(`cloudflare/README.md` "Runtime limits and logs").
 
 ## How to measure
 
@@ -52,7 +56,8 @@ median of 5 runs, Node v24.21.0, miniflare 4.20260730.0, Linux container
 | miniflare | first authenticated `GET /api/rooms/commons` | n/a | 7.6 |
 | miniflare | warm authenticated `GET /api/rooms/commons` | n/a | 4.3 |
 
-Reading the table against the 50 ms cap:
+Reading the table against the earlier 50 ms cap (the measurement that
+justified 1000 ms):
 
 - Module evaluation (about 93 ms CPU under Node) is charged to Worker startup,
   which has its own 400 ms limit, not to `cpu_ms`. It is the largest phase and
@@ -67,11 +72,12 @@ Reading the table against the 50 ms cap:
 - Warm requests are 4 to 8 ms; the cap only matters for cold and heavy
   requests (export, import, the first authenticated snapshot).
 
-Decision input for #141: raising `cpu_ms` well above the measured cold first
-request is justified by these numbers; 1000 ms leaves about 15x headroom over
-the 10,000-event constructor measurement and stays 30x below the Paid-plan
-default. Re-run the script after store migrations that add startup audits,
-and record the new table here with the date.
+Decision taken in #141 (merged 2026-09-14): raising `cpu_ms` well above the
+measured cold first request is justified by these numbers; the 1000 ms now in
+`cloudflare/wrangler.jsonc` leaves about 15x headroom over the 10,000-event
+constructor measurement and stays 30x below the Paid-plan default. The
+measured table above stands. Re-run the script after store migrations that
+add startup audits, and record the new table here with the date.
 
 ## Caveats
 

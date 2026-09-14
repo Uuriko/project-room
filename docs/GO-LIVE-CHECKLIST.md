@@ -36,18 +36,23 @@ Source: `cloudflare/README.md` "Reproduce"; `.github/workflows/test.yml`
 
 ### 2. Merge the two Worker proposals Telegram and email depend on (Grok Bot)
 
-- PR #140 (`claude/build-01-webhook-journal-worker-mount`): passes a
-  `ChannelWebhookInbox` to `createRoomServer` in `cloudflare/room.mjs`.
-  Without it the Worker answers 409 `channel_webhook_unavailable` on
-  `POST /api/inbox/webhooks/{connectionId}` and no Telegram update is ever
-  journaled. `docs/UNIFIED-INBOX.md` "Worker mount (proposal for Grok)".
+- PR #140 (`claude/build-01-webhook-journal-worker-mount`): **merged 14
+  September.** `cloudflare/room.mjs` on `main` now passes a
+  `ChannelWebhookInbox` to `createRoomServer`; the mount takes effect on the
+  next deploy (step 3). Until that deploy the live Worker still answers 409
+  `channel_webhook_unavailable` on `POST /api/inbox/webhooks/{connectionId}`
+  and no Telegram update is journaled. `docs/UNIFIED-INBOX.md` "Worker mount".
 - The `email()` handler proposal in `docs/EMAIL-ROUTING.md` "Worker email()
   handler (proposal for Grok)". PR #144 merged the parser and routing modules
   and their tests; the handler itself is not in `cloudflare/room.mjs` on
   `main`, so routed mail has nowhere to land until it is.
-- PR #141 (`claude/build-01-worker-cold-start-proposal`): non-fatal bootstrap
-  window, `limits.cpu_ms` 50 → 1000, Workers Logs on. See step 8 before
-  merging; the CPU cap is a plan decision, not only a code change.
+- PR #141 (`claude/build-01-worker-cold-start-proposal`): **merged 14
+  September** as code: non-fatal bootstrap window, `limits.cpu_ms` 50 → 1000
+  and Workers Logs on are in `cloudflare/wrangler.jsonc`, and
+  `cloudflare/README.md` "Runtime limits and logs" records the rationale. The
+  new cap and logging only reach the live Worker with the deploy in step 3,
+  and the plan confirmation in step 8 is still John's to make: the `limits`
+  key is honoured only on the Paid plan's Standard usage model.
 
 Post a receipt in issue #11 with the `[Agent]` tag after each merge
 (`docs/AGENT-LANES.md`).
@@ -190,16 +195,17 @@ If the room is to answer on its own trydemigod.com hostname:
 Until that decision is made, "live" means the `workers.dev` origin behind the
 existing doors, which is what this checklist verifies.
 
-### 8. Worker limits and the plan decision from #141 (John decides, Grok Bot applies)
+### 8. Worker limits and the plan decision from #141 (John decides)
 
-`cloudflare/wrangler.jsonc` sets `"limits": { "cpu_ms": 50 }` and
-`observability.enabled: false`. PR #141 (draft) proposes 1000 ms and Workers
-Logs on, citing Cloudflare's published limits: Free plan a fixed 10 ms, Paid
+`cloudflare/wrangler.jsonc` now sets `"limits": { "cpu_ms": 1000 }` and
+`observability: { enabled: true, head_sampling_rate: 1 }` (PR #141, merged 14
+September), citing Cloudflare's published limits: Free plan a fixed 10 ms, Paid
 default 30,000 ms, `limits` applying only to the Standard usage model. Local
-cold-start measurements (`scripts/measure-cold-start.mjs`, in that PR) put
-the store constructor at 59–69 ms for a 10,000-event room, already above the
-current cap. `docs/RE-AUDIT-2026-09-14.md` M5 says: decide the cap against
-that number before the Telegram live deploy.
+cold-start measurements (`scripts/measure-cold-start.mjs`, recorded in
+`docs/WORKER-LIMITS.md`) put the store constructor at 59–69 ms for a
+10,000-event room, already above the old 50 ms cap; `docs/RE-AUDIT-2026-09-14.md`
+M5 asked for the cap to be decided against that number before the Telegram
+live deploy. The code change is in; the plan confirmation below is still open.
 
 John must confirm, in the Cloudflare dashboard → **Workers & Pages → Plans**:
 
@@ -214,7 +220,9 @@ John must confirm, in the Cloudflare dashboard → **Workers & Pages → Plans**
    billing alerts). `cloudflare/README.md` "Remaining gates" item 3 has been
    open since 7 September.
 
-Grok Bot then merges #141 (or an amended cap) and deploys (step 3).
+Once John confirms the plan (or asks for an amended cap in
+`cloudflare/wrangler.jsonc`), the deploy in step 3 puts the limit and Workers
+Logs into effect.
 
 ### 9. Owner-to-confirm items before inviting anyone outside the team (John)
 
@@ -258,9 +266,13 @@ revision, results, limitations, rollback target and operator).
 
 ## 2. What Claude did / verified
 
-Session `https://claude.ai/code/session_01KZMBNK6RHbs3HjAdbjwWUm`, from
-`origin/main` at `<MAIN_SHA>` on `<DATE>`. Nothing was deployed and no secret
-was read or written.
+Session `https://claude.ai/code/session_01KZMBNK6RHbs3HjAdbjwWUm`, working
+from `origin/main` as it stood on 14 September 2026. `main` moves as PRs
+merge, so no fixed sha is recorded here: at deploy time the deployer records
+`git rev-parse origin/main` and the UTC date (`date -u +%Y-%m-%dT%H:%M:%SZ`)
+in the receipt posted in issue #11, and verifies that `sourceRevision` from
+`curl -sS $ORIGIN/api/version` equals that sha. Nothing was deployed by this
+session and no secret was read or written.
 
 - **Credentials:** `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`,
   `CF_API_TOKEN` and every `WRANGLER_*` variable are **unset** in the
@@ -275,20 +287,25 @@ was read or written.
   same command the CI `cloudflare` job runs.
 - **Configuration read:** `cloudflare/wrangler.jsonc` names one Worker,
   `project-room-staging`, with no environments; routes on `getdasha.com` and
-  `www.getdasha.com` under `/room*`; `limits.cpu_ms` 50; observability off.
-- **Not mounted on `main`:** `cloudflare/room.mjs` contains no
-  `ChannelWebhookInbox` and no `email()` handler; both are proposals
-  (PR #140 draft; `docs/EMAIL-ROUTING.md` handler section). PR #144 (email
-  parser and routing modules) is merged. PR #141 (CPU cap, Workers Logs) is
-  a draft.
+  `www.getdasha.com` under `/room*`; `limits.cpu_ms` 1000 and observability
+  on since PR #141 merged on 14 September (the deployed Worker still runs
+  the earlier configuration until step 3).
+- **Mounted on `main`, not yet deployed:** `cloudflare/room.mjs` passes a
+  `ChannelWebhookInbox` to `createRoomServer` (PR #140, merged 14 September).
+  **Not mounted:** the `email()` handler is still the proposal in
+  `docs/EMAIL-ROUTING.md` "Worker email() handler"; PR #144 (email parser and
+  routing modules) is merged, so routed mail has nowhere to land until the
+  handler exists (step 6 stays gated on it).
 - **Docs read:** `docs/AGENT-LANES.md`, `docs/UNIFIED-INBOX.md`,
   `docs/EMAIL-ROUTING.md`, `docs/SERVICE.md`, `docs/DATA-BOUNDARIES.md`,
   `docs/TRUST-PACKET.md`, `docs/INVITE-ONLY-DEPLOYMENT.md`,
   `docs/RE-AUDIT-2026-09-14.md`, `docs/CURRENT-ROOM.md`,
   `docs/HOW-TO-TEST.md`, `cloudflare/README.md`,
   `scripts/telegram-set-webhook.mjs`, `server/channel-adapters/telegram-config.mjs`,
-  `.github/workflows/test.yml`. `docs/WORKER-LIMITS.md` does not exist on
-  `main`; the limits discussion lives in PR #141 and `docs/RE-AUDIT-2026-09-14.md` M5.
+  `.github/workflows/test.yml`. `docs/WORKER-LIMITS.md` (from PR #160)
+  records the cold-start table behind the cap; `cloudflare/README.md`
+  "Runtime limits and logs" (PR #141) and `docs/RE-AUDIT-2026-09-14.md` M5
+  carry the decision rationale.
 - **Checks:** `npm run check` on this branch: 1333 tests pass, 0 fail (node:test, 131 s).
 
 ## 3. Verify it is live
@@ -320,10 +337,11 @@ an `X-Operation-Id`; quote it, not a body, when reporting a failure
 
 ### Telegram
 
-1. Probe the webhook route without a secret. Before step 2 of section 1 the
-   Worker answers 409 `channel_webhook_unavailable`; after the mount and
-   `connection.webhook`, a missing or wrong header answers 401
-   `channel_webhook_denied` and journals nothing. Either way no update is
+1. Probe the webhook route without a secret. Until the deploy in step 3 of
+   section 1 carries the #140 mount the live Worker answers 409
+   `channel_webhook_unavailable`; after that deploy and `connection.webhook`,
+   a missing or wrong header answers 401 `channel_webhook_denied` and
+   journals nothing. Either way no update is
    stored by this probe. `docs/UNIFIED-INBOX.md` "Webhook contract".
 
    ```sh
