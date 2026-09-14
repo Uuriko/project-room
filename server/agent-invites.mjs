@@ -67,7 +67,7 @@ const MEMBER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 // guessed legacy 8-symbol code offline (about 2^40 candidates map onto 2^32
 // handles), so the full hash never leaves the server.
 const INVITE_ID_LENGTH = 8;
-const INVITE_ID_PATTERN = /^[a-f0-9]{8}$/;
+const INVITE_ID_PATTERN = new RegExp(`^[a-f0-9]{${INVITE_ID_LENGTH}}$`);
 const inviteId = storedHash => storedHash.slice(0, INVITE_ID_LENGTH);
 
 export const agentInviteSchema = `
