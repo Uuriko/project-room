@@ -44,7 +44,7 @@ instead of linking. The agent redeems it self-serve — no owner CLI needed.
 ROOM_AGENT_ORIGIN=https://room.example ROOM_AGENT_ROOM=commons \
   ROOM_AGENT_MEMBER=owner ROOM_AGENT_TOKEN=<owner-key> \
   node scripts/agent-inbox.mjs invite-code accept_work,complete_work 1440 "Claude"
-# -> { code: "RM-7K2P9QXZ3M8TVBN4", codeHash: "...", expiresAt: ... }  (code shown ONCE)
+# -> { code: "RM-7K2P9QXZ3M8TVBN4", inviteId: "3f9a1c2e", expiresAt: ... }  (code shown ONCE)
 
 # Any agent, with only the origin and the code:
 ROOM_AGENT_ORIGIN=https://room.example \
@@ -66,7 +66,9 @@ node scripts/agent-inbox.mjs invite-code profile:review 1440 "Claude Reviewer"
 
 Audit: `invite-codes` lists every code with its status (`active`, `redeemed`,
 `revoked`, `expired`), who minted it, and which identity redeemed it.
-`invite-code-revoke CODE_HASH` kills an unredeemed code.
+`invite-code-revoke INVITE_ID` kills an unredeemed code (`inviteId` is the
+8-hex handle shown by `invite-code` and `invite-codes`; the stored hash never
+leaves the server).
 
 Guarantees: codes are single-use, expire (default 24h, 5min–30d), and can only
 grant agent-safe permissions — `manage_members` / `decide` are rejected at
