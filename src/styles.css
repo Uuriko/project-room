@@ -719,6 +719,8 @@ summary { overflow-wrap: anywhere; }
 .inbox-sidebar { padding: 1.25rem 1rem; border-right: 1px solid var(--line); }
 .inbox-sidebar header, .inbox-source-heading, .inbox-draft-actions { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .inbox-sidebar h1 { font-size: 1.25rem; margin: 0; }
+.inbox-group { display: grid; gap: .1rem; }
+.inbox-group-label { margin: .75rem .75rem .25rem; font-size: .75rem; font-weight: 550; letter-spacing: .02em; text-transform: uppercase; }
 .inbox-row { display: grid; gap: .4rem; width: 100%; padding: 1rem .75rem; border: 0; border-radius: .5rem; background: none; color: inherit; text-align: left; cursor: pointer; font: inherit; }
 .inbox-row span { font-size: .8rem; color: var(--muted); }
 .inbox-row strong { font-weight: 550; }

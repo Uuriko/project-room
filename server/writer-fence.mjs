@@ -2,7 +2,7 @@
 // Older service connections do not register this function, so ordinary writes fail
 // after the schema transaction commits, even if the connection predates migration.
 export const STORE_SCHEMA_VERSION = 27;
-export const WRITER_FUNCTION = "project_room_writer_v27";
+export const WRITER_FUNCTION = `project_room_writer_v${STORE_SCHEMA_VERSION}`;
 export const writerVersions = Object.freeze([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27]);
 const v6Tables = ["rooms", "events", "commands", "accounts", "member_accounts", "account_access_events",
   "credentials", "cursors", "projection_checkpoints", "account_credentials", "account_session_slots",

@@ -1,11 +1,11 @@
 // Data contract only: no credentials, network, persistence or send authority.
 import { createHash } from "node:crypto";
+import { ContractError, toChannelProfile } from "./channel-connection.mjs";
 
 export const emailLimits = Object.freeze({ bodyBytes: 262144, recipients: 200, attachments: 100, inputBytes: 2097152 });
-export class EmailContractError extends TypeError {
-  constructor(code) { super(code); this.name = "EmailContractError"; this.code = code; }
-}
-export const requireEmail = (condition, code = "invalid_email") => { if (!condition) throw new EmailContractError(code); };
+// One contract error class for every channel; the email name is retained for callers.
+export { ContractError as EmailContractError };
+export const requireEmail = (condition, code = "invalid_email") => { if (!condition) throw new ContractError(code); };
 const object = v => v !== null && typeof v === "object" && !Array.isArray(v);
 export const exactEmailFields = (v, keys) => object(v) && Object.keys(v).length === keys.length && keys.every(k => Object.hasOwn(v, k));
 export function emailText(value, max, { empty = false, multiline = false } = {}) {
@@ -15,7 +15,7 @@ export function emailText(value, max, { empty = false, multiline = false } = {})
 }
 export function emailInput(value) {
   let serialized;
-  try { serialized = JSON.stringify(value); } catch { throw new EmailContractError("invalid_email"); }
+  try { serialized = JSON.stringify(value); } catch { throw new ContractError("invalid_email"); }
   requireEmail(typeof serialized === "string" && Buffer.byteLength(serialized) <= emailLimits.inputBytes, "email_input_limit");
   return value;
 }
@@ -26,7 +26,6 @@ export const emailSourceId = (connection, messageId) => {
   const c = emailConnection(connection);
   return "email-" + emailDigest([c.accountId, c.provider, c.mailboxId, emailOpaqueId(messageId)]);
 };
-const localId = value => { requireEmail(typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value)); return value; };
 export const emailOpaqueId = value => emailText(value, 2048);
 const count = (value, max) => {
   requireEmail(Array.isArray(value) && value.length <= max && Array.from(value.keys()).every(i => Object.hasOwn(value, i)));
@@ -52,11 +51,14 @@ export function emailAddress(value) {
 const addresses = value => count(value, emailLimits.recipients).map(emailAddress);
 // Keep the local part case-sensitive; domain case does not change identity.
 const addressKey = value => { const at = value.address.lastIndexOf("@"); return value.address.slice(0, at) + "@" + value.address.slice(at + 1).toLowerCase(); };
+// Thin wrapper over the generic channel record (channel-connection.mjs). The
+// Graph-shaped profile is kept exactly as journals and envelopes store it.
 export function emailConnection(value) {
   requireEmail(exactEmailFields(value, ["accountId", "id", "revision", "provider", "mailboxId", "identity", "aliases"]), "invalid_email_connection");
   requireEmail(value.provider === "microsoft-graph" && Number.isSafeInteger(value.revision) && value.revision > 0, "invalid_email_connection");
-  return { accountId: localId(value.accountId), id: localId(value.id), revision: value.revision,
-    provider: value.provider, mailboxId: emailOpaqueId(value.mailboxId), identity: emailAddress(value.identity), aliases: addresses(value.aliases) };
+  const identity = emailAddress(value.identity), generic = toChannelProfile({ ...value, identity });
+  return { accountId: generic.accountId, id: generic.id, revision: generic.revision,
+    provider: generic.provider, mailboxId: emailOpaqueId(value.mailboxId), identity, aliases: addresses(value.aliases) };
 }
 function attachment(value) {
   requireEmail(exactEmailFields(value, ["id", "kind", "name", "contentType", "size", "inline", "contentId"]));

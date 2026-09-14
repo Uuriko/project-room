@@ -5,6 +5,7 @@ import { ServiceError } from "./store.mjs";
 import { clientAddress } from "./deployment.mjs";
 import { validId } from "../src/events.js";
 import { SyntheticInboxTransport } from "./inbox-transport.mjs";
+import { syncTelegramConnection } from "./channel-import.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
@@ -51,11 +52,16 @@ const sessionView = auth => ({
   expiresAt: auth.expiresAt
 });
 const exact = (value, fields) => Object.keys(value).length === fields.length && fields.every(field => Object.hasOwn(value, field));
+// Unified inbox connection routes, documented under the same templates in docs/openapi.yaml.
+const connectionRoutes = Object.freeze({ list: "/api/inbox/connections", read: "/api/inbox/connections/{id}",
+  sync: "/api/inbox/connections/{id}/sync", webhook: "/api/inbox/webhooks/{connectionId}" });
+const routePattern = template => new RegExp("^" + template.replaceAll("/", "\\/").replace(/\{[A-Za-z]+\}/g, "([^/]{1,384})") + "$");
+const webhookSecretHeader = "x-telegram-bot-api-secret-token";
 const rateHash = value => createHash("sha256").update(String(value)).digest("hex");
 
 export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = 1000, trustedLocalProxy = false,
   loadAsset = path => readFile(new URL(path, assetRoot)), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
-  resolveRequestSignal = () => null, syntheticInboxTransport = null, cookieNamespace = "",
+  resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot" }) {
   if (trustedLocalProxy && !origin?.startsWith("https://")) throw new Error("The deployment proxy requires a fixed HTTPS origin");
   if (typeof cookieNamespace !== "string" || !/^[A-Za-z0-9_-]{0,64}$/.test(cookieNamespace))
@@ -87,12 +93,31 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     const segments = rest.slice(1).split("/").map(segment => /^[a-z][a-z-]{0,40}$/.test(segment) ? segment : ":item");
     return `/api/rooms/:roomId/${segments.join("/")}`;
   }
-  const rates = new Map();
+  // Keys are "<family>:<ip or credential...>". Each family keeps at most
+  // RATE_FAMILY_KEYS live entries; a flood of foreign keys evicts that family's
+  // least recently touched entry instead of refusing every new key, so a busy
+  // minute cannot lock out fresh logins or joins, and one family cannot starve
+  // another. Map insertion order doubles as the recency order.
+  const RATE_FAMILY_KEYS = 2000;
+  const rates = new Map(), rateFamilies = new Map();
+  const rateFamily = id => id.slice(0, id.indexOf(":"));
+  const dropRate = (id, family = rateFamily(id)) => {
+    rates.delete(id);
+    const left = rateFamilies.get(family) - 1;
+    if (left > 0) rateFamilies.set(family, left); else rateFamilies.delete(family);
+  };
   function rate(id, maximum) {
     const now = Date.now();
-    for (const [k, v] of rates) if (v.until <= now) rates.delete(k);
-    if (!rates.has(id) && rates.size >= 2000) reject(429, "rate_limited", "Service is busy; retry later");
-    const entry = rates.get(id) || { n: 0, until: now + 60000 };
+    for (const [k, v] of rates) if (v.until <= now) dropRate(k);
+    const family = rateFamily(id);
+    let entry = rates.get(id);
+    if (entry) rates.delete(id);
+    else {
+      if ((rateFamilies.get(family) ?? 0) >= RATE_FAMILY_KEYS)
+        for (const k of rates.keys()) if (rateFamily(k) === family) { dropRate(k, family); break; }
+      rateFamilies.set(family, (rateFamilies.get(family) ?? 0) + 1);
+      entry = { n: 0, until: now + 60000 };
+    }
     entry.n++;
     rates.set(id, entry);
     if (entry.n > maximum) throw new ServiceError(429, "rate_limited", "Too many requests; retry after a minute",
@@ -214,7 +239,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       let remoteAddress;
       try { remoteAddress = resolveClientAddress(req); }
       catch { reject(403, "proxy_denied", "Invalid proxy configuration"); }
-      const url = new URL(req.url, expectedOrigin());
+      const url = new URL(req.url, expectedOrigin()), loopback = ["127.0.0.1", "::1"].includes(remoteAddress);
       if (url.pathname.startsWith("/api/")) res.setHeader("X-Operation-Id", operationId);
       if ((url.pathname === "/api/health" || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode }, req.method === "HEAD");
@@ -260,6 +285,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.writeHead(200, { "Content-Type": `${type}; charset=utf-8` });
         return res.end(req.method === "HEAD" ? undefined : data);
       }
+      const webhook = routePattern(connectionRoutes.webhook).exec(url.pathname);
+      if (webhook) {
+        // Provider callbacks carry a per-connection secret, never an account session.
+        // Verified updates only wait for the owner's import; nothing is stored here.
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        rate(`inbox-webhook:${remoteAddress}`, 120);
+        if (!channelWebhooks) reject(409, "channel_webhook_unavailable", "Webhook delivery is not configured here.");
+        const connectionId = pathId(webhook[1]), secret = req.headers[webhookSecretHeader];
+        if (typeof secret !== "string") reject(401, "channel_webhook_denied", "Webhook not accepted.");
+        const received = channelWebhooks.receive({ connectionId, secret, body: await body(req) });
+        return json(res, 202, { contractVersion: 1, connectionId, received: received.received, pending: received.pending });
+      }
       if (url.pathname === "/api/inbox" || url.pathname.startsWith("/api/inbox/")) {
         // Inbox authority is an account session, never a Room/agent bearer key.
         if (req.headers.authorization) reject(401, "account_session_required", "Use your current account session.");
@@ -278,7 +315,21 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         if (view !== null && (!["email-text-v1", "email-excerpt-v1"].includes(view) || url.searchParams.getAll("view").length !== 1))
           reject(422, "unsupported_inbox_view", "This inbox view is not supported.");
-        if (url.pathname === "/api/inbox" && req.method === "GET") return json(res, 200, store.inbox.list(token, binding, { includeEmail: view !== null }));
+        if (url.pathname === "/api/inbox" && req.method === "GET") return json(res, 200, store.inbox.list(token, binding, { includeChannels: view !== null }));
+        if (url.pathname === connectionRoutes.list && req.method === "GET") return json(res, 200, store.connections.connections(token, binding));
+        const connection = routePattern(connectionRoutes.read).exec(url.pathname);
+        if (connection && req.method === "GET") return json(res, 200, { ...store.connections.connectionRecord(token, pathId(connection[1]), binding), syncAvailable: loopback });
+        const sync = routePattern(connectionRoutes.sync).exec(url.pathname);
+        if (sync && req.method === "POST") {
+          protectWrite(req, auth, false); rate(`inbox-sync:${auth.account.id}`, 60);
+          // Recorded imports are local-only (like sample sending) and fixture-mode only.
+          if (!loopback) reject(403, "channel_sync_local_only", "Recorded imports are local only.");
+          const connectionId = pathId(sync[1]), data = await body(req);
+          if (!exact(data, ["requestId", "updates"]) || !validId(data.requestId) || !(data.updates === null || Array.isArray(data.updates)))
+            reject(422, "invalid_channel_update", "Supply a request ID and recorded updates, or null to import webhook updates.");
+          const result = await syncTelegramConnection({ store, token, binding, connectionId, requestId: data.requestId, updates: data.updates, webhooks: channelWebhooks });
+          return json(res, result.duplicate ? 200 : 201, { ...store.connections.connectionRecord(token, connectionId, binding), receipt: result.receipt, duplicate: result.duplicate, source: result.source });
+        }
         const source = /^\/api\/inbox\/sources\/([^/]{1,384})(?:\/(share-context|room-results|send-context|sends))?$/.exec(url.pathname);
         if (source && req.method === "GET") {
           const id = pathId(source[1]);
@@ -302,7 +353,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         if (url.pathname === "/api/inbox/simulation" && req.method === "POST") {
           protectWrite(req, auth, false); rate(`inbox-simulation:${auth.account.id}`, 60);
-          if (!["127.0.0.1", "::1"].includes(remoteAddress)) reject(403, "inbox_simulation_local_only", "Sample sending is local only.");
+          if (!loopback) reject(403, "inbox_simulation_local_only", "Sample sending is local only.");
           if (!syntheticInboxTransport) reject(409, "inbox_simulation_unavailable", "Sample sending is unavailable here.");
           const data = await body(req);
           if (!data || !exact(data, ["action", "sourceId", "sendId"]) || !["dispatch", "reconcile"].includes(data.action)
@@ -466,6 +517,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const revokeMatch = /^\/api\/rooms\/([^/]{1,384})\/invitations\/([^/]{1,384})\/revoke$/.exec(url.pathname);
       // Round-2 #101: creating an agent identity is open (an identity alone
       // grants nothing); linking it into a room is owner-only per room.
+      // Because the route is unauthenticated it is bounded twice: the
+      // per-address rate limit here, and the IDENTITY_LIMIT table cap that
+      // store.identities.create enforces inside its insert transaction
+      // (409 pilot_limit, no row written) — like the credentials table.
       if (url.pathname === "/api/agent-identities" && req.method === "POST") {
         const data = await body(req);
         rate(`identity-create:${remoteAddress}`, 30);
@@ -611,18 +666,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "export" && req.method === "GET") {
         // Round-2 #106: JSONL export of the event log (same visibility as
         // the events route — members only). One {sequence, event} per line.
-        // exportEvents is a generator that authenticates lazily, so pull the
-        // first item before committing to a 200: an auth/fence failure then
-        // takes the normal JSON error path instead of an empty 200 body.
-        const lines = store.exportEvents(selected.token, roomId, fence);
-        const first = lines.next();
-        res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8",
+        // The log is bounded (10000 events per room, the same bound import
+        // enforces), so the whole export is materialised before any header
+        // is written: an auth, fence or storage failure part-way through
+        // takes the normal JSON error path instead of truncating a 200 body
+        // that would read as a valid, merely shorter, export. Content-Length
+        // lets clients treat a dropped connection as an incomplete download.
+        const lines = [];
+        for (const line of store.exportEvents(selected.token, roomId, fence)) lines.push(JSON.stringify(line) + "\n");
+        const bytes = Buffer.from(lines.join(""), "utf8");
+        res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Content-Length": bytes.length,
           "Content-Disposition": `attachment; filename="room-${roomId}-export.jsonl"` });
-        if (!first.done) {
-          res.write(JSON.stringify(first.value) + "\n");
-          for (const line of lines) res.write(JSON.stringify(line) + "\n");
-        }
-        return res.end();
+        return res.end(bytes);
       }
       if (route === "import" && req.method === "POST") {
         // Round-2 #107: NDJSON import (the #106 export format). Owner-only,
@@ -790,5 +845,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   server.headersTimeout = 10000;
   server.keepAliveTimeout = 5000;
   server.closeStreams = () => { for (const { res } of streams) res.end(); };
+  server.rateLimitKeys = () => rates.size;
   return server;
 }

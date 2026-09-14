@@ -5,6 +5,8 @@ import { storedText } from "./text-results.mjs";
 import { ServiceError } from "./store.mjs";
 import { isSend, internalSend, validateSend, sendPreview, transitionSend } from "./inbox-outbox.mjs";
 import { readEmailEnvelope, EmailContractError } from "./email-envelope.mjs";
+import { readChannelEnvelope } from "./channel-adapters/index.mjs";
+import { channels, connectionState, profileChannel } from "./channel-connection.mjs";
 import { prepareGraphReplyDraft, buildGraphReplyDraft, classifyGraphReplyCreation, classifyGraphReplyUpdateAcknowledgment, normalizeReplyObservation, prepareGraphReplyUpdate, buildGraphReplyUpdate, compareReplyUpdateEnvelope } from "./graph-reply-draft.mjs";
 import { isReplyAttempt, validateReplyAttempt, transitionReplyAttempt, replyObservationReviewable, isReplyUpdate, transitionReplyUpdate } from "./graph-reply-journal.mjs";
 import { buildUpdateInspection, buildUpdateReview, replyAttemptWithObservation } from "./graph-reply-update-review.mjs";
@@ -23,6 +25,11 @@ const isShare = request => ["source.share", "source.excerpt"].includes(request.a
 const emailSelectionText = body => body.content.replace(/\r\n?/g, "\n");
 const text = (v, max, empty = false) => typeof v === "string" && v.isWellFormed() && v.length <= max && (empty || v.trim().length > 0);
 const same = (a, b) => canonical(a) === canonical(b);
+const participantLabel = p => p.displayName || p.handle || p.id;
+// One reading summary per source origin: synthetic samples, email, Telegram.
+const summary = d => d.adapter === "email" ? { sender: d.envelope.message.from.address, recipient: d.envelope.connection.identity.address, subject: d.envelope.message.subject }
+  : d.adapter === "telegram" ? { sender: participantLabel(d.envelope.message.from), recipient: participantLabel(d.envelope.connection.identity), subject: participantLabel(d.envelope.message.to[0]) }
+  : { sender: d.sender, recipient: d.recipient, subject: d.subject };
 export const inboxLimits = Object.freeze({ sources: 100, versions: 100, commands: 5000, paragraphs: 20 });
 export const inboxSchema = `
   CREATE TABLE private_inbox_sources (
@@ -66,11 +73,11 @@ function validate(request) {
   if (!isShare(request) && !revision(request.expectedRevision)) fail(422, "invalid_inbox_request", "Current revision required.");
   if (!["source.save", "source.import"].includes(request.action) && (!revision(request.sourceRevision) || !request.sourceRevision)) fail(422, "invalid_inbox_request", "Source revision required.");
   if (request.action === "source.import") {
-    if (!exact(request.data, ["adapter", "envelope"]) || request.data.adapter !== "email") fail(422, "invalid_inbox_source", "Supply a qualified email observation.");
+    if (!exact(request.data, ["adapter", "envelope"]) || !channels.includes(request.data.adapter)) fail(422, "invalid_inbox_source", "Supply a qualified channel observation.");
     let envelope;
-    try { envelope = readEmailEnvelope(request.data.envelope); }
-    catch (error) { if (error instanceof EmailContractError) fail(422, "invalid_inbox_source", "Email observation could not be confirmed."); throw error; }
-    if (envelope.sourceId !== request.sourceId) fail(422, "invalid_inbox_source", "Source identity does not match the email observation.");
+    try { envelope = readChannelEnvelope(request.data.envelope); }
+    catch (error) { if (error instanceof EmailContractError) fail(422, "invalid_inbox_source", "Channel observation could not be confirmed."); throw error; }
+    if (envelope.channel !== request.data.adapter || envelope.sourceId !== request.sourceId) fail(422, "invalid_inbox_source", "Source identity does not match the channel observation.");
   }
   if (request.action === "source.save") {
     const d = request.data;
@@ -99,15 +106,15 @@ const viewer = auth => ({ accountId: auth.account.id, authEpoch: auth.account.au
   sessionBinding: auth.sessionBinding, sessionRevision: auth.sessionRevision });
 const sharedBody = (data, request) => {
   if (request.action === "source.excerpt") {
-    if (data.adapter !== "email" || data.envelope.body.format !== "text") fail(409, "email_sharing_unavailable", "Only plain-text email excerpts can be shared.");
-    const content = emailSelectionText(readEmailEnvelope(data.envelope).body), { start, end } = request.selection;
-    const excerpt = content.slice(start, end), body = "Shared email excerpt\n\n" + excerpt;
+    if (!channels.includes(data.adapter) || data.envelope.body.format !== "text") fail(409, "channel_sharing_unavailable", "Only plain-text excerpts can be shared.");
+    const content = emailSelectionText(readChannelEnvelope(data.envelope).body), { start, end } = request.selection;
+    const excerpt = content.slice(start, end), body = (data.adapter === "email" ? "Shared email excerpt" : "Shared message excerpt") + "\n\n" + excerpt;
     if (end > content.length || !text(excerpt, 4000) || body.length > 4000)
       fail(422, "invalid_inbox_share", "Choose nonempty text up to 4,000 characters including the excerpt label.");
     return body;
   }
   const indexes = request.paragraphs;
-  if (data.adapter !== "synthetic") fail(409, "email_sharing_unavailable", "Email excerpt sharing is not yet available.");
+  if (data.adapter !== "synthetic") fail(409, "channel_sharing_unavailable", "Excerpt sharing is not yet available for this channel.");
   if (indexes.some(i => !Object.hasOwn(data.paragraphs, i))) fail(422, "invalid_inbox_share", "Selected text does not exist.");
   const body = "Shared sample excerpt\n\n" + indexes.map(i => data.paragraphs[i]).join("\n\n");
   if (body.length > 4000) fail(422, "invalid_inbox_share", "Choose at most 4,000 characters including the excerpt label.");
@@ -138,16 +145,23 @@ export class Inbox {
     if (!row) fail(404, "inbox_source_not_found", "Source version not found.");
     return JSON.parse(row.data_json);
   }
-  list(token, binding, { includeEmail = false } = {}) {
+  // Channel sources appear only for a client that negotiated a reading view.
+  list(token, binding, { includeChannels = false, includeEmail = false } = {}) {
     return this.store.readTransaction(() => {
-      const auth = this.auth(token, binding);
+      const auth = this.auth(token, binding), connections = new Map(), include = includeChannels || includeEmail;
+      const connection = profile => {
+        if (!connections.has(profile.id)) {
+          const saved = this.store.email.connection(auth.account.id, profile.id);
+          connections.set(profile.id, { id: profile.id, channel: profileChannel(profile), provider: profile.provider,
+            state: saved ? connectionState(saved, auth.account.authEpoch) : "disconnected" });
+        }
+        return connections.get(profile.id);
+      };
       const sources = this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? ORDER BY updated_at DESC,id").all(auth.account.id)
         .map(row => { const d = this.version(auth.account.id, row.id, row.revision);
-          if (d.adapter === "email" && !includeEmail) return null;
-          return { id: row.id, revision: row.revision, adapter: d.adapter,
-            sender: d.adapter === "email" ? d.envelope.message.from.address : d.sender,
-            recipient: d.adapter === "email" ? d.envelope.connection.identity.address : d.recipient,
-            subject: d.adapter === "email" ? d.envelope.message.subject : d.subject, updatedAt: row.updated_at }; }).filter(Boolean);
+          if (d.adapter !== "synthetic" && !include) return null;
+          return { id: row.id, revision: row.revision, adapter: d.adapter, ...summary(d), updatedAt: row.updated_at,
+            connection: d.adapter === "synthetic" ? null : connection(d.envelope.connection) }; }).filter(Boolean);
       return { contractVersion: 1, viewer: viewer(auth), sources };
     });
   }
@@ -156,7 +170,8 @@ export class Inbox {
       const auth = this.auth(token, binding), row = this.source(auth.account.id, sourceId);
       const draft = this.db.prepare("SELECT revision,source_revision,body,updated_at FROM private_inbox_drafts WHERE account_id=? AND source_id=?").get(auth.account.id, sourceId);
       const data = this.version(auth.account.id, row.id, row.revision);
-      const source = emailView && data.adapter === "email" ? this.emailView(auth, row, data.envelope, excerptView) : { id: row.id, revision: row.revision, ...data };
+      const source = emailView && data.adapter === "email" ? this.emailView(auth, row, data.envelope, excerptView)
+        : emailView && data.adapter === "telegram" ? this.channelView(auth, row, data.envelope, excerptView) : { id: row.id, revision: row.revision, ...data };
       return { contractVersion: 1, viewer: viewer(auth), source,
         draft: draft ? { revision: draft.revision, sourceRevision: draft.source_revision, body: draft.body, updatedAt: draft.updated_at,
           origin: this.draftOrigin(auth.account.id, sourceId, draft.body, row.revision) } : null };
@@ -166,19 +181,31 @@ export class Inbox {
     const envelope = readEmailEnvelope(value), { message, body, attachments } = envelope;
     const saved = this.db.prepare("SELECT data_json FROM private_email_connections WHERE account_id=? AND id=?")
       .get(auth.account.id, envelope.connection.id);
-    if (!saved || envelope.connection.accountId !== auth.account.id) fail(409, "email_connection_unavailable", "Email connection unavailable.");
+    if (!saved || envelope.connection.accountId !== auth.account.id) fail(409, "channel_connection_unavailable", "Connection unavailable.");
     const connection = JSON.parse(saved.data_json);
-    const connectionState = connection.state === "disconnected" ? "disconnected"
-      : connection.authEpoch !== auth.account.authEpoch ? "reconnect_required" : "active";
     // A bounded, inert reading projection, never a provider/send envelope. Keep
     // cursors, headers, HTML, attachment descriptors and mailbox IDs off this path.
     return { id: row.id, revision: row.revision, adapter: "email", sender: message.from.address,
       recipient: envelope.connection.identity.address, subject: message.subject,
       paragraphs: body.format === "text" ? [excerptView ? emailSelectionText(body) : body.content] : [],
       capabilities: { draft: true, share: excerptView && body.format === "text" && Boolean(body.content.trim()), send: false },
-      email: { view: excerptView ? "email-excerpt-v1" : "email-text-v1", accountId: auth.account.id, format: body.format, connectionState,
+      email: { view: excerptView ? "email-excerpt-v1" : "email-text-v1", accountId: auth.account.id, format: body.format,
+        connectionState: connectionState(connection, auth.account.authEpoch),
         to: message.to.map(a => a.address), cc: message.cc.map(a => a.address), bcc: message.bcc.map(a => a.address),
         attachmentState: attachments.state, attachmentCount: attachments.items.length } };
+  }
+  // Telegram reading projection: text, participants and attachment counts only.
+  // No file ids, chat ids, update cursors or bot identifiers reach the browser.
+  channelView(auth, row, value, excerptView = false) {
+    const envelope = readChannelEnvelope(value), { message, body, attachments, connection: profile } = envelope;
+    const saved = this.store.email.connection(auth.account.id, profile.id);
+    if (!saved || profile.accountId !== auth.account.id) fail(409, "channel_connection_unavailable", "Connection unavailable.");
+    const content = excerptView ? emailSelectionText(body) : body.content;
+    return { id: row.id, revision: row.revision, adapter: envelope.channel, ...summary({ adapter: envelope.channel, envelope }),
+      paragraphs: [content], capabilities: { draft: true, share: excerptView && Boolean(content.trim()), send: false },
+      channel: { view: excerptView ? "channel-excerpt-v1" : "channel-text-v1", accountId: auth.account.id, channel: envelope.channel, provider: profile.provider,
+        connectionState: connectionState(saved, auth.account.authEpoch), format: body.format, kind: message.kind, edited: message.editedAt !== null,
+        chat: participantLabel(message.to[0]), attachmentCount: attachments.length } };
   }
   draftOrigin(accountId, sourceId, body, sourceRevision) {
     const row = this.db.prepare(`SELECT request_json,receipt_json FROM private_inbox_commands WHERE account_id=?
@@ -455,7 +482,7 @@ export class Inbox {
   }
   // Trusted, transaction-bound importer only. Ordinary HTTP commands cannot use it.
   importSource(token, request, binding) {
-    if (!this.db.isTransaction || request?.action !== "source.import") fail(403, "email_importer_required", "Use the transactional email importer.");
+    if (!this.db.isTransaction || request?.action !== "source.import") fail(403, "channel_importer_required", "Use the transactional channel importer.");
     return this.apply(token, request, binding, importAuthority);
   }
   apply(token, request, binding, authority = null) {
@@ -463,9 +490,9 @@ export class Inbox {
       const auth = this.auth(token, binding); validate(request);
       if (isReplyAttempt(request) && authority !== replyAuthority) fail(403, "reply_driver_required", "Use the configured reply driver.");
       if (internalSend(request) && authority !== transportAuthority) fail(403, "inbox_transport_required", "Only the configured transport can record this outcome.");
-      if (request.action === "source.import" && authority !== importAuthority) fail(403, "email_importer_required", "Only the configured importer can record this source.");
+      if (request.action === "source.import" && authority !== importAuthority) fail(403, "channel_importer_required", "Only the configured importer can record this source.");
       if (request.action === "source.import" && request.data.envelope.connection.accountId !== auth.account.id)
-        fail(403, "email_account_mismatch", "Email observation belongs to another account.");
+        fail(403, "channel_account_mismatch", "Observation belongs to another account.");
       if (isShare(request) || request.action === "draft.adopt") this.auth(token, binding, request.roomId);
       const accountId = auth.account.id, fingerprint = digest(request);
       const prior = this.db.prepare("SELECT fingerprint,receipt_json FROM private_inbox_commands WHERE account_id=? AND request_id=?").get(accountId, request.requestId);

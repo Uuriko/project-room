@@ -143,3 +143,36 @@ test("v8 readonly verification refuses a v7 marker rather than migrating the bac
   assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /schema|version|migration/i);
   assert.equal(f.store.db.prepare("PRAGMA user_version").get().user_version, 7);
 });
+
+test("read-only open accepts a v27 backup written before the additive wake queue and attention tables", t => {
+  const f = fixture(t);
+  const rooms = f.store.db.prepare("SELECT id,sequence FROM rooms ORDER BY id").all();
+  const objects = () => f.store.db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'wake_queue%' OR name LIKE 'private_attention%' ORDER BY name").all().map(row => row.name);
+  const additive = objects();
+  assert.ok(additive.includes("wake_queue") && additive.includes("private_attention_prefs"));
+  // A half-present additive schema is a damaged file, not an older one.
+  f.store.db.exec("DROP TABLE wake_queue_commands; DROP TABLE private_attention_commands");
+  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /Wake queue schema requires operator reconciliation/);
+  f.store.db.exec("DROP TABLE wake_queue; DROP TABLE private_attention_prefs");
+  assert.deepEqual(objects(), [], "fixture now matches a pre-W4-45 v27 file");
+  const older = new RoomStore(f.filename, { readOnly: true, now: f.now });
+  try {
+    assert.deepEqual(older.db.prepare("SELECT id,sequence FROM rooms ORDER BY id").all(), rooms);
+    assert.equal(older.room("commons").state.room.id, "commons");
+    assert.equal(older.wakeQueue.verifySchema({ allowAbsent: true }), false);
+    assert.equal(older.attention.verifySchema({ allowAbsent: true }), false);
+    assert.throws(() => older.wakeQueue.verifySchema(), /Wake queue schema/, "a writable open still requires the tables");
+  } finally { older.close(); }
+  assert.deepEqual(objects(), [], "read-only verification is not migration");
+  // Only the additive tables are optional: a wrong schema marker still fails.
+  f.store.db.exec("PRAGMA user_version=26");
+  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v27/);
+  f.store.db.exec("PRAGMA user_version=27");
+  // A writable open recreates the additive tables and then verifies them strictly.
+  const upgraded = new RoomStore(f.filename, { now: f.now });
+  try {
+    assert.equal(upgraded.wakeQueue.verifySchema(), true);
+    assert.equal(upgraded.attention.verifySchema(), true);
+  } finally { upgraded.close(); }
+  assert.deepEqual(objects(), additive, "the service, not read-only verification, restores the additive schema");
+});

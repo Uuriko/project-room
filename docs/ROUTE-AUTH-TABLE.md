@@ -14,7 +14,7 @@ authorization (owner, `manage_members`, member) is enforced inside the
 
 | Method + route | Credential | Store-level authorization |
 |---|---|---|
-| `POST /api/agent-identities` | none (by design) | creates identity only; no room access granted |
+| `POST /api/agent-identities` | none (by design) | creates identity only; no room access granted; bounded by a per-address rate limit and a 5000-row table cap (`409 pilot_limit`) |
 | `POST /api/rooms/:id/identity-links` | room Bearer / session | `manage_members` |
 | `GET /api/rooms/:id/identity-links` | room Bearer / session | `manage_members` |
 | `DELETE /api/rooms/:id/identity-links` | room Bearer / session | `manage_members` |
@@ -39,7 +39,8 @@ All `GET` routes under `/api/rooms/:id/*` (snapshot, events, export,
 search, presence, capabilities, onboarding-funnel, provider-heartbeats,
 reminders, agent-connections, share-links, invitations, work-*, reply-*,
 charter, diagnostics, return-brief, thread) require a room credential with
-member visibility. `GET /api/rooms/:id/export` streams the full event log;
+member visibility. `GET /api/rooms/:id/export` returns the full event log as
+one `Content-Length`-framed JSONL body (never a partial 200);
 `GET /api/rooms/:id/stream` is the SSE feed.
 
 `tests/route-auth-table.test.js` enforces the headline invariant: every
