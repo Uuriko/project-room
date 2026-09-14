@@ -291,11 +291,11 @@ export class RoomStore {
         this.verifyInvitationAudit();
         this.shareLinks.verify();
         this.reminders.verifySchema();
-      this.wakeQueue.verifySchema();
-      this.attention.verifySchema();
-      // A lease whose holder died with the process is expired back to pending
-      // here, so a restart preserves the intent exactly once (W4-45 done-when).
-      if (!this.readOnly) this.wakeQueue.recover(this.now());
+        // Wake queue (W4-45) and attention preference (W4-46) tables are purely
+        // additive at v27, so a backup taken before them is still a valid v27
+        // file. Read-only never migrates, so verify them only when present.
+        this.wakeQueue.verifySchema({ allowAbsent: true });
+        this.attention.verifySchema({ allowAbsent: true });
         this.agentConnections.verify();
         this.verifyHelpHistory();
         this.inbox.verify();
