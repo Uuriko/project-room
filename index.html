@@ -289,6 +289,9 @@
               </div>
               <button id="new-work-button" class="button secondary" type="button">New</button>
             </div>
+            <div id="recipe-strip" class="recipe-strip" hidden></div>
+            <button id="recipe-preview-toggle" class="button ghost" type="button" hidden>Preview recipes</button>
+            <div id="recipe-preview" class="recipe-preview" hidden></div>
             <button id="resume-action" class="button secondary pending-save" type="button" hidden>Check pending save</button>
             <dialog id="work-dialog" aria-labelledby="new-work-title">
             <form id="new-work-form" class="new-work-form" hidden>
@@ -296,6 +299,7 @@
               <input id="source-message-id" type="hidden">
               <div id="source-context" class="source-context" hidden></div>
               <p id="work-reuse-hint" class="form-hint" hidden>Only outcome and done criteria copied.</p>
+              <label id="work-recipe-field" hidden>Start from a recipe <select id="work-recipe-select"><option value="">Blank outcome</option></select></label>
               <label>Outcome <textarea id="work-title-input" rows="1" maxlength="4096" required></textarea></label>
               <label>Done when… <textarea id="work-done-input" rows="2" maxlength="4096" required></textarea></label>
               <label>Owner <select id="assignee-select" required></select></label>

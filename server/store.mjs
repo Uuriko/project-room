@@ -12,6 +12,8 @@ import { STORE_SCHEMA_VERSION, registerWriter, installWriterFence, verifyWriterF
 import { ShareLinks, shareLinkSchema } from "./share-links.mjs";
 import { conflictingClaim } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
+import { WakeQueue, wakeQueueSchema } from "./wake-queue.mjs";
+import { Attention, attentionSchema } from "./attention.mjs";
 import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
 import { workItemChanges } from "../src/workflow.js";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
@@ -26,9 +28,11 @@ import { ReplyRequests } from "./reply-requests.mjs";
 import { validateHelpData } from "../src/work-help.js";
 import { auditWorkHelp } from "./work-help.mjs";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, validateHelpOfferData } from "../src/help-offers.js";
+import { classifyCommand } from "./action-classes.mjs";
 import {
   isSessionStatus, isTerminalSession, sessionRecord, listWorkItemSessions, sessionCommandType, sessionWorker,
-  validateSessionBudget, budgetLimitExceeded, SESSION_HEARTBEAT_STALE_MS
+  validateSessionBudget, budgetLimitExceeded, SESSION_HEARTBEAT_STALE_MS,
+  validateAttemptEnvironment, validateAttemptOutputs
 } from "../src/work-item-session.js";
 import { Inbox, inboxSchema } from "./inbox.mjs";
 import { EmailImport, emailImportSchema } from "./email-import.mjs";
@@ -150,7 +154,9 @@ const compact = state => ({ ...state, eventLog: [], seenEvents: {}, seenIdempote
 const sessionEventMatchesRequest = (event, request) => event?.data?.workItemId === request.workItemId
   && (request.action === "request_stop" ? event.type === T.SESSION_STOP_REQUESTED
     : event.type === T.SESSION_STARTED ? request.status === "processing"
-      : (event.type === T.SESSION_STATUS_CHANGED || event.type === T.SESSION_STOPPED) && event.data.status === request.status);
+      : (event.type === T.SESSION_STATUS_CHANGED || event.type === T.SESSION_STOPPED) && event.data.status === request.status)
+  && (event?.data?.environment ?? null) === (request.environment ?? null)
+  && JSON.stringify(event?.data?.outputs ?? null) === JSON.stringify(request.outputs ?? null);
 // Platform differences stay at the database boundary; identity, invitation and
 // command rules below are shared by every runtime. The default remains Node.
 const nodeReadTransactions = new WeakSet();
@@ -207,24 +213,29 @@ const shapes = {
   [T.VERIFICATION_RECORDED]: `${work} result completionEventId evidenceVersion summary nextAction`,
   [T.OWNER_DECISION_RECORDED]: `${work} decision completionEventId evidenceVersion reason`,
   [T.DECISION_RECORDED]: "sourceMessageId statement note",
-  [T.SESSION_STARTED]: `${work} budget`,
+  [T.SESSION_STARTED]: `${work} budget environment`,
   [T.SESSION_STATUS_CHANGED]: `${work} status spendCents`,
   [T.SESSION_STOP_REQUESTED]: work,
-  [T.SESSION_STOPPED]: `${work} status spendCents budgetEnforced reason limit`,
+  [T.SESSION_STOPPED]: `${work} status spendCents budgetEnforced reason limit outputs`,
   [T.CAPABILITIES_ADVERTISED]: "capabilities"
 };
+
+// W4-44 H2: the classified command surface, exported for the
+// action-class completeness test (every key must carry a class).
+export const COMMAND_TYPES = Object.freeze(Object.keys(shapes));
 
 export function validateCommand(command) {
   if (!command || Array.isArray(command) || typeof command !== "object" || Object.keys(command).some(k => !["id", "type", "data", "causationId"].includes(k))) fail(422, "invalid_command", "Supply only id, type, data, and optional causationId");
   if (!validId(command.id) || !Object.hasOwn(shapes, command.type)) fail(422, "invalid_command", "Invalid command id or type");
+  try { classifyCommand(command.type); } catch { fail(422, "invalid_command", "Unclassified command type"); }
   if (command.causationId != null && !validId(command.causationId)) fail(422, "invalid_command", "Invalid causationId");
   if (!command.data || Array.isArray(command.data) || typeof command.data !== "object") fail(422, "invalid_command", "Data must be an object");
   const allowed = shapes[command.type].split(" ");
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities"].includes(name) ? "array" : ["preferences", "budget"].includes(name) ? "object" : "string";
-    if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced"].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget"].includes(name) ? "object" : "string";
+    if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (Buffer.byteLength(JSON.stringify(command)) > 16384) fail(413, "too_large", "Command is too large");
   if (command.type === T.MESSAGE_POSTED) {
@@ -253,6 +264,9 @@ export class RoomStore {
     this.identities = new AgentIdentities(this);
     this.invites = new AgentInvites(this);
     this.reminders = new Reminders(this);
+    this.wakeQueue = new WakeQueue(this);
+    this.attention = new Attention(this);
+    this.readOnly = readOnly;
     this.agentConnections = new AgentConnections(this);
     this.guestAgentLinks = new GuestAgentLinks(this);
     this.replyRequests = new ReplyRequests(this);
@@ -277,6 +291,11 @@ export class RoomStore {
         this.verifyInvitationAudit();
         this.shareLinks.verify();
         this.reminders.verifySchema();
+      this.wakeQueue.verifySchema();
+      this.attention.verifySchema();
+      // A lease whose holder died with the process is expired back to pending
+      // here, so a restart preserves the intent exactly once (W4-45 done-when).
+      if (!this.readOnly) this.wakeQueue.recover(this.now());
         this.agentConnections.verify();
         this.verifyHelpHistory();
         this.inbox.verify();
@@ -354,11 +373,21 @@ export class RoomStore {
       // impact), so no schema version bump: IF NOT EXISTS is idempotent here
       // and the v0 block above covers fresh databases.
       this.db.exec(agentInviteSchema);
+      // Wake queue rows are purely additive (no data migration, no fence
+      // impact), so no schema version bump: IF NOT EXISTS is idempotent here.
+      this.db.exec(wakeQueueSchema);
+      // Attention preferences are purely additive as well (W4-46).
+      this.db.exec(attentionSchema);
       if (version < STORE_SCHEMA_VERSION) this.storagePlatform.installWriterFence(this.db);
       this.storagePlatform.verifyWriterFence(this.db);
       this.verifyInvitationAudit();
       this.shareLinks.verify();
       this.reminders.verifySchema();
+      this.wakeQueue.verifySchema();
+      this.attention.verifySchema();
+      // A lease whose holder died with the process is expired back to pending
+      // here, so a restart preserves the intent exactly once (W4-45 done-when).
+      if (!this.readOnly) this.wakeQueue.recover(this.now());
       this.agentConnections.verify();
       this.verifyHelpHistory();
       this.inbox.verify();
@@ -1222,7 +1251,7 @@ export class RoomStore {
       const room = this.room(roomId);
       return {
         contractVersion: 1, roomId, evaluatedThrough: room.sequence, viewerId: auth.member.id,
-        sessions: listWorkItemSessions(room.state.workItems, status)
+        sessions: listWorkItemSessions(room.state.workItems, status, { members: room.state.members, nowMs: this.now() })
       };
     });
   }
@@ -1233,7 +1262,7 @@ export class RoomStore {
     // report cumulative spend. Both are optional; nothing else is accepted.
     const required = ["requestId", "workItemId", "expectedRevision", "action",
       ...(request.action === "set_status" ? ["status"] : [])];
-    const optional = request.action === "set_status" ? ["budget", "spendCents"] : [];
+    const optional = request.action === "set_status" ? ["budget", "spendCents", "environment", "outputs"] : [];
     if (required.some(key => !keys.includes(key)) || keys.some(key => ![...required, ...optional].includes(key))) {
       fail(422, "invalid_session_action", "Supply requestId, workItemId, expectedRevision, and set_status or request_stop");
     }
@@ -1318,9 +1347,22 @@ export class RoomStore {
         if (cap !== null && others.length >= cap)
           fail(409, "budget_exceeded", `Concurrency budget of ${cap} reached (${others.length} active)`);
       }
+      // G1: the attempt contract. A start may declare its environment; a stop
+      // may record output references. Both are optional and validated.
+      if (request.environment !== undefined && type !== T.SESSION_STARTED)
+        fail(422, "invalid_session_environment", "An environment is declared when the session starts");
+      if (request.outputs !== undefined && type !== T.SESSION_STOPPED)
+        fail(422, "invalid_session_outputs", "Output references are recorded when the session stops");
+      let environment = null, outputs = null;
+      try { environment = validateAttemptEnvironment(request.environment); }
+      catch (error) { fail(422, "invalid_session_environment", error.message); }
+      try { outputs = validateAttemptOutputs(request.outputs); }
+      catch (error) { fail(422, "invalid_session_outputs", error.message); }
       const data = { workItemId: request.workItemId, expectedRevision: request.expectedRevision };
       if (type === T.SESSION_STATUS_CHANGED || type === T.SESSION_STOPPED) data.status = request.status;
       if (type === T.SESSION_STARTED && budget) data.budget = budget;
+      if (type === T.SESSION_STARTED && environment) data.environment = environment;
+      if (type === T.SESSION_STOPPED && outputs) data.outputs = outputs;
       if (request.spendCents !== undefined && type !== T.SESSION_STOP_REQUESTED) data.spendCents = request.spendCents;
       return this.command(token, roomId, { id: request.requestId, type, data }, expectedSessionBinding);
     });

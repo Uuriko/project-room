@@ -3,8 +3,10 @@ import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./cli
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
 import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
-import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary } from "./workflow.js";
+import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
+import { RECIPE_CATALOG, activeRecipes, previewAllRecipes } from "./work-recipes.js";
+import { attemptReceipts, attemptLedger, cancellationState } from "./work-item-session.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation, requestFailureMessage } from "./share-links.js";
 import { installAgentConnections } from "./agent-connections.js";
 import { installRoomInstructions } from "./room-instructions.js";
@@ -807,12 +809,74 @@ function renderContent(selector, html) {
   container.innerHTML = html; container._content = html;
   restoreDisclosures(container, saved);
 }
+// W4-43 H1: the three starter recipes surface as dismissible suggestion chips.
+// Triggers and outcomes are derived in src/work-recipes.js from committed
+// state; chips only open existing surfaces or prefill a draft - they never
+// send, launch or spend on the member's behalf.
+const dismissedRecipeChips = new Set();
+const recipeChipKey = r => `${r.id}:${r.outcome.workItemId ?? r.outcome.requestId ?? ""}`;
+function recipeChipHtml(r) {
+  const meta = RECIPE_CATALOG.find(c => c.id === r.id), key = recipeChipKey(r);
+  let label, action;
+  if (r.id === "draft-catch-up") {
+    label = `${r.trigger.unseen} new ${r.trigger.unseen === 1 ? "event" : "events"} since your caught-up marker`;
+    action = `<button type="button" class="button ghost" data-recipe-action="open-catch-up">Open catch-up draft</button>`;
+  } else if (r.id === "suggest-next-work") {
+    label = `Next step: ${esc(r.outcome.label)}`;
+    action = r.outcome.workItemId
+      ? `<button type="button" class="button ghost" data-recipe-action="focus-work" data-work-id="${esc(r.outcome.workItemId)}" aria-label="Open suggested work: ${esc(r.outcome.label)}">Open work</button>`
+      : `<button type="button" class="button ghost" data-recipe-action="open-chat" aria-label="Open suggested request: ${esc(r.outcome.label)}">Open request</button>`;
+  } else {
+    label = `"${esc(r.outcome.title ?? r.outcome.workItemId)}" has waited over a day for review`;
+    action = `<button type="button" class="button ghost" data-recipe-action="draft-review" data-work-id="${esc(r.outcome.workItemId)}" data-to="${esc(r.outcome.toMemberId)}">Draft a review request</button>`;
+  }
+  return `<div class="recipe-chip" data-recipe-chip="${esc(key)}"><span class="recipe-chip-label"><strong>${esc(meta.title)}</strong> - ${label}</span>${action}<button type="button" class="button ghost" data-recipe-dismiss="${esc(key)}" aria-label="Dismiss suggestion: ${esc(meta.title)}">Dismiss</button></div>`;
+}
+// W4-47 H6: dry-run preview panel. Lists every catalog recipe with what it
+// reads, its trigger, what it would do, and whether it would fire right now.
+// previewAllRecipes is a pure read over committed state - opening this panel
+// commits nothing, writes nothing and never marks intent handled.
+function recipePreviewLabel(p) {
+  if (!p.firesNow) return "Not firing right now";
+  const o = p.preview;
+  if (o.kind === "catch_up_draft") return "Firing now: would prepare a catch-up draft";
+  if (o.kind === "work_suggestion") return `Firing now: would suggest ${esc(o.label)}`;
+  if (o.kind === "review_request_draft") return `Firing now: would draft a review request for "${esc(o.title ?? o.workItemId)}"`;
+  return "Firing now";
+}
+function recipePreviewHtml(p) {
+  return `<div class="recipe-preview-item"><strong>${esc(p.title)}</strong>`
+    + `<div>Reads: ${esc(p.reads.join("; "))}</div>`
+    + `<div>Trigger: ${esc(p.trigger)}</div>`
+    + `<div>Would do: ${esc(p.outcome)}</div>`
+    + `<div class="recipe-preview-status">${recipePreviewLabel(p)}</div></div>`;
+}
+function syncRecipePreview() {
+  const toggle = $("#recipe-preview-toggle"), panel = $("#recipe-preview");
+  if (!toggle || !panel) return;
+  if (!state || !session) { toggle.hidden = true; panel.hidden = true; panel.replaceChildren(); return; }
+  toggle.hidden = false;
+  if (panel.hidden) return;
+  const previews = previewAllRecipes(state, session.member.id, { now: Date.now(), cursor: roomCursor, sequence: client.sequence });
+  renderContent("#recipe-preview", previews.map(recipePreviewHtml).join(""));
+}
+function syncRecipeStrip() {
+  const strip = $("#recipe-strip");
+  if (!strip) return;
+  if (!state || !session) { strip.hidden = true; strip.replaceChildren(); return; }
+  const recipes = activeRecipes(state, session.member.id, { now: Date.now(), cursor: roomCursor, sequence: client.sequence })
+    .filter(r => !dismissedRecipeChips.has(recipeChipKey(r)));
+  strip.hidden = recipes.length === 0;
+  renderContent("#recipe-strip", recipes.map(recipeChipHtml).join(""));
+}
 function render() {
   conversation = conversationIndex(state.messages);
   const members = Object.values(state.members), active = members.filter(m => m.active !== false);
   selectOptions("#message-to-select", active, "Everyone");
   syncWorkForm();
   syncActionForm();
+  syncRecipeStrip();
+  syncRecipePreview();
   setText("#presence-count", `${active.length} ${active.length === 1 ? "member" : "members"}`);
   renderContent("#member-stack", active.slice(0, 4).map(m => `<div class="member-avatar ${m.kind}" title="${esc(memberLabel(m.id))}" aria-hidden="true"><span>${initials(m.displayName)}</span></div>`).join(""));
   const railCtx = { workItems: state.workItems, messages: state.messages, now: Date.now() };
@@ -1085,6 +1149,32 @@ async function openRequestMode(kind, id) {
   }
 }
 $("#request-reply").addEventListener("click", () => { if (!state || busy || requestReading) return; setRequestMode({ kind: "request" }); });
+$("#recipe-preview-toggle").addEventListener("click", () => {
+  const panel = $("#recipe-preview");
+  if (!panel) return;
+  panel.hidden = !panel.hidden;
+  syncRecipePreview();
+});
+$("#recipe-strip").addEventListener("click", event => {
+  const dismissKey = event.target.closest("[data-recipe-dismiss]")?.dataset.recipeDismiss;
+  if (dismissKey) { dismissedRecipeChips.add(dismissKey); syncRecipeStrip(); return; }
+  const control = event.target.closest("[data-recipe-action]");
+  if (!control) return;
+  const action = control.dataset.recipeAction;
+  if (action === "open-catch-up") document.querySelector('[data-room-section="catch-up"]')?.click();
+  if (action === "open-chat") document.querySelector('[data-room-section="chat"]')?.click();
+  if (action === "focus-work") {
+    document.querySelector('[data-room-section="work"]')?.click();
+    const card = document.getElementById(workDomId(control.dataset.workId));
+    card?.scrollIntoView({ block: "nearest", behavior: "instant" }); card?.focus({ preventScroll: true });
+  }
+  if (action === "draft-review") {
+    const item = state?.workItems?.[control.dataset.workId];
+    if (!item) return;
+    document.querySelector('[data-room-section="chat"]')?.click();
+    setRequestMode({ kind: "request" }, { body: `Could you review "${item.title ?? control.dataset.workId}"? The result has been waiting for verification.`, toMemberId: control.dataset.to });
+  }
+});
 document.addEventListener("click", event => {
   const resume = event.target.closest("[data-resume-credit]");
   if (resume && state && !busy && !requestReading) {
@@ -1325,6 +1415,12 @@ function workCard(i, now, drafts, messages = []) {
   const claim = i.claim ? `<details class="claim"><summary data-focus-key="work-claim:${esc(i.id)}">Recorded scope · ${esc(claimStateLabel(i, now))}</summary><p>${esc(memberLabel(i.claim.holderId))}</p><p>${esc(i.claim.repository)}:${esc(i.claim.ref)}</p><p>${esc(i.claim.paths.join(", "))}</p><p>Expires ${esc(new Date(i.claim.expiresAt).toLocaleString())}. External activity is not measured.</p>${actions(i, true, now)}</details>` : "";
   const checks = `<div><dt>Verifier</dt><dd>${i.independentVerificationRequired ? esc(memberLabel(i.verifierMemberId)) : "Not required"}</dd></div><div><dt>Decision</dt><dd>${i.ownerDecisionRequired ? esc(memberLabel(i.humanDecisionMakerId)) : "Not required"}</dd></div>`;
   const updated = `<p class="form-hint">Last recorded update: ${esc(new Date(i.updatedAt).toLocaleString())}. Live execution is not measured.</p>`;
+  const attempts = attemptLedger(i);
+  const receipts = attemptReceipts(i);
+  // G7: silence is never termination - a stale-heartbeat run is labeled
+  // unresponsive with process state unknown, never "stopped".
+  const unresponsiveRun = cancellationState(i, { nowMs: Date.now() }).unresponsive;
+  const attemptsLine = attempts.length ? `<p class="form-hint" data-attempt-ledger="${esc(i.id)}">Attempts: ${attempts.map((a, ix) => `#${a.attempt} ${esc(memberLabel(a.performer))} · ${a.outcome ?? (unresponsiveRun ? "unresponsive - process state unknown" : "running")}${a.environment ? ` · ${esc(a.environment)}` : ""}${receipts[ix]?.successClaim === "unverified" ? " · unverified (missing outputs or measured usage)" : ""}`).join(" · ")}</p>` : "";
   const reuse = can("steer") ? `<button type="button" class="button ghost" data-reuse-work="${esc(i.id)}" data-focus-key="work-reuse:${esc(i.id)}">Use again</button>` : "";
   const latestDraft = drafts[0];
   const alternatives = drafts.length > 1 ? `<details class="work-drafts"><summary data-focus-key="work-drafts:${esc(i.id)}">Drafts (${drafts.length})</summary>${drafts.map(draft =>
@@ -1333,7 +1429,7 @@ function workCard(i, now, drafts, messages = []) {
   // F3: a stale-basis draft gets a derived read-time explanation of what changed; never a block.
   const changesToggle = staleBasis === null ? "" : `<button type="button" class="button ghost" data-work-changes="${esc(i.id)}" data-basis="${staleBasis}" data-focus-key="work-changes:${esc(i.id)}">What changed since revision ${staleBasis}</button><div class="work-changes-list" data-changes-list="${esc(i.id)}" hidden></div>`;
   const draftLink = i.receipt?.nativeText ? `<button class="source-link" type="button" data-read-result="${esc(i.id)}" data-focus-key="work-native-result:${esc(i.id)}">View result</button>` + alternatives : alternatives || (latestDraft ? `<a class="source-link" href="${esc(recordHref("message", latestDraft.id))}" data-open-message="${esc(latestDraft.id)}" data-focus-key="work-draft:${esc(i.id)}">View latest draft</a>` : "");
-  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span>${doneChip(i)}</div><h3>${esc(i.title)}</h3>${nextLine}${loopNotice}${draftLink}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span>${source}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${receiptCard(i)}${blocker}${decision}${claim}<div class="portable-actions">${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-portable-work="${esc(i.id)}" data-portable-mode="result" data-focus-key="work-result:${esc(i.id)}">Paste AI draft</button></div></details><div class="work-actions">${actions(i, false, now)}</div></article>`;
+  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span>${doneChip(i)}</div><h3>${esc(i.title)}</h3>${nextLine}${loopNotice}${draftLink}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span>${source}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${attemptsLine}${receiptCard(i)}${blocker}${decision}${claim}<div class="portable-actions">${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-portable-work="${esc(i.id)}" data-portable-mode="result" data-focus-key="work-result:${esc(i.id)}">Paste AI draft</button></div></details><div class="work-actions">${actions(i, false, now)}</div></article>`;
 }
 // Quiet Focus A4: a failed send reports beside the composer that holds the draft,
 // not only in the page-level status area; the Send button is the retry and the
@@ -2168,6 +2264,14 @@ function openWork(sourceId = null, reuseId = null) {
     $("#work-done-input").value = definition.definitionOfDone;
   }
   $("#work-reuse-hint").hidden = !definition;
+  const recipeSelect = $("#work-recipe-select");
+  if (definition || sourceId) $("#work-recipe-field").hidden = true;
+  else {
+    const recipes = workRecipeOptions(state.workItems);
+    recipeSelect.replaceChildren(new Option("Blank outcome", ""));
+    for (const recipe of recipes) recipeSelect.add(new Option(recipe.title.replace(/\s+/g, " ").slice(0, 80), recipe.workItemId));
+    $("#work-recipe-field").hidden = recipes.length === 0;
+  }
   $("#source-context").textContent = sourceId ? `Source: ${state.messages.find(m => m.id === sourceId)?.body || ""}` : "";
   $("#source-context").hidden = !sourceId; $("#work-title-input").focus();
   syncWorkForm();
@@ -2176,7 +2280,7 @@ function closeWorkForm({ returnFocus = true } = {}) {
   const unconfirmed = workRetryLocked;
   $("#work-dialog").close();
   $("#new-work-form").hidden = true; $("#new-work-form").reset();
-  setWorkRetry(false); $("#work-reuse-hint").hidden = true;
+  setWorkRetry(false); $("#work-reuse-hint").hidden = true; $("#work-recipe-field").hidden = true;
   setFormStatus($("#new-work-status"), "");
   pendingWork = null; workDraftId = null;
   const opener = workFormOpener; workFormOpener = null;
@@ -2199,6 +2303,17 @@ function setWorkRetry(locked) {
   $("#work-retry-hint").hidden = !locked;
   $("#cancel-work-button").textContent = locked ? "Close" : "Cancel";
 }
+$("#work-recipe-select").addEventListener("change", event => {
+  const recipeId = event.target.value;
+  if (!recipeId) { $("#work-title-input").value = ""; $("#work-done-input").value = ""; return; }
+  const item = state?.workItems?.[recipeId];
+  if (!item) return;
+  try {
+    const recipe = reusableWorkDefinition(item);
+    $("#work-title-input").value = recipe.title;
+    $("#work-done-input").value = recipe.definitionOfDone;
+  } catch { /* Definition changed since the list was built; leave the fields as they are. */ }
+});
 $("#new-work-button").addEventListener("click", () => openWork());
 $("#composer-work-button").addEventListener("click", () => openWork());
 $("#review-settings-button").addEventListener("click", () => {

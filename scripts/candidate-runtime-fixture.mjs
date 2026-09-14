@@ -13,6 +13,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('client/request-notices.mjs');
   paths.add('src/work-help.js'); paths.add('server/work-help.mjs');
   paths.add('client/help-actions.mjs');
+  paths.add('server/action-classes.mjs');
   paths.add('server/inbox.mjs');
   paths.add('server/inbox-outbox.mjs'); paths.add('server/inbox-transport.mjs'); paths.add('server/version.mjs');
   paths.add('scripts/stamp-version.mjs');
@@ -29,10 +30,13 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/guest-agent-links.mjs');
   paths.add('server/agent-invites.mjs');
   paths.add('src/work-item-session.js');
+  paths.add('src/work-recipes.js');
   paths.add('src/board.js');
   paths.add('src/work-templates.js');
   paths.add('src/room-templates.js');
   paths.add('server/diagnostics.mjs');
+  paths.add('server/wake-queue.mjs');
+  paths.add('server/attention.mjs');
   paths.add('scripts/release-evidence.mjs');
   for (const path of ['server/channel-connection.mjs', 'server/channel-import.mjs', 'server/channel-adapters/index.mjs', 'server/channel-adapters/email.mjs', 'server/channel-adapters/telegram.mjs']) paths.add(path);
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);

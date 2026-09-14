@@ -11,6 +11,27 @@ export function reusableWorkDefinition(work) {
   return definition;
 }
 
+// Reusable work recipes (F7): the room's own recorded definitions offered as
+// starting points for new work. Content only, like a reuse - never state,
+// assignment, permission, result or source relationship. Most recently
+// updated first, duplicates of the same definition collapsed, capped.
+export function workRecipeOptions(workItems, { limit = 8 } = {}) {
+  if (!workItems || typeof workItems !== "object" || Array.isArray(workItems)) throw new Error("Work list unavailable");
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) throw new Error("Invalid recipe limit");
+  const seen = new Set(), recipes = [];
+  const items = Object.values(workItems).sort((a, b) => String(b?.updatedAt ?? "").localeCompare(String(a?.updatedAt ?? "")));
+  for (const item of items) {
+    let definition;
+    try { definition = reusableWorkDefinition(item); } catch { continue; }
+    const key = `${definition.title}\n${definition.definitionOfDone}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    recipes.push({ workItemId: item.id, ...definition });
+    if (recipes.length >= limit) break;
+  }
+  return recipes;
+}
+
 // A parsed 2xx alone is not proof that this exact proposal was recorded.
 export function confirmsWorkProposal(receipt, command, roomId, memberId) {
   const entry = receipt?.event, data = entry?.data;

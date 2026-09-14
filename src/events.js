@@ -203,8 +203,10 @@ function validateEnvelope(incoming) {
     if (["expectedRevision", "expectedMemberRevision"].includes(key) && (!Number.isSafeInteger(value) || value < 0)) throw new Error(`Invalid ${key}`);
     if (["independentVerificationRequired", "ownerDecisionRequired", "active"].includes(key) && typeof value !== "boolean") throw new Error(`Invalid ${key}`);
     if (["permissions", "paths", "checksClaimed", "capabilities"].includes(key) && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !v.trim() || v.length > 512))) throw new Error(`Invalid ${key}`);
+    // Legacy events (v11-v18) used data.outputs as a plain string; keep that shape valid for strict replay.
+    if (key === "outputs" && typeof value !== "string" && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !v.trim() || v.length > 512))) throw new Error(`Invalid ${key}`);
     if (key === "preferences" && (Array.isArray(value) || typeof value !== "object" || Object.entries(value).some(([k, v]) => typeof k !== "string" || typeof v !== "string" || k.length > 64 || v.length > 64))) throw new Error(`Invalid ${key}`);
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget"].includes(key)) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 

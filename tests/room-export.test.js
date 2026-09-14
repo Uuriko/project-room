@@ -237,3 +237,25 @@ test("client exportRoom/importRoom use the hardened fetch posture and keep the s
   await assert.rejects(redirected.exportRoom());
   await assert.rejects(redirected.importRoom("{}\n"));
 });
+
+test("F8 semantics: export retains deleted-message history; projection and search hide it", async t => {
+  const { request, ownerKey, store } = await serve(t);
+  const cmd = (type, data) => store.command(ownerKey, "commons", { id: randomUUID(), type, data });
+  cmd(T.MESSAGE_POSTED, { messageId: "m1", body: "original secret wording" });
+  cmd(T.MESSAGE_EDITED, { messageId: "m1", body: "revised wording", expectedMessageRevision: 0 });
+  cmd(T.MESSAGE_DELETED, { messageId: "m1", expectedMessageRevision: 1, reason: "Posted in error" });
+  // Projection: tombstone only, edit history purged.
+  const projection = store.room("commons").state.messages.find(m => m.id === "m1");
+  assert.equal(projection.body, null);
+  assert.deepEqual(projection.editHistory, []);
+  assert.ok(projection.deletedAt && projection.deletedBy);
+  // Search never returns tombstoned messages, on either the old or new wording.
+  assert.equal(store.search(ownerKey, "commons", "secret", "messages").messages.length, 0);
+  assert.equal(store.search(ownerKey, "commons", "revised", "messages").messages.length, 0);
+  // Export is the complete history: original post, edit and tombstone event are all present.
+  const ndjson = await (await request("/api/rooms/commons/export", { token: ownerKey })).text();
+  const events = ndjson.trim().split("\n").map(l => JSON.parse(l).event);
+  assert.equal(events.find(e => e.type === T.MESSAGE_POSTED && e.data.messageId === "m1").data.body, "original secret wording");
+  assert.equal(events.find(e => e.type === T.MESSAGE_EDITED && e.data.messageId === "m1").data.body, "revised wording");
+  assert.equal(events.find(e => e.type === T.MESSAGE_DELETED && e.data.messageId === "m1").data.reason, "Posted in error");
+});
