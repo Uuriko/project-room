@@ -249,6 +249,11 @@ carry the claim, and the remaining tiers stay visibly open.
           "tests/usage.test.js"
         ],
         "browser": [],
+        "agent": [],
+        "hosted": []
+      }
+    },
+    {
       "id": "room-review-policy",
       "claim": "The room owner can make independent review and/or an owner decision mandatory; altered client fields cannot disable a mandatory gate, earlier work keeps its recorded requirements, and the proposer sees the requirement locked with the reason.",
       "evidence": {
