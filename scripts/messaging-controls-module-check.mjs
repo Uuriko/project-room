@@ -26,6 +26,9 @@ for(const width of [390,1280])test(`receiving consent is disclosed, stoppable an
   await allow.click();await page.getByText('Receiving allowed for 24 hours.',{exact:true}).waitFor();
   assert.deepEqual(await page.evaluate(()=>window.calls),[{action:'start',data:{connectionId:'one',expectedRevision:0,expectedConnectionRevision:1}}]);
   await page.getByText('Receiving',{exact:true}).click();
+  const allowedCopy=await page.locator('body').textContent();
+  assert.ok(!allowedCopy.includes('Invalid Date'));
+  assert.match(allowedCopy,/Allowed until /);
   await page.getByRole('button',{name:'Stop receiving · SMS',exact:true}).click();
   await page.getByText('Receiving stopped. Saved messages remain.',{exact:true}).waitFor();
   assert.equal(await page.getByRole('button',{name:'Disconnect SMS',exact:true}).count(),1);

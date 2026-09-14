@@ -8,6 +8,15 @@ import { formatShareInvitation, installShareLinks, setShareLinkStatus, invitatio
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
+test("receiving expiry labels never print Invalid Date", async () => {
+  const { formatReceivingExpiry } = await import("../src/messaging-connections-ui.js");
+  assert.equal(formatReceivingExpiry("not-a-date"), "unknown");
+  assert.equal(formatReceivingExpiry(undefined), "unknown");
+  const ms = Date.UTC(2026, 0, 15, 18, 30, 0);
+  assert.notEqual(formatReceivingExpiry(ms), "unknown");
+  assert.doesNotMatch(formatReceivingExpiry(ms), /Invalid Date/);
+});
+
 test("share-link expiry labels use the invitation expiry formatter", () => {
   assert.equal(formatShareLinkExpiry("not-a-date"), "unknown");
   assert.equal(formatShareLinkExpiry(undefined), "unknown");
