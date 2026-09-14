@@ -30,6 +30,10 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
   };
   try {
     const { ownerKey, accountKey, sourceId } = await json(await call('/__test-provision'));
+    // The webhook inbox is mounted: an unknown connection or wrong secret is 401
+    // channel_webhook_denied, not 409 channel_webhook_unavailable, and nothing is journaled.
+    const webhook = await call('/api/inbox/webhooks/unknown-connection', { data: { update_id: 1 }, headers: { 'X-Telegram-Bot-Api-Secret-Token': 'not-the-configured-secret-0123' } });
+    assert.equal((await json(webhook, 401)).error.code, 'channel_webhook_denied');
     assert.equal((await json(await call('/api/health'))).mode, 'cloudflare-staging');
     const version = await json(await call('/api/version'));
     assert.deepEqual(version, { status: 'ok', mode: 'cloudflare-staging', sourceRevision: 'unstamped', buildId: 'unstamped' });
