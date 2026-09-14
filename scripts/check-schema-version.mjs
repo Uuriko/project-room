@@ -1,6 +1,7 @@
 // CI gate: the store schema number has exactly one source,
 // STORE_SCHEMA_VERSION in server/writer-fence.mjs. Everything else that
 // states the number (the README status line, the docs/CURRENT-ROOM.md map,
+// the docs/SERVICE.md status sentence and storage bullet,
 // the writer function name, the fenced version list) must agree with it.
 // The map once said 26 while the store was on 27; this fails that drift.
 import { readFileSync } from "node:fs";
@@ -21,6 +22,8 @@ const stated = (path, pattern) => {
 
 expect("README.md status line (\"Schema N.\")", stated("README.md", /^Live app: .*\bSchema (\d+)\.$/m));
 expect("docs/CURRENT-ROOM.md map row (\"| Schema | N |\")", stated("docs/CURRENT-ROOM.md", /^\| Schema \| (\d+) \|$/m));
+expect("docs/SERVICE.md status sentence (\"Current schema is N\")", stated("docs/SERVICE.md", /\bCurrent schema is (\d+)\b/));
+expect("docs/SERVICE.md storage bullet (\"schema version N\")", stated("docs/SERVICE.md", /^- SQLite WAL, .*\bschema version (\d+)\b/m));
 expect("server/writer-fence.mjs WRITER_FUNCTION suffix", Number(/_v(\d+)$/.exec(WRITER_FUNCTION)?.[1]));
 expect("server/writer-fence.mjs writerVersions last entry", writerVersions.at(-1));
 

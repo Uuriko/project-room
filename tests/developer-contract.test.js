@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { routeDocsDrift } from "../scripts/route-docs-check.mjs";
 
 // D8: the public developer contract (quickstart, OpenAPI, error taxonomy,
 // versions) must reconcile with the implementation so an outside agent can
@@ -46,27 +47,13 @@ test("non-API quickstart endpoints are served by the documented discovery surfac
   for (const path of wellKnown) assert.ok(discovery.includes(`"${path}"`), `${path} missing from deploy/agent-discovery.mjs`);
 });
 
-const routeLine = http.split("\n").find(line => line.includes("^\\/api\\/rooms\\/") && line.includes("(?:\\/("));
-assert.ok(routeLine, "server room-route line found");
-const alternation = /\(\?:\\\/\(([^)]+)\)\)/.exec(routeLine);
-assert.ok(alternation, "server room-route alternation found");
-const implemented = new Set(alternation[1].split("|"));
-assert.ok(implemented.has("commands") && implemented.has("work-sessions"), "route alternation sanity");
-
-test("every OpenAPI room route exists in the server implementation", () => {
-  for (const op of documented) {
-    if (op.path.startsWith("/api/rooms/{roomId}/")) {
-      const rest = op.path.slice("/api/rooms/{roomId}/".length);
-      if (rest === "messages/{messageId}/thread") {
-        assert.ok(http.includes("threadMatch") && http.includes("\\/messages\\/") && http.includes("\\/thread"), "thread route missing from server");
-        continue;
-      }
-      assert.ok(!rest.includes("/"), `unexpected multi-segment openapi route ${op.path}`);
-      assert.ok(implemented.has(rest), `openapi ${op.path}: route "${rest}" not implemented in server/http.mjs`);
-    } else {
-      assert.ok(http.includes(`"${op.path}"`), `openapi ${op.path} not found in server/http.mjs`);
-    }
-  }
+test("every OpenAPI path is a route template the server serves, and every served template is documented", () => {
+  // Shared with the npm run check gate (scripts/route-docs-check.mjs): the
+  // served set is extracted from server/http.mjs string literals and anchored
+  // path regexes, parameters reduced to {} on both sides.
+  const { failures, served, documented } = routeDocsDrift({ http, openapi });
+  assert.deepEqual(failures, []);
+  assert.ok(served >= 60 && served === documented, `served ${served}, documented ${documented}`);
 });
 
 test("documented error categories and codes exist in the implementation", () => {
