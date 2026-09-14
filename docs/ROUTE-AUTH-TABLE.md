@@ -14,7 +14,7 @@ authorization (owner, `manage_members`, member) is enforced inside the
 
 | Method + route | Credential | Store-level authorization |
 |---|---|---|
-| `POST /api/agent-identities` | none (by design) | creates identity only; no room access granted |
+| `POST /api/agent-identities` | none (by design) | creates identity only; no room access granted; bounded by a per-address rate limit and a 5000-row table cap (`409 pilot_limit`) |
 | `POST /api/rooms/:id/identity-links` | room Bearer / session | `manage_members` |
 | `GET /api/rooms/:id/identity-links` | room Bearer / session | `manage_members` |
 | `DELETE /api/rooms/:id/identity-links` | room Bearer / session | `manage_members` |
