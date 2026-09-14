@@ -280,16 +280,20 @@ export function messageAddressesMember(message, member) {
 }
 
 // The input is the current authenticated room snapshot, never a cross-room index.
-export function searchMessages(state, query, limit = 50, { viewer = null, mentionsOnly = false } = {}) {
+// pinnedOnly (backlog follow-up 8) narrows the pool to state.pins before the
+// term applies, so the 50-result cap never hides a pinned match; with no term
+// it lists every pinned message, newest first like any other result.
+export function searchMessages(state, query, limit = 50, { viewer = null, mentionsOnly = false, pinnedOnly = false } = {}) {
   const parsed = parseSearchQuery(query);
   const term = parsed.term.toLocaleLowerCase();
   const only = Boolean(mentionsOnly || parsed.mentionsOnly);
   let pool = (state.messages || []).filter(message => !message.deletedAt);
+  if (pinnedOnly) { const pins = new Set((state.pins ?? []).map(pin => pin.messageId)); pool = pool.filter(message => pins.has(message.id)); }
   if (only) {
     if (!viewer?.id) return { messages: [], total: 0, mentionsOnly: true };
     pool = pool.filter(message => messageAddressesMember(message, viewer));
   }
-  if (!term && !only) return { messages: [], total: 0, mentionsOnly: false };
+  if (!term && !only && !pinnedOnly) return { messages: [], total: 0, mentionsOnly: false };
   const matches = !term ? pool : pool.filter(message =>
     message.body.toLocaleLowerCase().includes(term) ||
     (state.members[message.authorId]?.displayName || "").toLocaleLowerCase().includes(term));

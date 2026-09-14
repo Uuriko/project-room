@@ -216,7 +216,7 @@ const client = new RoomClient({
     $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = "";
     $("#thread-title").textContent = ""; $("#thread-context").textContent = "";
     $("#thread-bar").hidden = true; $("#search-results").hidden = true; $("#new-messages-button").hidden = true;
-    $("#search-mentions")?.setAttribute("aria-pressed", "false"); $("#message-search").value = ""; $("#clear-search").hidden = true;
+    $("#search-mentions")?.setAttribute("aria-pressed", "false"); $("#search-pinned")?.setAttribute("aria-pressed", "false"); $("#message-search").value = ""; $("#clear-search").hidden = true;
     $("#conversation-announcement").textContent = ""; delete $("#message-list").dataset.view;
     for (const id of ["rb-attention-list", "rb-involving-list", "rb-history-list"]) delete $(`#${id}`)._content;
     $("#rb-current-boundary").textContent = ""; $("#rb-history-boundary").textContent = ""; $("#decision-count").textContent = "";
@@ -1143,20 +1143,26 @@ function messageContent(m, cluster = {}, unreadStart = false) {
 function mentionsFilterOn() {
   return $("#search-mentions")?.getAttribute("aria-pressed") === "true";
 }
+// Backlog follow-up 8: "Pinned only" narrows search to state.pins (issue #6 B2).
+// Pins are messages, so work results step aside while it is on.
+function pinnedFilterOn() {
+  return $("#search-pinned")?.getAttribute("aria-pressed") === "true";
+}
 function renderSearch(now = Date.now()) {
   const query = $("#message-search").value;
   const parsed = parseSearchQuery(query);
-  const only = mentionsFilterOn() || parsed.mentionsOnly;
-  $("#clear-search").hidden = !query && !mentionsFilterOn();
-  $("#search-results").hidden = !query.trim() && !only;
-  if (!query.trim() && !only) { $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = ""; return; }
-  const result = searchMessages(state, query, 50, { viewer: session?.member, mentionsOnly: mentionsFilterOn() });
-  const work = only ? { work: [], total: 0 } : searchWork(state, parsed.term || query);
+  const only = mentionsFilterOn() || parsed.mentionsOnly, pinnedOnly = pinnedFilterOn();
+  const active = Boolean(query.trim()) || only || pinnedOnly;
+  $("#clear-search").hidden = !query && !mentionsFilterOn() && !pinnedOnly;
+  $("#search-results").hidden = !active;
+  if (!active) { $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = ""; return; }
+  const result = searchMessages(state, query, 50, { viewer: session?.member, mentionsOnly: mentionsFilterOn(), pinnedOnly });
+  const work = only || pinnedOnly ? { work: [], total: 0 } : searchWork(state, parsed.term || query);
   const total = result.total + work.total, shown = result.messages.length + work.work.length;
-  const noun = only && !parsed.term ? (total === 1 ? "mention" : "mentions") : (total === 1 ? "match" : "matches");
+  const noun = only && !parsed.term ? (total === 1 ? "mention" : "mentions") : pinnedOnly && !parsed.term ? (total === 1 ? "pinned message" : "pinned messages") : (total === 1 ? "match" : "matches");
   setText("#search-count", `${total} ${noun}${total > shown ? ` · ${shown} shown` : ""} in this room`);
   const list = $("#search-list"), focused = list.contains(document.activeElement) ? document.activeElement.dataset.searchKey : null;
-  const empty = only && !parsed.term ? "No one has @-mentioned you yet." : "No matches. Try a name or another phrase.";
+  const empty = only && !parsed.term ? "No one has @-mentioned you yet." : pinnedOnly && !parsed.term ? "Nothing is pinned yet." : pinnedOnly ? "No pinned messages match." : "No matches. Try a name or another phrase.";
   const html = work.work.map(({ item, excerpt }) => `<li><a href="${esc(workHref(item.id))}" data-open-work="${esc(item.id)}" data-search-key="work:${esc(item.id)}"><strong>${esc(item.title)}</strong><span>${esc(excerpt)}</span><small>Work · ${esc(workStatus(item, now).label)}</small></a></li>`).join("")
     + result.messages.filter(m => !isMutedBy(state, session?.member?.id, m.authorId)).map(m => `<li><a href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" data-search-key="message:${esc(m.id)}"><strong>${esc(name(m.authorId))}</strong><span>${esc(m.deletedAt ? "Message deleted" : (m.body ?? "").slice(0, 240))}</span><small>${m.replyToId ? "Open thread at this reply" : "Open in room"}</small></a></li>`).join("") || `<li class="empty-note">${empty}</li>`;
   if (list._content !== html) { list.innerHTML = html; list._content = html; }
@@ -2224,9 +2230,15 @@ $("#search-mentions").addEventListener("click", () => {
   $("#search-mentions").setAttribute("aria-pressed", on ? "false" : "true");
   if (state) renderSearch();
 });
+$("#search-pinned").addEventListener("click", () => {
+  const on = pinnedFilterOn();
+  $("#search-pinned").setAttribute("aria-pressed", on ? "false" : "true");
+  if (state) renderSearch();
+});
 $("#clear-search").addEventListener("click", () => {
   $("#message-search").value = "";
   $("#search-mentions").setAttribute("aria-pressed", "false");
+  $("#search-pinned").setAttribute("aria-pressed", "false");
   renderSearch(); $("#message-search").focus();
 });
 
@@ -2242,6 +2254,7 @@ function roomActionEntries() {
     { id: "write", label: requestMode ? "Open composer" : $("#message-input").value ? "Continue writing" : "Write a message", words: "compose chat draft reply", target: "#message-input" },
     { id: "search", label: "Search room", words: "find messages work", target: "#message-search" },
     { id: "mentions", label: "Mentioned you", words: "mentions addressed @me to:me", target: "#search-mentions", activate: true },
+    { id: "pinned-search", label: "Pinned only", words: "pins pinned search", target: "#search-pinned", activate: true },
     { id: "catch-up", label: "Catch me up", words: "updates attention needs me reminders", target: "#return-brief-panel > summary", reveal: "#return-brief-panel" },
     { id: "work", label: "View work", words: "tasks projects", target: "#work-view-work", activate: true },
     { id: "results", label: "View results", words: "completed approved finished artifacts", target: "#work-view-results", activate: true },

@@ -215,7 +215,11 @@ paths:
   /api/rooms/{roomId}/search:
     get:
       summary: Full-text search over messages and work items
-      description: Case-insensitive substring match. Deleted messages are excluded.
+      description: |
+        Case-insensitive substring match. Deleted messages are excluded.
+        `kind=pinned` searches only messages the room has pinned (issue #6 B2,
+        the `pins` route), in the same order as the other kinds, and skips
+        messages whose author the caller has muted.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: q
@@ -224,7 +228,7 @@ paths:
           schema: { type: string, minLength: 1, maxLength: 80 }
         - name: kind
           in: query
-          schema: { type: string, enum: [all, messages, work], default: all }
+          schema: { type: string, enum: [all, messages, work, pinned], default: all }
       responses:
         '200':
           description: Search results
