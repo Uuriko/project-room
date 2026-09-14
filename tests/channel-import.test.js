@@ -64,7 +64,8 @@ test("a recorded Telegram page imports beside email through the same importer; e
   assert.deepEqual(f.store.inbox.list(f.sessions.guest.token, f.sessions.guest.sessionBinding, { includeChannels: true }).sources, []);
   const view = f.read(edited.source.id, { emailView: true, excerptView: true }).source;
   assert.equal(view.channel.view, "channel-excerpt-v1"); assert.equal(view.channel.connectionState, "active"); assert.equal(view.channel.edited, true);
-  assert.deepEqual(view.capabilities, { draft: true, share: true, send: false });
+  assert.deepEqual(view.capabilities, { draft: true, share: true, send: true }, "an active bot connection with send capability offers replies");
+  assert.equal(view.needsYou, false, "a group message that neither mentions nor replies to the bot is not addressed to the owner");
   assert.deepEqual(view.paragraphs, ["Shall we work on this together?\n\nPrivate budget: 4300."]);
   for (const secret of ["7000000001", "-1001000000001", "900005", "file_id", "BQACAgIAAxkBAAIFixtureDoc"]) assert.equal(JSON.stringify(view).includes(secret), false, secret);
   const attached = f.read(f.sourceId("-1001000000001:42"), { emailView: true }).source;

@@ -22,6 +22,8 @@ Every `/api/*` route is either open by design (below) or requires a credential
 | `POST /api/session` | the access key itself | 401 on a wrong key; the key IS the credential |
 | `POST /api/inbox/webhooks/:connectionId` | capability (per-connection webhook secret header, constant-time hash compare) | 409 `channel_webhook_unavailable` until a webhook inbox is wired; 401 for unknown connections and wrong secrets alike; holds Telegram updates for the owner's import, discloses nothing |
 | `POST /api/inbox/connections/:id/reconnect` | account session + CSRF (owner of the connection) | 401/422 without a session, 404 for another account's connection; imports already-verified updates and stores only the webhook secret's hash |
+| `POST /api/inbox/connections/commands` | account session + CSRF (owner) | 401/422 without a session; only `connection.configure` (own account id) and `connection.disconnect` are accepted; webhook hashes and import pages are refused with 422 |
+| `POST /api/inbox/channel-sends` | account session + CSRF (owner) | 401/422 without a session, 404 for another account's source; only dispatches or reconciles a reply the journal already holds; nothing leaves the process until the Telegram bindings are set |
 | everything else (`/api/rooms/*`, `/api/inbox`, `/api/account-*`) | room credential or account session | 401/422 without one |
 
 ## 2. Capability URLs — the boundaries behind the unlinked URL

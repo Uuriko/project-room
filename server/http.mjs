@@ -4,9 +4,10 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { ServiceError } from "./store.mjs";
 import { clientAddress } from "./deployment.mjs";
 import { validId } from "../src/events.js";
-import { SyntheticInboxTransport } from "./inbox-transport.mjs";
+import { SyntheticInboxTransport, FixtureChannelSender } from "./inbox-transport.mjs";
 import { syncTelegramConnection } from "./channel-import.mjs";
 import { telegramConfig, TelegramLiveStatus, telegramLiveView } from "./channel-adapters/telegram-config.mjs";
+import { TelegramTransport } from "./channel-adapters/telegram-transport.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
@@ -54,8 +55,12 @@ const sessionView = auth => ({
 });
 const exact = (value, fields) => Object.keys(value).length === fields.length && fields.every(field => Object.hasOwn(value, field));
 // Unified inbox connection routes, documented under the same templates in docs/openapi.yaml.
-const connectionRoutes = Object.freeze({ list: "/api/inbox/connections", read: "/api/inbox/connections/{id}",
-  sync: "/api/inbox/connections/{id}/sync", reconnect: "/api/inbox/connections/{id}/reconnect", webhook: "/api/inbox/webhooks/{connectionId}" });
+const connectionRoutes = Object.freeze({ list: "/api/inbox/connections", read: "/api/inbox/connections/{id}", commands: "/api/inbox/connections/commands",
+  sync: "/api/inbox/connections/{id}/sync", reconnect: "/api/inbox/connections/{id}/reconnect", webhook: "/api/inbox/webhooks/{connectionId}",
+  channelSends: "/api/inbox/channel-sends" });
+// Providers the browser may reply through from the Inbox. Email stays out until
+// an outbound email slice exists; its sources report send: false.
+const channelSendProviders = Object.freeze(["telegram-bot"]);
 const routePattern = template => new RegExp("^" + template.replaceAll("/", "\\/").replace(/\{[A-Za-z]+\}/g, "([^/]{1,384})") + "$");
 const webhookSecretHeader = "x-telegram-bot-api-secret-token";
 const rateHash = value => createHash("sha256").update(String(value)).digest("hex");
@@ -63,12 +68,28 @@ const rateHash = value => createHash("sha256").update(String(value)).digest("hex
 export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = 1000, trustedLocalProxy = false,
   loadAsset = path => readFile(new URL(path, assetRoot)), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
-  telegram = telegramConfig(), telegramStatus = new TelegramLiveStatus(),
+  telegram = telegramConfig(), telegramStatus = new TelegramLiveStatus(), channelTransports = null,
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot" }) {
   // Live Telegram bindings are read once (Worker secrets or local env); the
   // config never holds up startup and the card reports "not configured".
   if (typeof telegram?.configured !== "boolean" || !Array.isArray(telegram.bindings)) throw new Error("Telegram configuration must come from telegramConfig()");
   if (trustedLocalProxy && !origin?.startsWith("https://")) throw new Error("The deployment proxy requires a fixed HTTPS origin");
+  if (channelTransports !== null && typeof channelTransports !== "function") throw new Error("channelTransports must be a resolver function");
+  // One send transport per (provider, account, connection): the live Telegram
+  // transport when the bindings are set, otherwise the inert fixture sender. The
+  // browser is told which ("live" or "fixture") so it labels outcomes honestly.
+  const channelSenders = new Map(), sendReceipts = new Map();
+  const resolveChannelTransport = channelTransports ?? (({ provider, accountId, connectionId }) => {
+    if (!channelSendProviders.includes(provider)) return null;
+    const key = JSON.stringify([provider, accountId, connectionId]);
+    if (!channelSenders.has(key)) {
+      if (channelSenders.size >= 2000) channelSenders.clear(); // Idle scopes only hold in-memory receipts; the send journal stays authoritative.
+      const adapter = telegram.configured ? new TelegramTransport({ config: telegram, status: telegramStatus, accountId, connectionId, receipts: sendReceipts })
+        : new FixtureChannelSender({ kind: provider, status: telegramStatus, accountId, connectionId });
+      channelSenders.set(key, { mode: telegram.configured ? "live" : "fixture", transport: new SyntheticInboxTransport(store.inbox, adapter) });
+    }
+    return channelSenders.get(key);
+  });
   if (typeof cookieNamespace !== "string" || !/^[A-Za-z0-9_-]{0,64}$/.test(cookieNamespace))
     throw new Error("Cookie namespace must contain at most 64 letters, digits, underscores or hyphens");
   if (syntheticInboxTransport && (!(syntheticInboxTransport instanceof SyntheticInboxTransport)
@@ -311,6 +332,25 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             status: telegramStatus, importAvailable: Boolean(channelWebhooks) });
           return { ...record, syncAvailable: loopback, live };
         };
+        if (url.pathname === connectionRoutes.commands && req.method === "POST") {
+          // Owner-managed connection records over HTTP: configure (add or update a
+          // bot or mailbox profile) and disconnect ("Remove": saved copies stay,
+          // nothing is deleted). Webhook hashes and import pages never come from here.
+          protectWrite(req, auth, false); rate(`inbox-connections:${auth.account.id}`, 30);
+          const data = await body(req);
+          if (!data || typeof data !== "object" || Array.isArray(data) || !["connection.configure", "connection.disconnect"].includes(data.action) || !validId(data.connectionId))
+            reject(422, "invalid_channel_connection", "Supply a connection.configure or connection.disconnect request.");
+          const result = store.connections.apply(token, data, binding);
+          return json(res, result.duplicate ? 200 : 201, { ...liveRecord(data.connectionId), receipt: result.receipt, duplicate: result.duplicate });
+        }
+        // The transport a channel source's replies go through, if this deployment has one.
+        const channelSendFor = sourceId => {
+          const link = store.inbox.sourceConnection(token, sourceId, binding);
+          if (!link || link.state !== "active" || !link.send) return null;
+          const sender = resolveChannelTransport({ provider: link.provider, accountId: auth.account.id, connectionId: link.connectionId });
+          return sender ? { ...link, ...sender } : null;
+        };
+        const channelSendView = sender => sender ? { provider: sender.provider, mode: sender.mode } : null;
         const connection = routePattern(connectionRoutes.read).exec(url.pathname);
         if (connection && req.method === "GET") return json(res, 200, liveRecord(pathId(connection[1])));
         const trigger = routePattern(connectionRoutes.reconnect).exec(url.pathname);
@@ -351,8 +391,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const source = /^\/api\/inbox\/sources\/([^/]{1,384})(?:\/(share-context|room-results|send-context|sends))?$/.exec(url.pathname);
         if (source && req.method === "GET") {
           const id = pathId(source[1]);
-          if (source[2] === "send-context") return json(res, 200, { ...store.inbox.sendContext(token, id, binding), simulationAvailable: Boolean(syntheticInboxTransport) });
-          if (source[2] === "sends") return json(res, 200, { ...store.inbox.sends(token, id, binding), simulationAvailable: Boolean(syntheticInboxTransport) });
+          if (source[2] === "send-context") return json(res, 200, { ...store.inbox.sendContext(token, id, binding), simulationAvailable: Boolean(syntheticInboxTransport), channelSend: channelSendView(channelSendFor(id)) });
+          if (source[2] === "sends") return json(res, 200, { ...store.inbox.sends(token, id, binding), simulationAvailable: Boolean(syntheticInboxTransport), channelSend: channelSendView(channelSendFor(id)) });
           if (source[2]) {
             const roomId = url.searchParams.get("roomId");
             if (!roomId || url.searchParams.getAll("roomId").length !== 1) reject(422, "invalid_room", "Choose a room.");
@@ -368,6 +408,21 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
           const result = store.inbox.apply(token, await body(req), binding);
           return json(res, result.duplicate ? 200 : 201, result);
+        }
+        if (url.pathname === connectionRoutes.channelSends && req.method === "POST") {
+          // Reply from the Inbox through a channel transport (Telegram today). The
+          // owner's session plus CSRF is the authority; the journal already holds
+          // the queued attempt, so this only dispatches or reconciles it.
+          protectWrite(req, auth, false); rate(`inbox-channel-send:${auth.account.id}`, 30);
+          const data = await body(req);
+          if (!data || !exact(data, ["action", "sourceId", "sendId"]) || !["dispatch", "reconcile"].includes(data.action)
+            || !validId(data.sourceId) || !validId(data.sendId)) reject(422, "invalid_inbox_send", "Choose the existing channel reply.");
+          const sender = channelSendFor(data.sourceId);
+          if (!sender) reject(409, "channel_sending_unavailable", "Sending is not enabled for this channel.");
+          const send = await sender.transport[data.action](token, data.sourceId, data.sendId, binding);
+          const last = telegramStatus.snapshot(auth.account.id, sender.connectionId).lastSendResult;
+          return json(res, 200, { ...store.inbox.sends(token, data.sourceId, binding), simulationAvailable: Boolean(syntheticInboxTransport), channelSend: channelSendView(sender), send,
+            lastSendResult: last ? { at: new Date(last.at).toISOString(), outcome: last.outcome, code: last.code } : null });
         }
         if (url.pathname === "/api/inbox/simulation" && req.method === "POST") {
           protectWrite(req, auth, false); rate(`inbox-simulation:${auth.account.id}`, 60);

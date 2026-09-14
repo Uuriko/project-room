@@ -81,6 +81,11 @@ test("unauthenticated endpoint inventory is pinned", async t => {
   // The owner-authenticated Telegram import trigger is account-session + CSRF scoped, never open.
   const trigger = await raw(origin, "/api/inbox/connections/telegram-fixture/reconnect", { method: "POST", body: { requestId: "boundary-probe" } });
   assert.ok([401, 422].includes(trigger.status), `POST import trigger must refuse without a session, got ${trigger.status}`);
+  // Connection commands and channel sends are the owner's session-scoped writes too.
+  const commands = await raw(origin, "/api/inbox/connections/commands", { method: "POST", body: { action: "connection.disconnect", requestId: "boundary-probe", connectionId: "telegram-fixture", expectedRevision: 0 } });
+  assert.ok([401, 422].includes(commands.status), `POST connection commands must refuse without a session, got ${commands.status}`);
+  const sends = await raw(origin, "/api/inbox/channel-sends", { method: "POST", body: { action: "dispatch", sourceId: "x", sendId: "y" } });
+  assert.ok([401, 422].includes(sends.status), `POST channel sends must refuse without a session, got ${sends.status}`);
 });
 
 test("capability previews never leak room content", async t => {

@@ -56,3 +56,30 @@ export class SyntheticInboxTransport {
     }
   }
 }
+
+// Inert stand-in for a channel provider whose live bindings are not set. It
+// records what would have been sent and answers "accepted" so the reply
+// journey can be exercised end to end; nothing leaves the process and the
+// browser labels every outcome a sample. `mode = "rejected"` rehearses a
+// definitive provider refusal.
+export class FixtureChannelSender {
+  #sent = new Map(); #status; #scope; #now;
+  mode = "accepted";
+  constructor({ kind, status = null, accountId = null, connectionId = null, now = () => Date.now() }) {
+    if (typeof kind !== "string" || !kind) throw new TypeError("A provider kind is required");
+    this.kind = kind; this.#status = status; this.#scope = { accountId, connectionId }; this.#now = now;
+  }
+  async submit({ operationId, envelope }) {
+    const prior = this.#sent.get(operationId);
+    if (prior && prior.previewVersion !== envelope.previewVersion) throw new ServiceError(409, "conflicting_inbox_observation", "This operation key already recorded a different reply.");
+    if (!prior) {
+      const outcome = this.mode === "rejected" ? "rejected" : "accepted";
+      this.#sent.set(operationId, { operationId, previewVersion: envelope.previewVersion, outcome, providerId: outcome === "accepted" ? "fixture:" + operationId : null,
+        ...(outcome === "rejected" ? { code: "fixture_rejected" } : {}) });
+      this.#status?.sent(this.#scope.accountId, this.#scope.connectionId, { at: this.#now(), outcome, code: "fixture" });
+    }
+    return structuredClone(this.#sent.get(operationId));
+  }
+  async lookup({ operationId }) { const receipt = this.#sent.get(operationId); return receipt ? structuredClone(receipt) : null; }
+  get submits() { return this.#sent.size; }
+}
