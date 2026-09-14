@@ -2,6 +2,12 @@
 
 ## 2026-09-14
 
+- Event streams (#6 E1 follow-up): the pump interval is configurable through
+  `ROOM_STREAM_INTERVAL_MS` (integer 50-5000, validated at startup) and its
+  default drops from 1000 ms to 250 ms, so delivery p50 falls from ~500 ms to
+  ~125 ms at one read per stream per interval (`server/deployment.mjs`,
+  `server/http.mjs`, `docs/SERVICE.md`).
+
 - Room review policy (#6 A4 follow-up): the owner sets it from the Room
   instructions dialog (**Review policy**: none, independent review, owner
   decision, or both) instead of a hand-written `room.policy_set` command;

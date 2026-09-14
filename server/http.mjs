@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { ServiceError } from "./store.mjs";
-import { clientAddress } from "./deployment.mjs";
+import { clientAddress, STREAM_INTERVAL_DEFAULT_MS } from "./deployment.mjs";
 import { validId } from "../src/events.js";
 import { SyntheticInboxTransport, FixtureChannelSender } from "./inbox-transport.mjs";
 import { syncTelegramConnection } from "./channel-import.mjs";
@@ -67,7 +67,7 @@ const rateHash = value => createHash("sha256").update(String(value)).digest("hex
 // A lagging stream that still has not drained its final event by now is dropped.
 const STREAM_DRAIN_GRACE_MS = 5000;
 
-export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = 1000, streamQueueCap = 65536, trustedLocalProxy = false,
+export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = STREAM_INTERVAL_DEFAULT_MS, streamQueueCap = 65536, trustedLocalProxy = false,
   loadAsset = path => readFile(new URL(path, assetRoot)), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
   telegram = telegramConfig(), telegramStatus = new TelegramLiveStatus(), channelTransports = null,
@@ -77,6 +77,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   if (typeof telegram?.configured !== "boolean" || !Array.isArray(telegram.bindings)) throw new Error("Telegram configuration must come from telegramConfig()");
   if (trustedLocalProxy && !origin?.startsWith("https://")) throw new Error("The deployment proxy requires a fixed HTTPS origin");
   if (!Number.isInteger(streamQueueCap) || streamQueueCap < 1) throw new Error("Stream queue cap must be a positive integer of bytes");
+  if (!Number.isInteger(streamInterval) || streamInterval < 1) throw new Error("Stream interval must be a positive integer of milliseconds");
   if (channelTransports !== null && typeof channelTransports !== "function") throw new Error("channelTransports must be a resolver function");
   // One send transport per (provider, account, connection): the live Telegram
   // transport when the bindings are set, otherwise the inert fixture sender. The
