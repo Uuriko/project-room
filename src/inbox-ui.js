@@ -86,6 +86,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     replyUI.reset({ preservePending });
     api.reset(); owner = null; epoch++; active = false; browsing = false; selected = null; rows = []; sharing = null; sharingBusy = false;
     drafts.clear(); positions.clear(); retryShare = null; if (!preservePending) persistShare();
+    connectionEpoch++; connectionNotes.clear(); $("#inbox-connections").hidden = true; $("#inbox-connections").replaceChildren();
     $("#workspace-nav").hidden = true; $("#inbox-panel").hidden = true; $("#inbox-share-dialog").close();
     $("#account-rooms-panel").hidden = true;
     resultPreview = null; resultEpoch++; $("#inbox-result-dialog").close(); $("#inbox-results").hidden = true;
@@ -134,10 +135,67 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       return section;
     }));
   }
+  // Connection cards: one per configured connection, with the live Telegram facts
+  // (binding state, webhook, last delivery, last send) and the import trigger.
+  let connectionEpoch = 0; const connectionNotes = new Map();
+  const when = value => value ? new Date(value).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "none yet";
+  const liveLines = live => !live ? [] : [
+    live.state === "configured" ? "Live: configured" : live.state === "invalid" ? "Live: invalid binding · " + live.invalid.join(", ") : "Live: not configured · set " + live.missing.join(", "),
+    { unset: "Webhook: not registered", set: "Webhook: secret stored " + when(live.webhookSetAt), matches: "Webhook: registered " + when(live.webhookSetAt), differs: "Webhook: stored secret differs from the binding · use Reconnect" }[live.webhook],
+    "Last update received: " + when(live.lastUpdateReceivedAt),
+    "Last send: " + (live.lastSendResult ? live.lastSendResult.outcome + (live.lastSendResult.code ? " · " + live.lastSendResult.code : "") + " · " + when(live.lastSendResult.at) : "none yet")
+  ];
+  function renderConnections(records) {
+    const container = $("#inbox-connections");
+    container.hidden = !records.length;
+    container.replaceChildren(...records.map(record => {
+      const c = record.connection, card = document.createElement("article"); card.className = "inbox-connection-card"; card.dataset.connectionId = c.id;
+      card.dataset.liveState = record.live?.state ?? "fixture"; card.dataset.connectionState = c.state;
+      const heading = document.createElement("h2"); heading.className = "form-hint"; heading.textContent = `${channelLabel[c.channel] ?? c.channel} · ${c.identity.displayName || c.identity.handle || c.externalId}`;
+      const status = document.createElement("p"); status.className = "inbox-connection-state"; status.textContent = stateLabel[c.state] ?? c.state;
+      const facts = document.createElement("ul"); facts.className = "inbox-connection-facts";
+      for (const line of liveLines(record.live)) { const item = document.createElement("li"); item.textContent = line; facts.append(item); }
+      card.append(heading, status, facts);
+      if (record.live) {
+        const actions = document.createElement("div"), button = document.createElement("button"), note = document.createElement("span");
+        actions.className = "inbox-connection-actions"; button.type = "button"; button.className = "button ghost"; button.textContent = "Reconnect";
+        button.setAttribute("aria-label", "Reconnect " + heading.textContent); button.disabled = c.state !== "active";
+        note.className = "inbox-connection-note"; note.setAttribute("role", "status"); note.textContent = connectionNotes.get(c.id) ?? "";
+        button.addEventListener("click", () => reconnect(c.id, button, note));
+        actions.append(button, note); card.append(actions);
+      }
+      return card;
+    }));
+  }
+  async function loadConnections() {
+    if (!owns()) return;
+    const turn = ++connectionEpoch;
+    try {
+      const listed = await api.connections(); if (!owns() || turn !== connectionEpoch) return;
+      const records = [];
+      for (const c of listed.connections) { const record = await api.connection(c.id); if (!owns() || turn !== connectionEpoch) return; records.push(record); }
+      renderConnections(records);
+    } catch { if (owns() && turn === connectionEpoch) renderConnections([]); }
+  }
+  async function reconnect(connectionId, button, note) {
+    if (!owns() || button.disabled) return;
+    button.disabled = true; note.textContent = "Reconnecting…";
+    try {
+      const result = await api.reconnectConnection(connectionId, crypto.randomUUID()); if (!owns()) return;
+      const parts = [result.registered ? "Webhook secret registered" : "", result.imported ? `Imported ${result.imported} ${result.imported === 1 ? "update" : "updates"}` : ""].filter(Boolean);
+      connectionNotes.set(connectionId, parts.length ? parts.join(" · ") : "No new updates yet");
+      await loadConnections(); if (result.imported) load();
+    } catch (error) {
+      if (!owns()) return;
+      connectionNotes.set(connectionId, error.code === "channel_webhook_unavailable" ? "Webhook delivery is not configured here." : error.code === "rate_limited" ? "Too many attempts. Try again in a minute." : "Couldn’t reconnect. Try again.");
+      await loadConnections();
+    }
+  }
   async function load() {
     sync(); if (!owns()) return;
     show("inbox"); text("#inbox-status", "Loading…");
     const turn = ++epoch;
+    loadConnections();
     try {
       const result = await api.list(); if (!owns() || turn !== epoch) return;
       rows = result.sources; renderList(); text("#inbox-status", rows.length ? "" : "No messages yet.");

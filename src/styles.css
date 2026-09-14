@@ -719,6 +719,13 @@ summary { overflow-wrap: anywhere; }
 .inbox-sidebar { padding: 1.25rem 1rem; border-right: 1px solid var(--line); }
 .inbox-sidebar header, .inbox-source-heading, .inbox-draft-actions { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .inbox-sidebar h1 { font-size: 1.25rem; margin: 0; }
+.inbox-connections { display: grid; gap: .5rem; margin: .75rem .75rem 0; }
+.inbox-connection-card { display: grid; gap: .3rem; padding: .75rem; border: 1px solid var(--line); border-radius: .5rem; }
+.inbox-connection-card h2 { margin: 0; font-size: .75rem; font-weight: 550; letter-spacing: .02em; text-transform: uppercase; }
+.inbox-connection-state { margin: 0; font-size: .8rem; text-transform: capitalize; }
+.inbox-connection-facts { margin: 0; padding: 0; list-style: none; display: grid; gap: .15rem; font-size: .8rem; color: var(--muted); overflow-wrap: anywhere; }
+.inbox-connection-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-top: .25rem; }
+.inbox-connection-note { font-size: .8rem; color: var(--muted); }
 .inbox-group { display: grid; gap: .1rem; }
 .inbox-group-label { margin: .75rem .75rem .25rem; font-size: .75rem; font-weight: 550; letter-spacing: .02em; text-transform: uppercase; }
 .inbox-row { display: grid; gap: .4rem; width: 100%; padding: 1rem .75rem; border: 0; border-radius: .5rem; background: none; color: inherit; text-align: left; cursor: pointer; font: inherit; }

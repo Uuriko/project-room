@@ -185,6 +185,21 @@ carry the claim, and the remaining tiers stay visibly open.
       }
     },
     {
+      "id": "telegram-live-trigger",
+      "claim": "Live Telegram: bot token and webhook secret read from deployment bindings with a visible not-configured state, a setWebhook registration script, a sendMessage transport with per-attempt idempotency and bounded retry, an owner-authenticated import trigger that works off loopback, and a connection card with status and Reconnect.",
+      "evidence": {
+        "unit": [
+          "tests/telegram-live.test.js",
+          "tests/telegram-adapter.test.js"
+        ],
+        "browser": [
+          "scripts/inbox-telegram-check.mjs"
+        ],
+        "agent": [],
+        "hosted": []
+      }
+    },
+    {
       "id": "telegram-send-preview",
       "claim": "A saved Telegram reply previews its bot and target chat and dispatches only over a matching fixture transport through the shared send journal.",
       "evidence": {
@@ -213,6 +228,7 @@ carry the claim, and the remaining tiers stay visibly open.
 | Unified inbox connections | channel-connection, channel-import, inbox-channel-client | open | open | open |
 | Telegram fixture import | telegram-adapter, channel-import | open | open | open |
 | Inbox connection routes | channel-import | open | open | open |
+| Live Telegram trigger and card | telegram-live, telegram-adapter | inbox-telegram-check | open | open |
 | Telegram send preview | channel-import, inbox-channel-client | open | open | open |
 
 Follow-up scope: claims made in docs beyond the README list (per-feature

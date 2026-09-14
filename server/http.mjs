@@ -6,6 +6,7 @@ import { clientAddress } from "./deployment.mjs";
 import { validId } from "../src/events.js";
 import { SyntheticInboxTransport } from "./inbox-transport.mjs";
 import { syncTelegramConnection } from "./channel-import.mjs";
+import { telegramConfig, TelegramLiveStatus, telegramLiveView } from "./channel-adapters/telegram-config.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
@@ -54,7 +55,7 @@ const sessionView = auth => ({
 const exact = (value, fields) => Object.keys(value).length === fields.length && fields.every(field => Object.hasOwn(value, field));
 // Unified inbox connection routes, documented under the same templates in docs/openapi.yaml.
 const connectionRoutes = Object.freeze({ list: "/api/inbox/connections", read: "/api/inbox/connections/{id}",
-  sync: "/api/inbox/connections/{id}/sync", webhook: "/api/inbox/webhooks/{connectionId}" });
+  sync: "/api/inbox/connections/{id}/sync", reconnect: "/api/inbox/connections/{id}/reconnect", webhook: "/api/inbox/webhooks/{connectionId}" });
 const routePattern = template => new RegExp("^" + template.replaceAll("/", "\\/").replace(/\{[A-Za-z]+\}/g, "([^/]{1,384})") + "$");
 const webhookSecretHeader = "x-telegram-bot-api-secret-token";
 const rateHash = value => createHash("sha256").update(String(value)).digest("hex");
@@ -62,7 +63,11 @@ const rateHash = value => createHash("sha256").update(String(value)).digest("hex
 export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = 1000, trustedLocalProxy = false,
   loadAsset = path => readFile(new URL(path, assetRoot)), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
+  telegram = telegramConfig(), telegramStatus = new TelegramLiveStatus(),
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot" }) {
+  // Live Telegram bindings are read once (Worker secrets or local env); the
+  // config never holds up startup and the card reports "not configured".
+  if (typeof telegram?.configured !== "boolean" || !Array.isArray(telegram.bindings)) throw new Error("Telegram configuration must come from telegramConfig()");
   if (trustedLocalProxy && !origin?.startsWith("https://")) throw new Error("The deployment proxy requires a fixed HTTPS origin");
   if (typeof cookieNamespace !== "string" || !/^[A-Za-z0-9_-]{0,64}$/.test(cookieNamespace))
     throw new Error("Cookie namespace must contain at most 64 letters, digits, underscores or hyphens");
@@ -276,6 +281,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const connectionId = pathId(webhook[1]), secret = req.headers[webhookSecretHeader];
         if (typeof secret !== "string") reject(401, "channel_webhook_denied", "Webhook not accepted.");
         const received = channelWebhooks.receive({ connectionId, secret, body: await body(req) });
+        telegramStatus.received(received.accountId, connectionId, { at: store.now(), count: received.received });
         return json(res, 202, { contractVersion: 1, connectionId, received: received.received, pending: received.pending });
       }
       if (url.pathname === "/api/inbox" || url.pathname.startsWith("/api/inbox/")) {
@@ -298,8 +304,39 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           reject(422, "unsupported_inbox_view", "This inbox view is not supported.");
         if (url.pathname === "/api/inbox" && req.method === "GET") return json(res, 200, store.inbox.list(token, binding, { includeChannels: view !== null }));
         if (url.pathname === connectionRoutes.list && req.method === "GET") return json(res, 200, store.connections.connections(token, binding));
+        // The card's live facts: binding state, webhook hash agreement, last delivery and send. Never values or hashes.
+        const liveRecord = connectionId => {
+          const record = store.connections.connectionRecord(token, connectionId, binding);
+          const live = telegramLiveView({ config: telegram, connection: store.connections.connection(auth.account.id, connectionId), record: record.connection,
+            status: telegramStatus, importAvailable: Boolean(channelWebhooks) });
+          return { ...record, syncAvailable: loopback, live };
+        };
         const connection = routePattern(connectionRoutes.read).exec(url.pathname);
-        if (connection && req.method === "GET") return json(res, 200, { ...store.connections.connectionRecord(token, pathId(connection[1]), binding), syncAvailable: loopback });
+        if (connection && req.method === "GET") return json(res, 200, liveRecord(pathId(connection[1])));
+        const trigger = routePattern(connectionRoutes.reconnect).exec(url.pathname);
+        if (trigger && req.method === "POST") {
+          // Owner-authenticated import trigger for hosted deployments: the account
+          // session plus CSRF is the connection owner's authority, no loopback needed.
+          protectWrite(req, auth, false); rate(`inbox-import:${auth.account.id}`, 30);
+          const connectionId = pathId(trigger[1]), data = await body(req);
+          if (!exact(data, ["requestId"]) || !validId(data.requestId) || data.requestId.length > 100) reject(422, "invalid_channel_update", "Supply a stable request ID.");
+          const current = store.connections.connectionRecord(token, connectionId, binding);
+          if (current.connection.channel !== "telegram") reject(409, "channel_sync_unsupported", "Live import is available for Telegram connections only.");
+          // Re-register: when the bindings are set, the connection accepts deliveries
+          // signed with TELEGRAM_WEBHOOK_SECRET (only its SHA-256 is stored).
+          let registered = false;
+          const stored = store.connections.connection(auth.account.id, connectionId)?.webhook?.secretHash ?? null;
+          if (telegram.configured && current.connection.state === "active" && stored !== telegram.webhookSecretHash()) {
+            store.connections.apply(token, { action: "connection.webhook", requestId: data.requestId + "-webhook", connectionId,
+              expectedRevision: current.connection.revision, secretHash: telegram.webhookSecretHash() }, binding);
+            registered = true;
+          }
+          if (!channelWebhooks && !registered) reject(409, "channel_webhook_unavailable", "Webhook delivery is not configured here.");
+          // Drain what the webhook already verified through the existing sync path.
+          const result = channelWebhooks ? await syncTelegramConnection({ store, token, binding, connectionId, requestId: data.requestId, updates: null, webhooks: channelWebhooks }) : null;
+          return json(res, result && !result.duplicate ? 201 : 200, { ...liveRecord(connectionId), registered, receipt: result?.receipt ?? null,
+            duplicate: result?.duplicate ?? false, source: result?.source ?? null, imported: result?.receipt.imports?.length ?? null });
+        }
         const sync = routePattern(connectionRoutes.sync).exec(url.pathname);
         if (sync && req.method === "POST") {
           protectWrite(req, auth, false); rate(`inbox-sync:${auth.account.id}`, 60);

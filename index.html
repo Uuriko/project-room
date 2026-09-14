@@ -78,7 +78,8 @@
           <header><h1 id="inbox-heading" tabindex="-1">Inbox</h1><button id="inbox-refresh" class="button ghost icon-button" type="button" aria-label="Refresh inbox">↻</button></header>
           <p id="inbox-status" role="status"></p>
           <div id="inbox-list" aria-label="Messages"></div>
-          <p id="inbox-empty" class="form-hint">Sample inbox. Email and Telegram connections are local fixtures for now; no live messages arrive and nothing is sent.</p>
+          <p id="inbox-empty" class="form-hint">Sample inbox. Email connections are local fixtures for now. Telegram can go live once the deployment's bot token and webhook secret bindings are set; until then nothing arrives and nothing is sent.</p>
+          <section id="inbox-connections" class="inbox-connections" aria-label="Connections" hidden></section>
         </aside>
         <button id="inbox-back" class="text-button inbox-back" type="button">← Inbox</button>
         <article id="inbox-reader" class="inbox-reader" hidden>

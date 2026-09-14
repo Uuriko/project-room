@@ -48,6 +48,8 @@ test("unauthenticated endpoint inventory is pinned", async t => {
     ["POST", "/api/invitations/preview", { invitationToken: randomBytes(32).toString("base64url") }, 404],
     ["POST", "/api/guest-agent-links/preview", { linkToken: `gt_${randomBytes(32).toString("base64url")}` }, 410],
     ["POST", "/api/session", { accessKey: randomBytes(32).toString("base64url") }, 401],
+    // Provider webhook: per-connection secret header is the credential; 409 until a webhook inbox is wired.
+    ["POST", "/api/inbox/webhooks/telegram-fixture", { update_id: 1 }, 409],
   ];
   for (const [method, path, body, expected] of open) {
     const res = await raw(origin, path, { method, body });
@@ -76,6 +78,9 @@ test("unauthenticated endpoint inventory is pinned", async t => {
     assert.ok([401, 422].includes(res.status), `GET ${path} must refuse without a session, got ${res.status}`);
     assert.ok(!JSON.stringify(res.json).includes("@"), `${path} refusal must not leak account data`);
   }
+  // The owner-authenticated Telegram import trigger is account-session + CSRF scoped, never open.
+  const trigger = await raw(origin, "/api/inbox/connections/telegram-fixture/reconnect", { method: "POST", body: { requestId: "boundary-probe" } });
+  assert.ok([401, 422].includes(trigger.status), `POST import trigger must refuse without a session, got ${trigger.status}`);
 });
 
 test("capability previews never leak room content", async t => {

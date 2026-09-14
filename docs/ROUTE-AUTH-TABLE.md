@@ -44,3 +44,11 @@ member visibility. `GET /api/rooms/:id/export` streams the full event log;
 
 `tests/route-auth-table.test.js` enforces the headline invariant: every
 mutating room route rejects unauthenticated requests.
+
+## Inbox connection routes (account session, not room credentials)
+
+| Method + route | Credential | Store-level authorization |
+|---|---|---|
+| `POST /api/inbox/connections/:id/reconnect` | account session cookie + `X-Session-Binding` + CSRF (`protectWrite`) | connection owner only (404 for another account's connection); re-registers the `TELEGRAM_WEBHOOK_SECRET` hash when the bindings are set, then drains verified webhook updates through `syncTelegramConnection`; 30/min per account; works off loopback |
+| `POST /api/inbox/connections/:id/sync` | account session + CSRF, loopback clients only | connection owner; recorded fixture pages (local development) |
+| `POST /api/inbox/webhooks/:connectionId` | none (provider callback); `X-Telegram-Bot-Api-Secret-Token` compared in constant time with the stored SHA-256 | 409 `channel_webhook_unavailable` when no webhook inbox is wired; 401 for unknown connections and wrong secrets alike; accepted updates are held, never imported, until the owner triggers an import |

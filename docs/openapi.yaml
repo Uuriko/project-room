@@ -533,7 +533,12 @@ paths:
           schema: { type: string }
       responses:
         '200':
-          description: Connection record plus mode (always fixture), webhook (secret configured) and syncAvailable (loopback client)
+          description: |
+            Connection record plus mode (always fixture), webhook (secret hash
+            stored), webhookSetAt, syncAvailable (loopback client) and, for
+            Telegram connections, `live`: the deployment's binding state and
+            per-connection live facts. `live` names bindings and states only;
+            it never carries a token, a secret or a hash.
           content:
             application/json:
               schema:
@@ -544,8 +549,77 @@ paths:
                   connection: { $ref: '#/components/schemas/ChannelConnection' }
                   mode: { type: string, enum: [fixture] }
                   webhook: { type: boolean }
+                  webhookSetAt: { type: [string, 'null'], format: date-time }
                   syncAvailable: { type: boolean }
+                  live:
+                    oneOf:
+                      - { type: 'null' }
+                      - $ref: '#/components/schemas/TelegramLiveStatus'
         '404': { description: channel_connection_not_found }
+  /api/inbox/connections/{id}/reconnect:
+    post:
+      summary: Owner-authenticated live import trigger (Telegram)
+      description: |
+        Account-session write (X-CSRF-Token, Origin, X-Session-Binding) for the
+        connection's owner; unlike the loopback-only sync route it works from
+        any client, including the hosted Worker. Rate limited to 30 per minute
+        per account. Body is `{ requestId }`.
+
+        1. When `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET` are set and
+           the active connection's stored webhook hash differs from the
+           binding's SHA-256, the hash is (re)stored through the
+           `connection.webhook` journal action (`registered: true`). The
+           secret itself is never stored or returned.
+        2. Updates the webhook route already verified are drained through the
+           same sync path as `/sync` (`updates: null`), one page per request;
+           `receipt.complete: false` means more remain. The same requestId
+           returns the journaled receipt (200, `duplicate: true`).
+
+        Today the drain reads the in-memory webhook inbox; once the durable
+        webhook journal lands it drains that instead, unchanged.
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId]
+              properties:
+                requestId: { type: string, maxLength: 100 }
+      responses:
+        '201':
+          description: A page was imported (possibly empty); connection record plus live status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contractVersion: { type: integer, enum: [1] }
+                  viewer: { type: object }
+                  connection: { $ref: '#/components/schemas/ChannelConnection' }
+                  mode: { type: string, enum: [fixture] }
+                  webhook: { type: boolean }
+                  webhookSetAt: { type: [string, 'null'], format: date-time }
+                  syncAvailable: { type: boolean }
+                  live: { $ref: '#/components/schemas/TelegramLiveStatus' }
+                  registered: { type: boolean, description: The binding's webhook secret hash was stored by this request }
+                  receipt: { type: [object, 'null'], description: page.apply receipt, null when no webhook inbox is wired }
+                  duplicate: { type: boolean }
+                  source: { type: [string, 'null'], enum: [webhook, journal, 'null'] }
+                  imported: { type: [integer, 'null'], description: Sources imported by this page }
+        '200': { description: Exact retry of a journaled import, or a registration with no webhook inbox to drain }
+        '401': { description: account_session_required }
+        '403': { description: csrf_denied or origin_denied }
+        '404': { description: channel_connection_not_found (including another account's connection) }
+        '409': { description: channel_sync_unsupported (not a Telegram connection) or channel_webhook_unavailable (nothing to register and no webhook inbox) }
+        '422': { description: invalid_channel_update (body shape) }
+        '429': { description: rate_limited }
   /api/inbox/connections/{id}/sync:
     post:
       summary: Import one recorded Telegram page
@@ -624,6 +698,27 @@ components:
       required: true
       schema: { type: string }
   schemas:
+    TelegramLiveStatus:
+      type: object
+      description: Live Telegram facts for the connection card. Binding names and states only; never values or hashes.
+      properties:
+        contractVersion: { type: integer, enum: [1] }
+        channel: { type: string, enum: [telegram] }
+        state: { type: string, enum: [not_configured, invalid, configured], description: Deployment binding state }
+        bindings: { type: array, items: { type: string }, description: Binding names the deployment reads (TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET, TELEGRAM_API_BASE) }
+        missing: { type: array, items: { type: string } }
+        invalid: { type: array, items: { type: string } }
+        webhook: { type: string, enum: [unset, set, matches, differs], description: Stored webhook secret hash versus the binding }
+        webhookSetAt: { type: [string, 'null'], format: date-time }
+        lastUpdateReceivedAt: { type: [string, 'null'], format: date-time, description: Last verified webhook delivery in this process }
+        receivedUpdates: { type: integer }
+        lastSendResult:
+          type: [object, 'null']
+          properties:
+            at: { type: string, format: date-time }
+            outcome: { type: string, enum: [accepted, rejected, failed] }
+            code: { type: [string, 'null'] }
+        importAvailable: { type: boolean, description: A webhook inbox is wired so the trigger can drain updates }
     CommandEnvelope:
       type: object
       required: [id, type, data]

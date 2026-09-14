@@ -43,6 +43,17 @@ function validReplyTarget(a, update = false) {
 const connectionStates = ["active", "disconnected", "reconnect_required"], channels = { email: "Email", telegram: "Telegram" };
 const validConnectionRef = c => c === null || (id(c?.id) && Object.hasOwn(channels, c.channel) && boundedText(c.provider, 64)
   && connectionStates.includes(c.state) && Object.keys(c).length === 4);
+const isoTime = v => v === null || (typeof v === "string" && v.length <= 40 && Number.isFinite(Date.parse(v)));
+const liveStates = ["not_configured", "invalid", "configured"], webhookStates = ["unset", "set", "matches", "differs"];
+// Live status carries binding names and states only; a value or hash in it is a contract violation.
+export const validLive = live => live === null || (live?.contractVersion === 1 && live.channel === "telegram" && liveStates.includes(live.state)
+  && [live.bindings, live.missing, live.invalid].every(list => Array.isArray(list) && list.length <= 8 && list.every(n => /^[A-Z][A-Z0-9_]{1,63}$/.test(n)))
+  && webhookStates.includes(live.webhook) && isoTime(live.webhookSetAt) && isoTime(live.lastUpdateReceivedAt) && revision(live.receivedUpdates)
+  && (live.lastSendResult === null || (isoTime(live.lastSendResult.at) && ["accepted", "rejected", "failed"].includes(live.lastSendResult.outcome)
+    && (live.lastSendResult.code === null || boundedText(live.lastSendResult.code, 64))))
+  && typeof live.importAvailable === "boolean");
+export const validConnectionRecord = (v, connectionId) => v.connection?.id === connectionId && validConnection(v.connection, v.viewer.accountId)
+  && v.mode === "fixture" && typeof v.webhook === "boolean" && isoTime(v.webhookSetAt ?? null) && typeof v.syncAvailable === "boolean" && validLive(v.live ?? null);
 export function validConnection(c, accountId) {
   return c?.accountId === accountId && id(c.id) && revision(c.revision) && c.revision > 0 && Object.hasOwn(channels, c.channel)
     && boundedText(c.provider, 64) && boundedText(c.externalId, 2048) && connectionStates.includes(c.state)
@@ -156,8 +167,14 @@ export class InboxClient {
   }
   connections() { return this.request("/connections", {}, v => Array.isArray(v.connections) && v.connections.every(c => validConnection(c, v.viewer.accountId))); }
   connection(connectionId) {
-    return this.request("/connections/" + encodeURIComponent(connectionId), {}, v => v.connection?.id === connectionId
-      && validConnection(v.connection, v.viewer.accountId) && v.mode === "fixture" && typeof v.webhook === "boolean" && typeof v.syncAvailable === "boolean");
+    return this.request("/connections/" + encodeURIComponent(connectionId), {}, v => validConnectionRecord(v, connectionId));
+  }
+  // Owner-authenticated live import trigger (re-registers the webhook secret when
+  // the deployment's Telegram bindings are set, then drains verified updates).
+  reconnectConnection(connectionId, requestId) {
+    return this.request("/connections/" + encodeURIComponent(connectionId) + "/reconnect", { method: "POST", data: { requestId } },
+      v => validConnectionRecord(v, connectionId) && typeof v.registered === "boolean" && typeof v.duplicate === "boolean"
+        && (v.imported === null || revision(v.imported)) && [null, "webhook", "journal", "recording"].includes(v.source));
   }
   read(sourceId) {
     return this.request("/sources/" + encodeURIComponent(sourceId) + "?view=email-excerpt-v1", {}, v => validSource(v.source, sourceId, v.viewer.accountId)
