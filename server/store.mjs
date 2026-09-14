@@ -272,6 +272,7 @@ export class RoomStore {
     this.replyRequests = new ReplyRequests(this);
     this.inbox = new Inbox(this);
     this.email = new EmailImport(this);
+    this.connections = this.email; // Every channel connection (email, Telegram) shares the importer.
     const version = this.storagePlatform.version(this.db);
     // Supported schema versions are the contiguous range 0..STORE_SCHEMA_VERSION.
     // A hand-maintained list dropped v26 when the version bumped to 27,

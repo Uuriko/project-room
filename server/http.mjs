@@ -5,6 +5,7 @@ import { ServiceError } from "./store.mjs";
 import { clientAddress } from "./deployment.mjs";
 import { validId } from "../src/events.js";
 import { SyntheticInboxTransport } from "./inbox-transport.mjs";
+import { syncTelegramConnection } from "./channel-import.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
@@ -51,11 +52,16 @@ const sessionView = auth => ({
   expiresAt: auth.expiresAt
 });
 const exact = (value, fields) => Object.keys(value).length === fields.length && fields.every(field => Object.hasOwn(value, field));
+// Unified inbox connection routes, documented under the same templates in docs/openapi.yaml.
+const connectionRoutes = Object.freeze({ list: "/api/inbox/connections", read: "/api/inbox/connections/{id}",
+  sync: "/api/inbox/connections/{id}/sync", webhook: "/api/inbox/webhooks/{connectionId}" });
+const routePattern = template => new RegExp("^" + template.replaceAll("/", "\\/").replace(/\{[A-Za-z]+\}/g, "([^/]{1,384})") + "$");
+const webhookSecretHeader = "x-telegram-bot-api-secret-token";
 const rateHash = value => createHash("sha256").update(String(value)).digest("hex");
 
 export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = 1000, trustedLocalProxy = false,
   loadAsset = path => readFile(new URL(path, assetRoot)), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
-  resolveRequestSignal = () => null, syntheticInboxTransport = null, cookieNamespace = "",
+  resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot" }) {
   if (trustedLocalProxy && !origin?.startsWith("https://")) throw new Error("The deployment proxy requires a fixed HTTPS origin");
   if (typeof cookieNamespace !== "string" || !/^[A-Za-z0-9_-]{0,64}$/.test(cookieNamespace))
@@ -214,7 +220,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       let remoteAddress;
       try { remoteAddress = resolveClientAddress(req); }
       catch { reject(403, "proxy_denied", "Invalid proxy configuration"); }
-      const url = new URL(req.url, expectedOrigin());
+      const url = new URL(req.url, expectedOrigin()), loopback = ["127.0.0.1", "::1"].includes(remoteAddress);
       if (url.pathname.startsWith("/api/")) res.setHeader("X-Operation-Id", operationId);
       if ((url.pathname === "/api/health" || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode }, req.method === "HEAD");
@@ -260,6 +266,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.writeHead(200, { "Content-Type": `${type}; charset=utf-8` });
         return res.end(req.method === "HEAD" ? undefined : data);
       }
+      const webhook = routePattern(connectionRoutes.webhook).exec(url.pathname);
+      if (webhook) {
+        // Provider callbacks carry a per-connection secret, never an account session.
+        // Verified updates only wait for the owner's import; nothing is stored here.
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        rate(`inbox-webhook:${remoteAddress}`, 120);
+        if (!channelWebhooks) reject(409, "channel_webhook_unavailable", "Webhook delivery is not configured here.");
+        const connectionId = pathId(webhook[1]), secret = req.headers[webhookSecretHeader];
+        if (typeof secret !== "string") reject(401, "channel_webhook_denied", "Webhook not accepted.");
+        const received = channelWebhooks.receive({ connectionId, secret, body: await body(req) });
+        return json(res, 202, { contractVersion: 1, connectionId, received: received.received, pending: received.pending });
+      }
       if (url.pathname === "/api/inbox" || url.pathname.startsWith("/api/inbox/")) {
         // Inbox authority is an account session, never a Room/agent bearer key.
         if (req.headers.authorization) reject(401, "account_session_required", "Use your current account session.");
@@ -278,7 +296,21 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         if (view !== null && (!["email-text-v1", "email-excerpt-v1"].includes(view) || url.searchParams.getAll("view").length !== 1))
           reject(422, "unsupported_inbox_view", "This inbox view is not supported.");
-        if (url.pathname === "/api/inbox" && req.method === "GET") return json(res, 200, store.inbox.list(token, binding, { includeEmail: view !== null }));
+        if (url.pathname === "/api/inbox" && req.method === "GET") return json(res, 200, store.inbox.list(token, binding, { includeChannels: view !== null }));
+        if (url.pathname === connectionRoutes.list && req.method === "GET") return json(res, 200, store.connections.connections(token, binding));
+        const connection = routePattern(connectionRoutes.read).exec(url.pathname);
+        if (connection && req.method === "GET") return json(res, 200, { ...store.connections.connectionRecord(token, pathId(connection[1]), binding), syncAvailable: loopback });
+        const sync = routePattern(connectionRoutes.sync).exec(url.pathname);
+        if (sync && req.method === "POST") {
+          protectWrite(req, auth, false); rate(`inbox-sync:${auth.account.id}`, 60);
+          // Recorded imports are local-only (like sample sending) and fixture-mode only.
+          if (!loopback) reject(403, "channel_sync_local_only", "Recorded imports are local only.");
+          const connectionId = pathId(sync[1]), data = await body(req);
+          if (!exact(data, ["requestId", "updates"]) || !validId(data.requestId) || !(data.updates === null || Array.isArray(data.updates)))
+            reject(422, "invalid_channel_update", "Supply a request ID and recorded updates, or null to import webhook updates.");
+          const result = await syncTelegramConnection({ store, token, binding, connectionId, requestId: data.requestId, updates: data.updates, webhooks: channelWebhooks });
+          return json(res, result.duplicate ? 200 : 201, { ...store.connections.connectionRecord(token, connectionId, binding), receipt: result.receipt, duplicate: result.duplicate, source: result.source });
+        }
         const source = /^\/api\/inbox\/sources\/([^/]{1,384})(?:\/(share-context|room-results|send-context|sends))?$/.exec(url.pathname);
         if (source && req.method === "GET") {
           const id = pathId(source[1]);
@@ -302,7 +334,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         if (url.pathname === "/api/inbox/simulation" && req.method === "POST") {
           protectWrite(req, auth, false); rate(`inbox-simulation:${auth.account.id}`, 60);
-          if (!["127.0.0.1", "::1"].includes(remoteAddress)) reject(403, "inbox_simulation_local_only", "Sample sending is local only.");
+          if (!loopback) reject(403, "inbox_simulation_local_only", "Sample sending is local only.");
           if (!syntheticInboxTransport) reject(409, "inbox_simulation_unavailable", "Sample sending is unavailable here.");
           const data = await body(req);
           if (!data || !exact(data, ["action", "sourceId", "sendId"]) || !["dispatch", "reconcile"].includes(data.action)

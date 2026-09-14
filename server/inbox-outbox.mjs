@@ -29,15 +29,24 @@ export function validateSend(request) {
     || (request.outcome === "rejected" ? request.providerId !== null : !validId(request.providerId))))
     fail(422, "invalid_inbox_send", "Supply a supported, correlated provider observation.");
 }
+// The transport provider a preview is addressed to: synthetic samples are their
+// own provider; channel sources name their connection's provider.
+export const previewProvider = envelope => envelope.provider ?? envelope.adapter;
+const label = p => p.displayName || p.handle || p.id;
 export function sendPreview(accountId, authEpoch, source, data, draft) {
-  if (data.adapter !== "synthetic") fail(409, "email_sending_unavailable", "Real email sending is not enabled.");
+  if (!["synthetic", "telegram"].includes(data.adapter)) fail(409, "channel_sending_unavailable", "Sending is not enabled for this channel.");
   if (!draft || !draft.body.trim() || draft.source_revision !== source.revision)
     fail(409, "stale_inbox_reply", "Save a reply to the current source before sending.");
+  const common = { accountId, authEpoch, sourceId: source.id, sourceRevision: source.revision, draftRevision: draft.revision };
   // Synthetic sources have one sender/recipient and no attachments. A real
   // adapter must qualify its own account, reply-to and attachment semantics.
-  const envelope = { adapter: data.adapter, accountId, authEpoch, sourceId: source.id,
-    sourceRevision: source.revision, draftRevision: draft.revision,
-    from: data.recipient, to: [data.sender], subject: data.subject, body: draft.body, attachments: [] };
+  const envelope = data.adapter === "synthetic"
+    ? { adapter: data.adapter, ...common, from: data.recipient, to: [data.sender], subject: data.subject, body: draft.body, attachments: [] }
+    // Telegram replies go from the connected bot into the originating chat, as a
+    // reply to the imported message. Fixture transport only; no Bot API call here.
+    : { adapter: data.adapter, provider: data.envelope.connection.provider, ...common,
+      from: label(data.envelope.connection.identity), to: [label(data.envelope.message.to[0])], subject: "", body: draft.body, attachments: [],
+      target: { chatId: data.envelope.message.to[0].id, replyToMessageId: data.envelope.message.id.split(":")[1], threadId: data.envelope.message.threadId } };
   const previewVersion = createHash("sha256").update(JSON.stringify(envelope)).digest("hex");
   return { ...envelope, previewVersion };
 }

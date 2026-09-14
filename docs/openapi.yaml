@@ -498,6 +498,114 @@ paths:
                 sequence: { type: integer }
       responses:
         '200': { description: Cursor stored }
+  /api/inbox/connections:
+    get:
+      summary: List the account's channel connections
+      description: |
+        Unified inbox (docs/UNIFIED-INBOX.md). Browser account-session route:
+        authenticated by the account_session cookie plus X-Session-Binding,
+        never by a room or agent bearer key. Returns the generic connection
+        record for every email and Telegram connection the account owns.
+      security: []
+      responses:
+        '200':
+          description: Connection records
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contractVersion: { type: integer, enum: [1] }
+                  viewer: { type: object }
+                  connections:
+                    type: array
+                    items: { $ref: '#/components/schemas/ChannelConnection' }
+        '401': { description: account_session_required }
+  /api/inbox/connections/{id}:
+    get:
+      summary: Read one channel connection
+      description: Account-session route. 404 channel_connection_not_found for another account's connection.
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Connection record plus mode (always fixture), webhook (secret configured) and syncAvailable (loopback client)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contractVersion: { type: integer, enum: [1] }
+                  viewer: { type: object }
+                  connection: { $ref: '#/components/schemas/ChannelConnection' }
+                  mode: { type: string, enum: [fixture] }
+                  webhook: { type: boolean }
+                  syncAvailable: { type: boolean }
+        '404': { description: channel_connection_not_found }
+  /api/inbox/connections/{id}/sync:
+    post:
+      summary: Import one recorded Telegram page
+      description: |
+        Account-session write (X-CSRF-Token, Origin). Loopback clients only
+        (403 channel_sync_local_only) and fixture-mode connections only. Body is
+        { requestId, updates }: `updates` is a recorded array of Telegram Update
+        objects, or null to import updates the webhook already verified. The
+        same requestId returns the journaled receipt (200, duplicate true).
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, updates]
+              properties:
+                requestId: { type: string }
+                updates:
+                  type: [array, 'null']
+                  items: { type: object }
+      responses:
+        '201': { description: Page imported; receipt lists per-source revisions }
+        '200': { description: Exact retry of a journaled sync }
+        '403': { description: csrf_denied or channel_sync_local_only }
+        '409': { description: channel_sync_unsupported, channel_sync_unavailable, channel_webhook_unavailable or a stale cursor }
+        '422': { description: invalid_channel_update }
+  /api/inbox/webhooks/{connectionId}:
+    post:
+      summary: Provider webhook delivery (Telegram)
+      description: |
+        No account session. X-Telegram-Bot-Api-Secret-Token is compared in
+        constant time with the SHA-256 the owner stored through the
+        connection.webhook import action; unknown connections and wrong secrets
+        share one 401. The body is a single Telegram Update or
+        { updates: [...] }. Accepted updates wait in process memory until the
+        owner imports them through the sync route; nothing is stored or fetched.
+        409 channel_webhook_unavailable when the deployment has no webhook inbox.
+      security: []
+      parameters:
+        - name: connectionId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '202': { description: "{ contractVersion, connectionId, received, pending }" }
+        '401': { description: channel_webhook_denied }
+        '409': { description: channel_webhook_unavailable or channel_webhook_backlog }
+        '422': { description: invalid_channel_update }
 components:
   securitySchemes:
     queryAuth:
@@ -545,6 +653,34 @@ components:
         actorId: { type: string }
         at: { type: string, format: date-time }
         data: { type: object }
+    ChannelConnection:
+      type: object
+      description: Generic unified-inbox connection record (docs/UNIFIED-INBOX.md); extra keys are rejected on input.
+      required: [accountId, id, revision, channel, provider, externalId, identity, capabilities, state]
+      properties:
+        accountId: { type: string }
+        id: { type: string }
+        revision: { type: integer, minimum: 1 }
+        channel: { type: string, enum: [email, telegram] }
+        provider: { type: string, enum: [microsoft-graph, telegram-bot] }
+        externalId: { type: string, description: Mailbox id or bot id }
+        identity:
+          type: object
+          required: [kind, id, handle, displayName]
+          properties:
+            kind: { type: string, enum: [mailbox, user, bot, chat, group, channel] }
+            id: { type: string }
+            handle: { type: string }
+            displayName: { type: string }
+        capabilities:
+          type: object
+          required: [read, send, threads, edit]
+          properties:
+            read: { type: boolean }
+            send: { type: boolean }
+            threads: { type: boolean }
+            edit: { type: boolean }
+        state: { type: string, enum: [active, disconnected, reconnect_required] }
     ErrorBody:
       type: object
       properties:
