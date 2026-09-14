@@ -4,7 +4,7 @@ import { ReturnBrief } from "./return-brief.js";
 import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
 import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, memberHandle, memberDoneChip, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
 import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer } from "./workflow.js";
-import { consumeJoinFragment, installShareLinks, canRetryInvitation, invitationUnavailableMessage, invitationDialogTitle } from "./share-links.js";
+import { consumeJoinFragment, installShareLinks, canRetryInvitation, invitationUnavailableMessage, invitationDialogTitle, invitationCapabilityLimits } from "./share-links.js";
 import { installAgentConnections } from "./agent-connections.js";
 import { installRoomInstructions } from "./room-instructions.js";
 import { installReminders } from "./reminders.js";
@@ -834,9 +834,11 @@ function renderInvitation() {
     $("#invitation-display-name").textContent = preview.displayName;
     $("#invitation-member-id").textContent = preview.memberId;
     $("#invitation-role").textContent = humanize(preview.role);
-    $("#invitation-permissions").textContent = preview.permissions.length
+    const granted = preview.permissions.length
       ? preview.permissions.map(humanize).join(", ")
       : "Conversation only";
+    const limits = invitationCapabilityLimits(preview.permissions);
+    $("#invitation-permissions").textContent = limits ? `${granted}. ${limits}` : granted;
     $("#invitation-issuer").textContent = preview.invitedByDisplayName || "Room owner";
     const expiry = new Date(preview.expiresAt);
     $("#invitation-expires").dateTime = expiry.toISOString();

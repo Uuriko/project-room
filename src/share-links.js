@@ -44,6 +44,15 @@ export function invitationDialogTitle(preview, phase) {
   return "Review this invitation";
 }
 
+export function invitationCapabilityLimits(permissions) {
+  const granted = Array.isArray(permissions) ? permissions : [];
+  const cannot = [];
+  if (!granted.includes("manage_members")) cannot.push("invite people or change membership");
+  if (!granted.includes("decide")) cannot.push("make room decisions");
+  if (!cannot.length) return "";
+  return `Cannot ${cannot.join("; ")}.`;
+}
+
 export function invitationUnavailableMessage(preview) {
   const whom = invitationAskWhom(preview);
   if (preview?.status === "expired") {

@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { formatShareInvitation, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, reuseVisibleRoom, invitationUnavailableMessage, formatInvitationExpiry, invitationAskWhom, invitationDialogTitle } from "../src/share-links.js";
+import { formatShareInvitation, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, reuseVisibleRoom, invitationUnavailableMessage, formatInvitationExpiry, invitationAskWhom, invitationDialogTitle, invitationCapabilityLimits } from "../src/share-links.js";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
@@ -65,6 +65,15 @@ test("expired invitation copy names the room owner and includes the expiry time"
   const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   assert.match(app, /invitationUnavailableMessage\(preview\)/);
   assert.doesNotMatch(app, /Ask a current Room administrator/);
+});
+
+test("invitation capability copy names what the membership cannot do", () => {
+  assert.equal(invitationCapabilityLimits([]), "Cannot invite people or change membership; make room decisions.");
+  assert.equal(invitationCapabilityLimits(["steer"]), "Cannot invite people or change membership; make room decisions.");
+  assert.equal(invitationCapabilityLimits(["steer", "manage_members"]), "Cannot make room decisions.");
+  assert.equal(invitationCapabilityLimits(["steer", "manage_members", "decide"]), "");
+  const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(app, /invitationCapabilityLimits\(preview\.permissions\)/);
 });
 
 test("invitation dialog title matches preview status and live regions are atomic", () => {
