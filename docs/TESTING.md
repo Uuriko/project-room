@@ -34,6 +34,14 @@ Keep `--test-concurrency=1` when running the full suite — the checks bind
 ports and share the display. Evidence artifacts land in `test-results/`
 (uploaded by CI on every run).
 
+CI runs `npm run test:browser:ci` instead: the same suite list (read from
+`test:browser`, so there is one source of truth) with the `spec` reporter
+on stdout and a `junit` file at `test-results/browser-junit.xml`. A
+following `if: always()` step, `node scripts/report-test-failures.mjs`,
+turns that file into one `::error` annotation per failed test and a
+Markdown table in the job summary, so the failing test is readable through
+the GitHub API even when the raw log and artifact are not reachable.
+
 ## 3. Load: `node scripts/load-test.mjs [agents] [iterations]`
 
 Spins N concurrent agents against the HTTP API (presence, post, claim,
@@ -62,6 +70,6 @@ flag that stops after the three static gates (syntax, journey-coverage,
 shadow-imports) and skips `node --test`. Full suite stays in CI.
 
 `.github/workflows/test.yml`: `contract` (`npm run check`), `browser`
-(`npm run test:browser`), `cloudflare` (Worker runtime checks). The
+(`npm run test:browser:ci`, see section 2), `cloudflare` (Worker runtime checks). The
 cloudflare job manually enumerates its `.check.mjs` files — keep that list
 in sync when adding Worker checks.
