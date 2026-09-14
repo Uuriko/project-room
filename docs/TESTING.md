@@ -5,8 +5,11 @@ Three suites, three commands. Run in this order when iterating.
 ## 1. Unit + gates: `npm run check`
 
 Syntax-checks every JS file, runs the journey-coverage gate, the
-no-shadow-imports gate, then `node --test` (the `tests/` suite). This is
-what the CI `contract` job runs. See [CONTRACT.md](CONTRACT.md).
+no-shadow-imports gate, the route-documentation gate
+(`scripts/route-docs-check.mjs`: every served `/api` route template is in
+`docs/openapi.yaml`), the schema-version gate, then `node --test` (the
+`tests/` suite). This is what the CI `contract` job runs. See
+[CONTRACT.md](CONTRACT.md).
 
 Run one file: `node --test tests/agent-upgrade.test.js`
 Run one test: `node --test --test-name-pattern="presence" tests/capabilities.test.js`
@@ -45,6 +48,13 @@ numbers (~175 ops/sec, pilot caps: 100 members/room, 10k events).
 
 Proves a live room survives the sqlite backup round-trip (counts + content
 compared after restore).
+
+## Cold start: `node scripts/measure-cold-start.mjs [runs] [--json]`
+
+Times import, fresh store, first request and store reopen under Node (CPU and
+wall) and, when `cloudflare/node_modules` has miniflare, the same requests
+against the real Worker entry (wall). Results and the reading against the
+Worker CPU cap are in [WORKER-LIMITS.md](WORKER-LIMITS.md).
 
 ## Pre-push suggestion
 
