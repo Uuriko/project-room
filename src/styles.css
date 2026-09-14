@@ -871,3 +871,9 @@ summary { overflow-wrap: anywhere; }
 .recipe-preview { display: flex; flex-direction: column; gap: 0.6rem; margin: 0.5rem 0; padding: 0.6rem; border: 1px solid var(--line-soft); border-radius: 8px; background: rgb(255 255 255 / 2%); }
 .recipe-preview-item { display: flex; flex-direction: column; gap: 0.2rem; max-width: 100%; overflow-wrap: anywhere; }
 .recipe-preview-item .recipe-preview-status { color: var(--text-dim, inherit); font-style: italic; }
+/* C2: read-only access preview inside a work card's details. */
+.access-preview { margin: .6rem 0 .2rem; padding: .6rem .8rem; border-left: 3px solid var(--blue, #75a7ff); background: var(--panel, rgba(127,127,127,0.06)); border-radius: 0 6px 6px 0; }
+.access-preview h4 { margin: 0; font-size: .8rem; color: var(--text); }
+.access-preview .work-facts { margin: .5rem 0 0; }
+.access-preview .work-facts > div { grid-template-columns: 7rem 1fr; }
+.access-preview .source-link { display: inline; }

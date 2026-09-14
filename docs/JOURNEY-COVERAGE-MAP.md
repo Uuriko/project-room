@@ -229,13 +229,15 @@ carry the claim, and the remaining tiers stay visibly open.
       }
     },
     {
-      "id": "owner-access-review",
-      "claim": "An owner-only, read-only access review names members and grants, guests with expiry, links with remaining joins, agent identities and connections with state, and last activity, with no token, secret or hash — identically from the route and the CLI.",
+      "id": "access-preview",
+      "claim": "Before a run, a member can read exactly what an agent's one-task view can access: the linked source message id only (never its thread, quoted mentions or imported excerpts), current evidence versions, the declared budget with unknowns labeled, and the server's own omission list; opening the preview starts and grants nothing.",
       "evidence": {
         "unit": [
-          "tests/access-review.test.js"
+          "tests/work-context.test.js"
         ],
-        "browser": [],
+        "browser": [
+          "scripts/access-preview-browser-check.mjs"
+        ],
         "agent": [],
         "hosted": []
       }
@@ -285,9 +287,9 @@ carry the claim, and the remaining tiers stay visibly open.
 | Unified inbox connections | channel-connection, channel-import, inbox-channel-client | open | open | open |
 | Telegram fixture import | telegram-adapter, channel-import | open | open | open |
 | Inbox connection routes | channel-import | open | open | open |
-| Owner access review | access-review | open | open | open |
 | Live Telegram trigger and card | telegram-live, telegram-adapter | inbox-telegram-check | open | open |
 | Telegram send preview | channel-import, inbox-channel-client | open | open | open |
+| What this agent can access (pre-run preview) | work-context | access-preview-browser-check | open | open |
 | Room review policy | work-actions, state-machine-invariants | room-policy-browser-check | open | open |
 | Unified inbox UI (list, reply, connections, needs-you, share) | inbox-unified-routes, inbox-channel-client | inbox-unified-check | open | open |
 

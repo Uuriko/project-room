@@ -6,7 +6,8 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
-import { selectedWorkContext } from "../server/work-context.mjs";
+import { selectedWorkContext, WORK_CONTEXT_OMISSIONS } from "../server/work-context.mjs";
+import { verifyAccessSummary } from "../src/client.js";
 import { nextWorkStep, workActions } from "../src/workflow.js";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { initialRoom } from "../server/bootstrap.mjs";
@@ -218,4 +219,67 @@ test("work CLI prints one selected context and rejects extra arguments without d
   const read = new (Object.getPrototypeOf(async function () {}).constructor)("client", "workId", code + "\nreturn { context, work, source }; ");
   const example = await read(f.client("producer"), "test-handoff");
   assert.equal(example.work.id, "test-handoff"); assert.equal(example.source.id, "test-request");
+});
+
+test("access summary lists only what the member can read; quoted mentions and imported messages add nothing; omissions match the report", async t => {
+  const f = await fixture(t);
+  // A quoted @mention of the accountable agent replying to the source, and an inbox-style excerpt import (server/inbox.mjs command id shape).
+  f.send("owner", T.MESSAGE_POSTED, { messageId: "quoted-mention", replyToId: "test-request", body: "@Test producer please take test-handoff: QUOTED-MENTION-SENTINEL" });
+  f.store.command(f.keys.owner, "commons", { id: "inbox-" + "a".repeat(24), type: T.MESSAGE_POSTED, data: { messageId: "excerpt-import", body: "IMPORTED-EXCERPT-SENTINEL" } });
+  const context = f.view(), summary = context.accessSummary;
+  assert.equal(summary.version, 1); assert.equal(summary.membership, "room");
+  assert.deepEqual(summary.conversation, { scope: "linked_source_message", sourceMessageIds: ["test-request"], sourceAvailability: "available", deliveredByDefault: false,
+    excluded: ["thread", "replies", "mentions", "imported_messages", "other_messages"] });
+  assert.deepEqual(summary.omitted, context.context.omitted, "the preview repeats the exact omissions the read reports");
+  assert.deepEqual(summary.omitted, [...WORK_CONTEXT_OMISSIONS]);
+  assert.deepEqual(summary.evidence, { records: [], retrieved: false });
+  assert.deepEqual(summary.budget, { maxRuntimeMs: "unknown", maxAttempts: "unknown", maxConcurrent: "unknown", maxSpendCents: "unknown", spendCents: "unknown", attemptCount: 0, sessionStatus: "queued" });
+  assert.equal(summary.externalExecution, false); assert.equal(summary.credentials, "none");
+  const text = JSON.stringify(summary);
+  for (const leak of ["SENTINEL", "quoted-mention", "excerpt-import", "UNRELATED"]) assert.equal(text.includes(leak), false, leak);
+  // Every listed record is one the requesting member can already read through the room projection.
+  const snapshot = f.store.snapshot(f.keys.producer, "commons");
+  for (const id of summary.conversation.sourceMessageIds) assert.ok(snapshot.state.messages.some(message => message.id === id));
+  assert.deepEqual([...summary.participantIds].sort(), context.context.participants.map(person => person.id).sort());
+  for (const id of summary.participantIds) assert.ok(Object.hasOwn(snapshot.state.members, id));
+  // Membership is room-wide: a permissionless guest sees the same scope, and the summary is neither wider nor a per-member grant.
+  const { participantIds: guestParticipants, ...guestSummary } = f.view("guest").accessSummary;
+  const { participantIds, ...producerSummary } = summary;
+  assert.deepEqual(guestSummary, producerSummary); assert.ok(guestParticipants.includes("guest")); assert.ok(participantIds.includes("producer"));
+  // Budget and evidence follow the current records exactly, never assumed.
+  const revision = () => f.store.snapshot(f.keys.owner, "commons").state.workItems["test-handoff"].revision;
+  f.send("producer", T.WORK_ACCEPTED, { workItemId: "test-handoff", expectedRevision: revision() });
+  f.store.mutateWorkSession(f.keys.producer, "commons", { requestId: crypto.randomUUID(), workItemId: "test-handoff", expectedRevision: revision(), action: "set_status", status: "processing", budget: { maxSpendCents: 500, maxAttempts: 2 } });
+  const budget = f.view().accessSummary.budget;
+  assert.deepEqual(budget, { maxRuntimeMs: "unknown", maxAttempts: 2, maxConcurrent: "unknown", maxSpendCents: 500, spendCents: "unknown", attemptCount: 1, sessionStatus: "processing" });
+  f.send("producer", T.WORK_STARTED, { workItemId: "test-handoff", expectedRevision: revision() });
+  f.send("producer", T.WORK_COMPLETED, { workItemId: "test-handoff", expectedRevision: revision(), summary: "Synthetic evidence", evidenceUrl: "https://example.invalid/synthetic", evidenceVersion: "v1", producerId: "producer", nextAction: "Review exact version" });
+  const completed = f.view();
+  assert.deepEqual(completed.accessSummary.evidence, { records: [{ record: "receipt", evidenceVersion: "v1", evidenceUrl: "https://example.invalid/synthetic" }], retrieved: false });
+  assert.equal(completed.accessSummary.evidence.records[0].evidenceVersion, completed.work.receipt.evidenceVersion);
+  // A deleted source keeps only its tombstone id; a missing or unlinked source lists no message at all.
+  f.send("owner", T.MESSAGE_DELETED, { messageId: "test-request", expectedMessageRevision: 0 });
+  assert.deepEqual(f.view().accessSummary.conversation.sourceMessageIds, ["test-request"]);
+  assert.equal(f.view().accessSummary.conversation.sourceAvailability, "deleted");
+  const state = structuredClone(snapshot.state), item = state.workItems["test-handoff"];
+  const conversation = () => selectedWorkContext({ state, workItemId: item.id, viewerId: "producer", sequence: snapshot.sequence, now: 2000 }).accessSummary.conversation;
+  item.sourceMessageId = "missing-id";
+  assert.deepEqual([conversation().scope, conversation().sourceMessageIds, conversation().sourceAvailability], ["linked_source_message", [], "unavailable"]);
+  item.sourceMessageId = null;
+  assert.deepEqual([conversation().scope, conversation().sourceMessageIds, conversation().sourceAvailability], ["none", [], "not_linked"]);
+  // The browser client accepts exactly this shape and rejects a widened or mismatched preview before rendering it.
+  assert.equal(verifyAccessSummary(completed, { roomId: "commons", workItemId: "test-handoff" }), completed.accessSummary);
+  const tampered = change => ({ ...completed, accessSummary: { ...completed.accessSummary, ...change } });
+  for (const bad of [
+    { omitted: completed.accessSummary.omitted.slice(1) },
+    { conversation: { ...completed.accessSummary.conversation, sourceMessageIds: ["test-request", "quoted-mention"] } },
+    { conversation: { ...completed.accessSummary.conversation, deliveredByDefault: true } },
+    { evidence: { records: [{ record: "receipt", evidenceVersion: "v2", evidenceUrl: null }], retrieved: false } },
+    { evidence: { ...completed.accessSummary.evidence, retrieved: true } },
+    { budget: { ...completed.accessSummary.budget, maxSpendCents: "unlimited" } },
+    { credentials: "room_key" }, { externalExecution: true }, { membership: "task" }
+  ]) assert.throws(() => verifyAccessSummary(tampered(bad), { roomId: "commons", workItemId: "test-handoff" }), error => error.code === "invalid_response");
+  assert.throws(() => verifyAccessSummary(completed, { roomId: "commons", workItemId: "another" }), error => error.code === "invalid_response");
+  assert.throws(() => verifyAccessSummary({ ...completed, accessSummary: undefined }, { roomId: "commons", workItemId: "test-handoff" }), error => error.code === "invalid_response");
+  assert.throws(() => verifyAccessSummary({ ...completed, evaluatedAt: "later" }, { roomId: "commons", workItemId: "test-handoff" }), error => error.code === "invalid_response");
 });

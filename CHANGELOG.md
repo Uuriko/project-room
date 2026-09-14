@@ -2,12 +2,14 @@
 
 ## 2026-09-14
 
-- Room review policy (#6 A4 follow-up): the owner sets it from the Room
-  instructions dialog (**Review policy**: none, independent review, owner
-  decision, or both) instead of a hand-written `room.policy_set` command;
-  members see the policy in force read only; both views follow live events and
-  refusals stay inline (`src/room-instructions.js`,
-  `scripts/room-policy-browser-check.mjs`).
+- Inspectable context (C2): `GET /api/rooms/:roomId/work-context` carries an
+  `accessSummary` (conversation scope and source message id, evidence
+  references, declared budget, participants and the exact omissions the read
+  already reports); the browser work card gains a read-only "What this agent
+  can access" panel from the same read plus the room roster. Quoted mentions
+  and imported excerpts add nothing; opening the panel starts and grants
+  nothing. Organization allowlists wait on the organization boundary (D1).
+  `docs/WORK-CONTEXT.md` documents the summary.
 
 ## 2026-09-12
 

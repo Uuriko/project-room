@@ -76,6 +76,54 @@ commands. Do not reinterpret a reservation as external permission or evidence th
 another worker stopped. Human decisions remain human. No runtime/MCP/hosted agent
 is installed or launched by this feature.
 
+## Access summary: what this agent can access
+
+Every response carries `accessSummary` (version 1), a read-only statement of
+what this one-task view can deliver to an agent before it starts. It is derived
+from the same committed projection and clock as the rest of the response, lists
+nothing the requesting member cannot already read through this view, and grants
+nothing: membership stays room-wide, so a permissionless guest and the
+accountable agent see the same scope for the same task.
+
+```json
+{
+  "version": 1, "membership": "room",
+  "conversation": { "scope": "linked_source_message", "sourceMessageIds": ["test-request"],
+    "sourceAvailability": "available", "deliveredByDefault": false,
+    "excluded": ["thread", "replies", "mentions", "imported_messages", "other_messages"] },
+  "evidence": { "records": [{ "record": "receipt", "evidenceVersion": "v1", "evidenceUrl": "https://…" }], "retrieved": false },
+  "budget": { "maxRuntimeMs": "unknown", "maxAttempts": 2, "maxConcurrent": "unknown", "maxSpendCents": 500,
+    "spendCents": "unknown", "attemptCount": 1, "sessionStatus": "processing" },
+  "participantIds": ["producer", "reviewer", "owner", "guest"],
+  "omitted": ["other_work", "other_messages", "event_history", "prior_receipts_and_checks", "private_reminders", "read_marker"],
+  "externalExecution": false, "credentials": "none"
+}
+```
+
+- `conversation`: `scope` is `linked_source_message` when the task links a
+  message and `none` otherwise. `sourceMessageIds` lists the exact linked
+  message only when it exists in the room (`sourceAvailability` is `available`,
+  `deleted` for a tombstone whose id is still listed, `unavailable` when the id
+  points at nothing, `not_linked` when the task has no source). It is delivered
+  only on opt-in (`deliveredByDefault: false`). A message that quotes or
+  @mentions the agent, a reply in the thread, or an excerpt imported from a
+  channel never enters the scope: they are not the linked source.
+- `evidence.records`: the current receipt, check, decision and handoff
+  references with their exact `evidenceVersion` and any `evidenceUrl`. They
+  are references; `retrieved: false` states the read fetched no bytes.
+- `budget`: the declared session bounds ([session budgets](SESSION-BUDGETS.md))
+  plus reported spend, attempt count and session status. Undeclared bounds and
+  unreported spend are `"unknown"`, never unlimited and never a grant.
+- `participantIds`: the members `context.participants` resolves for this task.
+- `omitted`: the same list as `context.omitted`, repeated so the preview and
+  the read can never disagree about what is missing.
+
+The browser shows the same summary as a "What this agent can access" panel in a
+work card's details. It is loaded on demand from this read, resolves names from
+the room roster, survives live re-renders until closed, and commits no event.
+Organization allowlists are not part of this summary; they wait on the
+organization boundary decision (D1).
+
 ## Optional help-offer context
 
 For a configured direct client:
