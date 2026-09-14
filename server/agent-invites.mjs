@@ -62,6 +62,13 @@ const DEFAULT_TTL_MINUTES = 1440; // 24h
 const MIN_TTL_MINUTES = 5;
 const MAX_TTL_MINUTES = 43200; // 30d
 const MEMBER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+// Public handle for a stored code: the first 8 hex digits (32 bits) of the
+// stored hash. Enough to pick one row within a room; too short to confirm a
+// guessed legacy 8-symbol code offline (about 2^40 candidates map onto 2^32
+// handles), so the full hash never leaves the server.
+const INVITE_ID_LENGTH = 8;
+const INVITE_ID_PATTERN = /^[a-f0-9]{8}$/;
+const inviteId = storedHash => storedHash.slice(0, INVITE_ID_LENGTH);
 
 export const agentInviteSchema = `
   CREATE TABLE IF NOT EXISTS agent_invite_codes (
@@ -85,7 +92,7 @@ const inviteStatus = (row, now) =>
   : now >= row.expires_at ? "expired" : "active";
 
 const view = (row, now) => ({
-  codeHash: row.code_hash,
+  inviteId: inviteId(row.code_hash),
   roomId: row.room_id,
   createdBy: row.created_by,
   permissions: JSON.parse(row.permissions_json),
@@ -105,8 +112,8 @@ export class AgentInvites {
   // its hash is stored. Callers may pass an explicit permissions list or a
   // standing profile name (chat/contribute/review); the profile maps
   // server-side to a fixed set, so editing the request cannot widen authority.
-  create(token, roomId, { permissions, profile, expiresInMinutes = DEFAULT_TTL_MINUTES, displayName } = {}) {
-    const auth = this.store.authenticate(token, roomId);
+  create(token, roomId, { permissions, profile, expiresInMinutes = DEFAULT_TTL_MINUTES, displayName } = {}, expectedSessionBinding = null) {
+    const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
     if (!memberCan(authority, auth.member.id, "manage_members")) fail(403, "access_denied", "Membership administration grant required");
     let profileName = null;
@@ -146,7 +153,7 @@ export class AgentInvites {
       const expiresAt = now + expiresInMinutes * 60000;
       this.db.prepare(`INSERT INTO agent_invite_codes(code_hash,room_id,created_by,permissions_json,display_name,created_at,expires_at)
         VALUES(?,?,?,?,?,?,?)`).run(stored, roomId, auth.member.id, JSON.stringify(permissions), name, now, expiresAt);
-      return { code, codeHash: stored, roomId, permissions, profile: profileName, displayName: name, createdAt: now, expiresAt };
+      return { code, inviteId: inviteId(stored), roomId, permissions, profile: profileName, displayName: name, createdAt: now, expiresAt };
     });
   }
 
@@ -221,26 +228,28 @@ export class AgentInvites {
     });
   }
 
-  // Owner-only: revoke an unredeemed code. Already-redeemed members are
-  // unaffected; unlink those with identity-unlink.
-  revoke(token, roomId, codeHash) {
-    const auth = this.store.authenticate(token, roomId);
+  // Owner-only: revoke an unredeemed code by the handle list() and create()
+  // return. Already-redeemed members are unaffected; unlink those with
+  // identity-unlink.
+  revoke(token, roomId, id, expectedSessionBinding = null) {
+    const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
     if (!memberCan(authority, auth.member.id, "manage_members")) fail(403, "access_denied", "Membership administration grant required");
-    if (typeof codeHash !== "string" || !/^[a-f0-9]{64}$/.test(codeHash)) fail(422, "invalid_invite", "codeHash is required");
+    if (typeof id !== "string" || !INVITE_ID_PATTERN.test(id)) fail(422, "invalid_invite", "inviteId is required");
     return this.store.transaction(() => {
-      const revoked = this.db.prepare(`UPDATE agent_invite_codes SET revoked_at=?
-        WHERE code_hash=? AND room_id=? AND redeemed_at IS NULL AND revoked_at IS NULL`)
-        .run(this.store.now(), codeHash, roomId);
-      if (revoked.changes !== 1) fail(404, "invite_unavailable", "Invite code not found, already used, or already revoked");
-      return { codeHash, revoked: true };
+      const rows = this.db.prepare(`SELECT code_hash FROM agent_invite_codes
+        WHERE room_id=? AND substr(code_hash,1,?)=? AND redeemed_at IS NULL AND revoked_at IS NULL`).all(roomId, INVITE_ID_LENGTH, id);
+      if (!rows.length) fail(404, "invite_unavailable", "Invite code not found, already used, or already revoked");
+      if (rows.length > 1) fail(409, "invite_ambiguous", "More than one active invite matches this handle; revoke it from the database");
+      this.db.prepare("UPDATE agent_invite_codes SET revoked_at=? WHERE code_hash=?").run(this.store.now(), rows[0].code_hash);
+      return { inviteId: id, revoked: true };
     });
   }
 
-  // Owner-only: audit view. Raw codes are never stored, so only hashes show
-  // (codeHash is the stored lookup hash, which is what revoke() takes).
-  list(token, roomId) {
-    const auth = this.store.authenticate(token, roomId);
+  // Owner-only: audit view. Raw codes are never stored and the stored hash
+  // stays server-side; rows carry the inviteId handle that revoke() takes.
+  list(token, roomId, expectedSessionBinding = null) {
+    const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
     if (!memberCan(authority, auth.member.id, "manage_members")) fail(403, "access_denied", "Membership administration grant required");
     const now = this.store.now();

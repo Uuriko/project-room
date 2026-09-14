@@ -61,7 +61,7 @@ test("unauthenticated endpoint inventory is pinned", async t => {
     ["GET", "/api/rooms/commons/export"],
     ["GET", "/api/rooms/commons/agent-invites"],
     ["POST", "/api/rooms/commons/agent-invites", { permissions: ["steer"] }],
-    ["DELETE", "/api/rooms/commons/agent-invites", { codeHash: "0".repeat(64) }],
+    ["DELETE", "/api/rooms/commons/agent-invites", { inviteId: "0".repeat(8) }],
   ];
   for (const [method, path, body] of guarded) {
     const res = await raw(origin, path, { method, body });
