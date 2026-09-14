@@ -6,6 +6,7 @@ import { rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { surfaceClass } from "../server/action-classes.mjs";
+import { wakeQueueLimits } from "../server/wake-queue.mjs";
 
 function fixture(t) {
   const f = createAcceptanceFixture();
@@ -207,4 +208,41 @@ test("HTTP: unauthenticated and malformed requests are refused; responses carry 
     }
     assert.doesNotMatch(raw, /"(token|accessKey|csrf|sessionBinding|credentialHash)"/);
   }
+});
+
+// Receipts are immutable and never deleted, so the per-member receipt cap must
+// bound pause and resume too - not only enqueue - or repeated pause commands
+// (including pausing an already-paused member) grow the table without bound.
+const receiptCount = (f, memberId) => f.store.db.prepare("SELECT count(*) n FROM wake_queue_commands WHERE room_id='commons' AND member_id=?").get(memberId).n;
+const fillReceipts = (f, memberId) => f.store.transaction(() => {
+  const insert = f.store.db.prepare("INSERT INTO wake_queue_commands VALUES('commons',?,?,'fixture','{}')");
+  for (let n = receiptCount(f, memberId); n < wakeQueueLimits.receipts; n++) insert.run(memberId, `synthetic-${n}`);
+});
+
+test("receipt capacity bounds pause and resume: at the cap both refuse with wake_limit, exact retries still answer", t => {
+  const f = fixture(t);
+  const paused = f.store.wakeQueue.pause(f.keys.owner, "commons", { requestId: randomUUID(), reason: "first" });
+  assert.equal(paused.receipt.alreadyPaused, false);
+  fillReceipts(f, "owner");
+  assert.equal(receiptCount(f, "owner"), wakeQueueLimits.receipts);
+  assert.throws(() => f.store.wakeQueue.pause(f.keys.owner, "commons", { requestId: randomUUID(), reason: "again" }), { code: "wake_limit", status: 409 }, "re-pause at the cap writes no receipt");
+  assert.throws(() => f.store.wakeQueue.resume(f.keys.owner, "commons", { requestId: randomUUID() }), { code: "wake_limit", status: 409 });
+  assert.equal(receiptCount(f, "owner"), wakeQueueLimits.receipts, "refused commands leave the receipt table where it was");
+  assert.equal(f.view().pause.reason, "first", "the refused resume changed nothing");
+  const retry = f.store.wakeQueue.pause(f.keys.owner, "commons", { requestId: paused.receipt.requestId, reason: "first" });
+  assert.equal(retry.duplicate, true, "an exact retry at the cap still returns its historical receipt");
+  assert.equal(receiptCount(f, "owner"), wakeQueueLimits.receipts);
+  assert.equal(f.store.wakeQueue.pause(f.keys.guest, "commons", { requestId: randomUUID(), reason: null }).receipt.state, "paused", "the cap is per member: another member still pauses");
+});
+
+test("HTTP: at a member's receipt cap the owner's pause and resume answer 409 wake_limit", async t => {
+  const f = await httpFixture(t);
+  const owner = await f.login("owner");
+  fillReceipts(f, "producer");
+  await errorCode(await f.pause(owner, "producer", "look first"), 409, "wake_limit");
+  await errorCode(await f.resume(owner, "producer"), 409, "wake_limit");
+  await errorCode(await f.pause(f.keys.producer, "producer"), 409, "wake_limit");
+  assert.equal(receiptCount(f, "producer"), wakeQueueLimits.receipts, "no receipt row was written by the refused commands");
+  assert.equal(f.store.wakeQueue.pauseStatus("commons", "producer"), null);
+  assert.equal((await f.pause(owner, "reviewer", "inspecting")).status, 201, "another member's row is unaffected by the producer's cap");
 });

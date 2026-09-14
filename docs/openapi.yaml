@@ -444,7 +444,9 @@ paths:
         attempts from starting; an attempt already running finishes. A member
         acts on its own row; the signed-in room owner (manage_members) acts on
         any member's. A removed member's row is inert (409 member_inactive).
-        Idempotent per requestId.
+        Idempotent per requestId: every recorded command retains one receipt,
+        and at the member's wake receipt cap new pause and resume commands
+        answer 409 wake_limit while exact retries still return their receipt.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -460,10 +462,10 @@ paths:
                 requestId: { type: string }
                 reason: { type: [string, "null"], maxLength: 200, description: Required (may be null) when action is pause }
       responses:
-        '201': { description: Pause state changed; body as GET plus receipt }
+        '201': { description: Command recorded; body as GET plus receipt (receipt.alreadyPaused / receipt.wasPaused say whether the state changed) }
         '200': { description: Duplicate requestId; historical receipt }
         '403': { description: owner_required }
-        '409': { description: member_inactive or idempotency_conflict }
+        '409': { description: member_inactive, wake_limit (this member's wake receipts are at capacity) or idempotency_conflict }
         '422': { description: invalid_pause_command }
   /api/rooms/{roomId}/provider-heartbeats:
     get:
