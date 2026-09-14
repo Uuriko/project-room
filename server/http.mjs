@@ -87,12 +87,31 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     const segments = rest.slice(1).split("/").map(segment => /^[a-z][a-z-]{0,40}$/.test(segment) ? segment : ":item");
     return `/api/rooms/:roomId/${segments.join("/")}`;
   }
-  const rates = new Map();
+  // Keys are "<family>:<ip or credential...>". Each family keeps at most
+  // RATE_FAMILY_KEYS live entries; a flood of foreign keys evicts that family's
+  // least recently touched entry instead of refusing every new key, so a busy
+  // minute cannot lock out fresh logins or joins, and one family cannot starve
+  // another. Map insertion order doubles as the recency order.
+  const RATE_FAMILY_KEYS = 2000;
+  const rates = new Map(), rateFamilies = new Map();
+  const rateFamily = id => id.slice(0, id.indexOf(":"));
+  const dropRate = (id, family = rateFamily(id)) => {
+    rates.delete(id);
+    const left = rateFamilies.get(family) - 1;
+    if (left > 0) rateFamilies.set(family, left); else rateFamilies.delete(family);
+  };
   function rate(id, maximum) {
     const now = Date.now();
-    for (const [k, v] of rates) if (v.until <= now) rates.delete(k);
-    if (!rates.has(id) && rates.size >= 2000) reject(429, "rate_limited", "Service is busy; retry later");
-    const entry = rates.get(id) || { n: 0, until: now + 60000 };
+    for (const [k, v] of rates) if (v.until <= now) dropRate(k);
+    const family = rateFamily(id);
+    let entry = rates.get(id);
+    if (entry) rates.delete(id);
+    else {
+      if ((rateFamilies.get(family) ?? 0) >= RATE_FAMILY_KEYS)
+        for (const k of rates.keys()) if (rateFamily(k) === family) { dropRate(k, family); break; }
+      rateFamilies.set(family, (rateFamilies.get(family) ?? 0) + 1);
+      entry = { n: 0, until: now + 60000 };
+    }
     entry.n++;
     rates.set(id, entry);
     if (entry.n > maximum) throw new ServiceError(429, "rate_limited", "Too many requests; retry after a minute",
@@ -790,5 +809,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   server.headersTimeout = 10000;
   server.keepAliveTimeout = 5000;
   server.closeStreams = () => { for (const { res } of streams) res.end(); };
+  server.rateLimitKeys = () => rates.size;
   return server;
 }
