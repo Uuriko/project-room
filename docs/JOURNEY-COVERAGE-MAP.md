@@ -255,6 +255,21 @@ carry the claim, and the remaining tiers stay visibly open.
         "agent": [],
         "hosted": []
       }
+    },
+    {
+      "id": "room-spend-allowance",
+      "claim": "The room owner can set a spend allowance over a rolling period; a session start that would commit more than the allowance is refused before anything is written, unknown spend never frees allowance, and every member sees allowance, spent, reserved and headroom from the same ledger the server enforces.",
+      "evidence": {
+        "unit": [
+          "tests/spend-allowance.test.js",
+          "tests/route-auth-table.test.js"
+        ],
+        "browser": [
+          "scripts/spend-allowance-browser-check.mjs"
+        ],
+        "agent": [],
+        "hosted": []
+      }
     }
   ]
 }
@@ -276,6 +291,7 @@ carry the claim, and the remaining tiers stay visibly open.
 | Live Telegram trigger and card | telegram-live, telegram-adapter | inbox-telegram-check | open | open |
 | Telegram send preview | channel-import, inbox-channel-client | open | open | open |
 | Room review policy | work-actions, state-machine-invariants | room-policy-browser-check | open | open |
+| Room spend allowance (owner cap, reserve on start, headroom card) | spend-allowance, route-auth-table | spend-allowance-browser-check | open | open |
 | Unified inbox UI (list, reply, connections, needs-you, share) | inbox-unified-routes, inbox-channel-client | inbox-unified-check | open | open |
 
 Follow-up scope: claims made in docs beyond the README list (per-feature

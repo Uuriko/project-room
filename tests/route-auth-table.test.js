@@ -13,7 +13,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 const MUTATING_ROOM_ROUTES = [
   "identity-links", "agent-invites", "import", "commands", "cursor", "work-sessions",
   "reminders", "agent-connections", "guest-agent-links", "share-links",
-  "share-links-cancel", "invitations",
+  "share-links-cancel", "invitations", "spend-allowance",
 ];
 const REVOKE_ROUTE = "invitations/some-invitation/revoke";
 

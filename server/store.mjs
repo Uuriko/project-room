@@ -6,6 +6,7 @@ import {
   MEMBERSHIP_AUTHORITY_POLICY_VERSION, validId, memberCan, ROOM_POLICY_FIELDS
 } from "../src/events.js";
 import { buildReturnBrief, resolveHistoryWindow, RETURN_BRIEF_DEFAULT_LIMIT } from "./return-brief.mjs";
+import { enforceSpendAllowance } from "./spend-allowance.mjs";
 import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal } from "./invitation-journal.mjs";
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
 import { STORE_SCHEMA_VERSION, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
@@ -189,6 +190,7 @@ const work = "workItemId expectedRevision";
 const shapes = {
   [T.ROOM_CHARTER_UPDATED]: "expectedRevision purpose outputs boundaries escalation",
   [T.ROOM_POLICY_SET]: ROOM_POLICY_FIELDS.join(" "),
+  [T.ROOM_SPEND_ALLOWANCE_SET]: "allowanceCents periodDays",
   [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId identityId",
   [T.MEMBER_ACCESS_CHANGED]: "memberId expectedMemberRevision permissions active",
   [T.MEMBER_STATUS_UPDATED]: "memberId message",
@@ -236,7 +238,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (Buffer.byteLength(JSON.stringify(command)) > 16384) fail(413, "too_large", "Command is too large");
@@ -1739,6 +1741,7 @@ export class RoomStore {
       const cleanup = endingAccess || endingRequest || endingHelp || endingOffer || endingClaim || endingWork || endingSession;
       // At capacity, each remaining membership/request/help/offer/claim and each open work item can still be ended once.
       if ((room.sequence >= 10000 && !cleanup) || (command.type === T.MEMBER_ADDED && Object.keys(room.state.members).length >= 100) || (command.type === T.WORK_PROPOSED && Object.keys(room.state.workItems).length >= 500)) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
+      enforceSpendAllowance(room.state, command, this.now(), fail); // C3: a start that would exceed the room allowance is refused
       const memberAuthorityEvent = [T.MEMBER_ADDED, T.MEMBER_ACCESS_CHANGED].includes(command.type);
       const incoming = event({
         type: command.type, roomId, actorId: auth.member.id, at: new Date(this.now()).toISOString(),

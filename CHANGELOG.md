@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-09-14
+
+- Room spend allowance (issue #6 C3): the owner records `room.spend_allowance_set`
+  (`allowanceCents` over `periodDays`, or null to remove it) through
+  `POST /api/rooms/:id/spend-allowance` (owner-only, 403 for everyone else) or the
+  "Agent spend" card. `store.command()` refuses a `session.started` that would
+  commit more than the allowance (`409 spend_allowance_exceeded`) and one that
+  declares no `maxSpendCents` while an allowance is set
+  (`422 spend_allowance_budget_required`); a live session reserves its declared
+  cap until it stops, a stop below the cap frees the difference, and an attempt
+  that closes without reporting spend holds its cap. `GET /api/rooms/:id/spend-allowance`
+  and the card show allowance, spent, reserved, held and headroom from the same
+  ledger (`spendLedger` in `src/work-item-session.js`). Docs: `docs/SESSION-BUDGETS.md`
+  "Room spend allowance". Tests: `tests/spend-allowance.test.js`,
+  `scripts/spend-allowance-browser-check.mjs`.
+
 ## 2026-09-12
 
 - Agent autonomy: `client/room-agent.mjs` + `scripts/agent-inbox.mjs` CLI now wrap

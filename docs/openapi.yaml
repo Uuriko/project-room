@@ -363,6 +363,67 @@ paths:
                         firstResultAt: { type: string, format: date-time, nullable: true }
                         minutesToFirstClaim: { type: integer, nullable: true }
                         minutesToFirstResult: { type: integer, nullable: true }
+  /api/rooms/{roomId}/spend-allowance:
+    get:
+      summary: Room spend allowance and ledger
+      description: >-
+        Issue #6 C3. The owner-set spend allowance (or null) with the spend
+        ledger over its period (30 days when none is set): spent (reported),
+        reserved (live sessions' remaining declared caps), held (closed
+        attempts that never reported spend keep their cap), committed,
+        headroom and the excess. Every member can read it - each figure
+        derives from work-session state members already see. Takes no
+        query parameters.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Allowance and ledger
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpendAllowanceReport'
+        '422': { description: invalid_spend_allowance (unexpected query parameter) }
+    post:
+      summary: Set or remove the room spend allowance
+      description: >-
+        Owner only; every other member receives 403 owner_required before any
+        command is built. Records room.spend_allowance_set with allowanceCents
+        (integer cents, 0 freezes starts) over periodDays (1-365, default 30),
+        or allowanceCents null to remove the allowance. requestId is an
+        optional idempotency key: the same id with the same input returns the
+        original receipt (200), with different input 409 idempotency_conflict.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [allowanceCents]
+              additionalProperties: false
+              properties:
+                allowanceCents: { type: [integer, 'null'], minimum: 0, maximum: 100000000 }
+                periodDays: { type: integer, minimum: 1, maximum: 365, default: 30 }
+                requestId: { type: string }
+      responses:
+        '201':
+          description: Committed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandReceipt'
+        '200':
+          description: Idempotent duplicate
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandReceipt'
+        '403': { description: owner_required }
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422': { description: invalid_spend_allowance }
   /api/rooms/{roomId}/invitations:
     get:
       summary: Invite-link analytics
@@ -1156,6 +1217,39 @@ components:
         next:
           type: array
           items: { type: object }
+    SpendAllowanceReport:
+      type: object
+      properties:
+        roomId: { type: string }
+        evaluatedThrough: { type: integer }
+        allowance:
+          type: [object, 'null']
+          properties:
+            allowanceCents: { type: integer }
+            periodDays: { type: integer }
+            revision: { type: integer }
+            setById: { type: string }
+            setAt: { type: string, format: date-time }
+        period:
+          type: object
+          properties:
+            days: { type: integer }
+            since: { type: string, format: date-time }
+            until: { type: string, format: date-time }
+        spentCents: { type: integer }
+        reservedCents: { type: integer }
+        heldCents: { type: integer }
+        committedCents: { type: integer }
+        headroomCents: { type: [integer, 'null'], description: allowance minus committed, floored at 0; null without an allowance }
+        overCents: { type: integer }
+        sessions:
+          type: object
+          properties:
+            live: { type: integer }
+            unreserved: { type: integer }
+            attemptsCounted: { type: integer }
+            attemptsUnreported: { type: integer }
+            attemptsHeld: { type: integer }
   responses:
     Conflict:
       description: The world moved — re-read, then decide; never blind-retry

@@ -22,6 +22,7 @@ authorization (owner, `manage_members`, member) is enforced inside the
 | `POST /api/rooms/:id/commands` | room Bearer / session | member; per-command field validation |
 | `POST /api/rooms/:id/cursor` | room Bearer / session | member (own read cursor) |
 | `POST /api/rooms/:id/work-sessions` | room Bearer / session | member |
+| `POST /api/rooms/:id/spend-allowance` | room Bearer / session | room owner only (403 `owner_required` before the command is built); the `room.spend_allowance_set` reducer refuses non-owners on the generic command path as well |
 | `POST /api/rooms/:id/reminders` | room Bearer / session | member |
 | `POST /api/rooms/:id/agent-connections` | room Bearer / session | member |
 | `POST /api/rooms/:id/guest-agent-links` | room Bearer / session | room owner + `manage_members` |
@@ -38,8 +39,10 @@ unauthenticated by design (invitation token in the body is the credential).
 All `GET` routes under `/api/rooms/:id/*` (snapshot, events, export,
 search, presence, capabilities, onboarding-funnel, provider-heartbeats,
 reminders, agent-connections, share-links, invitations, work-*, reply-*,
-charter, diagnostics, return-brief, thread) require a room credential with
-member visibility. `GET /api/rooms/:id/export` returns the full event log as
+charter, diagnostics, return-brief, thread, spend-allowance) require a room
+credential with member visibility. `GET /api/rooms/:id/spend-allowance` (C3)
+returns the room allowance with spent, reserved, held and headroom figures
+derived from work-session state every member already reads. `GET /api/rooms/:id/export` returns the full event log as
 one `Content-Length`-framed JSONL body (never a partial 200);
 `GET /api/rooms/:id/stream` is the SSE feed.
 

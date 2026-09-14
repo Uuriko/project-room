@@ -306,6 +306,20 @@
             <p id="people-hint" class="form-hint"></p>
             <div id="presence-list" class="presence-list"></div>
           </details>
+          <details id="spend-panel" class="panel presence-panel spend-panel" data-spend-allowance="none">
+            <summary class="section-summary"><span class="section-label"><strong>Agent spend</strong></span><span id="spend-summary" class="summary-note"></span></summary>
+            <p id="spend-figures" class="form-hint"></p>
+            <form id="spend-allowance-form" class="spend-allowance-form" hidden>
+              <label>Allowance (USD) <input id="spend-allowance-input" type="number" min="0" max="1000000" step="0.01" inputmode="decimal" required></label>
+              <label>Over (days) <input id="spend-period-input" type="number" min="1" max="365" step="1" value="30" required></label>
+              <div class="spend-allowance-actions">
+                <button class="button secondary" type="submit">Set allowance</button>
+                <button id="spend-allowance-remove" class="button ghost" type="button" hidden>Remove</button>
+              </div>
+              <p class="form-status form-hint" role="status"></p>
+            </form>
+            <p id="spend-note" class="form-hint"></p>
+          </details>
 
 
           <section class="panel work-panel" aria-labelledby="work-title">

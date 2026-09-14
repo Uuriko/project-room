@@ -39,6 +39,13 @@ session. Coordinate with them (post a message) or ask a claim manager.
 Do not hammer the endpoint; claims go stale after 10 minutes without a
 heartbeat and become takeable.
 
+**`spend_allowance_exceeded`** (409) — the room owner set a spend allowance
+and this start (or this spend report) would commit more than is left. Read
+`GET /api/rooms/:id/spend-allowance` for spent, reserved, held and headroom,
+declare a smaller `budget.maxSpendCents`, or ask the owner. A related
+`422 spend_allowance_budget_required` means the room has an allowance and
+the start declared no `maxSpendCents` to reserve.
+
 **`idempotency_conflict`** — this `requestId` was already used with
 *different* input. Recover the original input; never invent a replacement
 ID. (Same ID + same input = safe duplicate, returns the original receipt.)

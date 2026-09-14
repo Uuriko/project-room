@@ -10,6 +10,7 @@ export const EVENT_TYPES = Object.freeze({
   ROOM_CREATED: "room.created",
   ROOM_CHARTER_UPDATED: CHARTER_TYPE,
   ROOM_POLICY_SET: "room.policy_set",
+  ROOM_SPEND_ALLOWANCE_SET: "room.spend_allowance_set",
   MEMBER_ADDED: "member.added",
   MEMBER_JOINED_VIA_INVITATION: "member.joined_via_invitation",
   MEMBER_ACCESS_CHANGED: "member.access_changed",
@@ -54,6 +55,42 @@ export const ROOM_POLICY_FIELDS = Object.freeze(["requireIndependentReview", "re
 export function roomPolicy(state) {
   const stored = state?.room?.policy ?? {};
   return Object.fromEntries(ROOM_POLICY_FIELDS.map(field => [field, stored[field] === true]));
+}
+
+// Room spend allowance (issue #6 C3): the owner can cap what agent sessions
+// in this room may spend over a rolling period. Event-sourced
+// (room.spend_allowance_set) and carried on the projection;
+// server/spend-allowance.mjs refuses session starts that would commit more
+// than the allowance. allowanceCents null clears it. No allowance is the
+// default and the pre-allowance behaviour: sessions bound only themselves.
+export const SPEND_ALLOWANCE_LIMITS = Object.freeze({ allowanceCents: 100000000, periodDays: 365 });
+
+export function spendAllowance(state) {
+  const stored = state?.room?.spendAllowance;
+  if (!stored || !Number.isSafeInteger(stored.allowanceCents) || stored.allowanceCents < 0) return null;
+  return { allowanceCents: stored.allowanceCents, periodDays: stored.periodDays, revision: stored.revision, setById: stored.setById, setAt: stored.setAt };
+}
+
+function setSpendAllowance(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.kind !== "human" || actor.id !== state.room.ownerId) throw new Error("Only the Room owner may set the spend allowance");
+  const { allowanceCents, periodDays } = incoming.data;
+  const clearing = allowanceCents === null;
+  if (!clearing && (!Number.isSafeInteger(allowanceCents) || allowanceCents < 0 || allowanceCents > SPEND_ALLOWANCE_LIMITS.allowanceCents)) {
+    throw new Error(`allowanceCents must be an integer of cents from 0 to ${SPEND_ALLOWANCE_LIMITS.allowanceCents}, or null to remove the allowance`);
+  }
+  if (!clearing && (!Number.isSafeInteger(periodDays) || periodDays < 1 || periodDays > SPEND_ALLOWANCE_LIMITS.periodDays)) {
+    throw new Error(`periodDays must be an integer from 1 to ${SPEND_ALLOWANCE_LIMITS.periodDays}`);
+  }
+  if (clearing && periodDays != null) throw new Error("Removing the allowance takes no period");
+  const previous = state.room.spendAllowance ?? null;
+  state.room.spendAllowance = {
+    allowanceCents: clearing ? null : allowanceCents,
+    periodDays: clearing ? null : periodDays,
+    revision: (previous?.revision ?? 0) + 1,
+    setById: incoming.actorId,
+    setAt: incoming.at
+  };
 }
 
 export const PERMISSIONS = Object.freeze(["steer", "decide", "manage_members", "manage_claims", "accept_work", "complete_work", "verify", "write_external"]);
@@ -150,6 +187,7 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.ROOM_CREATED]: createRoom,
     [EVENT_TYPES.ROOM_CHARTER_UPDATED]: updateCharter,
     [EVENT_TYPES.ROOM_POLICY_SET]: setRoomPolicy,
+    [EVENT_TYPES.ROOM_SPEND_ALLOWANCE_SET]: setSpendAllowance,
     [EVENT_TYPES.MEMBER_ADDED]: addMember,
     [EVENT_TYPES.MEMBER_JOINED_VIA_INVITATION]: joinMemberViaInvitation,
     [EVENT_TYPES.MEMBER_ACCESS_CHANGED]: changeMemberAccess,
