@@ -201,7 +201,9 @@ export class WakeQueue {
   // pause/resume are the member's own stop control - draft class: they only
   // govern when this member's own queued intents may start. Idempotent via the
   // same commands receipt table as enqueue/requeue, and bounded by the same
-  // receipts cap (receiptCapacity) since every landed command retains a row.
+  // receipts cap (receiptCapacity) since every landed command retains a row -
+  // except that a state-changing pause is always admitted, so the stop
+  // control works at the cap.
   pause(token, roomId, request, binding = null, { memberId = null } = {}) {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId, binding);
@@ -212,9 +214,13 @@ export class WakeQueue {
       const fingerprint = this.receipt(request.requestId, fields, request);
       const prior = this.priorReceipt(roomId, subject, request, fingerprint);
       if (prior) return this.outcome(auth, roomId, subject, { receipt: prior, duplicate: true });
-      this.receiptCapacity(roomId, subject);
       const now = this.store.now();
       const existing = this.pauseStatus(roomId, subject);
+      // Stop always works (the reminders precedent for cancel): a pause that
+      // changes state is admitted even at the receipt cap. That adds at most
+      // one receipt per breach, because the matching resume stays capped and
+      // a no-op re-pause of an already-paused member is refused.
+      if (existing) this.receiptCapacity(roomId, subject);
       if (!existing) this.db.prepare("INSERT INTO wake_queue_pause VALUES(?,?,?,?)").run(roomId, subject, now, request.reason);
       const receipt = { requestId: request.requestId, state: "paused", pausedAt: existing ? existing.pausedAt : now, alreadyPaused: Boolean(existing) };
       this.db.prepare("INSERT INTO wake_queue_commands VALUES(?,?,?,?,?)").run(roomId, subject, request.requestId, fingerprint, JSON.stringify(receipt));

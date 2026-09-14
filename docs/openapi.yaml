@@ -444,9 +444,11 @@ paths:
         attempts from starting; an attempt already running finishes. A member
         acts on its own row; the signed-in room owner (manage_members) acts on
         any member's. A removed member's row is inert (409 member_inactive).
-        Idempotent per requestId: every recorded command retains one receipt,
-        and at the member's wake receipt cap new pause and resume commands
-        answer 409 wake_limit while exact retries still return their receipt.
+        Idempotent per requestId: every recorded command retains one receipt.
+        At the member's wake receipt cap a pause that changes state is still
+        recorded (stop always works), while a pause of an already-paused
+        member and every resume answer 409 wake_limit; exact retries still
+        return their receipt.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
