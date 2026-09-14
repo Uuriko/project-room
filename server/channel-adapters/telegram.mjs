@@ -74,7 +74,10 @@ export function readTelegramEnvelope(value) {
 
 // Raw Bot API shapes. Integers become opaque strings; nothing is fetched.
 const integer = value => { requireContract(Number.isSafeInteger(value), "invalid_telegram_update"); return String(value); };
-const at = seconds => { requireContract(Number.isSafeInteger(seconds) && seconds >= 0, "invalid_telegram_update"); return new Date(seconds * 1000).toISOString(); };
+// Unix seconds within the ISO range Date can format (year 9999), so a hostile
+// `date` is a 422 contract error rather than a RangeError from toISOString.
+const maxTelegramSeconds = 253402300799;
+const at = seconds => { requireContract(Number.isSafeInteger(seconds) && seconds >= 0 && seconds <= maxTelegramSeconds, "invalid_telegram_update"); return new Date(seconds * 1000).toISOString(); };
 const name = user => [user.first_name, user.last_name].filter(v => typeof v === "string" && v).join(" ");
 function participant(user, chat) {
   if (user) {

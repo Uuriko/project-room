@@ -185,6 +185,36 @@ carry the claim, and the remaining tiers stay visibly open.
       }
     },
     {
+      "id": "telegram-live-trigger",
+      "claim": "Live Telegram: bot token and webhook secret read from deployment bindings with a visible not-configured state, a setWebhook registration script, a sendMessage transport with per-attempt idempotency and bounded retry, an owner-authenticated import trigger that works off loopback, and a connection card with status and Reconnect.",
+      "evidence": {
+        "unit": [
+          "tests/telegram-live.test.js",
+          "tests/telegram-adapter.test.js"
+        ],
+        "browser": [
+          "scripts/inbox-telegram-check.mjs"
+        ],
+        "agent": [],
+        "hosted": []
+      }
+    },
+    {
+      "id": "unified-inbox-ui",
+      "claim": "One Inbox list across email, Telegram and samples with channel badges, channel and connection filters and a grouping toggle; a Telegram reply from the Inbox through the deployment's channel transport (fixture until the bindings are set) with accepted, rejected and unavailable states; connection add, reconnect and remove over owner-authenticated routes; a needs-you marker for messages addressed to the owner; and Telegram excerpt sharing into a room.",
+      "evidence": {
+        "unit": [
+          "tests/inbox-unified-routes.test.js",
+          "tests/inbox-channel-client.test.js"
+        ],
+        "browser": [
+          "scripts/inbox-unified-check.mjs"
+        ],
+        "agent": [],
+        "hosted": []
+      }
+    },
+    {
       "id": "channel-webhook-journal",
       "claim": "Verified webhook updates are journaled durably per connection and update id, survive a store reopen, drain in cursor order marking exactly the consumed rows imported, and record bounded failed attempts without blocking neighbours.",
       "evidence": {
@@ -242,8 +272,10 @@ carry the claim, and the remaining tiers stay visibly open.
 | Unified inbox connections | channel-connection, channel-import, inbox-channel-client | open | open | open |
 | Telegram fixture import | telegram-adapter, channel-import | open | open | open |
 | Inbox connection routes | channel-import | open | open | open |
+| Live Telegram trigger and card | telegram-live, telegram-adapter | inbox-telegram-check | open | open |
 | Telegram send preview | channel-import, inbox-channel-client | open | open | open |
 | Room review policy | work-actions, state-machine-invariants | room-policy-browser-check | open | open |
+| Unified inbox UI (list, reply, connections, needs-you, share) | inbox-unified-routes, inbox-channel-client | inbox-unified-check | open | open |
 
 Follow-up scope: claims made in docs beyond the README list (per-feature
 acceptance docs) can be folded into the same block; the checker format already
