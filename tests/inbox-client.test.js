@@ -44,14 +44,14 @@ test("provider review client negotiates a narrow view and validates its content,
 });
 test("email reader negotiates bounded account-qualified excerpt support without sending", async () => {
   const source = { id: "mail", revision: 1, adapter: "email", sender: "from@example.test", recipient: "me@example.test", subject: "", paragraphs: ["Plain text"],
-    capabilities: { draft: true, share: true, send: false }, email: { view: "email-excerpt-v1", accountId: "owner", format: "text", connectionState: "active",
+    capabilities: { draft: true, share: true, send: false }, needsYou: true, email: { view: "email-excerpt-v1", accountId: "owner", format: "text", connectionState: "active",
       to: ["me@example.test"], cc: [], bcc: [], attachmentState: "not_loaded", attachmentCount: 0 } };
   const f = setup(async path => {
     assert.equal(path, "/api/inbox/sources/mail?view=email-excerpt-v1");
     return reply({ contractVersion: 1, viewer, source, draft: null });
   });
   assert.equal((await f.client.read("mail")).source.email.format, "text");
-  for (const change of [s => s.email.accountId = "other", s => s.capabilities.send = true,
+  for (const change of [s => s.email.accountId = "other", s => s.capabilities.send = true, s => delete s.needsYou, s => s.needsYou = "yes",
     s => s.capabilities.share = false, s => s.email.view = "email-text-v1", s => s.email.format = "html", s => s.paragraphs = ["A\r\nB"],
     s => s.paragraphs = ["x".repeat(262145)], s => s.email.attachmentCount = -1]) {
     const invalid = structuredClone(source); change(invalid);

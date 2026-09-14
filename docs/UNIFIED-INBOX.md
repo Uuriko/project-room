@@ -1,13 +1,15 @@
 # Unified inbox: one connection record, one adapter interface
 
 The private Inbox reads messages from more than one platform through one
-account-owned import path. Email (Microsoft Graph shaped) and Telegram (Bot API
-shaped) are the first two channels. Email is fixture driven: no credentials,
-network calls or real sends exist for it in this tree. Telegram has a live path
-(webhook in, `sendMessage` out) that is inert until a person sets two
-deployment bindings; no token or secret is in code, tests, docs or journals.
-See [Live Telegram](#live-telegram-zero-spend) below. A live email provider
-still needs its own reviewed slice and separate authorization, exactly as
+account-owned import path and shows them in one list. Email (Microsoft Graph
+shaped) and Telegram (Bot API shaped) are the first two channels. Email is
+fixture driven: no credentials, network calls or real sends exist for it in
+this tree. Telegram has a live path (webhook in, `sendMessage` out, a reply box
+in the Inbox) that is inert until a person sets two deployment bindings; no
+token or secret is in code, tests, docs or journals. See
+[Live Telegram](#live-telegram-zero-spend) and
+[Fixture versus live](#fixture-versus-live) below. A live email provider still
+needs its own reviewed slice and separate authorization, exactly as
 [CURRENT-ROOM.md](CURRENT-ROOM.md) says for a real mailbox.
 
 ## Connection record
@@ -104,6 +106,8 @@ ids stay off that path. Excerpt sharing into a room works like email.
 | `GET /api/inbox/connections/{id}` | One record plus `mode`, `webhook`, `syncAvailable` |
 | `POST /api/inbox/connections/{id}/sync` | Import one recorded Telegram page `{ requestId, updates }` (at most 100 updates); `updates: null` drains the oldest pending journal rows. Each sync consumes at most 50 updates and reports `receipt.complete: false` when more remain, so a larger backlog drains over repeated syncs with fresh request IDs. The page and the acknowledgement of exactly the rows it consumed commit in one transaction. Loopback-only **and** fixture-mode only |
 | `POST /api/inbox/connections/{id}/reconnect` | Owner-authenticated live import trigger (account session, CSRF, 30/min per account) that works from any client, including the hosted Worker. When the Telegram bindings are set it first stores the SHA-256 of `TELEGRAM_WEBHOOK_SECRET` on the connection (`registered: true`), then drains the oldest pending journal rows through the same sync path (`updates: null`). Returns the connection record plus `live` status |
+| `POST /api/inbox/connections/commands` | Owner-managed connection records from the browser: exactly one `connection.configure` (add or update a bot or mailbox profile; the profile's `accountId` must be the caller's) or `connection.disconnect` ("Remove") request as the connections journal takes it. Account session, CSRF, origin, 30/min per account. `connection.webhook` and `page.apply` are refused with 422 `invalid_channel_connection`. Returns the connection record plus `live`, the receipt and `duplicate` |
+| `POST /api/inbox/channel-sends` | Reply from the Inbox: `{ action: "dispatch" \| "reconcile", sourceId, sendId }` drives an attempt the send journal already holds (`send.reserve` over `/api/inbox/commands`) through the deployment's transport for the source's connection. Account session, CSRF, 30/min per account. 409 `channel_sending_unavailable` for email, samples and inactive connections. Returns the send list, the attempt, `channelSend: { provider, mode }` and the connection's `lastSendResult` |
 | `POST /api/inbox/webhooks/{connectionId}` | Provider callback. `X-Telegram-Bot-Api-Secret-Token` is compared in constant time against the SHA-256 stored by `connection.webhook`; accepted updates are journaled durably (`pending_channel_updates`) until the owner syncs, and a redelivered `update_id` is a no-op in every status. At most 500 pending rows per connection (409 `channel_webhook_backlog`, delivery refused unchanged). Inert unless the server is started with a `ChannelWebhookInbox` |
 
 `GET /api/inbox/connections/{id}` adds `webhookSetAt` and, for Telegram, a
@@ -125,7 +129,13 @@ recording (or is a drain, `updates: null`); different `updates` answer 409
 `idempotency_conflict`.
 
 `GET /api/inbox?view=…` lists channel sources with a `connection`
-reference; clients without a negotiated view still see samples only.
+reference and a `needsYou` flag (see [Needs you](#needs-you)); clients without
+a negotiated view still see samples only. `GET /api/inbox/sources/{id}/sends`
+and `/send-context` add `channelSend`: `null` when this deployment has no
+transport for the source's connection, otherwise `{ provider, mode }` with
+`mode` `live` (bindings set) or `fixture` (inert sender). The Telegram excerpt
+view's `capabilities.send` is `true` on an active bot connection whose record
+allows sending; email stays `false`.
 
 ## Send
 
@@ -137,6 +147,28 @@ provider (`synthetic` for samples, `telegram-bot` for Telegram); the fixture
 `RecordedTelegramBot` doubles as that transport and records what it would have
 sent. The queued / unknown / accepted / rejected journal is unchanged. The
 browser shows no send panel for channel sources in this pilot.
+
+From the browser, a Telegram source with `capabilities.send` shows the same
+reply controls as a sample: save the draft, **Preview reply**, then **Send**.
+The dialog and the status line say which transport answers: "Reply on
+Telegram" / "Sent by the bot into the chat as a reply" when the bindings are
+set, "Sample Telegram reply" / "Sample only · Telegram is not configured here,
+nothing is sent" otherwise. `POST /api/inbox/channel-sends` dispatches or
+reconciles the queued attempt; the states are the journal's:
+
+| Journal state | Browser (live) | Browser (fixture) | Cause |
+| --- | --- | --- | --- |
+| `queued` | Reply ready · not sent | Sample reply ready · not sent | `send.reserve` |
+| `unknown` | Outcome unknown · check status | Sample outcome unknown | dispatch started; Telegram unreachable, busy or 5xx after retries (`lastSendResult.outcome = failed`, `code` network / rate_limited / server_error) |
+| `accepted` | Accepted by Telegram · delivery unconfirmed | Sample accepted · nothing left this server | `sendMessage` ok; `providerId` `telegram:<chat>:<message>` (`fixture:<operation>` for the fixture) |
+| `rejected` | Rejected by Telegram · not sent | Sample rejected · not sent | 400/403 from Telegram, `lastSendResult.code` is the slugged description |
+| `cancelled` | Cancelled · not sent | Sample cancelled · not sent | `send.cancel` while queued |
+
+Route-level refusals use the shared codes: 409 `channel_sending_unavailable`
+(email, samples, disconnected connection, or Telegram still unavailable after
+retries) and 409 `channel_connection_unavailable` (Telegram refused the bot
+token). Email sources show "Sending unavailable" until an outbound email slice
+exists (B23).
 
 `server/channel-adapters/telegram-transport.mjs` is the live counterpart:
 `telegramSendAdapter({ config, fixture, fetch })` returns the fixture bot when
@@ -161,6 +193,94 @@ forum `message_thread_id`) through an injected `fetch`:
   send journal for reconciliation. The token appears only in the request URL
   and is redacted from every error string.
 
+## Connection lifecycle: configure, reconnect, remove
+
+Every connection is a record in the account's connections journal
+(`server/email-import.mjs`, `store.connections`). The journal is append-only;
+"remove" is a state change, never a deletion, so imported messages remain
+readable as saved copies.
+
+| Step | Command | From the browser | Effect |
+| --- | --- | --- | --- |
+| Add | `connection.configure` with `expectedRevision: 0` and a profile at revision 1 | **Add connection** under the connection cards: Telegram bot (connection id, bot id, bot username, optional name) or email mailbox (connection id, address, optional name) | `state: active`; at most 20 connections per account; one connection per bot id or mailbox (`email_mailbox_exists`) |
+| Update or re-add | `connection.configure` with the current revision | Add connection with an existing id | Profile revision moves; provider and external id may not change (`email_mailbox_changed`); a disconnected record becomes active again |
+| Register the webhook secret | `connection.webhook` (server side only) | **Reconnect** on a Telegram card when the bindings are set | Stores the SHA-256 of `TELEGRAM_WEBHOOK_SECRET`; the record's revision does not move |
+| Import | `page.apply` under the import authority | **Reconnect** (drains verified webhook updates) | New or edited sources appear in the list |
+| Remove | `connection.disconnect` | **Remove**, then **Confirm remove** (or **Keep**) | `state: disconnected`; cards lose Reconnect and Remove; sources show "Disconnected · saved copy"; replies are refused with `channel_sending_unavailable`; a later `connection.configure` re-adds it |
+
+Authorization epochs: a connection whose `authEpoch` differs from the
+account's current epoch reads `reconnect_required` and cannot import or send
+until it is configured again.
+
+## Webhook contract
+
+- URL: `https://<room origin>/api/inbox/webhooks/<connection id>`, `POST`,
+  JSON body. Telegram sends one `Update` per request; the route also accepts
+  `{ "updates": [ … ] }` (up to 100) for tests and replays.
+- Authentication: header `X-Telegram-Bot-Api-Secret-Token`, compared in
+  constant time with the SHA-256 the connection stores. Unknown connection and
+  wrong secret both answer 401 `channel_webhook_denied`; nothing else is
+  disclosed.
+- Answers: 202 `{ connectionId, received, pending }` when the updates are
+  held; 409 `channel_webhook_unavailable` when the deployment has no
+  `ChannelWebhookInbox`; 409 `channel_webhook_backlog` when the per-connection
+  hold is full (Telegram retries later); 422 `invalid_channel_update` for a
+  body that is not an update; 413 above 16 KB; 120 requests per minute per
+  client address.
+- Journaling, not importing: a verified update is written durably to
+  `pending_channel_updates` (one row per connection and `update_id`; a
+  redelivered id is a no-op; at most 500 pending rows per connection) and
+  waits until the owner presses **Reconnect** (or calls the trigger). Import
+  runs under the import authority through the same `page.apply` path as
+  recorded fixtures, so duplicates and edits are handled by the journal. See
+  [Webhook journal lifecycle](#webhook-journal-lifecycle).
+- Allowed update kinds: `message`, `edited_message`, `channel_post`; callback
+  queries and member changes are skipped by `changes()` and refused by
+  `normalize()`.
+
+## Secrets handling
+
+Names only; values never appear in code, tests, docs, journals, logs or API
+responses.
+
+| Name | Where it lives | Who reads it | Never |
+| --- | --- | --- | --- |
+| `TELEGRAM_BOT_TOKEN` | Worker secret / local env | `telegramConfig()` accessor; the transport puts it in the outbound URL only | in a response, a card, a journal or an error string (`redactTelegram`) |
+| `TELEGRAM_WEBHOOK_SECRET` | Worker secret / local env, and Telegram's `setWebhook` call | `connection.webhook` stores only its SHA-256; the webhook route compares hashes | in a response or card (`live.webhook` reports unset / set / matches / differs only) |
+| `TELEGRAM_API_BASE` | optional var | `telegramConfig()` | — |
+| Account access keys, session cookies, CSRF | browser + server session tables | every inbox route (`protectWrite`) | in URLs or bodies of inbox routes |
+
+The **Add connection** form asks for a bot id and username, never a token; the
+form says so. Email fixtures carry no credentials at all.
+
+## Fixture versus live
+
+| Piece | Today | Becomes live when |
+| --- | --- | --- |
+| Email inbound | Recorded Graph fixtures; cards read "Inbound: fixture mailbox · not yet routed" | Cloudflare Email Routing hands mail to the Worker (#144: `server/mime-message.mjs`, `server/email-routing-inbound.mjs`, `docs/EMAIL-ROUTING.md`) and the Worker's `email()` handler is mounted |
+| Email outbound | None; sources say "Sending unavailable", `capabilities.send: false` | An outbound email slice (B23) |
+| Telegram inbound | Webhook route verifies and journals (`pending_channel_updates`); Reconnect imports | `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET` are set and `setWebhook` is registered |
+| Telegram outbound | `FixtureChannelSender` answers "accepted" locally; labels say "Sample"; `lastSendResult.code = fixture` | The same two bindings; `TelegramTransport` posts `sendMessage` |
+| Connection records | Real journal rows, live today | — |
+| Needs-you marker, filters, sharing | Live today over whatever is imported | — |
+
+## Needs you
+
+A message "needs you" when it addresses the account owner directly, decided by
+the pure selector `inboxNeedsYou` in `server/inbox.mjs` (a view over stored
+facts, never a stored flag, in the same spirit as `needsAttention` in
+`src/work-selectors.js`):
+
+- Email: the connection's mailbox address or one of its aliases is in **To**
+  (CC alone does not count).
+- Telegram: the message came from a private chat with the bot, mentions the
+  bot's `@handle`, or replies to a message the bot itself sent (a `providerId`
+  the send journal recorded as accepted or delivered).
+
+The list marks such rows "Needs you", the reader adds "Addressed to you", and
+the Inbox tab shows "(N need you)" the way a room's Catch-up shows its count.
+The W4-46 delivery model (quiet hours, digest) is room scoped and untouched;
+the Inbox marker is per account and does not enter the wake queue.
 ## Webhook journal lifecycle
 
 1. `receive` matches the connection and secret, validates the Telegram Update
@@ -264,10 +384,12 @@ once that file is next edited).
    ```
 
    Locally, export the same two variables before `npm start`.
-3. Configure the connection record for the bot (channel `telegram`, provider
-   `telegram-bot`, `externalId` = the bot id, `identity.kind` = `bot`) through
-   the connections journal (`connection.configure`). The connection id you
-   choose is part of the webhook URL.
+3. Add the connection: in the Inbox, open **Add connection**, keep
+   "Telegram bot", choose a connection id (it becomes part of the webhook
+   URL), enter the bot id (the digits before the colon in the token) and the
+   bot's username, press **Add**. This sends `connection.configure` to
+   `POST /api/inbox/connections/commands`; the same request works from a
+   script with the account session.
 4. Open the Inbox and press **Reconnect** on the Telegram card (or `POST
    /api/inbox/connections/{id}/reconnect`). It stores the SHA-256 of
    `TELEGRAM_WEBHOOK_SECRET` on the connection so deliveries are accepted, and
@@ -295,22 +417,52 @@ once that file is next edited).
    import it. Until the durable webhook journal lands, held updates live in
    process memory and the Worker must be started with a `ChannelWebhookInbox`.
 
-### Connection card
+### Email setup (fixture today, routed once #144 lands)
+
+1. In the Inbox, **Add connection**, choose "Email mailbox (fixture)", enter
+   the address and a name. The card reads "Inbound: fixture mailbox · not yet
+   routed" and "Sending: not available". Recorded fixtures import through
+   `scripts/*-contract-fixture.mjs`; nothing polls a mailbox.
+2. When #144 lands: enable Email Routing on the domain (or a subdomain such
+   as `mail.<domain>`), accept the MX and SPF records Cloudflare adds, add a
+   routing rule per address (or the domain catch-all) with the action "Send
+   to a Worker" pointing at the room Worker, and agree the address scheme
+   (one connection per mailbox, plus-addressing for tags, an optional
+   `*@domain` alias for catch-all). No secret, token or paid plan is involved.
+   See `docs/EMAIL-ROUTING.md` on that branch for caps and the handler
+   proposal.
+3. Outbound email remains a separate slice (B23).
+
+### Connection cards and the list
 
 `src/inbox-ui.js` renders one card per connection under the message list:
-channel and bot name, connection state, and for Telegram the live lines
-(`Live: not configured · set …` / `Live: configured`, `Webhook: …`, `Last
-update received`, `Last send`) plus **Reconnect**. The card and its API never
-show a token, secret, hash, chat id or bot id.
+channel and bot or mailbox name, connection state, and for Telegram the live
+lines (`Live: not configured · set …` / `Live: configured`, `Webhook: …`,
+`Last update received`, `Last send`) plus **Reconnect**; email cards read
+"Inbound: fixture mailbox · not yet routed" and "Sending: not available".
+Every active card has **Remove**, which asks for a second click (**Confirm
+remove** or **Keep**) instead of a native dialog. **Add connection** opens the
+form described above. The card and its API never show a token, secret, hash,
+chat id or bot id.
+
+The list shows every channel together, each row with a channel badge (Email,
+Telegram, Sample) and a "Needs you" mark when applicable. Two labelled selects
+filter by channel and by connection; "Group by connection" (on by default)
+keeps one section per connection, off gives one flat list, newest first.
+Rows stay buttons with `aria-current` on the open message; the filters are a
+`role="group"` named "Filter messages".
 
 ## Error codes
 
 Codes that apply to every channel are named `channel_*`:
-`channel_sending_unavailable` (send gate in `inbox-outbox.mjs` and the email
-adapter's `submit`/`lookup`), `channel_sharing_unavailable`,
+`channel_sending_unavailable` (send gate in `inbox-outbox.mjs`, the email
+adapter's `submit`/`lookup`, and `POST /api/inbox/channel-sends` when no
+transport applies), `channel_sharing_unavailable`,
 `channel_connection_unavailable`, `channel_connection_not_found` (connection
 routes, 404), `channel_importer_required`, `channel_account_mismatch`
-(`connection.configure` and `source.import` observations),
+(`connection.configure` and `source.import` observations; 422 over HTTP),
+`invalid_channel_connection` (422: the commands route saw something other
+than `connection.configure` or `connection.disconnect`),
 `channel_observation_scope_changed`, `channel_sync_page_limit` and the
 `channel_webhook_*` / `channel_sync_*` codes in `channel-import.mjs`
 (`channel_webhook_backlog` is now the journal's pending bound). The live
@@ -318,7 +470,16 @@ transport reuses `channel_sending_unavailable` (Telegram unreachable, busy or
 not configured) and `channel_connection_unavailable` (bad bot token).
 Codes tied to the Graph email import contract keep their historical `email_*`
 names (folders, cursors, delta pages, reply plans, `email_fixture_*` for the
-recorded mailbox reader) because their payloads are email specific.
+recorded mailbox reader) because their payloads are email specific. The
+connections journal shares a few of them across channels because the table
+predates multi-channel support: `stale_email_connection` (409, the record
+moved; refresh), `email_mailbox_exists` (a second connection for the same bot
+or mailbox), `email_mailbox_changed` (an id reused for a different bot or
+mailbox), `email_connection_limit` (20 per account), `email_connection_changed`
+(import or webhook on an inactive record). The send journal's own codes are
+`stale_inbox_reply`, `inbox_send_unresolved`, `inbox_reply_already_sent`,
+`inbox_send_not_found`, `stale_inbox_send`, `inbox_send_started`,
+`conflicting_inbox_observation` and `inbox_transport_mismatch`.
 
 ## Adding a platform (Slack, Discord, SMS)
 
