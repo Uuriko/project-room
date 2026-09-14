@@ -7,7 +7,7 @@ import { deploymentConfig } from "./server/deployment.mjs";
 import { createServer } from "node:http";
 import { maintenanceEnabled, maintenanceReply } from "./server/maintenance.mjs";
 
-const { host, port, origin, filename, production } = deploymentConfig();
+const { host, port, origin, filename, production, streamInterval } = deploymentConfig();
 const paused = maintenanceEnabled(process.env.ROOM_MAINTENANCE);
 process.umask(0o077);
 let havePilotDb = false;
@@ -26,7 +26,7 @@ const server = paused ? createServer((req, res) => {
     const reply = maintenanceReply(url.pathname);
     res.writeHead(reply.status, reply.headers); res.end(req.method === "HEAD" ? undefined : reply.body);
   } catch { res.writeHead(400, { "Cache-Control": "no-store" }); res.end(); }
-}) : createRoomServer({ store, origin, trustedLocalProxy: production, telegram: telegramConfig(process.env) });
+}) : createRoomServer({ store, origin, streamInterval, trustedLocalProxy: production, telegram: telegramConfig(process.env) });
 server.listen(port, host, () => console.log(`Project Room ${paused ? "paused" : production ? "invite-only pilot" : "local pilot"}: ${origin}`));
 let closing = false;
 function close() {

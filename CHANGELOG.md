@@ -2,15 +2,18 @@
 
 ## 2026-09-14
 
-- Moderation (issue #6 E4): any member can report a message to the room owner
-  with a short reason (`POST /api/rooms/:id/reports`); reports are private
-  records the owner alone can list (`GET /api/rooms/:id/reports`, "Reports" in
-  History), never room events, exports or streams. A member can mute another
-  member or agent for themselves (`member.mute_set`, reversible): that author's
-  messages collapse and leave the muter's mention results; nobody else is
-  affected and no authority moves. `docs/MODERATION.md` names the removal,
-  appeal and abuse paths (`server/moderation.mjs`, `tests/moderation.test.js`,
-  `scripts/moderation-browser-check.mjs`).
+- Event streams (#6 E1 follow-up): the pump interval is configurable through
+  `ROOM_STREAM_INTERVAL_MS` (integer 50-5000, validated at startup) and its
+  default drops from 1000 ms to 250 ms, so delivery p50 falls from ~500 ms to
+  ~125 ms at one read per stream per interval (`server/deployment.mjs`,
+  `server/http.mjs`, `docs/SERVICE.md`).
+
+- Room review policy (#6 A4 follow-up): the owner sets it from the Room
+  instructions dialog (**Review policy**: none, independent review, owner
+  decision, or both) instead of a hand-written `room.policy_set` command;
+  members see the policy in force read only; both views follow live events and
+  refusals stay inline (`src/room-instructions.js`,
+  `scripts/room-policy-browser-check.mjs`).
 
 ## 2026-09-12
 

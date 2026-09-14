@@ -13,7 +13,7 @@
 //   node scripts/load-test.mjs --mode streams|queue|commands|all [flags]
 //
 // Flags (safe defaults finish in well under two minutes on a laptop):
-//   --streams 50  --messages 200  --message-interval-ms 100  --stream-interval-ms 1000  --settle-ms auto
+//   --streams 50  --messages 200  --message-interval-ms 100  --stream-interval-ms 250  --settle-ms auto
 //   --wakes 200   --wake-interval-ms 5  --poll-ms 50  --lease-batch 32  --wake-members auto
 //   --agents 25   --iterations 5
 //   --quiet       suppress the human table (stderr); the JSON blob always goes to stdout.
@@ -29,6 +29,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { STREAM_INTERVAL_DEFAULT_MS } from "../server/deployment.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
@@ -72,7 +73,7 @@ const options = {
   streams: integer(flags.streams ?? 50, "streams", { min: 1, max: MAX_AGENT_MEMBERS }),
   messages: integer(flags.messages ?? 200, "messages", { min: 1, max: 5000 }),
   messageIntervalMs: integer(flags.messageIntervalMs ?? 100, "message-interval-ms"),
-  streamIntervalMs: integer(flags.streamIntervalMs ?? 1000, "stream-interval-ms", { min: 1 }),
+  streamIntervalMs: integer(flags.streamIntervalMs ?? STREAM_INTERVAL_DEFAULT_MS, "stream-interval-ms", { min: 1 }),
   settleMs: integer(flags.settleMs ?? "auto", "settle-ms"),
   wakes: integer(flags.wakes ?? 200, "wakes", { min: 1, max: 20000 }),
   wakeIntervalMs: integer(flags.wakeIntervalMs ?? 5, "wake-interval-ms"),
