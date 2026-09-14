@@ -12,6 +12,7 @@ Do not treat ChatGPT worktrees or the stale project-root `PROJECT-ROOM-CURRENT.m
 | Area | Start here |
 | --- | --- |
 | Test the live room | [HOW-TO-TEST.md](docs/HOW-TO-TEST.md) |
+| Go live (human steps, Telegram and email switch-on, verification) | [GO-LIVE-CHECKLIST.md](docs/GO-LIVE-CHECKLIST.md) |
 | Inbox, fixture email, private replies | [Email excerpt checkpoint](docs/EMAIL-EXCERPT-CHECKPOINT-2026-09-08.md), [account-first Inbox](docs/ACCOUNT-FIRST-INBOX-2026-09-08.md) |
 | Instinct, Muse, Grok Build, Grok Bot | [ROOM-ROSTER.md](docs/ROOM-ROSTER.md) |
 | Agent discovery (llms.txt / llms-full.txt / agent.json) | [DISCOVERY-FOR-AGENTS.md](docs/DISCOVERY-FOR-AGENTS.md) |
@@ -19,6 +20,8 @@ Do not treat ChatGPT worktrees or the stale project-root `PROJECT-ROOM-CURRENT.m
 | Act components (Approve / Reject / Open-in-Compute) | [ACT-COMPONENTS.md](docs/ACT-COMPONENTS.md) |
 | Member capabilities (Discord-style bits) | [MEMBER-CAPABILITIES.md](docs/MEMBER-CAPABILITIES.md) |
 | Export, retention, deletion semantics | [EXPORT-RETENTION-DELETION.md](docs/EXPORT-RETENTION-DELETION.md) |
+| Data boundaries (encryption, secrets, subprocessors, region) | [DATA-BOUNDARIES.md](docs/DATA-BOUNDARIES.md) |
+| Trust and support packet for pilot reviewers | [TRUST-PACKET.md](docs/TRUST-PACKET.md) |
 | Research and messaging plans | [research/](research/README.md) |
 | Unification history | [UNIFICATION-2026-09-07.md](docs/UNIFICATION-2026-09-07.md) |
 
@@ -43,6 +46,8 @@ keeps capability, retention and voluntary growth focused on useful collaboration
 | [Research](./docs/RESEARCH.md) | Sources, design inferences, and unverified comparison questions |
 | [Fold: Compute and Room](./docs/FOLD-COMPUTE-ROOM.md) | Engines stay separate; surface may fold lightly |
 | [Bridge: Compute](./docs/BRIDGE-COMPUTE.md) | Phase 1+ Work Item → `compute/api` → Receipt. Not Phase 0. |
+| [Contribution ledger](./docs/CONTRIBUTION-LEDGER.md) | Derived share weights from completion / verify / decide / artifact. Docs now; no payout. |
+| [Contribution rollup](./contribution-rollup/) | Phase 0.5 read-model + C1–C4 fixtures. Pure function for a later return-brief wire-up. |
 
 The included [workflow refinement](docs/WORKFLOW-REFINEMENT-2026-09-07.md) adds optional review/decision choices (both on by default), consistent status styling and repeat review, while sharing evidence predicates and removing a second rendering pass. It uses the existing model and preserves external-action permissions. That document's uncommitted/outbound-blocked statements describe its historical checkpoint; the source and subsequent coordination are now published in PR #23 and issue #11.
 
@@ -87,6 +92,8 @@ npx playwright install --with-deps chromium
 npm run test:browser
 node scripts/acceptance-fixture.mjs --port 52331
 ```
+
+`npm run check` also runs the lint gate (`npm run lint`, ESLint with the correctness-only rules in `eslint.config.mjs`); lint errors fail the check, warnings are printed and allowed.
 
 The fixture command creates a fresh temporary database; do not run it on an occupied port. It prints a private local credential-file path, not keys. Use the existing preserved preview when available; see the unification ledger. Tests use their own temporary rooms.
 

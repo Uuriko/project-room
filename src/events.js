@@ -10,17 +10,21 @@ export const EVENT_TYPES = Object.freeze({
   ROOM_CREATED: "room.created",
   ROOM_CHARTER_UPDATED: CHARTER_TYPE,
   ROOM_POLICY_SET: "room.policy_set",
+  ROOM_SPEND_ALLOWANCE_SET: "room.spend_allowance_set",
   ROOM_ARCHIVED: "room.archived",
   MEMBER_ADDED: "member.added",
   MEMBER_JOINED_VIA_INVITATION: "member.joined_via_invitation",
   MEMBER_ACCESS_CHANGED: "member.access_changed",
   MEMBER_STATUS_UPDATED: "member.status_updated",
   NOTIFICATION_PREFERENCES_SET: "notifications.preferences_set",
+  MEMBER_MUTE_SET: "member.mute_set",
   MESSAGE_POSTED: "message.posted",
   MESSAGE_EDITED: "message.edited",
   MESSAGE_DELETED: "message.deleted",
   REPLY_REQUEST_CANCELLED: REPLY_CANCELLED,
   MESSAGE_REACTION_SET: "message.reaction_set",
+  MESSAGE_PINNED: "message.pinned",
+  MESSAGE_UNPINNED: "message.unpinned",
   WORK_PROPOSED: "work.proposed",
   WORK_HELP_UPDATED,
   HELP_OFFER_OPENED,
@@ -72,6 +76,42 @@ export function isLeaveRequest(state, incoming) {
   const member = Object.hasOwn(state.members, String(incoming.data?.memberId)) && state.members[incoming.data.memberId];
   return Boolean(member) && incoming.actorId === member.id && member.active === true && incoming.data.active === false
     && Array.isArray(incoming.data.permissions) && JSON.stringify(incoming.data.permissions) === JSON.stringify(member.permissions);
+}
+
+// Room spend allowance (issue #6 C3): the owner can cap what agent sessions
+// in this room may spend over a rolling period. Event-sourced
+// (room.spend_allowance_set) and carried on the projection;
+// server/spend-allowance.mjs refuses session starts that would commit more
+// than the allowance. allowanceCents null clears it. No allowance is the
+// default and the pre-allowance behaviour: sessions bound only themselves.
+export const SPEND_ALLOWANCE_LIMITS = Object.freeze({ allowanceCents: 100000000, periodDays: 365 });
+
+export function spendAllowance(state) {
+  const stored = state?.room?.spendAllowance;
+  if (!stored || !Number.isSafeInteger(stored.allowanceCents) || stored.allowanceCents < 0) return null;
+  return { allowanceCents: stored.allowanceCents, periodDays: stored.periodDays, revision: stored.revision, setById: stored.setById, setAt: stored.setAt };
+}
+
+function setSpendAllowance(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.kind !== "human" || actor.id !== state.room.ownerId) throw new Error("Only the Room owner may set the spend allowance");
+  const { allowanceCents, periodDays } = incoming.data;
+  const clearing = allowanceCents === null;
+  if (!clearing && (!Number.isSafeInteger(allowanceCents) || allowanceCents < 0 || allowanceCents > SPEND_ALLOWANCE_LIMITS.allowanceCents)) {
+    throw new Error(`allowanceCents must be an integer of cents from 0 to ${SPEND_ALLOWANCE_LIMITS.allowanceCents}, or null to remove the allowance`);
+  }
+  if (!clearing && (!Number.isSafeInteger(periodDays) || periodDays < 1 || periodDays > SPEND_ALLOWANCE_LIMITS.periodDays)) {
+    throw new Error(`periodDays must be an integer from 1 to ${SPEND_ALLOWANCE_LIMITS.periodDays}`);
+  }
+  if (clearing && periodDays != null) throw new Error("Removing the allowance takes no period");
+  const previous = state.room.spendAllowance ?? null;
+  state.room.spendAllowance = {
+    allowanceCents: clearing ? null : allowanceCents,
+    periodDays: clearing ? null : periodDays,
+    revision: (previous?.revision ?? 0) + 1,
+    setById: incoming.actorId,
+    setAt: incoming.at
+  };
 }
 
 export const PERMISSIONS = Object.freeze(["steer", "decide", "manage_members", "manage_claims", "accept_work", "complete_work", "verify", "write_external"]);
@@ -169,17 +209,21 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.ROOM_CREATED]: createRoom,
     [EVENT_TYPES.ROOM_CHARTER_UPDATED]: updateCharter,
     [EVENT_TYPES.ROOM_POLICY_SET]: setRoomPolicy,
+    [EVENT_TYPES.ROOM_SPEND_ALLOWANCE_SET]: setSpendAllowance,
     [EVENT_TYPES.ROOM_ARCHIVED]: archiveRoom,
     [EVENT_TYPES.MEMBER_ADDED]: addMember,
     [EVENT_TYPES.MEMBER_JOINED_VIA_INVITATION]: joinMemberViaInvitation,
     [EVENT_TYPES.MEMBER_ACCESS_CHANGED]: changeMemberAccess,
     [EVENT_TYPES.MEMBER_STATUS_UPDATED]: updateMemberStatus,
     [EVENT_TYPES.NOTIFICATION_PREFERENCES_SET]: setNotificationPreferences,
+    [EVENT_TYPES.MEMBER_MUTE_SET]: setMemberMute,
     [EVENT_TYPES.MESSAGE_POSTED]: postMessage,
     [EVENT_TYPES.MESSAGE_EDITED]: editMessage,
     [EVENT_TYPES.MESSAGE_DELETED]: deleteMessage,
     [EVENT_TYPES.REPLY_REQUEST_CANCELLED]: cancelReplyRequest,
     [EVENT_TYPES.MESSAGE_REACTION_SET]: setMessageReaction,
+    [EVENT_TYPES.MESSAGE_PINNED]: pinMessage,
+    [EVENT_TYPES.MESSAGE_UNPINNED]: unpinMessage,
     [EVENT_TYPES.WORK_PROPOSED]: proposeWork,
     [EVENT_TYPES.WORK_HELP_UPDATED]: (state, incoming) => {
       const help = helpFromEvent(state, incoming);
@@ -409,8 +453,35 @@ function setNotificationPreferences(state, incoming) {
   member.notificationPreferences = { ...(member.notificationPreferences ?? defaultNotificationPreferences()), ...prefs };
 }
 
-function defaultNotificationPreferences() {
+export function defaultNotificationPreferences() {
   return { mentions: "all", replies: "all", work_updates: "all", announcements: "all" };
+}
+
+// Mute (issue #6 E4): a member hides another member's or agent's messages for
+// themselves. It is a personal preference recorded like notification
+// preferences (member.mute_set on the actor's own member record), never
+// authority: the muted member keeps every permission, nothing is addressed
+// at them, and the choice is reversible with muted:false. Clients collapse a
+// muted author's messages and notification feeds skip them (server/moderation.mjs).
+function setMemberMute(state, incoming) {
+  requireFields(incoming.data, ["memberId", "muted"]);
+  const actor = requireMember(state, incoming.actorId);
+  const target = knownMember(state, incoming.data.memberId);
+  if (typeof incoming.data.muted !== "boolean") throw new Error("Mute requires muted as true or false");
+  if (target.id === actor.id) throw new Error("You cannot mute yourself");
+  if (target.id === state.room.ownerId) throw new Error("The Room owner cannot be muted; the owner is the appeal path for moderation");
+  const muted = new Set(actor.mutedMemberIds ?? []);
+  if (incoming.data.muted) muted.add(target.id); else muted.delete(target.id);
+  // A preference never moves member.revision (which pins open invitations and access changes).
+  if (muted.size) actor.mutedMemberIds = [...muted].sort(); else delete actor.mutedMemberIds;
+}
+
+export function mutedMemberIds(state, viewerId) {
+  return state?.members?.[viewerId]?.mutedMemberIds ?? [];
+}
+
+export function isMutedBy(state, viewerId, authorId) {
+  return viewerId != null && authorId != null && mutedMemberIds(state, viewerId).includes(authorId);
 }
 
 function requireScopedMemberAdministration(state, actorId, targetId, currentTarget, nextPermissions) {
@@ -472,6 +543,7 @@ function deleteMessage(state, incoming) {
   message.editHistory = [];
   message.deletedAt = incoming.at;
   message.deletedBy = incoming.actorId;
+  dropPinsForMessage(state, message.id); // issue #6 B2: the tombstone drops the pin too
   message.revision = (message.revision ?? 0) + 1;
 }
 
@@ -985,4 +1057,65 @@ function stableStringify(value) {
     return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+// Pinned messages (issue #6 B2). A pin is a room-visible bookmark on one
+// existing message: any active member can pin or unpin, the room keeps at most
+// PIN_LIMIT pins, and the pinned list is ordered by when each pin was placed.
+// Pins reference message ids only; a deleted message (tombstone) drops out of
+// the pinned list under the same rules that hide its body everywhere else
+// (deleteMessage calls dropPinsForMessage). Event-sourced: message.pinned /
+// message.unpinned append to the room log and the projection carries
+// state.pins = [{ messageId, pinnedById, pinnedAt }]. Both reducers are
+// idempotent so an exact retry, or a replay of a duplicate, changes nothing.
+// The HTTP surface lives in server/pins.mjs.
+export const PIN_LIMIT = 50;
+
+// Command field allowlist for server/store.mjs validateCommand.
+export const PIN_COMMAND_SHAPES = Object.freeze({
+  [EVENT_TYPES.MESSAGE_PINNED]: "messageId",
+  [EVENT_TYPES.MESSAGE_UNPINNED]: "messageId"
+});
+
+function pinTarget(incoming) {
+  const messageId = incoming.data?.messageId;
+  if (typeof messageId !== "string" || !messageId.trim()) throw new Error("Missing required field: messageId");
+  return messageId;
+}
+
+function pinMessage(state, incoming) {
+  requireMember(state, incoming.actorId);
+  const messageId = pinTarget(incoming);
+  const message = state.messages.find(m => m.id === messageId);
+  if (!message) throw new Error("Pin must reference a message in this Room");
+  if (message.deletedAt || message.body == null) throw new Error("A deleted message cannot be pinned");
+  state.pins ??= [];
+  if (state.pins.some(pin => pin.messageId === messageId)) return; // idempotent
+  if (state.pins.length >= PIN_LIMIT) throw new Error(`Pin capacity reached: ${PIN_LIMIT} pinned messages per room; unpin one first`);
+  state.pins.push({ messageId, pinnedById: incoming.actorId, pinnedAt: incoming.at });
+}
+
+function unpinMessage(state, incoming) {
+  requireMember(state, incoming.actorId);
+  const messageId = pinTarget(incoming);
+  if (!state.pins?.length) return; // idempotent
+  state.pins = state.pins.filter(pin => pin.messageId !== messageId);
+}
+
+function dropPinsForMessage(state, messageId) {
+  if (state.pins?.some(pin => pin.messageId === messageId)) state.pins = state.pins.filter(pin => pin.messageId !== messageId);
+}
+
+export function isPinned(state, messageId) {
+  return Boolean(state?.pins?.some(pin => pin.messageId === messageId));
+}
+
+// Ordered pinned list joined with the live message. Tombstoned or missing
+// messages are filtered defensively even though the reducer already drops them.
+export function pinnedMessages(state) {
+  const byId = new Map((state?.messages ?? []).map(message => [message.id, message]));
+  return (state?.pins ?? []).flatMap(pin => {
+    const message = byId.get(pin.messageId);
+    return message && !message.deletedAt && message.body != null ? [{ ...pin, message }] : [];
+  });
 }

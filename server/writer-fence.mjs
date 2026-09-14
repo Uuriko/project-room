@@ -24,7 +24,7 @@ const v27Tables = [...tables, "agent_identities", "identity_links"];
 // same pattern: purely additive at v27, application tables but not fenced.
 // v28 (issue #6 A2 room lifecycle) adds the rooms.archived_at column; the
 // fenced table set is unchanged, so v28 fences the same tables as v27.
-export const applicationTables = Object.freeze([...v27Tables, "agent_invite_codes", "wake_queue", "wake_queue_commands", "private_attention_prefs", "private_attention_commands", "pending_channel_updates", "wake_queue_pause"]);
+export const applicationTables = Object.freeze([...v27Tables, "agent_invite_codes", "wake_queue", "wake_queue_commands", "private_attention_prefs", "private_attention_commands", "pending_channel_updates", "wake_queue_pause", "message_reports"]);
 export const fenceDefinitions = version => Object.freeze(({ 6: v6Tables, 7: v7Tables, 8: v8Tables, 9: v14Tables, 10: v14Tables, 11: v14Tables, 12: v14Tables, 13: v14Tables, 14: v14Tables, 15: v17Tables, 16: v17Tables, 17: v17Tables, 18: tables, 19: tables, 20: tables, 21: tables, 22: tables, 23: tables, 24: tables, 25: tables, 26: tables, 27: v27Tables, 28: v27Tables })[version].flatMap(table => ["INSERT", "UPDATE", "DELETE"].map(operation => {
   const name = `writer_v${version}_${table}_${operation.toLowerCase()}`;
   return Object.freeze({ name, sql: `CREATE TRIGGER ${name} BEFORE ${operation} ON ${table} BEGIN SELECT CASE WHEN project_room_writer_v${version}() IS NOT ${version} THEN RAISE(ABORT,'unsupported database writer') END; END` });

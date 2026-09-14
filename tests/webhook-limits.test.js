@@ -5,7 +5,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
-import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { telegramContractFixture } from "../scripts/telegram-contract-fixture.mjs";

@@ -5,16 +5,21 @@ import { ServiceError } from "./store.mjs";
 import { clientAddress, STREAM_INTERVAL_DEFAULT_MS } from "./deployment.mjs";
 import { validId } from "../src/events.js";
 import { SyntheticInboxTransport, FixtureChannelSender } from "./inbox-transport.mjs";
-import { syncTelegramConnection } from "./channel-import.mjs";
+import { channelSyncLimits, syncTelegramConnection } from "./channel-import.mjs";
 import { telegramConfig, TelegramLiveStatus, telegramLiveView } from "./channel-adapters/telegram-config.mjs";
 import { TelegramTransport } from "./channel-adapters/telegram-transport.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
+import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { discoveryDoc, isHealthAliasPath } from "../deploy/agent-discovery.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
 import { guestAgentLinkContract } from "./guest-agent-links.mjs";
 import { isSessionStatus, workItemSessionContract } from "../src/work-item-session.js";
+import { accessReviewReport } from "./access-review.mjs";
+import { roomUsageSummary, parseUsageDays } from "./usage-summary.mjs";
+import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
+import { listPins, setPin } from "./pins.mjs";
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -63,6 +68,7 @@ const connectionRoutes = Object.freeze({ list: "/api/inbox/connections", read: "
 const channelSendProviders = Object.freeze(["telegram-bot"]);
 const routePattern = template => new RegExp("^" + template.replaceAll("/", "\\/").replace(/\{[A-Za-z]+\}/g, "([^/]{1,384})") + "$");
 const webhookSecretHeader = "x-telegram-bot-api-secret-token";
+const JSON_BODY_BYTES = 16384;
 const rateHash = value => createHash("sha256").update(String(value)).digest("hex");
 // A lagging stream that still has not drained its final event by now is dropped.
 const STREAM_DRAIN_GRACE_MS = 5000;
@@ -232,9 +238,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       req.on("aborted", () => rejectPromise(new ServiceError(400, "aborted", "Request ended early")));
     });
   }
-  async function body(req) {
+  // Every JSON route takes the default limit; a caller passes `limit` only where
+  // the provider's payload is known to be larger (the Telegram webhook embeds
+  // the replied-to message).
+  async function body(req, { limit = JSON_BODY_BYTES } = {}) {
     if (!/^application\/json(?:\s*;|$)/i.test(req.headers["content-type"] || "")) reject(415, "json_required", "Use application/json");
-    const text = await readText(req, 16384, () => new ServiceError(413, "too_large", "Request is too large"));
+    const text = await readText(req, limit, () => new ServiceError(413, "too_large", "Request is too large"));
     try { const value = JSON.parse(text); if (!value || Array.isArray(value) || typeof value !== "object") throw new Error(); return value; }
     catch { reject(400, "invalid_json", "Expected a JSON object"); }
   }
@@ -351,11 +360,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // Provider callbacks carry a per-connection secret, never an account session.
         // Verified updates only wait for the owner's import; nothing is stored here.
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        rate(`inbox-webhook:${remoteAddress}`, 120);
+        // Telegram delivers every bot's updates from a few shared egress addresses,
+        // so the per-address key is only a high guard against unverified floods;
+        // the budget that matters is counted per verified connection, after the
+        // secret matched and before anything is journaled (channelSyncLimits).
+        rate(`inbox-webhook:${remoteAddress}`, channelSyncLimits.webhookPerAddress);
         if (!channelWebhooks) reject(409, "channel_webhook_unavailable", "Webhook delivery is not configured here.");
         const connectionId = pathId(webhook[1]), secret = req.headers[webhookSecretHeader];
         if (typeof secret !== "string") reject(401, "channel_webhook_denied", "Webhook not accepted.");
-        const received = channelWebhooks.receive({ connectionId, secret, body: await body(req) });
+        const received = channelWebhooks.receive({ connectionId, secret, body: await body(req, { limit: channelSyncLimits.webhookBodyBytes }),
+          verified: match => rate(`inbox-webhook-connection:${match.accountId}:${match.connectionId}`, channelSyncLimits.webhookPerConnection) });
         telegramStatus.received(received.accountId, connectionId, { at: store.now(), count: received.received });
         return json(res, 202, { contractVersion: 1, connectionId, received: received.received, pending: received.pending });
       }
@@ -672,7 +686,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["code", "displayName"]) || typeof data.code !== "string" || typeof data.displayName !== "string") reject(422, "invalid_invite", "Invite code and displayName are required");
         return json(res, 201, store.invites.redeem(data.code, { displayName: data.displayName }));
       }
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|provider-heartbeats|identity-links|agent-invites))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|usage|notifications|spend-allowance))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -759,6 +773,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const kind = url.searchParams.get("kind") ?? "all";
         return json(res, 200, store.search(selected.token, roomId, q, kind, fence));
       }
+      if (route === "usage" && req.method === "GET") {
+        // F5: read-only per-room usage summary. Member-visible like the
+        // sibling dashboards: every figure derives from data a member can
+        // already read (membership snapshot, work-session spend, events).
+        const params = url.searchParams;
+        if ([...params.keys()].some(key => !["days", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_usage_period", "Choose an optional number of days only");
+        return json(res, 200, roomUsageSummary(store, selected.token, roomId, { days: parseUsageDays(params.get("days")), expectedSessionBinding: fence }));
+      }
+      if (route === "pins") {
+        // Issue #6 B2: pinned messages. GET lists the ordered pins; POST pins or unpins one message (server/pins.mjs).
+        if (req.method === "GET") return json(res, 200, listPins(store, selected.token, roomId, fence));
+        if (req.method === "POST") return json(res, 200, setPin(store, selected.token, roomId, await body(req), fence));
+        reject(405, "method_not_allowed", "Method not allowed");
+      }
       if (route === "provider-heartbeats" && req.method === "GET") {
         // Round-2 #118: provider heartbeat dashboard.
         return json(res, 200, store.providerHeartbeats(selected.token, roomId, fence));
@@ -806,6 +834,23 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // takes the normal JSON error path instead of truncating a 200 body
         // that would read as a valid, merely shorter, export. Content-Length
         // lets clients treat a dropped connection as an incomplete download.
+        //
+        // BUILD-01 F2: ?format=html renders the same event walk as one
+        // self-contained document for people (server/room-export-html.mjs).
+        // Same auth, same materialise-then-answer rule, same Content-Length
+        // framing; the CSP header pins the document's single style block and
+        // forbids everything else, so a browser that opens it inline runs
+        // nothing.
+        const format = url.searchParams.get("format") ?? "jsonl";
+        if (!["jsonl", "html"].includes(format) || url.searchParams.getAll("format").length > 1) reject(422, "invalid_format", "format is jsonl (default) or html");
+        if (format === "html") {
+          const rows = [...store.exportEvents(selected.token, roomId, fence)];
+          const bytes = Buffer.from(renderRoomExportHtml(rows, { roomId }), "utf8");
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length,
+            "Content-Security-Policy": EXPORT_HTML_CSP,
+            "Content-Disposition": `attachment; filename="room-${roomId}-export.html"` });
+          return res.end(bytes);
+        }
         const lines = [];
         for (const line of store.exportEvents(selected.token, roomId, fence)) lines.push(JSON.stringify(line) + "\n");
         const bytes = Buffer.from(lines.join(""), "utf8");
@@ -842,6 +887,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const result = store.mutateWorkSession(selected.token, roomId, await body(req), fence);
         return json(res, result.duplicate ? 200 : 201, result);
       }
+      if (route === "spend-allowance" && req.method === "GET") {
+        // C3: room spend allowance with spent, reserved and headroom. Member-readable: derived from work-session state members already see.
+        if ([...url.searchParams.keys()].some(key => key !== "auth")) reject(422, "invalid_spend_allowance", "This read takes no parameters");
+        return json(res, 200, readSpendAllowance(store, selected.token, roomId, fence));
+      }
+      if (route === "spend-allowance" && req.method === "POST") {
+        const result = setSpendAllowance(store, selected.token, roomId, await body(req), fence); // owner-only (403 owner_required)
+        return json(res, result.duplicate ? 200 : 201, result);
+      }
       if (route === "work-discussion" && req.method === "GET") {
         const params = url.searchParams;
         if ([...params.keys()].some(key => !["workItemId", "cursor", "since", "limit", "auth"].includes(key) || params.getAll(key).length !== 1)
@@ -852,6 +906,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }));
       }
       if (route === "reminders" && req.method === "GET") return json(res, 200, store.reminders.list(selected.token, roomId, fence));
+      if (route === "notifications" && req.method === "GET") {
+        // B4: per-member feed derived from the event tail after the member's cursor. Read model only; the
+        // store method re-authenticates membership, and the read rate limit above already covers it.
+        const params = url.searchParams;
+        if ([...params.keys()].some(key => !["limit", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_notification_selection", "Choose an optional limit only");
+        if (params.has("limit") && !/^[1-9]\d*$/.test(params.get("limit"))) reject(422, "invalid_notification_limit", "Choose a positive limit");
+        return json(res, 200, store.notifications.list(selected.token, roomId, fence, params.has("limit") ? { limit: Number(params.get("limit")) } : {}));
+      }
       if (route === "agent-connections" && req.method === "GET") return json(res, 200, store.agentConnections.list(selected.token, roomId, fence));
       if (route === "diagnostics" && req.method === "GET") {
         store.agentConnections.owner(selected.token, roomId, fence);
@@ -873,6 +935,29 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.setHeader("Content-Disposition", `attachment; filename="room-${roomId}-support-export.json"`);
         return json(res, 200, bundle);
       }
+      if (route === "agent-pause" && req.method === "GET") {
+        // C6: wake-pause state for the caller, or (signed-in owner) one named
+        // member plus the room's paused roster. Authorization is store-level.
+        const params = url.searchParams;
+        if ([...params.keys()].some(key => !["memberId", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_pause_selection", "Choose at most one member");
+        return json(res, 200, store.wakeQueue.inspect(selected.token, roomId, { memberId: params.get("memberId") }, fence));
+      }
+      if (route === "agent-pause" && req.method === "POST") {
+        // C6: pause or resume a member's queued wakes (own row, or owner over
+        // another member). Draft class: nothing is sent, launched or spent.
+        const data = await body(req);
+        const fields = data.action === "resume" ? ["action", "memberId", "requestId"] : ["action", "memberId", "requestId", "reason"];
+        if (!["pause", "resume"].includes(data.action) || !exact(data, fields) || typeof data.memberId !== "string") reject(422, "invalid_pause_command", "Supply action (pause or resume), memberId, requestId and, for pause, reason or null");
+        const target = { memberId: data.memberId };
+        const result = data.action === "pause" ? store.wakeQueue.pause(selected.token, roomId, { requestId: data.requestId, reason: data.reason }, fence, target)
+          : store.wakeQueue.resume(selected.token, roomId, { requestId: data.requestId }, fence, target);
+        return json(res, result.duplicate ? 200 : 201, result);
+      }
+      if (route === "access-review" && req.method === "GET") {
+        // BUILD-01 D4: owner-only periodic access review; assembly lives in
+        // server/access-review.mjs and is shared with scripts/access-review.mjs.
+        return json(res, 200, accessReviewReport(store, selected.token, roomId, fence));
+      }
       if (route === "agent-connections" && req.method === "POST") {
         const result = store.agentConnections.apply(selected.token, roomId, await body(req), fence);
         return json(res, result.duplicate ? 200 : 201, result);
@@ -884,6 +969,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "reminders" && req.method === "POST") {
         const result = store.reminders.mutate(selected.token, roomId, await body(req), fence);
+        return json(res, result.duplicate ? 200 : 201, result);
+      }
+      // E4 moderation: any member reports a message (own receipt only); the owner alone lists reports.
+      if (route === "reports" && req.method === "GET") return json(res, 200, store.moderation.list(selected.token, roomId, fence));
+      if (route === "reports" && req.method === "POST") {
+        const result = store.moderation.report(selected.token, roomId, await body(req), fence);
         return json(res, result.duplicate ? 200 : 201, result);
       }
       if (route === "share-links" && req.method === "GET") return json(res, 200, store.shareLinks.list(selected.token, roomId, fence));
