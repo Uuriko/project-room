@@ -3507,7 +3507,7 @@ async function loadUsage() {
   try {
     const usage = await client.request(client.path("/usage"));
     if (request !== usageRequest || !state) return;
-    const { members, sessions, spend, caps, period } = usage;
+    const { members, sessions, spend, spendAllowance: ledger, caps, period } = usage;
     const spendNote = spend.reportedCents === "unknown" ? "no session reported spend"
       : spend.sessionsUnreported ? `${usageNumber(spend.sessionsUnreported)} of ${usageNumber(spend.sessionsReported + spend.sessionsUnreported)} sessions unreported` : "every session reported";
     $("#usage-period").textContent = `${period.days}d`;
@@ -3521,6 +3521,14 @@ async function loadUsage() {
         `<dt>Sessions started</dt><dd>${esc(usageNumber(sessions.started))}</dd>`,
         `<dt>Sessions stopped</dt><dd>${esc(usageNumber(sessions.stopped))}${sessions.budgetStops ? `<small>${esc(usageNumber(sessions.budgetStops))} stopped by budget</small>` : ""}</dd>`,
         `<dt>Reported spend</dt><dd>${esc(usageMoney(spend.reportedCents))}<small>${esc(spendNote)}</small></dd>`
+      ]),
+      // C3: the allowance ledger over its own period; "Agent spend" keeps the owner controls.
+      group("Spend allowance", [
+        `<dt>Allowance</dt><dd data-usage-allowance="${ledger.allowance ? "set" : "none"}">${ledger.allowance ? `${esc(usageMoney(ledger.allowance.allowanceCents))}<small>over ${esc(usageNumber(ledger.period.days))} days</small>` : "none set"}</dd>`,
+        `<dt>Spent</dt><dd>${esc(usageMoney(ledger.spentCents))}</dd>`,
+        `<dt>Reserved</dt><dd>${esc(usageMoney(ledger.reservedCents))}<small>${esc(usageNumber(ledger.sessions.live))} live</small></dd>`,
+        ...(ledger.heldCents ? [`<dt>Held</dt><dd>${esc(usageMoney(ledger.heldCents))}<small>unreported attempts</small></dd>`] : []),
+        `<dt>Headroom</dt><dd>${ledger.allowance ? esc(ledger.overCents ? `over by ${usageMoney(ledger.overCents)}` : usageMoney(ledger.headroomCents)) : "no cap"}</dd>`
       ]),
       group("Pilot caps", [
         usageCapRow("Members", caps.members),
