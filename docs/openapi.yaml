@@ -105,7 +105,7 @@ paths:
                     type: boolean
                     description: True when the room has events beyond `next`
         '409': { description: cursor_ahead - `after` exceeds the room's sequence; fetch a fresh snapshot }
-        '422': { description: invalid_cursor - `after`, `limit`, `actor`, `since` or `until` is malformed }
+        '422': { description: "invalid_cursor - `after`, `limit`, `actor`, `since` or `until` is malformed" }
   /api/rooms/{roomId}/stream:
     get:
       summary: Server-sent events stream
@@ -135,7 +135,7 @@ paths:
             text/event-stream:
               schema: { type: string }
         '409': { description: cursor_ahead - the resume sequence exceeds the room's sequence }
-        '422': { description: invalid_cursor, invalid_auth_mode, invalid_session_binding or session_binding_required }
+        '422': { description: "invalid_cursor, invalid_auth_mode, invalid_session_binding or session_binding_required" }
         '429': { description: stream_limit - close another room connection before opening more }
   /api/rooms/{roomId}/presence:
     get:
@@ -1011,7 +1011,7 @@ paths:
                 sequence: { type: integer, minimum: 0 }
       responses:
         '200': { description: Cursor stored }
-        '422': { description: invalid_cursor - body is not exactly `{ sequence }`, or sequence is negative or beyond the room's sequence }
+        '422': { description: "invalid_cursor - body is not exactly `{ sequence }`, or sequence is negative or beyond the room's sequence" }
   /api/rooms/{roomId}/reports:
     post:
       summary: Report a message to the room owner
