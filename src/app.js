@@ -1,4 +1,4 @@
-import { EVENT_TYPES as T, WORK_STATES as S } from "./events.js";
+import { EVENT_TYPES as T, WORK_STATES as S, roomPolicy } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
@@ -761,6 +761,7 @@ function syncWorkForm() {
   }
   const active = Object.values(state.members).filter(member => member.active !== false);
   const writing = $("#work-mode-select").value === "write";
+  syncWorkPolicy();
   const reviewing = $("#require-verification").checked;
   selectOptions("#assignee-select", active.filter(member => ["accept_work", "complete_work", ...(writing ? ["write_external"] : [])]
     .every(permission => member.permissions.includes(permission))), "Choose owner");
@@ -2270,6 +2271,25 @@ $("#decision-form").addEventListener("submit", e => {
     notice("Decision recorded.");
   }, { failureHint: "Decision not saved. Retry the same entry, or close and start again." });
 });
+// Room policy (issue #6 A4): when the owner made review or approval mandatory,
+// the proposer sees the requirement locked on with the reason. The server
+// enforces it regardless of what a client sends; this is only the honest view.
+function syncWorkPolicy() {
+  const policy = roomPolicy(state);
+  for (const [id, required] of [["#require-verification", policy.requireIndependentReview], ["#require-decision", policy.requireOwnerDecision]]) {
+    const box = $(id);
+    if (required) box.checked = true;
+    box.disabled = required;
+  }
+  const required = [policy.requireIndependentReview && "independent review", policy.requireOwnerDecision && "owner approval"].filter(Boolean);
+  // The "turn off review" escape does not exist under policy; say so and drop the settings shortcut.
+  $("#reviewer-unavailable-text").textContent = policy.requireIndependentReview
+    ? "No independent reviewer available. Room policy requires review: change the owner, or ask the room owner to add a reviewer."
+    : "No independent reviewer available. Change the owner or turn off review.";
+  $("#review-settings-button").hidden = policy.requireIndependentReview;
+  $("#work-policy-note").hidden = required.length === 0;
+  $("#work-policy-note").textContent = required.length ? `Room policy: ${required.join(" and ")} ${required.length > 1 ? "are" : "is"} required for every new outcome in this room. Only the room owner can change this.` : "";
+}
 function openWork(sourceId = null, reuseId = null) {
   if (!can("steer") || busy) return;
   if (!$("#new-work-form").hidden) { $(workRetryLocked ? "#retry-work-button" : "#work-title-input").focus(); return; }
