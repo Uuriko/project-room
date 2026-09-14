@@ -26,6 +26,7 @@ import { ReplyRequests } from "./reply-requests.mjs";
 import { validateHelpData } from "../src/work-help.js";
 import { auditWorkHelp } from "./work-help.mjs";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, validateHelpOfferData } from "../src/help-offers.js";
+import { classifyCommand } from "./action-classes.mjs";
 import {
   isSessionStatus, isTerminalSession, sessionRecord, listWorkItemSessions, sessionCommandType, sessionWorker,
   validateSessionBudget, budgetLimitExceeded, SESSION_HEARTBEAT_STALE_MS,
@@ -217,9 +218,14 @@ const shapes = {
   [T.CAPABILITIES_ADVERTISED]: "capabilities"
 };
 
+// W4-44 H2: the classified command surface, exported for the
+// action-class completeness test (every key must carry a class).
+export const COMMAND_TYPES = Object.freeze(Object.keys(shapes));
+
 export function validateCommand(command) {
   if (!command || Array.isArray(command) || typeof command !== "object" || Object.keys(command).some(k => !["id", "type", "data", "causationId"].includes(k))) fail(422, "invalid_command", "Supply only id, type, data, and optional causationId");
   if (!validId(command.id) || !Object.hasOwn(shapes, command.type)) fail(422, "invalid_command", "Invalid command id or type");
+  try { classifyCommand(command.type); } catch { fail(422, "invalid_command", "Unclassified command type"); }
   if (command.causationId != null && !validId(command.causationId)) fail(422, "invalid_command", "Invalid causationId");
   if (!command.data || Array.isArray(command.data) || typeof command.data !== "object") fail(422, "invalid_command", "Data must be an object");
   const allowed = shapes[command.type].split(" ");
