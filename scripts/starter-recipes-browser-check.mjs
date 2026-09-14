@@ -42,6 +42,18 @@ test("recipe strip: catch-up and next-work chips render from committed state; di
   // Dismissal hides only that chip for this page session.
   await chips.first().locator("[data-recipe-dismiss]").click();
   assert.equal(await strip.locator(".recipe-chip").count(), 1);
+  // W4-47 H6: the dry-run preview lists every catalog recipe - what it reads,
+  // its trigger, what it would do, and whether it would fire now - before
+  // anything is enabled. Opening the panel is a pure read.
+  await page.locator("#recipe-preview-toggle").click();
+  const items = page.locator("#recipe-preview .recipe-preview-item");
+  assert.equal(await items.count(), 3);
+  const previewText = await page.locator("#recipe-preview").textContent();
+  assert.match(previewText, /Draft catch-up/);
+  assert.match(previewText, /Reads:/);
+  assert.match(previewText, /Would do:/);
+  assert.match(previewText, /Firing now|Not firing right now/);
+  assert.deepEqual(errors, []);
   mkdirSync("test-results", { recursive: true });
   await strip.screenshot({ path: "test-results/starter-recipe-strip.png" });
   assert.deepEqual(errors, []);
