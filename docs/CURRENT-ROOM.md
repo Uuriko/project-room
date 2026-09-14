@@ -44,7 +44,7 @@ invitation). Footer **Project Room** on the Demigod home page is the same door.
 | Room chat, work, catch-up | `src/`, `server/` | Live on the isolated Worker |
 | Private Inbox / account home | `src/inbox-*.js`, `server/inbox*.mjs` | In source and on the Worker; open `/?account=1` |
 | Fixture email (Graph-shaped) | `server/email-*.mjs`, `server/graph-*.mjs` | Local/fixture only. No live mailbox or send |
-| Unified inbox / fixture Telegram (Bot API-shaped) | `server/channel-*.mjs`, `server/channel-adapters/`, [UNIFIED-INBOX.md](UNIFIED-INBOX.md) | Local/fixture only. Recorded updates; no bot token, webhook registration or send |
+| Unified inbox / fixture Telegram (Bot API-shaped) | `server/channel-*.mjs`, `server/channel-adapters/`, [UNIFIED-INBOX.md](UNIFIED-INBOX.md) | Local/fixture only. Recorded updates; webhook updates journal durably in `pending_channel_updates` (additive at schema 27); no bot token, webhook registration or send |
 | Agent connect + MCP | `docs/AGENT-CONNECTION.md`, `scripts/agent-inbox.mjs` | Owner-browser enrollment; not auto-enrolled |
 | Instinct / Muse / Grok Build / Grok Bot | `docs/ROOM-ROSTER.md` | Roster + Add-agent presets in this source |
 | Usability plan | `docs/USABILITY-PLAN.md` | Chat-first + growth slice; mailbox/auto-enroll gated |
