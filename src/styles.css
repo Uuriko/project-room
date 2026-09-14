@@ -233,10 +233,6 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 @media (prefers-reduced-motion: no-preference) {
   .done-chip { animation: done-chip-pop .42s cubic-bezier(.22, 1.35, .36, 1) both; }
 }
-.member-actions { display: flex; flex-wrap: wrap; gap: .75rem; margin: .1rem 0 .15rem; }
-.member-actions .text-button { min-height: 24px; font-size: .75rem; }
-.member-actions .member-remove.armed { color: var(--red); }
-.pause-chip { display: inline-flex; align-items: center; margin-left: .4rem; padding: .1rem .45rem; border-radius: 999px; border: 1px solid var(--room-quiet); color: var(--room-quiet); font-size: .65rem; font-weight: 700; }
 .member-status { margin: 0; color: var(--room-quiet); font-size: .65rem; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .context-rail .summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .context-rail .summary-card { min-height: 5.8rem; padding: .65rem; }
@@ -714,8 +710,6 @@ summary { overflow-wrap: anywhere; }
 #room-instructions-dialog textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: 1rem; resize: vertical; }
 .instructions-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .75rem; }
 #room-instructions-latest { border-left: 2px solid currentColor; padding-left: .75rem; margin: 1rem 0; }
-.room-policy { border-top: 1px solid var(--line); margin-top: 1rem; padding-top: .25rem; }
-.room-policy-current { margin: .25rem 0; font-size: 1rem; line-height: 1.5; }
 
 /* Inbox and Rooms share the shell; private source content stays in its own view. */
 .workspace-nav { display: flex; gap: 1.5rem; padding: 0 1rem; border-bottom: 1px solid var(--line); }
@@ -871,9 +865,16 @@ summary { overflow-wrap: anywhere; }
 .recipe-preview { display: flex; flex-direction: column; gap: 0.6rem; margin: 0.5rem 0; padding: 0.6rem; border: 1px solid var(--line-soft); border-radius: 8px; background: rgb(255 255 255 / 2%); }
 .recipe-preview-item { display: flex; flex-direction: column; gap: 0.2rem; max-width: 100%; overflow-wrap: anywhere; }
 .recipe-preview-item .recipe-preview-status { color: var(--text-dim, inherit); font-style: italic; }
-/* C2: read-only access preview inside a work card's details. */
-.access-preview { margin: .6rem 0 .2rem; padding: .6rem .8rem; border-left: 3px solid var(--blue, #75a7ff); background: var(--panel, rgba(127,127,127,0.06)); border-radius: 0 6px 6px 0; }
-.access-preview h4 { margin: 0; font-size: .8rem; color: var(--text); }
-.access-preview .work-facts { margin: .5rem 0 0; }
-.access-preview .work-facts > div { grid-template-columns: 7rem 1fr; }
-.access-preview .source-link { display: inline; }
+
+/* F5: read-only usage summary card */
+.usage-panel { box-shadow: none; }
+.usage-grid { display: grid; gap: .55rem; padding: .6rem 1rem 0; font-size: .875rem; }
+.usage-grid:empty { padding: 0; }
+.usage-heading { margin: .3rem 0 0; color: var(--room-quiet); font-size: .62rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.usage-heading:first-child { margin-top: 0; }
+.usage-grid dl { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .35rem .9rem; margin: 0; }
+.usage-grid dt { color: var(--muted); overflow-wrap: anywhere; }
+.usage-grid dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.usage-grid dd small { display: block; color: var(--muted); font-size: .75rem; }
+.usage-actions { padding: .5rem 1rem 0; }
+.usage-actions:has(> [hidden]) { padding: 0; }

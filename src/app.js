@@ -190,15 +190,16 @@ const client = new RoomClient({
     $("#auth-panel").setAttribute("aria-busy", pendingSignout ? "true" : "false");
     $("#identity-label").textContent = "Not signed in";
     $("#identity-label").removeAttribute("title");
-    for (const id of ["message-list", "work-list", "event-list", "presence-list", "member-stack", "summary-grid", "reply-context", "source-context", "action-context", "action-fields", "cursor-label", "presence-count", "message-count", "event-count", "rb-attention-list", "rb-involving-list", "rb-history-list", "decision-list"]) {
+    for (const id of ["message-list", "work-list", "event-list", "presence-list", "member-stack", "summary-grid", "reply-context", "source-context", "action-context", "action-fields", "cursor-label", "presence-count", "message-count", "event-count", "rb-attention-list", "rb-involving-list", "rb-history-list", "decision-list", "usage-grid", "usage-period", "usage-status"]) {
       const node = $(`#${id}`); node.replaceChildren(); delete node._content;
     }
+    $("#usage-refresh").hidden = true;
     for (const id of ["message-to-select", "assignee-select", "verifier-select"]) { $(`#${id}`).replaceChildren(); delete $(`#${id}`).dataset.signature; }
     for (const form of document.querySelectorAll("form")) {
       if (!keepAccount || !form.closest("#inbox-panel")) form.reset();
     }
     $("#work-dialog").close();
-    for (const id of ["people-panel", "composer-options", "work-options", "room-about", "connection-details", "rb-history-section", "rb-involving-section", "decision-section"]) $(`#${id}`).open = false;
+    for (const id of ["people-panel", "composer-options", "work-options", "room-about", "connection-details", "rb-history-section", "rb-involving-section", "decision-section", "usage-panel"]) $(`#${id}`).open = false;
     if ($("#room-guide")) $("#room-guide").hidden = true;
     if ($("#people-hint")) $("#people-hint").textContent = "";
     agentPauses = new Map(); armedRemoval = null;
@@ -2154,7 +2155,8 @@ function roomActionEntries() {
     { id: "how-invite", label: "How to invite someone", words: "how guest eight hours link help", always: true },
     { id: "how-agent", label: "How to add an agent", words: "how connect instinct muse grok help", always: true },
     { id: "how-inbox", label: "How to open Inbox", words: "how inbox mail email account", always: true },
-    { id: "instructions", label: "Room instructions", words: "guidance brief charter", target: "#room-instructions-open", reveal: "#room-about", activate: true }
+    { id: "instructions", label: "Room instructions", words: "guidance brief charter", target: "#room-instructions-open", reveal: "#room-about", activate: true },
+    { id: "usage", label: "Usage summary", words: "spend seats sessions caps limits budget headroom", target: "#usage-panel > summary", reveal: "#usage-panel" }
   ].filter(entry => {
     if (entry.always) return true;
     const target = $(entry.target); return target && !target.disabled && !target.closest("[hidden]");
@@ -3126,6 +3128,55 @@ function renderReturnBrief() {
 $("#return-brief-panel").addEventListener("toggle", e => {
   if (e.currentTarget.open && state) loadReturnBrief(); // reopening replaces the pagination chain
 });
+// F5: read-only usage summary card. Loaded when the card opens (and on
+// Refresh), never on every snapshot: the figures are a period summary, not a
+// live feed. Spend is what agents reported; "unknown" is rendered as such.
+let usageRequest = 0;
+const usageNumber = value => Number(value).toLocaleString("en-US");
+const usageMoney = cents => cents === "unknown" ? "unknown" : `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const usageBytes = bytes => bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : `${bytes} B`;
+function usageCapRow(label, cap, format = usageNumber) {
+  return `<dt>${esc(label)}</dt><dd>${esc(format(cap.used))} of ${esc(format(cap.limit))}<small>${esc(format(cap.remaining))} left</small></dd>`;
+}
+async function loadUsage() {
+  if (!state || !client.session) return;
+  const request = ++usageRequest;
+  $("#usage-status").textContent = "Loading usage…";
+  $("#usage-refresh").hidden = true;
+  try {
+    const usage = await client.request(client.path("/usage"));
+    if (request !== usageRequest || !state) return;
+    const { members, sessions, spend, caps, period } = usage;
+    const spendNote = spend.reportedCents === "unknown" ? "no session reported spend"
+      : spend.sessionsUnreported ? `${usageNumber(spend.sessionsUnreported)} of ${usageNumber(spend.sessionsReported + spend.sessionsUnreported)} sessions unreported` : "every session reported";
+    $("#usage-period").textContent = `${period.days}d`;
+    const group = (heading, rows) => `<h3 class="usage-heading">${esc(heading)}</h3><dl>${rows.join("")}</dl>`;
+    renderContent("#usage-grid", [
+      group("Seats", [
+        `<dt>People</dt><dd>${esc(usageNumber(members.humans))}</dd>`,
+        `<dt>Agents</dt><dd>${esc(usageNumber(members.agents))}${members.agentIdentities ? `<small>${esc(usageNumber(members.agentIdentities))} via managed identities</small>` : ""}</dd>`
+      ]),
+      group(`Last ${period.days} days`, [
+        `<dt>Sessions started</dt><dd>${esc(usageNumber(sessions.started))}</dd>`,
+        `<dt>Sessions stopped</dt><dd>${esc(usageNumber(sessions.stopped))}${sessions.budgetStops ? `<small>${esc(usageNumber(sessions.budgetStops))} stopped by budget</small>` : ""}</dd>`,
+        `<dt>Reported spend</dt><dd>${esc(usageMoney(spend.reportedCents))}<small>${esc(spendNote)}</small></dd>`
+      ]),
+      group("Pilot caps", [
+        usageCapRow("Members", caps.members),
+        usageCapRow("Work items", caps.workItems),
+        usageCapRow("Room history", caps.events),
+        usageCapRow("Room size", caps.projectionBytes, usageBytes)
+      ])
+    ].join(""));
+    $("#usage-status").textContent = "";
+  } catch (error) {
+    if (request !== usageRequest || !state) return;
+    $("#usage-status").textContent = error.status === 429 ? "Usage is rate limited; try again in a minute." : "Usage could not be loaded.";
+    $("#usage-refresh").hidden = false;
+  }
+}
+$("#usage-panel").addEventListener("toggle", e => { if (e.currentTarget.open) loadUsage(); });
+$("#usage-refresh").addEventListener("click", () => loadUsage());
 $("#room-navigation").addEventListener("click", e => {
   const section = e.target.closest("[data-room-section]")?.dataset.roomSection;
   if (!section || !state || busy) return;

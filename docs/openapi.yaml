@@ -363,6 +363,68 @@ paths:
                         firstResultAt: { type: string, format: date-time, nullable: true }
                         minutesToFirstClaim: { type: integer, nullable: true }
                         minutesToFirstResult: { type: integer, nullable: true }
+  /api/rooms/{roomId}/usage:
+    get:
+      summary: Room usage summary
+      description: >-
+        Read-only per-room usage for a period (default 30 days, `days` capped at
+        365): active human members and agent members (agents are principals,
+        never human seats), managed identities linked here, work sessions
+        started and stopped in the period, spend agents reported on those
+        sessions, and the bounded pilot caps with remaining headroom. Every
+        member can read it - each figure derives from data members already see.
+        Unreported spend is "unknown", never zero. Counts only; no member
+        details, credentials or hashes.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: days
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 365, default: 30 }
+      responses:
+        '200':
+          description: Usage summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  period:
+                    type: object
+                    properties:
+                      days: { type: integer }
+                      since: { type: string, format: date-time }
+                      until: { type: string, format: date-time }
+                  members:
+                    type: object
+                    properties:
+                      humans: { type: integer }
+                      agents: { type: integer }
+                      inactive: { type: integer }
+                      agentIdentities: { type: integer }
+                  sessions:
+                    type: object
+                    properties:
+                      started: { type: integer }
+                      stopped: { type: integer }
+                      budgetStops: { type: integer }
+                  spend:
+                    type: object
+                    properties:
+                      reportedCents: { oneOf: [{ type: integer }, { type: string, enum: [unknown] }] }
+                      sessionsReported: { type: integer }
+                      sessionsUnreported: { type: integer }
+                  caps:
+                    type: object
+                    description: members, events, workItems and projectionBytes, each { used, limit, remaining }.
+                    additionalProperties:
+                      type: object
+                      properties:
+                        used: { type: integer }
+                        limit: { type: integer }
+                        remaining: { type: integer }
+        '422': { description: invalid_usage_period }
   /api/rooms/{roomId}/invitations:
     get:
       summary: Invite-link analytics
