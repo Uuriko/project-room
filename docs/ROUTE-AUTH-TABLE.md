@@ -24,6 +24,7 @@ authorization (owner, `manage_members`, member) is enforced inside the
 | `POST /api/rooms/:id/work-sessions` | room Bearer / session | member |
 | `POST /api/rooms/:id/reminders` | room Bearer / session | member |
 | `POST /api/rooms/:id/agent-connections` | room Bearer / session | member |
+| `POST /api/rooms/:id/agent-pause` | room Bearer / session | the member itself (own wake-pause row), or the signed-in room owner + `manage_members` for another member; a removed member's row is inspect-only (`409 member_inactive`) |
 | `POST /api/rooms/:id/guest-agent-links` | room Bearer / session | room owner + `manage_members` |
 | `POST /api/rooms/:id/share-links` | room Bearer / session | human member + `manage_members` |
 | `POST /api/rooms/:id/share-links-cancel` | room Bearer / session | link issuer / `manage_members` |
@@ -37,7 +38,7 @@ unauthenticated by design (invitation token in the body is the credential).
 
 All `GET` routes under `/api/rooms/:id/*` (snapshot, events, export,
 search, presence, capabilities, onboarding-funnel, provider-heartbeats,
-reminders, agent-connections, share-links, invitations, work-*, reply-*,
+reminders, agent-connections, agent-pause, share-links, invitations, work-*, reply-*,
 charter, diagnostics, return-brief, thread) require a room credential with
 member visibility. `GET /api/rooms/:id/export` returns the full event log as
 one `Content-Length`-framed JSONL body (never a partial 200);

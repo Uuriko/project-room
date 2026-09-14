@@ -79,3 +79,132 @@ test("a paused member's dead-letter and failed attempts stay inspectable, other 
   assert.deepEqual(f.store.wakeQueue.due(f.at()).map(w => w.queueKey), ["recipe:draft-catch-up"], "guest's due wake is unaffected by the owner's pause");
   assert.equal(surfaceClass("wake-queue"), "draft", "the stop surface stays draft class: no sends, no spend");
 });
+
+// C6: the owner-facing HTTP surface over the same pause rows.
+// POST/GET /api/rooms/:id/agent-pause - a member acts on its own row; the
+// signed-in owner acts on any member's; a removed member's row is inert.
+import { createRoomServer } from "../server/http.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
+
+async function httpFixture(t) {
+  const f = fixture(t);
+  const server = createRoomServer({ store: f.store });
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  // Browser sessions for humans (cookie + CSRF + binding); bearer keys for agents.
+  f.login = async actor => {
+    const response = await fetch(`${origin}/api/session`, { method: "POST", headers: { Origin: origin, "Content-Type": "application/json" }, body: JSON.stringify({ accessKey: f.keys[actor] }) });
+    assert.equal(response.status, 201);
+    return { cookie: response.headers.get("set-cookie").split(";")[0], session: await response.json() };
+  };
+  f.call = (path, { method = "GET", data, as } = {}) => fetch(`${origin}${path}`, {
+    method,
+    headers: { Origin: origin, ...(data === undefined ? {} : { "Content-Type": "application/json" }),
+      ...(typeof as === "string" ? { Authorization: `Bearer ${as}` }
+        : as ? { Cookie: as.cookie, "X-CSRF-Token": as.session.csrf, "X-Session-Binding": as.session.sessionBinding } : {}) },
+    ...(data === undefined ? {} : { body: JSON.stringify(data) })
+  });
+  f.pause = (as, memberId, reason = null) => f.call("/api/rooms/commons/agent-pause", { method: "POST", as, data: { action: "pause", memberId, requestId: randomUUID(), reason } });
+  f.resume = (as, memberId) => f.call("/api/rooms/commons/agent-pause", { method: "POST", as, data: { action: "resume", memberId, requestId: randomUUID() } });
+  f.inspect = (as, memberId = null) => f.call(`/api/rooms/commons/agent-pause${memberId ? `?memberId=${encodeURIComponent(memberId)}` : ""}`, { as });
+  return f;
+}
+const errorCode = async (response, status, code) => {
+  assert.equal(response.status, status);
+  const body = await response.json();
+  assert.equal(body.error.code, code);
+  return body;
+};
+
+test("HTTP: only the signed-in owner pauses another member; a member pauses itself", async t => {
+  const f = await httpFixture(t);
+  const owner = await f.login("owner"), guest = await f.login("guest");
+  await errorCode(await f.pause(guest, "producer"), 403, "owner_required");
+  await errorCode(await f.pause(f.keys.producer, "reviewer"), 403, "owner_required");
+  await errorCode(await f.inspect(guest, "producer"), 403, "owner_required");
+  await errorCode(await f.pause(owner, "nobody"), 404, "member_not_found");
+  const self = await f.pause(f.keys.producer, "producer", "own maintenance");
+  assert.equal(self.status, 201);
+  const selfBody = await self.json();
+  assert.equal(selfBody.receipt.state, "paused");
+  assert.equal(selfBody.memberId, "producer");
+  assert.equal(selfBody.viewerId, "producer");
+  assert.equal("paused" in selfBody, false, "a non-owner never receives the room roster");
+  const paused = await f.pause(owner, "reviewer", "inspecting");
+  assert.equal(paused.status, 201);
+  const body = await paused.json();
+  assert.equal(body.memberId, "reviewer");
+  assert.equal(body.viewerId, "owner");
+  assert.equal(body.pause.reason, "inspecting");
+  assert.deepEqual(body.paused.map(p => p.memberId), ["producer", "reviewer"], "the owner sees the whole paused roster");
+  const guestView = await f.inspect(guest);
+  assert.equal(guestView.status, 200);
+  const guestBody = await guestView.json();
+  assert.equal(guestBody.memberId, "guest");
+  assert.equal(guestBody.pause, null);
+  assert.equal("paused" in guestBody, false);
+  assert.equal(f.store.wakeQueue.pauseStatus("commons", "reviewer").reason, "inspecting");
+  assert.equal(f.store.wakeQueue.pauseStatus("commons", "guest"), null);
+});
+
+test("HTTP: a paused agent's queued wake does not start until the owner resumes it", async t => {
+  const f = await httpFixture(t);
+  const owner = await f.login("owner");
+  f.enqueue({}, "producer");
+  assert.deepEqual(f.store.wakeQueue.due(f.at()).map(w => [w.queueKey]), [["recipe:draft-catch-up"]]);
+  assert.equal((await f.pause(owner, "producer", "look first")).status, 201);
+  assert.deepEqual(f.store.wakeQueue.due(f.at()), [], "paused: the due wake is not leasable");
+  assert.equal(f.store.wakeQueue.lease("commons", "producer", "recipe:draft-catch-up", "worker-1"), null);
+  const view = await (await f.inspect(owner, "producer")).json();
+  assert.deepEqual(view.pending.map(w => w.queueKey), ["recipe:draft-catch-up"]);
+  assert.equal(view.running.length, 0);
+  assert.equal(view.pause.reason, "look first");
+  const resumed = await f.resume(owner, "producer");
+  assert.equal(resumed.status, 201);
+  assert.equal((await resumed.json()).receipt.wasPaused, true);
+  assert.deepEqual(f.store.wakeQueue.due(f.at()).map(w => w.queueKey), ["recipe:draft-catch-up"]);
+  assert.ok(f.store.wakeQueue.lease("commons", "producer", "recipe:draft-catch-up", "worker-1"), "resumed: the wake starts");
+});
+
+test("HTTP: a removed member's pause row is inert - inspectable, unchangeable, and it never restarts wakes", async t => {
+  const f = await httpFixture(t);
+  const owner = await f.login("owner");
+  f.enqueue({}, "producer");
+  assert.equal((await f.pause(owner, "producer", "before removal")).status, 201);
+  const producer = f.store.room("commons").state.members.producer;
+  const removed = await f.call("/api/rooms/commons/commands", { method: "POST", as: owner, data: { id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED,
+    data: { memberId: "producer", expectedMemberRevision: producer.revision, permissions: [...producer.permissions], active: false } } });
+  assert.equal(removed.status, 201);
+  assert.equal(f.store.room("commons").state.members.producer.active, false);
+  await errorCode(await f.inspect(f.keys.producer), 401, "unauthenticated");
+  await errorCode(await f.resume(f.keys.producer, "producer"), 401, "unauthenticated");
+  const view = await (await f.inspect(owner, "producer")).json();
+  assert.equal(view.pause.reason, "before removal", "the owner still sees the row");
+  await errorCode(await f.resume(owner, "producer"), 409, "member_inactive");
+  await errorCode(await f.pause(owner, "producer"), 409, "member_inactive");
+  assert.equal(f.store.wakeQueue.pauseStatus("commons", "producer").reason, "before removal");
+  assert.equal(f.store.room("commons").state.members.producer.active, false, "the pause row never reactivates a member");
+  assert.deepEqual(f.store.wakeQueue.due(f.at()), [], "a removed member's queued wake does not start");
+});
+
+test("HTTP: unauthenticated and malformed requests are refused; responses carry no credential material", async t => {
+  const f = await httpFixture(t);
+  await errorCode(await f.call("/api/rooms/commons/agent-pause"), 401, "unauthenticated");
+  await errorCode(await f.pause(undefined, "producer"), 401, "unauthenticated");
+  await errorCode(await f.pause("A".repeat(43), "producer"), 401, "unauthenticated");
+  const owner = await f.login("owner");
+  await errorCode(await f.call("/api/rooms/commons/agent-pause", { method: "POST", as: owner, data: { action: "pause", memberId: "producer", requestId: randomUUID() } }), 422, "invalid_pause_command");
+  await errorCode(await f.call("/api/rooms/commons/agent-pause", { method: "POST", as: owner, data: { action: "stop", memberId: "producer", requestId: randomUUID() } }), 422, "invalid_pause_command");
+  await errorCode(await f.call("/api/rooms/commons/agent-pause?memberId=a&memberId=b", { as: owner }), 422, "invalid_pause_selection");
+  await errorCode(await f.call("/api/rooms/commons/agent-pause", { method: "POST", as: { cookie: owner.cookie, session: { csrf: "0".repeat(64), sessionBinding: owner.session.sessionBinding } }, data: { action: "resume", memberId: "producer", requestId: randomUUID() } }), 403, "csrf_denied");
+  const responses = [await f.pause(owner, "producer", "audit"), await f.inspect(owner, "producer"), await f.inspect(owner), await f.pause(f.keys.reviewer, "reviewer"), await f.resume(owner, "producer")];
+  for (const response of responses) {
+    assert.ok([200, 201].includes(response.status));
+    const raw = await response.text();
+    for (const secret of [...Object.values(f.keys), owner.cookie.split("=")[1], owner.session.csrf, owner.session.sessionBinding]) {
+      assert.equal(raw.includes(secret), false, "pause responses never carry keys, cookies, CSRF tokens or bindings");
+    }
+    assert.doesNotMatch(raw, /"(token|accessKey|csrf|sessionBinding|credentialHash)"/);
+  }
+});

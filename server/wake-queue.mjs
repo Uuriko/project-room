@@ -87,14 +87,35 @@ export class WakeQueue {
     const row = this.db.prepare("SELECT * FROM wake_queue_pause WHERE room_id=? AND member_id=?").get(roomId, memberId);
     return row ? { pausedAt: row.paused_at, reason: row.reason } : null;
   }
+  // C6: owner-facing pause. A member always acts on its own pause row; the
+  // signed-in room owner may also inspect, pause and resume another member's.
+  // A removed member's row stays inspectable but inert: changing it is
+  // refused, so a resume can never restart a removed member's queued wakes.
+  isOwner(auth, roomId, authority = this.store.roomAuthority(roomId)) {
+    return Boolean(auth.account) && auth.kind === "session" && auth.member.kind === "human"
+      && auth.member.id === authority.ownerId && auth.member.permissions.includes("manage_members");
+  }
+  subject(auth, roomId, memberId, { change = false } = {}) {
+    if (memberId === null || memberId === undefined || memberId === auth.member.id) return auth.member.id;
+    if (!validId(memberId)) fail(422, "invalid_member", "Choose one member");
+    const authority = this.store.roomAuthority(roomId);
+    if (!this.isOwner(auth, roomId, authority)) fail(403, "owner_required", "Only the signed-in room owner can inspect, pause or resume another member");
+    if (!Object.hasOwn(authority.members, memberId)) fail(404, "member_not_found", "Unknown member");
+    if (change && authority.members[memberId].active === false) fail(409, "member_inactive", "This member's access has ended; its pause row is inert");
+    return memberId;
+  }
+  pausedMembers(roomId) {
+    return this.db.prepare("SELECT member_id,paused_at,reason FROM wake_queue_pause WHERE room_id=? ORDER BY member_id").all(roomId)
+      .map(row => ({ memberId: row.member_id, pausedAt: row.paused_at, reason: row.reason }));
+  }
   // The one stop surface: pause state, pending wakes (won't start while
   // paused), already-running attempts (left to finish), and readable recent
   // outcomes (done/dead with attempts and the last error).
-  current(auth, roomId) {
-    const wakes = this.db.prepare("SELECT * FROM wake_queue WHERE room_id=? AND member_id=? ORDER BY queue_key").all(roomId, auth.member.id).map(view);
+  current(auth, roomId, memberId = auth.member.id) {
+    const wakes = this.db.prepare("SELECT * FROM wake_queue WHERE room_id=? AND member_id=? ORDER BY queue_key").all(roomId, memberId).map(view);
     return {
-      roomId, viewerId: auth.member.id, evaluatedAt: this.store.now(),
-      pause: this.pauseStatus(roomId, auth.member.id),
+      roomId, viewerId: auth.member.id, memberId, evaluatedAt: this.store.now(),
+      pause: this.pauseStatus(roomId, memberId),
       wakes,
       pending: wakes.filter(w => w.state === "pending"),
       running: wakes.filter(w => w.state === "leased"),
@@ -105,6 +126,18 @@ export class WakeQueue {
   }
   list(token, roomId, binding = null) {
     return this.store.readTransaction(() => this.current(this.store.authenticate(token, roomId, binding), roomId));
+  }
+  // C6: the caller's own view, or (owner) one named member's view plus the
+  // room's paused roster. Reads only; no credential material is included.
+  inspect(token, roomId, { memberId = null } = {}, binding = null) {
+    return this.store.readTransaction(() => {
+      const auth = this.store.authenticate(token, roomId, binding);
+      return this.outcome(auth, roomId, this.subject(auth, roomId, memberId));
+    });
+  }
+  outcome(auth, roomId, subject, extra = {}) {
+    const current = this.current(auth, roomId, subject);
+    return { ...(this.isOwner(auth, roomId) ? { ...current, paused: this.pausedMembers(roomId) } : current), ...extra };
   }
   receipt(requestId, fields, request) {
     return createHash("sha256").update(JSON.stringify(Object.fromEntries(fields.sort().map(field => [field, request[field]])))).digest("hex");
@@ -159,36 +192,38 @@ export class WakeQueue {
   // pause/resume are the member's own stop control - draft class: they only
   // govern when this member's own queued intents may start. Idempotent via the
   // same commands receipt table as enqueue/requeue.
-  pause(token, roomId, request, binding = null) {
+  pause(token, roomId, request, binding = null, { memberId = null } = {}) {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId, binding);
+      const subject = this.subject(auth, roomId, memberId, { change: true });
       const fields = ["requestId", "reason"];
       if (!request || Array.isArray(request) || Object.keys(request).length !== fields.length || !fields.every(field => Object.hasOwn(request, field))
         || !validId(request.requestId) || (request.reason !== null && (typeof request.reason !== "string" || request.reason.length > 200))) fail(422, "invalid_wake_pause", "Supply a request ID and an optional short reason.");
       const fingerprint = this.receipt(request.requestId, fields, request);
-      const prior = this.priorReceipt(roomId, auth.member.id, request, fingerprint);
-      if (prior) return { ...this.current(auth, roomId), receipt: prior, duplicate: true };
+      const prior = this.priorReceipt(roomId, subject, request, fingerprint);
+      if (prior) return this.outcome(auth, roomId, subject, { receipt: prior, duplicate: true });
       const now = this.store.now();
-      const existing = this.pauseStatus(roomId, auth.member.id);
-      if (!existing) this.db.prepare("INSERT INTO wake_queue_pause VALUES(?,?,?,?)").run(roomId, auth.member.id, now, request.reason);
+      const existing = this.pauseStatus(roomId, subject);
+      if (!existing) this.db.prepare("INSERT INTO wake_queue_pause VALUES(?,?,?,?)").run(roomId, subject, now, request.reason);
       const receipt = { requestId: request.requestId, state: "paused", pausedAt: existing ? existing.pausedAt : now, alreadyPaused: Boolean(existing) };
-      this.db.prepare("INSERT INTO wake_queue_commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, request.requestId, fingerprint, JSON.stringify(receipt));
-      return { ...this.current(auth, roomId), receipt, duplicate: false };
+      this.db.prepare("INSERT INTO wake_queue_commands VALUES(?,?,?,?,?)").run(roomId, subject, request.requestId, fingerprint, JSON.stringify(receipt));
+      return this.outcome(auth, roomId, subject, { receipt, duplicate: false });
     });
   }
-  resume(token, roomId, request, binding = null) {
+  resume(token, roomId, request, binding = null, { memberId = null } = {}) {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId, binding);
+      const subject = this.subject(auth, roomId, memberId, { change: true });
       const fields = ["requestId"];
       if (!request || Array.isArray(request) || Object.keys(request).length !== fields.length || !validId(request.requestId)) fail(422, "invalid_wake_resume", "Supply a request ID.");
       const fingerprint = this.receipt(request.requestId, fields, request);
-      const prior = this.priorReceipt(roomId, auth.member.id, request, fingerprint);
-      if (prior) return { ...this.current(auth, roomId), receipt: prior, duplicate: true };
-      const existing = this.pauseStatus(roomId, auth.member.id);
-      this.db.prepare("DELETE FROM wake_queue_pause WHERE room_id=? AND member_id=?").run(roomId, auth.member.id);
+      const prior = this.priorReceipt(roomId, subject, request, fingerprint);
+      if (prior) return this.outcome(auth, roomId, subject, { receipt: prior, duplicate: true });
+      const existing = this.pauseStatus(roomId, subject);
+      this.db.prepare("DELETE FROM wake_queue_pause WHERE room_id=? AND member_id=?").run(roomId, subject);
       const receipt = { requestId: request.requestId, state: "active", wasPaused: Boolean(existing) };
-      this.db.prepare("INSERT INTO wake_queue_commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, request.requestId, fingerprint, JSON.stringify(receipt));
-      return { ...this.current(auth, roomId), receipt, duplicate: false };
+      this.db.prepare("INSERT INTO wake_queue_commands VALUES(?,?,?,?,?)").run(roomId, subject, request.requestId, fingerprint, JSON.stringify(receipt));
+      return this.outcome(auth, roomId, subject, { receipt, duplicate: false });
     });
   }
   requeue(token, roomId, request, binding = null) {

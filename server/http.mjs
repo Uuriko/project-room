@@ -535,7 +535,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["code", "displayName"]) || typeof data.code !== "string" || typeof data.displayName !== "string") reject(422, "invalid_invite", "Invite code and displayName are required");
         return json(res, 201, store.invites.redeem(data.code, { displayName: data.displayName }));
       }
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|provider-heartbeats|identity-links|agent-invites))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|provider-heartbeats|identity-links|agent-invites|agent-pause))?$/.exec(url.pathname);
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
       if (threadMatch && req.method === "GET") {
         // Round-2 #112: threaded replies.
@@ -747,6 +747,24 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           diagnostics: diagnostics.list(roomId) });
         res.setHeader("Content-Disposition", `attachment; filename="room-${roomId}-support-export.json"`);
         return json(res, 200, bundle);
+      }
+      if (route === "agent-pause" && req.method === "GET") {
+        // C6: wake-pause state for the caller, or (signed-in owner) one named
+        // member plus the room's paused roster. Authorization is store-level.
+        const params = url.searchParams;
+        if ([...params.keys()].some(key => !["memberId", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_pause_selection", "Choose at most one member");
+        return json(res, 200, store.wakeQueue.inspect(selected.token, roomId, { memberId: params.get("memberId") }, fence));
+      }
+      if (route === "agent-pause" && req.method === "POST") {
+        // C6: pause or resume a member's queued wakes (own row, or owner over
+        // another member). Draft class: nothing is sent, launched or spent.
+        const data = await body(req);
+        const fields = data.action === "resume" ? ["action", "memberId", "requestId"] : ["action", "memberId", "requestId", "reason"];
+        if (!["pause", "resume"].includes(data.action) || !exact(data, fields) || typeof data.memberId !== "string") reject(422, "invalid_pause_command", "Supply action (pause or resume), memberId, requestId and, for pause, reason or null");
+        const target = { memberId: data.memberId };
+        const result = data.action === "pause" ? store.wakeQueue.pause(selected.token, roomId, { requestId: data.requestId, reason: data.reason }, fence, target)
+          : store.wakeQueue.resume(selected.token, roomId, { requestId: data.requestId }, fence, target);
+        return json(res, result.duplicate ? 200 : 201, result);
       }
       if (route === "agent-connections" && req.method === "POST") {
         const result = store.agentConnections.apply(selected.token, roomId, await body(req), fence);

@@ -86,6 +86,13 @@ expiry, revocation, and rate limits.
   support revocation); for a leaked access key, remove the member and re-issue.
   Capability tokens are single-purpose, so a leak's blast radius is bounded to
   that token's scope.
+- **Runaway or malicious agent**: the owner pauses it from People
+  (**Pause**; `POST /api/rooms/:id/agent-pause`), which stops its queued wakes
+  from starting while a running attempt finishes, inspects, then **Remove**s it
+  (a second confirming click sends `MEMBER_ACCESS_CHANGED`, revoking its
+  credentials and connections). Neither step recalls context already delivered
+  to the agent's provider — see `docs/AGENT-CONNECTION.md`, "What pause and
+  remove cannot do".
 - **Abuse/spam**: rate limits (above) plus owner moderation (member removal,
   link cancellation). No automated blocklist — the deployment is
   invite-only by construction, not by filtering.
@@ -108,3 +115,7 @@ expiry, revocation, and rate limits.
   nofollow`, `Cache-Control: no-store`, `Referrer-Policy: no-referrer`).
 - Item 5 is operational (owner-run), not automated; with B5 landed there are
   no open follow-ups.
+- 2026-09-14 (C6): owner pause/resume/remove for agents added to item 5; the
+  route is in the mutating-route inventory (`tests/route-auth-table.test.js`)
+  and `tests/wake-pause.test.js` pins owner-only access, the inert row of a
+  removed member and secret-free responses.

@@ -313,6 +313,62 @@ paths:
                 identityId: { type: string }
       responses:
         '200': { description: Identity unlinked }
+  /api/rooms/{roomId}/agent-pause:
+    get:
+      summary: Inspect a member's wake pause
+      description: >-
+        The caller's own wake-queue pause state, pending and running wakes and
+        recent outcomes. The signed-in room owner may name another member with
+        memberId and also receives the room's paused roster. No credentials.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: memberId
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Pause state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  viewerId: { type: string }
+                  memberId: { type: string }
+                  pause: { type: [object, "null"] }
+                  pending: { type: array, items: { type: object } }
+                  running: { type: array, items: { type: object } }
+                  paused: { type: array, items: { type: object }, description: Owner only }
+        '403': { description: owner_required - only the signed-in owner inspects another member }
+    post:
+      summary: Pause or resume a member's queued wakes
+      description: >-
+        Draft class - nothing is sent, launched or spent. Pausing stops new
+        attempts from starting; an attempt already running finishes. A member
+        acts on its own row; the signed-in room owner (manage_members) acts on
+        any member's. A removed member's row is inert (409 member_inactive).
+        Idempotent per requestId.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, memberId, requestId]
+              properties:
+                action: { type: string, enum: [pause, resume] }
+                memberId: { type: string }
+                requestId: { type: string }
+                reason: { type: [string, "null"], maxLength: 200, description: Required (may be null) when action is pause }
+      responses:
+        '201': { description: Pause state changed; body as GET plus receipt }
+        '200': { description: Duplicate requestId; historical receipt }
+        '403': { description: owner_required }
+        '409': { description: member_inactive or idempotency_conflict }
+        '422': { description: invalid_pause_command }
   /api/rooms/{roomId}/provider-heartbeats:
     get:
       summary: Provider heartbeat dashboard

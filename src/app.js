@@ -81,6 +81,10 @@ let lastComposerSelection = null;
 let lastInvitationOpener = null;
 let roomActionsContext = null;
 let selectedWorkView = "work";
+// C6: owner-facing agent controls. agentPauses is the owner's last-read paused
+// roster (memberId -> { pausedAt, reason }); armedRemoval is the one agent whose
+// Remove button is waiting for its confirming second click.
+let agentPauses = new Map(), armedRemoval = null, memberActionBusy = false;
 const invitation = {
   phase: "idle", version: 0, secret: null, preview: null, redemptionId: null,
   opener: null, openerSelection: null
@@ -196,6 +200,7 @@ const client = new RoomClient({
     for (const id of ["people-panel", "composer-options", "work-options", "room-about", "connection-details", "rb-history-section", "rb-involving-section", "decision-section"]) $(`#${id}`).open = false;
     if ($("#room-guide")) $("#room-guide").hidden = true;
     if ($("#people-hint")) $("#people-hint").textContent = "";
+    agentPauses = new Map(); armedRemoval = null;
     for (const control of document.querySelectorAll("#auth-form input, #auth-form button")) control.disabled = pendingSignout;
     setFormStatus($("#new-work-status"), ""); setFormStatus($("#action-error"), ""); setFormStatus($("#composer-status"), "");
     $("#action-dialog").close(); $("#new-work-form").hidden = true; $("#reply-bar").hidden = true;
@@ -880,6 +885,14 @@ function render() {
   setText("#presence-count", `${active.length} ${active.length === 1 ? "member" : "members"}`);
   renderContent("#member-stack", active.slice(0, 4).map(m => `<div class="member-avatar ${m.kind}" title="${esc(memberLabel(m.id))}" aria-hidden="true"><span>${initials(m.displayName)}</span></div>`).join(""));
   const railCtx = { workItems: state.workItems, messages: state.messages, now: Date.now() };
+  const ownerView = Boolean(session && state.room.ownerId === session.member.id && can("manage_members"));
+  // C6: Pause/Resume govern the agent's queued wakes; Remove ends access via
+  // MEMBER_ACCESS_CHANGED and asks for a second click instead of a native dialog.
+  const memberActions = m => {
+    if (!ownerView || m.kind !== "agent" || m.active === false) return "";
+    const paused = agentPauses.has(m.id), armed = armedRemoval === m.id;
+    return `<div class="member-actions" data-member-actions="${esc(m.id)}"><button type="button" class="text-button" data-member-pause="${esc(m.id)}" data-pause-action="${paused ? "resume" : "pause"}" title="${paused ? "Let queued wakes start again" : "Queued wakes will not start; a running attempt finishes"}">${paused ? "Resume" : "Pause"}</button><button type="button" class="text-button member-remove${armed ? " armed" : ""}" data-member-remove="${esc(m.id)}" aria-pressed="${armed}">${armed ? "Confirm remove" : "Remove"}</button>${armed ? `<button type="button" class="text-button" data-member-remove-cancel="${esc(m.id)}">Keep</button>` : ""}</div>`;
+  };
   const presenceRow = m => {
     const presence = memberPresence(m, railCtx);
     // Agents get loud @handles; humans keep the exact "Name (id)" rail label so attribution stays unambiguous (quiet-attribution gate).
@@ -889,7 +902,7 @@ function render() {
     const doneChip = done
       ? `<span class="done-chip" title="${esc(done.title)}" data-done-work="${esc(done.workItemId)}">${esc(done.label)}</span>`
       : "";
-    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}" ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(presenceLabel(presence))}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong><span class="sr-only">${esc(presenceLabel(presence))}</span>${doneChip}</div><p class="member-status">${esc(status)}</p><details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p></details></div></div>`;
+    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}" ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(presenceLabel(presence))}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong><span class="sr-only">${esc(presenceLabel(presence))}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start">Paused</span>` : ""}</div><p class="member-status">${esc(status)}</p>${memberActions(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p></details></div></div>`;
   };
   const byPresence = (a, b) => (a.active === false) - (b.active === false) || a.displayName.localeCompare(b.displayName);
   const people = members.filter(m => m.kind !== "agent").sort(byPresence);
@@ -2001,6 +2014,53 @@ $("#mention-list")?.addEventListener("mousedown", e => {
   if (!option) return;
   e.preventDefault();
   applyMentionMember(state.members[option.dataset.mentionId]);
+});
+// C6: the owner's pause roster is one read when People opens and after each
+// action; the row buttons never appear for non-owners or inactive agents.
+async function refreshAgentPauses() {
+  if (!state || !session || state.room.ownerId !== session.member.id || !can("manage_members")) return;
+  const generation = client.generation;
+  try {
+    const view = await client.request(client.path("/agent-pause"));
+    if (generation !== client.generation || !state) return;
+    agentPauses = new Map((view.paused ?? []).map(p => [p.memberId, p]));
+    render();
+  } catch { /* the roster stays as last read; the next action re-reads it */ }
+}
+$("#people-panel").addEventListener("toggle", () => { if ($("#people-panel").open) refreshAgentPauses(); });
+$("#presence-list").addEventListener("click", async e => {
+  const pauseButton = e.target.closest("[data-member-pause]"), removeButton = e.target.closest("[data-member-remove]"), keepButton = e.target.closest("[data-member-remove-cancel]");
+  if (!pauseButton && !removeButton && !keepButton) return;
+  e.preventDefault();
+  if (!ownsRoomActions(null) || memberActionBusy) return;
+  const memberId = pauseButton?.dataset.memberPause ?? removeButton?.dataset.memberRemove ?? keepButton.dataset.memberRemoveCancel;
+  const focusAction = selector => $(`#presence-list [${selector}="${CSS.escape(memberId)}"]`)?.focus();
+  if (keepButton) { armedRemoval = null; render(); focusAction("data-member-remove"); return; }
+  const member = state.members[memberId];
+  if (!member || member.kind !== "agent" || member.active === false || state.room.ownerId !== session.member.id || !can("manage_members")) return;
+  if (removeButton && armedRemoval !== memberId) { armedRemoval = memberId; render(); focusAction("data-member-remove"); return; }
+  memberActionBusy = true;
+  const generation = client.generation;
+  try {
+    if (removeButton) {
+      const entry = draftCommand(null, T.MEMBER_ACCESS_CHANGED, { memberId, expectedMemberRevision: member.revision, permissions: [...member.permissions], active: false });
+      armedRemoval = null;
+      await client.send(entry.command);
+      if (generation !== client.generation || !state) return;
+      agentPauses.delete(memberId);
+      notice(`${displayName(memberId)} removed. Room access and connections ended; context already delivered to its provider is not recalled.`);
+    } else {
+      const action = pauseButton.dataset.pauseAction;
+      const view = await client.request(client.path("/agent-pause"), { method: "POST", data: { action, memberId, requestId: crypto.randomUUID(), ...(action === "pause" ? { reason: null } : {}) } });
+      if (generation !== client.generation || !state) return;
+      agentPauses = new Map((view.paused ?? []).map(p => [p.memberId, p]));
+      notice(action === "pause" ? `${displayName(memberId)} paused: queued wakes will not start; a running attempt finishes.` : `${displayName(memberId)} resumed.`);
+    }
+    render();
+    focusAction(removeButton ? "data-member-record-id" : "data-member-pause");
+  } catch (error) {
+    if (generation === client.generation && state) notice(error.message || "Action not saved. Try again.", true);
+  } finally { memberActionBusy = false; }
 });
 $("#presence-list").addEventListener("click", e => {
   if (!shouldAddressPresenceClick(e.target)) return;
