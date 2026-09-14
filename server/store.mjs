@@ -12,7 +12,7 @@ import { STORE_SCHEMA_VERSION, registerWriter, installWriterFence, verifyWriterF
 import { ShareLinks, shareLinkSchema } from "./share-links.mjs";
 import { conflictingClaim } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
-import { WakeQueue, wakeQueueSchema } from "./wake-queue.mjs";
+import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
 import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
@@ -297,6 +297,7 @@ export class RoomStore {
         // additive at v27, so a backup taken before them is still a valid v27
         // file. Read-only never migrates, so verify them only when present.
         this.wakeQueue.verifySchema({ allowAbsent: true });
+        this.wakeQueue.verifyPauseSchema({ allowAbsent: true });
         this.attention.verifySchema({ allowAbsent: true });
         this.agentConnections.verify();
         this.verifyHelpHistory();
@@ -382,6 +383,8 @@ export class RoomStore {
       // Wake queue rows are purely additive (no data migration, no fence
       // impact), so no schema version bump: IF NOT EXISTS is idempotent here.
       this.db.exec(wakeQueueSchema);
+      // The pause surface (W4-48) is purely additive as well.
+      this.db.exec(wakeQueuePauseSchema);
       // Attention preferences are purely additive as well (W4-46).
       this.db.exec(attentionSchema);
       // The channel webhook update journal (B20) follows the same additive pattern.
@@ -392,6 +395,7 @@ export class RoomStore {
       this.shareLinks.verify();
       this.reminders.verifySchema();
       this.wakeQueue.verifySchema();
+      this.wakeQueue.verifyPauseSchema();
       this.attention.verifySchema();
       // A lease whose holder died with the process is expired back to pending
       // here, so a restart preserves the intent exactly once (W4-45 done-when).
