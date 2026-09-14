@@ -13,6 +13,7 @@ import { ShareLinks, shareLinkSchema } from "./share-links.mjs";
 import { conflictingClaim } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
 import { WakeQueue, wakeQueueSchema } from "./wake-queue.mjs";
+import { Attention, attentionSchema } from "./attention.mjs";
 import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
 import { workItemChanges } from "../src/workflow.js";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
@@ -264,6 +265,7 @@ export class RoomStore {
     this.invites = new AgentInvites(this);
     this.reminders = new Reminders(this);
     this.wakeQueue = new WakeQueue(this);
+    this.attention = new Attention(this);
     this.readOnly = readOnly;
     this.agentConnections = new AgentConnections(this);
     this.guestAgentLinks = new GuestAgentLinks(this);
@@ -289,6 +291,7 @@ export class RoomStore {
         this.shareLinks.verify();
         this.reminders.verifySchema();
       this.wakeQueue.verifySchema();
+      this.attention.verifySchema();
       // A lease whose holder died with the process is expired back to pending
       // here, so a restart preserves the intent exactly once (W4-45 done-when).
       if (!this.readOnly) this.wakeQueue.recover(this.now());
@@ -372,12 +375,15 @@ export class RoomStore {
       // Wake queue rows are purely additive (no data migration, no fence
       // impact), so no schema version bump: IF NOT EXISTS is idempotent here.
       this.db.exec(wakeQueueSchema);
+      // Attention preferences are purely additive as well (W4-46).
+      this.db.exec(attentionSchema);
       if (version < STORE_SCHEMA_VERSION) this.storagePlatform.installWriterFence(this.db);
       this.storagePlatform.verifyWriterFence(this.db);
       this.verifyInvitationAudit();
       this.shareLinks.verify();
       this.reminders.verifySchema();
       this.wakeQueue.verifySchema();
+      this.attention.verifySchema();
       // A lease whose holder died with the process is expired back to pending
       // here, so a restart preserves the intent exactly once (W4-45 done-when).
       if (!this.readOnly) this.wakeQueue.recover(this.now());
