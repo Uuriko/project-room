@@ -265,6 +265,10 @@
               <p>This is the chat. Write below. Type <kbd>@</kbd> to address a person or agent. Invite people. Plug AI agents in from <strong>People</strong> — they join this conversation like anyone else. Inbox uses <strong>Account key</strong>.</p>
               <button type="button" id="room-guide-dismiss" class="button ghost">Got it</button>
             </div>
+            <details id="pinned-panel" class="pinned-panel" hidden>
+              <summary id="pinned-heading" class="section-summary"><span class="section-label"><strong>Pinned</strong></span><span id="pinned-count" class="count-chip"></span></summary>
+              <ol id="pinned-list" class="pinned-list" aria-labelledby="pinned-heading"></ol>
+            </details>
             <ol id="message-list" class="message-list" tabindex="0" aria-label="Conversation messages"></ol>
             <button id="new-messages-button" class="new-messages-button" type="button" hidden></button>
             <div id="reply-bar" class="reply-bar" hidden><span id="reply-context"></span><span class="reply-bar-actions"><button id="reply-mention" type="button" class="button ghost" hidden aria-pressed="false">Also @</button><button id="cancel-reply" type="button" class="button ghost">Cancel reply</button></span></div>

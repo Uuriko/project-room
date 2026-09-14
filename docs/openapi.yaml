@@ -218,6 +218,76 @@ paths:
                   query: { type: string }
                   messages: { type: array, items: { type: object } }
                   workItems: { type: array, items: { type: object } }
+  /api/rooms/{roomId}/pins:
+    get:
+      summary: List pinned messages
+      description: |
+        Issue #6 B2. The room's pinned messages in the order they were pinned,
+        joined with the live message (author, body, createdAt). Members only;
+        membership is re-checked on every call. Deleted messages (tombstones)
+        never appear. At most 50 pins per room.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Ordered pinned list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PinnedList'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+    post:
+      summary: Pin or unpin one message
+      description: |
+        Any active member may pin or unpin a live message. Appends a
+        `message.pinned` / `message.unpinned` event through the single write
+        path; a request for the state the room is already in appends nothing
+        and answers `changed: false`. `requestId` is an optional client
+        idempotency key for the underlying command (same rules as the
+        `commands` route). Pinning a deleted message is 409 `message_deleted`;
+        the 51st pin is 409 `command_rejected` (pin capacity).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messageId, pinned]
+              properties:
+                messageId: { type: string }
+                pinned: { type: boolean }
+                requestId: { type: string, description: Optional idempotency key for the command }
+      responses:
+        '200':
+          description: The resulting pinned list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PinnedList'
+                  - type: object
+                    properties:
+                      messageId: { type: string }
+                      pinned: { type: boolean }
+                      changed: { type: boolean, description: true when this call appended an event }
+                      event:
+                        type: object
+                        description: Command receipt when an event was issued; absent otherwise
+                        properties:
+                          id: { type: string }
+                          sequence: { type: integer }
+                          duplicate: { type: boolean }
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+        '404':
+          description: No such message in this room (message_not_found)
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/InvalidInput'
   /api/agent-identities:
     post:
       summary: Create a multi-room agent identity
@@ -1094,7 +1164,7 @@ components:
           description: Client-generated idempotency key (UUID)
         type:
           type: string
-          description: Event type, e.g. message.posted, message.edited, message.deleted, notifications.preferences_set, capabilities.advertised
+          description: Event type, e.g. message.posted, message.edited, message.deleted, message.pinned, message.unpinned, notifications.preferences_set, capabilities.advertised
         data:
           type: object
           description: Event payload; validated per event type
@@ -1114,6 +1184,29 @@ components:
         actorId: { type: string }
         at: { type: string, format: date-time }
         data: { type: object }
+    PinnedList:
+      type: object
+      description: Pinned messages in pin order (issue #6 B2). Tombstoned messages are excluded.
+      required: [roomId, sequence, limit, count, pins]
+      properties:
+        roomId: { type: string }
+        sequence: { type: integer, description: Room sequence the list was read at }
+        limit: { type: integer, description: Maximum pins per room (50) }
+        count: { type: integer }
+        pins:
+          type: array
+          items:
+            type: object
+            required: [messageId, pinnedById, pinnedAt, authorId, body, createdAt]
+            properties:
+              messageId: { type: string }
+              pinnedById: { type: string }
+              pinnedAt: { type: string, format: date-time }
+              authorId: { type: string }
+              body: { type: string }
+              createdAt: { type: string, format: date-time }
+              workItemId: { type: [string, 'null'] }
+              replyToId: { type: [string, 'null'] }
     ChannelConnection:
       type: object
       description: Generic unified-inbox connection record (docs/UNIFIED-INBOX.md); extra keys are rejected on input.

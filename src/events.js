@@ -20,6 +20,8 @@ export const EVENT_TYPES = Object.freeze({
   MESSAGE_DELETED: "message.deleted",
   REPLY_REQUEST_CANCELLED: REPLY_CANCELLED,
   MESSAGE_REACTION_SET: "message.reaction_set",
+  MESSAGE_PINNED: "message.pinned",
+  MESSAGE_UNPINNED: "message.unpinned",
   WORK_PROPOSED: "work.proposed",
   WORK_HELP_UPDATED,
   HELP_OFFER_OPENED,
@@ -160,6 +162,8 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.MESSAGE_DELETED]: deleteMessage,
     [EVENT_TYPES.REPLY_REQUEST_CANCELLED]: cancelReplyRequest,
     [EVENT_TYPES.MESSAGE_REACTION_SET]: setMessageReaction,
+    [EVENT_TYPES.MESSAGE_PINNED]: pinMessage,
+    [EVENT_TYPES.MESSAGE_UNPINNED]: unpinMessage,
     [EVENT_TYPES.WORK_PROPOSED]: proposeWork,
     [EVENT_TYPES.WORK_HELP_UPDATED]: (state, incoming) => {
       const help = helpFromEvent(state, incoming);
@@ -442,6 +446,7 @@ function deleteMessage(state, incoming) {
   message.editHistory = [];
   message.deletedAt = incoming.at;
   message.deletedBy = incoming.actorId;
+  dropPinsForMessage(state, message.id); // issue #6 B2: the tombstone drops the pin too
   message.revision = (message.revision ?? 0) + 1;
 }
 
@@ -955,4 +960,65 @@ function stableStringify(value) {
     return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+// Pinned messages (issue #6 B2). A pin is a room-visible bookmark on one
+// existing message: any active member can pin or unpin, the room keeps at most
+// PIN_LIMIT pins, and the pinned list is ordered by when each pin was placed.
+// Pins reference message ids only; a deleted message (tombstone) drops out of
+// the pinned list under the same rules that hide its body everywhere else
+// (deleteMessage calls dropPinsForMessage). Event-sourced: message.pinned /
+// message.unpinned append to the room log and the projection carries
+// state.pins = [{ messageId, pinnedById, pinnedAt }]. Both reducers are
+// idempotent so an exact retry, or a replay of a duplicate, changes nothing.
+// The HTTP surface lives in server/pins.mjs.
+export const PIN_LIMIT = 50;
+
+// Command field allowlist for server/store.mjs validateCommand.
+export const PIN_COMMAND_SHAPES = Object.freeze({
+  [EVENT_TYPES.MESSAGE_PINNED]: "messageId",
+  [EVENT_TYPES.MESSAGE_UNPINNED]: "messageId"
+});
+
+function pinTarget(incoming) {
+  const messageId = incoming.data?.messageId;
+  if (typeof messageId !== "string" || !messageId.trim()) throw new Error("Missing required field: messageId");
+  return messageId;
+}
+
+function pinMessage(state, incoming) {
+  requireMember(state, incoming.actorId);
+  const messageId = pinTarget(incoming);
+  const message = state.messages.find(m => m.id === messageId);
+  if (!message) throw new Error("Pin must reference a message in this Room");
+  if (message.deletedAt || message.body == null) throw new Error("A deleted message cannot be pinned");
+  state.pins ??= [];
+  if (state.pins.some(pin => pin.messageId === messageId)) return; // idempotent
+  if (state.pins.length >= PIN_LIMIT) throw new Error(`Pin capacity reached: ${PIN_LIMIT} pinned messages per room; unpin one first`);
+  state.pins.push({ messageId, pinnedById: incoming.actorId, pinnedAt: incoming.at });
+}
+
+function unpinMessage(state, incoming) {
+  requireMember(state, incoming.actorId);
+  const messageId = pinTarget(incoming);
+  if (!state.pins?.length) return; // idempotent
+  state.pins = state.pins.filter(pin => pin.messageId !== messageId);
+}
+
+function dropPinsForMessage(state, messageId) {
+  if (state.pins?.some(pin => pin.messageId === messageId)) state.pins = state.pins.filter(pin => pin.messageId !== messageId);
+}
+
+export function isPinned(state, messageId) {
+  return Boolean(state?.pins?.some(pin => pin.messageId === messageId));
+}
+
+// Ordered pinned list joined with the live message. Tombstoned or missing
+// messages are filtered defensively even though the reducer already drops them.
+export function pinnedMessages(state) {
+  const byId = new Map((state?.messages ?? []).map(message => [message.id, message]));
+  return (state?.pins ?? []).flatMap(pin => {
+    const message = byId.get(pin.messageId);
+    return message && !message.deletedAt && message.body != null ? [{ ...pin, message }] : [];
+  });
 }

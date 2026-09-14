@@ -1,4 +1,4 @@
-import { EVENT_TYPES as T, WORK_STATES as S, roomPolicy } from "./events.js";
+import { EVENT_TYPES as T, WORK_STATES as S, roomPolicy, pinnedMessages, isPinned, PIN_LIMIT } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
@@ -70,7 +70,7 @@ let offerContextVersion = null;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
 let requestMode = null, requestReading = false, requestEpoch = 0;
 const composerKey = () => replyDraftKey(requestMode, currentThreadId);
-const viewPositions = new Map(), pendingReactions = new Map(), locallyOwnedMessageIds = new Set();
+const viewPositions = new Map(), pendingReactions = new Map(), pendingPins = new Set(), locallyOwnedMessageIds = new Set();
 let newVisibleMessages = 0, unreadAnchorId = null, mentionIndex = 0;
 let roomCursor = 0, roomGeneration = -1, showAllAttention = false, returnClock = null;
 let signoutOperationId = 0, signoutLoading = false;
@@ -1006,6 +1006,7 @@ function renderMessages() {
   }
   $("#new-messages-button").hidden = newVisibleMessages === 0;
   $("#new-messages-button").textContent = `${newVisibleMessages} new ${newVisibleMessages === 1 ? "message" : "messages"} · jump to latest`;
+  renderPinned();
   if (announceCount) $("#conversation-announcement").textContent = `${announceCount} new ${announceCount === 1 ? "message" : "messages"} in ${currentThreadId ? "this thread" : "the room"}. Room event ${client.sequence}.`;
 }
 function draftFeedbackHTML(message) {
@@ -1032,7 +1033,7 @@ function messageContent(m, cluster = {}, unreadStart = false) {
   const groupedTime = cluster.grouped
     ? `<time class="grouped-time" datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time>`
     : "";
-  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${author.kind === "agent" ? `<span>${esc(kindLabel(author.kind))}</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · room-visible</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(parent.body.slice(0,90))}</a>` : ""}</div>${m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<p class="message-body">${mentionHtml(m.body, Object.values(state.members), esc)}</p>`}<div class="draft-feedback">${draftFeedbackHTML(m)}</div><div class="reactions" role="group" aria-label="Reactions to message by ${esc(authorLabel)}">${reactionButtons}</div><div class="message-links">${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>${doneChip(i)}`).join("")}${!m.deletedAt && m.workItemId && workActions(state.workItems[m.workItemId], state.members[session.member.id]).some(([action]) => action === "complete") ? `<button class="message-to-work" type="button" data-message-action="result" data-message-id="${esc(m.id)}">Save as result</button>` : ""}<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>${!currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : ""}${!m.deletedAt && can("steer") && !(m.proposal && m.workItemId) ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : ""}${!m.deletedAt && can("decide") && state.members[session.member.id]?.kind === "human" ? `<button class="message-to-work" data-message-action="decide" data-message-id="${esc(m.id)}" type="button">Record decision</button>` : ""}</div></div>`;
+  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${author.kind === "agent" ? `<span>${esc(kindLabel(author.kind))}</span>` : ""}${isPinned(state, m.id) ? `<span class="pinned-chip">Pinned</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · room-visible</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(parent.body.slice(0,90))}</a>` : ""}</div>${m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<p class="message-body">${mentionHtml(m.body, Object.values(state.members), esc)}</p>`}<div class="draft-feedback">${draftFeedbackHTML(m)}</div><div class="reactions" role="group" aria-label="Reactions to message by ${esc(authorLabel)}">${reactionButtons}</div><div class="message-links">${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>${doneChip(i)}`).join("")}${!m.deletedAt && m.workItemId && workActions(state.workItems[m.workItemId], state.members[session.member.id]).some(([action]) => action === "complete") ? `<button class="message-to-work" type="button" data-message-action="result" data-message-id="${esc(m.id)}">Save as result</button>` : ""}<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button">Reply</button>${!m.deletedAt ? `<button class="message-to-work" data-message-action="pin" data-message-id="${esc(m.id)}" type="button" aria-pressed="${isPinned(state, m.id)}">${isPinned(state, m.id) ? "Unpin" : "Pin"}</button>` : ""}${!currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : ""}${!m.deletedAt && can("steer") && !(m.proposal && m.workItemId) ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : ""}${!m.deletedAt && can("decide") && state.members[session.member.id]?.kind === "human" ? `<button class="message-to-work" data-message-action="decide" data-message-id="${esc(m.id)}" type="button">Record decision</button>` : ""}</div></div>`;
 }
 function mentionsFilterOn() {
   return $("#search-mentions")?.getAttribute("aria-pressed") === "true";
@@ -1875,6 +1876,7 @@ $("#message-list").addEventListener("click", e => {
     if (item && workActions(item, state.members[session.member.id]).some(([action]) => action === "complete")) openWorkAction(item, "complete", id);
   }
   else if (button.dataset.messageAction === "react") setReaction(id, button.dataset.reaction);
+  else if (button.dataset.messageAction === "pin") setPinned(id);
   else if (["reply", "thread"].includes(button.dataset.messageAction)) {
     switchThread(conversation.rootById.get(id), button.dataset.messageAction === "reply");
     if (button.dataset.messageAction === "reply") {
@@ -2190,6 +2192,50 @@ $("#new-messages-button").addEventListener("click", () => {
   const list = $("#message-list"); list.scrollTop = list.scrollHeight; newVisibleMessages = 0; unreadAnchorId = null;
   $("#new-messages-button").hidden = true; list.focus({ preventScroll: true });
 });
+// Pinned messages (issue #6 B2): any active member can pin or unpin a live
+// message; the room keeps at most PIN_LIMIT pins in the order they were placed.
+// The server re-checks membership per call and a deleted message drops out of
+// the list; this is the honest view of state.pins plus the two controls.
+async function setPinned(messageId) {
+  if (pendingPins.has(messageId) || !state || !conversation.byId.get(messageId)) return;
+  const pinned = isPinned(state, messageId);
+  if (!pinned && pinnedMessages(state).length >= PIN_LIMIT) { notice(`This room already has ${PIN_LIMIT} pinned messages. Unpin one first.`, true); return; }
+  // Re-entry is guarded by pendingPins rather than a disabled control, so a keyboard user's focus stays on the button.
+  const pending = draftCommand(null, pinned ? T.MESSAGE_UNPINNED : T.MESSAGE_PINNED, { messageId });
+  pendingPins.add(messageId);
+  const generation = client.generation;
+  try {
+    await client.send(pending.command);
+    if (generation === client.generation && state) notice(pinned ? "Message unpinned." : "Message pinned.");
+  } catch (error) {
+    if (generation === client.generation && state) notice(`${error.message}. Nothing was pinned or unpinned.`, true);
+  } finally { pendingPins.delete(messageId); if (state && generation === client.generation) renderMessages(); }
+}
+function renderPinned() {
+  const panel = $("#pinned-panel"), list = $("#pinned-list");
+  const pins = state ? pinnedMessages(state) : [];
+  panel.hidden = pins.length === 0;
+  setText("#pinned-count", pins.length ? `${pins.length} of ${PIN_LIMIT}` : "");
+  if (!pins.length) { list.innerHTML = ""; return; }
+  const html = pins.map(({ message: m, pinnedById }) => `<li class="pinned-item" data-pinned-message="${esc(m.id)}"><a class="source-link pinned-link" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}">${esc(displayName(m.authorId))} · <time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a><p class="pinned-body">${esc(m.body.length > 200 ? `${m.body.slice(0, 200)}…` : m.body)}</p><span class="pinned-meta">Pinned by ${esc(displayName(pinnedById))}</span><button type="button" class="text-button" data-message-action="pin" data-message-id="${esc(m.id)}" aria-label="Unpin message by ${esc(displayName(m.authorId))}">Unpin</button></li>`).join("");
+  if (list.innerHTML !== html) {
+    // Keyboard users keep their place: the same item's control when it is still there,
+    // otherwise the neighbouring item, otherwise the section heading. Focus never falls to the page body.
+    const focusedItem = list.contains(document.activeElement) ? document.activeElement.closest("[data-pinned-message]") : null;
+    const focusedId = focusedItem?.dataset.pinnedMessage, focusedIndex = focusedItem ? [...list.children].indexOf(focusedItem) : -1;
+    list.innerHTML = html;
+    if (focusedItem) {
+      const buttons = [...list.querySelectorAll("button")];
+      const target = list.querySelector(`[data-pinned-message="${CSS.escape(focusedId)}"] button`) ?? buttons[Math.min(focusedIndex, buttons.length - 1)] ?? $("#pinned-panel > summary");
+      target.focus({ preventScroll: true });
+    }
+  }
+}
+$("#pinned-list").addEventListener("click", e => {
+  const button = e.target.closest("[data-message-action=\"pin\"]");
+  if (button && state && !busy) setPinned(button.dataset.messageId);
+});
+
 async function setReaction(messageId, reaction) {
   const key = `${messageId}:${reaction}`, previous = pendingReactions.get(key);
   if (previous?.busy || !Object.hasOwn(REACTIONS, reaction)) return;

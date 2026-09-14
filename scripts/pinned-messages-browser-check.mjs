@@ -1,0 +1,107 @@
+// Simulated human journey against disposable first-party data, not human research.
+// Issue #6 B2: a member pins a message from the keyboard, the Pinned section
+// lists pins in pin order and follows other members' pins live, unpin works
+// from the section itself, and a deleted message drops out of the section.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { rmSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { chromium } from "playwright";
+import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
+import { createRoomServer } from "../server/http.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
+
+async function setup(t, viewport = { width: 1440, height: 1000 }) {
+  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
+    f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+  });
+  const page = await browser.newPage({ viewport, reducedMotion: "reduce" }), errors = [], outside = [];
+  page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message));
+  await page.route("**/*", route => {
+    if (new URL(route.request().url()).origin !== origin) { outside.push(route.request().url()); return route.abort(); }
+    return route.continue();
+  });
+  t.after(() => { assert.deepEqual(errors, [], "no page errors"); assert.deepEqual(outside, [], "no outside requests"); });
+  await page.goto(origin);
+  await page.locator("#auth-panel").waitFor({ state: "visible" });
+  await page.locator("#access-key").fill(f.keys.owner);
+  await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await page.locator("#main").waitFor({ state: "visible" });
+  const send = (actor, type, data) => f.store.command(f.keys[actor], "commons", { id: randomUUID(), type, data });
+  const post = async body => {
+    await page.locator("#message-input").fill(body);
+    await page.locator("#message-form button[type=submit]").click();
+    await page.locator("#message-list .message-body", { hasText: body }).first().waitFor({ state: "visible" });
+  };
+  const row = body => page.locator("#message-list .message", { hasText: body });
+  const messageId = body => f.store.room("commons").state.messages.find(m => m.body === body)?.id;
+  return { ...f, page, send, post, row, messageId, panel: page.locator("#pinned-panel"), items: page.locator("#pinned-list .pinned-item"), pins: () => f.store.room("commons").state.pins ?? [] };
+}
+
+for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["mobile", { width: 390, height: 844 }]]) {
+  test(`pinned messages ${label}: keyboard pin, ordered live section, unpin from the section, tombstone drops out`, { timeout: 60000 }, async t => {
+    const f = await setup(t, viewport), { page } = f;
+    assert.equal(await f.panel.isHidden(), true, "no pins, no section");
+
+    await f.post("Meeting room is B-204 from Thursday");
+    await f.post("Parking code is 4411");
+    const pinButton = f.row("Meeting room is B-204").getByRole("button", { name: "Pin", exact: true });
+    assert.equal(await pinButton.getAttribute("aria-pressed"), "false");
+    // Keyboard only: focus the control and press Enter.
+    await pinButton.focus(); await page.keyboard.press("Enter");
+    await f.panel.waitFor({ state: "visible" });
+    await f.row("Meeting room is B-204").getByRole("button", { name: "Unpin", exact: true }).waitFor({ state: "visible" });
+    assert.equal(await f.row("Meeting room is B-204").getByRole("button", { name: "Unpin", exact: true }).getAttribute("aria-pressed"), "true");
+    assert.equal(await page.evaluate(() => document.activeElement?.dataset.messageAction === "pin" && document.activeElement.textContent), "Unpin", "focus stays on the control that was pressed");
+    assert.equal(await f.row("Meeting room is B-204").locator(".pinned-chip").textContent(), "Pinned");
+    assert.equal(await f.row("Parking code is 4411").locator(".pinned-chip").count(), 0, "only the pinned message carries the chip");
+    assert.equal(await page.locator("#pinned-count").textContent(), "1 of 50");
+    assert.deepEqual(f.pins().map(p => [p.pinnedById, f.messageId("Meeting room is B-204 from Thursday") === p.messageId]), [["owner", true]]);
+    await page.locator("#pinned-panel").evaluate(el => { el.open = true; });
+    assert.equal(await f.items.count(), 1);
+    assert.match(await f.items.first().locator(".pinned-body").textContent(), /^Meeting room is B-204 from Thursday$/);
+    assert.match(await f.items.first().locator(".pinned-meta").textContent(), /^Pinned by /);
+
+    // Another member pins from the API: the section follows live and keeps pin order (not message order).
+    await f.post("Bring the projector adapter");
+    f.send("producer", T.MESSAGE_PINNED, { messageId: f.messageId("Bring the projector adapter") });
+    await page.waitForFunction(() => document.querySelectorAll("#pinned-list .pinned-item").length === 2);
+    f.send("producer", T.MESSAGE_PINNED, { messageId: f.messageId("Parking code is 4411") });
+    await page.waitForFunction(() => document.querySelectorAll("#pinned-list .pinned-item").length === 3);
+    assert.deepEqual(await f.items.locator(".pinned-body").allTextContents(), ["Meeting room is B-204 from Thursday", "Bring the projector adapter", "Parking code is 4411"]);
+    assert.equal(await page.locator("#pinned-count").textContent(), "3 of 50");
+    assert.match(await f.items.nth(1).locator(".pinned-meta").textContent(), /Test producer/);
+
+    // Unpin from the section itself, from the keyboard; focus stays in the section.
+    const unpin = f.items.nth(1).getByRole("button", { name: /^Unpin message by/ });
+    await unpin.focus(); await page.keyboard.press("Space");
+    await page.waitForFunction(() => document.querySelectorAll("#pinned-list .pinned-item").length === 2);
+    assert.deepEqual(await f.items.locator(".pinned-body").allTextContents(), ["Meeting room is B-204 from Thursday", "Parking code is 4411"]);
+    assert.equal(await page.evaluate(() => document.activeElement?.closest("#pinned-panel") !== null), true, "focus did not fall off the page after the item went");
+    assert.equal(await f.row("Bring the projector adapter").getByRole("button", { name: "Pin", exact: true }).getAttribute("aria-pressed"), "false");
+    assert.deepEqual(f.pins().map(p => p.messageId), [f.messageId("Meeting room is B-204 from Thursday"), f.messageId("Parking code is 4411")]);
+
+    // A deleted message drops out of the section; the tombstone offers no pin control.
+    const doomed = f.messageId("Parking code is 4411");
+    f.send("owner", T.MESSAGE_DELETED, { messageId: doomed, expectedMessageRevision: 0, reason: "cleanup" });
+    await page.waitForFunction(() => document.querySelectorAll("#pinned-list .pinned-item").length === 1);
+    assert.deepEqual(await f.items.locator(".pinned-body").allTextContents(), ["Meeting room is B-204 from Thursday"]);
+    const tombstone = page.locator("#message-list .message", { has: page.locator(".message-tombstone") });
+    assert.equal(await tombstone.getByRole("button", { name: /^(Pin|Unpin)$/ }).count(), 0);
+    assert.equal(await page.locator("#pinned-list").textContent().then(text => text.includes("4411")), false, "a deleted body is gone from the section");
+
+    // The link in the section reveals the message in the conversation.
+    await f.items.first().locator(".pinned-link").click();
+    await page.waitForFunction(() => location.hash.startsWith("#pr-record/message/"));
+
+    // Unpin the last one from the message row: the section hides again.
+    await f.row("Meeting room is B-204").getByRole("button", { name: "Unpin", exact: true }).click();
+    await f.panel.waitFor({ state: "hidden" });
+    assert.deepEqual(f.pins(), []);
+  });
+}

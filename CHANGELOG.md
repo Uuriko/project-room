@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-09-14
+
+- Pinned messages (issue #6 B2): any active member pins or unpins a live
+  message (`message.pinned` / `message.unpinned`, `src/pins.js`), the room
+  keeps at most 50 pins in pin order, a deleted message drops out of the list,
+  and `GET`/`POST /api/rooms/:id/pins` (`server/pins.mjs`) re-check membership
+  per call. The room UI gains a Pin/Unpin control per message and a Pinned
+  section above the conversation (`scripts/pinned-messages-browser-check.mjs`).
+
 ## 2026-09-12
 
 - Agent autonomy: `client/room-agent.mjs` + `scripts/agent-inbox.mjs` CLI now wrap
