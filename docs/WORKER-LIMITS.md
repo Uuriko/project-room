@@ -13,11 +13,21 @@ was decided against a number, and so a later change can be too. The
 
 ## How to measure
 
+One script, two subcommands (PR #160's per-phase measurement and PR #141's
+constructor-against-a-filled-log measurement were folded into it; `--json`
+works for both):
+
 ```sh
-node scripts/measure-cold-start.mjs            # 3 runs, table
-node scripts/measure-cold-start.mjs 5 --json   # 5 runs, machine-readable
-node scripts/measure-cold-start.mjs --no-miniflare
+node scripts/measure-cold-start.mjs                       # phases: 3 runs, table
+node scripts/measure-cold-start.mjs phases 5 --json       # phases: 5 runs, machine-readable
+node scripts/measure-cold-start.mjs --no-miniflare        # phases: Node rows only
+node scripts/measure-cold-start.mjs constructor           # 10,000 events, 5 cold constructions
+node scripts/measure-cold-start.mjs constructor 2000 3 --help-history --json
 ```
+
+`phases` (the default) answers "what does the first request pay on an empty
+workspace?"; `constructor` answers "how does the store constructor grow with
+the event log?".
 
 Node rows come from fresh child processes: import of `server/store.mjs` and
 `server/http.mjs`, a fresh store (`RoomStore` constructor plus `initialize`),
@@ -36,6 +46,18 @@ so the cold row is isolate creation, module evaluation and the object
 constructor, not the workerd process start. The measurement bundle adds one
 provisioning route to a subclass of `ProjectRoom`; it is built in memory and
 is not a deployment artifact.
+
+`constructor [events=10000] [runs=5] [--help-history] [--json]` builds one
+database holding `events` audit rows (`message.posted`, capped at the
+10,000-event pilot limit) with the real server modules, then times `runs`
+cold `RoomStore` constructions of it: schema verification, projection
+provenance repair, invitation audit and work-help history audit, the work a
+restarted Durable Object does before its first answer. It reports the build
+time and min / median / max wall and CPU of the constructor with every
+sample. `--help-history` also opens one help invitation so the help audit
+replays every event instead of taking its no-help fast path. The 10,000-event
+build itself runs every command through the store and takes a few minutes;
+the constructor samples are the measurement.
 
 ## Measured on 2026-09-14
 
@@ -79,6 +101,23 @@ constructor measurement and stays 30x below the Paid-plan default. The
 measured table above stands. Re-run the script after store migrations that
 add startup audits, and record the new table here with the date.
 
+## Measured on 2026-09-14: constructor against a 10,000-event log
+
+`node scripts/measure-cold-start.mjs constructor 10000 5 [--help-history]`
+on the same host, same Node, after the store gained the spend-allowance,
+notification, moderation and room-lifecycle tables (#141's original run,
+before those, saw 59-69 ms wall):
+
+| Store | Build | Constructor CPU ms (min / median / max) | Constructor wall ms (min / median / max) |
+|---|---|---|---|
+| 10,000 `message.posted`, no help invitation | 204 s | 76.9 / 82.3 / 92.2 | 76.8 / 82.0 / 88.0 |
+| 10,000 events with one open help invitation (`--help-history`) | 172 s | 80.5 / 87.6 / 99.8 | 73.6 / 89.1 / 95.5 |
+
+The help-history replay adds about 5 to 7 ms at the pilot cap; the constructor
+alone now sits at 80 to 90 ms, still about 11x below the 1000 ms cap and
+well above the old 50 ms one. The build column is the synthetic fill (every
+event goes through `store.command`), not part of the cold start.
+
 ## Caveats
 
 - Node's `node:sqlite` file database and workerd's Durable Object SQLite differ
@@ -88,6 +127,6 @@ add startup audits, and record the new table here with the date.
 - The container that ran these numbers is not the edge; expect variance of
   tens of percent between hosts. Medians over several runs are reported for
   that reason.
-- The measurement covers an empty workspace. For the constructor against a
-  filled event log, use the N-event build in #141's variant of the script
-  once it lands, or fill the database before the reopen phase.
+- The `phases` table covers an empty workspace. For the constructor against a
+  filled event log, use the `constructor` subcommand (the N-event build from
+  #141), whose 2026-09-14 numbers are recorded above.
