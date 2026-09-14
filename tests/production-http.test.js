@@ -82,6 +82,7 @@ test('GET /api/auth-config has no identity provider', async t => {
 test('Room client does not load an identity-provider browser SDK', () => {
   const src = readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
   assert.doesNotMatch(src, /clerk\.browser\.js|@clerk\/clerk-js|@clerk\/ui/);
+  assert.doesNotMatch(src, /if \(providerSettings && !initialInvitationFragment\)/);
 });
 
 test('sign-in help does not call the live host a local pilot', () => {

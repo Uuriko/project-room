@@ -3311,15 +3311,6 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
     await shareLinksUI.open(initialJoinFragment); return;
   }
   const requestedRoom = selectedRoomFromLocation();
-  if (providerSettings && !initialInvitationFragment) {
-    const account = await ensureAccountSession();
-    if (providerJoinRequested) { await loadProvider(); await completeProviderJoin(); if (accountClient.session?.authenticated) return; }
-    if (account?.authenticated) {
-      authKind = 'account';
-      if (requestedRoom) await client.restore(requestedRoom); else showAccountWorkspace();
-      scheduleProviderRenewal(); return;
-    }
-  }
   if (requestedRoom || accountHomeFromLocation()) {
     const account = await ensureAccountSession();
     if (!account?.authenticated) {
