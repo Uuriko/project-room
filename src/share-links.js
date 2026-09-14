@@ -27,6 +27,12 @@ export function formatInvitationExpiry(expiresAt) {
   return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
+export function invitationExpiryDateTime(expiresAt) {
+  const date = new Date(expiresAt);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString();
+}
+
 export function invitationAskWhom(preview) {
   const name = typeof preview?.invitedByDisplayName === "string" ? preview.invitedByDisplayName.trim() : "";
   if (name && !/^room (owner|administrator)$/i.test(name)) return name;

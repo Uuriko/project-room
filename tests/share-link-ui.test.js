@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { formatShareInvitation, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, reuseVisibleRoom, invitationUnavailableMessage, formatInvitationExpiry, invitationAskWhom, invitationDialogTitle, invitationCapabilityLimits, agentMembershipLimits } from "../src/share-links.js";
+import { formatShareInvitation, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, reuseVisibleRoom, invitationUnavailableMessage, formatInvitationExpiry, invitationAskWhom, invitationDialogTitle, invitationCapabilityLimits, agentMembershipLimits, invitationExpiryDateTime } from "../src/share-links.js";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
@@ -65,6 +65,12 @@ test("expired invitation copy names the room owner and includes the expiry time"
   const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   assert.match(app, /invitationUnavailableMessage\(preview\)/);
   assert.doesNotMatch(app, /Ask a current Room administrator/);
+  const iso = invitationExpiryDateTime(preview.expiresAt);
+  assert.equal(iso, new Date(preview.expiresAt).toISOString());
+  assert.equal(invitationExpiryDateTime("not-a-date"), "");
+  assert.equal(invitationExpiryDateTime(undefined), "");
+  assert.match(app, /invitationExpiryDateTime\(preview\.expiresAt\)/);
+  assert.match(app, /formatInvitationExpiry\(preview\.expiresAt\)/);
 });
 
 test("agent setup copy follows the selected access level", () => {

@@ -4,7 +4,7 @@ import { ReturnBrief } from "./return-brief.js";
 import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
 import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, memberHandle, memberDoneChip, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
 import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer } from "./workflow.js";
-import { consumeJoinFragment, installShareLinks, canRetryInvitation, invitationUnavailableMessage, invitationDialogTitle, invitationCapabilityLimits } from "./share-links.js";
+import { consumeJoinFragment, installShareLinks, canRetryInvitation, invitationUnavailableMessage, invitationDialogTitle, invitationCapabilityLimits, formatInvitationExpiry, invitationExpiryDateTime } from "./share-links.js";
 import { installAgentConnections } from "./agent-connections.js";
 import { installRoomInstructions } from "./room-instructions.js";
 import { installReminders } from "./reminders.js";
@@ -840,9 +840,14 @@ function renderInvitation() {
     const limits = invitationCapabilityLimits(preview.permissions);
     $("#invitation-permissions").textContent = limits ? `${granted}. ${limits}` : granted;
     $("#invitation-issuer").textContent = preview.invitedByDisplayName || "Room owner";
-    const expiry = new Date(preview.expiresAt);
-    $("#invitation-expires").dateTime = expiry.toISOString();
-    $("#invitation-expires").textContent = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(expiry);
+    const iso = invitationExpiryDateTime(preview.expiresAt);
+    if (iso) {
+      $("#invitation-expires").dateTime = iso;
+      $("#invitation-expires").textContent = formatInvitationExpiry(preview.expiresAt);
+    } else {
+      $("#invitation-expires").removeAttribute("datetime");
+      $("#invitation-expires").textContent = "";
+    }
   }
   let summary = phase === "terminal" ? "This invitation is unavailable." : "Checking invitation…";
   if (preview && phase !== "terminal") summary = pending
