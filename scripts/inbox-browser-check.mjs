@@ -55,7 +55,15 @@ async function setup(t, mobile = false, simulate = false) {
   await page.goto(origin + "/?room=commons");
   await page.locator("#access-key").fill(accountKey); await page.locator('#auth-form button[type="submit"]').click();
   await page.locator("#main").waitFor({ state: "visible" });
-  const inbox = async () => { await page.locator("#nav-inbox").click(); await page.locator("#inbox-reader").waitFor({ state: "visible" }); };
+  // Opening the inbox lists the connections and opens the first message, two independent round
+  // trips; on a phone the opened reader covers the sidebar. Settle both before any sidebar step:
+  // the reader rendered, and the connection list rendered (the product unhides the add-connection
+  // control exactly then, whether or not any connection exists), or a step-back probe can pass an
+  // instant before the reader appears, and a late connection render re-lists the rows mid-click.
+  const inbox = async () => {
+    await page.locator("#nav-inbox").click(); await page.locator("#inbox-reader").waitFor({ state: "visible" });
+    await page.locator("#inbox-add-connection:not([hidden])").waitFor({ state: "attached" });
+  };
   const pick = async id => {
     if (mobile && await page.locator("#inbox-back").isVisible()) await page.locator("#inbox-back").click();
     await page.locator(`[data-source-id="${id}"]`).click();
