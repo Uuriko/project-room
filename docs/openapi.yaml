@@ -1111,7 +1111,7 @@ paths:
   /api/ready:
     get:
       summary: Readiness
-      description: Open (also HEAD). 200 `{ status: ready }` once the store answers; 503 `{ status: unavailable }` otherwise.
+      description: "Open (also HEAD). 200 `{ status: ready }` once the store answers; 503 `{ status: unavailable }` otherwise."
       security: []
       responses:
         '200': { description: "{ status: ready }" }
