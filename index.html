@@ -410,6 +410,22 @@
         <label>When to ask for help<textarea name="escalation" rows="2" maxlength="1000"></textarea></label>
         <p class="form-hint">Optional · 1,000 characters each. Clear all fields to remove.</p>
       </form>
+      <section id="room-policy" class="room-policy" aria-labelledby="room-policy-title" hidden>
+        <h3 id="room-policy-title">Review policy</h3>
+        <p id="room-policy-current" class="room-policy-current"></p>
+        <div id="room-policy-owner" hidden>
+          <label for="room-policy-select">Every new outcome in this room needs</label>
+          <select id="room-policy-select" aria-describedby="room-policy-help">
+            <option value="none">Nothing extra · the proposer chooses</option>
+            <option value="review">Independent review</option>
+            <option value="decision">Owner decision</option>
+            <option value="both">Independent review and owner decision</option>
+          </select>
+          <div class="instructions-actions"><button id="room-policy-apply" class="button secondary" type="button">Apply policy</button></div>
+        </div>
+        <p id="room-policy-help" class="form-hint"></p>
+        <p id="room-policy-status" class="form-hint" role="status"></p>
+      </section>
       <p id="room-instructions-status" class="form-hint" role="status"></p>
       <div class="instructions-actions">
         <button id="room-instructions-save" class="button primary" type="submit" form="room-instructions-form">Save</button>

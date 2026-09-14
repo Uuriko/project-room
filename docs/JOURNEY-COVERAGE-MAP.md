@@ -243,7 +243,7 @@ carry the claim, and the remaining tiers stay visibly open.
     },
     {
       "id": "room-review-policy",
-      "claim": "The room owner can make independent review and/or an owner decision mandatory; altered client fields cannot disable a mandatory gate, earlier work keeps its recorded requirements, and the proposer sees the requirement locked with the reason.",
+      "claim": "The room owner can make independent review and/or an owner decision mandatory from the Room instructions dialog (members see the policy read only); altered client fields cannot disable a mandatory gate, earlier work keeps its recorded requirements, and the proposer sees the requirement locked with the reason.",
       "evidence": {
         "unit": [
           "tests/work-actions.test.js",

@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-09-14
+
+- Room review policy (#6 A4 follow-up): the owner sets it from the Room
+  instructions dialog (**Review policy**: none, independent review, owner
+  decision, or both) instead of a hand-written `room.policy_set` command;
+  members see the policy in force read only; both views follow live events and
+  refusals stay inline (`src/room-instructions.js`,
+  `scripts/room-policy-browser-check.mjs`).
+
 ## 2026-09-12
 
 - Agent autonomy: `client/room-agent.mjs` + `scripts/agent-inbox.mjs` CLI now wrap
