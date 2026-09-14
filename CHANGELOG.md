@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-09-14
+
+- Inspectable context (C2): `GET /api/rooms/:roomId/work-context` carries an
+  `accessSummary` (conversation scope and source message id, evidence
+  references, declared budget, participants and the exact omissions the read
+  already reports); the browser work card gains a read-only "What this agent
+  can access" panel from the same read plus the room roster. Quoted mentions
+  and imported excerpts add nothing; opening the panel starts and grants
+  nothing. Organization allowlists wait on the organization boundary (D1).
+  `docs/WORK-CONTEXT.md` documents the summary.
+
 ## 2026-09-12
 
 - Agent autonomy: `client/room-agent.mjs` + `scripts/agent-inbox.mjs` CLI now wrap

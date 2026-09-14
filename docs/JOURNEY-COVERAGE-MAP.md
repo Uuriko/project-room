@@ -199,6 +199,20 @@ carry the claim, and the remaining tiers stay visibly open.
       }
     },
     {
+      "id": "access-preview",
+      "claim": "Before a run, a member can read exactly what an agent's one-task view can access: the linked source message id only (never its thread, quoted mentions or imported excerpts), current evidence versions, the declared budget with unknowns labeled, and the server's own omission list; opening the preview starts and grants nothing.",
+      "evidence": {
+        "unit": [
+          "tests/work-context.test.js"
+        ],
+        "browser": [
+          "scripts/access-preview-browser-check.mjs"
+        ],
+        "agent": [],
+        "hosted": []
+      }
+    },
+    {
       "id": "telegram-send-preview",
       "claim": "A saved Telegram reply previews its bot and target chat and dispatches only over a matching fixture transport through the shared send journal.",
       "evidence": {
@@ -228,6 +242,7 @@ carry the claim, and the remaining tiers stay visibly open.
 | Telegram fixture import | telegram-adapter, channel-import | open | open | open |
 | Inbox connection routes | channel-import | open | open | open |
 | Telegram send preview | channel-import, inbox-channel-client | open | open | open |
+| What this agent can access (pre-run preview) | work-context | access-preview-browser-check | open | open |
 
 Follow-up scope: claims made in docs beyond the README list (per-feature
 acceptance docs) can be folded into the same block; the checker format already

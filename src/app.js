@@ -156,6 +156,7 @@ const client = new RoomClient({
     releaseSubmission(submitControls);
     submitOperationId += 1; busy = false;
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
+    accessPreviews.clear();
     $("#resume-action").hidden = true; $("#refresh-action").hidden = true;
     $("#action-evidence").hidden = true; $("#action-evidence").removeAttribute("href");
     $("#action-text").hidden = true; $("#action-text-body").textContent = ""; $("#action-text-origin").textContent = "";
@@ -1402,6 +1403,32 @@ function receiptCard(i) {
 function shareDraftButton(item, key = "task") {
   return `<button type="button" class="button secondary" data-portable-work="${esc(item.id)}" data-portable-mode="draft" data-focus-key="share-draft:${esc(item.id)}:${esc(key)}">Share draft</button>`;
 }
+// C2: read-only "what this agent can access" preview. Loaded on demand from the
+// same one-task read an agent gets (client.workContext), rendered with the room
+// roster for names, and kept across snapshot re-renders until closed. It shows
+// exactly the omissions the server reports; opening it starts and grants nothing.
+const accessPreviews = new Map();
+const BUDGET_LABELS = Object.freeze({ maxRuntimeMs: "Runtime", maxAttempts: "Attempts", maxConcurrent: "Concurrent sessions", maxSpendCents: "Spend cap", spendCents: "Reported spend" });
+const budgetValue = (key, value) => value === "unknown" ? "unknown" : key === "maxRuntimeMs" ? (value < 60000 ? `${Math.round(value / 1000)} s` : `${Math.round(value / 60000)} min`) : /Cents$/.test(key) ? `$${(value / 100).toFixed(2)}` : String(value);
+function accessPreviewHtml(i) {
+  const entry = accessPreviews.get(i.id);
+  if (!entry) return "";
+  const id = `${workDomId(i.id)}-access`;
+  if (entry.error) return `<section class="access-preview" id="${esc(id)}" data-access-panel="${esc(i.id)}" role="region" aria-label="What this agent can access"><p class="form-hint">${esc(entry.error)}</p></section>`;
+  const summary = entry.summary, conversation = summary.conversation, sourceId = conversation.sourceMessageIds[0] ?? null;
+  const source = state.messages.find(message => message.id === sourceId);
+  const conversationLine = conversation.scope === "none" ? "No linked message. The agent sees this task record only, never the conversation."
+    : conversation.sourceAvailability === "unavailable" ? `The linked source message (${esc(i.sourceMessageId)}) is not available in this room, so nothing from the conversation is delivered.`
+    : `Only the one linked source message${source ? ` <a class="source-link" href="${esc(recordHref("message", source.id))}" data-open-message="${esc(source.id)}">${esc(source.id)}</a> by ${esc(memberLabel(source.authorId))}` : ""}${conversation.sourceAvailability === "deleted" ? " (deleted; only the tombstone remains)" : ""}, and only when the agent asks for it. Not its thread, replies, @mentions or imported channel excerpts.`;
+  const evidence = summary.evidence.records.length
+    ? summary.evidence.records.map(record => `${esc(humanize(record.record))} · version ${esc(record.evidenceVersion ?? "unknown")}${record.evidenceUrl ? ` · ${esc(record.evidenceUrl)}` : ""}`).join("<br>") + '<br><span class="form-hint">References only; nothing is retrieved or verified by the read.</span>'
+    : "No linked evidence yet.";
+  const budget = Object.keys(BUDGET_LABELS).map(key => `${BUDGET_LABELS[key]} ${esc(budgetValue(key, summary.budget[key]))}`).join(" · ") + ` · attempts so far ${esc(String(summary.budget.attemptCount))}. Unknown is not unlimited.`;
+  const roster = Object.values(state.members).filter(member => member.active !== false);
+  const referenced = new Set(summary.participantIds);
+  const readers = roster.map(member => `${esc(member.displayName)}${member.kind === "agent" ? " (agent)" : ""}${referenced.has(member.id) ? " · on this task" : ""}`).join(", ");
+  return `<section class="access-preview" id="${esc(id)}" data-access-panel="${esc(i.id)}" role="region" aria-labelledby="${esc(id)}-title"><h4 id="${esc(id)}-title">What this agent can access</h4><p class="form-hint">The one-task view an agent reads before it starts, evaluated ${esc(new Date(entry.evaluatedAt).toLocaleString())}. Read-only: opening it starts nothing and grants nothing. Organization allowlists are not available yet.</p><dl class="work-facts"><div><dt>Conversation</dt><dd>${conversationLine}</dd></div><div><dt>Evidence</dt><dd>${evidence}</dd></div><div><dt>Budget</dt><dd>${budget}</dd></div><div><dt>Who can read</dt><dd>Room-wide membership: ${roster.length} active ${roster.length === 1 ? "member" : "members"} share this view — ${readers}. This is not a task-level grant.</dd></div><div><dt>Not included</dt><dd data-access-omitted>${summary.omitted.map(entry => esc(humanize(entry))).join(", ")}</dd></div></dl></section>`;
+}
 function workCard(i, now, drafts, messages = []) {
   const next = nextWorkStep(i, now), status = workStatus(i, now), help = helpView(i, now);
   // Derived read-time signal only: a pause hint, never a block or a dispatch.
@@ -1429,7 +1456,7 @@ function workCard(i, now, drafts, messages = []) {
   // F3: a stale-basis draft gets a derived read-time explanation of what changed; never a block.
   const changesToggle = staleBasis === null ? "" : `<button type="button" class="button ghost" data-work-changes="${esc(i.id)}" data-basis="${staleBasis}" data-focus-key="work-changes:${esc(i.id)}">What changed since revision ${staleBasis}</button><div class="work-changes-list" data-changes-list="${esc(i.id)}" hidden></div>`;
   const draftLink = i.receipt?.nativeText ? `<button class="source-link" type="button" data-read-result="${esc(i.id)}" data-focus-key="work-native-result:${esc(i.id)}">View result</button>` + alternatives : alternatives || (latestDraft ? `<a class="source-link" href="${esc(recordHref("message", latestDraft.id))}" data-open-message="${esc(latestDraft.id)}" data-focus-key="work-draft:${esc(i.id)}">View latest draft</a>` : "");
-  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span>${doneChip(i)}</div><h3>${esc(i.title)}</h3>${nextLine}${loopNotice}${draftLink}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span>${source}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${attemptsLine}${receiptCard(i)}${blocker}${decision}${claim}<div class="portable-actions">${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-portable-work="${esc(i.id)}" data-portable-mode="result" data-focus-key="work-result:${esc(i.id)}">Paste AI draft</button></div></details><div class="work-actions">${actions(i, false, now)}</div></article>`;
+  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span>${doneChip(i)}</div><h3>${esc(i.title)}</h3>${nextLine}${loopNotice}${draftLink}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span>${source}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${attemptsLine}${receiptCard(i)}${blocker}${decision}${claim}<div class="portable-actions">${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-portable-work="${esc(i.id)}" data-portable-mode="result" data-focus-key="work-result:${esc(i.id)}">Paste AI draft</button><button type="button" class="button ghost" data-access-preview="${esc(i.id)}" data-focus-key="work-access:${esc(i.id)}" aria-expanded="${accessPreviews.has(i.id) ? "true" : "false"}"${accessPreviews.has(i.id) ? ` aria-controls="${workDomId(i.id)}-access"` : ""}>What this agent can access</button></div>${accessPreviewHtml(i)}</details><div class="work-actions">${actions(i, false, now)}</div></article>`;
 }
 // Quiet Focus A4: a failed send reports beside the composer that holds the draft,
 // not only in the page-level status area; the Send button is the retry and the
@@ -2330,6 +2357,26 @@ $("#work-list").addEventListener("click", e => {
   if (e.target.closest("[data-empty-suggest]")) { $("#message-input").focus(); return; }
   const button = e.target.closest("[data-reuse-work]");
   if (button) openWork(null, button.dataset.reuseWork);
+});
+document.addEventListener("click", async e => {
+  const button = e.target.closest("[data-access-preview]");
+  if (!button || !state || !session) return;
+  const workId = button.dataset.accessPreview;
+  if (accessPreviews.has(workId)) { accessPreviews.delete(workId); renderReturnBrief(); return; }
+  const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
+  button.disabled = true;
+  try {
+    const context = await client.workContext(workId);
+    if (!context || !sameSession(generation, roomId, memberId)) return;
+    accessPreviews.set(workId, { summary: context.accessSummary, evaluatedAt: context.evaluatedAt });
+  } catch (error) {
+    if (!sameSession(generation, roomId, memberId)) return;
+    accessPreviews.set(workId, { error: `Access preview could not be loaded (${error.code || error.status || "request failed"}); try again.` });
+  } finally {
+    button.disabled = false;
+  }
+  renderReturnBrief();
+  document.querySelector(`[data-access-preview="${CSS.escape(workId)}"]`)?.focus();
 });
 document.addEventListener("click", async e => {
   const button = e.target.closest("[data-work-changes]");

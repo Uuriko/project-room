@@ -474,7 +474,16 @@ paths:
           in: query
           schema: { type: boolean, default: false }
       responses:
-        '200': { description: Work context }
+        '200':
+          description: |
+            Work context. Includes `accessSummary` (version 1): the read-only
+            "what this agent can access" preview - conversation scope and the
+            linked source message id (never its thread, replies, quoted mentions
+            or imported excerpts), current evidence references and versions
+            (not retrieved), the declared session budget with undeclared bounds
+            as "unknown", participant ids, and the same `omitted` list as
+            `context.omitted`. It lists nothing the caller cannot already read
+            through this view and grants nothing. See docs/WORK-CONTEXT.md.
         '404': { $ref: '#/components/responses/NotFound' }
   /api/rooms/{roomId}/work-result:
     get:
