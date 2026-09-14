@@ -240,6 +240,21 @@ carry the claim, and the remaining tiers stay visibly open.
         "agent": [],
         "hosted": []
       }
+    },
+    {
+      "id": "room-review-policy",
+      "claim": "The room owner can make independent review and/or an owner decision mandatory; altered client fields cannot disable a mandatory gate, earlier work keeps its recorded requirements, and the proposer sees the requirement locked with the reason.",
+      "evidence": {
+        "unit": [
+          "tests/work-actions.test.js",
+          "tests/state-machine-invariants.test.js"
+        ],
+        "browser": [
+          "scripts/room-policy-browser-check.mjs"
+        ],
+        "agent": [],
+        "hosted": []
+      }
     }
   ]
 }
@@ -260,6 +275,7 @@ carry the claim, and the remaining tiers stay visibly open.
 | Inbox connection routes | channel-import | open | open | open |
 | Live Telegram trigger and card | telegram-live, telegram-adapter | inbox-telegram-check | open | open |
 | Telegram send preview | channel-import, inbox-channel-client | open | open | open |
+| Room review policy | work-actions, state-machine-invariants | room-policy-browser-check | open | open |
 | Unified inbox UI (list, reply, connections, needs-you, share) | inbox-unified-routes, inbox-channel-client | inbox-unified-check | open | open |
 
 Follow-up scope: claims made in docs beyond the README list (per-feature
