@@ -92,6 +92,7 @@ test("agent setup copy follows the selected access level", () => {
   assert.match(html, /Choose Max for full room power/);
   const src = readFileSync(new URL("../src/agent-connections.js", import.meta.url), "utf8");
   assert.match(src, /agentMembershipLimits\(\$\(\"#agent-connect-access\"\)\.value\)/);
+  assert.match(html, /<option value="max">Full room power<\/option>/);
 });
 
 test("invitation capability copy names what the membership cannot do", () => {
