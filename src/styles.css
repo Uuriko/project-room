@@ -834,5 +834,5 @@ summary { overflow-wrap: anywhere; }
 
 /* W4-43 H1: recipe suggestion chips */
 .recipe-strip { display: flex; flex-direction: column; gap: 0.4rem; margin: 0.5rem 0; }
-.recipe-chip { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; padding: 0.4rem 0.6rem; border: 1px solid var(--line-soft); border-radius: 8px; background: rgb(255 255 255 / 2%); }
-.recipe-chip .recipe-chip-label { flex: 1; min-width: 12rem; }
+.recipe-chip { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; max-width: 100%; padding: 0.4rem 0.6rem; border: 1px solid var(--line-soft); border-radius: 8px; background: rgb(255 255 255 / 2%); }
+.recipe-chip .recipe-chip-label { flex: 1 1 12rem; min-width: 0; overflow-wrap: anywhere; }
