@@ -38,7 +38,7 @@ async function setup(t, mobile = false) {
 
 for (const mobile of [false, true]) test(`setup presets ${mobile ? "mobile" : "desktop"}: defaults, none, custom and bounded max`, { timeout: 30000 }, async t => {
   const f = await setup(t, mobile), p = f.page; await f.open();
-  assert.match(await p.locator("#agent-limit-hint").textContent(), /cannot invite people, change membership, or make room decisions/i);
+  assert.match(await p.locator("#agent-limit-hint").textContent(), /Max can invite people, change membership, decide/i);
   assert.equal(await p.locator("#agent-setup-preset").inputValue(), "moderate");
   assert.equal(await p.locator("#agent-connect-access").inputValue(), "contribute");
   for (const [preset, access, expiry] of [["max", "max", "30"], ["low", "chat", "1"], ["moderate", "contribute", "7"]]) {
@@ -60,7 +60,7 @@ for (const mobile of [false, true]) test(`setup presets ${mobile ? "mobile" : "d
   await p.locator("#agent-setup-preset").selectOption("max");
   await p.locator("#agent-create").click(); await p.locator("#agent-setup").waitFor({ state: "visible" });
   const agent = Object.values(f.store.room("commons").state.members).find(m => m.displayName === "Preset agent");
-  assert.deepEqual(agent.permissions, ["steer", "manage_claims", "accept_work", "complete_work", "verify"]);
+  assert.deepEqual(agent.permissions, ["steer", "decide", "manage_members", "manage_claims", "accept_work", "complete_work", "verify", "write_external"]);
   assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
 });
 test("browser owner issues digest-only setup; a real external client imports, reads, rotates and loses access", { timeout: 30000 }, async t => {

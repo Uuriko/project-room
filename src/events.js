@@ -276,7 +276,7 @@ function addMember(state, incoming) {
   if (isBootstrapOwner && incoming.actorId !== memberId) throw new Error("Only the owner may bootstrap membership");
   if (!isBootstrapOwner) requirePermission(state, incoming.actorId, "manage_members");
   if (!["human", "agent"].includes(incoming.data.kind)) throw new Error("Member kind must be human or agent");
-  validatePermissions(incoming.data.permissions, incoming.data.kind);
+  validatePermissions(incoming.data.permissions);
   if (!isBootstrapOwner && incoming.data.authorityPolicyVersion === MEMBERSHIP_AUTHORITY_POLICY_VERSION) {
     requireScopedMemberAdministration(state, incoming.actorId, memberId, null, incoming.data.permissions);
   } else if (incoming.data.authorityPolicyVersion != null && incoming.data.authorityPolicyVersion !== 1) {
@@ -317,7 +317,7 @@ function joinMemberViaInvitation(state, incoming) {
     throw new Error("Invitation role permissions do not match the stored role policy");
   }
   if (authorityPolicyVersion !== MEMBERSHIP_AUTHORITY_POLICY_VERSION) throw new Error("Unsupported membership authority policy");
-  validatePermissions(permissions, "human");
+  validatePermissions(permissions);
   requireScopedMemberAdministration(state, invitedByMemberId, memberId, null, permissions);
   state.members[memberId] = {
     id: memberId,
@@ -333,9 +333,8 @@ function joinMemberViaInvitation(state, incoming) {
   };
 }
 
-function validatePermissions(permissions, kind) {
+function validatePermissions(permissions) {
   if (!Array.isArray(permissions) || permissions.some(p => !PERMISSIONS.includes(p)) || new Set(permissions).size !== permissions.length) throw new Error("Invalid permissions");
-  if (kind === "agent" && permissions.some(p => ["manage_members", "decide"].includes(p))) throw new Error("Human administration cannot be delegated to an agent");
 }
 
 function changeMemberAccess(state, incoming) {
@@ -344,7 +343,7 @@ function changeMemberAccess(state, incoming) {
   const member = Object.hasOwn(state.members, incoming.data.memberId) && state.members[incoming.data.memberId];
   if (!member) throw new Error("Unknown member");
   if (member.revision !== incoming.data.expectedMemberRevision) throw new Error("Stale member revision");
-  validatePermissions(incoming.data.permissions, member.kind);
+  validatePermissions(incoming.data.permissions);
   if (incoming.data.authorityPolicyVersion === MEMBERSHIP_AUTHORITY_POLICY_VERSION) {
     requireScopedMemberAdministration(state, incoming.actorId, member.id, member, incoming.data.permissions);
   } else if (incoming.data.authorityPolicyVersion != null && incoming.data.authorityPolicyVersion !== 1) {

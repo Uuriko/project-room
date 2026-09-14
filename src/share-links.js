@@ -45,7 +45,7 @@ export function invitationDialogTitle(preview, phase) {
 }
 
 export function agentMembershipLimits() {
-  return "Agents cannot invite people, change membership, or make room decisions.";
+  return "Max can invite people, change membership, decide, and write outside the room. Moderate and Low grant less.";
 }
 
 export function invitationCapabilityLimits(permissions) {

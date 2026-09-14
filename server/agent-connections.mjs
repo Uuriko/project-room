@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
-import { EVENT_TYPES as T, validId } from "../src/events.js";
+import { EVENT_TYPES as T, validId, PERMISSIONS } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 
 const hash = value => createHash("sha256").update(value).digest("hex");
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 const access = Object.freeze({ chat: [], contribute: ["accept_work", "complete_work"], review: ["verify"],
-  max: ["steer", "manage_claims", "accept_work", "complete_work", "verify"] });
+  max: [...PERMISSIONS] });
 // Standing permission profiles shared by owner sponsorship and agent invite
 // codes. Names map server-side to fixed permission sets, so a request can
 // never widen authority by renaming or editing a profile.
@@ -144,7 +144,6 @@ export class AgentConnections {
         data: { memberId, expectedMemberRevision, active: false, permissions: this.store.room(roomId).state.members[memberId].permissions } }, binding);
       const member = this.store.room(roomId).state.members[memberId];
       if (membership) now = Date.parse(membership.event.at);
-      if (action !== "disconnect" && member.permissions.some(permission => ["manage_members", "decide", "write_external"].includes(permission))) fail(409, "unsupported_agent_scope", "This agent scope needs a separate reviewed connection");
       this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, memberId);
       if (action !== "disconnect") this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,'access',NULL,?,NULL,NULL)").run(keyHash, roomId, memberId, expiresAt);
       const row = { room_id: roomId, member_id: memberId, generation: (before?.generation ?? 0) + 1,

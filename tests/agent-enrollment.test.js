@@ -22,7 +22,7 @@ function fixture(t) {
 test("max setup uses a fixed agent-safe scope, rejects overrides and replays exactly", t => {
   const f = fixture(t), request = { ...f.request, access: "max" };
   const result = f.apply(request);
-  assert.deepEqual(f.store.authenticate(f.key.token).member.permissions, ["steer", "manage_claims", "accept_work", "complete_work", "verify"]);
+  assert.deepEqual(f.store.authenticate(f.key.token).member.permissions, ["steer", "decide", "manage_members", "manage_claims", "accept_work", "complete_work", "verify", "write_external"]);
   assert.equal(f.apply(request).duplicate, true);
   assert.throws(() => f.apply({ ...request, permissions: ["manage_members", "decide", "write_external"] }), { code: "invalid_connection" });
   assert.throws(() => f.apply({ ...request, access: "none" }), { code: "invalid_connection" });

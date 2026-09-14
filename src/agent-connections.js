@@ -31,9 +31,9 @@ export function installAgentConnections({ client, getState }) {
     chat: "Can read this room’s history and post messages.",
     contribute: "Can read this room, post messages, and contribute work.",
     review: "Can read this room, post messages, and review work.",
-    max: "Can steer, coordinate claims, contribute and review. Human administration and external writes stay off."
+    max: "Can do almost everything in this room, including invites, membership, decisions, and writes outside it. Choose a lower preset to reduce that."
   };
-  const presetHints = { max: "Broad agent access · 30 days", moderate: "Contribute work · 7 days", low: "Read & chat · 1 day",
+  const presetHints = { max: "Full room power · 30 days", moderate: "Contribute work · 7 days", low: "Read & chat · 1 day",
     none: "No new room access. Existing connections stay unchanged.", custom: "Choose access, connection and expiry in More." };
   function markCustom() {
     $("#agent-setup-preset").value = "custom";

@@ -75,21 +75,21 @@ test("owner mints a one-time code; the raw code is never stored", async t => {
   assert.ok(!JSON.stringify(row).includes(res.json.code), "raw code appears nowhere in the stored row");
 });
 
-test("minting is owner-only and can never grant administration", async t => {
+test("minting is owner-only; unknown permissions are refused; Max may grant invite and decide", async t => {
   const { origin, ownerKey } = await serve(t);
-  // An agent member cannot mint.
   const id = await post(origin, "/api/agent-identities", { displayName: "Grunt" });
   const linked = await post(origin, "/api/rooms/commons/identity-links",
     { identityId: id.json.identityId, permissions: ["accept_work"] }, ownerKey);
   assert.equal(linked.status, 201);
   const denied = await mint(origin, id.json.secret, { permissions: ["accept_work"] });
   assert.equal(denied.status, 403);
-  // manage_members, decide, and unknown permissions are rejected at issuance.
-  for (const permissions of [["manage_members"], ["decide"], ["accept_work", "manage_members"], ["fly"], []]) {
+  for (const permissions of [["fly"], []]) {
     const bad = await mint(origin, ownerKey, { permissions });
     assert.equal(bad.status, 422, JSON.stringify(permissions));
   }
-  // Bad TTLs are rejected.
+  const full = await mint(origin, ownerKey, { permissions: ["manage_members", "decide"] });
+  assert.equal(full.status, 201, JSON.stringify(full.json));
+  assert.deepEqual(full.json.permissions, ["manage_members", "decide"]);
   for (const expiresInMinutes of [0, 4, 43201, "soon"]) {
     const bad = await mint(origin, ownerKey, { permissions: ["accept_work"], expiresInMinutes });
     assert.equal(bad.status, 422, JSON.stringify(expiresInMinutes));
@@ -119,7 +119,7 @@ test("redeem enrolls an agent member with the code's scope and nothing more", as
   assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM member_accounts WHERE member_id=?").get(res.json.memberId).n, 0);
   const member = store.room("commons").state.members[res.json.memberId];
   assert.equal(member.kind, "agent");
-  assert.ok(!member.permissions.includes("manage_members") && !member.permissions.includes("decide"));
+  assert.deepEqual(member.permissions, ["accept_work", "complete_work"]);
 });
 
 test("a code is single-use: the second redemption fails", async t => {
@@ -297,8 +297,8 @@ test("CLI mints a code from a profile name and rejects unknown profiles", async 
   const max = await cli(origin, ["invite-code", "profile:max", "60", "Max Bot"], ownerEnv);
   assert.equal(max.status, 0, max.stderr);
   assert.equal(max.json.profile, "max");
-  assert.deepEqual(max.json.permissions, ["steer", "manage_claims", "accept_work", "complete_work", "verify"]);
-  assert.equal(max.json.permissions.includes("manage_members"), false);
+  assert.deepEqual(max.json.permissions, ["steer", "decide", "manage_members", "manage_claims", "accept_work", "complete_work", "verify", "write_external"]);
+  assert.equal(max.json.permissions.includes("manage_members"), true);
   const bad = await cli(origin, ["invite-code", "profile:admin"], ownerEnv);
   assert.notEqual(bad.status, 0);
 });

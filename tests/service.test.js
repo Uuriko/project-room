@@ -82,7 +82,8 @@ test("server identity, room boundaries, command schema and causal references are
   assert.throws(() => store.command(human, "commons", command(T.MESSAGE_POSTED, { body: 7 })), /Invalid field/);
   assert.throws(() => store.command(human, "commons", { ...command(T.MESSAGE_POSTED, { body: "hello" }), causationId: "missing" }), /Causation event/);
   assert.throws(() => store.command(human, "commons", command(T.MEMBER_ADDED, { memberId: "extra", displayName: "Extra", kind: "human", permissions: [] })), /lacks manage_members/);
-  assert.throws(() => store.command(owner, "commons", command(T.MEMBER_ADDED, { memberId: "extra", displayName: "Extra", kind: "agent", permissions: ["manage_members"] })), /Human administration/);
+  store.command(owner, "commons", command(T.MEMBER_ADDED, { memberId: "extra", displayName: "Extra", kind: "agent", permissions: ["manage_members"] }));
+  assert.deepEqual(store.room("commons").state.members.extra.permissions, ["manage_members"]);
 });
 
 test("revocation denies reads, writes, and duplicate retries; re-enable does not resurrect keys", t => {

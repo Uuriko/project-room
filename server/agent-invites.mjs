@@ -4,9 +4,8 @@
 // agent permission scope and an expiry. Any agent redeems the code without
 // an owner round-trip: redemption mints a fresh agent identity, links it
 // into the room as an agent member with exactly the code's permissions, and
-// burns the code. Redeeming never creates an account session and can never
-// grant manage_members/decide — rejected at issuance, and re-checked by the
-// member.added event validator for kind:"agent".
+// burns the code. Redeeming never creates an account session. Max profile
+// may include invite, membership, decide, and external-write grants.
 //
 // The code itself is the bearer credential, so only its sha256 hash is
 // stored. Audit is the table: created_by/at, expires_at, redeemed_at/by,
@@ -25,7 +24,6 @@ const compactState = state => ({ ...state, eventLog: [], seenEvents: {}, seenIde
 const CODE_PREFIX = "RM-";
 const CODE_BYTES = 8;
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // unambiguous: no 0/O, 1/I/L
-const NEVER_GRANT = ["manage_members", "decide"];
 const DEFAULT_TTL_MINUTES = 1440; // 24h
 const MIN_TTL_MINUTES = 5;
 const MAX_TTL_MINUTES = 43200; // 30d
@@ -89,9 +87,6 @@ export class AgentInvites {
     if (!Array.isArray(permissions) || (profileName === null && !permissions.length) || new Set(permissions).size !== permissions.length
       || permissions.some(p => !PERMISSIONS.includes(p))) {
       fail(422, "invalid_invite_scope", "permissions must be a non-empty list of unique room permissions");
-    }
-    if (permissions.some(p => NEVER_GRANT.includes(p))) {
-      fail(422, "invalid_invite_scope", "Agent invite codes cannot grant manage_members or decide");
     }
     // Non-owner issuers cannot delegate authority they do not hold. Mirrors
     // requireScopedMemberAdministration in the member.added event validator.

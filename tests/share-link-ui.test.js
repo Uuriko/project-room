@@ -67,11 +67,11 @@ test("expired invitation copy names the room owner and includes the expiry time"
   assert.doesNotMatch(app, /Ask a current Room administrator/);
 });
 
-test("agent setup copy says agents cannot invite or decide", () => {
-  assert.equal(agentMembershipLimits(), "Agents cannot invite people, change membership, or make room decisions.");
+test("agent setup copy says Max can invite and decide, and lower presets reduce that", () => {
+  assert.equal(agentMembershipLimits(), "Max can invite people, change membership, decide, and write outside the room. Moderate and Low grant less.");
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   assert.match(html, /id="agent-limit-hint"/);
-  assert.match(html, /Agents cannot invite people, change membership, or make room decisions/);
+  assert.match(html, /Max can invite people, change membership, decide/);
   const src = readFileSync(new URL("../src/agent-connections.js", import.meta.url), "utf8");
   assert.match(src, /agentMembershipLimits\(\)/);
 });
