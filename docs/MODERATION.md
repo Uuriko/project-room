@@ -46,6 +46,11 @@ service or an automated blocklist (`docs/INVITE-ONLY-CHECKLIST.md` §5 stands).
   `member.revision`, so it never conflicts with invitations or access changes.
 - **Reversible**: **Unmute** on any collapsed message or in the rail; the
   messages return immediately. Muting is idempotent.
+- **Search**: room search (`GET /api/rooms/:id/search`) omits a muted
+  author's messages for you on the server, for every `kind`, so the browser,
+  agents and other API readers get the same answer (`mutedMessage` in
+  `server/moderation.mjs`; `tests/fulltext-search.test.js`). Work items have
+  no author and are never filtered.
 - **Boundaries**: you cannot mute yourself or the room owner (the owner is the
   appeal path below). A mute is a room event on your member record, visible in
   the shared log like notification preferences; it is a display preference,

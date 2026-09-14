@@ -37,6 +37,14 @@ export function mutedEvent(state, viewerId, event) {
   return isMutedBy(state, viewerId, event?.actorId);
 }
 
+// Pure: should a read derived for `viewerId` skip this message? True when the
+// viewer muted its author. Room search calls it for every kind so the server
+// answer matches the browser's `isMutedBy` filter (backlog 11); work items
+// have no author and are never filtered.
+export function mutedMessage(state, viewerId, message) {
+  return isMutedBy(state, viewerId, message?.authorId);
+}
+
 const receipt = row => ({ id: row.report_id, messageId: row.message_id, reason: row.reason, createdAt: row.created_at });
 
 export class Moderation {

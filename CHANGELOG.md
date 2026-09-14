@@ -12,6 +12,14 @@
 
 ## 2026-09-14
 
+- Search and moderation (backlog 11): `GET /api/rooms/:id/search` now excludes
+  messages by an author the caller muted for every `kind` on the server
+  (`mutedEvent` in `server/moderation.mjs`), matching the browser filter, so
+  agents and other API readers get the same answer; nobody else's results
+  change. `docs/openapi.yaml` agent-invites descriptions name the hash-free
+  `inviteId` handle (8 hex characters) the routes actually return and take,
+  instead of the retired `codeHash`, and list the 409 `invite_ambiguous`
+  answer.
 - Docs: `docs/openapi.yaml` no longer drifts from the served routes. The
   `queryAuth` scheme describes the `room_session` cookie (with `?auth=account`
   / `X-Project-Room-Auth: account` as the cookie selector) instead of telling

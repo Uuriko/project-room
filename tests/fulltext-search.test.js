@@ -75,6 +75,53 @@ test("full-text search over messages and work (round-2 #113)", async t => {
   assert.equal((await get("/api/rooms/commons/search?q=fox")).status, 401);
 });
 
+// Backlog 11: a muted author's messages are excluded server-side for every kind,
+// mirroring the browser's isMutedBy filter (E4 moderation, docs/MODERATION.md).
+test("search skips a muted author's messages for the muter only, across kind=all and kind=messages", async t => {
+  const { store, ownerKey, get, post, propose } = await serve(t);
+  const keys = { owner: ownerKey };
+  const send = (actor, type, data) => store.command(keys[actor], "commons", { id: randomUUID(), type, data });
+  for (const [memberId, kind, permissions] of [["guest", "human", []], ["producer", "agent", ["accept_work"]]]) {
+    send("owner", T.MEMBER_ADDED, { memberId, displayName: `Test ${memberId}`, kind, permissions, ...(kind === "agent" ? { accountableHumanId: "owner" } : {}) });
+    keys[memberId] = store.issueAccessKey("commons", memberId);
+  }
+  const search = async (q, kind, actor) => {
+    const res = await get(`/api/rooms/commons/search?q=${encodeURIComponent(q)}${kind ? `&kind=${kind}` : ""}`, keys[actor]);
+    assert.equal(res.status, 200);
+    return res.json();
+  };
+  const ids = (r) => r.messages.map(m => m.id);
+
+  const fromOwner = post("Meeting room is B-204 from Thursday");
+  const fromProducer = send("producer", T.MESSAGE_POSTED, { messageId: randomUUID(), body: "Meeting agenda from the producer" }).event.data.messageId;
+  propose("Book the meeting room");
+
+  // Before muting, the guest sees both messages under every kind, plus the work item where kind allows.
+  for (const kind of [undefined, "all", "messages"]) assert.deepEqual(ids(await search("meeting", kind, "guest")), [fromOwner, fromProducer]);
+  assert.equal((await search("meeting", "all", "guest")).workItems.length, 1);
+
+  // The guest mutes the producer: the producer's message drops out for the guest under kind=all, default and kind=messages.
+  send("guest", T.MEMBER_MUTE_SET, { memberId: "producer", muted: true });
+  for (const kind of [undefined, "all", "messages"]) assert.deepEqual(ids(await search("meeting", kind, "guest")), [fromOwner], `kind=${kind}`);
+  // Work is never filtered by mute (work has no author), and the count stays.
+  const all = await search("meeting", "all", "guest");
+  assert.equal(all.workItems.length, 1);
+  assert.deepEqual(ids(await search("meeting", "work", "guest")), []);
+  assert.equal((await search("meeting", "work", "guest")).workItems.length, 1);
+  // A query matching only the muted author's message is simply empty, not an error.
+  assert.deepEqual(await search("agenda", "messages", "guest"), { roomId: "commons", query: "agenda", messages: [], workItems: [] });
+
+  // Nobody else is affected: the owner and the muted producer still see everything.
+  assert.deepEqual(ids(await search("meeting", "all", "owner")), [fromOwner, fromProducer]);
+  assert.deepEqual(ids(await search("meeting", "messages", "producer")), [fromOwner, fromProducer]);
+  // Muting is one-directional: the producer's own search is not affected by being muted.
+  assert.deepEqual(ids(await search("agenda", "all", "producer")), [fromProducer]);
+
+  // Unmute restores the results immediately.
+  send("guest", T.MEMBER_MUTE_SET, { memberId: "producer", muted: false });
+  assert.deepEqual(ids(await search("meeting", "all", "guest")), [fromOwner, fromProducer]);
+});
+
 // Backlog follow-up 8: kind=pinned narrows search to state.pins (issue #6 B2).
 test("kind=pinned searches only pinned messages, follows unpin, and hides a muted author's pin from the muter", async t => {
   const { store, ownerKey, get, post, propose, remove } = await serve(t);

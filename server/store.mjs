@@ -1596,9 +1596,10 @@ export class RoomStore {
   }
   // Round-2 #113: full-text search over messages and work items.
   // Substring match, case-insensitive; deleted messages are excluded.
-  // Backlog follow-up 8: kind=pinned narrows to messages in state.pins (issue
-  // #6 B2), in message order like the other kinds, and skips authors the
-  // caller muted (mutedEvent) so a pinned message stays hidden for its muter.
+  // kind=pinned narrows to messages in state.pins (issue #6 B2), in message
+  // order like the other kinds. Backlog 11: messages by an author the caller
+  // muted (E4) are excluded for every kind, server-side (mutedEvent), so
+  // agents and other API readers match the UI.
   search(token, roomId, query, kind = "all", expectedSessionBinding = null) {
     if (typeof query !== "string" || !query.trim() || query.length > 80) fail(422, "invalid_search", "Search is 1 to 80 characters");
     if (!["all", "messages", "work", "pinned"].includes(kind)) fail(422, "invalid_search", "kind is all, messages, work, or pinned");
@@ -1610,7 +1611,8 @@ export class RoomStore {
       if (kind === "all" || kind === "messages" || kind === "pinned") {
         for (const m of room.state.messages ?? []) {
           if (m.body == null) continue; // tombstone
-          if (kind === "pinned" && (!isPinned(room.state, m.id) || mutedEvent(room.state, auth.member?.id, { actorId: m.authorId }))) continue;
+          if (kind === "pinned" && !isPinned(room.state, m.id)) continue;
+          if (mutedEvent(room.state, auth.member?.id, { actorId: m.authorId })) continue; // muted author (E4), every kind
           if (m.body.toLowerCase().includes(needle)) {
             result.messages.push({ id: m.id, authorId: m.authorId, body: m.body, createdAt: m.createdAt, workItemId: m.workItemId });
           }
