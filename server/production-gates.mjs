@@ -1,19 +1,30 @@
 import { providerConfig } from './provider-config.mjs';
 import { openJoinContract } from './open-contract.mjs';
+import { validId } from '../src/events.js';
 
-const OPERATOR = /^idp-[a-f0-9]{64}$/;
+const CLERK_OPERATOR = /^idp-[a-f0-9]{64}$/;
 
-// Fail closed when ROOM_PRODUCTION=1. Secrets never live in this module.
+export function isNamedOperatorId(value) {
+  if (typeof value !== 'string' || value.includes('@')) return false;
+  return CLERK_OPERATOR.test(value) || validId(value);
+}
+
+export function accountsMatchOperator(accountId, memberId, operatorAccountId) {
+  if (!isNamedOperatorId(operatorAccountId || '')) return false;
+  if (accountId === operatorAccountId || memberId === operatorAccountId) return true;
+  return Boolean(memberId) && operatorAccountId.length === 6 && memberId.endsWith(operatorAccountId);
+}
+
+// Fail closed when ROOM_PRODUCTION=1. Clerk is optional when a local operator is named.
 export function assertProductionReady(env, origin, { ship = openJoinContract().ship } = {}) {
   if (env.ROOM_PRODUCTION !== '1') {
     return { production: false, providerAuth: origin ? providerConfig(env, origin) : null, operatorAccountId: null };
   }
-  const providerAuth = providerConfig(env, origin);
-  if (!providerAuth) throw new Error('ROOM_PRODUCTION requires Clerk issuer, publishable key, and pinned public key');
   const operatorAccountId = env.ROOM_OPERATOR_ACCOUNT_ID;
-  if (!OPERATOR.test(operatorAccountId || '')) {
-    throw new Error('ROOM_PRODUCTION requires ROOM_OPERATOR_ACCOUNT_ID as idp-<64 hex>');
+  if (!isNamedOperatorId(operatorAccountId || '')) {
+    throw new Error('ROOM_PRODUCTION requires ROOM_OPERATOR_ACCOUNT_ID as idp-<64 hex> or a local account/member id');
   }
+  const providerAuth = origin ? providerConfig(env, origin) : null;
   if (ship !== false) throw new Error('ROOM_PRODUCTION forbids shipping public MCP join');
   return { production: true, providerAuth, operatorAccountId };
 }

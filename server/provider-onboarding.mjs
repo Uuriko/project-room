@@ -3,6 +3,7 @@ import { initialRoom } from './bootstrap.mjs';
 import { ServiceError } from './store.mjs';
 import { applyEvent, event, EVENT_TYPES as T } from '../src/events.js';
 import { providerAccountId } from './operator-account-id.mjs';
+import { accountsMatchOperator } from './production-gates.mjs';
 
 export const STARTER_ROOM_ID = 'welcome';
 const HOST_ID = 'welcome-host';
@@ -35,7 +36,7 @@ function joinWelcome(store, accountId, memberId, provenance) {
 }
 
 function maybeGrantOperator(store, accountId, memberId, roomId, operatorAccountId) {
-  if (!operatorAccountId || accountId !== operatorAccountId || roomId !== STARTER_ROOM_ID) return;
+  if (!accountsMatchOperator(accountId, memberId, operatorAccountId) || roomId !== STARTER_ROOM_ID) return;
   const room = store.room(STARTER_ROOM_ID);
   const member = room.state.members[memberId];
   if (!member?.active || member.permissions.includes('manage_members')) return;
@@ -126,4 +127,10 @@ export async function loginWithProvider(store, { token, verify, issuer, slotToke
     const session = store.loginAccountSession(slotToken, credential, expectedRevision, { revokeRoomToken });
     return { session, roomId };
   });
+}
+
+export function grantNamedOperator(store, accountId, operatorAccountId) {
+  if (!accountId || !operatorAccountId) return;
+  const rows = store.db.prepare('SELECT room_id, member_id FROM member_accounts WHERE account_id=?').all(accountId);
+  for (const row of rows) maybeGrantOperator(store, accountId, row.member_id, row.room_id, operatorAccountId);
 }

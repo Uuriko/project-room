@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RoomStore } from '../server/store.mjs';
-import { loginWithProvider, STARTER_ROOM_ID } from '../server/provider-onboarding.mjs';
+import { loginWithProvider, grantNamedOperator, STARTER_ROOM_ID } from '../server/provider-onboarding.mjs';
 import { createRoomServer } from '../server/http.mjs';
 
 function fixture(t, sub = 'user_alice') {
@@ -22,6 +22,15 @@ function fixture(t, sub = 'user_alice') {
     }
   };
 }
+
+test('local member suffix is granted manage_members without Clerk', async t => {
+  const op = fixture(t, 'user_alice');
+  await loginWithProvider(op.store, op.options);
+  const memberId = Object.keys(op.store.room(STARTER_ROOM_ID).state.members).find(id => id.startsWith('member-'));
+  assert.deepEqual(op.store.room(STARTER_ROOM_ID).state.members[memberId].permissions, []);
+  grantNamedOperator(op.store, op.accountId, memberId.slice(-6));
+  assert.deepEqual(op.store.room(STARTER_ROOM_ID).state.members[memberId].permissions, ['manage_members']);
+});
 
 test('named operator gets manage_members on Welcome; others stay empty', async t => {
   const op = fixture(t, 'user_alice');

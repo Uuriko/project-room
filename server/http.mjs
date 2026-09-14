@@ -16,7 +16,7 @@ import { isSessionStatus, workItemSessionContract } from "../src/work-item-sessi
 import { openJoinContract, publicMcpCard } from "./open-contract.mjs";
 import { handlePublicMcpMessage, MCP_CORS, MCP_VERSION, mcpOriginAllowed } from "../client/mcp-public.mjs";
 import { createClerkVerifier } from './clerk-verifier.mjs';
-import { loginWithProvider, refreshWithProvider } from './provider-onboarding.mjs';
+import { loginWithProvider, refreshWithProvider, grantNamedOperator } from './provider-onboarding.mjs';
 import { publicProviderConfig } from './provider-config.mjs';
 import { createAccountRoom } from './account-room-create.mjs';
 
@@ -539,6 +539,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
               slot = created.session;
             }
           }
+          if (slot.account && operatorAccountId) {
+            store.transaction(() => grantNamedOperator(store, slot.account.id, operatorAccountId));
+          }
           return json(res, 200, accountView(slot));
         }
         checkOrigin(req, true);
@@ -553,6 +556,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const loggedIn = store.loginAccountSession(slotToken, data.accountAccessKey, data.expectedSessionRevision, {
             revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null
           });
+          if (loggedIn.account && operatorAccountId) {
+            store.transaction(() => grantNamedOperator(store, loggedIn.account.id, operatorAccountId));
+          }
           return json(res, 201, accountView(loggedIn));
         }
         if (req.method === "DELETE") {
