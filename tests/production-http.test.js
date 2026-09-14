@@ -78,3 +78,8 @@ test('GET /api/auth-config has no identity provider', async t => {
   assert.equal(auth.provider, null);
   assert.equal((await (await fetch(origin + '/api/open')).json()).ship, false);
 });
+
+test('Room client does not load an identity-provider browser SDK', () => {
+  const src = readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(src, /clerk\.browser\.js|@clerk\/clerk-js|@clerk\/ui/);
+});

@@ -26,30 +26,7 @@ function providerIntent(value) {
   try { if (value) sessionStorage.setItem('pr-provider-join', '1'); else sessionStorage.removeItem('pr-provider-join'); } catch {}
 }
 async function loadProvider() {
-  if (providerLoad) return providerLoad;
-  providerLoad = (async () => {
-    const config = providerSettings;
-    if (config?.provider !== 'clerk' || new URL(config.issuer).origin !== config.issuer || !config.issuer.startsWith('https://')) throw Error('Sign-in unavailable');
-    const loadScript = (path, key = null) => new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      const timer = setTimeout(() => { script.remove(); reject(Error('Sign-in timed out. Refresh to retry.')); }, 15000);
-      script.src = config.issuer + path; script.async = true; script.crossOrigin = 'anonymous';
-      if (key) script.setAttribute('data-clerk-publishable-key', key);
-      script.onload = () => { clearTimeout(timer); resolve(); };
-      script.onerror = () => { clearTimeout(timer); reject(Error('Sign-in unavailable. Refresh to retry.')); };
-      document.head.append(script);
-    });
-    await loadScript('/npm/@clerk/ui@1/dist/ui.browser.js');
-    await loadScript('/npm/@clerk/clerk-js@6/dist/clerk.browser.js', config.publishableKey);
-    const sdk = window.Clerk;
-    await sdk.load({ ui: { ClerkUI: window.__internal_ClerkUICtor } });
-    providerSDK = sdk;
-    sdk.addListener(() => {
-      if (providerJoinRequested && sdk.session && !providerBusy) completeProviderJoin().catch(providerFailure);
-    });
-    return sdk;
-  })();
-  return providerLoad;
+  throw Error('Sign-in unavailable');
 }
 function providerFailure(error) {
   providerIntent(false);
@@ -3323,14 +3300,7 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
 (async () => {
   if (location.protocol !== 'file:') {
     try {
-      const config = await accountClient.request('/api/auth-config');
-      if (config?.provider === 'clerk') {
-        providerSettings = config;
-        $('#provider-join').hidden = false; $('#key-access').open = false;
-        $('#sign-in-entry').textContent = 'Other options';
-        $('#sign-in-entry').className = 'text-button';
-        $('#project-help-signin').textContent = 'Choose Join and use an available sign-in method. Have a key or invitation? Open Other options. Keep account keys private.';
-      }
+      await accountClient.request('/api/auth-config');
     } catch { /* Existing key access remains available during config failure. */ }
   }
   if (initialJoinFragment) {
