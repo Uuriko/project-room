@@ -34,5 +34,9 @@ if (schema.status !== 0) process.exit(schema.status || 1);
   const lint = spawnSync(process.execPath, ["scripts/lint.mjs", "--skip-if-missing"], { stdio: "inherit" });
   if (lint.status !== 0) process.exit(lint.status || 1);
 }
+// Open-route inventory (B48): every `security: []` route in docs/openapi.yaml
+// is named in docs/ROUTE-AUTH-TABLE.md and docs/INVITE-ONLY-CHECKLIST.md §1.
+const openRoutes = spawnSync(process.execPath, ["scripts/open-routes.mjs", "--check"], { stdio: "inherit" });
+if (openRoutes.status !== 0) process.exit(openRoutes.status || 1);
 const result = spawnSync(process.execPath, ["--test"], { stdio: "inherit" });
 process.exit(result.status ?? 1);
