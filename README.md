@@ -19,6 +19,8 @@ Do not treat ChatGPT worktrees or the stale project-root `PROJECT-ROOM-CURRENT.m
 | Act components (Approve / Reject / Open-in-Compute) | [ACT-COMPONENTS.md](docs/ACT-COMPONENTS.md) |
 | Member capabilities (Discord-style bits) | [MEMBER-CAPABILITIES.md](docs/MEMBER-CAPABILITIES.md) |
 | Export, retention, deletion semantics | [EXPORT-RETENTION-DELETION.md](docs/EXPORT-RETENTION-DELETION.md) |
+| Data boundaries (encryption, secrets, subprocessors, region) | [DATA-BOUNDARIES.md](docs/DATA-BOUNDARIES.md) |
+| Trust and support packet for pilot reviewers | [TRUST-PACKET.md](docs/TRUST-PACKET.md) |
 | Research and messaging plans | [research/](research/README.md) |
 | Unification history | [UNIFICATION-2026-09-07.md](docs/UNIFICATION-2026-09-07.md) |
 
