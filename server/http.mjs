@@ -108,18 +108,26 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   const streams = new Set();
   const diagnostics = new DiagnosticsLog();
 
-  // Room-scoped support-export route templates: static words only, ids become :item.
+  // Route templates for diagnostics: static words only, ids become :item.
+  const templateSegments = rest => rest.split("/").map(segment => /^[a-z][a-z-]{0,40}$/.test(segment) ? segment : ":item").join("/");
+  const requestPathname = requestUrl => { try { return new URL(requestUrl, expectedOrigin()).pathname; } catch { return null; } };
+  // Room-scoped support-export route templates.
   function diagnosticRoute(requestUrl, roomId) {
     if (!roomId) return null;
-    let pathname;
-    try { pathname = new URL(requestUrl, expectedOrigin()).pathname; } catch { return null; }
+    const pathname = requestPathname(requestUrl);
+    if (pathname === null) return null;
     const prefix = `/api/rooms/${encodeURIComponent(roomId)}`;
     if (pathname !== prefix && !pathname.startsWith(prefix + "/")) return null;
     const rest = pathname.slice(prefix.length);
     if (!rest) return "/api/rooms/:roomId";
-    const segments = rest.slice(1).split("/").map(segment => /^[a-z][a-z-]{0,40}$/.test(segment) ? segment : ":item");
-    return `/api/rooms/:roomId/${segments.join("/")}`;
+    return `/api/rooms/:roomId/${templateSegments(rest.slice(1))}`;
   }
+  // Operator trace for failures outside a room scope: the static path template
+  // only, never the query string, headers, body or the error's own message.
+  const serviceRoute = requestUrl => {
+    const pathname = requestPathname(requestUrl);
+    return pathname === null || pathname === "/" ? "/" : "/" + templateSegments(pathname.slice(1).slice(0, 512));
+  };
   // Keys are "<family>:<ip or credential...>". Each family keeps at most
   // RATE_FAMILY_KEYS live entries; a flood of foreign keys evicts that family's
   // least recently touched entry instead of refusing every new key, so a busy
@@ -203,20 +211,27 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Content-Length": Buffer.byteLength(body) });
     res.end(head ? undefined : body);
   }
-  async function body(req) {
-    if (!/^application\/json(?:\s*;|$)/i.test(req.headers["content-type"] || "")) reject(415, "json_required", "Use application/json");
-    if (Number(req.headers["content-length"]) > 16384) { req.resume(); reject(413, "too_large", "Request is too large"); }
-    const text = await new Promise((resolve, rejectPromise) => {
+  // Bounded request reader shared by the JSON and NDJSON routes: an oversized
+  // Content-Length is refused before any byte is read, buffering stops once the
+  // streamed bytes pass the limit, and a client that stops sending fails the
+  // request at once instead of holding it until the server request timeout.
+  function readText(req, limit, tooLarge) {
+    if (Number(req.headers["content-length"]) > limit) { req.resume(); throw tooLarge(); }
+    return new Promise((resolve, rejectPromise) => {
       let bytes = 0; const chunks = [];
       req.on("data", chunk => {
         bytes += chunk.length;
-        if (bytes > 16384) { chunks.length = 0; rejectPromise(new ServiceError(413, "too_large", "Request is too large")); }
+        if (bytes > limit) { chunks.length = 0; rejectPromise(tooLarge()); }
         else chunks.push(chunk);
       });
       req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
       req.on("error", rejectPromise);
       req.on("aborted", () => rejectPromise(new ServiceError(400, "aborted", "Request ended early")));
     });
+  }
+  async function body(req) {
+    if (!/^application\/json(?:\s*;|$)/i.test(req.headers["content-type"] || "")) reject(415, "json_required", "Use application/json");
+    const text = await readText(req, 16384, () => new ServiceError(413, "too_large", "Request is too large"));
     try { const value = JSON.parse(text); if (!value || Array.isArray(value) || typeof value !== "object") throw new Error(); return value; }
     catch { reject(400, "invalid_json", "Expected a JSON object"); }
   }
@@ -615,32 +630,28 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // store.identities.create enforces inside its insert transaction
       // (409 pilot_limit, no row written) — like the credentials table.
       if (url.pathname === "/api/agent-identities" && req.method === "POST") {
-        const data = await body(req);
         rate(`identity-create:${remoteAddress}`, 30);
+        const data = await body(req);
         if (!exact(data, ["displayName"]) || typeof data.displayName !== "string") reject(422, "invalid_identity", "displayName is required");
         return json(res, 201, store.identities.create(data.displayName));
       }
       // Agent invite codes: redemption is unauthenticated (the code is the
       // bearer credential); issuance is owner-only per room.
       if (url.pathname === "/api/agent-invites/redeem" && req.method === "POST") {
-        const data = await body(req);
         rate(`invite-redeem:${remoteAddress}`, 20);
+        const data = await body(req);
         if (!exact(data, ["code", "displayName"]) || typeof data.code !== "string" || typeof data.displayName !== "string") reject(422, "invalid_invite", "Invite code and displayName are required");
         return json(res, 201, store.invites.redeem(data.code, { displayName: data.displayName }));
       }
       const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|provider-heartbeats|identity-links|agent-invites|access-review))?$/.exec(url.pathname);
+      // Round-2 #112: threaded replies share the room funnel below (id decoding,
+      // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
-      if (threadMatch && req.method === "GET") {
-        // Round-2 #112: threaded replies.
-        const threadRoomId = threadMatch[1], threadMessageId = threadMatch[2];
-        const threadSelected = roomCredentials(req, url);
-        const threadFence = threadSelected.mode === "account" ? accountBinding(req) : expectedBinding(req);
-        return json(res, 200, store.messageThread(threadSelected.token, threadRoomId, threadMessageId, threadFence));
-      }
-      if (!match && !revokeMatch) reject(404, "not_found", "Not found");
-      const roomId = pathId((match ?? revokeMatch)[1]);
+      if (!match && !revokeMatch && !threadMatch) reject(404, "not_found", "Not found");
+      const roomId = pathId((match ?? revokeMatch ?? threadMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
-      const route = match ? (match[2] ?? "") : "invitation-revoke";
+      const threadMessageId = threadMatch ? pathId(threadMatch[2]) : null;
+      const route = match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : "thread";
       const selected = roomCredentials(req, url);
       const fence = selected.mode === "account" ? accountBinding(req, route === "stream" ? url : null) : expectedBinding(req);
       const auth = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
@@ -649,6 +660,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
       rate(`read:${auth.credentialHash}`, 600);
       if (!["GET", "HEAD"].includes(req.method)) { protectWrite(req, auth, selected.bearer); rate(`write:${auth.credentialHash}`, 60); }
+      if (route === "thread" && req.method === "GET") return json(res, 200, store.messageThread(selected.token, roomId, threadMessageId, fence));
       if (!route && req.method === "GET") {
         const params = url.searchParams;
         if (params.has("view") && (params.getAll("view").length !== 1 || params.get("view") !== "work"
@@ -742,17 +754,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "agent-invites") {
         // One-time agent invite codes: owner-only issuance, audit, revocation.
         const data = req.method === "GET" ? {} : await body(req);
-        if (req.method === "GET") return json(res, 200, { roomId, invites: store.invites.list(selected.token, roomId) });
+        if (req.method === "GET") return json(res, 200, { roomId, invites: store.invites.list(selected.token, roomId, fence) });
         if (req.method === "POST") {
           const keys = Object.keys(data);
           if ((!keys.includes("permissions") && !keys.includes("profile"))
             || keys.some(k => !["permissions", "profile", "expiresInMinutes", "displayName"].includes(k)))
             reject(422, "invalid_invite", "permissions or profile is required; optional: expiresInMinutes, displayName");
-          return json(res, 201, store.invites.create(selected.token, roomId, data));
+          return json(res, 201, store.invites.create(selected.token, roomId, data, fence));
         }
         if (req.method === "DELETE") {
-          if (!exact(data, ["codeHash"]) || typeof data.codeHash !== "string") reject(422, "invalid_invite", "codeHash is required");
-          return json(res, 200, store.invites.revoke(selected.token, roomId, data.codeHash));
+          if (!exact(data, ["inviteId"]) || typeof data.inviteId !== "string") reject(422, "invalid_invite", "inviteId is required");
+          return json(res, 200, store.invites.revoke(selected.token, roomId, data.inviteId, fence));
         }
         reject(405, "method_not_allowed", "Method not allowed");
       }
@@ -776,16 +788,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // Round-2 #107: NDJSON import (the #106 export format). Owner-only,
         // replaces room history. 8MB cap — larger restores go through backup.
         if (!/^application\/x-ndjson/i.test(req.headers["content-type"] || "")) reject(415, "ndjson_required", "Use application/x-ndjson");
-        const text = await new Promise((resolve, rejectPromise) => {
-          let bytes = 0; const chunks = [];
-          req.on("data", chunk => {
-            bytes += chunk.length;
-            if (bytes > 8 * 1024 * 1024) { chunks.length = 0; req.destroy(); rejectPromise(new ServiceError(413, "too_large", "Import is too large; use database backup instead")); }
-            else chunks.push(chunk);
-          });
-          req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-          req.on("error", rejectPromise);
-        });
+        const text = await readText(req, 8 * 1024 * 1024, () => new ServiceError(413, "too_large", "Import is too large; use database backup instead"));
         // Number lines before dropping blanks so the reported line matches the file.
         const lines = text.split("\n").map((l, i) => [l, i + 1]).filter(([l]) => l.trim()).map(([l, lineNumber]) => {
           try { return JSON.parse(l); } catch { reject(422, "invalid_import", `Line ${lineNumber} is not valid JSON`); }
@@ -935,6 +938,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route) {
         diagnostics.record({ operationId, at: new Date().toISOString(), status: httpStatus, code, category, route, roomId });
         console.warn(`room diagnostic ${operationId} ${httpStatus} ${code} ${category} ${route}`);
+      } else if (httpStatus >= 500) {
+        // Non-room 5xx (inbox, account session, login) still leave an operator trace.
+        console.warn(`service diagnostic ${operationId} ${httpStatus} ${code} ${category} ${serviceRoute(req.url)}`);
       }
       json(res, httpStatus, { ...agentErrorBody({ httpStatus, code, message, roomId, workItemId }), operationId, category });
     }

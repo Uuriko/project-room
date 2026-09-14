@@ -54,7 +54,7 @@ if (action === "reply") {
   node scripts/agent-inbox.mjs invite-code PERM1,PERM2 [EXPIRES_MINUTES] [DISPLAY_NAME]
   node scripts/agent-inbox.mjs invite-code profile:chat|contribute|review [EXPIRES_MINUTES] [DISPLAY_NAME]
   node scripts/agent-inbox.mjs invite-codes
-  node scripts/agent-inbox.mjs invite-code-revoke CODE_HASH
+  node scripts/agent-inbox.mjs invite-code-revoke INVITE_ID
   node scripts/agent-inbox.mjs redeem-invite CODE DISPLAY_NAME
   node scripts/agent-inbox.mjs doctor
   node scripts/agent-inbox.mjs support-export
@@ -121,7 +121,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
       || (action === "invite-code" && (checkpoint === undefined || checkpoint.startsWith("--")
         || (checkpoint.startsWith("profile:") && !["chat", "contribute", "review"].includes(checkpoint.slice("profile:".length)))
         || (extra[0] !== undefined && !/^\d+$/.test(extra[0])) || extra.slice(1).join(" ").length > 80))
-      || (action === "invite-code-revoke" && !/^[a-f0-9]{64}$/.test(checkpoint ?? ""))
+      || (action === "invite-code-revoke" && !/^[a-f0-9]{8}$/.test(checkpoint ?? ""))
       || (action === "redeem-invite" && (checkpoint === undefined || checkpoint.startsWith("--") || !extra.length || extra.join(" ").length > 80))
       || (action === "invite-codes" && (checkpoint !== undefined || extra.length))
       || (action === "doctor" && (checkpoint !== undefined || extra.length))
