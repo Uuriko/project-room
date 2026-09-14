@@ -86,7 +86,7 @@ paths:
   /api/rooms/{roomId}/stream:
     get:
       summary: Server-sent events stream
-      description: Live event stream. Resume with Last-Event-ID header or ?after=.
+      description: Live event stream. Resume with Last-Event-ID header or ?after=. A consumer whose unsent bytes exceed the per-connection cap (64 KiB) receives a final `stream_lagging` event, is closed alone, and resumes by reconnecting with Last-Event-ID.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:

@@ -49,7 +49,7 @@ Restore drill: restore to a DIFFERENT private path first, run `scripts/audit-inv
 - Desktop Enter and mobile newline work; failed sends preserve drafts; live updates preserve focus. Capture screenshots after removing invitation fragments and with synthetic test content only.
 - Restart the service and confirm persisted messages, membership and invitation usage. Exercise a backup restore separately.
 - Test repeated joins from distinct visitors behind Caddy, secure-cookie behavior, proxy timeouts and SSE. Existing simulated-proxy tests are not actual TLS/host validation.
-- `/api/health` is process liveness. `/api/ready` reports 200 only if a room can be read, otherwise 503; neither proves disk durability, backup freshness, capacity or agent health. Check at a restrained cadence (for example once per minute), with backoff and one operator notification on a meaningful failure. No monitor is installed by this repository change.
+- `/api/health` is process liveness. `/api/ready` reports 200 only if a room can be read and storage has not refused three consecutive writes; otherwise 503 (`reason: storage_unavailable` after disk-full, read-only or I/O failures, recovering on the next committed write — see `docs/SAFE-DIAGNOSTICS.md`); neither proves disk durability, backup freshness, capacity or agent health. Check at a restrained cadence (for example once per minute), with backoff and one operator notification on a meaningful failure. No monitor is installed by this repository change.
 - Report exact deployed revision, results, limitations, rollback target and operator. Do not infer independent/live-agent verification from synthetic local tests.
 
 ## Source publication and next dependencies
