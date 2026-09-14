@@ -1,5 +1,5 @@
 import { validId } from "./events.js";
-import { agentMembershipLimits } from "./share-links.js";
+import { agentMembershipLimits, formatShareLinkExpiry } from "./share-links.js";
 import { rosterSelection, rosterNameTaken, rosterById, suggestedConfigDir, capabilitySummary, setupChecklist, routeHint, placeholderSnippetPaths, grokBuildToml, mcpJson, claudeMcpAddCommand, reconnectCopy, routeFromDisplayName } from "./room-roster.js";
 
 const $ = selector => document.querySelector(selector);
@@ -171,9 +171,9 @@ export function installAgentConnections({ client, getState }) {
         const li = document.createElement("li"), name = document.createElement("strong"), text = document.createElement("p");
         name.textContent = row.displayName;
         const state = row.status === "key_issued"
-          ? (row.firstActionAt ? `Connected · first action ${new Date(row.firstActionAt).toLocaleString()}` : "Access ready · waiting for first action")
+          ? (row.firstActionAt ? `Connected · first action ${formatShareLinkExpiry(row.firstActionAt)}` : "Access ready · waiting for first action")
           : statuses[row.status];
-        text.textContent = `${state} · ${new Date(row.expiresAt).toLocaleString()}`;
+        text.textContent = `${state} · ${formatShareLinkExpiry(row.expiresAt)}`;
         li.append(name, text);
         if (row.status !== "disconnected") {
           const copySteps = document.createElement("button");

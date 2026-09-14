@@ -19,6 +19,10 @@ test("share-link expiry labels use the invitation expiry formatter", () => {
   assert.match(src, /expires \$\{formatShareLinkExpiry\(link\.expiresAt\)\}/);
   assert.match(src, /Invitation expires \$\{formatShareLinkExpiry\(preview\.link\.expiresAt\)\}/);
   assert.doesNotMatch(src, /toLocaleString/);
+  const agents = readFileSync(new URL("../src/agent-connections.js", import.meta.url), "utf8");
+  assert.match(agents, /formatShareLinkExpiry\(row\.expiresAt\)/);
+  assert.match(agents, /formatShareLinkExpiry\(row\.firstActionAt\)/);
+  assert.doesNotMatch(agents, /toLocaleString/);
 });
 
 test("invitation note formatting is bounded plain text with an exact URL-only fallback", () => {
