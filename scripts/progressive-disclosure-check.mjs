@@ -8,7 +8,6 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 
-const SECTIONS = ["#return-brief-panel", "#composer-options", "#people-panel", "#record-panel", "#decision-section"];
 // Sections normalized to the shared .section-summary anatomy.
 const SHARED = ["#composer-options", "#people-panel", "#record-panel", "#decision-section"];
 

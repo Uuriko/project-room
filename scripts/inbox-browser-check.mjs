@@ -435,6 +435,7 @@ async function selectExcerpt(page, value) {
   const field = page.locator("#inbox-excerpt-text"); await field.focus();
   await field.press("ControlOrMeta+A"); await field.press("ArrowLeft");
   await page.keyboard.down("Shift");
+  // eslint-disable-next-line no-unused-vars -- one key press per character; the character itself is not needed
   for (const point of value) await page.keyboard.press("ArrowRight");
   await page.keyboard.up("Shift");
   await page.locator("#inbox-share-confirm:not([disabled])").waitFor();

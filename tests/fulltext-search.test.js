@@ -29,7 +29,7 @@ async function serve(t) {
 }
 
 test("full-text search over messages and work (round-2 #113)", async t => {
-  const { origin, ownerKey, get, post, propose, remove } = await serve(t);
+  const { ownerKey, get, post, propose, remove } = await serve(t);
   const keepId = post("The quick brown fox jumps");
   post("something unrelated here");
   const doomed = post("fox in the henhouse");

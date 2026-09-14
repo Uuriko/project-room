@@ -69,7 +69,7 @@ test("memberId omitted resolves to the caller", async t => {
 });
 
 test("a member cannot set another member's status; the owner can", async t => {
-  const { request, agentKey, agent2Key, ownerKey } = await serve(t);
+  const { request, agent2Key, ownerKey } = await serve(t);
   assert.equal((await setStatus(request, agent2Key, { memberId: "agent", message: "hijacked" })).status, 422);
   assert.equal((await setStatus(request, ownerKey, { memberId: "agent", message: "owner set" })).status, 201);
 });

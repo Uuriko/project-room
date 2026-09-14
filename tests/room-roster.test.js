@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import {
-  ROOM_ROSTER, rosterById, rosterSelection, suggestedConfigDir, rosterNameTaken,
+  ROOM_ROSTER, rosterById, rosterSelection, rosterNameTaken,
   grokBuildToml, mcpJson, importCommand, roomRosterMain, capabilitySummary,
   setupChecklist, routeHint, placeholderSnippetPaths, routeFromDisplayName,
   claudeMcpAddCommand, reconnectCopy

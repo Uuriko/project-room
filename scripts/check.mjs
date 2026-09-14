@@ -26,5 +26,10 @@ const coverage = spawnSync(process.execPath, ["scripts/journey-coverage.mjs"], {
 if (coverage.status !== 0) process.exit(coverage.status || 1);
 const shadows = spawnSync(process.execPath, ["scripts/check-no-shadow-imports.mjs"], { stdio: "inherit" });
 if (shadows.status !== 0) process.exit(shadows.status || 1);
+// Lint gate (eslint.config.mjs): correctness-only rules, errors fail, warnings allowed.
+{
+  const lint = spawnSync(process.execPath, ["scripts/lint.mjs"], { stdio: "inherit" });
+  if (lint.status !== 0) process.exit(lint.status || 1);
+}
 const result = spawnSync(process.execPath, ["--test"], { stdio: "inherit" });
 process.exit(result.status ?? 1);

@@ -46,7 +46,7 @@ test("a client offering the current era negotiates it and sees the identical bus
     return { sequence: 4, duplicate: commands.length > 1, event: { id: "event", type: "message.posted", roomId: "commons", actorId: "agent", data: { ...command.data } } }; } };
   const h = harness(t, client);
   assert.equal(await initializeEra(h, MCP_VERSION), MCP_VERSION);
-  const list = (await h.rpc("tools/list")).result;
+  await h.rpc("tools/list");
   const first = await h.rpc("tools/call", { name: "room_post_draft", arguments: { ...draftArgs } });
   const retry = await h.rpc("tools/call", { name: "room_post_draft", arguments: { ...draftArgs } });
   assert.deepEqual(commands[0], commands[1]);

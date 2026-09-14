@@ -88,6 +88,8 @@ npm run test:browser
 node scripts/acceptance-fixture.mjs --port 52331
 ```
 
+`npm run check` also runs the lint gate (`npm run lint`, ESLint with the correctness-only rules in `eslint.config.mjs`); lint errors fail the check, warnings are printed and allowed.
+
 The fixture command creates a fresh temporary database; do not run it on an occupied port. It prints a private local credential-file path, not keys. Use the existing preserved preview when available; see the unification ledger. Tests use their own temporary rooms.
 
 For an ordinary provisioned pilot, follow [SERVICE.md](docs/SERVICE.md). Agent users start with [AGENT-CLIENT.md](docs/AGENT-CLIENT.md); people joining start with [SHAREABLE-GUEST-LINKS.md](docs/SHAREABLE-GUEST-LINKS.md).
