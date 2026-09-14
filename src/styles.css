@@ -907,6 +907,7 @@ summary { overflow-wrap: anywhere; }
 .usage-grid dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
 .usage-grid dd small { display: block; color: var(--muted); font-size: .75rem; }
 .usage-actions { padding: .5rem 1rem 0; }
+.record-actions { display: grid; gap: .35rem; justify-items: start; padding: .5rem 1rem 0; }
 .usage-actions:has(> [hidden]) { padding: 0; }
 
 /* B4 notification feed: compact rows inside catch-up; the badge reuses .catchup-signals. */

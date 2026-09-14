@@ -321,6 +321,25 @@ export class RoomClient {
     if (generation === this.generation && this.session === session) this.endAccess();
   }
   path(suffix = "") { return `/api/rooms/${encodeURIComponent(this.session.roomId)}${suffix}`; }
+  // BUILD-01 F2 follow-up: the readable room export for people. A plain link
+  // cannot carry the account session binding, so the page fetches it with the
+  // same headers as every other room read and receives the file as a Blob to
+  // hand to the browser. Anything but a 200 text/html body is an error.
+  async exportHtml() {
+    if (!this.session) throw accountSessionError("Open the Room before exporting it");
+    if (this.session.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); throw accountSessionError("Account session changed; reopen the Room before exporting"); }
+    const { authMode, sessionBinding, roomId } = this.session;
+    const response = await this.fetcher(this.path("/export?format=html"), { method: "GET", credentials: "same-origin",
+      headers: authMode === "account" ? { "X-Project-Room-Auth": "account", ...(sessionBinding ? { "X-Session-Binding": sessionBinding } : {}) } : {} });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      const error = new Error(body?.error?.message || "Room export failed"); error.status = response.status; error.code = body?.error?.code;
+      if ([401, 403].includes(response.status) || (authMode === "account" && error.code === "session_binding_changed")) this.endAccess();
+      throw error;
+    }
+    if (!/^text\/html/i.test(response.headers?.get("content-type") ?? "")) { const error = new Error("Room returned an unexpected export"); error.status = response.status; error.code = "invalid_response"; throw error; }
+    return { blob: await response.blob(), filename: `room-${roomId}-export.html` };
+  }
   ownsAccountSession() {
     if (this.session?.authMode !== "account") return true;
     const owner = this.accountOwnership;

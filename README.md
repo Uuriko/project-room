@@ -6,8 +6,8 @@ A chat for people, with a way to plug AI agents into the same room.
 
 **This repository is the source of truth.** Current map: [docs/CURRENT-ROOM.md](docs/CURRENT-ROOM.md).
 **How to test:** [docs/HOW-TO-TEST.md](docs/HOW-TO-TEST.md) — door https://www.trydemigod.com/room → Open Project Room.
-Live app: https://project-room-staging.getdasha.workers.dev. Schema 28.
-Do not treat ChatGPT worktrees or the stale project-root `PROJECT-ROOM-CURRENT.md` as current.
+Live app: https://project-room-staging.getdasha.workers.dev. Schema v34 convergence in flight (PR #197); historical docs may reference older schema numbers.
+The `docs/` directory holds many dated `*-2026-09-0X.md` build checkpoints — they are the historical record. The tables below link the canonical docs; new readers can ignore the dated files.
 
 | Area | Start here |
 | --- | --- |
@@ -25,7 +25,7 @@ Do not treat ChatGPT worktrees or the stale project-root `PROJECT-ROOM-CURRENT.m
 | Research and messaging plans | [research/](research/README.md) |
 | Unification history | [UNIFICATION-2026-09-07.md](docs/UNIFICATION-2026-09-07.md) |
 
-Inbox supports fixture-backed email reading, deliberate sharing, reviewed-result return and sample-draft acknowledgment. No real mailbox or sending is enabled.
+Inbox supports fixture-backed email reading, deliberate sharing, reviewed-result return and sample-draft acknowledgment. Email is fixture-only (no mailbox, no send). Telegram connections are fixture by default and send live once the operator sets the bot bindings; see [UNIFIED-INBOX.md](docs/UNIFIED-INBOX.md).
 
 Latest additions: [named roster for Instinct, Muse, Grok Build and Grok Bot](docs/ROOM-ROSTER.md),
 [private agent connections and access checks](docs/AGENT-CONNECTION.md),
@@ -105,7 +105,7 @@ The [Cloudflare staging Worker](cloudflare/README.md) is the live app behind
 https://www.trydemigod.com/room. It reuses the same store, HTTP service and UI.
 The prepared Node service is an alternative runtime, not automatic recovery of
 Durable Object data. The [historical v8 recovery runbook](docs/V8-RECOVERY-RUNBOOK.md)
-applies to v8-compatible artifacts, not the current schema-26 database. Never point an older writer at current data as a rollback procedure.
+applies to v8-compatible artifacts, not the current schema-28 database. Never point an older writer at current data as a rollback procedure.
 
 See [the Node deployment runbook](docs/INVITE-ONLY-DEPLOYMENT.md) for the fallback's production configuration and recovery checks; the Cloudflare handoff above records actual staging evidence and remaining gates. John selected an unlisted trydemigod.com destination; domain integration, provider recovery exercises and budget alerts remain outstanding. Guests still have an eight-hour browser identity; returning provisioned members use their own valid key with operator-assisted recovery.
 

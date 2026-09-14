@@ -2,6 +2,8 @@
 // Issue #6 B2: a member pins a message from the keyboard, the Pinned section
 // lists pins in pin order and follows other members' pins live, unpin works
 // from the section itself, and a deleted message drops out of the section.
+// Backlog follow-up 8: the "Pinned only" search toggle lists pins alone,
+// narrows by the typed term, follows unpin live, and clears with the search.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
@@ -77,6 +79,22 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await page.locator("#pinned-count").textContent(), "3 of 50");
     assert.match(await f.items.nth(1).locator(".pinned-meta").textContent(), /Test producer/);
 
+    // "Pinned only" search: pins alone with no term, narrowed by the term, no work results; the toggle clears with the search.
+    const pinnedToggle = page.getByRole("button", { name: "Pinned only", exact: true }), results = page.locator("#search-list li");
+    assert.equal(await pinnedToggle.getAttribute("aria-pressed"), "false");
+    await pinnedToggle.focus(); await page.keyboard.press("Enter");
+    assert.equal(await pinnedToggle.getAttribute("aria-pressed"), "true");
+    await page.locator("#search-results").waitFor({ state: "visible" });
+    assert.equal(await page.locator("#search-count").textContent(), "3 pinned messages in this room");
+    assert.deepEqual(await results.locator("span").allTextContents(), ["Bring the projector adapter", "Parking code is 4411", "Meeting room is B-204 from Thursday"], "newest first, pinned only");
+    await page.locator("#message-search").fill("meeting");
+    assert.equal(await page.locator("#search-count").textContent(), "1 match in this room");
+    assert.deepEqual(await results.locator("span").allTextContents(), ["Meeting room is B-204 from Thursday"], "the term narrows the pinned pool");
+    await page.locator("#message-search").fill("projector");
+    assert.deepEqual(await results.locator("span").allTextContents(), ["Bring the projector adapter"]);
+    await page.locator("#message-search").fill("");
+    assert.equal(await page.locator("#search-count").textContent(), "3 pinned messages in this room");
+
     // Unpin from the section itself, from the keyboard; focus stays in the section.
     const unpin = f.items.nth(1).getByRole("button", { name: /^Unpin message by/ });
     await unpin.focus(); await page.keyboard.press("Space");
@@ -85,6 +103,12 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await page.evaluate(() => document.activeElement?.closest("#pinned-panel") !== null), true, "focus did not fall off the page after the item went");
     assert.equal(await f.row("Bring the projector adapter").getByRole("button", { name: "Pin", exact: true }).getAttribute("aria-pressed"), "false");
     assert.deepEqual(f.pins().map(p => p.messageId), [f.messageId("Meeting room is B-204 from Thursday"), f.messageId("Parking code is 4411")]);
+    // The pinned-only search followed the unpin live, and Clear drops the toggle with the term.
+    await page.waitForFunction(() => document.querySelector("#search-count")?.textContent === "2 pinned messages in this room");
+    assert.deepEqual(await results.locator("span").allTextContents(), ["Parking code is 4411", "Meeting room is B-204 from Thursday"]);
+    await page.locator("#clear-search").click();
+    assert.equal(await pinnedToggle.getAttribute("aria-pressed"), "false");
+    assert.equal(await page.locator("#search-results").isHidden(), true);
 
     // A deleted message drops out of the section; the tombstone offers no pin control.
     const doomed = f.messageId("Parking code is 4411");

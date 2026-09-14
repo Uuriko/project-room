@@ -2,9 +2,9 @@
 //
 // One report per room that an owner can read on a schedule and compare with
 // the last one: who is a member and what they may do, which guests are still
-// inside and until when, which invitation links can still admit someone, which
-// agent identities and connections exist and in what state, and when each
-// member last acted. Assembly is a pure read over the store; the HTTP route
+// inside and until when, which invitation links and one-time agent invite
+// codes can still admit someone, which agent identities and connections exist
+// and in what state, and when each member last acted. Assembly is a pure read over the store; the HTTP route
 // and the CLI print the same object. No token, secret or hash is ever
 // selected — the report is meant to be pasted into a review ticket.
 import { ServiceError } from "./store.mjs";
@@ -75,6 +75,14 @@ export function assembleAccessReview(store, roomId) {
     const { id, role, permissions, createdAt, expiresAt, maxJoins, joins, remainingJoins, status } = store.shareLinks.view(row);
     return { id, role, permissions, issuerMemberId: row.issuer_member_id, createdAt: iso(createdAt), expiresAt: iso(expiresAt), maxJoins, joins, remainingJoins, status };
   });
+  // One-time agent invite codes that are neither redeemed nor revoked: what
+  // could still admit an agent, plus those that lapsed unredeemed (for the
+  // record, like an expired link). Only the hash-free inviteId handle that
+  // revoke() takes is selected — never the code or its stored hash.
+  const pendingInvites = db.prepare("SELECT * FROM agent_invite_codes WHERE room_id=? AND redeemed_at IS NULL AND revoked_at IS NULL ORDER BY created_at DESC,code_hash").all(roomId).map(row => {
+    const { inviteId, displayName, permissions, createdBy, createdAt, expiresAt, status } = store.invites.view(row, now);
+    return { inviteId, displayName, permissions, inviterMemberId: createdBy, createdAt: iso(createdAt), expiresAt: iso(expiresAt), status };
+  });
   const agentIdentities = db.prepare(`SELECT l.identity_id AS identityId, l.member_id AS memberId, l.linked_at AS linkedAt,
       i.display_name AS displayName FROM identity_links l JOIN agent_identities i ON i.identity_id=l.identity_id
       WHERE l.room_id=? ORDER BY l.linked_at, l.identity_id`).all(roomId).map(row => ({
@@ -90,8 +98,8 @@ export function assembleAccessReview(store, roomId) {
   const roomLastActivityAt = [...lastActivity.values()].filter(Boolean).sort().at(-1) ?? null;
   return { format: ACCESS_REVIEW_FORMAT, roomId, roomTitle: state.room.title, ownerId: state.room.ownerId, generatedAt: iso(now),
     lastActivityAt: roomLastActivityAt, counts: { members: members.length, guests: guests.length, shareLinks: shareLinks.length,
-      agentIdentities: agentIdentities.length, agentConnections: agentConnections.length },
-    members, guests, shareLinks, agentIdentities, agentConnections };
+      pendingInvites: pendingInvites.length, agentIdentities: agentIdentities.length, agentConnections: agentConnections.length },
+    members, guests, shareLinks, pendingInvites, agentIdentities, agentConnections };
 }
 
 // Plain-text rendering shared by the CLI; one block per room.
@@ -104,6 +112,8 @@ export function renderAccessReview(report) {
   for (const g of report.guests) lines.push(`  ${g.memberId}  ${g.displayName}  ${g.kind}  ${g.status}  joined ${when(g.joinedAt)}  expires ${when(g.expiresAt)}  last activity: ${when(g.lastActivityAt)}`);
   lines.push(`Share links (${report.shareLinks.length}):`);
   for (const l of report.shareLinks) lines.push(`  ${l.id}  ${l.status}  joins ${l.joins}/${l.maxJoins} (${l.remainingJoins} remaining)  issued by ${l.issuerMemberId}  expires ${l.expiresAt}`);
+  lines.push(`Pending agent invites (${report.pendingInvites.length}):`);
+  for (const i of report.pendingInvites) lines.push(`  ${i.inviteId}  ${i.displayName ?? "(unnamed)"}  ${i.status}  grants: ${grants(i.permissions)}  issued by ${i.inviterMemberId}  created ${i.createdAt}  expires ${i.expiresAt}`);
   lines.push(`Agent identities (${report.agentIdentities.length}):`);
   for (const i of report.agentIdentities) lines.push(`  ${i.identityId}  ${i.displayName}  member ${i.memberId}${i.memberActive ? "" : " (inactive)"}  linked ${i.linkedAt}  last activity: ${when(i.lastActivityAt)}`);
   lines.push(`Agent connections (${report.agentConnections.length}):`);

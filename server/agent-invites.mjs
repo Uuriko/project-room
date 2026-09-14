@@ -109,6 +109,10 @@ const view = (row, now) => ({
 export class AgentInvites {
   constructor(store) { this.store = store; this.db = store.db; }
 
+  // Hash-free public shape of one stored row (inviteId handle, never the
+  // stored hash), shared with the access review.
+  view(row, now = this.store.now()) { return view(row, now); }
+
   // Owner-only: mint a one-time code. The raw code is returned once; only
   // its hash is stored. Callers may pass an explicit permissions list or a
   // standing profile name (chat/contribute/review); the profile maps

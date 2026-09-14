@@ -194,10 +194,10 @@ const client = new RoomClient({
     $("#auth-panel").setAttribute("aria-busy", pendingSignout ? "true" : "false");
     $("#identity-label").textContent = "Not signed in";
     $("#identity-label").removeAttribute("title");
-    for (const id of ["message-list", "work-list", "event-list", "presence-list", "member-stack", "summary-grid", "reply-context", "source-context", "action-context", "action-fields", "cursor-label", "presence-count", "message-count", "event-count", "rb-attention-list", "rb-involving-list", "rb-history-list", "decision-list", "usage-grid", "usage-period", "usage-status"]) {
+    for (const id of ["message-list", "work-list", "event-list", "presence-list", "member-stack", "summary-grid", "reply-context", "source-context", "action-context", "action-fields", "cursor-label", "presence-count", "message-count", "event-count", "rb-attention-list", "rb-involving-list", "rb-history-list", "decision-list", "usage-grid", "usage-period", "usage-status", "record-export-status"]) {
       const node = $(`#${id}`); node.replaceChildren(); delete node._content;
     }
-    $("#usage-refresh").hidden = true;
+    $("#usage-refresh").hidden = true; $("#record-export-html").disabled = false; exportRequest += 1;
     for (const id of ["message-to-select", "assignee-select", "verifier-select"]) { $(`#${id}`).replaceChildren(); delete $(`#${id}`).dataset.signature; }
     for (const form of document.querySelectorAll("form")) {
       if (!keepAccount || !form.closest("#inbox-panel")) form.reset();
@@ -216,7 +216,7 @@ const client = new RoomClient({
     $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = "";
     $("#thread-title").textContent = ""; $("#thread-context").textContent = "";
     $("#thread-bar").hidden = true; $("#search-results").hidden = true; $("#new-messages-button").hidden = true;
-    $("#search-mentions")?.setAttribute("aria-pressed", "false"); $("#message-search").value = ""; $("#clear-search").hidden = true;
+    $("#search-mentions")?.setAttribute("aria-pressed", "false"); $("#search-pinned")?.setAttribute("aria-pressed", "false"); $("#message-search").value = ""; $("#clear-search").hidden = true;
     $("#conversation-announcement").textContent = ""; delete $("#message-list").dataset.view;
     for (const id of ["rb-attention-list", "rb-involving-list", "rb-history-list"]) delete $(`#${id}`)._content;
     $("#rb-current-boundary").textContent = ""; $("#rb-history-boundary").textContent = ""; $("#decision-count").textContent = "";
@@ -1143,20 +1143,26 @@ function messageContent(m, cluster = {}, unreadStart = false) {
 function mentionsFilterOn() {
   return $("#search-mentions")?.getAttribute("aria-pressed") === "true";
 }
+// Backlog follow-up 8: "Pinned only" narrows search to state.pins (issue #6 B2).
+// Pins are messages, so work results step aside while it is on.
+function pinnedFilterOn() {
+  return $("#search-pinned")?.getAttribute("aria-pressed") === "true";
+}
 function renderSearch(now = Date.now()) {
   const query = $("#message-search").value;
   const parsed = parseSearchQuery(query);
-  const only = mentionsFilterOn() || parsed.mentionsOnly;
-  $("#clear-search").hidden = !query && !mentionsFilterOn();
-  $("#search-results").hidden = !query.trim() && !only;
-  if (!query.trim() && !only) { $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = ""; return; }
-  const result = searchMessages(state, query, 50, { viewer: session?.member, mentionsOnly: mentionsFilterOn() });
-  const work = only ? { work: [], total: 0 } : searchWork(state, parsed.term || query);
+  const only = mentionsFilterOn() || parsed.mentionsOnly, pinnedOnly = pinnedFilterOn();
+  const active = Boolean(query.trim()) || only || pinnedOnly;
+  $("#clear-search").hidden = !query && !mentionsFilterOn() && !pinnedOnly;
+  $("#search-results").hidden = !active;
+  if (!active) { $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = ""; return; }
+  const result = searchMessages(state, query, 50, { viewer: session?.member, mentionsOnly: mentionsFilterOn(), pinnedOnly });
+  const work = only || pinnedOnly ? { work: [], total: 0 } : searchWork(state, parsed.term || query);
   const total = result.total + work.total, shown = result.messages.length + work.work.length;
-  const noun = only && !parsed.term ? (total === 1 ? "mention" : "mentions") : (total === 1 ? "match" : "matches");
+  const noun = only && !parsed.term ? (total === 1 ? "mention" : "mentions") : pinnedOnly && !parsed.term ? (total === 1 ? "pinned message" : "pinned messages") : (total === 1 ? "match" : "matches");
   setText("#search-count", `${total} ${noun}${total > shown ? ` · ${shown} shown` : ""} in this room`);
   const list = $("#search-list"), focused = list.contains(document.activeElement) ? document.activeElement.dataset.searchKey : null;
-  const empty = only && !parsed.term ? "No one has @-mentioned you yet." : "No matches. Try a name or another phrase.";
+  const empty = only && !parsed.term ? "No one has @-mentioned you yet." : pinnedOnly && !parsed.term ? "Nothing is pinned yet." : pinnedOnly ? "No pinned messages match." : "No matches. Try a name or another phrase.";
   const html = work.work.map(({ item, excerpt }) => `<li><a href="${esc(workHref(item.id))}" data-open-work="${esc(item.id)}" data-search-key="work:${esc(item.id)}"><strong>${esc(item.title)}</strong><span>${esc(excerpt)}</span><small>Work · ${esc(workStatus(item, now).label)}</small></a></li>`).join("")
     + result.messages.filter(m => !isMutedBy(state, session?.member?.id, m.authorId)).map(m => `<li><a href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" data-search-key="message:${esc(m.id)}"><strong>${esc(name(m.authorId))}</strong><span>${esc(m.deletedAt ? "Message deleted" : (m.body ?? "").slice(0, 240))}</span><small>${m.replyToId ? "Open thread at this reply" : "Open in room"}</small></a></li>`).join("") || `<li class="empty-note">${empty}</li>`;
   if (list._content !== html) { list.innerHTML = html; list._content = html; }
@@ -1613,8 +1619,10 @@ async function submit(form, fn, { failureHint } = {}) {
     else notice(text, true);
   }
   finally {
-    if (operationId !== submitOperationId) return;
-    busy = false; releaseSubmission(ticket, { restoreFocus: true }); if (state) render();
+    // No `return` in `finally`: it would swallow anything the catch handler threw.
+    if (operationId === submitOperationId) {
+      busy = false; releaseSubmission(ticket, { restoreFocus: true }); if (state) render();
+    }
   }
 }
 $("#invitation-dismiss").addEventListener("click", () => closeInvitation());
@@ -2222,9 +2230,15 @@ $("#search-mentions").addEventListener("click", () => {
   $("#search-mentions").setAttribute("aria-pressed", on ? "false" : "true");
   if (state) renderSearch();
 });
+$("#search-pinned").addEventListener("click", () => {
+  const on = pinnedFilterOn();
+  $("#search-pinned").setAttribute("aria-pressed", on ? "false" : "true");
+  if (state) renderSearch();
+});
 $("#clear-search").addEventListener("click", () => {
   $("#message-search").value = "";
   $("#search-mentions").setAttribute("aria-pressed", "false");
+  $("#search-pinned").setAttribute("aria-pressed", "false");
   renderSearch(); $("#message-search").focus();
 });
 
@@ -2240,6 +2254,7 @@ function roomActionEntries() {
     { id: "write", label: requestMode ? "Open composer" : $("#message-input").value ? "Continue writing" : "Write a message", words: "compose chat draft reply", target: "#message-input" },
     { id: "search", label: "Search room", words: "find messages work", target: "#message-search" },
     { id: "mentions", label: "Mentioned you", words: "mentions addressed @me to:me", target: "#search-mentions", activate: true },
+    { id: "pinned-search", label: "Pinned only", words: "pins pinned search", target: "#search-pinned", activate: true },
     { id: "catch-up", label: "Catch me up", words: "updates attention needs me reminders", target: "#return-brief-panel > summary", reveal: "#return-brief-panel" },
     { id: "work", label: "View work", words: "tasks projects", target: "#work-view-work", activate: true },
     { id: "results", label: "View results", words: "completed approved finished artifacts", target: "#work-view-results", activate: true },
@@ -3507,7 +3522,7 @@ async function loadUsage() {
   try {
     const usage = await client.request(client.path("/usage"));
     if (request !== usageRequest || !state) return;
-    const { members, sessions, spend, caps, period } = usage;
+    const { members, sessions, spend, spendAllowance: ledger, caps, period } = usage;
     const spendNote = spend.reportedCents === "unknown" ? "no session reported spend"
       : spend.sessionsUnreported ? `${usageNumber(spend.sessionsUnreported)} of ${usageNumber(spend.sessionsReported + spend.sessionsUnreported)} sessions unreported` : "every session reported";
     $("#usage-period").textContent = `${period.days}d`;
@@ -3521,6 +3536,14 @@ async function loadUsage() {
         `<dt>Sessions started</dt><dd>${esc(usageNumber(sessions.started))}</dd>`,
         `<dt>Sessions stopped</dt><dd>${esc(usageNumber(sessions.stopped))}${sessions.budgetStops ? `<small>${esc(usageNumber(sessions.budgetStops))} stopped by budget</small>` : ""}</dd>`,
         `<dt>Reported spend</dt><dd>${esc(usageMoney(spend.reportedCents))}<small>${esc(spendNote)}</small></dd>`
+      ]),
+      // C3: the allowance ledger over its own period; "Agent spend" keeps the owner controls.
+      group("Spend allowance", [
+        `<dt>Allowance</dt><dd data-usage-allowance="${ledger.allowance ? "set" : "none"}">${ledger.allowance ? `${esc(usageMoney(ledger.allowance.allowanceCents))}<small>over ${esc(usageNumber(ledger.period.days))} days</small>` : "none set"}</dd>`,
+        `<dt>Spent</dt><dd>${esc(usageMoney(ledger.spentCents))}</dd>`,
+        `<dt>Reserved</dt><dd>${esc(usageMoney(ledger.reservedCents))}<small>${esc(usageNumber(ledger.sessions.live))} live</small></dd>`,
+        ...(ledger.heldCents ? [`<dt>Held</dt><dd>${esc(usageMoney(ledger.heldCents))}<small>unreported attempts</small></dd>`] : []),
+        `<dt>Headroom</dt><dd>${ledger.allowance ? esc(ledger.overCents ? `over by ${usageMoney(ledger.overCents)}` : usageMoney(ledger.headroomCents)) : "no cap"}</dd>`
       ]),
       group("Pilot caps", [
         usageCapRow("Members", caps.members),
@@ -3538,6 +3561,28 @@ async function loadUsage() {
 }
 $("#usage-panel").addEventListener("toggle", e => { if (e.currentTarget.open) loadUsage(); });
 $("#usage-refresh").addEventListener("click", () => loadUsage());
+// BUILD-01 F2 follow-up: any member can take the readable export with them.
+// The client fetches it with the room headers and the page hands the file to
+// the browser; the server decides who may export (the same check as JSONL).
+let exportRequest = 0;
+async function exportRoomHtml() {
+  if (!state || !client.session) return;
+  const request = ++exportRequest, button = $("#record-export-html"), status = $("#record-export-status");
+  button.disabled = true; status.textContent = "Preparing the export…";
+  try {
+    const { blob, filename } = await client.exportHtml();
+    if (request !== exportRequest || !state) return;
+    const url = URL.createObjectURL(blob), link = document.createElement("a");
+    link.href = url; link.download = filename; link.hidden = true;
+    document.body.append(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    status.textContent = `Download started: ${filename}. Deleted messages appear as deleted, as members saw them.`;
+  } catch (error) {
+    if (request !== exportRequest || !state) return;
+    status.textContent = error.status === 429 ? "Export is rate limited; try again in a minute." : "The export could not be prepared. Try again.";
+  } finally { if (request === exportRequest) button.disabled = false; }
+}
+$("#record-export-html").addEventListener("click", () => exportRoomHtml());
 $("#room-navigation").addEventListener("click", e => {
   const section = e.target.closest("[data-room-section]")?.dataset.roomSection;
   if (!section || !state || busy) return;

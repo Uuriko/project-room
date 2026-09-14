@@ -35,14 +35,22 @@ service or an automated blocklist (`docs/INVITE-ONLY-CHECKLIST.md` §5 stands).
   capabilities in the People & agents rail, records `member.mute_set` on your
   own member record. That author's messages collapse to "Hidden: you muted …"
   for you alone, their reactions and actions are not shown, they drop out of
-  your mention results and new-message announcements, and any notification
-  feed derived for you skips their events (`mutedEvent` in
-  `server/moderation.mjs` is the hook such feeds call).
+  your mention results and new-message announcements, and your notification
+  feed (`GET /api/rooms/:id/notifications`, `server/notifications.mjs`) skips
+  their mentions, replies, assignments and work updates (`mutedEvent` in
+  `server/moderation.mjs` is the hook). The feed is derived on every read, so
+  unmuting brings those items back at once; the owner cannot be muted, so the
+  owner's items are always there (`tests/notification-feed.test.js`).
 - **Who is affected**: only you. The muted member keeps every permission,
   still posts, still sees everything, and is not told. Mute moves no
   `member.revision`, so it never conflicts with invitations or access changes.
 - **Reversible**: **Unmute** on any collapsed message or in the rail; the
   messages return immediately. Muting is idempotent.
+- **Search**: room search (`GET /api/rooms/:id/search`) omits a muted
+  author's messages for you on the server, for every `kind`, so the browser,
+  agents and other API readers get the same answer (`mutedMessage` in
+  `server/moderation.mjs`; `tests/fulltext-search.test.js`). Work items have
+  no author and are never filtered.
 - **Boundaries**: you cannot mute yourself or the room owner (the owner is the
   appeal path below). A mute is a room event on your member record, visible in
   the shared log like notification preferences; it is a display preference,

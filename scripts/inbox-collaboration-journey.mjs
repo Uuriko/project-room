@@ -70,7 +70,10 @@ export async function createInboxCollaborationJourney({ mobile = false } = {}) {
       await card.locator(`[data-action="${name}"]`).click(); await p.locator("#action-dialog").waitFor();
     };
     async function inbox() {
-      await page.locator("#nav-inbox").click(); await page.locator("#inbox-reader").waitFor();
+      // Settle the inbox's initial load (first message opened, connection list rendered) before the
+      // step-back probe: on a phone the opened reader covers the sidebar.
+      await page.locator("#nav-inbox").click(); await page.locator("#inbox-reader").waitFor({ state: "visible" });
+      await page.locator("#inbox-add-connection:not([hidden])").waitFor({ state: "attached" });
       if (mobile && await page.locator("#inbox-back").isVisible()) await page.locator("#inbox-back").click();
       await page.locator(`[data-source-id="${sourceId}"]`).click(); await page.locator("#inbox-reader").waitFor();
     }

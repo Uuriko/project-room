@@ -100,3 +100,26 @@ test("wake queue is draft-class and enqueueing appends no room events", t => {
   assert.equal(after.sequence, before.sequence, "queue intent is private state, never a room event");
   assert.deepEqual(after.state, before.state);
 });
+
+// The receipt cap bounds every command that retains a receipt. Requeue and
+// enqueue share the check: at the cap both refuse, the dead letter stays
+// parked, and an exact retry still answers with its historical receipt.
+test("receipt capacity bounds requeue as well as enqueue", t => {
+  const f = fixture(t);
+  const first = f.enqueue({ maxAttempts: 1 });
+  const memberId = f.store.authenticate(f.keys.owner, "commons").member.id;
+  f.store.wakeQueue.lease("commons", memberId, "recipe:draft-catch-up", "worker-1");
+  assert.equal(f.store.wakeQueue.fail("commons", memberId, "recipe:draft-catch-up", { leaseOwner: "worker-1", error: "boom" }).state, "dead");
+  const receipts = () => f.store.db.prepare("SELECT count(*) n FROM wake_queue_commands WHERE room_id='commons' AND member_id=?").get(memberId).n;
+  f.store.transaction(() => {
+    const insert = f.store.db.prepare("INSERT INTO wake_queue_commands VALUES('commons',?,?,'fixture','{}')");
+    for (let n = receipts(); n < wakeQueueLimits.receipts; n++) insert.run(memberId, `synthetic-${n}`);
+  });
+  const requeue = () => f.store.wakeQueue.requeue(f.keys.owner, "commons", { requestId: randomUUID(), queueKey: "recipe:draft-catch-up", dueAt: f.at() });
+  assert.throws(requeue, { code: "wake_limit", status: 409 }, "requeue at the cap is refused");
+  assert.throws(() => f.enqueue({ queueKey: "recipe:request-review" }), { code: "wake_limit", status: 409 }, "enqueue at the cap is refused");
+  assert.equal(f.list()[0].state, "dead", "the refused requeue left the dead letter parked");
+  assert.equal(f.list().length, 1);
+  assert.equal(receipts(), wakeQueueLimits.receipts, "refused commands write no receipt");
+  assert.equal(f.enqueue({ requestId: first.receipt.requestId, maxAttempts: 1 }).duplicate, true, "an exact retry at the cap still returns its historical receipt");
+});
