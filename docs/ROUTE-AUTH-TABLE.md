@@ -37,11 +37,14 @@ unauthenticated by design (invitation token in the body is the credential).
 
 All `GET` routes under `/api/rooms/:id/*` (snapshot, events, export,
 search, presence, capabilities, onboarding-funnel, provider-heartbeats,
-reminders, agent-connections, share-links, invitations, work-*, reply-*,
+usage, reminders, agent-connections, share-links, invitations, work-*, reply-*,
 charter, diagnostics, return-brief, thread) require a room credential with
 member visibility. `GET /api/rooms/:id/export` returns the full event log as
 one `Content-Length`-framed JSONL body (never a partial 200);
-`GET /api/rooms/:id/stream` is the SSE feed.
+`GET /api/rooms/:id/stream` is the SSE feed. `GET /api/rooms/:id/usage` (F5)
+is member-readable like its sibling dashboards because every figure derives
+from data a member already reads (membership snapshot, work-session spend,
+events); it returns counts only and shares the read-family rate limit.
 
 `tests/route-auth-table.test.js` enforces the headline invariant: every
 mutating room route rejects unauthenticated requests.

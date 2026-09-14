@@ -210,6 +210,18 @@ carry the claim, and the remaining tiers stay visibly open.
         "agent": [],
         "hosted": []
       }
+    },
+    {
+      "id": "room-usage-summary",
+      "claim": "Every member can read a per-room usage summary for a capped period: human seats and agent principals counted separately, sessions started and stopped, spend as reported (unknown, never zero, when unreported) and the store's pilot caps with remaining headroom; non-members are refused and the response carries no secrets or hashes.",
+      "evidence": {
+        "unit": [
+          "tests/usage.test.js"
+        ],
+        "browser": [],
+        "agent": [],
+        "hosted": []
+      }
     }
   ]
 }

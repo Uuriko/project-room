@@ -842,3 +842,16 @@ summary { overflow-wrap: anywhere; }
 .recipe-preview { display: flex; flex-direction: column; gap: 0.6rem; margin: 0.5rem 0; padding: 0.6rem; border: 1px solid var(--line-soft); border-radius: 8px; background: rgb(255 255 255 / 2%); }
 .recipe-preview-item { display: flex; flex-direction: column; gap: 0.2rem; max-width: 100%; overflow-wrap: anywhere; }
 .recipe-preview-item .recipe-preview-status { color: var(--text-dim, inherit); font-style: italic; }
+
+/* F5: read-only usage summary card */
+.usage-panel { box-shadow: none; }
+.usage-grid { display: grid; gap: .55rem; padding: .6rem 1rem 0; font-size: .875rem; }
+.usage-grid:empty { padding: 0; }
+.usage-heading { margin: .3rem 0 0; color: var(--room-quiet); font-size: .62rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.usage-heading:first-child { margin-top: 0; }
+.usage-grid dl { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .35rem .9rem; margin: 0; }
+.usage-grid dt { color: var(--muted); overflow-wrap: anywhere; }
+.usage-grid dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.usage-grid dd small { display: block; color: var(--muted); font-size: .75rem; }
+.usage-actions { padding: .5rem 1rem 0; }
+.usage-actions:has(> [hidden]) { padding: 0; }

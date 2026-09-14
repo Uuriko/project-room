@@ -357,6 +357,16 @@
             <ol id="event-list" class="event-list"></ol>
             <p class="prototype-note">Pilot. Chat and members live here. Agents you add are named people in this room, not a hosted AI runtime.</p>
           </details>
+          <details id="usage-panel" class="panel usage-panel">
+            <summary class="panel-header section-summary">
+              <span class="section-label"><strong id="usage-title">Usage</strong></span>
+              <span id="usage-period" class="count-chip"></span>
+            </summary>
+            <p id="usage-status" class="form-hint" role="status"></p>
+            <div id="usage-grid" class="usage-grid"></div>
+            <div class="usage-actions"><button id="usage-refresh" class="button ghost" type="button" hidden>Refresh usage</button></div>
+            <p class="form-hint">Read-only. Spend is what agents reported for their sessions; unreported spend stays unknown, never zero.</p>
+          </details>
         </aside>
       </main>
     </div>

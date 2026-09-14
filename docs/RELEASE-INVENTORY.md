@@ -37,6 +37,7 @@ worker), **unknown** (not verified recently enough to claim).
 | Work search, board projection, room results | qualified | tests/work-search, board-projection, room-results |
 | Import/export, recovery, schema upgrades | qualified | tests/recovery*, room-export, agent-upgrade, writer-fence |
 | Release evidence manifest, journey coverage map | qualified | scripts/release-evidence.mjs, scripts/journey-coverage.mjs |
+| Per-room usage summary (seats, sessions, reported spend, pilot caps and headroom; read-only) | local | server/usage-summary.mjs, `GET /api/rooms/:id/usage`, tests/usage.test.js (F5) |
 | Hosted deployment (worker serving the current build) | **unknown** | Last recorded live: fb90a70 / Worker 901be347 / schema 7 (Sep 8 research). Not reverified since; B7/B8 gate any live claim |
 | Hosted AI execution, remote OAuth MCP, execution runner | not delivered | no implementation on main |
 | Money movement (funding, payout, refunds) | not delivered | externally gated (backlog section J) |
