@@ -54,3 +54,34 @@ Both accept the owner's account session or room key so the CLI can pull them
 
 `tests/route-auth-table.test.js` enforces the headline invariant: every
 mutating room route rejects unauthenticated requests.
+
+## Open routes (no credential)
+
+The source of this list is `docs/openapi.yaml`: an operation is open exactly
+when it declares `security: []`. `tests/invite-only-boundary.test.js` probes
+every `/api` route the server can match without a credential and fails when
+the served-open set differs from the declared set; `node scripts/open-routes.mjs
+--check` (part of `npm run check`) fails when this table or
+`docs/INVITE-ONLY-CHECKLIST.md` §1 omits a declared route.
+
+| Method + route | Credential | What it discloses |
+|---|---|---|
+| `GET /api/health`, `GET /api/version`, `GET /api/ready` (and `HEAD`) | none | operational metadata only |
+| `GET /api/guest-agent-links`, `GET /api/work-item-sessions` (and `HEAD`) | none | static contract documents, no room data |
+| `GET /api/account-session` | none (creates an anonymous browser slot; 20/address/min) | `authenticated: false`, a CSRF token and session binding; `POST`/`DELETE` (sign-in/out) need the slot cookie + CSRF |
+| `POST /api/agent-identities` | none (by design) | see Mutating routes above |
+| `POST /api/agent-invites/redeem` | capability (invite code, 20/address/min) | 404 `invite_unavailable` for unknown codes; burns the code on success |
+| `POST /api/share-links/preview`, `POST /api/invitations/preview`, `POST /api/guest-agent-links/preview` | capability (link / invitation token, 30/address/min) | room title + access only; 410 / 404 for unknown tokens |
+| `POST /api/guest-agent-links/join` | capability (`gt_` link token, 20/address/min) | `read_chat` access for the linked guest member; 410 for unknown tokens |
+| `POST /api/session` | the access key in the body (10/address/min) | 401 on a wrong key; sets `room_session` on success |
+| `POST /api/inbox/webhooks/:connectionId` | per-connection webhook secret header | see Inbox connection routes below |
+
+## Inbox connection routes (account session, not room credentials)
+
+| Method + route | Credential | Store-level authorization |
+|---|---|---|
+| `POST /api/inbox/connections/:id/reconnect` | account session cookie + `X-Session-Binding` + CSRF (`protectWrite`) | connection owner only (404 for another account's connection); re-registers the `TELEGRAM_WEBHOOK_SECRET` hash when the bindings are set, then drains verified webhook updates through `syncTelegramConnection`; 30/min per account; works off loopback |
+| `POST /api/inbox/connections/commands` | account session cookie + `X-Session-Binding` + CSRF (`protectWrite`) | connection owner only (`connection.configure` refuses another account's `accountId` with 422 `channel_account_mismatch`; `connection.disconnect` on another account's connection is 404); accepts only `connection.configure` and `connection.disconnect`, never `connection.webhook` or `page.apply`; 30/min per account; works off loopback |
+| `POST /api/inbox/channel-sends` | account session + CSRF (`protectWrite`) | source owner only (404 otherwise); dispatches or reconciles an already-queued reply attempt through the deployment's transport for the source's connection (live Telegram when the bindings are set, inert fixture otherwise); 409 `channel_sending_unavailable` for email, samples and inactive connections; 30/min per account |
+| `POST /api/inbox/connections/:id/sync` | account session + CSRF, loopback clients only | connection owner; recorded fixture pages (local development) |
+| `POST /api/inbox/webhooks/:connectionId` | none (provider callback); `X-Telegram-Bot-Api-Secret-Token` compared in constant time with the stored SHA-256 | 409 `channel_webhook_unavailable` when no webhook inbox is wired; 401 for unknown connections and wrong secrets alike; accepted updates are held, never imported, until the owner triggers an import |

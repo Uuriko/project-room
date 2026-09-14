@@ -30,6 +30,27 @@ const participantLabel = p => p.displayName || p.handle || p.id;
 const summary = d => d.adapter === "email" ? { sender: d.envelope.message.from.address, recipient: d.envelope.connection.identity.address, subject: d.envelope.message.subject }
   : d.adapter === "telegram" ? { sender: participantLabel(d.envelope.message.from), recipient: participantLabel(d.envelope.connection.identity), subject: participantLabel(d.envelope.message.to[0]) }
   : { sender: d.sender, recipient: d.recipient, subject: d.subject };
+// Needs-you: the message addresses the account owner directly, in the same
+// spirit as needsAttention in src/work-selectors.js (a pure view over stored
+// facts, never a stored flag). Email: the mailbox or one of its aliases is in
+// To (CC alone does not count). Telegram: a private chat with the bot, a
+// mention of the bot's handle, or a reply to a message the bot itself sent (a
+// providerId the send journal recorded as accepted or delivered).
+const addressKey = a => (a?.address ?? "").toLowerCase();
+const escapeRegExp = value => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+export function inboxNeedsYou(d, sentIds = new Set()) {
+  if (d.adapter === "email") {
+    const own = new Set([d.envelope.connection.identity, ...(d.envelope.connection.aliases ?? [])].map(addressKey));
+    return d.envelope.message.to.some(a => own.has(addressKey(a)));
+  }
+  if (d.adapter === "telegram") {
+    const { message, body, connection } = d.envelope, handle = connection.identity.handle;
+    if (message.to[0].kind === "chat") return true;
+    if (handle.length > 1 && new RegExp(escapeRegExp(handle) + "(?![A-Za-z0-9_])", "i").test(body.content)) return true;
+    return message.replyTo !== null && sentIds.has("telegram:" + message.replyTo);
+  }
+  return false;
+}
 export const inboxLimits = Object.freeze({ sources: 100, versions: 100, commands: 5000, paragraphs: 20 });
 export const inboxSchema = `
   CREATE TABLE private_inbox_sources (
@@ -157,11 +178,12 @@ export class Inbox {
         }
         return connections.get(profile.id);
       };
+      const sentIds = include ? this.sentProviderIds(auth.account.id) : new Set();
       const sources = this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? ORDER BY updated_at DESC,id").all(auth.account.id)
         .map(row => { const d = this.version(auth.account.id, row.id, row.revision);
           if (d.adapter !== "synthetic" && !include) return null;
           return { id: row.id, revision: row.revision, adapter: d.adapter, ...summary(d), updatedAt: row.updated_at,
-            connection: d.adapter === "synthetic" ? null : connection(d.envelope.connection) }; }).filter(Boolean);
+            connection: d.adapter === "synthetic" ? null : connection(d.envelope.connection), needsYou: inboxNeedsYou(d, sentIds) }; }).filter(Boolean);
       return { contractVersion: 1, viewer: viewer(auth), sources };
     });
   }
@@ -189,6 +211,7 @@ export class Inbox {
       recipient: envelope.connection.identity.address, subject: message.subject,
       paragraphs: body.format === "text" ? [excerptView ? emailSelectionText(body) : body.content] : [],
       capabilities: { draft: true, share: excerptView && body.format === "text" && Boolean(body.content.trim()), send: false },
+      needsYou: inboxNeedsYou({ adapter: "email", envelope }),
       email: { view: excerptView ? "email-excerpt-v1" : "email-text-v1", accountId: auth.account.id, format: body.format,
         connectionState: connectionState(connection, auth.account.authEpoch),
         to: message.to.map(a => a.address), cc: message.cc.map(a => a.address), bcc: message.bcc.map(a => a.address),
@@ -200,11 +223,14 @@ export class Inbox {
     const envelope = readChannelEnvelope(value), { message, body, attachments, connection: profile } = envelope;
     const saved = this.store.email.connection(auth.account.id, profile.id);
     if (!saved || profile.accountId !== auth.account.id) fail(409, "channel_connection_unavailable", "Connection unavailable.");
-    const content = excerptView ? emailSelectionText(body) : body.content;
+    const content = excerptView ? emailSelectionText(body) : body.content, state = connectionState(saved, auth.account.authEpoch);
+    // `send` is the adapter capability on an active connection; whether this
+    // deployment has a transport for it is reported by the send routes.
     return { id: row.id, revision: row.revision, adapter: envelope.channel, ...summary({ adapter: envelope.channel, envelope }),
-      paragraphs: [content], capabilities: { draft: true, share: excerptView && Boolean(content.trim()), send: false },
+      paragraphs: [content], capabilities: { draft: true, share: excerptView && Boolean(content.trim()), send: state === "active" && profile.capabilities.send === true },
+      needsYou: inboxNeedsYou({ adapter: envelope.channel, envelope }, this.sentProviderIds(auth.account.id)),
       channel: { view: excerptView ? "channel-excerpt-v1" : "channel-text-v1", accountId: auth.account.id, channel: envelope.channel, provider: profile.provider,
-        connectionState: connectionState(saved, auth.account.authEpoch), format: body.format, kind: message.kind, edited: message.editedAt !== null,
+        connectionState: state, format: body.format, kind: message.kind, edited: message.editedAt !== null,
         chat: participantLabel(message.to[0]), attachmentCount: attachments.length } };
   }
   draftOrigin(accountId, sourceId, body, sourceRevision) {
@@ -267,6 +293,21 @@ export class Inbox {
       return { contractVersion: 1, viewer: viewer(auth), sourceId, sourceRevision: row.revision, roomId, roomTitle: state.room.title,
         audienceVersion: digest(inboxAudience(state)), audience: inboxAudience(state),
         members: Object.values(state.members).filter(m => m.active === true).map(m => ({ id: m.id, displayName: m.displayName, kind: m.kind })) };
+    });
+  }
+  // Provider ids of replies the account's connections actually sent.
+  sentProviderIds(accountId) {
+    return new Set([...this.outbox(accountId).values()].filter(s => s.providerId !== null && ["accepted", "delivered"].includes(s.status)).map(s => s.providerId));
+  }
+  // Which connection a channel source belongs to, for server-side transport
+  // selection only. Synthetic samples have none.
+  sourceConnection(token, sourceId, binding) {
+    return this.store.readTransaction(() => {
+      const auth = this.auth(token, binding), row = this.source(auth.account.id, sourceId), data = this.version(auth.account.id, row.id, row.revision);
+      if (data.adapter === "synthetic") return null;
+      const saved = this.store.email.connection(auth.account.id, data.envelope.connection.id);
+      return { adapter: data.adapter, connectionId: data.envelope.connection.id, provider: data.envelope.connection.provider,
+        state: saved ? connectionState(saved, auth.account.authEpoch) : "disconnected", send: data.envelope.connection.capabilities?.send === true };
     });
   }
   outbox(accountId, sourceId = null) {
