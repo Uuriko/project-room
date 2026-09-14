@@ -3,13 +3,23 @@
 // (store.email, i.e. store.connections) persists the resulting page.
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { emailDigest } from "./email-envelope.mjs";
-import { profileChannel, requireContract } from "./channel-connection.mjs";
+import { connectionState, profileChannel, requireContract } from "./channel-connection.mjs";
 import * as telegram from "./channel-adapters/telegram.mjs";
 import { validId } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 export const channelSyncLimits = Object.freeze({ pageMessages: 50, webhookUpdates: 100, webhookBacklog: 500 });
+// B49 (I3): the owner-chosen webhook secret must carry some entropy. 16-256
+// characters, no whitespace or control characters, at least 6 distinct
+// characters, so an obviously weak value (one repeated character, "abab...")
+// is refused where the plaintext enters the server (`ChannelWebhookInbox.hash`)
+// and at receive time before any hash compare. Choose >=32 random bytes; a
+// random 16-hex secret fails the distinct bound about 3 times in 100000.
+export const webhookSecretLimits = Object.freeze({ minChars: 16, maxChars: 256, minDistinct: 6 });
+export const validateWebhookSecret = secret => typeof secret === "string" && secret.isWellFormed()
+  && secret.length >= webhookSecretLimits.minChars && secret.length <= webhookSecretLimits.maxChars
+  && !/[\s\p{Cc}]/u.test(secret) && new Set(secret).size >= webhookSecretLimits.minDistinct;
 
 // Prepare and apply stay separate so a lost acknowledgement can be retried with
 // the exact operation. A new prepare rehydrates; it never rebases old content.
@@ -63,16 +73,22 @@ export async function prepareTelegramFixturePage({ store, token, binding, connec
 export class ChannelWebhookInbox {
   #store;
   constructor(store) { this.#store = store; }
-  static hash(secret) { return createHash("sha256").update(secret).digest("hex"); }
+  // The only place a plaintext secret enters the server; `connection.webhook` stores this hash.
+  static hash(secret) {
+    if (!validateWebhookSecret(secret)) fail(422, "weak_webhook_secret", "Choose a webhook secret of 16 to 256 characters without whitespace and with at least 6 distinct characters.");
+    return createHash("sha256").update(secret).digest("hex");
+  }
   #match(connectionId, secret) {
-    if (!validId(connectionId) || typeof secret !== "string" || secret.length < 16 || secret.length > 256) return null;
+    if (!validId(connectionId) || !validateWebhookSecret(secret)) return null;
     const presented = Buffer.from(ChannelWebhookInbox.hash(secret), "hex");
     let found = null;
     // Connection IDs are only unique per account; compare every candidate in constant time.
-    for (const row of this.#store.db.prepare("SELECT account_id,data_json FROM private_email_connections WHERE id=?").all(connectionId)) {
+    // The account's current auth epoch decides the state (connectionState): a
+    // connection whose owner must reconnect refuses deliveries like a disconnected one.
+    for (const row of this.#store.db.prepare("SELECT c.account_id,c.data_json,a.auth_epoch FROM private_email_connections c JOIN accounts a ON a.id=c.account_id WHERE c.id=?").all(connectionId)) {
       const connection = JSON.parse(row.data_json), stored = connection.webhook?.secretHash;
       const ok = typeof stored === "string" && stored.length === 64 && timingSafeEqual(Buffer.from(stored, "hex"), presented);
-      if (ok && connection.state === "active" && profileChannel(connection.profile) === "telegram") found = { accountId: row.account_id, connectionId, profile: connection.profile };
+      if (ok && connectionState(connection, row.auth_epoch) === "active" && profileChannel(connection.profile) === "telegram") found = { accountId: row.account_id, connectionId, profile: connection.profile };
     }
     return found;
   }
@@ -114,6 +130,31 @@ export class ChannelWebhookInbox {
   fail(accountId, connectionId, updateIds, error) { return this.#store.channelUpdates.failed(accountId, connectionId, updateIds, error); }
 }
 
+// Replays the pure part of prepare (page, hydrate, normalize) over the supplied
+// updates with the journaled cursor context and compares it with the journaled
+// page.apply request envelope by envelope. Source revisions are state, not
+// content, and stay out of the comparison; the envelopes carry the connection
+// profile as it was, so a replay after a reconnect still compares like for like.
+async function sameRecording(store, accountId, requestId, profile, updates) {
+  const row = store.db.prepare("SELECT request_json FROM private_email_commands WHERE account_id=? AND request_id=?").get(accountId, requestId);
+  const request = row ? JSON.parse(row.request_json) : null;
+  if (request?.action !== "page.apply") return false;
+  const connection = request.observations.find(observation => observation.kind === "message")?.envelope.connection ?? profile;
+  try {
+    const reader = new telegram.RecordedTelegramBot({ connection, updates, limit: channelSyncLimits.pageMessages }), adapter = telegram.bind({ reader, connection });
+    const page = await adapter.changes({ cursor: request.reset ? null : request.expectedCursor });
+    if (page.cursor !== request.cursor || page.complete !== request.complete) return false;
+    const ids = [...new Set(page.changes.map(change => change.messageId))];
+    if (ids.length !== request.observations.length) return false;
+    for (const [index, messageId] of ids.entries()) {
+      const observation = request.observations[index], hydrated = await adapter.hydrate(messageId);
+      if (hydrated === null ? observation.kind !== "absent" || observation.messageId !== messageId
+        : observation.kind !== "message" || emailDigest(observation.envelope) !== emailDigest(adapter.normalize(hydrated))) return false;
+    }
+    return true;
+  } catch (error) { if (error?.name !== "EmailContractError") throw error; return false; }
+}
+
 // Account-session sync of one recorded Telegram page. `updates` null drains
 // updates the webhook already verified for this connection.
 export async function syncTelegramConnection({ store, token, binding, connectionId, requestId, updates, webhooks = null }) {
@@ -121,13 +162,17 @@ export async function syncTelegramConnection({ store, token, binding, connection
   if (profileChannel(captured.connection.profile) !== "telegram") fail(409, "channel_sync_unsupported", "Recorded sync is available for Telegram connections only.");
   if (captured.connection.mode !== "fixture") fail(409, "channel_sync_unavailable", "Only fixture connections can import a recorded page.");
   if (!validId(requestId)) fail(422, "invalid_channel_update", "Supply a stable request ID.");
-  // A retried sync returns its journaled page receipt instead of re-reading the recording.
-  const prior = store.email.priorReceipt(captured.connection.profile.accountId, requestId);
+  const accountId = captured.connection.profile.accountId;
+  // A retried sync returns its journaled page receipt instead of re-reading the
+  // recording, but only for the same content: a supplied recording must rebuild
+  // the journaled page (I2). A drain (`updates: null`) takes a server-chosen
+  // slice, so a retried drain is always the same request.
+  const prior = store.email.priorReceipt(accountId, requestId);
   if (prior) {
-    if (prior.action !== "page.apply" || prior.connectionId !== connectionId) fail(409, "idempotency_conflict", "Request ID already used for different import content.");
+    if (prior.action !== "page.apply" || prior.connectionId !== connectionId || (updates !== null && !await sameRecording(store, accountId, requestId, captured.connection.profile, updates)))
+      fail(409, "idempotency_conflict", "Request ID already used for different import content.");
     return { receipt: prior, duplicate: true, source: "journal", request: null };
   }
-  const accountId = captured.connection.profile.accountId;
   let source = "recording";
   if (updates === null) {
     if (!webhooks) fail(409, "channel_webhook_unavailable", "Webhook delivery is not configured here.");

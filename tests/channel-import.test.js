@@ -2,13 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { emailContractFixture } from "../scripts/email-contract-fixture.mjs";
 import { telegramContractFixture } from "../scripts/telegram-contract-fixture.mjs";
 import { normalizeGraphEmail } from "../server/graph-email.mjs";
 import { RecordedTelegramBot, telegramSourceId } from "../server/channel-adapters/telegram.mjs";
-import { prepareTelegramFixturePage, syncTelegramConnection, ChannelWebhookInbox, telegramFolderId } from "../server/channel-import.mjs";
+import { prepareTelegramFixturePage, syncTelegramConnection, ChannelWebhookInbox, telegramFolderId, validateWebhookSecret } from "../server/channel-import.mjs";
 import { SyntheticInboxTransport } from "../server/inbox-transport.mjs";
 import { SyntheticMailFixture } from "../scripts/synthetic-mail-fixture.mjs";
 import { RoomStore } from "../server/store.mjs";
@@ -255,4 +255,52 @@ test("the sync helper refuses non-Telegram connections and rejects malformed rec
   await assert.rejects(syncTelegramConnection({ store: f.store, token: f.auth.token, binding: f.auth.sessionBinding, connectionId: "missing", requestId: "x", updates: [] }),
     { code: "channel_connection_not_found" });
   assert.deepEqual(auditRecovery(f.store), before);
+});
+// B49 (security review I1-I3): auth epoch, replay content check, secret strength.
+test("webhook secrets need entropy, a retried sync must carry the same recording, and a reconnect_required connection refuses deliveries", async t => {
+  const f = fixture(t); f.configure(f.telegram.connection);
+  const webhooks = new ChannelWebhookInbox(f.store), secret = "fixture-webhook-secret-0123456789", connectionId = f.telegram.connection.id;
+  const hook = (requestId, secretHash, expectedRevision = 1) => f.apply({ action: "connection.webhook", requestId, connectionId, expectedRevision, secretHash });
+  const receive = (updates, token = secret) => webhooks.receive({ connectionId, secret: token, body: { updates } });
+  hook("hook", ChannelWebhookInbox.hash(secret));
+  // I3: obviously weak values never become a stored hash and are refused before any compare.
+  for (const weak of ["aaaaaaaaaaaaaaaa", "abababababababab", "abcdeabcdeabcdeabcde", "short-secret-01", "has whitespace 0123456", "tab\tseparated-0123456", "0123456789abcdef\u0000", "x".repeat(257), 42, null, undefined]) {
+    assert.equal(validateWebhookSecret(weak), false, JSON.stringify(weak));
+    assert.throws(() => ChannelWebhookInbox.hash(weak), { status: 422, code: "weak_webhook_secret" });
+  }
+  assert.equal(validateWebhookSecret("0123456789abcdef"), true); assert.equal(validateWebhookSecret(randomBytes(32).toString("hex")), true);
+  hook("hook-weak", createHash("sha256").update("aaaaaaaaaaaaaaaa").digest("hex"));
+  assert.throws(() => receive([f.telegram.updates[0]], "aaaaaaaaaaaaaaaa"), { status: 401, code: "channel_webhook_denied" });
+  assert.deepEqual(webhooks.journal(f.auth.account.id, connectionId), { pending: 0, imported: 0, failed: 0 });
+  hook("hook-strong", ChannelWebhookInbox.hash(secret));
+  // I2: same request ID, same recording -> the journaled receipt; different recording -> 409 without side effects.
+  const sync = (requestId, updates) => syncTelegramConnection({ store: f.store, token: f.auth.token, binding: f.auth.sessionBinding, connectionId, requestId, updates, webhooks });
+  const first = f.telegram.updates.slice(0, 2), rest = f.telegram.updates.slice(2);
+  const applied = await sync("sync-a", first); assert.equal(applied.duplicate, false); assert.equal(applied.receipt.imports.length, 2);
+  const before = auditRecovery(f.store);
+  const replay = await sync("sync-a", structuredClone(first)); assert.equal(replay.duplicate, true); assert.deepEqual(replay.receipt, applied.receipt);
+  await assert.rejects(sync("sync-a", rest), { status: 409, code: "idempotency_conflict" });
+  await assert.rejects(sync("sync-a", [{ ...first[0], message: { ...first[0].message, text: "Edited budget: 9999." } }, first[1]]), { code: "idempotency_conflict" });
+  await assert.rejects(sync("sync-a", [first[0]]), { code: "idempotency_conflict" });
+  await assert.rejects(sync("sync-a", "nope"), { code: "idempotency_conflict" });
+  assert.deepEqual(auditRecovery(f.store), before, "a conflicting replay changes nothing");
+  assert.equal(receive(rest).pending, rest.length);
+  const drained = await sync("drain-a", null); assert.equal(drained.source, "webhook"); assert.equal(drained.receipt.imports.length, 3);
+  assert.equal((await sync("drain-a", null)).duplicate, true, "a retried drain is the same request: the slice is server-chosen");
+  // I1: after an auth epoch change the connection is reconnect_required and deliveries are refused, not queued.
+  assert.equal(receive([f.telegram.updates[0]]).pending, 1, "an update behind the offset still journals while active");
+  f.store.changeAccountAccess(f.auth.account.id, { expectedRevision: 0, active: false, reason: "End fixture access" });
+  f.store.changeAccountAccess(f.auth.account.id, { expectedRevision: 1, active: true, reason: "Restore fixture access" });
+  const slot = f.store.createAccountSessionSlot();
+  f.auth = f.sessions.owner = { token: slot.token, account: f.auth.account, ...f.store.loginAccountSession(slot.token, f.store.issueAccountAccessKey(f.auth.account.id), 0) };
+  assert.equal(f.store.connections.connections(f.auth.token, f.auth.sessionBinding).connections[0].state, "reconnect_required");
+  assert.throws(() => receive([f.telegram.updates[1]]), { status: 401, code: "channel_webhook_denied" });
+  assert.deepEqual(webhooks.journal(f.auth.account.id, connectionId), { pending: 1, imported: 4, failed: 0 }, "nothing queued for a connection that must reconnect");
+  // Reconnecting drops the webhook; configuring it again restores delivery.
+  f.telegram.connection.revision = 2;
+  f.apply({ action: "connection.configure", requestId: randomUUID(), connectionId, expectedRevision: 1, profile: structuredClone(f.telegram.connection) });
+  assert.throws(() => receive([f.telegram.updates[1]]), { status: 401 });
+  hook("hook-again", ChannelWebhookInbox.hash(secret), 2);
+  assert.equal(receive([f.telegram.updates[1]]).pending, 2);
+  assert.deepEqual(f.store.connections.verify(), { connections: 1, folders: 1, sources: 4 });
 });

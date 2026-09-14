@@ -116,6 +116,18 @@ names, `webhook` unset / set / matches / differs, `lastUpdateReceivedAt`,
 `lastSendResult`, `importAvailable`). It names bindings and states only; a
 token, secret or hash never appears in a response.
 
+Webhook secret and state (B49). `ChannelWebhookInbox.hash` is the only place a
+plaintext secret enters the server; it accepts 16–256 characters without
+whitespace or control characters and with at least 6 distinct characters (422
+`weak_webhook_secret`), and a presented secret outside that rule is refused
+before any compare. Choose at least 32 random bytes (64 hex characters). A
+delivery is accepted only while the connection is `active` for the account's
+current auth epoch: a `reconnect_required` or `disconnected` connection answers
+401 `channel_webhook_denied` and journals nothing. A retried `sync` with the
+same `requestId` returns the journaled receipt only when it carries the same
+recording (or is a drain, `updates: null`); different `updates` answer 409
+`idempotency_conflict`.
+
 `GET /api/inbox?view=…` lists channel sources with a `connection`
 reference and a `needsYou` flag (see [Needs you](#needs-you)); clients without
 a negotiated view still see samples only. `GET /api/inbox/sources/{id}/sends`

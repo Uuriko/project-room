@@ -24,7 +24,13 @@ Every `/api/*` route is either open by design (below) or requires a credential
 | `POST /api/inbox/connections/:id/reconnect` | account session + CSRF (owner of the connection) | 401/422 without a session, 404 for another account's connection; imports already-verified updates and stores only the webhook secret's hash |
 | `POST /api/inbox/connections/commands` | account session + CSRF (owner) | 401/422 without a session; only `connection.configure` (own account id) and `connection.disconnect` are accepted; webhook hashes and import pages are refused with 422 |
 | `POST /api/inbox/channel-sends` | account session + CSRF (owner) | 401/422 without a session, 404 for another account's source; only dispatches or reconciles a reply the journal already holds; nothing leaves the process until the Telegram bindings are set |
-| everything else (`/api/rooms/*`, `/api/inbox`, `/api/account-*`) | room credential or account session | 401/422 without one |
+| `GET /api/account-session` | none | creates an anonymous browser slot (20/address/min) and returns `authenticated: false`, a CSRF token and the session binding; the slot grants nothing until `POST` signs in with an account key (slot cookie + CSRF required) |
+| everything else (`/api/rooms/*`, `/api/inbox`, `/api/account-rooms`, `POST`/`DELETE /api/account-session`) | room credential or account session | 401/422 without one |
+
+The open rows are derived, not hand-kept: `docs/openapi.yaml` marks each open
+operation `security: []`, `tests/invite-only-boundary.test.js` fails when the
+server serves an undeclared route anonymously, and `scripts/open-routes.mjs
+--check` (in `npm run check`) fails when a declared route is missing here.
 
 ## 2. Capability URLs — the boundaries behind the unlinked URL
 
@@ -50,7 +56,14 @@ expiry, revocation, and rate limits.
   rejected across credential tables.
 - **Rate limits** (`server/http.mjs`): preview/join/redeem/login endpoints are
   per-IP (and per-token where it matters) rate-limited, so capability URLs
-  cannot be brute-forced at speed.
+  cannot be brute-forced at speed. Each key gets a fixed allowance per minute,
+  and keys live in a per-family map (`login:`, `join:`, `read:`, ...) capped at
+  2000 live keys per family (`RATE_FAMILY_KEYS`); when a family is full, a new
+  key evicts that family's least recently touched entry rather than being
+  refused. Under a flood of foreign addresses this means a fresh legitimate
+  caller is always admitted, while a key that is being hammered is re-touched
+  on every request and so is never the one evicted — it stays limited until
+  its minute is up.
 
 ## 3. Indexing
 
