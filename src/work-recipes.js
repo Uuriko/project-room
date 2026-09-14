@@ -91,3 +91,45 @@ export function activeRecipes(state, memberId, { now = Date.now(), cursor = null
 
   return Object.freeze(out);
 }
+
+// W4-47 H6: dry-run preview. Before enabling a recipe the member can see
+// exactly what it would read and what it would do. previewRecipe is a PURE
+// read: it holds no store handle, commits no events, writes nothing - the
+// done-when ("preview itself has no external effects") is structural, and
+// tests/recipe-preview.test.js asserts the state is byte-identical after a
+// preview and that every preview result is frozen.
+
+export const RECIPE_READS = Object.freeze({
+  "draft-catch-up": Object.freeze([
+    "your caught-up marker (event cursor)",
+    "the room's latest committed sequence"
+  ]),
+  "suggest-next-work": Object.freeze([
+    "committed work steps that currently need you",
+    "open requests addressed to you"
+  ]),
+  "request-review": Object.freeze([
+    "results you are accountable for and their verification state",
+    "the named verifier's membership and activity",
+    "result timestamps (24-hour review window)"
+  ])
+});
+
+export function previewRecipe(state, memberId, recipeId, { now = Date.now(), cursor = null, sequence = null } = {}) {
+  const meta = RECIPE_CATALOG.find(r => r.id === recipeId);
+  if (!meta) throw new Error("Unknown recipe");
+  const firing = activeRecipes(state, memberId, { now, cursor, sequence }).find(r => r.id === recipeId) ?? null;
+  return Object.freeze({
+    id: meta.id,
+    title: meta.title,
+    reads: RECIPE_READS[meta.id],
+    trigger: meta.trigger,
+    outcome: meta.outcome,
+    firesNow: firing !== null,
+    preview: firing ? firing.outcome : null
+  });
+}
+
+export function previewAllRecipes(state, memberId, opts = {}) {
+  return Object.freeze(RECIPE_CATALOG.map(r => previewRecipe(state, memberId, r.id, opts)));
+}
