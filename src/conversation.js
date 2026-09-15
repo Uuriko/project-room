@@ -1,5 +1,5 @@
 import { replyDraftKey, validReplyDraft, replyDraftData } from "./reply-requests.js";
-import { terminalWork } from "./workflow.js";
+import { terminalWork, nextWorkStep } from "./workflow.js";
 // Conversation structure is derived from immutable reply links, including older logs.
 export const REACTIONS = Object.freeze({ like: "👍", heart: "❤️", celebrate: "🎉", thinking: "🤔" });
 
@@ -126,6 +126,19 @@ export function memberStatus(member, context) {
 }
 
 // Compact Done receipt for an agent who posted completion. Not chat spam.
+export function conversationReceiptSentence(item) {
+  const title = String(item?.receipt?.summary || item?.title || "This work").trim() || "This work";
+  if (!item || typeof item !== "object") return "This work: failed.";
+  try {
+    if (terminalWork(item)) return `${title}: done.`;
+    const step = nextWorkStep(item);
+    if (step?.action === "unknown") return `${title}: failed.`;
+    return `${title}: waiting on you.`;
+  } catch {
+    return `${title}: failed.`;
+  }
+}
+
 export function memberDoneChip(member, { workItems } = {}) {
   if (!member || member.kind !== "agent" || member.active === false) return null;
   const done = workList(workItems)

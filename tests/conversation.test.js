@@ -1,12 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T, replay } from "../src/events.js";
-import { conversationIndex, searchMessages, ConversationDrafts, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS, kindLabel, memberStatus, memberHandle, memberOnLine, memberDoneChip, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, escapeChatAction, composerPlaceholder, removeMention, parseSearchQuery, messageAddressesMember, reactionPills, REACTIONS } from "../src/conversation.js";
+import { conversationIndex, searchMessages, ConversationDrafts, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS, kindLabel, memberStatus, memberHandle, memberOnLine, memberDoneChip, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, escapeChatAction, composerPlaceholder, removeMention, parseSearchQuery, messageAddressesMember, reactionPills, REACTIONS, conversationReceiptSentence } from "../src/conversation.js";
 import { draftCommand } from "../src/client.js";
 
 function room(t) {
@@ -340,4 +340,28 @@ test("People rail derives work titles and qualified result labels from room work
   workItems.review.independentVerificationRequired = false;
   workItems.review.receipt.evidenceVersion = "v1";
   assert.equal(memberDoneChip(codex, ctx)?.label, "Done");
+});
+
+test("conversationReceiptSentence maps work and receipt shapes to one status sentence", () => {
+  const done = conversationReceiptSentence({
+    title: "Ship docs",
+    state: "completed",
+    receipt: { eventId: "evt-1", evidenceVersion: "v1", summary: "Ship docs" },
+    independentVerificationRequired: false,
+    ownerDecisionRequired: false
+  });
+  assert.match(done, /done/);
+  assert.doesNotMatch(done, /failed|waiting on you/);
+  const waiting = conversationReceiptSentence({
+    title: "Ship docs",
+    state: "proposed",
+    accountableMemberId: "owner"
+  });
+  assert.match(waiting, /waiting on you/);
+  assert.doesNotMatch(waiting, /: done\.|: failed\./);
+  const failed = conversationReceiptSentence({ title: "Ship docs", state: "nope" });
+  assert.match(failed, /failed/);
+  assert.doesNotMatch(failed, /done|waiting on you/);
+  const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(app, /conversationReceiptSentence\(item\)/);
 });
