@@ -20,6 +20,15 @@ export function googleSubject(sub) {
   return typeof sub === 'string' && /^[1-9][0-9]{0,254}$/.test(sub);
 }
 
+// SameSite=Strict cookies set on the Google callback are stored, but a 302
+// follow-up is still the cross-site navigation and will not send them.
+// A same-origin HTML return lets the next load include the session.
+export function googlePostLoginPage(href) {
+  if (href !== '/?google=error' && !/^\/\?room=[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(href)) fail('google_callback_invalid');
+  const safe = href.replace(/&/g, '&amp;');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${safe}"><title>Opening Project Room</title></head><body><p>Opening Room…</p><p><a href="${safe}">Continue</a></p></body></html>`;
+}
+
 export function googleConfig(env = {}, origin) {
   const clientId = env.ROOM_GOOGLE_CLIENT_ID;
   const clientSecret = env.ROOM_GOOGLE_CLIENT_SECRET;

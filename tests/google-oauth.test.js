@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import {
-  GoogleSignIn, googleConfig, googleSubject, GOOGLE_ISSUER, GOOGLE_CALLBACK_PATH, GOOGLE_START_PATH, GOOGLE_SCOPES
+  GoogleSignIn, googleConfig, googleSubject, googlePostLoginPage, GOOGLE_ISSUER, GOOGLE_CALLBACK_PATH, GOOGLE_START_PATH, GOOGLE_SCOPES
 } from '../server/google-oauth.mjs';
 
 const clientId = '1234567890-abcdefghijklmnopqrstuvwxyz.apps.googleusercontent.com';
@@ -116,4 +116,11 @@ test('rejects tokens that omit openid or fail audience/subject checks', async ()
 test('start and callback paths are stable public routes', () => {
   assert.equal(GOOGLE_START_PATH, '/api/auth/google/start');
   assert.equal(GOOGLE_CALLBACK_PATH, '/api/auth/google/callback');
+});
+
+test('googlePostLoginPage only returns same-origin room or error paths', () => {
+  assert.match(googlePostLoginPage('/?room=welcome'), /url=\/\?room=welcome/);
+  assert.match(googlePostLoginPage('/?google=error'), /url=\/\?google=error/);
+  assert.throws(() => googlePostLoginPage('https://evil.example/'), { code: 'google_callback_invalid' });
+  assert.throws(() => googlePostLoginPage('/?room=welcome&next=https://evil.example'), { code: 'google_callback_invalid' });
 });

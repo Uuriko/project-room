@@ -19,7 +19,7 @@ import { createClerkVerifier } from './clerk-verifier.mjs';
 import { loginWithProvider, refreshWithProvider, grantNamedOperator } from './provider-onboarding.mjs';
 import { publicProviderConfig } from './provider-config.mjs';
 import { createAccountRoom } from './account-room-create.mjs';
-import { GoogleSignIn, GOOGLE_ISSUER, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH } from './google-oauth.mjs';
+import { GoogleSignIn, GOOGLE_ISSUER, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage } from './google-oauth.mjs';
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -330,6 +330,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (google() && url.pathname === GOOGLE_CALLBACK_PATH) {
         if (req.method !== 'GET') reject(405, 'method_not_allowed', 'Method not allowed');
         rate(`google-callback:${remoteAddress}`, 20);
+        const finishGoogle = href => {
+          const html = googlePostLoginPage(href);
+          res.setHeader('Content-Security-Policy', "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+          return res.end(html);
+        };
         try {
           const pending = await google().complete({ callbackUrl: expectedOrigin() + url.pathname + url.search });
           const result = await loginWithProvider(store, {
@@ -337,13 +343,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             slotToken: pending.slotToken, expectedRevision: pending.expectedRevision, operatorAccountId
           });
           setCookie(res, accountCookieName, pending.slotToken, Math.max(0, Math.floor((result.session.expiresAt - store.now()) / 1000)));
-          res.statusCode = 302;
-          res.setHeader('Location', `/?room=${encodeURIComponent(result.roomId)}`);
-          return res.end();
+          return finishGoogle(`/?room=${encodeURIComponent(result.roomId)}`);
         } catch {
-          res.statusCode = 302;
-          res.setHeader('Location', '/?google=error');
-          return res.end();
+          return finishGoogle('/?google=error');
         }
       }
       if (url.pathname === "/api/version" && ["GET", "HEAD"].includes(req.method)) {

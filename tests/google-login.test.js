@@ -62,8 +62,10 @@ test('Google HTTP start redirects to Google; callback joins Welcome without usin
   assert.equal(authorize.searchParams.get('client_id'), clientId);
   assert.equal(authorize.searchParams.get('redirect_uri'), origin + GOOGLE_CALLBACK_PATH);
   const callback = await fetch(`${origin}${GOOGLE_CALLBACK_PATH}?state=${authorize.searchParams.get('state')}&code=code-fixture`, { redirect: 'manual' });
-  assert.equal(callback.status, 302);
-  assert.equal(callback.headers.get('location'), `/?room=${STARTER_ROOM_ID}`);
+  assert.equal(callback.status, 200);
+  const html = await callback.text();
+  assert.match(html, new RegExp(`content="0;url=/\\?room=${STARTER_ROOM_ID}"`));
+  assert.match(callback.headers.get('set-cookie') || '', /account_session=/);
   const accountId = providerAccountId(GOOGLE_ISSUER, sub);
   assert.equal(store.db.prepare('SELECT id FROM accounts').get().id, accountId);
   assert.doesNotMatch(accountId, /@/);
@@ -92,7 +94,7 @@ test('Google callback failure returns to the room without provisioning an accoun
   const start = await fetch(origin + '/api/auth/google/start', { redirect: 'manual' });
   const authorize = new URL(start.headers.get('location'));
   const callback = await fetch(`${origin}${GOOGLE_CALLBACK_PATH}?state=${authorize.searchParams.get('state')}&error=access_denied`, { redirect: 'manual' });
-  assert.equal(callback.status, 302);
-  assert.equal(callback.headers.get('location'), '/?google=error');
+  assert.equal(callback.status, 200);
+  assert.match(await callback.text(), /url=\/\?google=error/);
   assert.equal(store.db.prepare('SELECT count(*) AS n FROM accounts').get().n, 0);
 });
