@@ -63,6 +63,10 @@ export async function liveAudit({ origin = LIVE_ORIGIN, door = ROOM_DOOR, fetchI
     note(asset.res.status === 200, 'app_import', `${path} ${asset.res.status}`);
   }
 
+  const card = await get('/agent.json');
+  note(card.res.status === 200, 'agent_json', card.res.status);
+  note(card.json?.name === 'Project Room', 'agent_json_name', card.json?.name);
+
   const doorRes = await fetchImpl(door, { redirect: 'manual' });
   const doorHtml = await doorRes.text();
   note(doorRes.status === 200, 'door_status', doorRes.status);
