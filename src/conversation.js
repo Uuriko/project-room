@@ -126,8 +126,9 @@ export function memberStatus(member, context) {
 }
 
 // Compact Done receipt for an agent who posted completion. Not chat spam.
+// Prefix is the work title so the line stays one pasteable sentence.
 export function conversationReceiptSentence(item) {
-  const title = String(item?.receipt?.summary || item?.title || "This work").trim() || "This work";
+  const title = String(item?.title || item?.receipt?.summary || "This work").trim() || "This work";
   if (!item || typeof item !== "object") return "This work: failed.";
   try {
     if (terminalWork(item)) return `${title}: done.`;

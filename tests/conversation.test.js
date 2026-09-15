@@ -362,7 +362,20 @@ test("conversationReceiptSentence maps work and receipt shapes to one status sen
   const failed = conversationReceiptSentence({ title: "Ship docs", state: "nope" });
   assert.match(failed, /failed/);
   assert.doesNotMatch(failed, /done|waiting on you/);
+  const longSummary = conversationReceiptSentence({
+    title: "Ship docs",
+    state: "completed",
+    receipt: { eventId: "evt-1", evidenceVersion: "v1", summary: "Merged the docs pull request after review." },
+    independentVerificationRequired: false,
+    ownerDecisionRequired: false
+  });
+  assert.equal(longSummary, "Ship docs: done.");
   const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(app, /conversationReceiptSentence\(item\)/);
   assert.match(app, /conversationReceiptSentence\(i\)/);
+  assert.match(app, /class="message-work-receipt"/);
+  assert.match(app, /class="receipt-sentence">\$\{esc\(conversationReceiptSentence\(i\)\)\}/);
+  assert.match(css, /\.receipt-sentence/);
+  assert.match(css, /\.message-work-receipt/);
 });
