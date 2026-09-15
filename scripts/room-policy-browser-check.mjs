@@ -68,15 +68,19 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(recorded.independentVerificationRequired, true); assert.equal(recorded.ownerDecisionRequired, true);
     assert.equal(recorded.verifierMemberId, "reviewer"); assert.equal(recorded.humanDecisionMakerId, "owner");
     // Only review mandatory: approval is the proposer's choice again and the reason names review alone.
+    // Wait for the policy render itself: #work-policy-note is written only by syncWorkPolicy,
+    // while a checkbox disabled flag is also cleared by closeWorkForm's setWorkRetry(false),
+    // so waiting on the checkbox can resolve before the policy event arrives.
     f.send(T.ROOM_POLICY_SET, { requireIndependentReview: true, requireOwnerDecision: false });
-    await page.waitForFunction(() => !document.querySelector("#require-decision").disabled);
+    await page.waitForFunction(() => /^Room policy: independent review is required/.test(document.querySelector("#work-policy-note").textContent));
     await f.openForm();
     assert.equal(await f.review.isDisabled(), true); assert.equal(await f.decision.isDisabled(), false);
     assert.match(await f.note.textContent(), /^Room policy: independent review is required/);
     await page.locator("#cancel-work-button").click(); await page.locator("#new-work-form").waitFor({ state: "hidden" });
     // Policy off again: the existing behaviour returns, and the item recorded under policy keeps its requirements.
+    // Same as above: wait for the policy-off render (the note is cleared only by syncWorkPolicy).
     f.send(T.ROOM_POLICY_SET, { requireIndependentReview: false, requireOwnerDecision: false });
-    await page.waitForFunction(() => !document.querySelector("#require-verification").disabled);
+    await page.waitForFunction(() => document.querySelector("#work-policy-note").textContent === "");
     await f.openForm();
     assert.equal(await f.review.isDisabled(), false); assert.equal(await f.decision.isDisabled(), false); assert.equal(await f.note.isHidden(), true);
     await f.review.uncheck(); assert.equal(await f.review.isChecked(), false);
