@@ -2,8 +2,9 @@ import { pathToFileURL } from 'node:url';
 import { GOOGLE_CALLBACK_PATH, GOOGLE_START_PATH, GOOGLE_SCOPES } from '../server/google-oauth.mjs';
 
 export const LIVE_ORIGIN = 'https://room.trydemigod.com';
+export const ROOM_DOOR = 'https://www.trydemigod.com/room';
 
-export async function liveAudit({ origin = LIVE_ORIGIN, fetchImpl = fetch } = {}) {
+export async function liveAudit({ origin = LIVE_ORIGIN, door = ROOM_DOOR, fetchImpl = fetch } = {}) {
   const failures = [];
   const note = (ok, code, detail) => { if (!ok) failures.push({ code, detail }); };
   const get = async path => {
@@ -61,6 +62,12 @@ export async function liveAudit({ origin = LIVE_ORIGIN, fetchImpl = fetch } = {}
     const asset = await get(path);
     note(asset.res.status === 200, 'app_import', `${path} ${asset.res.status}`);
   }
+
+  const doorRes = await fetchImpl(door, { redirect: 'manual' });
+  const doorHtml = await doorRes.text();
+  note(doorRes.status === 200, 'door_status', doorRes.status);
+  note(doorHtml.includes(origin), 'door_live_origin', origin);
+  note(!/project-room-staging/.test(doorHtml), 'door_not_staging', 'staging Join href');
 
   return {
     ok: failures.length === 0,
