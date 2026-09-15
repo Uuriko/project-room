@@ -59,18 +59,24 @@ export const durableStorage = {
     if (!db.isTransaction) throw new Error('Writer fence installation requires the migration transaction');
     // Marker-based old guards must be removed before moving the shared marker.
     // Only exact, previously verified historical definitions may be removed.
+    // Current-version triggers are already correct; an idempotent re-run keeps
+    // them (and only recreates the ones a repaired additive table is missing).
     const known = new Map(writerVersions.filter(v => v < STORE_SCHEMA_VERSION).flatMap(durableFenceDefinitions).map(def => [def.name, def.sql]));
+    const current = new Map(fences.map(def => [def.name, def.sql]));
     for (const row of db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v*'").all()) {
+      if (current.get(row.name) === row.sql) continue;
       if (known.get(row.name) !== row.sql) reconciliation();
       db.exec(`DROP TRIGGER ${row.name}`);
     }
-    if (hasPermit(db)) {
+    if (hasPermit(db) && permitValue(db) !== STORE_SCHEMA_VERSION) {
       if (!writerVersions.includes(db.migrationSource) || db.migrationSource < 8) reconciliation();
       verifyPermit(db, db.migrationSource, db.migrationSource);
       db.exec(`DROP TABLE ${permit}`);
     }
-    db.exec(permitSchema(STORE_SCHEMA_VERSION));
-    db.storage.sql.exec(`INSERT INTO ${permit} VALUES(1,${STORE_SCHEMA_VERSION})`);
+    if (!hasPermit(db)) {
+      db.exec(permitSchema(STORE_SCHEMA_VERSION));
+      db.storage.sql.exec(`INSERT INTO ${permit} VALUES(1,${STORE_SCHEMA_VERSION})`);
+    }
     for (const { name, sql } of fences) {
       const existing = db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?").get(name);
       if (!existing) db.exec(sql);

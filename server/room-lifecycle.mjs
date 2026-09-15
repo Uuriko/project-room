@@ -29,7 +29,7 @@ export function migrateRoomLifecycleV28(store) {
   store.transaction(() => {
     if (!hasArchivedColumn(store.db)) store.db.exec("ALTER TABLE rooms ADD COLUMN archived_at TEXT");
     store.db.prepare("UPDATE rooms SET archived_at=json_extract(projection,'$.room.archivedAt') WHERE archived_at IS NOT json_extract(projection,'$.room.archivedAt')").run();
-    store.storagePlatform.setVersion(store.db, ROOM_LIFECYCLE_SCHEMA_VERSION);
+    if (store.storagePlatform.version(store.db) < ROOM_LIFECYCLE_SCHEMA_VERSION) store.storagePlatform.setVersion(store.db, ROOM_LIFECYCLE_SCHEMA_VERSION);
   });
 }
 

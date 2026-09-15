@@ -50,7 +50,7 @@ test("fence definitions form one exact trigger per table and operation, and tabl
     previous = tables;
   }
   assert.equal(new Set(applicationTables).size, applicationTables.length);
-  assert.ok(tablesOf(STORE_SCHEMA_VERSION).length < applicationTables.length, "additive tables exist outside the fenced set");
+  assert.equal(tablesOf(STORE_SCHEMA_VERSION).length, applicationTables.length, "v34 converges and fences both schema lineages");
 });
 
 test("for any fence version, a write passes exactly when the registered writer answers that integer version", t => {

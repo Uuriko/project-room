@@ -6,7 +6,7 @@ Do not continue from a ChatGPT worktree or the stale project-root
 
 | | |
 | --- | --- |
-| Schema | 28 |
+| Schema | 34 |
 | Live app | https://project-room-staging.getdasha.workers.dev |
 | Public door | https://www.trydemigod.com/room (`/project-room` alias) |
 | Public door (getdasha) | https://www.getdasha.com/room · https://lobby.getdasha.com/room |
@@ -64,7 +64,7 @@ invitation). Footer **Project Room** on the Demigod home page is the same door.
 | Kits catalog | [ROOM-KITS-CATALOG.md](ROOM-KITS-CATALOG.md) | `/room/kits` — catalog + install stub; not an App Store |
 | Quiet / fast | [QUIET-FAST.md](QUIET-FAST.md) | Infer route, hide chrome, no success toasts |
 | Work Item Session | [WORK-ITEM-SESSION.md](WORK-ITEM-SESSION.md) | Title + status + Stop ledger; schema 26 additive; no Slack-with-bots UI |
-| Room lifecycle (issue #6 A2) | `server/room-lifecycle.mjs`, `src/events.js`, Rooms panel in `src/app.js` | Schema 28 adds `rooms.archived_at`. `POST /api/account-rooms` creates a room for an account that administers membership somewhere; owner-only `room.archived` makes a room read-only (reads, streams and export continue, every write is 409 `room_archived`); a member leaves with `member.access_changed` on themself; the switcher lists archived rooms as read-only entries. Personal/organization is a `room.kind` badge until D1 |
+| Room lifecycle (issue #6 A2) | `server/room-lifecycle.mjs`, `src/events.js`, Rooms panel in `src/app.js` | Schema 34 adds `rooms.archived_at`. `POST /api/account-rooms` creates a room for an account that administers membership somewhere; owner-only `room.archived` makes a room read-only (reads, streams and export continue, every write is 409 `room_archived`); a member leaves with `member.access_changed` on themself; the switcher lists archived rooms as read-only entries. Personal/organization is a `room.kind` badge until D1 |
 | Demigod `/room` landing | `deploy/room-entry.mjs` | Live on trydemigod.com; Connect P1 + private invite (no lobby publish) after next door publish |
 | getdasha `/room` door | `deploy/room-entry.mjs` `PUBLIC_ROOM_DOOR_HTML` | Worker serves HTML at `/room`; packets stay at `/room/llms.txt`; Connect invite stays private by default |
 | Research / messaging plans | [`research/`](../research/README.md) | Copied from the Codex ChatGPT project mirror |
