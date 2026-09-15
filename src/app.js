@@ -1,5 +1,5 @@
 import { EVENT_TYPES as T, WORK_STATES as S } from "./events.js";
-import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
+import { AccountClient, RoomClient, draftCommand, retryUnconfirmed, connectionIdentityLine } from "./client.js";
 import { ReturnBrief } from "./return-brief.js";
 import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
 import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, memberHandle, memberDoneChip, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills, conversationReceiptSentence } from "./conversation.js";
@@ -520,6 +520,7 @@ const recordDomId = (kind, id) => `pr-${kind}-record-${[...String(id)].map(chara
 const recordHref = (kind, id) => `#pr-record/${kind}/${encodeURIComponent(id)}`;
 const workDomId = id => recordDomId("work", id);
 const workHref = id => recordHref("work", id);
+let hostIdentity = "";
 function setConnectionStatus(text) {
   const normalized = /^(Reconnecting|Connection interrupted)/.test(text)
     ? "Connection interrupted · reconnecting; displayed history may be stale"
@@ -530,7 +531,7 @@ function setConnectionStatus(text) {
   status.dataset.state = connected ? "connected"
     : /^Not connected · (account )?sign.in required$/.test(normalized) ? "signed-out" : "other";
   if (status.textContent !== visible) status.textContent = visible;
-  $("#connection-explanation").textContent = normalized;
+  $("#connection-explanation").textContent = hostIdentity ? `${normalized}\n${hostIdentity}` : normalized;
 }
 function setFormStatus(status, text, error = false) {
   if (status.textContent === text && status.classList.contains("visible") === Boolean(text)
@@ -3330,7 +3331,14 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
 (async () => {
   if (location.protocol !== 'file:') {
     try {
-      applyAuthConfig(await accountClient.request('/api/auth-config'));
+      const auth = await accountClient.request('/api/auth-config');
+      applyAuthConfig(auth);
+      const [version, open] = await Promise.all([
+        accountClient.request('/api/version').catch(() => ({})),
+        accountClient.request('/api/open').catch(() => ({}))
+      ]);
+      hostIdentity = connectionIdentityLine(version, open, auth);
+      setConnectionStatus($("#connection-status").textContent);
     } catch { /* Existing key access remains available during config failure. */ }
   }
   if (new URLSearchParams(location.search).get('google') === 'error') {

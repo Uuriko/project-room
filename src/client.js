@@ -15,6 +15,14 @@ const sameAccountSession = (candidate, owner) => Boolean(candidate?.account && o
   && candidate.sessionRevision === owner.sessionRevision
   && candidate.sessionBinding === owner.sessionBinding;
 
+export function connectionIdentityLine(version = {}, open = {}, auth = {}) {
+  const sha = typeof version.sourceRevision === "string" && /^[a-f0-9]{40}$/i.test(version.sourceRevision)
+    ? version.sourceRevision.slice(0, 7).toLowerCase() : "";
+  const walkIn = open.ship === false ? "unpublished walk-in" : open.ship === true ? "published walk-in" : "";
+  const signIn = auth.provider === "google" ? "Google sign-in" : auth.provider === null ? "key sign-in" : "";
+  return [sha && `revision ${sha}`, walkIn, signIn].filter(Boolean).join(" · ");
+}
+
 export class AccountClient {
   constructor({ fetcher = globalThis.fetch.bind(globalThis) } = {}) {
     this.fetcher = fetcher;
