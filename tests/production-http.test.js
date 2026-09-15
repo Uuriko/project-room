@@ -85,6 +85,25 @@ test('Room client does not load an identity-provider browser SDK', () => {
   assert.doesNotMatch(src, /if \(providerSettings && !initialInvitationFragment\)/);
 });
 
+test('GET /privacy is public and does not treat email as a Gmail inbox grant', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'prod-privacy-'));
+  const store = new RoomStore(join(directory, 'room.sqlite'));
+  const server = createRoomServer({ store });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(r => server.close(r));
+    store.close(); rmSync(directory, { recursive: true, force: true });
+  });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const res = await fetch(origin + '/privacy');
+  assert.equal(res.status, 200);
+  const html = await res.text();
+  assert.match(html, /Project Room privacy/);
+  assert.match(html, /Email is not the account key/);
+  assert.doesNotMatch(html, /gmail\.readonly/);
+});
+
 test('sign-in help does not call the live host a local pilot', () => {
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   assert.match(html, /Never paste a human account key into an agent chat/);
