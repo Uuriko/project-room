@@ -32,6 +32,7 @@ test('Google HTTP start redirects to Google; callback joins Welcome without usin
   const token = idToken();
   const server = createRoomServer({
     store,
+    operatorAccountId: 'c6a94a',
     googleAuth: {
       clientId, clientSecret: 'GOCSPX-fixture',
       fetchImpl: async (url) => {
@@ -66,6 +67,9 @@ test('Google HTTP start redirects to Google; callback joins Welcome without usin
   const accountId = providerAccountId(GOOGLE_ISSUER, sub);
   assert.equal(store.db.prepare('SELECT id FROM accounts').get().id, accountId);
   assert.doesNotMatch(accountId, /@/);
+  const cookie = callback.headers.get('set-cookie').split(';')[0].split('=')[1];
+  const joined = store.authenticateAccountSession(cookie, STARTER_ROOM_ID);
+  assert.deepEqual(joined.member.permissions, ['manage_members']);
   const app = readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
   assert.match(app, /Continue with Google/);
   assert.match(app, /authorizationPath === '\/api\/auth\/google\/start'/);

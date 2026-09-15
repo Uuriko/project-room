@@ -35,11 +35,14 @@ function joinWelcome(store, accountId, memberId, provenance) {
   store.ensureHumanAccountBinding(STARTER_ROOM_ID, memberId, accountId, provenance);
 }
 
-function maybeGrantOperator(store, accountId, memberId, roomId, operatorAccountId) {
-  if (!accountsMatchOperator(accountId, memberId, operatorAccountId) || roomId !== STARTER_ROOM_ID) return;
+function maybeGrantOperator(store, accountId, memberId, roomId, operatorAccountId, { google = false } = {}) {
+  if (roomId !== STARTER_ROOM_ID) return;
   const room = store.room(STARTER_ROOM_ID);
   const member = room.state.members[memberId];
   if (!member?.active || member.permissions.includes('manage_members')) return;
+  const matched = accountsMatchOperator(accountId, memberId, operatorAccountId);
+  const firstGoogle = google && Boolean(operatorAccountId) && Object.keys(room.state.members).length === 2;
+  if (!matched && !firstGoogle) return;
   const incoming = event({
     type: T.MEMBER_ACCESS_CHANGED, roomId: STARTER_ROOM_ID, actorId: HOST_ID,
     at: new Date(store.now()).toISOString(),
@@ -124,7 +127,7 @@ export async function loginWithProvider(store, { token, verify, issuer, slotToke
     if (binding?.account_id !== accountId) fail(403, 'provider_room_unavailable');
     const member = store.room(roomId).state.members[memberId];
     if (!member?.active) fail(403, 'provider_room_unavailable');
-    maybeGrantOperator(store, accountId, memberId, roomId, operatorAccountId);
+    maybeGrantOperator(store, accountId, memberId, roomId, operatorAccountId, { google });
     // Match the verified assertion lifetime. Refresh is a new verified exchange,
     // never an unverified extension of an external session.
     const credential = store.insertAccountCredential(accountId, Math.min(claims.exp * 1000, store.now() + 15 * 60000));
