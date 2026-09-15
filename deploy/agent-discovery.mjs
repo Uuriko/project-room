@@ -53,7 +53,7 @@ export const SHORT_PACKET_SYNONYMS = Object.freeze([
   "/room/cursor.md", "/room/CURSOR.md"
 ]);
 
-export const AGENT_CARD_SYNONYMS = Object.freeze(["/room/agent.json"]);
+export const AGENT_CARD_SYNONYMS = Object.freeze(["/agent.json", "/room/agent.json"]);
 
 // Kits / tools catalog — a distinct packet, not the llms short index.
 // Agents guess /room/kit, /room/kits, /room/apps, /room/tools on www.

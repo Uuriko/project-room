@@ -136,7 +136,7 @@ test("www leftover synonyms serve the short packet or agent card, not 404", asyn
     "/room/gemini.md", "/room/GEMINI.md",
     "/room/cursor.md", "/room/CURSOR.md"
   ]);
-  assert.deepEqual([...AGENT_CARD_SYNONYMS], ["/room/agent.json"]);
+  assert.deepEqual([...AGENT_CARD_SYNONYMS], ["/agent.json", "/room/agent.json"]);
   const origin = await serve(t);
   const short = discoveryDoc("/llms.txt");
   const card = discoveryDoc("/.well-known/agent.json");
@@ -148,7 +148,7 @@ test("www leftover synonyms serve the short packet or agent card, not 404", asyn
     assert.equal(get.headers.get("content-type"), short.type, path);
     assert.equal(await get.text(), short.body, path);
   }
-  for (const path of ["/room/agent.json", "/room/agent.json/"]) {
+  for (const path of ["/agent.json", "/agent.json/", "/room/agent.json", "/room/agent.json/"]) {
     assert.equal(discoveryDoc(path).body, card.body, path);
     const get = await fetch(origin + path);
     assert.equal(get.status, 200, path);
