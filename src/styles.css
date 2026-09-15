@@ -210,6 +210,8 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .presence-list { display: grid; padding: .55rem .8rem .8rem; }
 .presence-heading { margin: .55rem 0 .1rem; color: var(--room-quiet); font-size: .62rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
 .presence-heading:first-child { margin-top: 0; }
+.dm-label { display: block; width: 100%; margin: .15rem 0; padding: .35rem .5rem; border: 0; border-radius: .4rem; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.dm-label:hover, .dm-label:focus-visible { background: var(--room-wash, rgba(255,255,255,.06)); }
 .presence-member { display: grid; grid-template-columns: 2.2rem 1fr auto; align-items: start; gap: .65rem; min-width: 0; padding: .55rem .15rem; cursor: pointer; }
 .presence-member:hover { background: rgb(255 255 255 / 3%); }
 .presence-member .member-avatar { width: 2.2rem; margin: .1rem 0 0; border-color: var(--panel); }

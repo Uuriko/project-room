@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { channelDirectory, channelSidebar, directConversation, parseChannelSearch, roomsToChannelEntries, accountRoomsSidebar } from "../src/channels.js";
+import { channelDirectory, channelSidebar, directConversation, parseChannelSearch, roomsToChannelEntries, accountRoomsSidebar, roomMemberDirectMessages } from "../src/channels.js";
 
 const rows = [
   { id: "general", kind: "channel", name: "General", workspaceId: "acme", unread: 4, updatedAt: "2026-09-14T18:00:00.000Z" },
@@ -51,6 +51,23 @@ test("account rooms project through the channel sidebar without changing ids", (
   assert.throws(() => roomsToChannelEntries("nope"), /array/);
   const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   assert.match(app, /accountRoomsSidebar\(accountRoomsCache\)/);
+});
+
+test("roomMemberDirectMessages projects other humans in this room as DM pairs", () => {
+  const dms = roomMemberDirectMessages("me", {
+    me: { id: "me", displayName: "Me", kind: "human" },
+    zoe: { id: "zoe", displayName: "Zoe", kind: "human" },
+    bot: { id: "bot", displayName: "Bot", kind: "agent" },
+    gone: { id: "gone", displayName: "Gone", kind: "human", active: false }
+  });
+  assert.equal(dms.length, 1);
+  assert.equal(dms[0].id, "dm:me:zoe");
+  assert.equal(dms[0].kind, "dm");
+  assert.equal(dms[0].name, "Zoe");
+  assert.deepEqual(dms[0].memberIds, ["me", "zoe"]);
+  const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(app, /roomMemberDirectMessages\(session\.member\.id, state\.members\)/);
+  assert.match(app, /data-dm-member/);
 });
 
 test("A11 search modifiers are removed from text and normalized without weakening unknown terms", () => {

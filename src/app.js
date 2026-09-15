@@ -6,7 +6,7 @@ import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, Draft
 import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer } from "./workflow.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation, invitationUnavailableMessage, invitationDialogTitle, invitationCapabilityLimits, formatInvitationExpiry, invitationExpiryDateTime, formatShareLinkExpiry, expiryTimeMarkup } from "./share-links.js";
 import { installAgentConnections } from "./agent-connections.js";
-import { accountRoomsSidebar } from "./channels.js";
+import { accountRoomsSidebar, roomMemberDirectMessages } from "./channels.js";
 import { installRoomInstructions } from "./room-instructions.js";
 import { installReminders } from "./reminders.js";
 import { installPortableWork, installResultCopy } from "./portable-work.js";
@@ -1129,7 +1129,12 @@ function render() {
   const byPresence = (a, b) => (a.active === false) - (b.active === false) || a.displayName.localeCompare(b.displayName);
   const people = members.filter(m => m.kind !== "agent").sort(byPresence);
   const agents = members.filter(m => m.kind === "agent").sort(byPresence);
-  renderContent("#presence-list", `${people.length ? `<p class="presence-heading">People</p>${people.map(presenceRow).join("")}` : ""}${agents.length ? `<p class="presence-heading">Agents</p>${agents.map(presenceRow).join("")}` : ""}`);
+  const dms = session?.member?.id ? roomMemberDirectMessages(session.member.id, state.members) : [];
+  const dmRow = row => {
+    const otherId = row.memberIds.find(id => id !== session.member.id);
+    return `<button type="button" class="dm-label" data-dm-member="${esc(otherId)}">${esc(row.name)}</button>`;
+  };
+  renderContent("#presence-list", `${people.length ? `<p class="presence-heading">People</p>${people.map(presenceRow).join("")}` : ""}${agents.length ? `<p class="presence-heading">Agents</p>${agents.map(presenceRow).join("")}` : ""}${dms.length ? `<p class="presence-heading">Direct messages</p>${dms.map(dmRow).join("")}` : ""}`);
   for (const id of ["new-work-button", "composer-work-button"]) {
     $("#" + id).hidden = !can("steer"); $("#" + id).disabled = !can("steer");
   }
@@ -2241,6 +2246,13 @@ $("#mention-list")?.addEventListener("mousedown", e => {
   applyMentionMember(state.members[button.dataset.mentionId]);
 });
 $("#presence-list").addEventListener("click", e => {
+  const dm = e.target.closest(".dm-label");
+  if (dm) {
+    const member = state?.members[dm.dataset.dmMember];
+    if (!member || member.active === false) return;
+    applyMentionMember(member);
+    return;
+  }
   if (!shouldAddressPresenceClick(e.target)) return;
   const row = e.target.closest(".presence-member");
   const member = state?.members[row?.dataset.memberRecordId];

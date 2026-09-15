@@ -52,6 +52,18 @@ export function accountRoomsSidebar(rooms, { selectedId = null, workspaceId = "a
   return channelSidebar(roomsToChannelEntries(rooms, workspaceId), { selectedId });
 }
 
+export function roomMemberDirectMessages(viewerId, members) {
+  const viewer = text(viewerId, "viewer");
+  const list = Array.isArray(members) ? members : Object.values(members && typeof members === "object" ? members : {});
+  return list.filter(member => member && typeof member === "object" && typeof member.id === "string"
+    && member.id !== viewer && member.active !== false && member.kind !== "agent")
+    .map(member => {
+      const pair = directConversation(viewer, member.id);
+      const name = typeof member.displayName === "string" && member.displayName.trim() ? member.displayName.trim() : member.id;
+      return Object.freeze({ ...pair, name });
+    });
+}
+
 export function parseChannelSearch(query) {
   if (typeof query !== "string") throw new TypeError("Search query must be a string");
   const result = { text: "", in: [], from: [], has: [], is: [], unknown: [] }, words = query.trim().match(/"[^"]*"|\S+/g) ?? [], kept = [];
