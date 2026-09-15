@@ -4,7 +4,7 @@ import { ReturnBrief } from "./return-brief.js";
 import { needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult } from "./work-selectors.js";
 import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, memberHandle, memberDoneChip, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
 import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer } from "./workflow.js";
-import { consumeJoinFragment, installShareLinks, canRetryInvitation, invitationUnavailableMessage, invitationDialogTitle, invitationCapabilityLimits, formatInvitationExpiry, invitationExpiryDateTime, formatShareLinkExpiry } from "./share-links.js";
+import { consumeJoinFragment, installShareLinks, canRetryInvitation, invitationUnavailableMessage, invitationDialogTitle, invitationCapabilityLimits, formatInvitationExpiry, invitationExpiryDateTime, formatShareLinkExpiry, expiryTimeMarkup } from "./share-links.js";
 import { installAgentConnections } from "./agent-connections.js";
 import { installRoomInstructions } from "./room-instructions.js";
 import { installReminders } from "./reminders.js";
@@ -1578,7 +1578,7 @@ function helpCard(item, help) {
   const capacity = context?.availability.reason;
   const capacityText = { work_offer_limit: "This request has enough offers for now.", member_offer_limit: "Finish an existing offer before adding another.", history_full: "Offer history is full." }[capacity];
   return `<details class="work-help"><summary data-focus-key="work-help:${esc(item.id)}">${label}${live.length && !selected ? ` <span class="form-hint">· ${live.length}</span>` : ""}</summary>
-    ${invitation ? `<p class="definition">${esc(help.help.scope)}</p><p class="form-hint">Ends ${esc(formatShareLinkExpiry(help.help.expiresAt))}</p>` : ""}
+    ${invitation ? `<p class="definition">${esc(help.help.scope)}</p><p class="form-hint">Ends ${expiryTimeMarkup(help.help.expiresAt, esc)}</p>` : ""}
     ${selected ? '<p class="form-hint">Coordination only. Work and permissions stay unchanged.</p>' : ""}
     <div class="portable-actions">${context?.availability.canOffer ? helpButton(item, "offer-help", "Offer help") : ""}${help?.canPublish && invitation ? helpButton(item, "help", "Edit") : ""}${help?.canWithdraw ? helpButton(item, "end-help", "End request") : ""}</div>
     ${capacityText ? `<p class="form-hint">${capacityText}</p>` : ""}
@@ -1626,7 +1626,7 @@ function workCard(i, now, drafts) {
   const source = i.sourceMessageId ? `<a class="source-link" href="${esc(recordHref("message", i.sourceMessageId))}" data-open-message="${esc(i.sourceMessageId)}" data-focus-key="work-source:${esc(i.id)}">From this conversation</a>` : "";
   const blocker = i.blocker ? `<div class="blocker"><strong>Blocked</strong><p>${esc(i.blocker.reason)}</p><p>${esc(i.blocker.nextAction)}</p></div>` : "";
   const decision = i.decision ? `<div class="decision"><strong>${esc(humanize(i.decision.decision))}</strong><p>${esc(i.decision.reason)}</p></div>` : "";
-  const claim = i.claim ? `<details class="claim"><summary data-focus-key="work-claim:${esc(i.id)}">Recorded scope · ${esc(claimStateLabel(i, now))}</summary><p>${esc(memberLabel(i.claim.holderId))}</p><p>${esc(i.claim.repository)}:${esc(i.claim.ref)}</p><p>${esc(i.claim.paths.join(", "))}</p><p>Expires ${esc(formatShareLinkExpiry(i.claim.expiresAt))}. External activity is not measured.</p>${actions(i, true, now)}</details>` : "";
+  const claim = i.claim ? `<details class="claim"><summary data-focus-key="work-claim:${esc(i.id)}">Recorded scope · ${esc(claimStateLabel(i, now))}</summary><p>${esc(memberLabel(i.claim.holderId))}</p><p>${esc(i.claim.repository)}:${esc(i.claim.ref)}</p><p>${esc(i.claim.paths.join(", "))}</p><p>Expires ${expiryTimeMarkup(i.claim.expiresAt, esc)}. External activity is not measured.</p>${actions(i, true, now)}</details>` : "";
   const checks = `<div><dt>Verifier</dt><dd>${i.independentVerificationRequired ? esc(memberLabel(i.verifierMemberId)) : "Not required"}</dd></div><div><dt>Decision</dt><dd>${i.ownerDecisionRequired ? esc(memberLabel(i.humanDecisionMakerId)) : "Not required"}</dd></div>`;
   const updated = `<p class="form-hint">Last recorded update: ${esc(formatShareLinkExpiry(i.updatedAt))}. Live execution is not measured.</p>`;
   const reuse = can("steer") ? `<button type="button" class="button ghost" data-reuse-work="${esc(i.id)}" data-focus-key="work-reuse:${esc(i.id)}">Use again</button>` : "";

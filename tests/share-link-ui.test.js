@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { formatShareInvitation, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, reuseVisibleRoom, invitationUnavailableMessage, formatInvitationExpiry, invitationAskWhom, invitationDialogTitle, invitationCapabilityLimits, agentMembershipLimits, invitationExpiryDateTime, formatShareLinkExpiry } from "../src/share-links.js";
+import { formatShareInvitation, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, reuseVisibleRoom, invitationUnavailableMessage, formatInvitationExpiry, invitationAskWhom, invitationDialogTitle, invitationCapabilityLimits, agentMembershipLimits, invitationExpiryDateTime, formatShareLinkExpiry, expiryTimeMarkup } from "../src/share-links.js";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
@@ -33,13 +33,19 @@ test("share-link expiry labels use the invitation expiry formatter", () => {
   assert.match(agents, /formatShareLinkExpiry\(row\.firstActionAt\)/);
   assert.doesNotMatch(agents, /toLocaleString/);
   const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
-  assert.match(app, /formatShareLinkExpiry\(help\.help\.expiresAt\)/);
   assert.match(app, /formatShareLinkExpiry\(i\.updatedAt\)/);
   assert.match(app, /formatShareLinkExpiry\(item\.helpWanted\.expiresAt\)/);
-  assert.match(app, /formatShareLinkExpiry\(i\.claim\.expiresAt\)/);
   assert.doesNotMatch(app, /toLocaleString/);
   const iso = new Date(ms).toISOString();
   assert.equal(formatShareLinkExpiry(iso), formatInvitationExpiry(iso));
+  const esc = value => String(value).replaceAll('"', "&quot;");
+  assert.equal(expiryTimeMarkup("not-a-date", esc), "unknown");
+  const markup = expiryTimeMarkup(ms, esc);
+  assert.match(markup, /^<time datetime="/);
+  assert.match(markup, new RegExp(esc(invitationExpiryDateTime(ms))));
+  assert.match(markup, new RegExp(esc(formatShareLinkExpiry(ms))));
+  assert.match(app, /expiryTimeMarkup\(i\.claim\.expiresAt, esc\)/);
+  assert.match(app, /expiryTimeMarkup\(help\.help\.expiresAt, esc\)/);
 });
 
 test("invitation note formatting is bounded plain text with an exact URL-only fallback", () => {

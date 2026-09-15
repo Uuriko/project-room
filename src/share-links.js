@@ -35,6 +35,14 @@ export function invitationExpiryDateTime(expiresAt) {
   return date.toISOString();
 }
 
+export function expiryTimeMarkup(expiresAt, escapeHtml) {
+  const label = formatShareLinkExpiry(expiresAt);
+  const iso = invitationExpiryDateTime(expiresAt);
+  const safe = escapeHtml(label);
+  if (!iso) return safe;
+  return `<time datetime="${escapeHtml(iso)}">${safe}</time>`;
+}
+
 export function invitationAskWhom(preview) {
   const name = typeof preview?.invitedByDisplayName === "string" ? preview.invitedByDisplayName.trim() : "";
   if (name && !/^room (owner|administrator)$/i.test(name)) return name;
