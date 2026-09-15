@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { channelDirectory, channelSidebar, directConversation, parseChannelSearch } from "../src/channels.js";
+import { readFileSync } from "node:fs";
+import { channelDirectory, channelSidebar, directConversation, parseChannelSearch, roomsToChannelEntries, accountRoomsSidebar } from "../src/channels.js";
 
 const rows = [
   { id: "general", kind: "channel", name: "General", workspaceId: "acme", unread: 4, updatedAt: "2026-09-14T18:00:00.000Z" },
@@ -34,6 +35,22 @@ test("A4 direct conversations are canonical pairs and deny self, missing, or ove
   assert.throws(() => directConversation("me", "me"), /distinct/);
   assert.throws(() => directConversation("", "zoe"), /member/);
   assert.throws(() => channelDirectory([{ id: "d", kind: "dm", name: "Bad", memberIds: ["a", "b", "c"] }]), /exactly two/);
+});
+
+test("account rooms project through the channel sidebar without changing ids", () => {
+  const rooms = [
+    { id: "zeta", title: "Zeta" },
+    { id: "alpha", title: "  Alpha  ", unread: 2 },
+    { id: "bare" }
+  ];
+  assert.deepEqual(roomsToChannelEntries(rooms).map(row => row.id), ["zeta", "alpha", "bare"]);
+  const sidebar = accountRoomsSidebar(rooms, { selectedId: "zeta" });
+  assert.equal(sidebar.selectedId, "zeta");
+  assert.deepEqual(sidebar.sections[0].items.map(item => item.id), ["alpha", "bare", "zeta"]);
+  assert.equal(sidebar.unread, 2);
+  assert.throws(() => roomsToChannelEntries("nope"), /array/);
+  const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(app, /accountRoomsSidebar\(accountRoomsCache\)/);
 });
 
 test("A11 search modifiers are removed from text and normalized without weakening unknown terms", () => {

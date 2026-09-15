@@ -6,6 +6,7 @@ import { REACTIONS, conversationIndex, searchMessages, ConversationDrafts, Draft
 import { nextWorkStep, workStatus, workActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer } from "./workflow.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation, invitationUnavailableMessage, invitationDialogTitle, invitationCapabilityLimits, formatInvitationExpiry, invitationExpiryDateTime, formatShareLinkExpiry, expiryTimeMarkup } from "./share-links.js";
 import { installAgentConnections } from "./agent-connections.js";
+import { accountRoomsSidebar } from "./channels.js";
 import { installRoomInstructions } from "./room-instructions.js";
 import { installReminders } from "./reminders.js";
 import { installPortableWork, installResultCopy } from "./portable-work.js";
@@ -343,7 +344,7 @@ inboxUI = installInbox({ account: accountClient, room: client, getRoom: () => st
   try { await client.refresh(); if (state && isCurrent()) revealMessage(receipt.messageId); }
   catch { if (isCurrent()) notice("Shared. Refresh the room to view it.", true); }
 } });
-let accountCheckFlight = null, roomListVersion = 0, roomListCursor = null;
+let accountCheckFlight = null, roomListVersion = 0, roomListCursor = null, accountRoomsCache = [];
 let pendingRoomCreation = null, roomCreationBusy = false;
 function clearPrivateWorkspace(options) {
   pendingRoomCreation = null; roomCreationBusy = false;
@@ -397,12 +398,18 @@ async function confirmAccount() {
 async function loadAccountRooms(more = false) {
   const version = ++roomListVersion, owned = accountClient.session;
   if (!owned?.authenticated) return;
-  if (!more) { roomListCursor = null; $("#account-rooms-list").replaceChildren(); }
+  if (!more) { roomListCursor = null; accountRoomsCache = []; $("#account-rooms-list").replaceChildren(); }
   $("#account-rooms-more").hidden = true; $("#account-rooms-status").textContent = "Loading…";
   try {
     const value = await accountClient.rooms(more ? roomListCursor : null);
     if (version !== roomListVersion || accountClient.session !== owned || !value) return;
-    for (const room of value.rooms) {
+    accountRoomsCache = more ? accountRoomsCache.concat(value.rooms) : [...value.rooms];
+    const sidebar = accountRoomsSidebar(accountRoomsCache);
+    const byId = new Map(accountRoomsCache.map(room => [room.id, room]));
+    $("#account-rooms-list").replaceChildren();
+    for (const item of sidebar.sections[0].items) {
+      const room = byId.get(item.id);
+      if (!room) continue;
       const button = document.createElement("button"); button.type = "button"; button.className = "inbox-row";
       button.dataset.accountRoom = room.id;
       const title = typeof room.title === "string" ? room.title.trim() : "";

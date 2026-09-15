@@ -38,6 +38,20 @@ export function channelSidebar(input, { selectedId = null } = {}) {
 }
 
 const modifiers = new Set(["in", "from", "has", "is"]);
+export function roomsToChannelEntries(rooms, workspaceId = "account") {
+  if (!Array.isArray(rooms)) throw new TypeError("Rooms must be an array");
+  return rooms.map(room => {
+    if (!room || typeof room !== "object") throw new TypeError("Room entry must be an object");
+    const id = String(room.id ?? "").trim();
+    const title = typeof room.title === "string" ? room.title.trim() : "";
+    return { id, kind: "channel", name: title || id, workspaceId, unread: Number.isInteger(room.unread) && room.unread >= 0 ? room.unread : 0 };
+  });
+}
+
+export function accountRoomsSidebar(rooms, { selectedId = null, workspaceId = "account" } = {}) {
+  return channelSidebar(roomsToChannelEntries(rooms, workspaceId), { selectedId });
+}
+
 export function parseChannelSearch(query) {
   if (typeof query !== "string") throw new TypeError("Search query must be a string");
   const result = { text: "", in: [], from: [], has: [], is: [], unknown: [] }, words = query.trim().match(/"[^"]*"|\S+/g) ?? [], kept = [];
