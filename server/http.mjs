@@ -19,6 +19,7 @@ import { createClerkVerifier } from './clerk-verifier.mjs';
 import { loginWithProvider, refreshWithProvider, grantNamedOperator } from './provider-onboarding.mjs';
 import { publicProviderConfig } from './provider-config.mjs';
 import { createAccountRoom } from './account-room-create.mjs';
+import { GoogleSignIn, GOOGLE_ISSUER, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH } from './google-oauth.mjs';
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -63,7 +64,7 @@ const rateHash = value => createHash("sha256").update(String(value)).digest("hex
 
 export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = 1000, trustedLocalProxy = false,
   loadAsset = path => readFile(new URL(path, assetRoot)), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
-  resolveRequestSignal = () => null, syntheticInboxTransport = null, cookieNamespace = "", providerAuth = null, gmailConnections = null, telegramConnections = null, twilioConnections = null,
+  resolveRequestSignal = () => null, syntheticInboxTransport = null, cookieNamespace = "", providerAuth = null, googleAuth = null, gmailConnections = null, telegramConnections = null, twilioConnections = null,
   operatorAccountId = null,
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot" }) {
   if (trustedLocalProxy && !origin?.startsWith("https://")) throw new Error("The deployment proxy requires a fixed HTTPS origin");
@@ -80,6 +81,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   }
   const expectedOrigin = () => origin || `http://127.0.0.1:${server.address().port}`;
   const providerVerifier = providerAuth ? createClerkVerifier({ ...providerAuth, now: () => store.now() }) : null;
+  let googleSignIn = null;
+  const google = () => {
+    if (!googleAuth) return null;
+    if (!googleSignIn) googleSignIn = new GoogleSignIn({
+      clientId: googleAuth.clientId, clientSecret: googleAuth.clientSecret,
+      redirectUri: (googleAuth.redirectUri || expectedOrigin() + GOOGLE_CALLBACK_PATH),
+      now: () => store.now(), fetchImpl: googleAuth.fetchImpl ?? fetch
+    });
+    return googleSignIn;
+  };
   // Avoid local-instance sign-in collisions; namespacing is not host isolation.
   const scopedCookieName = name => `${expectedOrigin().startsWith("https:") ? "__Host-" : ""}${cookieNamespace ? cookieNamespace + "_" : ""}${name}`;
   const streams = new Set();
@@ -277,7 +288,43 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, { status: "ok", mode: serviceMode }, req.method === "HEAD");
       }
       if (url.pathname === '/api/auth-config' && ['GET', 'HEAD'].includes(req.method)) {
-        return json(res, 200, publicProviderConfig(providerAuth), req.method === 'HEAD');
+        return json(res, 200, publicProviderConfig(providerAuth, googleAuth), req.method === 'HEAD');
+      }
+      if (google() && url.pathname === GOOGLE_START_PATH) {
+        if (req.method !== 'GET') reject(405, 'method_not_allowed', 'Method not allowed');
+        rate(`google-start:${remoteAddress}`, 10);
+        let slotToken = cookie(req, accountCookieName), expectedRevision = 0;
+        if (!slotToken) {
+          const created = store.createAccountSessionSlot();
+          slotToken = created.token;
+          expectedRevision = created.session.sessionRevision;
+          setCookie(res, accountCookieName, slotToken, Math.max(0, Math.floor((created.session.expiresAt - store.now()) / 1000)));
+        } else {
+          expectedRevision = store.accountSessionSlot(slotToken).sessionRevision;
+        }
+        const started = google().begin({ slotToken, expectedRevision });
+        res.statusCode = 302;
+        res.setHeader('Location', started.authorizationUrl);
+        return res.end();
+      }
+      if (google() && url.pathname === GOOGLE_CALLBACK_PATH) {
+        if (req.method !== 'GET') reject(405, 'method_not_allowed', 'Method not allowed');
+        rate(`google-callback:${remoteAddress}`, 20);
+        try {
+          const pending = await google().complete({ callbackUrl: expectedOrigin() + url.pathname + url.search });
+          const result = await loginWithProvider(store, {
+            token: pending.idToken, verify: async () => pending.claims, issuer: GOOGLE_ISSUER,
+            slotToken: pending.slotToken, expectedRevision: pending.expectedRevision, operatorAccountId
+          });
+          setCookie(res, accountCookieName, pending.slotToken, Math.max(0, Math.floor((result.session.expiresAt - store.now()) / 1000)));
+          res.statusCode = 302;
+          res.setHeader('Location', `/?room=${encodeURIComponent(result.roomId)}`);
+          return res.end();
+        } catch {
+          res.statusCode = 302;
+          res.setHeader('Location', '/?google=error');
+          return res.end();
+        }
       }
       if (url.pathname === "/api/version" && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode, sourceRevision: SOURCE_REVISION, buildId: BUILD_ID }, req.method === "HEAD");

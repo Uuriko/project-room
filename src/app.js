@@ -79,7 +79,20 @@ async function signOutProvider() {
     if (sdk.session) await sdk.signOut();
   }
 }
+function applyAuthConfig(config) {
+  if (config?.provider === 'google' && config.authorizationPath === '/api/auth/google/start') {
+    providerSettings = { provider: 'google', authorizationPath: config.authorizationPath };
+    $('#provider-join-button').textContent = 'Continue with Google';
+    $('#provider-join').hidden = false;
+  }
+}
 $('#provider-join-button').addEventListener('click', async () => {
+  if (providerSettings?.provider === 'google') {
+    $('#provider-join-button').disabled = true;
+    $('#provider-join-status').textContent = 'Opening Google…';
+    location.assign(providerSettings.authorizationPath);
+    return;
+  }
   providerIntent(true); $('#provider-join-button').disabled = true; $('#provider-join-status').textContent = '';
   try {
     const sdk = await loadProvider();
@@ -3317,8 +3330,14 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
 (async () => {
   if (location.protocol !== 'file:') {
     try {
-      await accountClient.request('/api/auth-config');
+      applyAuthConfig(await accountClient.request('/api/auth-config'));
     } catch { /* Existing key access remains available during config failure. */ }
+  }
+  if (new URLSearchParams(location.search).get('google') === 'error') {
+    setFormStatus($('#auth-error'), 'Google sign-in didn’t complete. Try again or use a key.', true);
+    const cleaned = new URL(location.href);
+    cleaned.searchParams.delete('google');
+    history.replaceState(history.state, '', `${cleaned.pathname}${cleaned.search}${cleaned.hash}`);
   }
   if (initialJoinFragment) {
     // Invitation preview deliberately does not restore/open a Room session.

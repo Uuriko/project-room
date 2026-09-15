@@ -39,5 +39,6 @@ test('Cloudflare Worker wires serviceMode from productionGates.production', () =
   const src = readFileSync(new URL('../cloudflare/room.mjs', import.meta.url), 'utf8');
   assert.match(src, /serviceMode: cloudflareServiceMode\(productionGates\.production\)/);
   assert.match(src, /providerAuth: null/);
+  assert.match(src, /googleAuth: googleConfig\(env, env\.ROOM_ORIGIN\)/);
   assert.doesNotMatch(src, /providerConfig/);
 });

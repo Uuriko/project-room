@@ -9,6 +9,7 @@ import { maintenanceEnabled, maintenanceResponse } from '../server/maintenance.m
 import { isEdgeDoorUrl } from '../deploy/agent-discovery.mjs';
 import { assertProductionReady, cloudflareServiceMode } from '../server/production-gates.mjs';
 import { openJoinContract } from '../server/open-contract.mjs';
+import { googleConfig } from '../server/google-oauth.mjs';
 
 function roomOrigin(env) {
   const origin = new URL(env.ROOM_ORIGIN);
@@ -29,7 +30,7 @@ export class ProjectRoom {
     this.store = new RoomStore(null, { database: new DurableDatabase(ctx.storage), storagePlatform: durableStorage });
     bootstrapRoom(this.store, env);
     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: cloudflareServiceMode(productionGates.production),
-      providerAuth: null, operatorAccountId: productionGates.operatorAccountId,
+      providerAuth: null, googleAuth: googleConfig(env, env.ROOM_ORIGIN), operatorAccountId: productionGates.operatorAccountId,
       resolveRequestSignal: () => this.requestSignals.getStore(),
       loadAsset: async path => {
         const response = await env.ASSETS.fetch(new Request(new URL('/' + path, env.ROOM_ORIGIN)));

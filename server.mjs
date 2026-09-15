@@ -7,6 +7,7 @@ import { createServer } from "node:http";
 import { maintenanceEnabled, maintenanceReply } from "./server/maintenance.mjs";
 import { assertProductionReady } from './server/production-gates.mjs';
 import { openJoinContract } from './server/open-contract.mjs';
+import { googleConfig } from './server/google-oauth.mjs';
 
 const { host, port, origin, filename, production } = deploymentConfig();
 const paused = maintenanceEnabled(process.env.ROOM_MAINTENANCE);
@@ -50,7 +51,7 @@ const server = paused ? createServer((req, res) => {
     const reply = maintenanceReply(url.pathname);
     res.writeHead(reply.status, reply.headers); res.end(req.method === "HEAD" ? undefined : reply.body);
   } catch { res.writeHead(400, { "Cache-Control": "no-store" }); res.end(); }
-}) : createRoomServer({ store, origin, trustedLocalProxy: production, providerAuth, gmailConnections: gmailRuntime?.connections, telegramConnections: telegramRuntime?.connections, twilioConnections: twilioRuntime?.connections, operatorAccountId: productionGates.operatorAccountId });
+}) : createRoomServer({ store, origin, trustedLocalProxy: production, providerAuth, googleAuth: googleConfig(process.env, origin), gmailConnections: gmailRuntime?.connections, telegramConnections: telegramRuntime?.connections, twilioConnections: twilioRuntime?.connections, operatorAccountId: productionGates.operatorAccountId });
 let closing = false;
 function close(exitCode=0) {
   if (closing) return;

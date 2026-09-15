@@ -26,7 +26,10 @@ export function providerConfig(env, origin) {
   return config;
 }
 
-export function publicProviderConfig(config) {
+export function publicProviderConfig(config, google = null) {
+  if (google?.clientId) {
+    return { provider: 'google', authorizationPath: '/api/auth/google/start' };
+  }
   return config?.publishableKey
     ? { provider: 'clerk', issuer: config.issuer, publishableKey: config.publishableKey }
     : { provider: null };

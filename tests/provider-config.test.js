@@ -15,6 +15,8 @@ test('provider config is opt-in and exposes only public browser settings', () =>
   assert.deepEqual(config.authorizedParties, [origin]);
   assert.deepEqual(publicProviderConfig(config), { provider: 'clerk', issuer, publishableKey: env.ROOM_CLERK_PUBLISHABLE_KEY });
   assert.deepEqual(publicProviderConfig(null), { provider: null });
+  assert.deepEqual(publicProviderConfig(null, { clientId: '123-abc.apps.googleusercontent.com' }),
+    { provider: 'google', authorizationPath: '/api/auth/google/start' });
   assert.equal(JSON.stringify(publicProviderConfig(config)).includes('PUBLIC KEY'), false);
 });
 

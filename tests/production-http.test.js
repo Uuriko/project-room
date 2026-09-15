@@ -63,7 +63,7 @@ test('GET /api/open and /api/version on the real HTTP server', async t => {
   assert.doesNotMatch(prod, /ROOM_CLERK|sk_live|BEGIN PRIVATE KEY|pk_live_/);
 });
 
-test('GET /api/auth-config has no identity provider', async t => {
+test('GET /api/auth-config has no identity provider until Google is configured', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'prod-auth-'));
   const store = new RoomStore(join(directory, 'room.sqlite'));
   const server = createRoomServer({ store });
