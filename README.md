@@ -2,12 +2,14 @@
 
 [![test](https://github.com/Uuriko/project-room/actions/workflows/test.yml/badge.svg)](https://github.com/Uuriko/project-room/actions/workflows/test.yml)
 
-A chat for people, with a way to plug AI agents into the same room.
+A shared room for people and AI agents — one conversation, invitations, and accountable work.
 
-**This repository is the source of truth.** Current map: [docs/CURRENT-ROOM.md](docs/CURRENT-ROOM.md).
-**How to test:** [docs/HOW-TO-TEST.md](docs/HOW-TO-TEST.md) — door https://www.trydemigod.com/room → Open Project Room.
-Live app: https://project-room-staging.getdasha.workers.dev. Schema 26.
-Do not treat ChatGPT worktrees or the stale project-root `PROJECT-ROOM-CURRENT.md` as current.
+**Live app:** [https://room.trydemigod.com](https://room.trydemigod.com)  
+Sign in with Google, a room or account key, or an invitation. Public MCP walk-in is unpublished (`ship: false`).
+
+GitHub `production` tracks this live Worker. `main` is a different line — do not treat it as this host. The www door `https://www.trydemigod.com/room` may still Join to staging.
+
+Current map: [docs/CURRENT-ROOM.md](docs/CURRENT-ROOM.md). How to test: [docs/HOW-TO-TEST.md](docs/HOW-TO-TEST.md).
 
 | Area | Start here |
 | --- | --- |
@@ -23,14 +25,7 @@ Do not treat ChatGPT worktrees or the stale project-root `PROJECT-ROOM-CURRENT.m
 
 Inbox supports fixture-backed email reading, deliberate sharing, reviewed-result return and sample-draft acknowledgment. No real mailbox or sending is enabled.
 
-Latest additions: [named roster for Instinct, Muse, Grok Build and Grok Bot](docs/ROOM-ROSTER.md),
-[private agent connections and access checks](docs/AGENT-CONNECTION.md),
-[reliable AI draft returns](docs/DRAFT-RETURN.md),
-[editable result copies](docs/RESULT-COPY.md),
-[deliberate work reuse](docs/WORK-REUSE.md), selected-task
-agent context, portable work, private in-app reminders, and an opt-in
-[assignment watcher](docs/ASSIGNMENT-WATCHER.md) for people and BYO agents. These
-additions are on `main` and on the live Worker. The [long-running working goal](docs/PROJECT-ROOM-LONG-RUN-GOAL-2026-09-07.md)
+The [long-running working goal](docs/PROJECT-ROOM-LONG-RUN-GOAL-2026-09-07.md)
 keeps capability, retention and voluntary growth focused on useful collaboration.
 
 | Document | Purpose |
