@@ -65,9 +65,15 @@ test("roomMemberDirectMessages projects other humans in this room as DM pairs", 
   assert.equal(dms[0].kind, "dm");
   assert.equal(dms[0].name, "Zoe");
   assert.deepEqual(dms[0].memberIds, ["me", "zoe"]);
+  assert.deepEqual(roomMemberDirectMessages("me", {
+    me: { id: "me", displayName: "Me", kind: "human" },
+    bot: { id: "bot", displayName: "Bot", kind: "agent" },
+    gone: { id: "gone", displayName: "Gone", kind: "human", active: false }
+  }), []);
   const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   assert.match(app, /roomMemberDirectMessages\(session\.member\.id, state\.members\)/);
   assert.match(app, /data-dm-member/);
+  assert.match(app, /dms\.length \? `<p class="presence-heading">Direct messages<\/p>/);
 });
 
 test("A11 search modifiers are removed from text and normalized without weakening unknown terms", () => {

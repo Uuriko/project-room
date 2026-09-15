@@ -7,7 +7,7 @@ import { clientAddress } from "./deployment.mjs";
 import { validId } from "../src/events.js";
 import { SyntheticInboxTransport } from "./inbox-transport.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
-import { agentErrorBody, errorCategory } from "../src/agent-error.mjs";
+import { agentErrorBody, errorCategory, resolveAgentErrorAx } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle, diagnosticRoute } from "./diagnostics.mjs";
 import { discoveryDoc, isHealthAliasPath } from "../deploy/agent-discovery.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
@@ -1086,7 +1086,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         diagnostics.record({ operationId, at: new Date().toISOString(), status: httpStatus, code, category, route, roomId });
         console.warn(`room diagnostic ${operationId} ${httpStatus} ${code} ${category} ${route}`);
       }
-      json(res, httpStatus, { ...agentErrorBody({ httpStatus, code, message, roomId, workItemId }), operationId, category });
+      const mcpAccept = /text\/event-stream/i.test(req.headers.accept || "");
+      const humanUnauth = !req.headers.authorization && httpStatus === 401 && code === "unauthenticated" && !mcpAccept;
+      const ax = resolveAgentErrorAx(httpStatus, code, message, {
+        roomId, workItemId,
+        hint: humanUnauth ? "Sign in with Google or a room key." : undefined
+      });
+      json(res, httpStatus, { error: { code, message }, status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next, operationId, category });
     }
   });
   server.requestTimeout = 15000;

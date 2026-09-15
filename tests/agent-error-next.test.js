@@ -74,6 +74,11 @@ test("live 401/403/stale-revision/unknown-work/input-refused return next agents 
   assert.equal(unauthBody.error.code, "unauthenticated");
   assert.equal(typeof unauthBody.error.message, "string");
   assertAx(unauthBody, { reason: "unauthenticated" });
+  const session = await f.request("/api/session");
+  assert.equal(session.status, 401);
+  const sessionBody = await session.json();
+  assert.equal(sessionBody.hint, "Sign in with Google or a room key.");
+  assert.doesNotMatch(sessionBody.hint, /guest-agent|ga1\./);
 
   const forbidden = await f.request("/api/rooms/commons/agent-connections", { token: f.keys.producer });
   assert.equal(forbidden.status, 403);

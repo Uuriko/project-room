@@ -127,13 +127,14 @@ export function memberStatus(member, context) {
 
 // Compact Done receipt for an agent who posted completion. Not chat spam.
 // Prefix is the work title so the line stays one pasteable sentence.
-export function conversationReceiptSentence(item) {
+export function conversationReceiptSentence(item, viewerId) {
   const title = String(item?.title || item?.receipt?.summary || "This work").trim() || "This work";
   if (!item || typeof item !== "object") return "This work: failed.";
   try {
     if (terminalWork(item)) return `${title}: done.`;
     const step = nextWorkStep(item);
     if (step?.action === "unknown") return `${title}: failed.`;
+    if (viewerId && step?.memberId && step.memberId !== viewerId) return `${title}: waiting.`;
     return `${title}: waiting on you.`;
   } catch {
     return `${title}: failed.`;

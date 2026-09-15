@@ -356,9 +356,16 @@ test("conversationReceiptSentence maps work and receipt shapes to one status sen
     title: "Ship docs",
     state: "proposed",
     accountableMemberId: "owner"
-  });
+  }, "owner");
   assert.match(waiting, /waiting on you/);
   assert.doesNotMatch(waiting, /: done\.|: failed\./);
+  const waitingOther = conversationReceiptSentence({
+    title: "Ship docs",
+    state: "proposed",
+    accountableMemberId: "owner"
+  }, "producer");
+  assert.equal(waitingOther, "Ship docs: waiting.");
+  assert.doesNotMatch(waitingOther, /waiting on you/);
   const failed = conversationReceiptSentence({ title: "Ship docs", state: "nope" });
   assert.match(failed, /failed/);
   assert.doesNotMatch(failed, /done|waiting on you/);
@@ -372,10 +379,10 @@ test("conversationReceiptSentence maps work and receipt shapes to one status sen
   assert.equal(longSummary, "Ship docs: done.");
   const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  assert.match(app, /conversationReceiptSentence\(item\)/);
-  assert.match(app, /conversationReceiptSentence\(i\)/);
+  assert.match(app, /conversationReceiptSentence\(item, session\?\.member\?\.id\)/);
+  assert.match(app, /conversationReceiptSentence\(i, session\?\.member\?\.id\)/);
   assert.match(app, /class="message-work-receipt"/);
-  assert.match(app, /class="receipt-sentence">\$\{esc\(conversationReceiptSentence\(i\)\)\}/);
+  assert.match(app, /class="receipt-sentence">\$\{esc\(conversationReceiptSentence\(i, session\?\.member\?\.id\)\)\}/);
   assert.match(css, /\.receipt-sentence/);
   assert.match(css, /\.message-work-receipt/);
 });
