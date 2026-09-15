@@ -1,5 +1,7 @@
 # Cloudflare staging candidate
 
+**Live production origin is https://room.trydemigod.com.** This file is a historical staging record, not the live host.
+
 **Local candidate update:** private reminders now require schema v8. They and the
 portable-work checkpoint are not published or deployed. See the
 [reminder plan](../docs/PRIVATE-REMINDERS-PLAN-2026-09-07.md). A migrated v8 database
