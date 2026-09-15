@@ -300,8 +300,11 @@ paths:
         path; a request for the state the room is already in appends nothing
         and answers `changed: false`. `requestId` is an optional client
         idempotency key for the underlying command (same rules as the
-        `commands` route). Pinning a deleted message is 409 `message_deleted`;
-        the 51st pin is 409 `command_rejected` (pin capacity).
+        `commands` route). Answers 201 when an event was appended and 200
+        when the room was already in the requested state or `requestId`
+        replayed an earlier command. Pinning a deleted message is 409
+        `message_deleted` (the same pin through `commands` is 409
+        `command_rejected`); the 51st pin is 409 `command_rejected` (pin capacity).
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -316,25 +319,18 @@ paths:
                 pinned: { type: boolean }
                 requestId: { type: string, description: Optional idempotency key for the command }
       responses:
-        '200':
-          description: The resulting pinned list
+        '201':
+          description: Event appended (`changed: true`); body is the resulting pinned list
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: '#/components/schemas/PinnedList'
-                  - type: object
-                    properties:
-                      messageId: { type: string }
-                      pinned: { type: boolean }
-                      changed: { type: boolean, description: true when this call appended an event }
-                      event:
-                        type: object
-                        description: Command receipt when an event was issued; absent otherwise
-                        properties:
-                          id: { type: string }
-                          sequence: { type: integer }
-                          duplicate: { type: boolean }
+                $ref: '#/components/schemas/PinResult'
+        '200':
+          description: Already in the requested state, or an idempotent `requestId` replay (`changed: false`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PinResult'
         '401':
           description: No room credential, or membership ended (unauthenticated)
         '404':
@@ -2651,6 +2647,23 @@ components:
               createdAt: { type: string, format: date-time }
               workItemId: { type: [string, 'null'] }
               replyToId: { type: [string, 'null'] }
+    PinResult:
+      description: Body of POST /api/rooms/{roomId}/pins on 201 (event appended) and 200 (already in that state or requestId replayed)
+      allOf:
+        - $ref: '#/components/schemas/PinnedList'
+        - type: object
+          required: [messageId, pinned, changed]
+          properties:
+            messageId: { type: string }
+            pinned: { type: boolean }
+            changed: { type: boolean, description: true when this call appended an event (201); false on 200 }
+            event:
+              type: object
+              description: Command receipt when a command was issued; absent when the room was already in the requested state
+              properties:
+                id: { type: string }
+                sequence: { type: integer }
+                duplicate: { type: boolean }
     ChannelConnection:
       type: object
       description: Generic unified-inbox connection record (docs/UNIFIED-INBOX.md); extra keys are rejected on input.

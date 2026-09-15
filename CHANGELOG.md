@@ -53,6 +53,14 @@
   and clarifies that 201 means the command was recorded (`alreadyPaused` /
   `wasPaused` say whether the state changed). Tests: `tests/wake-pause.test.js`,
   `tests/wake-queue.test.js`.
+- Pins (issue #6 B2 follow-up): pinning a deleted message answers 409 on both
+  write paths. `store.command` now maps the reducer's "cannot be pinned"
+  refusal to 409 `command_rejected` (it was 422), matching the 409
+  `message_deleted` that `POST /api/rooms/:id/pins` already returned.
+  `POST /pins` follows the mutation convention: 201 when an event was
+  appended, 200 when the room was already in the requested state or a
+  `requestId` replayed. `docs/openapi.yaml` (`PinResult`),
+  `docs/ROUTE-AUTH-TABLE.md`.
 - Room lifecycle (issue #6 A2): schema 28 adds `rooms.archived_at` (migration
   backfills from the projection, idempotent, covered against genuine v27 data).
   `POST /api/account-rooms` creates a room for an account that already

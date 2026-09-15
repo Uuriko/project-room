@@ -145,7 +145,8 @@ test("store: pin commands are classified, field-checked, idempotent by command i
   // Deleting a pinned message drops the pin; pinning a tombstone is refused.
   f.cmd(f.guestKey, T.MESSAGE_DELETED, { messageId: m2, expectedMessageRevision: 0, reason: "cleanup" });
   assert.deepEqual(f.pins().map(p => p.messageId), [m1]);
-  assert.throws(() => f.cmd(f.ownerKey, T.MESSAGE_PINNED, { messageId: m2 }), { status: 422, code: "command_rejected", message: /deleted message/ });
+  // The same status as POST /pins (409 message_deleted): a tombstone is a state conflict, not a malformed command.
+  assert.throws(() => f.cmd(f.ownerKey, T.MESSAGE_PINNED, { messageId: m2 }), { status: 409, code: "command_rejected", message: /deleted message/ });
 
   // Revoked members cannot pin or unpin.
   f.cmd(f.ownerKey, T.MEMBER_ACCESS_CHANGED, { memberId: "helper", expectedMemberRevision: 0, permissions: ["accept_work"], active: false });
@@ -173,15 +174,16 @@ async function serve(t) {
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const call = async (method, token, body) => {
-    const res = await fetch(`${origin}/api/rooms/commons/pins`, {
+  const call = async (method, token, body, path = "/api/rooms/commons/pins") => {
+    const res = await fetch(`${origin}${path}`, {
       method, headers: { Origin: origin, ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
       ...(body === undefined ? {} : { body: typeof body === "string" ? body : JSON.stringify(body) })
     });
     const text = await res.text();
     return { status: res.status, json: text ? JSON.parse(text) : null };
   };
-  return { ...f, origin, list: token => call("GET", token), send: (token, body) => call("POST", token, body) };
+  return { ...f, origin, list: token => call("GET", token), send: (token, body) => call("POST", token, body),
+    command: (token, type, data) => call("POST", token, { id: randomUUID(), type, data }, "/api/rooms/commons/commands") };
 }
 
 test("routes: GET /pins lists ordered pins for members only; POST pins and unpins idempotently", async t => {
@@ -202,23 +204,23 @@ test("routes: GET /pins lists ordered pins for members only; POST pins and unpin
   assert.equal((await f.send(f.guestKey, { messageId: "missing", pinned: true })).status, 404);
 
   const pinned = await f.send(f.guestKey, { messageId: m2, pinned: true });
-  assert.equal(pinned.status, 200);
+  assert.equal(pinned.status, 201, "an appended event answers 201 like every other mutation");
   assert.equal(pinned.json.changed, true); assert.equal(pinned.json.pinned, true); assert.equal(typeof pinned.json.event.sequence, "number"); assert.equal(pinned.json.event.duplicate, false);
   assert.deepEqual(pinned.json.pins.map(p => [p.messageId, p.pinnedById, p.authorId, p.body]), [[m2, "guest", "guest", "parking code 4411"]]);
   const sequence = f.store.room("commons").sequence;
   const again = await f.send(f.helperKey, { messageId: m2, pinned: true });
-  assert.equal(again.status, 200); assert.equal(again.json.changed, false); assert.equal(again.json.event, undefined);
+  assert.equal(again.status, 200, "already in the requested state: 200, nothing appended"); assert.equal(again.json.changed, false); assert.equal(again.json.event, undefined);
   assert.equal(f.store.room("commons").sequence, sequence, "asking for the state the room is already in appends no event");
 
   // A client-chosen requestId makes the write idempotent across retries.
   const requestId = randomUUID();
   const first = await f.send(f.ownerKey, { messageId: m1, pinned: true, requestId });
-  assert.equal(first.json.changed, true);
+  assert.equal(first.status, 201); assert.equal(first.json.changed, true);
   // The reducer is a no-op for a second pin, so the route's early return answers and the retry of the id is never even needed;
   // but a retried id after an unpin must not resurrect the pin with a different body either.
   await f.send(f.ownerKey, { messageId: m1, pinned: false });
   const conflict = await f.send(f.ownerKey, { messageId: m1, pinned: true, requestId });
-  assert.equal(conflict.status, 200); assert.equal(conflict.json.changed, false, "the original receipt is returned; no new event"); assert.equal(conflict.json.event.duplicate, true); assert.equal(conflict.json.event.sequence, first.json.event.sequence);
+  assert.equal(conflict.status, 200, "a replayed requestId is a duplicate: 200"); assert.equal(conflict.json.changed, false, "the original receipt is returned; no new event"); assert.equal(conflict.json.event.duplicate, true); assert.equal(conflict.json.event.sequence, first.json.event.sequence);
   assert.equal(conflict.json.pinned, true);
   assert.deepEqual((await f.list(f.ownerKey)).json.pins.map(p => p.messageId), [m2], "the replayed receipt did not re-pin");
 
@@ -250,7 +252,13 @@ test("routes: tombstoned messages drop out of pins, and membership is re-checked
   assert.ok(!JSON.stringify(after.json).includes("doomed"), "a deleted body never reaches the pinned list");
   const tombstone = await f.send(f.ownerKey, { messageId: m2, pinned: true });
   assert.equal(tombstone.status, 409); assert.equal(tombstone.json.error.code, "message_deleted");
-  assert.equal((await f.send(f.ownerKey, { messageId: m2, pinned: false })).json.changed, false, "unpinning a tombstone is a no-op");
+  // Both write paths agree: the same pin through POST /commands is a 409 too (command_rejected, the reducer's message).
+  const viaCommand = await f.command(f.ownerKey, T.MESSAGE_PINNED, { messageId: m2 });
+  assert.equal(viaCommand.status, 409, "POST /commands: a tombstone pin is a conflict, not a 422 field error");
+  assert.equal(viaCommand.json.error.code, "command_rejected"); assert.match(viaCommand.json.error.message, /deleted message cannot be pinned/);
+  assert.deepEqual((await f.list(f.ownerKey)).json.pins.map(p => p.messageId), [m1], "neither refusal changed anything");
+  const unpinTombstone = await f.send(f.ownerKey, { messageId: m2, pinned: false });
+  assert.equal(unpinTombstone.status, 200); assert.equal(unpinTombstone.json.changed, false, "unpinning a tombstone is a no-op");
 
   // The guest could read and pin a moment ago; once access ends, both calls refuse.
   f.cmd(f.ownerKey, T.MEMBER_ACCESS_CHANGED, { memberId: "guest", expectedMemberRevision: 0, permissions: [], active: false });

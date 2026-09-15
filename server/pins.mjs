@@ -52,6 +52,7 @@ export function setPin(store, token, roomId, data, expectedSessionBinding = null
     const room = store.room(roomId);
     const message = room.state.messages.find(m => m.id === messageId);
     if (!message) fail(404, "message_not_found", "No such message in this room");
+    // 409 on both write paths: the same refusal through `commands` is 409 command_rejected (store.command maps the reducer message).
     if (data.pinned && (message.deletedAt || message.body == null)) fail(409, "message_deleted", "A deleted message cannot be pinned");
     return { pinned: Boolean(room.state.pins?.some(pin => pin.messageId === messageId)) };
   });
