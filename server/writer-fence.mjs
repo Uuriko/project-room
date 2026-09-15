@@ -1,9 +1,9 @@
 // Upgrade compatibility fence, not authentication against a database administrator.
 // Older service connections do not register this function, so ordinary writes fail
 // after the schema transaction commits, even if the connection predates migration.
-export const STORE_SCHEMA_VERSION = 34;
+export const STORE_SCHEMA_VERSION = 35;
 export const WRITER_FUNCTION = `project_room_writer_v${STORE_SCHEMA_VERSION}`;
-export const writerVersions = Object.freeze([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34]);
+export const writerVersions = Object.freeze([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35]);
 const v6Tables = ["rooms", "events", "commands", "accounts", "member_accounts", "account_access_events",
   "credentials", "cursors", "projection_checkpoints", "account_credentials", "account_session_slots",
   "membership_invitations", "membership_invitation_events", "membership_invitation_journal"];
@@ -18,9 +18,16 @@ const v27Tables = [...tables, "agent_identities", "identity_links"];
 // later advanced to v33. v34 converges them without rewriting either history.
 const deployedV28Tables = [...v27Tables, "agent_invite_codes", "room_attachments"];
 const rebuiltAdditiveTables = ["agent_invite_codes", "wake_queue", "wake_queue_commands", "private_attention_prefs", "private_attention_commands", "pending_channel_updates", "wake_queue_pause", "message_reports"];
-export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);
+// v34 is the converged tip of the two v28 lineages: the fenced set of the
+// deployed lineage plus every purely additive table from the rebuilt one.
+const v34Tables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);
+// v35 (issue #6 D6 redaction) adds message_redactions, one row per redacted
+// message, and rewrites that message's event bodies; a pre-v35 writer would
+// neither know the table nor keep the rows and the log in step, so the table
+// joins the fenced set.
+export const applicationTables = Object.freeze([...v34Tables, "message_redactions"]);
 const tablesFor = version => version <= 27 ? ({ 6: v6Tables, 7: v7Tables, 8: v8Tables, 9: v14Tables, 10: v14Tables, 11: v14Tables, 12: v14Tables, 13: v14Tables, 14: v14Tables, 15: v17Tables, 16: v17Tables, 17: v17Tables, 18: tables, 19: tables, 20: tables, 21: tables, 22: tables, 23: tables, 24: tables, 25: tables, 26: tables, 27: v27Tables })[version]
-  : version === 28 ? v27Tables : version <= 33 ? deployedV28Tables : applicationTables;
+  : version === 28 ? v27Tables : version <= 33 ? deployedV28Tables : version === 34 ? v34Tables : applicationTables;
 export const fenceDefinitions = version => Object.freeze(tablesFor(version).flatMap(table => ["INSERT", "UPDATE", "DELETE"].map(operation => {
   const name = `writer_v${version}_${table}_${operation.toLowerCase()}`;
   return Object.freeze({ name, sql: `CREATE TRIGGER ${name} BEFORE ${operation} ON ${table} BEGIN SELECT CASE WHEN project_room_writer_v${version}() IS NOT ${version} THEN RAISE(ABORT,'unsupported database writer') END; END` });
@@ -56,7 +63,7 @@ export function registerWriter(db) {
   db.function("project_room_writer_v25", () => 25);
   db.function("project_room_writer_v26", () => 26);
   db.function("project_room_writer_v27", () => 27);
-  for (const version of [28, 29, 30, 31, 32, 33]) db.function(`project_room_writer_v${version}`, () => version);
+  for (const version of [28, 29, 30, 31, 32, 33, 34]) db.function(`project_room_writer_v${version}`, () => version);
   db.function(WRITER_FUNCTION, () => STORE_SCHEMA_VERSION);
 }
 

@@ -133,14 +133,14 @@ test("an update that cannot be imported records its error and attempt count, par
   assert.doesNotThrow(() => auditRecovery(f.store));
 });
 
-test("schema: a v34 file from before the journal opens read-only and gains the table on a writable open; a partial schema is refused", t => {
+test("schema: a v35 file from before the journal opens read-only and gains the table on a writable open; a partial schema is refused", t => {
   const f = fixture(t);
   f.receive([f.message(2000)]);
   f.store.close();
   const raw = new DatabaseSync(f.filename);
   raw.exec("DROP INDEX pending_channel_updates_status; DROP TABLE pending_channel_updates;");
   raw.close();
-  // Read-only never migrates: an older backup is still a valid v34 file.
+  // Read-only never migrates: an older backup is still a valid v35 file.
   const older = new RoomStore(f.filename, { readOnly: true });
   assert.equal(older.channelUpdates.verifySchema({ allowAbsent: true }), false);
   assert.throws(() => older.channelUpdates.verifySchema(), /operator reconciliation/);
@@ -148,7 +148,7 @@ test("schema: a v34 file from before the journal opens read-only and gains the t
   // A writable open adds the table without a schema version change.
   f.store = new RoomStore(f.filename);
   assert.equal(f.store.channelUpdates.verifySchema(), true);
-  assert.equal(f.store.storagePlatform.version(f.store.db), 34);
+  assert.equal(f.store.storagePlatform.version(f.store.db), 35);
   assert.deepEqual(f.store.channelUpdates.verify(), { pending: 0, imported: 0, failed: 0 });
   assert.deepEqual(auditRecovery(f.store).tables.map(row => row.table).sort(), [...applicationTables].sort());
   f.store.close();

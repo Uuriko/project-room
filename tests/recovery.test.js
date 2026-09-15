@@ -19,7 +19,7 @@ function fixture(t) {
   return { ...f, directory };
 }
 
-test("online capture preserves all 38 tables, identity boundaries and exact retries through recovery and restart", async t => {
+test("online capture preserves all 39 tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t);
   const { identityId } = f.store.identities.create("Recovery agent");
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
@@ -38,7 +38,7 @@ test("online capture preserves all 38 tables, identity boundaries and exact retr
   f.cursor = f.store.room("commons").sequence;
   f.store.markCaughtUp(f.keys.owner, "commons", f.cursor);
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 38);
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 39);
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);
@@ -153,7 +153,7 @@ test("v8 readonly verification refuses a v7 marker rather than migrating the bac
   assert.equal(f.store.db.prepare("PRAGMA user_version").get().user_version, 7);
 });
 
-test("read-only open accepts a v34 backup written before the additive wake queue and attention tables", t => {
+test("read-only open accepts a v35 backup written before the additive wake queue and attention tables", t => {
   const f = fixture(t);
   const rooms = f.store.db.prepare("SELECT id,sequence FROM rooms ORDER BY id").all();
   const objects = () => f.store.db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'wake_queue%' OR name LIKE 'private_attention%' ORDER BY name").all().map(row => row.name);
@@ -175,8 +175,8 @@ test("read-only open accepts a v34 backup written before the additive wake queue
   assert.deepEqual(objects(), [], "read-only verification is not migration");
   // Only the additive tables are optional: a wrong schema marker still fails.
   f.store.db.exec("PRAGMA user_version=27");
-  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v34/);
-  f.store.db.exec("PRAGMA user_version=34");
+  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v35/);
+  f.store.db.exec("PRAGMA user_version=35");
   // A writable open recreates the additive tables and then verifies them strictly.
   const upgraded = new RoomStore(f.filename, { now: f.now });
   try {

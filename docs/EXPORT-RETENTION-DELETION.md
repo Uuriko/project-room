@@ -98,7 +98,7 @@ behaviours marked (pinned).
   hash is the content from then on. On every open (writable and read-only)
   the service checks that no redacted message keeps text in the events, the
   projection or the retained checkpoint and that the `message_redactions`
-  table and the log agree, and refuses to serve otherwise (schema 29,
+  table and the log agree, and refuses to serve otherwise (schema 35,
   `server/message-redaction.mjs`).
 - **Limits.** Text already delivered to an agent, a channel or a browser is
   not recalled. Work-item titles, descriptions, charters and decisions are not

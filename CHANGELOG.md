@@ -2,13 +2,29 @@
 
 ## Unreleased
 
+- Message redaction (issue #6 D6): schema 35 adds `message_redactions`
+  (migration creates the table and backfills from any `message.redacted`
+  event, idempotent, covered against genuine v34 data; verified on every
+  open, writable and read-only). `message.redacted` by the room owner or the
+  author is the one deliberate exception to append-only event bodies: the
+  target's `message.posted` and `message.edited` events are rewritten in the
+  same transaction to a record carrying the SHA-256 of the removed text and
+  the redaction event's id, so the projection, search, both export formats,
+  an import round-trip, a projection rebuild and a restored backup reproduce
+  the redaction and never the text; event ids and sequences stay. A native
+  work result whose message was redacted keeps its evidence version (the
+  hash is the content). A second redaction appends nothing; redacted
+  messages cannot be edited, deleted or pinned; the room and both exports
+  render "Message redacted". Deletion is unchanged: a tombstone that keeps
+  history. `docs/EXPORT-RETENTION-DELETION.md` gains a Redaction section and
+  a retention-policy stub (preservation hold deferred to D1).
 - Repo hygiene: README no longer cites a stale schema number or a nonexistent
   root file; the seven dead `test-results/` screenshot links in the 9/7 browser
   checkpoint docs are annotated as local-only; new `docs/README.md` orients
   readers across the dated checkpoint archive.
-- Schema lineage: v34 convergence in flight (PR #197) to reunite the repo's v28
-  lineage with the deployed v28–v33 lineage. Schema changes stay frozen until it
-  lands. Hand-resolved merges on 9/14 dropped some wiring; PR #180 restored it.
+- Schema lineage: v34 convergence merged (PR #197), reuniting the repo's v28
+  lineage with the deployed v28–v33 lineage; the schema freeze is lifted.
+  Hand-resolved merges on 9/14 dropped some wiring; PR #180 restored it.
 
 ## 2026-09-14
 

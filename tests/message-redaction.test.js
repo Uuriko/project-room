@@ -2,7 +2,7 @@
 // Deletion stays a tombstone that keeps history (tests/room-export.test.js);
 // redaction rewrites the message's post and edits in the log to a SHA-256
 // record, so every replay reproduces the redaction and never the text. Also
-// the v29 migration that adds message_redactions to genuine v28 data.
+// the v35 migration that adds message_redactions to genuine v34 data.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
@@ -13,7 +13,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createRuntimePackage } from "../scripts/runtime-package.mjs";
-import { frozenRecoveryFixture, v28RedactionBaseline } from "../scripts/frozen-runtime-fixture.mjs";
+import { frozenRecoveryFixture, v34RedactionBaseline } from "../scripts/frozen-runtime-fixture.mjs";
 import { RoomStore, COMMAND_TYPES } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
@@ -21,7 +21,7 @@ import { backupRoom } from "../server/backup.mjs";
 import { classifyCommand } from "../server/action-classes.mjs";
 import { textVersion } from "../server/text-results.mjs";
 import { renderRoomExportHtml } from "../server/room-export-html.mjs";
-import { migrateMessageRedactionsV29, verifyMessageRedactions, rewriteRedacted, historyRedactions, bodySha256 } from "../server/message-redaction.mjs";
+import { migrateMessageRedactionsV35, verifyMessageRedactions, rewriteRedacted, historyRedactions, bodySha256 } from "../server/message-redaction.mjs";
 import { STORE_SCHEMA_VERSION, applicationTables } from "../server/writer-fence.mjs";
 import { applyEvent, event, replay, EVENT_TYPES as T, PERMISSIONS, redactedBody, messageTombstone, pinnedMessages } from "../src/events.js";
 
@@ -42,7 +42,7 @@ const storedText = store => ["SELECT body AS t FROM events", "SELECT projection 
   .flatMap(sql => store.db.prepare(sql).all().map(row => row.t)).join("\n");
 
 test("reducer: a redacted post replays body-less, the redaction event tombstones and pins drop, and text or record never sit together", () => {
-  assert.equal(STORE_SCHEMA_VERSION, 29);
+  assert.equal(STORE_SCHEMA_VERSION, 35);
   assert.ok(COMMAND_TYPES.includes(T.MESSAGE_REDACTED)); assert.equal(classifyCommand(T.MESSAGE_REDACTED), "act");
   assert.ok(applicationTables.includes("message_redactions"));
   const post = event({ type: T.MESSAGE_POSTED, actorId: "a", roomId: "r", data: { messageId: "m", body: SECRET } });
@@ -122,7 +122,7 @@ test("store: redaction rewrites the log, tombstones the projection, leaves searc
     [{ message_id: "m", event_id: result.event.id, sequence: result.sequence, body_sha256: result.event.data.bodySha256, redacted_by: "guest" }]);
   // Replay from the rewritten log is the stored projection; the recovery audit agrees.
   assert.deepEqual(store.rebuildProjection("commons"), store.room("commons"));
-  assert.equal(auditRecovery(store).schemaVersion, 29);
+  assert.equal(auditRecovery(store).schemaVersion, 35);
   // Idempotent: a second redaction, by anyone entitled, appends nothing and answers the first.
   const again = cmd(store, keys.owner, "commons", T.MESSAGE_REDACTED, { messageId: "m" });
   assert.deepEqual(again, { sequence: result.sequence, event: result.event, duplicate: true });
@@ -214,7 +214,7 @@ test("HTTP: export carries the redaction and no text, import reproduces it, a ta
   const backup = await backupRoom(join(f.directory, "room.sqlite"), f.directory);
   assert.equal(readFileSync(backup.filename, "latin1").includes("PURGE-ME"), false);
   const restored = new RoomStore(backup.filename, { readOnly: true });
-  try { assert.equal(message(restored, "commons", "m").body, null); assert.equal(auditRecovery(restored).schemaVersion, 29); } finally { restored.close(); }
+  try { assert.equal(message(restored, "commons", "m").body, null); assert.equal(auditRecovery(restored).schemaVersion, 35); } finally { restored.close(); }
 });
 
 test("store: a native text result and a reply request survive redaction — the hash is the content from then on", async t => {
@@ -237,7 +237,7 @@ test("store: a native text result and a reply request survive redaction — the 
   assert.equal(result.text.evidenceVersion, `sha256:${sha256(SECRET)}`); assert.equal(result.receipt.evidenceVersion, result.text.evidenceVersion);
   assert.equal(store.room("commons").state.replyRequests.ask.status, "open");
   assert.deepEqual(store.rebuildProjection("commons"), store.room("commons"));
-  assert.equal(auditRecovery(store).schemaVersion, 29);
+  assert.equal(auditRecovery(store).schemaVersion, 35);
   const reopened = new RoomStore(join(f.directory, "room.sqlite"), { readOnly: true });
   try { assert.equal(auditRecovery(reopened).events, store.room("commons").sequence + reopened.db.prepare("SELECT count(*) AS n FROM events WHERE room_id<>'commons'").get().n); } finally { reopened.close(); }
 });
@@ -254,43 +254,43 @@ test("store: bootstrap with a redacted history records the obligation; a history
   store.initialize([...seed("r"), rewriteRedacted(post, redaction.id), redaction]);
   assert.deepEqual(store.db.prepare("SELECT message_id,event_id,sequence FROM message_redactions").all().map(row => ({ ...row })), [{ message_id: "m", event_id: redaction.id, sequence: 6 }]);
   verifyMessageRedactions(store);
-  assert.equal(auditRecovery(store).schemaVersion, 29);
+  assert.equal(auditRecovery(store).schemaVersion, 35);
 });
 
-test("migration: genuine v28 data gains message_redactions exactly once, keeps every row, and the migration is idempotent", { timeout: 120000 }, async t => {
-  const root = mkdtempSync(join(tmpdir(), "room-redaction-v28-"));
+test("migration: genuine v34 data gains message_redactions exactly once, keeps every row, and the migration is idempotent", { timeout: 120000 }, async t => {
+  const root = mkdtempSync(join(tmpdir(), "room-redaction-v34-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const repository = fileURLToPath(new URL("../", import.meta.url)), destination = join(root, "v28");
-  createRuntimePackage({ repository, commit: v28RedactionBaseline, destination });
-  const createFixture = await frozenRecoveryFixture(repository, destination, v28RedactionBaseline);
+  const repository = fileURLToPath(new URL("../", import.meta.url)), destination = join(root, "v34");
+  createRuntimePackage({ repository, commit: v34RedactionBaseline, destination });
+  const createFixture = await frozenRecoveryFixture(repository, destination, v34RedactionBaseline);
   const f = createFixture(join(root, "room.sqlite"));
   t.after(() => f.store.close());
   const { RoomStore: OldStore } = await import(pathToFileURL(join(destination, "server/store.mjs")));
   const hasTable = db => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='message_redactions'").get());
-  assert.equal(f.store.db.prepare("PRAGMA user_version").get().user_version, 28);
+  assert.equal(f.store.db.prepare("PRAGMA user_version").get().user_version, 34);
   assert.equal(hasTable(f.store.db), false, "the baseline predates the table");
   const rows = Object.fromEntries(["rooms", "events", "projection_checkpoints", "commands"].map(table => [table, f.store.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]));
-  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v29/, "read-only never migrates an older backup");
-  assert.equal(f.store.db.prepare("PRAGMA user_version").get().user_version, 28, "the refused read-only open changed nothing");
+  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v35/, "read-only never migrates an older backup");
+  assert.equal(f.store.db.prepare("PRAGMA user_version").get().user_version, 34, "the refused read-only open changed nothing");
   const current = new RoomStore(f.filename, { now: f.now });
   t.after(() => current.close());
-  assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 29);
+  assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 35);
   assert.equal(hasTable(current.db), true);
-  assert.deepEqual(current.db.prepare("SELECT * FROM message_redactions").all(), [], "pre-v29 stores redacted nothing");
+  assert.deepEqual(current.db.prepare("SELECT * FROM message_redactions").all(), [], "pre-v35 stores redacted nothing");
   for (const [table, expected] of Object.entries(rows)) assert.deepEqual(current.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all(), expected, `${table} is byte-identical`);
   const audit = auditRecovery(current);
-  assert.equal(audit.schemaVersion, 29);
+  assert.equal(audit.schemaVersion, 35);
   const catalog = () => current.db.prepare("SELECT name,sql FROM sqlite_master ORDER BY name").all();
   const schema = catalog();
-  migrateMessageRedactionsV29(current);
+  migrateMessageRedactionsV35(current);
   assert.deepEqual(catalog(), schema, "a second run adds nothing");
   assert.deepEqual(auditRecovery(current), audit);
   verifyMessageRedactions(current);
   assert.throws(() => new OldStore(f.filename), /newer than this service/);
-  // The upgraded store redacts genuine pre-v29 text, and the old package's text is gone from it.
+  // The upgraded store redacts genuine pre-v35 text, and the old package's text is gone from it.
   const target = current.room("commons").state.messages.find(m => m.body === f.command.data.body);
   cmd(current, f.keys.owner, "commons", T.MESSAGE_REDACTED, { messageId: target.id });
   assert.equal(storedText(current).includes(f.command.data.body), false);
   assert.equal(current.db.prepare("SELECT count(*) AS n FROM message_redactions").get().n, 1);
-  assert.equal(auditRecovery(current).schemaVersion, 29);
+  assert.equal(auditRecovery(current).schemaVersion, 35);
 });

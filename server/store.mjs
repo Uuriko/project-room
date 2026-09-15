@@ -12,6 +12,7 @@ import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchem
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
 import { STORE_SCHEMA_VERSION, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
+import { migrateMessageRedactionsV35, verifyMessageRedactions, redactMessage, historyRedactions, insertRedactions } from "./message-redaction.mjs";
 import { ShareLinks, shareLinkSchema } from "./share-links.mjs";
 import { conflictingClaim } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
@@ -236,6 +237,7 @@ const shapes = {
   [T.MESSAGE_POSTED]: `messageId body workItemId replyToId toMemberId packetId basisRevision allowOlderBasis ${REPLY_FIELDS.join(" ")}`,
   [T.MESSAGE_EDITED]: "messageId body expectedMessageRevision",
   [T.MESSAGE_DELETED]: "messageId expectedMessageRevision reason",
+  [T.MESSAGE_REDACTED]: "messageId", // D6: the store adds bodySha256 from the log; owner or author
   [T.REPLY_REQUEST_CANCELLED]: "requestMessageId expectedRequestRevision reason",
   [T.MESSAGE_REACTION_SET]: "messageId reaction active",
   ...PIN_COMMAND_SHAPES,
@@ -357,6 +359,7 @@ export class RoomStore {
         // migrates, so verify it only when present.
         this.channelUpdates.verifySchema({ allowAbsent: true });
         verifyRoomLifecycle(this);
+        verifyMessageRedactions(this);
         this.moderation.verifySchema({ allowAbsent: true }); // E4 message reports: additive at v27 as well.
         return;
       } catch (error) { this.db.close(); throw error; }
@@ -428,6 +431,10 @@ export class RoomStore {
         throw new Error("Pre-v25 reply resolution history requires operator reconciliation");
       if (version < 27) this.migrateAgentIdentitiesV27();
       if (!this.db.prepare("SELECT 1 FROM pragma_table_info('rooms') WHERE name='archived_at'").get()) migrateRoomLifecycleV28(this);
+      // Message redaction (issue #6 D6): schema v35 adds the message_redactions
+      // table and backfills it from any message.redacted events; idempotent, so
+      // the fresh-database path above (which lands at v4) takes it too.
+      if (version < 35) migrateMessageRedactionsV35(this);
       // Agent invite codes are purely additive (no data migration, no fence
       // impact), so no schema version bump: IF NOT EXISTS is idempotent here
       // and the v0 block above covers fresh databases.
@@ -465,6 +472,7 @@ export class RoomStore {
       this.channelUpdates.verifySchema();
       this.channelUpdates.verify();
       verifyRoomLifecycle(this);
+        verifyMessageRedactions(this);
     }); } catch (error) { this.db.close(); throw error; }
   }
 
@@ -796,6 +804,7 @@ export class RoomStore {
       this.db.prepare("INSERT INTO rooms(id,sequence,projection,archived_at) VALUES(?,?,?,?)").run(state.room.id, events.length, JSON.stringify(compact(state)), archivedAtOf(state));
       const insert = this.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
       events.forEach((e, i) => insert.run(state.room.id, i + 1, e.id, JSON.stringify(e)));
+      insertRedactions(this, state.room.id, historyRedactions(events));
       return state.room.id;
     });
   }
@@ -1555,8 +1564,8 @@ export class RoomStore {
         if (!e || typeof e !== "object" || e.roomId !== roomId || !e.type || !e.actorId || !e.at || !e.id) fail(422, "invalid_import", `Line ${i + 1} is not a well-formed event`);
         return e;
       });
-      let state;
-      try { state = compact(events.reduce(applyEvent, emptyRoomState())); }
+      let state, redactions;
+      try { state = compact(events.reduce(applyEvent, emptyRoomState())); redactions = historyRedactions(events); }
       catch (error) { fail(422, "invalid_import", `Export does not replay: ${error.message}`); }
       if (new Set(events.map(e => e.id)).size !== events.length) fail(422, "invalid_import", "Import has duplicate event ids");
       // Dependent rows reference event ids/sequences; a history replacement
@@ -1570,9 +1579,11 @@ export class RoomStore {
       // history — a stale checkpoint would corrupt rebuildProjection, so
       // replace it with one taken from the imported state.
       this.db.prepare("DELETE FROM projection_checkpoints WHERE room_id=?").run(roomId);
+      this.db.prepare("DELETE FROM message_redactions WHERE room_id=?").run(roomId); // D6: rows follow the history they describe
       this.db.prepare("DELETE FROM events WHERE room_id=?").run(roomId);
       const insert = this.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
       events.forEach((e, i) => insert.run(roomId, i + 1, e.id, JSON.stringify(e)));
+      insertRedactions(this, roomId, redactions);
       this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(events.length, JSON.stringify(state), archivedAtOf(state), roomId);
       this.db.prepare("INSERT INTO projection_checkpoints(room_id,sequence,projection) VALUES(?,?,?)").run(roomId, events.length, JSON.stringify(state));
       return { imported: events.length, sequence: events.length };
@@ -1808,6 +1819,7 @@ export class RoomStore {
       if (command.causationId && !this.db.prepare("SELECT 1 FROM events WHERE room_id=? AND id=?").get(roomId, command.causationId)) fail(422, "invalid_cause", "Causation event must exist in this room");
       const room = this.room(roomId);
       refuseArchivedWrite(room.state);
+      if (command.type === T.MESSAGE_REDACTED) return redactMessage(this, roomId, auth, command, fingerprint, room); // D6: rewrites the target's log entries too
       const target = room.state.members[command.data.memberId];
       const endingAccess = command.type === T.MEMBER_ACCESS_CHANGED && target?.active === true && command.data.active === false
         && canonical(target.permissions) === canonical(command.data.permissions);

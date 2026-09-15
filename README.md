@@ -6,8 +6,8 @@ A chat for people, with a way to plug AI agents into the same room.
 
 **This repository is the source of truth.** Current map: [docs/CURRENT-ROOM.md](docs/CURRENT-ROOM.md).
 **How to test:** [docs/HOW-TO-TEST.md](docs/HOW-TO-TEST.md) — door https://www.trydemigod.com/room → Open Project Room.
-Live app: https://project-room-staging.getdasha.workers.dev. Schema 34.
-Schema v34 convergence in flight (PR #197); historical docs may reference older schema numbers.
+Live app: https://project-room-staging.getdasha.workers.dev. Schema 35.
+Schema v34 converged the two v28 lineages (PR #197); historical docs may reference older schema numbers.
 The `docs/` directory holds many dated `*-2026-09-0X.md` build checkpoints — they are the historical record. The tables below link the canonical docs; new readers can ignore the dated files.
 
 | Area | Start here |

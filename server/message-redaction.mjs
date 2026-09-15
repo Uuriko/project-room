@@ -13,7 +13,7 @@
 // when and the hash of the last body, which is what the recovery audit and
 // native text results compare from then on.
 //
-// Schema v29 adds `message_redactions`, one row per redacted message, so a
+// Schema v35 adds `message_redactions`, one row per redacted message, so a
 // restore or an operator can list the obligations without decoding the log;
 // verifyMessageRedactions runs on every open (writable and read-only) and
 // refuses a store where redacted text survives in the events, the projection
@@ -23,7 +23,7 @@ import { createHash } from "node:crypto";
 import { EVENT_TYPES as T, applyEvent, event, redactedBody, validId } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 
-export const MESSAGE_REDACTION_SCHEMA_VERSION = 29;
+export const MESSAGE_REDACTION_SCHEMA_VERSION = 35;
 export const messageRedactionSchema = `
   CREATE TABLE IF NOT EXISTS message_redactions (
     room_id TEXT NOT NULL REFERENCES rooms(id), message_id TEXT NOT NULL, event_id TEXT NOT NULL UNIQUE, sequence INTEGER NOT NULL,
@@ -40,9 +40,9 @@ const BODY_EVENTS_SQL = "SELECT sequence,id,body FROM events WHERE room_id=? AND
 const INSERT_ROW = "INSERT INTO message_redactions(room_id,message_id,event_id,sequence,body_sha256,redacted_at,redacted_by) VALUES(?,?,?,?,?,?,?)";
 
 // Idempotent: a re-run on a migrated store changes nothing. No message.redacted
-// event exists before v29, so the backfill matches no row; it is kept so the
+// event exists before v35, so the backfill matches no row; it is kept so the
 // table and the log agree by construction on every path through here.
-export function migrateMessageRedactionsV29(store) {
+export function migrateMessageRedactionsV35(store) {
   store.transaction(() => {
     store.db.exec(messageRedactionSchema);
     store.db.prepare(`INSERT OR IGNORE INTO message_redactions(room_id,message_id,event_id,sequence,body_sha256,redacted_at,redacted_by)
