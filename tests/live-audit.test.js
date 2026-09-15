@@ -20,7 +20,8 @@ test('liveAudit fails closed on ship:true or a mailbox Gmail scope', async () =>
     [GOOGLE_START_PATH]: new Response('', { status: 302, headers: { Location: `https://accounts.google.com/o/oauth2/v2/auth?client_id=1-abc.apps.googleusercontent.com&redirect_uri=${encodeURIComponent(LIVE_ORIGIN + GOOGLE_CALLBACK_PATH)}&scope=${encodeURIComponent(GOOGLE_SCOPES + ' https://www.googleapis.com/auth/gmail.readonly')}&code_challenge_method=S256` } }),
     '/privacy': new Response('Email is not the account key', { status: 200 }),
     '/api/ready': json(200, { status: 'ready' }),
-    '/': new Response('<html></html>', { status: 200 })
+    '/': new Response('<html></html>', { status: 200 }),
+    '/src/app.js': new Response('export {}', { status: 200 })
   };
   const result = await liveAudit({
     fetchImpl: async url => routes[new URL(url).pathname] || new Response('missing', { status: 404 })
@@ -43,7 +44,8 @@ test('liveAudit passes a correct unpublished Google host', async () => {
     [GOOGLE_START_PATH]: new Response('', { status: 302, headers: { Location: location } }),
     '/privacy': new Response('Email is not the account key. Sign-in does not read your Gmail inbox.', { status: 200 }),
     '/api/ready': json(200, { status: 'ready' }),
-    '/': new Response('<html>Project Room</html>', { status: 200 })
+    '/': new Response('<html>Project Room</html>', { status: 200 }),
+    '/src/app.js': new Response('export {}', { status: 200 })
   };
   const result = await liveAudit({
     fetchImpl: async url => routes[new URL(url).pathname] || new Response('missing', { status: 404 })

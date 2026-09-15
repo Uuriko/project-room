@@ -51,6 +51,17 @@ export async function liveAudit({ origin = LIVE_ORIGIN, fetchImpl = fetch } = {}
   note(home.res.status === 200, 'home', home.res.status);
   note(!/clerk\.browser\.js|@clerk\/clerk-js/.test(home.text), 'home_no_clerk_sdk', 'clerk sdk');
 
+  const app = await get('/src/app.js');
+  note(app.res.status === 200, 'app_js', app.res.status);
+  const browserImports = [...app.text.matchAll(/(?:from\s*|import\s*)["'](\.[^"']+)["']/g)].map(match => {
+    const relative = match[1].startsWith('./') ? match[1].slice(2) : match[1];
+    return '/src/' + relative.replace(/^\.\.\//, '');
+  });
+  for (const path of browserImports) {
+    const asset = await get(path);
+    note(asset.res.status === 200, 'app_import', `${path} ${asset.res.status}`);
+  }
+
   return {
     ok: failures.length === 0,
     origin,
