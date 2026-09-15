@@ -937,7 +937,9 @@ export class RoomStore {
   }
   accountRooms(token, binding, { after = null } = {}) {
     if (after !== null && !validId(after)) fail(422, "invalid_room", "Invalid room continuation");
-    return this.transaction(() => {
+    // Pure read: a write transaction here would fail on a read-only or
+    // write-locked database and count toward the readiness 503 threshold.
+    return this.readTransaction(() => {
       const auth = this.authenticateAccountSession(token, null, binding);
       const rows = this.db.prepare("SELECT room_id FROM member_accounts WHERE account_id=? AND room_id>? ORDER BY room_id LIMIT 51")
         .all(auth.account.id, after ?? "");

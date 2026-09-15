@@ -154,3 +154,43 @@ test("link creation retries preserve scope and guests cannot administer invitati
   assert.throws(() => f.store.shareLinks.list(guest.slot.token, "commons", accepted.session.sessionBinding), { code: "access_denied" });
   assert.throws(() => f.store.shareLinks.cancel(guest.slot.token, "commons", f.result.link.id, accepted.session.sessionBinding), { code: "access_denied" });
 });
+
+test("HTTP share-link administration refuses room bearer keys; room-key and account browser sessions still work", async t => {
+  const f = fixture(t), server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const request = (path, { method = "GET", headers = {}, data } = {}) => fetch(origin + path, { method,
+    headers: { Origin: origin, ...(data === undefined ? {} : { "Content-Type": "application/json" }), ...headers },
+    ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
+  const refused = async response => { assert.equal(response.status, 403); assert.equal((await response.json()).error.code, "access_denied"); };
+  const create = { requestId: randomUUID(), linkToken: randomBytes(32).toString("base64url"), expiresAt: Date.now() + 3600000, maxJoins: 1, expectedMemberRevision: 0 };
+  // The owner's room access key administers links at the store level, but the
+  // documented HTTP contract is the signed-in account session only.
+  const bearer = { Authorization: `Bearer ${f.ownerKey}` };
+  await refused(await request("/api/rooms/commons/share-links", { headers: bearer }));
+  await refused(await request("/api/rooms/commons/share-links", { method: "POST", headers: bearer, data: create }));
+  await refused(await request("/api/rooms/commons/share-links-cancel", { method: "POST", headers: bearer, data: { linkId: f.result.link.id } }));
+  // A room session token sent as a bearer credential is a bearer key too.
+  const roomSession = f.store.createSession(f.ownerKey);
+  await refused(await request("/api/rooms/commons/share-links", { headers: { Authorization: `Bearer ${roomSession.token}` } }));
+  const links = f.store.shareLinks.list(f.ownerKey, "commons", null).links;
+  assert.equal(links.length, 1, "nothing was created"); assert.equal(links[0].status, "active", "nothing was cancelled");
+  // The owner's room-key browser session (cookie + CSRF), which the Room app uses, still administers links.
+  const roomCookie = { Cookie: `room_session=${roomSession.token}`, "X-Session-Binding": roomSession.session.sessionBinding, "X-CSRF-Token": roomSession.session.csrf };
+  const roomListed = await request("/api/rooms/commons/share-links", { headers: roomCookie });
+  assert.equal(roomListed.status, 200); assert.equal((await roomListed.json()).links.length, 1);
+  const roomCreated = await request("/api/rooms/commons/share-links", { method: "POST", headers: roomCookie, data: create });
+  assert.equal(roomCreated.status, 201);
+  // So does the owner's signed-in account session (?auth=account).
+  const account = f.store.accountForMember("commons", "owner"), slot = f.store.createAccountSessionSlot();
+  const session = f.store.loginAccountSession(slot.token, f.store.issueAccountAccessKey(account.id), 0);
+  const cookie = { Cookie: `account_session=${slot.token}`, "X-Project-Room-Auth": "account", "X-Session-Binding": session.sessionBinding, "X-CSRF-Token": session.csrf };
+  const listed = await request("/api/rooms/commons/share-links", { headers: cookie });
+  assert.equal(listed.status, 200); assert.equal((await listed.json()).links.length, 2);
+  const cancelled = await request("/api/rooms/commons/share-links-cancel", { method: "POST", headers: cookie, data: { linkId: (await roomCreated.json()).link.id } });
+  assert.equal(cancelled.status, 200); assert.equal((await cancelled.json()).link.status, "cancelled");
+  const created = await request("/api/rooms/commons/share-links", { method: "POST", headers: cookie,
+    data: { ...create, requestId: randomUUID(), linkToken: randomBytes(32).toString("base64url") } });
+  assert.equal(created.status, 201);
+});
