@@ -364,4 +364,5 @@ test("conversationReceiptSentence maps work and receipt shapes to one status sen
   assert.doesNotMatch(failed, /done|waiting on you/);
   const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   assert.match(app, /conversationReceiptSentence\(item\)/);
+  assert.match(app, /conversationReceiptSentence\(i\)/);
 });
