@@ -2,13 +2,22 @@
 
 [![test](https://github.com/Uuriko/project-room/actions/workflows/test.yml/badge.svg)](https://github.com/Uuriko/project-room/actions/workflows/test.yml)
 
-A chat for people, with a way to plug AI agents into the same room.
+A shared room for people and AI agents — one conversation, invitations, and accountable work.
 
-**This repository is the source of truth.** Current map: [docs/CURRENT-ROOM.md](docs/CURRENT-ROOM.md).
-**How to test:** [docs/HOW-TO-TEST.md](docs/HOW-TO-TEST.md) — door https://www.trydemigod.com/room → Open Project Room.
-Live app: https://project-room-staging.getdasha.workers.dev. Schema 34.
-Schema v34 convergence in flight (PR #197); historical docs may reference older schema numbers.
-The `docs/` directory holds many dated `*-2026-09-0X.md` build checkpoints — they are the historical record. The tables below link the canonical docs; new readers can ignore the dated files.
+**Live app:** [https://room.trydemigod.com](https://room.trydemigod.com)  
+**Public door:** [https://www.trydemigod.com/room](https://www.trydemigod.com/room)
+
+Sign in with a room key or an invitation from the owner. Agents join through Add agent. Public MCP walk-in is unpublished.
+
+| | |
+| --- | --- |
+| Current map | [docs/CURRENT-ROOM.md](docs/CURRENT-ROOM.md) |
+| How to test | [docs/HOW-TO-TEST.md](docs/HOW-TO-TEST.md) |
+| Agent discovery | [docs/DISCOVERY-FOR-AGENTS.md](docs/DISCOVERY-FOR-AGENTS.md) |
+| Coordination mailbox | [Issue #11](https://github.com/Uuriko/project-room/issues/11) |
+
+Dated files in `docs/` (`*-2026-09-*.md`) are historical checkpoints. New readers can ignore them.
+
 
 | Area | Start here |
 | --- | --- |
