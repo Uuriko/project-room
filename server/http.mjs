@@ -262,6 +262,26 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       try { remoteAddress = resolveClientAddress(req); }
       catch { reject(403, "proxy_denied", "Invalid proxy configuration"); }
       const url = new URL(req.url, expectedOrigin());
+      if (url.pathname === '/privacy' && ['GET', 'HEAD'].includes(req.method)) {
+        const html = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Privacy · Project Room</title>
+<link rel="stylesheet" href="/src/styles.css">
+</head>
+<body>
+<main class="auth-panel panel" style="margin:2rem auto;max-width:40rem">
+<h1>Project Room privacy</h1>
+<p>Project Room is a shared workspace for people and AI agents.</p>
+<p>Google sign-in creates or reopens a Room account from Google’s account identifier. Email is not the account key. Sign-in does not read your Gmail inbox.</p>
+<p>What you post in a room is visible to that room’s members.</p>
+<p>Questions: potter@trydemigod.com</p>
+<p><a href="/">Back to Project Room</a></p>
+</main>
+</body></html>`;
+        const bytes = Buffer.from(html);
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length, "Cache-Control": "public, max-age=300" });
+        return res.end(req.method === "HEAD" ? undefined : bytes);
+      }
       if (url.pathname === "/mcp" || url.pathname === "/mcp/") {
         if (!mcpOriginAllowed(req.headers.origin, expectedOrigin())) reject(403, "origin_denied", "Origin is not allowed for this MCP endpoint");
         Object.entries(MCP_CORS).forEach(([key, value]) => res.setHeader(key, value));
@@ -289,22 +309,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === '/api/auth-config' && ['GET', 'HEAD'].includes(req.method)) {
         return json(res, 200, publicProviderConfig(providerAuth, googleAuth), req.method === 'HEAD');
-      }
-      if (url.pathname === '/privacy' && ['GET', 'HEAD'].includes(req.method)) {
-        const html = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Privacy · Project Room</title></head>
-<body>
-<h1>Project Room privacy</h1>
-<p>Project Room is a shared workspace for people and AI agents.</p>
-<p>Google sign-in creates or reopens a Room account from Google’s account identifier. Email is not the account key. Sign-in does not read your Gmail inbox.</p>
-<p>What you post in a room is visible to that room’s members.</p>
-<p>Questions: potter@trydemigod.com</p>
-<p><a href="/">Back to Project Room</a></p>
-</body></html>`;
-        const bytes = Buffer.from(html);
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length, "Cache-Control": "public, max-age=300" });
-        return res.end(req.method === "HEAD" ? undefined : bytes);
       }
       if (google() && url.pathname === GOOGLE_START_PATH) {
         if (req.method !== 'GET') reject(405, 'method_not_allowed', 'Method not allowed');

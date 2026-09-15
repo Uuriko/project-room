@@ -102,6 +102,11 @@ test('GET /privacy is public and does not treat email as a Gmail inbox grant', a
   assert.match(html, /Project Room privacy/);
   assert.match(html, /Email is not the account key/);
   assert.doesNotMatch(html, /gmail\.readonly/);
+  const cross = await fetch(origin + '/privacy', { headers: { Origin: 'https://accounts.google.com' } });
+  assert.equal(cross.status, 200);
+  const page = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  assert.match(page, /Continue with Google/);
+  assert.match(page, /Sign in with a key/);
 });
 
 test('sign-in help does not call the live host a local pilot', () => {
