@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="./src/styles.css">
   </head>
   <body>
+    <noscript><p class="form-hint">JavaScript is required to open Project Room.</p></noscript>
     <a id="skip-link" class="skip-link" href="#auth-title">Skip to content</a>
     <div class="app-shell">
       <header class="topbar">
@@ -32,8 +33,6 @@
       </div>
       <section id="auth-panel" class="auth-panel panel" aria-labelledby="auth-title" hidden>
         <h1 id="auth-title" class="welcome-wordmark" tabindex="-1">Project <span>Room</span></h1>
-        <button id="copy-agent-setup" class="button agent-setup-button" type="button">Copy agent setup <span aria-hidden="true">↗</span></button>
-        <p id="agent-setup-status" class="form-hint" role="status"></p>
         <div id="provider-join" hidden>
           <button id="provider-join-button" class="button primary" type="button">Continue with Google</button>
           <p id="provider-join-status" class="form-hint" role="status"></p>
@@ -62,6 +61,8 @@
         </details>
         </details>
         <p id="auth-error" class="status form-status" role="alert"></p>
+        <button id="copy-agent-setup" class="button agent-setup-button" type="button">Copy agent setup <span aria-hidden="true">↗</span></button>
+        <p id="agent-setup-status" class="form-hint" role="status"></p>
       </section>
 
       <dialog id="project-help" class="project-help" aria-labelledby="project-help-title">

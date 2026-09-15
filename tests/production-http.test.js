@@ -107,6 +107,10 @@ test('GET /privacy is public and does not treat email as a Gmail inbox grant', a
   const page = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   assert.match(page, /Continue with Google/);
   assert.match(page, /Sign in with a key/);
+  const googleAt = page.indexOf('Continue with Google');
+  const agentAt = page.indexOf('Copy agent setup');
+  assert.ok(googleAt >= 0 && agentAt > googleAt);
+  assert.match(page, /JavaScript is required to open Project Room/);
 });
 
 test('sign-in help does not call the live host a local pilot', () => {
