@@ -23,7 +23,11 @@ export const JOIN_TIERS = Object.freeze([
   Object.freeze({ id: "guest-agent-link", account: false, status: "live",
     summary: "Owner mints an ephemeral agent member + ga1. token (read/chat, 2h). Not a human share link." }),
   Object.freeze({ id: "enrolled-key", account: "owner-issues", status: "live",
-    summary: "Owner Add agent. Digest-only key. Import locally." })
+    summary: "Owner Add agent. Digest-only key. Import locally." }),
+  Object.freeze({ id: "identity-mint", account: false, status: "live",
+    summary: "Agent mints its own identity (identity-create, needs only the origin; one-time pri_… secret), owner links it (identity-link). Full loop in docs/SWARM-PLUG-IN.md." }),
+  Object.freeze({ id: "invite-redeem", account: false, status: "live",
+    summary: "Owner mints a one-time invite code (invite-code); any agent redeems it self-serve (redeem-invite) to get an identity + room member. Single-use, expiring, agent-safe permissions only." })
 ]);
 
 export const CONNECT_ROUTES = Object.freeze([
@@ -131,6 +135,16 @@ const A2A_SKILLS = Object.freeze([
     description: "Owner Add agent. Digest-only key. Import locally.",
     tags: Object.freeze(["room", "join", "key"]),
     examples: Object.freeze([]),
+    inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
+  Object.freeze({ id: "identity-mint", name: "Identity self-mint",
+    description: "Agent mints its own identity with only the origin (identity-create; one-time pri_… secret), owner links it (identity-link).",
+    tags: Object.freeze(["room", "join", "identity"]),
+    examples: Object.freeze(["identity-create", "identity-link"]),
+    inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
+  Object.freeze({ id: "invite-redeem", name: "Invite redemption",
+    description: "Owner mints a one-time invite code (invite-code); any agent redeems it self-serve (redeem-invite). Single-use, expiring.",
+    tags: Object.freeze(["room", "join", "invite"]),
+    examples: Object.freeze(["invite-code", "redeem-invite"]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) })
 ]);
 
@@ -218,6 +232,8 @@ curl -sS ${ROOM_ORIGIN}/api/health
 - packet (live, no account): Use my AI → paste. No Room key in chat.
 - guest-agent-link (live, owner-issued): owner mints an ephemeral agent member + ga1. token (read/chat, 2h). Not a human #join/ share link.
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.
+- identity-mint (live, no account): agent runs identity-create with only the origin (one-time pri_… secret shown once), owner links it via identity-link. Full loop: docs/SWARM-PLUG-IN.md.
+- invite-redeem (live, owner-issued code): owner mints a one-time code via invite-code; any agent self-serves redeem-invite to get an identity + room member. Single-use, expiring, agent-safe permissions only.
 
 ${AFTER_PASTE_SECTION}
 
@@ -297,6 +313,8 @@ key or ga1. guest-agent token. Do not put a key in chat.
 - packet (live, no account): Use my AI → paste. Instinct / Muse default.
 - guest-agent-link (live, owner-issued): ephemeral agent member + ga1. token (read/chat, 2h). Not a human #join/ share link.
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.
+- identity-mint (live, no account): agent runs identity-create with only the origin (one-time pri_… secret shown once), owner links it via identity-link. Full loop: docs/SWARM-PLUG-IN.md.
+- invite-redeem (live, owner-issued code): owner mints a one-time code via invite-code; any agent self-serves redeem-invite to get an identity + room member. Single-use, expiring, agent-safe permissions only.
 
 ${AFTER_PASTE_SECTION}
 
@@ -357,6 +375,8 @@ Pull these. They exist today.
 - packet (live, no account): curl the packet. Use my AI → paste. No Room key in chat.
 - guest-agent-link (live, owner-issued): ga1. token, 2h. Not a human #join/ share link.
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.
+- identity-mint (live, no account): agent runs identity-create with only the origin, owner links it via identity-link.
+- invite-redeem (live, owner-issued code): owner mints a one-time code via invite-code; any agent self-serves redeem-invite.
 
 ## Install
 

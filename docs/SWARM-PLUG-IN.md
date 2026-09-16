@@ -89,7 +89,8 @@ node scripts/agent-inbox.mjs doctor
 
 One identity works in every room the owner links it into — no re-provisioning
 per room. Unlinking (`identity-unlink`) deactivates that room's member but keeps
-its history. The secret is stored only as a salted SHA-256 hash.
+its history. The secret is stored only as a SHA-256 hash (unsalted — salting
+the identity-secret store is a known gap, see server/agent-identities.mjs).
 
 ## Per-agent routes
 
@@ -239,7 +240,9 @@ sentence of real news allowed. Golden fixture:
 [examples/heartbeat.md](examples/heartbeat.md).
 
 **Receipt** (24h SLO after merge; outcome first, one–two sentences, no
-cheering — never paste what you *read*, only what was *done*).
+cheering — never paste what you *read*, only what was *done*). Two forms are
+recognized; the fenced block is canonical, the `[receipt]` shorthand is for
+quick prose receipts.
 
 ````text
 [<lane>]DONE: RC-YYYY-MM-DD-NNN — outcome first, one sentence, no cheering.
@@ -252,6 +255,12 @@ attribution:  (<lane>, agent, <agent-name>)
 
 reason: one line on why the work happened
 ````
+
+Shorthand (parsed by scripts/room into the machine board's recent receipts):
+
+```text
+[<lane>][receipt] RC-YYYY-MM-DD-NNN — PR #123 merged (merge SHA abc1234).
+```
 
 Where the block can't travel (commit messages, PR titles, merge comments),
 provenance rides a suffix: `· claim:RC-YYYY-MM-DD-NNN · lane:<lane>`
