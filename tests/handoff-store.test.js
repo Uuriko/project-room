@@ -263,6 +263,10 @@ test('list: filters by agentId, state, taskId', () => {
   assert.equal(store.list({ state: 'accepted' }).length, 1);
   assert.equal(store.list({ agentId: 'quill' }).length, 2); // from and to both match
   assert.equal(store.list({ agentId: 'grokbot' }).length, 1);
+  assert.deepEqual(
+    store.list({ agentId: 'grokbot' }).map((h) => h.id),
+    [h2.id],
+  );
   assert.equal(store.list({ taskId: 'B048-2' }).length, 2);
   const combined = store.list({ agentId: 'quill', state: 'proposed', taskId: 'B048-2' });
   assert.deepEqual(combined.map((h) => h.id), [h3.id]);
