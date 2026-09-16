@@ -69,7 +69,7 @@ optional.push("server/channel-adapters/telegram-config.mjs", "server/channel-ada
 optional.push("server/pins.mjs");
 optional.push("server/notifications.mjs");
 optional.push("server/spend-allowance.mjs");
-optional.push("src/growth-emit.js", "src/growth-events.js", "src/growth-collector.js", "src/growth-mentions.js");
+optional.push("src/growth-emit.js", "src/growth-events.js", "src/growth-collector.js", "src/growth-mentions.js", "src/growth-fanout.js");
 const allowed = new Set([...required, ...optional]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 const check = condition => { if (!condition) throw new Error("Runtime package does not match its exact allowlisted contract"); };
