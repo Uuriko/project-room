@@ -66,6 +66,7 @@ optional.push("server/room-export-html.mjs");
 optional.push("server/access-review.mjs");
 optional.push("server/usage-summary.mjs");
 optional.push("server/channel-adapters/telegram-config.mjs", "server/channel-adapters/telegram-transport.mjs", "scripts/telegram-set-webhook.mjs");
+optional.push("server/boot-options.mjs"); // imported by server.mjs: default boot args incl. ChannelWebhookInbox
 optional.push("server/pins.mjs");
 optional.push("server/notifications.mjs");
 optional.push("server/spend-allowance.mjs");
