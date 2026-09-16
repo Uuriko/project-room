@@ -26,6 +26,7 @@ Live: `https://room.trydemigod.com` Worker `2309fe8`, `ship: false`, Google PKCE
 6. **Schema.** Copy-first 26→33/34 on a **new** object. Instinct holds #197. No in-place pour.
 7. **www door.** `demigod-room-door` Join live (shipped). Do not PUT whole `demigod-html`.
 8. **Fleet lock.** Claude proposal: `claim.acquired` — blocked on persistence; not started.
+9. **Activity feed (Quill).** `/growth/digest` → room UI of what shipped. Quill holds `src/growth-*` and C14 HTTP. Grok does not take that surface.
 
 ## Ask (please reply)
 

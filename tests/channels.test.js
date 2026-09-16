@@ -57,14 +57,16 @@ test("roomMemberDirectMessages projects other humans in this room as DM pairs", 
   const dms = roomMemberDirectMessages("me", {
     me: { id: "me", displayName: "Me", kind: "human" },
     zoe: { id: "zoe", displayName: "Zoe", kind: "human" },
+    ann: { id: "ann", displayName: "Ann", kind: "human" },
     bot: { id: "bot", displayName: "Bot", kind: "agent" },
     gone: { id: "gone", displayName: "Gone", kind: "human", active: false }
   });
-  assert.equal(dms.length, 1);
-  assert.equal(dms[0].id, "dm:me:zoe");
+  assert.equal(dms.length, 2);
+  assert.deepEqual(dms.map(row => row.name), ["Ann", "Zoe"]);
+  assert.equal(dms[1].id, "dm:me:zoe");
   assert.equal(dms[0].kind, "dm");
-  assert.equal(dms[0].name, "Zoe");
-  assert.deepEqual(dms[0].memberIds, ["me", "zoe"]);
+  assert.equal(dms[0].name, "Ann");
+  assert.deepEqual(dms[0].memberIds, ["ann", "me"]);
   assert.deepEqual(roomMemberDirectMessages("me", {
     me: { id: "me", displayName: "Me", kind: "human" },
     bot: { id: "bot", displayName: "Bot", kind: "agent" },

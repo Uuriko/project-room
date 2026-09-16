@@ -61,7 +61,8 @@ export function roomMemberDirectMessages(viewerId, members) {
       const pair = directConversation(viewer, member.id);
       const name = typeof member.displayName === "string" && member.displayName.trim() ? member.displayName.trim() : member.id;
       return Object.freeze({ ...pair, name });
-    });
+    })
+    .sort((left, right) => left.name.localeCompare(right.name));
 }
 
 export function parseChannelSearch(query) {
