@@ -8,6 +8,8 @@ import { createServer } from "node:http";
 import { maintenanceEnabled, maintenanceReply } from "./server/maintenance.mjs";
 import { growthCollector } from "./src/growth-emit.js";
 import { loadFromFile, saveToFile } from "./src/growth-persistence.js";
+import { createWatcher } from "./src/growth-watch.js";
+import { createScheduler, defaultGrowthRules, DEFAULT_INTERVAL_MS } from "./src/growth-scheduler.js";
 
 const { host, port, origin, filename, production, streamInterval } = deploymentConfig();
 const paused = maintenanceEnabled(process.env.ROOM_MAINTENANCE);
@@ -48,12 +50,39 @@ if (!paused) {
     console.warn(`[growth] snapshot restore skipped: ${error?.message ?? error}`);
   }
 }
-server.listen(port, host, () => console.log(`Project Room ${paused ? "paused" : production ? "invite-only pilot" : "local pilot"}: ${origin}`));
+let growthScheduler = null;
+let growthIntervalMs = 0;
+server.listen(port, host, () => {
+  console.log(`Project Room ${paused ? "paused" : production ? "invite-only pilot" : "local pilot"}: ${origin}`);
+  // C13 readiness note: the listen line above must stay the first stdout write,
+  // because packaging tests treat first stdout data as "server ready".
+  if (!paused) console.log(growthScheduler && growthScheduler.isRunning()
+    ? `[growth] scheduler started (tick every ${growthIntervalMs}ms)`
+    : "[growth] scheduler disabled");
+});
+// Track C C13 — growth scheduler. Drives the C12 watcher on a fixed
+// cadence and logs triggered alert hits (no delivery anywhere). Any
+// failure here only costs alert logging, never boot or shutdown.
+if (!paused) {
+  try {
+    const growthWatcher = createWatcher({ collector: growthCollector, rules: defaultGrowthRules() });
+    const envInterval = process.env.GROWTH_WATCH_INTERVAL_MS;
+    const intervalMs = envInterval === undefined || envInterval === "" ? DEFAULT_INTERVAL_MS : Number(envInterval);
+    growthIntervalMs = intervalMs;
+    growthScheduler = createScheduler({ watcher: growthWatcher, intervalMs });
+    growthScheduler.start();
+  } catch (error) {
+    growthScheduler = null;
+    console.warn(`[growth] scheduler disabled: ${error?.message ?? error}`);
+  }
+}
 let closing = false;
 function close() {
   if (closing) return;
   closing = true;
   if (!paused) {
+    try { growthScheduler?.stop(); }
+    catch (error) { console.warn(`[growth] scheduler stop failed: ${error?.message ?? error}`); }
     try { saveToFile(growthSnapshotPath, growthCollector); }
     catch (error) { console.warn(`[growth] snapshot write failed: ${error?.message ?? error}`); }
   }
