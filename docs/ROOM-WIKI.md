@@ -2,10 +2,24 @@
 
 A WikiSkill-style experience compiler for the Project Room agent swarm.
 
-**The pattern.** Agents run tasks, preserve what happened as raw entries here,
-consolidate recurring failures and successful strategies, then propose *one
-atomic procedure update at a time* (see `docs/ROOM-PROCEDURES.md`). Validated
-updates are kept; rejected ones are rolled back.
+**Lineage.** This design follows WikiSkill (arXiv 2608.27454, Google Research):
+raw execution traces → persistent wiki → atomic skill updates, validated before
+keeping, with the wiki itself append-only. Validation gates take after GEPA's
+outperform-parent rule (arXiv 2507.19457): a procedure change must prove itself
+against what it replaces. The closest open-source analog is srlabs/skillforge
+(git-backed `skills/` + `wiki/` + immutable `raw/`, one skill change per
+iteration). We keep **three planes**: immutable raw traces
+(`docs/ROOM-TRACES.jsonl`, one line per merged slice), the distilled wiki (this
+file), and the validated procedures (`docs/ROOM-PROCEDURES.md`).
+
+**Two roles.**
+
+- **Wiki Maintainer** — runs at merge time: reads the trace and the raw
+  handoff/builder reports for the merged slice, distills *one* wiki entry.
+- **Skill Proposer** — turns recurring wiki patterns into procedure PRs.
+
+In this room the merging agent plays both roles, but the steps stay separate:
+never write a procedure change directly from a single trace.
 
 **The rule that makes it work: this file is append-only.**
 

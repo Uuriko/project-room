@@ -9,6 +9,12 @@ against the wiki. They change the WikiSkill way:
   proves wrong in practice, revert it *and* append a wiki entry recording why.
 - **The wiki is the source of truth.** Procedures summarize it; they never
   override it.
+- **Recurrence rule.** A wiki lesson promotes into a procedure only after
+  recurring across at least two independent slices (anecdote → rule).
+  Single-slice lessons stay in the wiki until they recur.
+- **Info barrier.** Worker/builder agents are briefed with *this procedures
+  file only* — they never need the full wiki. Knowledge must be compilable
+  into instructions; the wiki is maintainer-read.
 
 ---
 
