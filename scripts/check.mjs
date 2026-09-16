@@ -44,5 +44,8 @@ if (schema.status !== 0) process.exit(schema.status || 1);
 // is named in docs/ROUTE-AUTH-TABLE.md and docs/INVITE-ONLY-CHECKLIST.md §1.
 const openRoutes = spawnSync(process.execPath, ["scripts/open-routes.mjs", "--check"], { stdio: "inherit" });
 if (openRoutes.status !== 0) process.exit(openRoutes.status || 1);
+// Room Wiki gate (D2): the experience-compiler planes stay schema-valid and ordered.
+const wiki = spawnSync(process.execPath, ["scripts/check-wiki.mjs"], { stdio: "inherit" });
+if (wiki.status !== 0) process.exit(wiki.status || 1);
 const result = spawnSync(process.execPath, ["--test"], { stdio: "inherit" });
 process.exit(result.status ?? 1);
