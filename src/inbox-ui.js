@@ -103,7 +103,8 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     api.reset(); owner = null; epoch++; active = false; browsing = false; selected = null; rows = []; sharing = null; sharingBusy = false;
     drafts.clear(); positions.clear(); retryShare = null; if (!preservePending) persistShare();
     connectionEpoch++; connectionNotes.clear(); connectionRecords.clear(); $("#inbox-connections").hidden = true; $("#inbox-connections").replaceChildren();
-    filters = { channel: "all", connection: "all", grouped: true }; $("#inbox-filters").hidden = true; $("#inbox-group-toggle").checked = true;
+    filters = { channel: "all", connection: "all", grouped: true, unreadOnly: false }; $("#inbox-filters").hidden = true; $("#inbox-group-toggle").checked = true;
+    const unreadToggle = $("#inbox-unread-toggle"); if (unreadToggle) unreadToggle.checked = false;
     for (const selector of ["#inbox-filter-channel", "#inbox-filter-connection"]) { $(selector).replaceChildren(); $(selector).value = ""; }
     $("#inbox-connection-form").reset(); $("#inbox-add-connection").open = false; $("#inbox-add-connection").hidden = true; text("#inbox-connection-form-status", ""); text("#inbox-attention-count", "");
     $("#workspace-nav").hidden = true; $("#inbox-panel").hidden = true; $("#inbox-share-dialog").close();
@@ -136,10 +137,11 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   const connectionName = id => { const c = connectionRecords.get(id)?.connection; return c ? (c.identity.displayName || c.identity.handle || c.externalId) : null; };
   // One list across channels. Filters narrow by channel or connection; grouping
   // (the default) keeps one section per connection, off gives one flat list.
-  let filters = { channel: "all", connection: "all", grouped: true };
+  let filters = { channel: "all", connection: "all", grouped: true, unreadOnly: false };
   const rowChannel = source => source.connection?.channel ?? "sample", rowConnection = source => source.connection?.id ?? "sample";
   const visibleRows = () => rows.filter(source => (filters.channel === "all" || rowChannel(source) === filters.channel)
-    && (filters.connection === "all" || rowConnection(source) === filters.connection));
+    && (filters.connection === "all" || rowConnection(source) === filters.connection)
+    && (!filters.unreadOnly || !source.readAt));
   function renderFilters() {
     $("#inbox-filters").hidden = rows.length === 0;
     const option = (value, label) => { const o = document.createElement("option"); o.value = value; o.textContent = label; return o; };
@@ -159,6 +161,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   function row(source) {
     const button = document.createElement("button"); button.type = "button"; button.className = "inbox-row";
     button.dataset.sourceId = source.id; button.dataset.channel = rowChannel(source); button.dataset.needsYou = source.needsYou ? "true" : "false";
+    button.dataset.read = source.readAt ? "true" : "false";
     button.setAttribute("aria-current", selected === source.id ? "true" : "false");
     const meta = document.createElement("span"), sender = document.createElement("span"), badge = document.createElement("span"), subject = document.createElement("strong");
     meta.className = "inbox-row-meta"; sender.textContent = source.sender; badge.className = "inbox-channel-badge";
@@ -166,6 +169,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     meta.append(badge, sender);
     if (source.needsYou) { const mark = document.createElement("span"); mark.className = "inbox-needs-you"; mark.textContent = "Needs you"; meta.append(mark); }
     subject.textContent = source.subject || "(No subject)";
+    if (!source.readAt) subject.style.fontWeight = "700";
     button.append(meta, subject); button.addEventListener("click", () => open(source.id)); return button;
   }
   function renderList() {
@@ -193,6 +197,36 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   $("#inbox-filter-channel").addEventListener("change", () => { filters.channel = $("#inbox-filter-channel").value; if (owns()) renderList(); });
   $("#inbox-filter-connection").addEventListener("change", () => { filters.connection = $("#inbox-filter-connection").value; if (owns()) renderList(); });
   $("#inbox-group-toggle").addEventListener("change", () => { filters.grouped = $("#inbox-group-toggle").checked; if (owns()) renderList(); });
+  // The unread filter is built here so no static markup changes are needed.
+  if (!$("#inbox-unread-toggle")) {
+    const label = document.createElement("label"); label.className = "inbox-filter-toggle";
+    const box = document.createElement("input"); box.id = "inbox-unread-toggle"; box.type = "checkbox";
+    label.append(box, document.createTextNode(" Unread only"));
+    $("#inbox-filters").append(label);
+    box.addEventListener("change", () => { filters.unreadOnly = box.checked; if (owns()) renderList(); });
+  }
+  // Read/unread toggle next to "Ask room": read state is a marker, not a new
+  // source version, so drafts and their revision pins are unaffected.
+  const readToggle = document.createElement("button");
+  readToggle.type = "button"; readToggle.id = "inbox-read-toggle"; readToggle.className = "button secondary"; readToggle.hidden = true;
+  $("#inbox-ask").before(readToggle);
+  readToggle.addEventListener("click", async () => {
+    const sourceId = selected, d = drafts.get(sourceId);
+    if (!d || d.busy || !owns()) return;
+    const action = d.source.readAt ? "source.unread" : "source.read";
+    readToggle.disabled = true;
+    try {
+      const result = await api.apply({ action, requestId: crypto.randomUUID(), sourceId, expectedRevision: d.source.revision });
+      if (!owns() || drafts.get(sourceId) !== d) return;
+      d.source.readAt = result.receipt.readAt;
+      const listed = rows.find(r => r.id === sourceId);
+      if (listed) listed.readAt = result.receipt.readAt;
+      renderList();
+    } catch (error) {
+      if (!owns() || drafts.get(sourceId) !== d) return;
+      text("#inbox-draft-status", error.code === "stale_inbox_source" ? "Changed elsewhere. Refresh to retry." : "Couldn’t update read state. Try again.");
+    } finally { if (owns() && drafts.get(sourceId) === d) render(); }
+  });
   // Connection cards: one per configured connection, with the live Telegram facts
   // (binding state, webhook, last delivery, last send) and the import trigger.
   let connectionEpoch = 0; const connectionNotes = new Map(), connectionRecords = new Map(), removing = new Set();
@@ -363,6 +397,9 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     const d = drafts.get(selected); if (!d || !owns()) return;
     $("#inbox-reader").hidden = false;
     text("#inbox-subject", d.source.subject || "(No subject)");
+    readToggle.hidden = false;
+    readToggle.textContent = d.source.readAt ? "Mark unread" : "Mark read";
+    readToggle.disabled = d.busy || d.pending;
     const email = d.source.email, channel = d.source.channel, live = connectionRecords.get(rows.find(r => r.id === selected)?.connection?.id)?.live?.state === "configured";
     text("#inbox-source-label", email ? "Sample email · only you" : channel ? `${live ? "" : "Sample "}${channelLabel[channel.channel] ?? channel.channel} message · only you` : "Sample message · only you");
     $("#inbox-ask").hidden = Boolean(email || channel) && !d.source.capabilities.share && !pendingShare();

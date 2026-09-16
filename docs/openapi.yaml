@@ -1904,7 +1904,10 @@ paths:
         shareRequestId, resultVersion), `source.share` (sourceRevision,
         roomId, audienceVersion, paragraphs), `source.excerpt`
         (sourceRevision, roomId, audienceVersion, selection) and the
-        `send.*` transitions. `source.import`, the transport-only `send.*`
+        `send.*` transitions. `source.read` and `source.unread` take only
+        (expectedRevision) and record or clear the account's read marker:
+        the receipt carries `sourceRevision` and `readAt` (`null` when
+        unread) and no new source version is created. `source.import`, the transport-only `send.*`
         outcomes and the reply-driver `reply.*` transitions are refused here
         (403 channel_importer_required, inbox_transport_required,
         reply_driver_required). The same requestId returns the journaled

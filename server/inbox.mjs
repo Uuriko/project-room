@@ -78,12 +78,24 @@ export const inboxSchema = `
   CREATE TRIGGER private_inbox_commands_no_update BEFORE UPDATE ON private_inbox_commands BEGIN SELECT RAISE(ABORT,'inbox receipts are immutable'); END;
   CREATE TRIGGER private_inbox_commands_no_delete BEFORE DELETE ON private_inbox_commands BEGIN SELECT RAISE(ABORT,'inbox receipts are retained'); END;
 `;
+// Per-source read markers (readAt timestamp; no row means unread). Purely
+// additive: reads ride the existing inbox command journal, so the sources
+// and versions tables — and their revision lineage — stay untouched.
+export const inboxReadSchema = `
+  CREATE TABLE IF NOT EXISTS private_inbox_reads (
+    account_id TEXT NOT NULL, source_id TEXT NOT NULL, read_at INTEGER NOT NULL CHECK(read_at>0),
+    PRIMARY KEY(account_id,source_id),
+    FOREIGN KEY(account_id,source_id) REFERENCES private_inbox_sources(account_id,id)
+  );
+`;
 function validate(request) {
   if (isReplyAttempt(request)) return validateReplyAttempt(request);
   if (isSend(request)) return validateSend(request);
   const common = ["requestId", "action", "sourceId"], fields = {
     "source.save": [...common, "expectedRevision", "data"],
     "source.import": [...common, "expectedRevision", "data"],
+    "source.read": [...common, "expectedRevision"],
+    "source.unread": [...common, "expectedRevision"],
     "draft.save": [...common, "expectedRevision", "sourceRevision", "body"],
     "draft.adopt": [...common, "expectedRevision", "sourceRevision", "roomId", "workItemId", "shareRequestId", "resultVersion"],
     "source.share": [...common, "sourceRevision", "roomId", "audienceVersion", "paragraphs"],
@@ -92,7 +104,7 @@ function validate(request) {
   if (!fields || !exact(request, fields) || !validId(request.requestId) || !validId(request.sourceId))
     fail(422, "invalid_inbox_request", "Supply an exact inbox operation and stable request ID.");
   if (!isShare(request) && !revision(request.expectedRevision)) fail(422, "invalid_inbox_request", "Current revision required.");
-  if (!["source.save", "source.import"].includes(request.action) && (!revision(request.sourceRevision) || !request.sourceRevision)) fail(422, "invalid_inbox_request", "Source revision required.");
+  if (!["source.save", "source.import", "source.read", "source.unread"].includes(request.action) && (!revision(request.sourceRevision) || !request.sourceRevision)) fail(422, "invalid_inbox_request", "Source revision required.");
   if (request.action === "source.import") {
     if (!exact(request.data, ["adapter", "envelope"]) || !channels.includes(request.data.adapter)) fail(422, "invalid_inbox_source", "Supply a qualified channel observation.");
     let envelope;
@@ -166,6 +178,12 @@ export class Inbox {
     if (!row) fail(404, "inbox_source_not_found", "Source version not found.");
     return JSON.parse(row.data_json);
   }
+  // Per-source read markers. A read-only open of a file written before the
+  // marker table existed sees no markers: everything reads unread.
+  readMarkers(accountId) {
+    if (!this.db.prepare("SELECT 1 FROM sqlite_master WHERE name='private_inbox_reads'").get()) return new Map();
+    return new Map(this.db.prepare("SELECT source_id,read_at FROM private_inbox_reads WHERE account_id=?").all(accountId).map(r => [r.source_id, r.read_at]));
+  }
   // Channel sources appear only for a client that negotiated a reading view.
   list(token, binding, { includeChannels = false, includeEmail = false } = {}) {
     return this.store.readTransaction(() => {
@@ -179,10 +197,12 @@ export class Inbox {
         return connections.get(profile.id);
       };
       const sentIds = include ? this.sentProviderIds(auth.account.id) : new Set();
+      const readAt = this.readMarkers(auth.account.id);
       const sources = this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? ORDER BY updated_at DESC,id").all(auth.account.id)
         .map(row => { const d = this.version(auth.account.id, row.id, row.revision);
           if (d.adapter !== "synthetic" && !include) return null;
           return { id: row.id, revision: row.revision, adapter: d.adapter, ...summary(d), updatedAt: row.updated_at,
+            readAt: readAt.get(row.id) ?? null,
             connection: d.adapter === "synthetic" ? null : connection(d.envelope.connection), needsYou: inboxNeedsYou(d, sentIds) }; }).filter(Boolean);
       return { contractVersion: 1, viewer: viewer(auth), sources };
     });
@@ -194,6 +214,7 @@ export class Inbox {
       const data = this.version(auth.account.id, row.id, row.revision);
       const source = emailView && data.adapter === "email" ? this.emailView(auth, row, data.envelope, excerptView)
         : emailView && data.adapter === "telegram" ? this.channelView(auth, row, data.envelope, excerptView) : { id: row.id, revision: row.revision, ...data };
+      source.readAt = this.readMarkers(auth.account.id).get(sourceId) ?? null;
       return { contractVersion: 1, viewer: viewer(auth), source,
         draft: draft ? { revision: draft.revision, sourceRevision: draft.source_revision, body: draft.body, updatedAt: draft.updated_at,
           origin: this.draftOrigin(auth.account.id, sourceId, draft.body, row.revision) } : null };
@@ -584,6 +605,19 @@ export class Inbox {
         this.db.prepare(`INSERT INTO private_inbox_sources VALUES(?,?,?,?,?) ON CONFLICT(account_id,id)
           DO UPDATE SET revision=excluded.revision,updated_at=excluded.updated_at`).run(accountId, sourceId, receipt.revision, now, now);
         this.db.prepare("INSERT INTO private_inbox_versions VALUES(?,?,?,?)").run(accountId, sourceId, receipt.revision, JSON.stringify(request.data));
+      } else if (["source.read", "source.unread"].includes(action)) {
+        // Read state is a marker, not a content version: the source revision
+        // never moves, only the marker's read_at does. expectedRevision is the
+        // source revision the caller saw, so a concurrent import races stale.
+        const source = this.source(accountId, sourceId);
+        if (source.revision !== request.expectedRevision) fail(409, "stale_inbox_source", "Source changed. Review the current version.");
+        Object.assign(receipt, { sourceRevision: source.revision, readAt: action === "source.read" ? now : null });
+        if (action === "source.read") {
+          this.db.prepare(`INSERT INTO private_inbox_reads(account_id,source_id,read_at) VALUES(?,?,?)
+            ON CONFLICT(account_id,source_id) DO UPDATE SET read_at=excluded.read_at`).run(accountId, sourceId, now);
+        } else {
+          this.db.prepare("DELETE FROM private_inbox_reads WHERE account_id=? AND source_id=?").run(accountId, sourceId);
+        }
       } else {
         const source = this.source(accountId, sourceId);
         if (source.revision !== request.sourceRevision) fail(409, "stale_inbox_source", "Source changed. Review the current version.");
@@ -617,7 +651,12 @@ export class Inbox {
       const name = /^CREATE (?:TABLE|TRIGGER) ([a-z_]+)/.exec(sql.trim())[1];
       require(normalize(this.db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(name)?.sql) === normalize(sql));
     }
-    const sources = new Map(), drafts = new Map(), historicalRooms = new Map(), outboxes = new Map(), replyBoxes = new Map(), updateBoxes = new Map(), dispatches = new Map(), replyReads = new Map(); let versions = 0;
+    // The read-marker table is purely additive (a read-only open of a file
+    // written before it existed sees no markers): verify its shape and rows
+    // only when it is present.
+    const readsSchema = this.db.prepare("SELECT sql FROM sqlite_master WHERE name='private_inbox_reads'").get()?.sql;
+    if (readsSchema !== undefined) require(normalize(readsSchema) === normalize(inboxReadSchema.replace("IF NOT EXISTS ", "")));
+    const sources = new Map(), drafts = new Map(), historicalRooms = new Map(), outboxes = new Map(), replyBoxes = new Map(), updateBoxes = new Map(), dispatches = new Map(), replyReads = new Map(), reads = new Map(); let versions = 0;
     for (const row of this.db.prepare("SELECT * FROM private_inbox_commands ORDER BY sequence").all()) {
       const request = JSON.parse(row.request_json), receipt = JSON.parse(row.receipt_json); validate(request);
       require(row.request_id === request.requestId && row.fingerprint === digest(request) && revision(row.auth_epoch) && Number.isSafeInteger(row.at));
@@ -689,6 +728,12 @@ export class Inbox {
         expected.revision = request.expectedRevision + 1;
         require(same(this.version(row.account_id, request.sourceId, expected.revision), request.data));
         sources.set(key, { account_id: row.account_id, id: request.sourceId, revision: expected.revision, created_at: prior?.created_at ?? row.at, updated_at: row.at }); versions++;
+      } else if (["source.read", "source.unread"].includes(request.action)) {
+        require(prior?.revision === request.expectedRevision);
+        Object.assign(expected, { sourceRevision: request.expectedRevision, readAt: request.action === "source.read" ? row.at : null });
+        const marker = canonical([row.account_id, request.sourceId]);
+        if (request.action === "source.read") reads.set(marker, { account_id: row.account_id, source_id: request.sourceId, read_at: row.at });
+        else reads.delete(marker);
       } else {
         require(prior?.revision === request.sourceRevision);
         if (request.action === "draft.save" || request.action === "draft.adopt") {
@@ -718,6 +763,7 @@ export class Inbox {
     require(same(rows("private_inbox_sources"), [...sources.values()].map(canonical).sort()));
     require(same(rows("private_inbox_drafts"), [...drafts.values()].map(canonical).sort()));
     require(this.db.prepare("SELECT count(*) n FROM private_inbox_versions").get().n === versions);
+    if (readsSchema !== undefined) require(same(rows("private_inbox_reads"), [...reads.values()].map(canonical).sort()));
     return { sources: sources.size, drafts: drafts.size, versions };
     });
   }

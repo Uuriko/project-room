@@ -17,7 +17,7 @@ const v27Tables = [...tables, "agent_identities", "identity_links"];
 // while the deployed lineage fenced agent_invite_codes + room_attachments and
 // later advanced to v33. v34 converges them without rewriting either history.
 const deployedV28Tables = [...v27Tables, "agent_invite_codes", "room_attachments"];
-const rebuiltAdditiveTables = ["agent_invite_codes", "wake_queue", "wake_queue_commands", "private_attention_prefs", "private_attention_commands", "pending_channel_updates", "wake_queue_pause", "message_reports"];
+const rebuiltAdditiveTables = ["agent_invite_codes", "wake_queue", "wake_queue_commands", "private_attention_prefs", "private_attention_commands", "pending_channel_updates", "wake_queue_pause", "message_reports", "private_inbox_reads"];
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);
 const tablesFor = version => version <= 27 ? ({ 6: v6Tables, 7: v7Tables, 8: v8Tables, 9: v14Tables, 10: v14Tables, 11: v14Tables, 12: v14Tables, 13: v14Tables, 14: v14Tables, 15: v17Tables, 16: v17Tables, 17: v17Tables, 18: tables, 19: tables, 20: tables, 21: tables, 22: tables, 23: tables, 24: tables, 25: tables, 26: tables, 27: v27Tables })[version]
   : version === 28 ? v27Tables : version <= 33 ? deployedV28Tables : applicationTables;
