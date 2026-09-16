@@ -852,8 +852,15 @@ cmd_rebuild() {
 }
 
 rebuild_commit_push() { # $1 = rebuilt file
-  local out="$1" rr start_branch
+  local out="$1" rr start_branch staged
   rr="$(repo_root)"
+  # Resolve relative --out against the original cwd, then snapshot outside the
+  # repo: the branch checkout below would clobber $out when it lives inside the
+  # working tree (e.g. --out ROOM-STATE.md run from the repo root), and cp
+  # source==dest aborts under set -e.
+  case "$out" in /*) ;; *) out="$PWD/$out" ;; esac
+  staged="$(mktemp)" || die "rebuild: mktemp failed"
+  cp "$out" "$staged" || die "rebuild: snapshot failed"
   start_branch="$(git -C "$rr" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   git -C "$rr" fetch origin main --quiet || die "rebuild: fetch origin/main failed"
   if git -C "$rr" show-ref --verify --quiet refs/remotes/origin/room-state; then
@@ -861,7 +868,8 @@ rebuild_commit_push() { # $1 = rebuilt file
   else
     git -C "$rr" checkout --quiet -B room-state origin/main
   fi
-  cp "$out" "$rr/ROOM-STATE.md"
+  cp "$staged" "$rr/ROOM-STATE.md"
+  rm -f "$staged"
   if git -C "$rr" status --porcelain -- ROOM-STATE.md | grep -q .; then
     git -C "$rr" add ROOM-STATE.md
     git -C "$rr" -c user.name="quill" -c user.email="quill@local" commit --quiet \
