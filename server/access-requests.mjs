@@ -13,8 +13,15 @@
 // store.mjs to apply, following the agent-identities.mjs pattern.
 
 import { randomUUID } from "node:crypto";
-import { ServiceError } from "./store.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
+
+// Local ServiceError (mirrors server/store.mjs). We avoid importing from
+// store.mjs here to break the circular dependency for the Workers bundle:
+// store.mjs imports this module, so this module cannot import from store.mjs
+// at the top level without esbuild failing on the cycle.
+class ServiceError extends Error {
+  constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
+}
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 // Minimal permission check (avoids importing src/events.js, which is not
