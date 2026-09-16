@@ -102,6 +102,10 @@ export async function liveAudit({ origin = LIVE_ORIGIN, door = ROOM_DOOR, fetchI
   note(originFull.res.status === 200, 'origin_full_status', originFull.res.status);
   note(originFull.text.includes(`origin ${origin}`), 'origin_full_origin', originFull.text.slice(0, 120));
   note(!/project-room-staging/.test(originFull.text), 'origin_full_not_staging', 'staging origin in /llms-full.txt');
+  const originKits = await get('/kits.txt');
+  note(originKits.res.status === 200, 'origin_kits_status', originKits.res.status);
+  note(originKits.text.includes(`origin ${origin}`), 'origin_kits_origin', originKits.text.slice(0, 120));
+  note(!/project-room-staging/.test(originKits.text), 'origin_kits_not_staging', 'staging origin in /kits.txt');
 
   const card = await get('/agent.json');
   note(card.res.status === 200, 'agent_json', card.res.status);
