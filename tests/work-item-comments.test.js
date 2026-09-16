@@ -24,3 +24,14 @@ test("malformed inputs are refused", () => {
   throwsCode(() => cm.add("wi-1", { authorId: "a", text: "" }), "invalid_comment");
   throwsCode(() => extractMentions(123), "invalid_comment");
 });
+test("add is deterministic when commentId/createdAt are supplied", () => {
+  const cm = createComments();
+  const input = { authorId: "ada", text: "hi", commentId: "c-42", createdAt: "2026-09-16T00:00:00.000Z" };
+  const a = cm.add("wi-1", input);
+  assert.equal(a.commentId, "c-42");
+  assert.equal(a.createdAt, "2026-09-16T00:00:00.000Z");
+  const b = cm.add("wi-1", { authorId: "ada", text: "hi" });
+  assert.ok(b.commentId.startsWith("c-"));
+  assert.equal(b.createdAt, null);
+  throwsCode(() => cm.add("wi-1", { authorId: "a", text: "x", createdAt: "" }), "invalid_comment");
+});
