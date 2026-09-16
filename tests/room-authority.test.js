@@ -109,3 +109,15 @@ for (const phase of ['after-identity', 'before-committed-read']) {
     });
   }
 }
+
+test('roomAuthority on a room with malformed projection fails 500 projection_corrupt, not an uncaught TypeError', t => {
+  const f = fixture(t);
+  // Simulate a corrupt projection: room row exists but json_extract finds no ownerId/members.
+  f.store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify({ room: {}, state: 'corrupt' }));
+  assert.throws(() => f.store.roomAuthority('commons'), error => {
+    assert.equal(error.status, 500);
+    assert.equal(error.code, 'projection_corrupt');
+    assert.ok(!(error instanceof TypeError), 'must not leak a raw TypeError');
+    return true;
+  });
+});

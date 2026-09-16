@@ -770,7 +770,10 @@ export class RoomStore {
     // intact without decoding conversation, work history or the Room brief in JS.
     const row = this.db.prepare("SELECT sequence,json_extract(projection,'$.room.ownerId','$.members') AS authority FROM rooms WHERE id=?").get(roomId);
     if (!row) fail(404, "room_not_found", "Room not found");
-    const [ownerId, members] = JSON.parse(row.authority);
+    const authority = JSON.parse(row.authority);
+    const [ownerId, members] = Array.isArray(authority) ? authority : [];
+    if (typeof ownerId !== "string" || !members || typeof members !== "object")
+      fail(500, "projection_corrupt", "Room projection is missing authority fields");
     return { sequence: row.sequence, ownerId, members };
   }
   rebuildProjection(roomId, through = null) {
