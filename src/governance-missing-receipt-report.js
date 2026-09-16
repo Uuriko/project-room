@@ -1,0 +1,1 @@
+export function buildGovernanceMissingReceiptReport({completedTaskIds,receipts}){let have=new Set(receipts.map(x=>x.taskId)),missing=[...new Set(completedTaskIds)].filter(x=>!have.has(x)).sort();return Object.freeze({kind:"governance-missing-receipt-report/v1",missing:Object.freeze(missing),complete:!missing.length})}
