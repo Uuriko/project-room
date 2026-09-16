@@ -170,6 +170,15 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
 
     def first_rc: ([capture("(?<t>RC-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+)")] | .[0] | .t) // null;
 
+    # prose receipt fields: [lane][receipt] A010-2 ... PR #392 ... Merge SHA: <hex>
+    def first_task: ([capture("(?<t>[A-Z]+[0-9]*-[0-9]+)")] | .[0] | .t) // null;
+    def first_pr:
+      (([capture("(?:PR|pull)[ \\t#:/]*#?(?<n>[0-9]+)")] | .[0] | .n)
+       // ([capture("project-room#(?<n>[0-9]+)")] | .[0] | .n)) // null;
+    def first_sha:
+      ([capture("(?<![A-Za-z0-9])[Mm]erge(?:d)?(?: SHA| commit)?[ \\t]*:[ \\t]*(?<s>[0-9a-f]{7,40})(?![A-Za-z0-9])")]
+       | .[0] | .s) // null;
+
     def parse_comment:
       (.body | gsub("\r"; "")) as $body
       | (.id) as $id | (.created_at) as $at
@@ -177,7 +186,7 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
       | (($first | capture("^\\[(?<lane>[A-Za-z0-9_-]+)\\](?<rest>[\\s\\S]*)$"))
          // {lane: null, rest: $first}) as $lp
       | ($lp.rest | gsub("^[ \t]+"; "")) as $rest
-      | (($rest | capture("^(?<p>\\[claim\\]|STATUS:|DONE:|HANDOFF:|RECLAIM)(?<tail>[\\s\\S]*)$"))
+      | (($rest | capture("^(?<p>\\[claim\\]|\\[receipt\\]|STATUS:|DONE:|HANDOFF:|RECLAIM)(?<tail>[\\s\\S]*)$"))
          // {p: null, tail: $rest}) as $pf
       | ($body | fence("claim")) as $fclaim
       | ($body | fence("receipt")) as $frcpt
@@ -185,6 +194,13 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
       | (if $pf.p == "[claim]" then
            if $fclaim then {kind:"claim", block:($fclaim|fields)}
            else {kind:"malformed", want:"room-claim"} end
+         elif $pf.p == "[receipt]" then
+           {kind:"receipt",
+            task:($pf.tail | first_task),
+            pr:($body | first_pr),
+            merged:($body | first_sha),
+            ref:($pf.tail | first_rc),
+            receipt:(if $frcpt then ($frcpt|fields) else null end)}
          elif $pf.p == "STATUS:" then
            (if ($pf.tail | test("^[ \t]*ACK[ \t]+RC-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+")) then
               {ack:true, ack_task:(($pf.tail | first_rc))}
@@ -269,7 +285,7 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
         else . end;
 
     (reduce .[] as $e (
-      {tasks:{}, log:[], illegal:[], refused:[], noticed:[], lanes:[]};
+      {tasks:{}, log:[], illegal:[], refused:[], noticed:[], lanes:[], prose_receipts:[]};
       ($e.id) as $cid | ($e.at) as $at
       | if $e.kind == "claim" then
           ($e.block["task-id"] // null) as $tid
@@ -369,6 +385,12 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
                             receipt:($e.receipt != null)}]
               end
             end
+        elif $e.kind == "receipt" then
+          .prose_receipts += [{task:($e.task // "unknown"), lane:$e.lane,
+                               pr:($e.pr // null),
+                               merged:(($e.receipt // {})["merged"] // $e.merged // "none"),
+                               at:$at, comment_id:$cid}]
+          | .log += [{id:$cid, at:$at, kind:"receipt", task_id:$e.task, ok:true}]
         elif $e.kind == "handoff" then
           ((($e.hblock // {})["task-id"] // null) // (($e.cblock // {})["task-id"] // null)) as $tid
           | if ($tid | not) then .log += [{id:$cid, at:$at, kind:"handoff", ok:false, errors:["no task-id"]}]
@@ -435,7 +457,8 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
     | {board:$board, generated_at:iso($now | tonumber),
        comments:$meta.comments, watermark:$meta.watermark,
        tasks:.tasks, illegal:.illegal, refused:.refused,
-       noticed:.noticed, lanes:.lanes, log:.log}
+       noticed:.noticed, lanes:.lanes, log:.log,
+       prose_receipts:(.prose_receipts // [])}
   '
 }
 
@@ -452,9 +475,9 @@ build_state() { # -> state JSON on stdout (live board)
 # jq: state -> ROOM-STATE.md (machine board)
 # ---------------------------------------------------------------------------
 
-render_md() { # $1=now_epoch $2=registry_json ; stdin: state JSON -> markdown
-  local now="$1" reg="$2"
-  jq -r --argjson now "$now" --arg board "$(board_addr)" --argjson reg "$reg" '
+render_md() { # $1=now_epoch $2=registry_json $3=watcher_state ; stdin: state JSON -> markdown
+  local now="$1" reg="$2" watcher="${3:-active}"
+  jq -r --argjson now "$now" --arg board "$(board_addr)" --argjson reg "$reg" --arg watcher "$watcher" '
     def iso($e): ($e | strftime("%Y-%m-%dT%H:%M:%SZ"));
     def epoch($s): (($s | fromdate) // 0);
     def is_live($s): (["submitted","working","suspended"] | index($s)) != null;
@@ -469,6 +492,7 @@ render_md() { # $1=now_epoch $2=registry_json ; stdin: state JSON -> markdown
     | ([$open_all[] | .lane] | map(select(. != null)) | unique) as $livelanes
     | ($reg | map(select(.lane as $l | ($livelanes | index($l)) | not))) as $unclaimed
     | ([.tasks[] | .task_id as $t | .receipts[] | {task_id:$t, merged:(.merged // "none"), comment_id}]
+       + [.prose_receipts[] | {task_id:.task, merged:(.merged // "none"), comment_id}]
        | sort_by(.comment_id) | reverse | .[0:10]) as $rcpts
     | ($open | .[0:25] | map(row(.))) as $orows
     | (($open | length) - 25) as $orest
@@ -498,7 +522,7 @@ render_md() { # $1=now_epoch $2=registry_json ; stdin: state JSON -> markdown
       (if ($rrows | length) == 0 then "(none)" else ($rrows | join("\n")) end),
       "",
       "## signals",
-      "board_comments=\(.comments) threshold=1500 rotation_due=\($rot) watcher=paused open_claims=\($open_all | length) watermark=\(.watermark)"]
+      "board_comments=\(.comments) threshold=1500 rotation_due=\($rot) watcher=\($watcher) open_claims=\($open_all | length) watermark=\(.watermark)"]
     | join("\n") + "\n"
   '
 }
@@ -843,7 +867,7 @@ cmd_rebuild() {
   st="$(build_state)"
   reg="$(registry_json)"
   now="$(date +%s)"
-  printf '%s' "$st" | render_md "$now" "$reg" > "$out.tmp" || die "rebuild: render failed"
+  printf '%s' "$st" | render_md "$now" "$reg" "${ROOM_WATCHER_STATE:-active}" > "$out.tmp" || die "rebuild: render failed"
   mv "$out.tmp" "$out"
   bytes="$(wc -c < "$out" | tr -d ' ')"
   printf 'room: wrote %s (%s bytes)\n' "$out" "$bytes"
