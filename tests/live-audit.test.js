@@ -9,7 +9,7 @@ function json(status, body, headers = {}) {
 
 const liveDoor = `<a class="open" href="${LIVE_ORIGIN}">Join</a>`;
 const stagingDoor = '<a class="open" href="https://project-room-staging.getdasha.workers.dev">Join</a>';
-const liveHome = '<html><button>Continue with Google</button><button>Copy agent setup</button><noscript>JavaScript is required to open Project Room.</noscript></html>';
+const liveHome = '<html><a id="skip-link" href="#auth-title">Skip</a><button>Continue with Google</button><button>Copy agent setup</button><noscript>JavaScript is required to open Project Room.</noscript></html>';
 
 function header(init, name) {
   const headers = init?.headers;
@@ -209,4 +209,26 @@ test('liveAudit fails closed when fetch throws or times out', async () => {
   assert.equal(result.ok, false);
   assert.ok(result.failures.some(item => item.code === 'fetch_unreachable'));
   assert.ok(result.failures.some(item => item.code === 'ship'));
+});
+
+test('liveAudit fails closed when skip-link does not target #auth-title', async () => {
+  const location = 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({
+    client_id: '380132515029-abc.apps.googleusercontent.com',
+    redirect_uri: LIVE_ORIGIN + GOOGLE_CALLBACK_PATH,
+    scope: GOOGLE_SCOPES,
+    code_challenge_method: 'S256'
+  }).toString();
+  const routes = {
+    '/api/version': json(200, { status: 'ok', mode: 'cloudflare-production', sourceRevision: 'b'.repeat(40) }),
+    '/api/open': json(200, { ship: false, persistence: 'none' }),
+    '/api/auth-config': json(200, { provider: 'google', authorizationPath: GOOGLE_START_PATH }),
+    [GOOGLE_START_PATH]: new Response('', { status: 302, headers: { Location: location } }),
+    '/privacy': new Response('Email is not the account key', { status: 200 }),
+    '/api/ready': json(200, { status: 'ready' }),
+    '/': new Response('<html><a id="skip-link" href="#access-key">Skip</a><button>Continue with Google</button><noscript>JavaScript is required to open Project Room.</noscript></html>', { status: 200 }),
+    '/src/app.js': new Response('export {}', { status: 200 })
+  };
+  const result = await liveAudit({ fetchImpl: fetchRoutes(routes) });
+  assert.equal(result.ok, false);
+  assert.ok(result.failures.some(item => item.code === 'home_skip_auth_title'));
 });

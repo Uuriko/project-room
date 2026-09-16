@@ -68,6 +68,7 @@ export async function liveAudit({ origin = LIVE_ORIGIN, door = ROOM_DOOR, fetchI
   const agentAt = home.text.indexOf('Copy agent setup');
   note(googleAt >= 0 && (agentAt === -1 || agentAt > googleAt), 'home_google_before_agent', 'Copy agent setup precedes Google');
   note(home.text.includes('JavaScript is required to open Project Room'), 'home_noscript', 'missing noscript');
+  note(/id="skip-link"[^>]*href="#auth-title"|href="#auth-title"[^>]*id="skip-link"/.test(home.text), 'home_skip_auth_title', 'skip-link missing #auth-title');
 
   const app = await get('/src/app.js');
   note(app.res.status === 200, 'app_js', app.res.status);
