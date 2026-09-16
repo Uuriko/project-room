@@ -37,7 +37,8 @@ const growthHttp = paused ? null : createGrowthHttp({
     ? { running: growthScheduler.isRunning(), tickCount: growthScheduler.getTickCount(), intervalMs: growthIntervalMs }
     : { running: false, tickCount: 0, intervalMs: growthIntervalMs }
 });
-const server = paused ? createServer((req, res) => {  try {
+const server = paused ? createServer((req, res) => {
+  try {
     const url = new URL(req.url, origin);
     if (url.origin !== origin || req.headers.host !== new URL(origin).host) {
       res.writeHead(403, { "Cache-Control": "no-store" }); res.end(); return;
