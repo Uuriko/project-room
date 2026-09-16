@@ -65,6 +65,11 @@ function electionError(code, message, detail) {
   return err;
 }
 
+/** Next fencing token after the previous lease record: strictly monotonic. */
+function nextToken(record) {
+  return (record?.token ?? 0) + 1;
+}
+
 /** Minimal in-memory lease store: { get(), set(record), del() }. */
 export function createMemoryLockStore() {
   let record = null;
@@ -202,7 +207,7 @@ export function createElection(deps = {}) {
 
       // No lease, or the lease expired: take it. The fencing token climbs
       // monotonically from whatever the previous record carried.
-      const token = (record?.token ?? 0) + 1;
+      const token = nextToken(record);
       const next = {
         holder: instanceId,
         token,
