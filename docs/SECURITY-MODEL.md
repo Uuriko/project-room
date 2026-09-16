@@ -30,7 +30,9 @@ authentication, authorization, and data protection.
 ## Data protection
 
 - Secrets never in the repo. Use `wrangler secret put` or the dashboard.
-- PII minimized. Message redaction available (see PR #188 history).
+- PII minimized. Secret redaction is built into data export (`src/data-export.mjs`
+  redacts secret-shaped values and PEM private keys at any depth); message
+  redaction in the room UI is not yet implemented.
 - All errors use the shape in `docs/ERROR-TAXONOMY.md` — no stack traces or
   secrets leak through error responses.
 

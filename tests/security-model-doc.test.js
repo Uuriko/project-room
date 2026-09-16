@@ -14,3 +14,9 @@ test("SECURITY-MODEL.md exists with core sections", () => {
     assert.ok(content.includes(section), `Doc should include ${section}`);
   }
 });
+test("SECURITY-MODEL.md makes no false redaction claims", () => {
+  const path = join(root, "docs", "SECURITY-MODEL.md");
+  const content = readFileSync(path, "utf8");
+  assert.ok(!content.includes("PR #188"), "Doc must not cite unmerged PR #188 as available");
+  assert.ok(content.includes("src/data-export.mjs"), "Doc should reference the actual redaction implementation");
+});
