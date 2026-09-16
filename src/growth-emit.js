@@ -18,6 +18,7 @@ import { EVENT_TYPES, applyEvent } from "./events.js";
 import { defineEvent } from "./growth-events.js";
 import { createCollector } from "./growth-collector.js";
 import { detectMentions } from "./growth-mentions.js";
+import { createFanout } from "./growth-fanout.js";
 
 // Frozen mapping from room event types (EVENT_TYPES values) to C1 growth
 // event types. Room event types absent from this table are skipped silently.
@@ -41,11 +42,28 @@ export const growthTypeFor = roomType =>
 // may persist it or fan events out; C3 keeps it in memory per the contract.
 export const growthCollector = createCollector();
 
+// Shared process-local fan-out hub. Subscribers (dashboards, alerts,
+// downstream pipelines) are notified of every envelope recorded through
+// applyEventWithGrowth. Use getGrowthFanout() to subscribe.
+export const growthFanout = createFanout();
+export const getGrowthFanout = () => growthFanout;
+
 // Emission failures are counted here, not on the collector: the C2
 // collector only counts envelopes it accepted or rejected at the door,
 // while these are failures to build or hand off an envelope at all.
 let emissionFailures = 0;
 export const getGrowthEmissionFailures = () => emissionFailures;
+
+// Notify the fan-out hub without ever throwing into the emission path:
+// subscriber errors are isolated inside fanout.notify, and a defensive
+// catch counts the vanishingly unlikely case of notify itself failing.
+const notifyFanout = envelope => {
+  try {
+    growthFanout.notify(envelope);
+  } catch {
+    emissionFailures += 1;
+  }
+};
 
 // Message length buckets for the message.sent aggregate. Bodies are never
 // collected — only the bucket travels with the event.
@@ -184,6 +202,9 @@ export function applyEventWithGrowth(current, incoming, collector) {
       emissionFailures += 1;
       return { state, growthOk: false, growthReason: `collector refused event: ${result.reason}` };
     }
+    // C6: fan the recorded envelope out to subscribers. Failure-isolated:
+    // notify errors never change the primary result or the room path.
+    notifyFanout(envelope);
     // C4: project @-mentions of agent members from posted messages. Mention
     // emission is best-effort and fully isolated from the primary event: a
     // detection or record failure is counted but never changes the primary
@@ -194,6 +215,7 @@ export function applyEventWithGrowth(current, incoming, collector) {
         for (const mention of mentions) {
           try {
             if (!collector.record(mention).ok) emissionFailures += 1;
+            else notifyFanout(mention);
           } catch {
             emissionFailures += 1;
           }
