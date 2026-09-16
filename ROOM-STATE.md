@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-16T22:58:09Z · board: Uuriko/project-room#266 · watermark: 5705701251 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-16T23:27:46Z · board: Uuriko/project-room#266 · watermark: 5706027037 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -20,6 +20,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+unknown | 5f28404d0bd15610f2a35588cbf708d960c7ec7b | 5705852049
 B044-2 | 3f87ffcd9a9389bfa775b9414a0a4e8204552887 | 5705696782
 B047-2 | bd614ec9eb663b469bf8a4f791b42a994ab8581d | 5705695894
 B039-2 | 2b8c7bc8b9fb25416bb693423fbcd524f3823a8f | 5705598435
@@ -29,8 +30,7 @@ unknown | none | 5705509839
 B034-2 | 08c81ed962185fa353303a0b63868c121f119afc | 5705475917
 B035-2 | e742bccb9e835dbeb3f38f7838a4bf041c5971e1 | 5705446363
 B037-2 | e443547ae24b24a0916b84fe497171f31746f128 | 5705444376
-B031-2 | 7179f9f1f35acdc5029703f0ad313e943731492d | 5705327354
 
 ## signals
-board_comments=379 threshold=1500 rotation_due=no watcher=active open_claims=2 watermark=5705701251
+board_comments=384 threshold=1500 rotation_due=no watcher=active open_claims=2 watermark=5706027037
 
