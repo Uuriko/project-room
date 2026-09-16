@@ -63,6 +63,7 @@ optional.push("server/moderation.mjs");
 optional.push("server/channel-connection.mjs", "server/channel-import.mjs", "server/channel-adapters/index.mjs", "server/channel-adapters/email.mjs", "server/channel-adapters/telegram.mjs", "server/channel-adapters/gmail.mjs", "server/channel-adapters/whatsapp.mjs");
 optional.push("server/mime-message.mjs", "server/email-routing-inbound.mjs", "server/channel-journal.mjs");
 optional.push("server/agent-rooms.mjs"); // agent room ownership service (imported by server/http.mjs)
+optional.push("server/identity-ratelimit.mjs"); // per-identity rate limiter (imported by server/agent-rooms.mjs; no imports of its own)
 optional.push("server/room-export-html.mjs");
 optional.push("server/access-review.mjs");
 optional.push("server/access-requests.mjs", "server/identity-ratelimit.mjs");
