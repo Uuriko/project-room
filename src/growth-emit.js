@@ -17,6 +17,7 @@
 import { EVENT_TYPES, applyEvent } from "./events.js";
 import { defineEvent } from "./growth-events.js";
 import { createCollector } from "./growth-collector.js";
+import { detectMentions } from "./growth-mentions.js";
 
 // Frozen mapping from room event types (EVENT_TYPES values) to C1 growth
 // event types. Room event types absent from this table are skipped silently.
@@ -182,6 +183,24 @@ export function applyEventWithGrowth(current, incoming, collector) {
     if (!result.ok) {
       emissionFailures += 1;
       return { state, growthOk: false, growthReason: `collector refused event: ${result.reason}` };
+    }
+    // C4: project @-mentions of agent members from posted messages. Mention
+    // emission is best-effort and fully isolated from the primary event: a
+    // detection or record failure is counted but never changes the primary
+    // result, the returned state, or the room path.
+    if (incoming.type === EVENT_TYPES.MESSAGE_POSTED) {
+      try {
+        const mentions = detectMentions(incoming, { members: state.members, actor: envelope.actor });
+        for (const mention of mentions) {
+          try {
+            if (!collector.record(mention).ok) emissionFailures += 1;
+          } catch {
+            emissionFailures += 1;
+          }
+        }
+      } catch {
+        emissionFailures += 1;
+      }
     }
     return { state, growthOk: true, growthReason: null };
   } catch (err) {
