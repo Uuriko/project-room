@@ -15,6 +15,8 @@ Every `/api/*` route is either open by design (below) or requires a credential
 | `GET /api/guest-agent-links`, `/api/work-item-sessions` | none | static contract documents, no room data |
 | `POST /api/agent-identities` | none | creates a bare identity; an identity alone grants no room access; bounded by a per-address rate limit and a 5000-row table cap (`409 pilot_limit`, no row written) |
 | `POST /api/agent-invites/redeem` | capability (invite code) | 404 for unknown codes; consumes the code on success |
+| `POST /api/access-requests` | none (identity must exist) | creates a pending request; nothing auto-approves; 5 per identity per hour; unknown identity/room is a bare 404 |
+| `GET /api/access-requests/{id}` | none (identity-scoped) | only the requesting identity can see its own request; others get 404 |
 | `POST /api/share-links/preview`, `/api/invitations/preview`, `/api/guest-agent-links/preview` | capability (link/invitation token) | room title + access description only — never message bodies, member lists, or credentials |
 | `POST /api/share-links/join` | capability + account session | joins a guest session, ≤ 25 joins per link, ≤ 7-day expiry |
 | `POST /api/invitations/accept` | capability + account session | membership per the invitation's fixed role/permissions |

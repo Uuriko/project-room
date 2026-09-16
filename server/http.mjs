@@ -18,6 +18,7 @@ import { guestAgentLinkContract } from "./guest-agent-links.mjs";
 import { isSessionStatus, workItemSessionContract } from "../src/work-item-session.js";
 import { accessReviewReport } from "./access-review.mjs";
 import { roomUsageSummary, parseUsageDays } from "./usage-summary.mjs";
+import { AccessRequests, accessRequestSchema } from "./access-requests.mjs";
 import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
 import { listPins, setPin } from "./pins.mjs";
 
@@ -89,6 +90,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // transport when the bindings are set, otherwise the inert fixture sender. The
   // browser is told which ("live" or "fixture") so it labels outcomes honestly.
   const channelSenders = new Map(), sendReceipts = new Map();
+  // Self-serve access requests: schema applied here (http.mjs owns the
+  // instance to avoid pulling the module into the Workers bundle via store.mjs).
+  store.db.exec(accessRequestSchema);
+  const accessRequests = new AccessRequests(store);
   const resolveChannelTransport = channelTransports ?? (({ provider, accountId, connectionId }) => {
     if (!channelSendProviders.includes(provider)) return null;
     const key = JSON.stringify([provider, accountId, connectionId]);
@@ -697,15 +702,33 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["code", "displayName"]) || typeof data.code !== "string" || typeof data.displayName !== "string") reject(422, "invalid_invite", "Invite code and displayName are required");
         return json(res, 201, store.invites.redeem(data.code, { displayName: data.displayName }));
       }
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|usage|notifications|spend-allowance))?$/.exec(url.pathname);
+      // Self-serve access requests: an identity without membership asks to
+      // join. Unauthenticated (the identity is not a member yet); the
+      // module rate-limits per identity and never reveals more than 404.
+      if (url.pathname === "/api/access-requests" && req.method === "POST") {
+        const data = await body(req);
+        if (!exact(data, ["roomId", "identityId", "displayName", "requestedPermissions", "note", "requestId"])) {
+          reject(422, "invalid_request", "roomId, identityId, displayName, requestedPermissions, note, requestId are the accepted fields");
+        }
+        return json(res, 201, accessRequests.request(data.roomId, data));
+      }
+      const accessStatusMatch = /^\/api\/access-requests\/([^/]{1,64})$/.exec(url.pathname);
+      if (accessStatusMatch && req.method === "GET") {
+        const identityId = url.searchParams.get("identityId");
+        if (!identityId) reject(422, "invalid_request", "identityId query param is required");
+        return json(res, 200, accessRequests.status(pathId(accessStatusMatch[1]), identityId));
+      }
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
-      if (!match && !revokeMatch && !threadMatch) reject(404, "not_found", "Not found");
-      const roomId = pathId((match ?? revokeMatch ?? threadMatch)[1]);
+      const accessDecideMatch = /^\/api\/rooms\/([^/]{1,384})\/access-requests\/([^/]{1,64})\/decide$/.exec(url.pathname);
+      if (!match && !revokeMatch && !threadMatch && !accessDecideMatch) reject(404, "not_found", "Not found");
+      const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
       const threadMessageId = threadMatch ? pathId(threadMatch[2]) : null;
-      const route = match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : "thread";
+      const accessRequestId = accessDecideMatch ? pathId(accessDecideMatch[2]) : null;
+      const route = match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : "access-decide";
       const selected = roomCredentials(req, url);
       const fence = selected.mode === "account" ? accountBinding(req, route === "stream" ? url : null) : expectedBinding(req);
       const auth = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
@@ -971,6 +994,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // BUILD-01 D4: owner-only periodic access review; assembly lives in
         // server/access-review.mjs and is shared with scripts/access-review.mjs.
         return json(res, 200, accessReviewReport(store, selected.token, roomId, fence));
+      }
+      if (route === "access-requests" && req.method === "GET") {
+        const status = url.searchParams.get("status") ?? "pending";
+        return json(res, 200, { roomId, requests: accessRequests.list(selected.token, roomId, { status }, fence) });
+      }
+      if (route === "access-decide" && req.method === "POST") {
+        const data = await body(req);
+        if (!exact(data, ["decision", "permissions", "note"])) {
+          reject(422, "invalid_request", "decision, permissions, note are the accepted fields");
+        }
+        return json(res, 200, accessRequests.decide(selected.token, roomId, accessRequestId, data, fence));
       }
       if (route === "agent-connections" && req.method === "POST") {
         const result = store.agentConnections.apply(selected.token, roomId, await body(req), fence);
