@@ -1,0 +1,3 @@
+# Task 396: property-governance-revalidation-plan
+
+Content-free change, downstream impact, deterministic revalidation and closure assurance.
