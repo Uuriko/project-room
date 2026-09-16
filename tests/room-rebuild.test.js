@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -80,7 +80,7 @@ test("rebuild --commit-push survives a dirty ROOM-STATE.md on main", () => {
 });
 
 test("rebuild --commit-push is a no-op when the board is unchanged", () => {
-  const { dir, origin, wt } = scratch();
+  const { dir, wt } = scratch();
   try {
     sh(`git -C "${wt}" checkout -qb room-state`);
     sh(`git -C "${wt}" push -q origin room-state`);
