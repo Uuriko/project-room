@@ -31,6 +31,9 @@ function fetchRoutes(routes, doorHtml = liveDoor) {
       if (originHdr && originHdr !== LIVE_ORIGIN) return json(403, { error: { code: 'origin_denied' } });
       return json(200, { jsonrpc: '2.0' });
     }
+    if (path === '/llms.txt' && !Object.hasOwn(routes, path)) {
+      return new Response(`origin ${LIVE_ORIGIN}\n`, { status: 200 });
+    }
     if (path === '/agent.json' && !Object.hasOwn(routes, path)) return json(200, { name: 'Project Room' });
     if (path === '/' && !Object.hasOwn(routes, path)) return new Response(liveHome, { status: 200 });
     return routes[path] || new Response('missing', { status: 404 });
@@ -368,4 +371,27 @@ test('liveAudit fails closed when door AGENTS.md still names staging', async () 
   assert.equal(result.ok, false);
   assert.ok(result.failures.some(item => item.code === 'door_agents_not_staging'));
   assert.ok(result.failures.some(item => item.code === 'door_agents_origin'));
+});
+
+test('liveAudit fails closed when origin /llms.txt still names staging', async () => {
+  const location = 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({
+    client_id: '380132515029-abc.apps.googleusercontent.com',
+    redirect_uri: LIVE_ORIGIN + GOOGLE_CALLBACK_PATH,
+    scope: GOOGLE_SCOPES,
+    code_challenge_method: 'S256'
+  }).toString();
+  const routes = {
+    '/api/version': json(200, { status: 'ok', mode: 'cloudflare-production', sourceRevision: 'b'.repeat(40) }),
+    '/api/open': json(200, { ship: false, persistence: 'none' }),
+    '/api/auth-config': json(200, { provider: 'google', authorizationPath: GOOGLE_START_PATH }),
+    [GOOGLE_START_PATH]: new Response('', { status: 302, headers: { Location: location } }),
+    '/privacy': new Response('Email is not the account key', { status: 200 }),
+    '/api/ready': json(200, { status: 'ready' }),
+    '/src/app.js': new Response('export {}', { status: 200 }),
+    '/llms.txt': new Response('origin https://project-room-staging.getdasha.workers.dev\n', { status: 200 })
+  };
+  const result = await liveAudit({ fetchImpl: fetchRoutes(routes) });
+  assert.equal(result.ok, false);
+  assert.ok(result.failures.some(item => item.code === 'origin_llms_not_staging'));
+  assert.ok(result.failures.some(item => item.code === 'origin_llms_origin'));
 });
