@@ -13,7 +13,8 @@ const entryOf = (value, index) => {
   check(value !== null && typeof value === "object", `entry ${index} must be an object`);
   check(typeof value.agentId === "string" && value.agentId.length > 0, `entry ${index} needs an agentId`);
   check(typeof value.action === "string" && value.action.length > 0, `entry ${index} needs an action`);
-  check(typeof value.at === "string" && !Number.isNaN(new Date(value.at).getTime()), `entry ${index} needs a parseable at`);
+  check(value.at === null || (typeof value.at === "string" && !Number.isNaN(new Date(value.at).getTime())),
+    `entry ${index} needs a parseable at or null`);
   check(value.room === undefined || (typeof value.room === "string" && value.room.length > 0),
     `entry ${index} room must be a non-empty string if given`);
   check(value.target === undefined || (typeof value.target === "string" && value.target.length > 0),
@@ -26,10 +27,12 @@ const entryOf = (value, index) => {
 export function createLedger({ store } = {}) {
   check(store === undefined || Array.isArray(store), "store must be an array if given");
   const entries = store ?? [];
-  // Record an action. Returns the frozen entry.
+  // Record an action. Returns the frozen entry. `at` is caller-supplied
+  // (ISO string) or null — no wall-clock reads, the ledger is pure.
   const record = ({ agentId, action, room, target, metadata, at } = {}) => {
-    const timestamp = at === undefined || at === null ? new Date().toISOString() : at;
-    const entry = entryOf({ agentId, action, room, target, metadata, at: timestamp }, entries.length);
+    check(at === undefined || at === null || (typeof at === "string" && at.length > 0),
+      "at must be a non-empty string if given");
+    const entry = entryOf({ agentId, action, room, target, metadata, at: at ?? null }, entries.length);
     entries.push(entry);
     return entry;
   };

@@ -32,3 +32,13 @@ test("malformed inputs are refused", () => {
   throwsCode(() => ledger.record({ agentId: "x", action: "y", at: "bad" }), "invalid_attribution");
   throwsCode(() => ledger.query({ limit: 0 }), "invalid_attribution");
 });
+test("record is pure: no wall-clock reads, at is caller-supplied or null", () => {
+  const ledger = createLedger();
+  const a = ledger.record({ agentId: "x", action: "y", at: "2026-09-16T00:00:00.000Z" });
+  assert.equal(a.at, "2026-09-16T00:00:00.000Z");
+  const b = ledger.record({ agentId: "x", action: "y" });
+  assert.equal(b.at, null);
+  const c = ledger.record({ agentId: "x", action: "y" });
+  assert.deepEqual(b, c);
+  throwsCode(() => ledger.record({ agentId: "x", action: "y", at: "" }), "invalid_attribution");
+});
