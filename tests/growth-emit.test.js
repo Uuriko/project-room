@@ -94,13 +94,25 @@ test("C3 message.sent carries identifiers and aggregates, never the body", () =>
   assert.equal(JSON.stringify(envelope).includes("private content"), false);
 });
 
-test("C3 agent.mentioned is out of scope: plain posts do not emit it", () => {
-  // The C1 vocabulary has agent.mentioned, but C3 only wires the nine mapped
-  // types; mention detection is a later slice. A post mentioning an agent
-  // emits exactly one growth event: message.sent.
+test("C4 applyEventWithGrowth emits agent.mentioned alongside message.sent (C3 integration)", () => {
+  // C4 wired mention detection into the wrapped choke point: an exact-case
+  // @-mention of an agent member now emits agent.mentioned after message.sent.
   const { state, collector } = fresh();
   const res = applyEventWithGrowth(state,
-    roomEvent("ev-mention", EVENT_TYPES.MESSAGE_POSTED, "maya", { body: "hey @codex look" }, 4), collector);
+    roomEvent("ev-mention", EVENT_TYPES.MESSAGE_POSTED, "maya", { body: "hey @Codex look" }, 4), collector);
+  assert.equal(res.growthOk, true);
+  assert.deepEqual(collector.query({}).map(e => e.type), ["agent.mentioned", "message.sent"]);
+  const mention = collector.query({ limit: 1 })[0];
+  assert.deepEqual(mention.fields,
+    { roomId: ROOM, messageId: "ev-mention", mentionedAgentId: "codex", mentionCount: 1 });
+});
+
+test("C4 mention matching is exact and case-sensitive (C3 integration)", () => {
+  // "@CODEX" matches neither the "Codex" handle nor the "codex" id, so only
+  // message.sent is emitted.
+  const { state, collector } = fresh();
+  const res = applyEventWithGrowth(state,
+    roomEvent("ev-nomention", EVENT_TYPES.MESSAGE_POSTED, "maya", { body: "hey @CODEX look" }, 5), collector);
   assert.equal(res.growthOk, true);
   assert.deepEqual(collector.query({}).map(e => e.type), ["message.sent"]);
 });
