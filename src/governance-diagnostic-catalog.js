@@ -1,0 +1,1 @@
+export const governanceDiagnostics=Object.freeze(["invalid","unknown-field","pii-forbidden","content-forbidden","stale","cycle"]);export const isGovernanceDiagnostic=x=>governanceDiagnostics.includes(x);
