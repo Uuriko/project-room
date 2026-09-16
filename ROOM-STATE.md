@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-16T22:37:19Z · board: Uuriko/project-room#266 · watermark: 5705533959 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-16T22:58:09Z · board: Uuriko/project-room#266 · watermark: 5705701251 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -20,17 +20,17 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+B044-2 | 3f87ffcd9a9389bfa775b9414a0a4e8204552887 | 5705696782
+B047-2 | bd614ec9eb663b469bf8a4f791b42a994ab8581d | 5705695894
+B039-2 | 2b8c7bc8b9fb25416bb693423fbcd524f3823a8f | 5705598435
+B042-2 | 35edc0529688505a7bbf8dd21c3bbe80ee88f026 | 5705596566
+B041-2 | 0858d48009b8d8bd4ce3eb34a1dde27d6c10dc1a | 5705583151
 unknown | none | 5705509839
 B034-2 | 08c81ed962185fa353303a0b63868c121f119afc | 5705475917
 B035-2 | e742bccb9e835dbeb3f38f7838a4bf041c5971e1 | 5705446363
 B037-2 | e443547ae24b24a0916b84fe497171f31746f128 | 5705444376
 B031-2 | 7179f9f1f35acdc5029703f0ad313e943731492d | 5705327354
-B032-2 | 47cf364 | 5705320533
-B033-2 | 95e252c83eb0c9887563e420b116174483017490 | 5705285692
-B029-2 | 4fe3102051200f9be0d6f0043bb1e07a29d43d3c | 5705137282
-B030-2 | e677e9ec21e51f587912fb8c3a1589f0badff040 | 5705118216
-B028-2 | 5a48b5d16b4028787d1b3ce7f0426ed85ee5a556 | 5705101503
 
 ## signals
-board_comments=370 threshold=1500 rotation_due=no watcher=active open_claims=2 watermark=5705533959
+board_comments=379 threshold=1500 rotation_due=no watcher=active open_claims=2 watermark=5705701251
 
