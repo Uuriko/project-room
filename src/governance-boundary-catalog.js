@@ -1,0 +1,1 @@
+export const governanceBoundaries=Object.freeze(["resolution-evidence-link/v1","resolution-control-link/v1","resolution-safeguard-link/v1"]);export const isGovernanceBoundary=x=>governanceBoundaries.includes(x);
