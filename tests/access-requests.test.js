@@ -5,19 +5,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { AccessRequests, accessRequestSchema, MAX_PENDING_PER_IDENTITY_ROOM } from "../server/access-requests.mjs";
+import { MAX_PENDING_PER_IDENTITY_ROOM } from "../server/access-requests.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 
 function setup(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-access-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
   store.initialize(initialRoom("commons"));
-  // The schema export is applied here directly; store.mjs wiring is a
-  // follow-up once the read/unread lane's store.mjs claim clears.
-  store.db.exec(accessRequestSchema);
-  const requests = new AccessRequests(store, {
-    rateLimiter: createRateLimiter({ capacity: 1000, refillPerSecond: 1000 })
-  });
+  const requests = store.accessRequests;
+  // Use a generous limiter in tests; the production default is 5/hr.
+  requests.rateLimiter = createRateLimiter({ capacity: 1000, refillPerSecond: 1000 });
   const ownerToken = store.issueAccessKey("commons", "owner");
   const identity = store.identities.create("Requesting Agent");
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
@@ -183,7 +180,7 @@ test("non-owner cannot list or decide", async t => {
 
 test("expired requests are not decidable", async t => {
   const { store, requests, ownerToken, identity } = setup(t);
-  const old = requests.request("commons", {
+  requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_old"
   });
