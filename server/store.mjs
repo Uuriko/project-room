@@ -28,7 +28,6 @@ import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs"
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, isRoomAccessToken } from "./guest-agent-links.mjs";
 import { AgentIdentities, agentIdentitySchema, isIdentitySecret } from "./agent-identities.mjs";
-import { AccessRequests, accessRequestSchema } from "./access-requests.mjs";
 import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
 import { charterContext, charterFromEvent } from "../src/room-charter.js";
@@ -312,7 +311,6 @@ export class RoomStore {
     this.storagePlatform = storagePlatform;
     this.shareLinks = new ShareLinks(this);
     this.identities = new AgentIdentities(this);
-    this.accessRequests = new AccessRequests(this);
     this.invites = new AgentInvites(this);
     this.reminders = new Reminders(this);
     this.notifications = new Notifications(this);
@@ -402,8 +400,7 @@ export class RoomStore {
       CREATE TABLE projection_checkpoints (room_id TEXT PRIMARY KEY REFERENCES rooms(id), sequence INTEGER NOT NULL, projection TEXT NOT NULL);
       ${invitationSchema}
       ${agentIdentitySchema}
-      ${agentInviteSchema}
-      ${accessRequestSchema}`);
+      ${agentInviteSchema}`);
       this.storagePlatform.setVersion(this.db, 4);
     }
     if (version > 0 && version < 26 && (
@@ -443,10 +440,6 @@ export class RoomStore {
       this.db.exec(wakeQueuePauseSchema);
       // Attention preferences are purely additive as well (W4-46).
       this.db.exec(attentionSchema);
-      // Self-serve access requests are purely additive (no data migration,
-      // no fence impact), so no schema version bump: IF NOT EXISTS is
-      // idempotent here and the v0 block above covers fresh databases.
-      this.db.exec(accessRequestSchema);
       // The channel webhook update journal (B20) follows the same additive pattern.
       this.db.exec(channelJournalSchema);
       // Per-source read markers are purely additive (no data migration): IF NOT

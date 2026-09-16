@@ -5,16 +5,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { MAX_PENDING_PER_IDENTITY_ROOM } from "../server/access-requests.mjs";
+import { AccessRequests, accessRequestSchema, MAX_PENDING_PER_IDENTITY_ROOM } from "../server/access-requests.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 
 function setup(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-access-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
   store.initialize(initialRoom("commons"));
-  const requests = store.accessRequests;
-  // Use a generous limiter in tests; the production default is 5/hr.
-  requests.rateLimiter = createRateLimiter({ capacity: 1000, refillPerSecond: 1000 });
+  store.db.exec(accessRequestSchema);
+  const requests = new AccessRequests(store, {
+    rateLimiter: createRateLimiter({ capacity: 1000, refillPerSecond: 1000 })
+  });
   const ownerToken = store.issueAccessKey("commons", "owner");
   const identity = store.identities.create("Requesting Agent");
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
