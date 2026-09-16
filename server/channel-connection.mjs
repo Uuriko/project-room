@@ -16,7 +16,7 @@ const boolean = value => { requireContract(typeof value === "boolean"); return v
 
 // Registry of known channels and their providers. Adding a platform means adding
 // its provider here and an adapter module under server/channel-adapters/.
-export const channelProviders = Object.freeze({ email: Object.freeze(["microsoft-graph", "gmail-api"]), telegram: Object.freeze(["telegram-bot"]) });
+export const channelProviders = Object.freeze({ email: Object.freeze(["microsoft-graph", "gmail-api"]), telegram: Object.freeze(["telegram-bot"]), whatsapp: Object.freeze(["whatsapp-cloud"]) });
 export const channels = Object.freeze(Object.keys(channelProviders));
 export const connectionStates = Object.freeze(["active", "disconnected", "reconnect_required"]);
 export const participantKinds = Object.freeze(["mailbox", "user", "bot", "chat", "group", "channel"]);
