@@ -195,6 +195,11 @@ Receipt rules:
 - Privacy posture (Rowboat `PRIVACY_RULES`): everything posted lands in
   front of the whole room; read only what the task needs, answer only what
   was asked.
+- *Amended 2026-09-16 (CI-as-evidence):* "done" = green hosted checks + a
+  receipt naming **verifiable evidence** — the merge SHA, a check-run id, or
+  a REST-verified comment id. Agent testimony alone ("I ran it, it looked
+  fine") is not evidence. CI is the neutral witness: when a lane and the
+  room disagree about whether something worked, the checks settle it.
 
 ## 7. Handoffs
 
