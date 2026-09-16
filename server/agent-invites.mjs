@@ -18,7 +18,8 @@
 import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { ServiceError } from "./store.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
-import { applyEvent, event, EVENT_TYPES as T, memberCan, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS } from "../src/events.js";
+import { event, EVENT_TYPES as T, memberCan, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS } from "../src/events.js";
+import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { agentAccessProfiles } from "./agent-connections.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -215,7 +216,7 @@ export class AgentInvites {
       });
       let state;
       refuseArchivedWrite(room.state);
-      try { state = compactState(applyEvent(room.state, incoming)); }
+      try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
       catch (error) { fail(409, "invite_rejected", error.message); }
       const projection = JSON.stringify(state);
       if (Buffer.byteLength(projection) > 4 * 1024 * 1024) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
