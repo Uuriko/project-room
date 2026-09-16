@@ -3,14 +3,17 @@
 // turned into a frozen capability card that other agents can read to
 // decide what to delegate. Cards are versioned; a registry keeps the
 // latest card per agent. All state is caller-owned (a Map); the module
-// is pure and dependency-free. Frozen outputs; malformed inputs throw
-// CapCardError. Auto-publish wiring on enrollment is a later slice.
+// is pure and dependency-free: publishedAt is caller-supplied (ISO string)
+// or null — the builder performs no wall-clock reads. Frozen outputs;
+// malformed inputs throw CapCardError. Auto-publish wiring on enrollment
+// is a later slice.
 const CARD_VERSION = 1;
 class CapCardError extends Error { constructor(code, message) { super(message); this.name = "CapCardError"; this.code = code; } }
 const fail = (code, message) => { throw new CapCardError(code, message); };
 const check = (condition, message) => { if (!condition) fail("invalid_cap_card", message); };
-// Build a capability card from enrollment metadata.
-export function buildCard({ agentId, name, lanes, tools, model, description }) {
+// Build a capability card from enrollment metadata. publishedAt is an
+// optional caller-supplied ISO timestamp; when omitted it is null.
+export function buildCard({ agentId, name, lanes, tools, model, description, publishedAt }) {
   check(typeof agentId === "string" && agentId.length > 0, "agentId must be a non-empty string");
   check(typeof name === "string" && name.length > 0, "name must be a non-empty string");
   check(Array.isArray(lanes) && lanes.length > 0 && lanes.every(l => typeof l === "string" && l.length > 0),
@@ -20,10 +23,12 @@ export function buildCard({ agentId, name, lanes, tools, model, description }) {
   check(model === undefined || (typeof model === "string" && model.length > 0), "model must be a non-empty string if given");
   check(description === undefined || (typeof description === "string" && description.length <= 1000),
     "description must be ≤1000 chars if given");
+  check(publishedAt === undefined || (typeof publishedAt === "string" && publishedAt.length > 0),
+    "publishedAt must be a non-empty string if given");
   return Object.freeze({ version: CARD_VERSION, agentId, name,
     lanes: Object.freeze([...lanes].sort()), tools: Object.freeze([...tools].sort()),
     model: model ?? null, description: description ?? null,
-    publishedAt: new Date().toISOString() });
+    publishedAt: publishedAt ?? null });
 }
 // Registry of the latest card per agent. store is a caller-owned Map.
 export function createCardRegistry({ store } = {}) {

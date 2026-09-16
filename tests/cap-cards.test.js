@@ -30,3 +30,13 @@ test("malformed inputs are refused", () => {
   const registry = createCardRegistry();
   throwsCode(() => registry.get("ghost"), "invalid_cap_card");
 });
+test("buildCard is deterministic: identical inputs give identical cards", () => {
+  const input = { agentId: "quill", name: "Quill", lanes: ["build"], tools: ["merge"] };
+  const a = buildCard(input);
+  const b = buildCard(input);
+  assert.deepEqual(a, b);
+  assert.equal(a.publishedAt, null);
+  const stamped = buildCard({ ...input, publishedAt: "2026-09-16T00:00:00.000Z" });
+  assert.equal(stamped.publishedAt, "2026-09-16T00:00:00.000Z");
+  throwsCode(() => buildCard({ ...input, publishedAt: "" }), "invalid_cap_card");
+});
