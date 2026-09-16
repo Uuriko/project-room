@@ -1,0 +1,1 @@
+export function buildGovernanceDisclosureSurfaceSummary({counts}){if(!counts||Object.values(counts).some(x=>!Number.isInteger(x)||x<0))throw Error("counts invalid");counts=Object.freeze(Object.fromEntries(Object.entries(counts).sort()));return Object.freeze({kind:"governance-disclosure-surface-summary/v1",counts,total:Object.values(counts).reduce((a,b)=>a+b,0)})}
