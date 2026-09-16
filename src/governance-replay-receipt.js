@@ -1,0 +1,1 @@
+import{createHash}from"node:crypto";export function buildGovernanceReplayReceipt(x){for(let k of["environmentHash","snapshotHash","manifestHash","resultHash"])if(!/^[a-f0-9]{64}$/.test(x?.[k]||""))throw Error("receipt invalid");let b={kind:"governance-replay-receipt/v1",...x};return Object.freeze({...b,receiptHash:createHash("sha256").update(JSON.stringify(b)).digest("hex")})}
