@@ -9,6 +9,7 @@ function json(status, body, headers = {}) {
 
 const liveDoor = `<a class="open" href="${LIVE_ORIGIN}">Join</a>`;
 const stagingDoor = '<a class="open" href="https://project-room-staging.getdasha.workers.dev">Join</a>';
+const liveHome = '<html><button>Continue with Google</button><button>Copy agent setup</button><noscript>JavaScript is required to open Project Room.</noscript></html>';
 
 function fetchRoutes(routes, doorHtml = liveDoor) {
   return async url => {
@@ -16,6 +17,7 @@ function fetchRoutes(routes, doorHtml = liveDoor) {
     if (href === ROOM_DOOR) return new Response(doorHtml, { status: 200 });
     const path = new URL(href).pathname;
     if (path === '/agent.json' && !Object.hasOwn(routes, path)) return json(200, { name: 'Project Room' });
+    if (path === '/' && !Object.hasOwn(routes, path)) return new Response(liveHome, { status: 200 });
     return routes[path] || new Response('missing', { status: 404 });
   };
 }
@@ -34,7 +36,6 @@ test('liveAudit fails closed on ship:true or a mailbox Gmail scope', async () =>
     [GOOGLE_START_PATH]: new Response('', { status: 302, headers: { Location: `https://accounts.google.com/o/oauth2/v2/auth?client_id=1-abc.apps.googleusercontent.com&redirect_uri=${encodeURIComponent(LIVE_ORIGIN + GOOGLE_CALLBACK_PATH)}&scope=${encodeURIComponent(GOOGLE_SCOPES + ' https://www.googleapis.com/auth/gmail.readonly')}&code_challenge_method=S256` } }),
     '/privacy': new Response('Email is not the account key', { status: 200 }),
     '/api/ready': json(200, { status: 'ready' }),
-    '/': new Response('<html></html>', { status: 200 }),
     '/src/app.js': new Response('export {}', { status: 200 })
   };
   const result = await liveAudit({ fetchImpl: fetchRoutes(routes) });
@@ -56,7 +57,6 @@ test('liveAudit passes a correct unpublished Google host', async () => {
     [GOOGLE_START_PATH]: new Response('', { status: 302, headers: { Location: location } }),
     '/privacy': new Response('Email is not the account key. Sign-in does not read your Gmail inbox.', { status: 200 }),
     '/api/ready': json(200, { status: 'ready' }),
-    '/': new Response('<html>Project Room</html>', { status: 200 }),
     '/src/app.js': new Response('export {}', { status: 200 })
   };
   const result = await liveAudit({ fetchImpl: fetchRoutes(routes) });
@@ -77,7 +77,6 @@ test('liveAudit fails closed when the Demigod door Join still points at staging'
     [GOOGLE_START_PATH]: new Response('', { status: 302, headers: { Location: location } }),
     '/privacy': new Response('Email is not the account key', { status: 200 }),
     '/api/ready': json(200, { status: 'ready' }),
-    '/': new Response('<html>Project Room</html>', { status: 200 }),
     '/src/app.js': new Response('export {}', { status: 200 })
   };
   const result = await liveAudit({ fetchImpl: fetchRoutes(routes, stagingDoor) });
@@ -100,11 +99,32 @@ test('liveAudit fails closed when /agent.json is missing', async () => {
     [GOOGLE_START_PATH]: new Response('', { status: 302, headers: { Location: location } }),
     '/privacy': new Response('Email is not the account key', { status: 200 }),
     '/api/ready': json(200, { status: 'ready' }),
-    '/': new Response('<html>Project Room</html>', { status: 200 }),
     '/src/app.js': new Response('export {}', { status: 200 }),
     '/agent.json': new Response('missing', { status: 404 })
   };
   const result = await liveAudit({ fetchImpl: fetchRoutes(routes) });
   assert.equal(result.ok, false);
   assert.ok(result.failures.some(item => item.code === 'agent_json'));
+});
+
+test('liveAudit fails closed when Copy agent setup precedes Continue with Google', async () => {
+  const location = 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({
+    client_id: '380132515029-abc.apps.googleusercontent.com',
+    redirect_uri: LIVE_ORIGIN + GOOGLE_CALLBACK_PATH,
+    scope: GOOGLE_SCOPES,
+    code_challenge_method: 'S256'
+  }).toString();
+  const routes = {
+    '/api/version': json(200, { status: 'ok', mode: 'cloudflare-production', sourceRevision: 'b'.repeat(40) }),
+    '/api/open': json(200, { ship: false, persistence: 'none' }),
+    '/api/auth-config': json(200, { provider: 'google', authorizationPath: GOOGLE_START_PATH }),
+    [GOOGLE_START_PATH]: new Response('', { status: 302, headers: { Location: location } }),
+    '/privacy': new Response('Email is not the account key', { status: 200 }),
+    '/api/ready': json(200, { status: 'ready' }),
+    '/': new Response('<html><button>Copy agent setup</button><button>Continue with Google</button><noscript>JavaScript is required to open Project Room.</noscript></html>', { status: 200 }),
+    '/src/app.js': new Response('export {}', { status: 200 })
+  };
+  const result = await liveAudit({ fetchImpl: fetchRoutes(routes) });
+  assert.equal(result.ok, false);
+  assert.ok(result.failures.some(item => item.code === 'home_google_before_agent'));
 });

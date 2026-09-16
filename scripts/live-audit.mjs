@@ -51,6 +51,10 @@ export async function liveAudit({ origin = LIVE_ORIGIN, door = ROOM_DOOR, fetchI
   const home = await get('/');
   note(home.res.status === 200, 'home', home.res.status);
   note(!/clerk\.browser\.js|@clerk\/clerk-js/.test(home.text), 'home_no_clerk_sdk', 'clerk sdk');
+  const googleAt = home.text.indexOf('Continue with Google');
+  const agentAt = home.text.indexOf('Copy agent setup');
+  note(googleAt >= 0 && (agentAt === -1 || agentAt > googleAt), 'home_google_before_agent', 'Copy agent setup precedes Google');
+  note(home.text.includes('JavaScript is required to open Project Room'), 'home_noscript', 'missing noscript');
 
   const app = await get('/src/app.js');
   note(app.res.status === 200, 'app_js', app.res.status);
