@@ -1,4 +1,4 @@
-import { RoomAgentClient, validWorkSearchQuery, createAgentIdentity, redeemAgentInvite } from "../client/room-agent.mjs";
+import { RoomAgentClient, validWorkSearchQuery, createAgentIdentity, redeemAgentInvite, requestAccess } from "../client/room-agent.mjs";
 import { packetMarkdown } from "../src/work-packet.js";
 import { validId } from "../src/events.js";
 import { agentConnectionFromEnvironment, readConnectionInput, saveAgentConnection, connectionDiagnostic, ConnectionError } from "../client/agent-connection.mjs";
@@ -56,6 +56,9 @@ if (action === "reply") {
   node scripts/agent-inbox.mjs invite-codes
   node scripts/agent-inbox.mjs invite-code-revoke INVITE_ID
   node scripts/agent-inbox.mjs redeem-invite CODE DISPLAY_NAME
+  node scripts/agent-inbox.mjs request-access ROOM_ID IDENTITY_ID DISPLAY_NAME PERM1,PERM2 [NOTE]
+  node scripts/agent-inbox.mjs access-requests [STATUS]
+  node scripts/agent-inbox.mjs access-decide REQUEST_ID approve|deny [PERM1,PERM2] [NOTE]
   node scripts/agent-inbox.mjs doctor
   node scripts/agent-inbox.mjs support-export
   node scripts/agent-inbox.mjs sessions [STATUS]
@@ -101,7 +104,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
         || (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > 50))
         || (cursor !== undefined && (since !== undefined || cursor.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(cursor)))) throw new ConnectionError("usage_error");
     }
-    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "sessions", "claim", "session", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "identity-link", "identity-links", "identity-unlink", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "funnel", "export", "import-history", "thread", "doctor", "support-export"].includes(action)
+    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "sessions", "claim", "session", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "identity-link", "identity-links", "identity-unlink", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "request-access", "access-requests", "access-decide", "funnel", "export", "import-history", "thread", "doctor", "support-export"].includes(action)
       || (["connect", "import"].includes(action) && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
       || (action === "import" && ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"].some(name => process.env[name] !== undefined))
       || (["packet", "work", "discussion", "result", "claim"].includes(action) && !validId(checkpoint))
@@ -123,11 +126,14 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
         || (extra[0] !== undefined && !/^\d+$/.test(extra[0])) || extra.slice(1).join(" ").length > 80))
       || (action === "invite-code-revoke" && !/^[a-f0-9]{8}$/.test(checkpoint ?? ""))
       || (action === "redeem-invite" && (checkpoint === undefined || checkpoint.startsWith("--") || !extra.length || extra.join(" ").length > 80))
+      || (action === "request-access" && (checkpoint === undefined || extra.length < 3 || extra.length > 4))
+      || (action === "access-requests" && (checkpoint !== undefined && !/^[a-z]+$/.test(checkpoint) || extra.length))
+      || (action === "access-decide" && (checkpoint === undefined || !["approve", "deny"].includes(extra[0])))
       || (action === "invite-codes" && (checkpoint !== undefined || extra.length))
       || (action === "doctor" && (checkpoint !== undefined || extra.length))
       || (action === "support-export" && (checkpoint !== undefined || extra.length))) throw new ConnectionError("usage_error");
-    const config = ["identity-create", "redeem-invite"].includes(action) ? {} : action === "import" ? await readConnectionInput() : agentConnectionFromEnvironment(),
-      client = ["identity-create", "redeem-invite"].includes(action) ? null : new RoomAgentClient(config);
+    const config = ["identity-create", "redeem-invite", "request-access"].includes(action) ? {} : action === "import" ? await readConnectionInput() : agentConnectionFromEnvironment(),
+      client = ["identity-create", "redeem-invite", "request-access"].includes(action) ? null : new RoomAgentClient(config);
     let result;
     if (["connect", "import", "check"].includes(action)) {
       result = await client.checkConnection();
@@ -167,6 +173,17 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
       : action === "invite-codes" ? await client.agentInvites()
       : action === "invite-code-revoke" ? await client.revokeAgentInvite(checkpoint)
       : action === "redeem-invite" ? await redeemAgentInvite(process.env.ROOM_AGENT_ORIGIN, checkpoint, extra.join(" "))
+      : action === "request-access" ? await requestAccess(process.env.ROOM_AGENT_ORIGIN, {
+          roomId: checkpoint, identityId: extra[0], displayName: extra[1],
+          requestedPermissions: extra[2].split(",").map(p => p.trim()).filter(Boolean),
+          ...(extra[3] === undefined ? {} : { note: extra[3] })
+        })
+      : action === "access-requests" ? await client.accessRequests(checkpoint === undefined ? {} : { status: checkpoint })
+      : action === "access-decide" ? await client.decideAccessRequest(checkpoint, {
+          decision: extra[0],
+          ...(extra[1] === undefined ? {} : { permissions: extra[1].split(",").map(p => p.trim()).filter(Boolean) }),
+          ...(extra[2] === undefined ? {} : { note: extra[2] })
+        })
       : action === "support-export" ? await client.diagnosticsExport()
       : action === "sessions" ? await client.workSessions(checkpoint === undefined ? {} : { status: checkpoint })
       : action === "claim" ? await client.claimSession(checkpoint,

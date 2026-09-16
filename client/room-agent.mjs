@@ -188,6 +188,36 @@ export async function redeemAgentInvite(origin, code, displayName, { fetchImpl =
   }
   return value;
 }
+// Self-serve access request (unauthenticated): an identity without room
+// membership asks to join. The roomId, identityId, displayName and
+// requestedPermissions are required; note is optional. Returns the pending
+// request; the agent polls GET /api/access-requests/:id?identityId=... for
+// the owner's decision.
+export async function requestAccess(origin, { roomId, identityId, displayName, requestedPermissions, note, requestId } = {}, { fetchImpl = globalThis.fetch, signal } = {}) {
+  let service;
+  try { service = assertServiceOrigin(origin); }
+  catch { throw new RoomClientError(0, "invalid_config", "Use a fixed HTTPS origin or an isolated loopback development origin"); }
+  let response;
+  try {
+    response = await fetchImpl(`${service}/api/access-requests`, {
+      method: "POST", redirect: "error", credentials: "omit",
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roomId, identityId, displayName, requestedPermissions,
+        ...(note === undefined ? {} : { note }), ...(requestId === undefined ? {} : { requestId }) }),
+    });
+  } catch (error) {
+    if (error instanceof RoomClientError) throw error;
+    throw new RoomClientError(0, "service_unavailable", "Could not complete the request. Check the service address and retry.");
+  }
+  let value;
+  try { value = await response.json(); } catch { value = null; }
+  if (!response.ok) throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room request failed");
+  if (typeof value?.requestId !== "string" || typeof value?.status !== "string") {
+    throw new RoomClientError(200, "invalid_response", "Room returned an invalid access request");
+  }
+  return value;
+}
 export class RoomAgentClient {
   #origin;
   #roomId;
@@ -577,6 +607,24 @@ export class RoomAgentClient {
   }
   revokeAgentInvite(inviteId, { signal } = {}) {
     return this.#deletePath(`/api/rooms/${encodeURIComponent(this.#roomId)}/agent-invites`, { inviteId }, signal);
+  }
+  // Self-serve access requests. Listing and deciding are owner-only (the
+  // server enforces manage_members); the request itself is unauthenticated
+  // via the standalone requestAccess() below.
+  async #accessAdmin(suffix, body, { signal } = {}) {
+    const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal);
+    if (value?.roomId !== this.#roomId) {
+      throw new RoomClientError(200, "invalid_response", "Room response does not match the configured room");
+    }
+    return value;
+  }
+  accessRequests({ status } = {}, { signal } = {}) {
+    const query = status === undefined ? "" : `?status=${encodeURIComponent(status)}`;
+    return this.#accessAdmin(`/access-requests${query}`, undefined, { signal });
+  }
+  decideAccessRequest(requestId, { decision, permissions, note } = {}, { signal } = {}) {
+    return this.#accessAdmin(`/access-requests/${encodeURIComponent(requestId)}/decide`,
+      { decision, ...(permissions === undefined ? {} : { permissions }), ...(note === undefined ? {} : { note }) }, { signal });
   }
   // W4-57 M6: sanitized support-export bundle (owner-only). Whitelisted
   // scalar fields only — safe to hand to support without redaction.
