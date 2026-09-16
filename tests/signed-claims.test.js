@@ -27,7 +27,10 @@ test("expired claims are rejected", () => {
 test("tampered tokens are rejected", () => {
   const token = signClaim({ agentId: "a", action: "x", payload: {}, secret: SECRET });
   const [body, sig] = token.split(".");
-  const tampered = `${body}.${sig.slice(0, -1)}${sig.slice(-1) === "A" ? "B" : "A"}`;
+  // Tamper the FIRST signature char: it always encodes real bits, so the
+  // decoded signature always changes. (The last base64url char's low bits
+  // are padding — swapping it can decode to identical bytes and flake.)
+  const tampered = `${body}.${sig[0] === "A" ? "B" : "A"}${sig.slice(1)}`;
   throwsCode(() => verifyClaim({ token: tampered, secret: SECRET }), "invalid_claim");
   throwsCode(() => verifyClaim({ token, secret: "b".repeat(32) }), "invalid_claim");
 });
