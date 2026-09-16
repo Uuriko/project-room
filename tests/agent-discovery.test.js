@@ -371,3 +371,267 @@ test("A2A agent card conforms to the official A2A 0.3.0 AgentCard shape", () => 
   }
   assert.equal(card.protocolVersion, A2A_PROTOCOL_VERSION);
 });
+
+// ============================================================================
+// B029-2 [quill-s2]: pure A2A agent discovery planner (../src/agent-discovery.mjs)
+//
+// NOTE: the tests above cover deploy/agent-discovery.mjs (the room's public
+// discovery documents). Everything below covers the src/ discovery planner
+// only and must not touch the room-discovery tests above.
+import {
+  createAgentDiscovery,
+  DEFAULT_CACHE_TTL_MS,
+  DISCOVERY_ERROR_CODES,
+} from "../src/agent-discovery.mjs";
+import { EventEmitter } from "node:events";
+
+function fakeCard({ agentId, lanes = [], tools = [], skills = [], capabilities, version = 1 }) {
+  const card = { version, agentId, lanes, tools };
+  if (skills.length > 0) card.skills = skills;
+  if (capabilities !== undefined) card.capabilities = capabilities;
+  return Object.freeze(card);
+}
+
+const PLANNER_CARDS = [
+  fakeCard({ agentId: "alpha", lanes: ["summarize", "translate"], tools: ["gmail-send"], version: 2 }),
+  fakeCard({ agentId: "beta", lanes: ["summarize"], tools: [], version: 5, skills: ["summarize-prose"] }),
+  fakeCard({ agentId: "gamma", lanes: ["translate"], tools: ["gmail-send", "calendar-read"], version: 1 }),
+  fakeCard({ agentId: "delta", lanes: ["deploy"], tools: ["ssh"], version: 9 }),
+];
+
+function fakeRegistry(cards = PLANNER_CARDS) {
+  let listCalls = 0;
+  return {
+    list: () => { listCalls += 1; return cards; },
+    get listCalls() { return listCalls; },
+  };
+}
+
+function manualClock(start = 1_000_000) {
+  let now = start;
+  const fn = () => now;
+  fn.advance = (ms) => { now += ms; };
+  return fn;
+}
+
+class EmittingRegistry extends EventEmitter {
+  constructor(cards = PLANNER_CARDS) {
+    super();
+    this.cards = cards;
+    this.listCalls = 0;
+  }
+  list() {
+    this.listCalls += 1;
+    return this.cards;
+  }
+}
+
+/** Assert fn() throws an Error whose code === expected. */
+function assertCoded(fn, expected) {
+  let thrown = null;
+  try {
+    fn();
+  } catch (err) {
+    thrown = err;
+  }
+  assert.ok(thrown instanceof Error, `expected an Error with code ${expected}, got ${thrown}`);
+  assert.equal(typeof thrown.code, "string", "thrown error must carry a string code");
+  assert.equal(thrown.code, expected);
+}
+
+test("B029-2: discover ranks agents by capability coverage ratio", () => {
+  const discovery = createAgentDiscovery({ cardRegistry: fakeRegistry() });
+  const results = discovery.discover({ capabilities: ["summarize", "translate", "gmail-send"] });
+  assert.deepEqual(results.map((r) => r.agentId), ["alpha", "gamma", "beta"]);
+  assert.equal(results[0].score, 1); // alpha covers 3/3
+  assert.equal(results[1].score, 2 / 3); // gamma covers 2/3
+  assert.equal(results[2].score, 1 / 3); // beta covers 1/3
+  assert.deepEqual(results[0].matchedCapabilities, ["gmail-send", "summarize", "translate"]);
+  assert.deepEqual(results[1].matchedCapabilities, ["gmail-send", "translate"]);
+  assert.deepEqual(results[2].matchedCapabilities, ["summarize"]);
+  assert.equal(results[0].card.agentId, "alpha", "each result carries its card");
+});
+
+test("B029-2: capability matching is duck-typed across card shapes", () => {
+  const registry = fakeRegistry([
+    fakeCard({ agentId: "duck", lanes: [], tools: [], capabilities: ["custom-cap"], version: 1 }),
+    fakeCard({ agentId: "lanes", lanes: ["custom-cap"], version: 1 }),
+  ]);
+  const discovery = createAgentDiscovery({ cardRegistry: registry });
+  const results = discovery.discover({ capabilities: ["custom-cap"] });
+  // Equal score and version: tiebreak falls to agentId ascending.
+  assert.deepEqual(results.map((r) => r.agentId), ["duck", "lanes"]);
+});
+
+test("B029-2: tiebreak is version desc, then agentId asc", () => {
+  const registry = fakeRegistry([
+    fakeCard({ agentId: "zeta", lanes: ["summarize"], version: 1 }),
+    fakeCard({ agentId: "eta", lanes: ["summarize"], version: 7 }),
+    fakeCard({ agentId: "theta", lanes: ["summarize"], version: 7 }),
+  ]);
+  const discovery = createAgentDiscovery({ cardRegistry: registry });
+  const results = discovery.discover({ capabilities: ["summarize"] });
+  assert.deepEqual(results.map((r) => r.agentId), ["eta", "theta", "zeta"]);
+});
+
+test("B029-2: discover throws AD_NO_MATCH when no agent matches any capability", () => {
+  const discovery = createAgentDiscovery({ cardRegistry: fakeRegistry() });
+  assertCoded(() => discovery.discover({ capabilities: ["definitely-not-a-capability"] }), "AD_NO_MATCH");
+});
+
+test("B029-2: limit caps the ranked list from the top", () => {
+  const discovery = createAgentDiscovery({ cardRegistry: fakeRegistry() });
+  const results = discovery.discover({ capabilities: ["summarize", "translate", "gmail-send"], limit: 2 });
+  assert.equal(results.length, 2);
+  assert.deepEqual(results.map((r) => r.agentId), ["alpha", "gamma"]);
+});
+
+test("B029-2: excludeAgentIds removes agents from contention", () => {
+  const discovery = createAgentDiscovery({ cardRegistry: fakeRegistry() });
+  const results = discovery.discover({
+    capabilities: ["summarize", "translate", "gmail-send"],
+    excludeAgentIds: ["alpha", "gamma"],
+  });
+  assert.deepEqual(results.map((r) => r.agentId), ["beta"]);
+  // Excluding every contender is a no-match, never an empty silent list.
+  assertCoded(
+    () => discovery.discover({
+      capabilities: ["summarize", "translate", "gmail-send"],
+      excludeAgentIds: ["alpha", "beta", "gamma"],
+    }),
+    "AD_NO_MATCH",
+  );
+});
+
+test("B029-2: skills filter requires every requested skill", () => {
+  const discovery = createAgentDiscovery({ cardRegistry: fakeRegistry() });
+  const results = discovery.discover({ capabilities: ["summarize"], skills: ["summarize-prose"] });
+  assert.deepEqual(results.map((r) => r.agentId), ["beta"]);
+  assertCoded(
+    () => discovery.discover({ capabilities: ["summarize"], skills: ["no-such-skill"] }),
+    "AD_NO_MATCH",
+  );
+});
+
+test("B029-2: findForTask wraps discover for a task description", () => {
+  const discovery = createAgentDiscovery({ cardRegistry: fakeRegistry() });
+  const viaWrapper = discovery.findForTask("write a summary and translate it", ["summarize", "translate"]);
+  const viaDiscover = discovery.discover({ capabilities: ["summarize", "translate"] });
+  assert.deepEqual(viaWrapper.map((r) => r.agentId), viaDiscover.map((r) => r.agentId));
+  assert.equal(viaWrapper[0].agentId, "alpha");
+  assertCoded(() => discovery.findForTask("", ["summarize"]), "AD_INVALID_QUERY");
+  assertCoded(() => discovery.findForTask("   ", ["summarize"]), "AD_INVALID_QUERY");
+  assertCoded(() => discovery.findForTask(42, ["summarize"]), "AD_INVALID_QUERY");
+  assertCoded(() => discovery.findForTask("task", []), "AD_INVALID_QUERY");
+});
+
+test("B029-2: repeated identical queries hit the cache", () => {
+  const clock = manualClock();
+  const registry = fakeRegistry();
+  const discovery = createAgentDiscovery({ cardRegistry: registry, clock });
+  const query = { capabilities: ["summarize", "translate"] };
+  const first = discovery.discover(query);
+  const second = discovery.discover(query);
+  assert.equal(registry.listCalls, 1, "second query must not re-enumerate the registry");
+  assert.deepEqual(second, first);
+  assert.deepEqual(discovery.stats(), { queries: 2, hits: 1, misses: 1 });
+  // Caller-side mutation of a returned array must not corrupt the cache.
+  second.push({ agentId: "spoofed" });
+  const third = discovery.discover(query);
+  assert.equal(third.length, first.length);
+  assert.equal(registry.listCalls, 1);
+});
+
+test("B029-2: cache entries expire after the injected TTL", () => {
+  const clock = manualClock();
+  const registry = fakeRegistry();
+  const discovery = createAgentDiscovery({ cardRegistry: registry, clock, cacheTtlMs: 1000 });
+  discovery.discover({ capabilities: ["summarize"] });
+  clock.advance(999);
+  discovery.discover({ capabilities: ["summarize"] });
+  assert.equal(registry.listCalls, 1, "still fresh just before the TTL");
+  clock.advance(2);
+  discovery.discover({ capabilities: ["summarize"] });
+  assert.equal(registry.listCalls, 2, "re-enumerates once the TTL elapses");
+  assert.deepEqual(discovery.stats(), { queries: 3, hits: 1, misses: 2 });
+});
+
+test("B029-2: default cache TTL is 60s and honors the injected clock", () => {
+  assert.equal(DEFAULT_CACHE_TTL_MS, 60 * 1000);
+  const clock = manualClock();
+  const registry = fakeRegistry();
+  const discovery = createAgentDiscovery({ cardRegistry: registry, clock });
+  discovery.discover({ capabilities: ["summarize"] });
+  clock.advance(60 * 1000);
+  discovery.discover({ capabilities: ["summarize"] });
+  assert.equal(registry.listCalls, 1, "TTL boundary is inclusive");
+  clock.advance(1);
+  discovery.discover({ capabilities: ["summarize"] });
+  assert.equal(registry.listCalls, 2);
+});
+
+test("B029-2: registry change events invalidate the cache", () => {
+  const registry = new EmittingRegistry();
+  const discovery = createAgentDiscovery({ cardRegistry: registry });
+  discovery.discover({ capabilities: ["summarize"] });
+  discovery.discover({ capabilities: ["summarize"] });
+  assert.equal(registry.listCalls, 1);
+  registry.emit("change");
+  discovery.discover({ capabilities: ["summarize"] });
+  assert.equal(registry.listCalls, 2, "change event must drop cached results");
+});
+
+test("B029-2: registries without change events degrade gracefully to TTL-only", () => {
+  const plain = fakeRegistry();
+  assert.equal(typeof plain.on, "undefined");
+  const discovery = createAgentDiscovery({ cardRegistry: plain });
+  discovery.discover({ capabilities: ["summarize"] });
+  assert.equal(plain.listCalls, 1);
+  const throwing = fakeRegistry();
+  throwing.on = () => { throw new Error("boom"); };
+  assert.doesNotThrow(() => createAgentDiscovery({ cardRegistry: throwing }));
+});
+
+test("B029-2: clearCache forces the next query to re-enumerate", () => {
+  const registry = fakeRegistry();
+  const discovery = createAgentDiscovery({ cardRegistry: registry });
+  discovery.discover({ capabilities: ["summarize"] });
+  discovery.discover({ capabilities: ["summarize"] });
+  assert.equal(registry.listCalls, 1);
+  discovery.clearCache();
+  discovery.discover({ capabilities: ["summarize"] });
+  assert.equal(registry.listCalls, 2);
+});
+
+test("B029-2: Map-shaped registries enumerate without list()", () => {
+  const store = new Map([
+    ["alpha", fakeCard({ agentId: "alpha", lanes: ["summarize"], version: 3 })],
+  ]);
+  const discovery = createAgentDiscovery({ cardRegistry: store });
+  const results = discovery.discover({ capabilities: ["summarize"] });
+  assert.deepEqual(results.map((r) => r.agentId), ["alpha"]);
+});
+
+test("B029-2: coded-error contract — every failure throws an Error with a code", () => {
+  assertCoded(() => createAgentDiscovery(), "AD_NO_REGISTRY");
+  assertCoded(() => createAgentDiscovery({ cardRegistry: null }), "AD_NO_REGISTRY");
+  const discovery = createAgentDiscovery({ cardRegistry: fakeRegistry() });
+  assertCoded(() => discovery.discover(null), "AD_INVALID_QUERY");
+  assertCoded(() => discovery.discover("summarize"), "AD_INVALID_QUERY");
+  assertCoded(() => discovery.discover({}), "AD_INVALID_QUERY");
+  assertCoded(() => discovery.discover({ capabilities: [] }), "AD_INVALID_QUERY");
+  assertCoded(() => discovery.discover({ capabilities: ["ok", 42] }), "AD_INVALID_QUERY");
+  assertCoded(() => discovery.discover({ capabilities: ["ok"], limit: 0 }), "AD_INVALID_QUERY");
+  assertCoded(() => discovery.discover({ capabilities: ["ok"], limit: 1.5 }), "AD_INVALID_QUERY");
+  assertCoded(() => discovery.discover({ capabilities: ["ok"], skills: "summarize" }), "AD_INVALID_QUERY");
+  const unsupported = createAgentDiscovery({ cardRegistry: {} });
+  assertCoded(() => unsupported.discover({ capabilities: ["summarize"] }), "AD_REGISTRY_UNSUPPORTED");
+  // Every exported error code is reachable and a string.
+  assert.ok(Array.isArray(DISCOVERY_ERROR_CODES) && DISCOVERY_ERROR_CODES.length >= 4);
+  for (const code of DISCOVERY_ERROR_CODES) {
+    assert.equal(typeof code, "string");
+    assert.match(code, /^AD_/);
+  }
+  // Invalid queries never count toward stats (queries = hits + misses).
+  assert.deepEqual(discovery.stats(), { queries: 0, hits: 0, misses: 0 });
+});
