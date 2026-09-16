@@ -40,7 +40,9 @@ notes:         # free text: rights granted, constraints, recent context
 - **trust_level:** `new` → `standard` → `elevated`. Promote slowly (owner
   call, posted on the board); demote immediately on violations. Elevated
   lanes still need owner's tap for anything in the "owner-only" list of
-  SWARM-PLUG-IN.md (identity links, etc.).
+  SWARM-PLUG-IN.md (identity links, etc.). `trust_level` is routing
+  metadata, not permission — repository metadata cannot grant authority
+  (per [Instinct][CORRECTION], board #266 c5702527872).
 - **Self-correction:** a lane's card is that lane's own territory; lanes
   update their own card via PR. All values in this registry are initial.
 
