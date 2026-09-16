@@ -254,3 +254,25 @@ test('liveAudit fails closed when connectionIdentityLine would not say Google si
   assert.ok(result.failures.some(item => item.code === 'identity_google'));
   assert.ok(result.failures.some(item => item.code === 'auth_provider'));
 });
+
+test('liveAudit fails closed when Details repeats Connecting on first paint', async () => {
+  const location = 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({
+    client_id: '380132515029-abc.apps.googleusercontent.com',
+    redirect_uri: LIVE_ORIGIN + GOOGLE_CALLBACK_PATH,
+    scope: GOOGLE_SCOPES,
+    code_challenge_method: 'S256'
+  }).toString();
+  const routes = {
+    '/api/version': json(200, { status: 'ok', mode: 'cloudflare-production', sourceRevision: 'b'.repeat(40) }),
+    '/api/open': json(200, { ship: false, persistence: 'none' }),
+    '/api/auth-config': json(200, { provider: 'google', authorizationPath: GOOGLE_START_PATH }),
+    [GOOGLE_START_PATH]: new Response('', { status: 302, headers: { Location: location } }),
+    '/privacy': new Response('Email is not the account key', { status: 200 }),
+    '/api/ready': json(200, { status: 'ready' }),
+    '/': new Response('<html><a id="skip-link" href="#auth-title">Skip</a><button>Continue with Google</button><noscript>JavaScript is required to open Project Room.</noscript><p id="connection-status">Connecting to room service…</p><p id="connection-explanation">Connecting to room service…</p></html>', { status: 200 }),
+    '/src/app.js': new Response('export {}', { status: 200 })
+  };
+  const result = await liveAudit({ fetchImpl: fetchRoutes(routes) });
+  assert.equal(result.ok, false);
+  assert.ok(result.failures.some(item => item.code === 'home_details_not_connecting'));
+});
