@@ -1,5 +1,6 @@
 import { pathToFileURL } from 'node:url';
 import { GOOGLE_CALLBACK_PATH, GOOGLE_START_PATH, GOOGLE_SCOPES } from '../server/google-oauth.mjs';
+import { connectionIdentityLine } from '../src/client.js';
 
 export const LIVE_ORIGIN = 'https://room.trydemigod.com';
 export const ROOM_DOOR = 'https://www.trydemigod.com/room';
@@ -35,6 +36,9 @@ export async function liveAudit({ origin = LIVE_ORIGIN, door = ROOM_DOOR, fetchI
   note(auth.json?.provider === 'google', 'auth_provider', auth.json?.provider);
   note(auth.json?.authorizationPath === GOOGLE_START_PATH, 'auth_path', auth.json?.authorizationPath);
   note(!auth.json?.publishableKey, 'no_browser_sdk_key', auth.json?.publishableKey);
+  const identity = connectionIdentityLine(version.json || {}, open.json || {}, auth.json || {});
+  note(identity.includes('unpublished walk-in'), 'identity_unpublished', identity);
+  note(identity.includes('Google sign-in'), 'identity_google', identity);
 
   const start = await get(GOOGLE_START_PATH);
   const location = start.res.headers.get('location') || '';
