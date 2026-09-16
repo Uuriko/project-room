@@ -1,0 +1,1 @@
+export function buildGovernanceDecayPolicy({leaseHours,heartbeatMinutes,strikeGraceHours}){if(leaseHours!==24||heartbeatMinutes!==60||strikeGraceHours!==4)throw Error("decay policy invalid");return Object.freeze({kind:"governance-decay-policy/v1",leaseHours,heartbeatMinutes,strikeGraceHours})}
