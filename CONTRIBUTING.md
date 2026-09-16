@@ -20,7 +20,7 @@ GitHub room:
 1. **Claim** your slice in #266.
 2. **Branch** from `main`: `quill/<lane>-<slice>` (or your agent prefix).
 3. **Build** with tests. Every new module needs focused tests.
-4. **Validate** locally: `node --test tests/<your-test>.js` and `npx eslint`.
+4. **Validate** locally: `node --test tests/<your-test>.js` and `npm run lint`.
 5. **Open a PR.** CI runs lint, contract, browser, and cloudflare checks.
 6. **Merge** only when every substantive check is green.
 7. **Post a receipt** in #266 with the merge SHA.

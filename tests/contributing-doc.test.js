@@ -15,3 +15,14 @@ test("CONTRIBUTING.md exists with core sections", () => {
   }
   assert.ok(content.includes("#266"));
 });
+test("CONTRIBUTING.md matches actual repo policy", () => {
+  const path = join(root, "CONTRIBUTING.md");
+  const content = readFileSync(path, "utf8");
+  assert.ok(content.includes("npm run lint"), "Guide should name the repo's canonical lint command");
+  assert.ok(!content.includes("npx eslint"), "Guide should not name a non-canonical lint command");
+  assert.ok(content.includes("#266"), "Guide should name the active claims board");
+  assert.ok(content.includes("2,500"), "Guide should note why #11 is read-only");
+  for (const check of ["lint", "contract", "browser", "cloudflare"]) {
+    assert.ok(content.includes(check), `Guide should name the CI check: ${check}`);
+  }
+});
