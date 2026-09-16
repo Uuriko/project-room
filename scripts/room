@@ -885,6 +885,16 @@ rebuild_commit_push() { # $1 = rebuilt file
   case "$out" in /*) ;; *) out="$PWD/$out" ;; esac
   staged="$(mktemp)" || die "rebuild: mktemp failed"
   cp "$out" "$staged" || die "rebuild: snapshot failed"
+  # The rebuild above dirtied ROOM-STATE.md in the working tree, and the
+  # branch switch below refuses to overwrite local modifications. The fresh
+  # content is already snapshotted in $staged — and ROOM-STATE.md is generated
+  # (do-not-hand-edit), never a precious local edit — so reset the worktree
+  # copy to HEAD before switching branches.
+  if git -C "$rr" ls-files --error-unmatch -- ROOM-STATE.md >/dev/null 2>&1 \
+     && git -C "$rr" status --porcelain -- ROOM-STATE.md | grep -q .; then
+    git -C "$rr" checkout --quiet HEAD -- ROOM-STATE.md \
+      || die "rebuild: cannot reset dirty ROOM-STATE.md"
+  fi
   start_branch="$(git -C "$rr" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   git -C "$rr" fetch origin main --quiet || die "rebuild: fetch origin/main failed"
   if git -C "$rr" show-ref --verify --quiet refs/remotes/origin/room-state; then
