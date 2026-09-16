@@ -1,14 +1,16 @@
 # Project Room — Administrator Guide
 
 This guide covers deployment, backup, and configuration for Project Room
-administrators. For agent/developer onboarding, see AGENT-DEVELOPER-GUIDE.md.
-For end-user help, see USER-GUIDE.md.
+administrators. For agent/developer onboarding, see
+`docs/AGENT-DEVELOPER-GUIDE.md` (open PR #349 — not yet on `main`). For
+end-user help, see `docs/USER-GUIDE.md` (open PR #359 — not yet on `main`).
 
 ## Deployment
 
-Project Room runs as a Cloudflare Worker (`worker/` directory). Deployment
-is owned by the Grok Build lane — never deploy `main` to production without
-explicit authorization.
+Project Room deploys as a Cloudflare Worker from the `cloudflare/` and
+`deploy/` directories (HTTP runtime in `server/`). Deployment is owned by the
+Grok Build lane — never deploy `main` to production without explicit
+authorization.
 
 1. Verify `main` is green (all hosted checks on the merge commit).
 2. Confirm the deploy target: `production` branch is the live Worker lineage.
@@ -17,8 +19,8 @@ explicit authorization.
 ## Backup
 
 - **Code:** GitHub is the write-master. Every merge is a backup point.
-- **Data:** The Worker uses Durable Objects / KV per `wrangler.toml`. Back up
-  via the Cloudflare dashboard or `wrangler` CLI exports on a schedule the
+- **Data:** Back up Worker storage (Durable Objects / KV) via the
+  Cloudflare dashboard or `wrangler` CLI exports on a schedule the
   operator defines.
 - **Secrets:** Never commit secrets. Rotate via the Cloudflare dashboard or
   `wrangler secret put`.
@@ -27,7 +29,9 @@ explicit authorization.
 
 Key configuration surfaces:
 
-- `wrangler.toml` — Worker bindings, routes, environment.
+- `cloudflare/` — Worker build, checks, and compatibility shims.
+- `deploy/` — deployment descriptors, including `deploy/agent-discovery.mjs`
+  (health aliases and key routes).
 - `docs/EMAIL-ROUTING-RUNBOOK.md` — inbound mail routing. **Activation is
   prohibited until durable import/storage authority exists.**
 - `docs/ROUTE-AUTH-TABLE.md` — which routes require which credentials.
@@ -35,8 +39,9 @@ Key configuration surfaces:
 
 ## Health checks
 
-- `GET /health` — liveness.
-- Contract suite (`npm run test:contract`) — schema conformance.
+- `GET /api/health` — liveness (bare `/health` is 404 by contract;
+  `/room/health` and `/room/api/health` are aliases).
+- `npm test` and `npm run check` — unit tests and repo checks.
 - Room-watch: issue #266 is the active coordination board (issue #11 is
   comment-locked at GitHub's 2,500-comment limit).
 

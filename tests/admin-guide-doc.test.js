@@ -14,3 +14,12 @@ test("ADMIN-GUIDE.md exists with core sections", () => {
     assert.ok(content.includes(section), `Guide should include ${section}`);
   }
 });
+test("ADMIN-GUIDE.md operational claims match the repo", () => {
+  const path = join(root, "docs", "ADMIN-GUIDE.md");
+  const content = readFileSync(path, "utf8");
+  for (const wrong of ["`worker/`", "GET /health", "test:contract", "wrangler.toml"]) {
+    assert.ok(!content.includes(wrong), `Guide must not contain unverified claim: ${wrong}`);
+  }
+  assert.ok(content.includes("GET /api/health"), "Guide should document the real health endpoint");
+  assert.ok(content.includes("production` branch"), "Guide should name the real live lineage");
+});
