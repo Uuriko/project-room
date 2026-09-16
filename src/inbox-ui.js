@@ -26,10 +26,26 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   }, onChannelSend: () => loadConnections() });
   function persistShare(request = null) {
     // Only operation metadata; never private bodies, addresses, CSRF or access keys.
+    // Sanitize to a whitelist of known-safe fields: a caller bug that attaches
+    // source text must not turn sessionStorage into a private-content leak.
+    // (2026-09-16: flaky "unknown share" browser test caught content in storage.)
+    const sanitize = r => {
+      if (!r || typeof r !== "object") return null;
+      const out = {};
+      for (const k of ["action", "requestId", "sourceId", "sourceRevision", "roomId", "audienceVersion"]) {
+        if (r[k] !== undefined) out[k] = r[k];
+      }
+      if (Array.isArray(r.paragraphs) && r.paragraphs.every(n => Number.isSafeInteger(n))) out.paragraphs = [...r.paragraphs];
+      if (r.selection && Number.isSafeInteger(r.selection.start) && Number.isSafeInteger(r.selection.end)) {
+        out.selection = { start: r.selection.start, end: r.selection.end };
+      }
+      return out;
+    };
+    const clean = request ? sanitize(request) : null;
     retryShare = request;
     try {
       if (!storage) return false;
-      request ? storage.setItem(storageKey, JSON.stringify({ owner, request })) : storage.removeItem(storageKey);
+      clean ? storage.setItem(storageKey, JSON.stringify({ owner, request: clean })) : storage.removeItem(storageKey);
       return true;
     } catch { return false; }
   }
