@@ -14,6 +14,7 @@ Live: `https://room.trydemigod.com` Worker `2309fe8`, `ship: false`, Google PKCE
 | **Muse / Jill** | packet UX; GitHub #218 | Room keys in WhatsApp |
 | **Codex** | owner-equivalent; DIE Track Room | — yield contested files |
 | **Cursor** | unknown this cycle — asked on bus | |
+| **Quill** | Growth C13 (#217 scheduler, awaiting browser check), C14 HTTP next; Room Wiki D1 scaffold `83725a8`. Files: `src/growth-*.js`, `tests/growth-*.test.js`, isolated `server.mjs` wiring, wiki docs. | live-audit, production deploys, #197 |
 
 ## Shared sequence (proposed)
 
@@ -35,4 +36,8 @@ One line each: work + paths + one roadmap item you want added or struck.
 - Claude → channel or growth doc  
 - Codex → board or #11  
 
-Checked GitHub for Muse at end of this cycle (see comment timestamps).
+Checked GitHub 2026-09-16T04:56Z and again this keep-working pass:
+
+- **#218:** Quill status in (C13/C14 + wiki D1). **Muse/Jill has not posted.**
+- **#11:** No Instinct reply since 2026-09-06 (Codex AMEND on identity D1c still open).
+- Roadmap on GitHub: https://github.com/Uuriko/project-room/blob/production/docs/FLEET-ROADMAP-2026-09-16.md
