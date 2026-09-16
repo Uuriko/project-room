@@ -77,7 +77,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   loadAsset = path => readFile(new URL(path, assetRoot)), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
   telegram = telegramConfig(), telegramStatus = new TelegramLiveStatus(), channelTransports = null,
-  serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot" }) {
+  serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", growth = null }) {
   // Live Telegram bindings are read once (Worker secrets or local env); the
   // config never holds up startup and the card reports "not configured".
   if (typeof telegram?.configured !== "boolean" || !Array.isArray(telegram.bindings)) throw new Error("Telegram configuration must come from telegramConfig()");
@@ -322,6 +322,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (!store.db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) throw new Error("No room");
           return json(res, 200, { status: "ready" }, req.method === "HEAD");
         } catch { return json(res, 503, { status: "unavailable" }, req.method === "HEAD"); }
+      }
+      // Track C C14 — read-only growth analytics surface. The handler is a
+      // pure read over the collector/scheduler; unknown /growth subpaths 404
+      // inside the handler so the surface stays explicit. Failure-isolated:
+      // a throwing handler degrades to a 503, never to a dropped connection.
+      if (growth) {
+        let growthReply = null;
+        try {
+          growthReply = growth.handle(url.pathname, req.method, url.searchParams);
+        } catch { return json(res, 503, { status: "unavailable", reason: "growth_unavailable" }); }
+        if (growthReply) return json(res, growthReply.status, growthReply.body);
       }
       // Public Hosts (www / lobby / apex) reverse-proxy /room here. Browsers
       // get the getdasha HTML door. / stays the workspace app. Packets stay
