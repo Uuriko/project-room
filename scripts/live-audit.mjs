@@ -77,6 +77,14 @@ export async function liveAudit({ origin = LIVE_ORIGIN, door = ROOM_DOOR, fetchI
   note(doorHtml.includes(origin), 'door_live_origin', origin);
   note(!/project-room-staging/.test(doorHtml), 'door_not_staging', 'staging Join href');
 
+  const mcpDeny = await fetchImpl(origin + '/mcp', {
+    method: 'POST',
+    redirect: 'manual',
+    headers: { Origin: 'https://evil.example', 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'live-audit', version: '0' } } })
+  });
+  note(mcpDeny.status === 403, 'mcp_origin_denied', mcpDeny.status);
+
   return {
     ok: failures.length === 0,
     origin,
