@@ -1,0 +1,1 @@
+export const governanceStages=Object.freeze(["contract","decision","exception","resolution"]);export const schemaForStage=s=>governanceStages.includes(s)?Object.freeze({stage:s,hashField:s+"Hash"}):null;
