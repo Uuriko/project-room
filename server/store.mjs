@@ -443,8 +443,9 @@ export class RoomStore {
       // The channel webhook update journal (B20) follows the same additive pattern.
       this.db.exec(channelJournalSchema);
       // Per-source read markers are purely additive (no data migration): IF NOT
-      // EXISTS is idempotent here. The table is fenced like the other additive
-      // tables via rebuiltAdditiveTables in server/writer-fence.mjs.
+      // EXISTS is idempotent here. The table is intentionally outside the writer
+      // fence (see unfencedAdditiveTables in server/writer-fence.mjs) so
+      // same-schema packaged fallbacks that predate it still verify.
       this.db.exec(inboxReadSchema);
       this.db.exec(moderationSchema); // Message reports (issue #6 E4): purely additive, same pattern.
       ensureAttachmentSchema(this.db); // Converge the deployed v28-v33 attachment lineage before installing v34 fences.
