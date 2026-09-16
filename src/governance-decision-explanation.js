@@ -1,0 +1,1 @@
+export function buildGovernanceDecisionExplanation({steps}){let codes=steps.map(x=>x.decisionCode).sort(),counts={allowed:0,denied:0,deferred:0,escalated:0};codes.forEach(x=>counts[x]++);return Object.freeze({kind:"governance-decision-explanation/v1",codes:Object.freeze(codes),counts:Object.freeze(counts),total:codes.length})}
