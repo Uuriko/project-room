@@ -55,7 +55,8 @@ const addressKey = value => { const at = value.address.lastIndexOf("@"); return 
 // Graph-shaped profile is kept exactly as journals and envelopes store it.
 export function emailConnection(value) {
   requireEmail(exactEmailFields(value, ["accountId", "id", "revision", "provider", "mailboxId", "identity", "aliases"]), "invalid_email_connection");
-  requireEmail(value.provider === "microsoft-graph" && Number.isSafeInteger(value.revision) && value.revision > 0, "invalid_email_connection");
+  // Both email providers share the envelope; the adapter registry distinguishes them.
+  requireEmail(["microsoft-graph", "gmail-api"].includes(value.provider) && Number.isSafeInteger(value.revision) && value.revision > 0, "invalid_email_connection");
   const identity = emailAddress(value.identity), generic = toChannelProfile({ ...value, identity });
   return { accountId: generic.accountId, id: generic.id, revision: generic.revision,
     provider: generic.provider, mailboxId: emailOpaqueId(value.mailboxId), identity, aliases: addresses(value.aliases) };
