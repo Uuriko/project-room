@@ -4,11 +4,19 @@ import { GOOGLE_CALLBACK_PATH, GOOGLE_START_PATH, GOOGLE_SCOPES } from '../serve
 export const LIVE_ORIGIN = 'https://room.trydemigod.com';
 export const ROOM_DOOR = 'https://www.trydemigod.com/room';
 
-export async function liveAudit({ origin = LIVE_ORIGIN, door = ROOM_DOOR, fetchImpl = fetch } = {}) {
+export async function liveAudit({ origin = LIVE_ORIGIN, door = ROOM_DOOR, fetchImpl = fetch, timeoutMs = 15000 } = {}) {
   const failures = [];
   const note = (ok, code, detail) => { if (!ok) failures.push({ code, detail }); };
+  const timedFetch = async (url, init = {}) => {
+    try {
+      return await fetchImpl(url, { ...init, signal: init.signal ?? AbortSignal.timeout(timeoutMs) });
+    } catch {
+      note(false, 'fetch_unreachable', String(url));
+      return new Response('unreachable', { status: 599 });
+    }
+  };
   const get = async path => {
-    const res = await fetchImpl(origin + path, { redirect: 'manual' });
+    const res = await timedFetch(origin + path, { redirect: 'manual' });
     const text = await res.text();
     let json = null;
     try { json = JSON.parse(text); } catch {}
@@ -44,7 +52,7 @@ export async function liveAudit({ origin = LIVE_ORIGIN, door = ROOM_DOOR, fetchI
   note(privacy.res.status === 200, 'privacy_status', privacy.res.status);
   note(/Email is not the account key/.test(privacy.text), 'privacy_copy', 'missing account-key sentence');
   note(!/gmail\.readonly/.test(privacy.text), 'privacy_no_mailbox_scope', 'gmail.readonly');
-  const privacyGoogle = await fetchImpl(origin + '/privacy', {
+  const privacyGoogle = await timedFetch(origin + '/privacy', {
     redirect: 'manual',
     headers: { Origin: 'https://accounts.google.com' }
   });
@@ -76,13 +84,13 @@ export async function liveAudit({ origin = LIVE_ORIGIN, door = ROOM_DOOR, fetchI
   note(card.res.status === 200, 'agent_json', card.res.status);
   note(card.json?.name === 'Project Room', 'agent_json_name', card.json?.name);
 
-  const doorRes = await fetchImpl(door, { redirect: 'manual' });
+  const doorRes = await timedFetch(door, { redirect: 'manual' });
   const doorHtml = await doorRes.text();
   note(doorRes.status === 200, 'door_status', doorRes.status);
   note(doorHtml.includes(origin), 'door_live_origin', origin);
   note(!/project-room-staging/.test(doorHtml), 'door_not_staging', 'staging Join href');
 
-  const mcpDeny = await fetchImpl(origin + '/mcp', {
+  const mcpDeny = await timedFetch(origin + '/mcp', {
     method: 'POST',
     redirect: 'manual',
     headers: { Origin: 'https://evil.example', 'Content-Type': 'application/json', Accept: 'application/json' },

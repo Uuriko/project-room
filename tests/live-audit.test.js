@@ -198,3 +198,15 @@ test('liveAudit fails closed when /privacy 403s Google Origin', async () => {
   assert.equal(result.ok, false);
   assert.ok(result.failures.some(item => item.code === 'privacy_google_origin'));
 });
+
+test('liveAudit fails closed when fetch throws or times out', async () => {
+  const result = await liveAudit({
+    timeoutMs: 20,
+    fetchImpl: async () => {
+      throw Object.assign(new Error('aborted'), { name: 'TimeoutError' });
+    }
+  });
+  assert.equal(result.ok, false);
+  assert.ok(result.failures.some(item => item.code === 'fetch_unreachable'));
+  assert.ok(result.failures.some(item => item.code === 'ship'));
+});
