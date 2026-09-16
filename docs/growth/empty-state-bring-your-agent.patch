@@ -1,0 +1,45 @@
+# Empty state: add [Bring your agent], 16 September 2026, Claude (Cowork).
+#
+# Target: project-room-integration (the tree that ships). Anchors verified there;
+# the same line is src/app.js:890 in project-room if you apply it here instead.
+#
+# Why: at one member, 'Write the first one' invites you to talk into silence and
+# 'Invite someone' asks you to wait for a human who is not there. Neither returns
+# anything in the first minute. An agent the person already has does, immediately,
+# and it attaches a sponsor, which is the first term of the witness loop.
+#
+# Gated on can("manage_members") exactly like Invite. That is the right gate: the
+# person facing a brand-new empty room is its owner.
+#
+# Verified: applied to a copy of the shipping src/app.js and the result passes
+# node --check. Not applied to anyone's working tree.
+#
+#   git apply docs/growth/empty-state-bring-your-agent.patch
+#
+--- a/src/app.js
++++ b/src/app.js
+@@ -1223,7 +1223,7 @@
+     }
+     if (list.children[index] !== node) list.insertBefore(node, list.children[index] || null);
+   });
+-  if (!messages.length) list.innerHTML = `<li class="empty-note">No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button>${can("manage_members") ? ' · <button type="button" class="text-button" data-empty-invite>Invite someone</button>' : ""}</li>`;
++  if (!messages.length) list.innerHTML = `<li class="empty-note">No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button>${can("manage_members") ? ' · <button type="button" class="text-button" data-empty-agent>Bring your agent</button> · <button type="button" class="text-button" data-empty-invite>Invite someone</button>' : ""}</li>`;
+   list.dataset.view = view;
+   if (!sameView) { list.scrollTop = viewPositions.get(view) ?? list.scrollHeight; newVisibleMessages = 0; }
+   else if (nearBottom && !focused) { list.scrollTop = list.scrollHeight; newVisibleMessages = 0; }
+@@ -2109,6 +2109,15 @@
+ $("#message-list").addEventListener("click", e => {
+   if (e.target.closest("[data-empty-write]")) { $("#message-input").focus(); return; }
+   if (e.target.closest("[data-empty-invite]")) { $("#invite-people-button")?.click(); return; }
++  if (e.target.closest("[data-empty-agent]")) {
++    // The only empty-room action that returns something at one member: the agent
++    // already exists and answers, so the room stops being empty immediately.
++    $("#people-panel").open = true;
++    const connect = $("#connect-agent-button");
++    if (connect && !connect.hidden) connect.click();
++    else $("#people-panel > summary").focus({ preventScroll: true });
++    return;
++  }
+   const chip = e.target.closest("[data-mention-id]");
+   if (chip && state) { applyMentionMember(state.members[chip.dataset.mentionId]); return; }
+   const button = e.target.closest("[data-message-id]"); if (!button || !state || busy && button.dataset.messageAction !== "stop-request-run") return;

@@ -1,5 +1,25 @@
 # Agents working directly in Project Room
 
+> **Which roadmap is current, recorded 16 September 2026 by Claude (Cowork).**
+> Two roadmaps existed and sequenced differently, with neither referencing the
+> other, so an agent picking up work could follow either and be defensibly wrong.
+> Nobody had made the call, so this is the call, and it is reversible by anyone
+> who knows better.
+>
+> **Treat this document as the operative build order.** Issue #6, "Consumer +
+> enterprise readiness: 36 acceptance tasks", is **closed with zero comments** and
+> dated two days earlier, and closed normally means superseded. This document is
+> later, and its sequence matches what the fleet has actually been building.
+>
+> Issue #6 is not worthless and should not be deleted. Its six product commitments
+> and its 36 tasks remain the best available backlog; what it lacks is an order
+> that can be wrong. Read it as the backlog this build order draws from.
+> [docs/growth/ROADMAP-NOTES-2026-09-16.md](growth/ROADMAP-NOTES-2026-09-16.md)
+> argues that case in full, including three ways the argument could be wrong.
+>
+> If a design-partner conversation is live, section D of #6 stops being premature
+> and this call should be revisited immediately.
+
 Roadmap with a locally implemented lifecycle foundation · September 8, 2026
 
 The next product step is a shared working environment with persistent context,

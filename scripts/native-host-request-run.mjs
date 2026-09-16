@@ -1,6 +1,7 @@
 // Manual acceptance runner, deliberately excluded from automatic test suites.
 // Uses existing subscription auth; never installs/configures a provider or host.
-import { readFileSync, writeFileSync, openSync, closeSync } from "node:fs";
+import { readFileSync, writeFileSync, openSync, closeSync, existsSync, unlinkSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
@@ -26,14 +27,14 @@ const env = { ...process.env };
 delete env.OPENAI_API_KEY; delete env.ANTHROPIC_API_KEY;
 let binary, args;
 if (host === "codex") {
-  binary = "/Applications/ChatGPT.app/Contents/Resources/codex";
+  binary = process.env.ROOM_CODEX_BINARY || "/Applications/ChatGPT.app/Contents/Resources/codex";
   const quote = JSON.stringify;
   const server = `{command=${quote(process.execPath)},args=[${quote(adapter)}],cwd=${quote(fileURLToPath(new URL("../", import.meta.url)))},env={${Object.entries(mcpEnvironment).map(([k,v]) => k + "=" + quote(v)).join(",")}},enabled_tools=${quote(names)},required=true,default_tools_approval_mode="approve"}`;
   args = ["exec", "--ignore-user-config", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "--json", "-C", fixture.directory,
     "-c", "features.shell_tool=false", "-c", "features.apps=false", "-c", "features.hooks=false", "-c", 'web_search="disabled"',
     "-c", 'approval_policy="never"', "-c", `mcp_servers={room=${server}}`, "-"];
 } else {
-  binary = "/Users/johnpotter/.local/bin/claude";
+  binary = process.env.ROOM_CLAUDE_BINARY || join(homedir(), ".local", "bin", "claude");
   args = ["--print", "--restricted", "--tools", "", "--strict-mcp-config", "--mcp-config",
     JSON.stringify({ mcpServers: { room: { command: process.execPath, args: [adapter], env: mcpEnvironment } } }),
     "--no-session-persistence", "--setting-sources", "", "--permission-mode", "dontAsk", "--allowedTools", names.map(n => "mcp__room__" + n).join(","),
@@ -43,6 +44,16 @@ if (host === "codex") {
 // Reserve evidence before any model calls. Existing evidence must never trigger
 // a duplicate exercise followed by a late file-exists failure.
 const output = openSync(resolve(outputPath), "wx", 0o600);
+
+// The reservation above stays first so existing evidence still refuses before
+// anything else runs. A missing host binary used to surface as spawn noise
+// inside the evidence file instead of as an error, and the file just reserved
+// then blocked the retry. Release it and name the variable to set.
+if (!existsSync(binary)) {
+  closeSync(output);
+  unlinkSync(resolve(outputPath));
+  throw new Error(`${host} host binary not found at ${binary}. Set ${host === "codex" ? "ROOM_CODEX_BINARY" : "ROOM_CLAUDE_BINARY"} to its path.`);
+}
 const child = spawn(binary, args, { cwd: fixture.directory, env, stdio: ["pipe", "pipe", "pipe"] });
 let stdout = "", stderr = "", buffer = "", timedOut = false, outputLimited = false, killTimer;
 const startedAt = new Date().toISOString();
