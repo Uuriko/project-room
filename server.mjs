@@ -10,6 +10,7 @@ import { growthCollector } from "./src/growth-emit.js";
 import { loadFromFile, saveToFile } from "./src/growth-persistence.js";
 import { createWatcher } from "./src/growth-watch.js";
 import { createScheduler, defaultGrowthRules, DEFAULT_INTERVAL_MS } from "./src/growth-scheduler.js";
+import { createGrowthHttp } from "./src/growth-http.js";
 
 const { host, port, origin, filename, production, streamInterval } = deploymentConfig();
 const paused = maintenanceEnabled(process.env.ROOM_MAINTENANCE);
@@ -21,6 +22,21 @@ if (!paused && production && !havePilotDb) throw new Error("Provision a persiste
 if (!paused) mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
 const store = paused ? null : new RoomStore(filename);
 if (store && production && !store.db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) { store.close(); throw new Error("Provision a room before deployment"); }
+// Track C C13/C14 — growth scheduler state. Declared before the server is
+// created so the C14 read-only HTTP surface can close over live status via
+// a getter evaluated per request (the scheduler itself starts after listen).
+let growthScheduler = null;
+let growthIntervalMs = 0;
+// Track C C14 — read-only growth HTTP surface (GET /growth/summary,
+// /growth/digest, /growth/health). Pure reads over the collector and the
+// scheduler-status getter: no emission, no mutation, no timers. Null in
+// paused (maintenance) mode, where the minimal handler takes over.
+const growthHttp = paused ? null : createGrowthHttp({
+  collector: growthCollector,
+  getSchedulerStatus: () => growthScheduler
+    ? { running: growthScheduler.isRunning(), tickCount: growthScheduler.getTickCount(), intervalMs: growthIntervalMs }
+    : { running: false, tickCount: 0, intervalMs: growthIntervalMs }
+});
 const server = paused ? createServer((req, res) => {
   try {
     const url = new URL(req.url, origin);
@@ -30,7 +46,7 @@ const server = paused ? createServer((req, res) => {
     const reply = maintenanceReply(url.pathname);
     res.writeHead(reply.status, reply.headers); res.end(req.method === "HEAD" ? undefined : reply.body);
   } catch { res.writeHead(400, { "Cache-Control": "no-store" }); res.end(); }
-}) : createRoomServer({ store, origin, streamInterval, trustedLocalProxy: production, telegram: telegramConfig(process.env) });
+}) : createRoomServer({ store, origin, streamInterval, trustedLocalProxy: production, telegram: telegramConfig(process.env), growth: growthHttp });
 // Track C C11 — growth collector persistence. The snapshot lives in its own
 // JSON file next to the store file; it never touches the store schema. Any
 // failure here only costs analytics history, never boot or shutdown.
@@ -50,8 +66,8 @@ if (!paused) {
     console.warn(`[growth] snapshot restore skipped: ${error?.message ?? error}`);
   }
 }
-let growthScheduler = null;
-let growthIntervalMs = 0;
+// (growthScheduler / growthIntervalMs are declared above, before server creation,
+// so the C14 surface can close over them via a per-request status getter.)
 server.listen(port, host, () => {
   console.log(`Project Room ${paused ? "paused" : production ? "invite-only pilot" : "local pilot"}: ${origin}`);
   // C13 readiness note: the listen line above must stay the first stdout write,
