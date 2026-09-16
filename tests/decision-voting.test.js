@@ -3,7 +3,7 @@
 // this file covers the separate voting module.)
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createDecisions, DecisionError } from "../server/decision-register.mjs";
+import { createDecisions, DecisionError } from "../server/decision-voting.mjs";
 
 const throwsCode = (fn, code) => assert.throws(fn, error => error instanceof DecisionError && error.code === code);
 
