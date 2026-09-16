@@ -4,9 +4,10 @@
 // { channel, provider, normalize(raw), changes({ cursor }), hydrate(id), submit(), lookup() }.
 import * as email from "./email.mjs";
 import * as telegram from "./telegram.mjs";
+import * as gmail from "./gmail.mjs";
 import { ContractError, channelProviders, profileChannel } from "../channel-connection.mjs";
 
-export const channelAdapters = Object.freeze(new Map([email, telegram].map(adapter => [adapter.provider, adapter])));
+export const channelAdapters = Object.freeze(new Map([email, telegram, gmail].map(adapter => [adapter.provider, adapter])));
 for (const [channel, providers] of Object.entries(channelProviders)) {
   for (const provider of providers) if (channelAdapters.get(provider)?.channel !== channel) throw new Error(`Channel adapter missing for ${provider}`);
 }
