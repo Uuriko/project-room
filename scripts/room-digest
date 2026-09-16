@@ -1,0 +1,333 @@
+#!/usr/bin/env bash
+#
+# room-digest — weekly human-plane digest for the project-room claims board.
+#
+# Rowboat port, Wave 3 (R7). Composes the scripts/room verbs
+# (metrics --since, receipts-scan, rotation-check, query --live, plus event
+# detail through room _parse/_state) into one concise markdown brief for
+# John — the human plane to ROOM-STATE.md's machine plane. Research line:
+# CHAOSS health metrics + a trust digest, under Rowboat's scheduler
+# discipline (rowboatlabs/rowboat, Apache License 2.0): stamp at write,
+# read fenced blocks only, grace windows around automated actions, and the
+# config/state split.
+#
+# READ-ONLY AGAINST THE BOARD BY DEFAULT. This script NEVER posts: it has
+# no --post flag and calls no posting verb. The only write it performs is
+# the local --out file; --dry-run suppresses even that and prints the plan
+# instead. Findings are content, not failure: exit 0 even when the board
+# looks unhealthy.
+#
+# Deps: bash, gh, jq, and the sibling scripts/room (never reimplemented:
+# comment parsing always goes through `room _parse` / `room _state`).
+#
+# Exit codes: 0 ok · 1 error.
+
+set -euo pipefail
+
+VERSION="0.1.0"
+DEFAULT_REPO="Uuriko/project-room"
+DEFAULT_ISSUE="266"
+
+REPO="$DEFAULT_REPO"
+ISSUE="$DEFAULT_ISSUE"
+DRY_RUN=0
+SINCE=""
+OUT=""
+
+_dir="$(dirname -- "$0")"
+case "$_dir" in
+  /*) ;;
+  *) _dir="$PWD/$_dir" ;;
+esac
+ROOM="${ROOM_CLI:-$_dir/room}"
+unset _dir
+
+# ---------------------------------------------------------------------------
+# small utilities
+# ---------------------------------------------------------------------------
+
+die() { printf 'room-digest: error: %s\n' "$*" >&2; exit 1; }
+warn() { printf 'room-digest: warn: %s\n' "$*" >&2; }
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || die "missing dependency: $1 (need bash + gh + jq)"
+}
+
+iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+one_line() {
+  printf '%s' "$1" | tr '\n' ' ' | sed -e 's/[[:space:]][[:space:]]*/ /g' -e 's/^[ ]*//' -e 's/[ ]*$//'
+}
+
+md_cell() { # one_line + escape table pipes
+  one_line "$1" | sed 's/|/\\|/g'
+}
+
+m_val() { # $1 = metrics output, $2 = key -> value (first token)
+  printf '%s\n' "$1" | sed -n "s/^$2=\([^ ]*\).*/\1/p"
+}
+
+board_addr() { printf '%s#%s' "$REPO" "$ISSUE"; }
+
+usage() {
+  cat <<'EOF'
+room-digest — weekly digest for the claims board (read-only)
+
+Usage: room-digest [--since ISO] [--out PATH] [--dry-run]
+                   [--repo OWNER/REPO] [--issue N]
+
+  --since ISO   digest window start (default: 7 days ago, UTC). Everything
+                with a board timestamp >= ISO is "this window".
+  --out PATH    write the markdown digest to PATH (atomic temp+rename).
+                Default: print to stdout.
+  --dry-run     do not write --out; print PLAN + digest to stdout.
+
+Global flags: --dry-run --repo OWNER/REPO --issue N --help
+
+Composes scripts/room verbs into one brief: merged PRs since --since,
+receipts posted, lease expirations/reclaims, duplicate-claim refusals,
+missing receipts (24h SLO), board comment count vs the 1500 ceiling, and a
+"for John's call" section. NEVER posts to the board.
+
+Examples:
+  scripts/room-digest --dry-run
+  scripts/room-digest --since 2026-09-09T00:00:00Z --out /tmp/digest.md
+EOF
+}
+
+# ---------------------------------------------------------------------------
+# room-verb composition (read-only verbs only)
+# ---------------------------------------------------------------------------
+
+room() { # verb args... -> stdout; read-only verbs only
+  "$ROOM" --repo "$REPO" --issue "$ISSUE" "$@"
+}
+
+fetch_comments() { # -> JSON array of all comments on the board issue
+  gh api --paginate "repos/$REPO/issues/$ISSUE/comments?per_page=100" 2>/dev/null \
+    | jq -s 'add // []' \
+    || die "failed to fetch board comments from $(board_addr)"
+}
+
+build_state() { # $1 = comments JSON -> state JSON (via room's own parser)
+  local n wm
+  n="$(printf '%s' "$1" | jq 'length')"
+  wm="$(printf '%s' "$1" | jq 'map(.id) | max // 0')"
+  printf '%s' "$1" | room _parse | room _state --comments "$n" --watermark "$wm"
+}
+
+merged_prs_tsv() { # $1 = rcpt shas (space-sep) -> TSV n,merged,sha,claim,rcpt,title
+  local have="$1" prs
+  prs="$(gh api "repos/$REPO/pulls?state=closed&per_page=100&sort=updated&direction=desc" 2>/dev/null \
+    || die "failed to fetch PRs from $REPO")"
+  printf '%s' "$prs" | jq -r --arg s "$SINCE" --arg shas "$have" '
+    ($shas | split(" ") | map(select(length > 0))) as $have
+    | [.[] | select(.merged_at != null and (.merged_at >= $s))
+       | .merge_commit_sha as $sha
+       | {n: .number, title: (.title // ""), merged: .merged_at, sha: ($sha[0:7]),
+          claim: (((.body // "") | ([capture("·[ \t]*claim:(?<t>[A-Za-z0-9_-]+)")]
+                    | .[0].t)) // "-"),
+          rcpt: ([$have[] | select($sha | startswith(.))] | length > 0)}]
+    | sort_by(.merged)
+    | .[] | [.n, .merged, .sha, .claim, (if .rcpt then "yes" else "no" end), .title]
+    | @tsv'
+}
+
+# ---------------------------------------------------------------------------
+# main
+# ---------------------------------------------------------------------------
+
+main() {
+  while [ $# -gt 0 ]; do case "$1" in
+    --dry-run) DRY_RUN=1; shift ;;
+    --repo)    REPO="$2"; shift 2 ;;
+    --issue)   ISSUE="$2"; shift 2 ;;
+    --since)   SINCE="$2"; shift 2 ;;
+    --out)     OUT="$2"; shift 2 ;;
+    --help|-h) usage; exit 0 ;;
+    --) shift; break ;;
+    -*) die "unknown flag $1" ;;
+    *) die "unexpected argument $1 (see --help)" ;;
+  esac; done
+  need gh; need jq
+  [ -x "$ROOM" ] || die "sibling scripts/room not found/executable: $ROOM"
+  if [ -z "$SINCE" ]; then
+    SINCE="$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)"
+  fi
+  date -u -d "$SINCE" +%s >/dev/null 2>&1 || die "unparseable --since: $SINCE"
+
+  local now metrics rot mr_raw board_comments rotation_due comments state rcpt_shas
+  now="$(iso_now)"
+
+  metrics="$(room metrics --since "$SINCE")"
+  rot="$(room rotation-check)"
+  mr_raw="$(room receipts-scan 2>/dev/null || true)"
+  board_comments="$(m_val "$rot" board_comments)"
+  rotation_due="$(m_val "$rot" rotation_due)"
+
+  comments="$(fetch_comments)"
+  state="$(build_state "$comments")"
+  rcpt_shas="$(printf '%s' "$state" | jq -r '[.tasks[] | .receipts[] | .merged]
+    | map(select(. != null and . != "none")) | join(" ")')"
+
+  # ---- windowed detail ----------------------------------------------------
+  local prs_tsv done_tsv reclaim_tsv refusal_tsv refusals_n qlive
+  prs_tsv="$(merged_prs_tsv "$rcpt_shas")"
+  done_tsv="$(printf '%s' "$state" | jq -r --arg s "$SINCE" '
+    . as $root
+    | [.log[] | select(.kind == "done" and .ok and ((.at // "") >= $s))]
+    | sort_by(.at)
+    | .[] | [.at, .task_id, ($root.tasks[.task_id].lane // "(none)"),
+              (.comment_id | tostring)] | @tsv')"
+  reclaim_tsv="$(printf '%s' "$state" | jq -r --arg s "$SINCE" '
+    [.tasks | to_entries[] | .value
+     | select(((.released_at // "") >= $s) or ((.strike_one_at // "") >= $s))
+     | {tid: .task_id, lane: (.lane // "(released)"), state,
+        rel: (.released_at // "-"), s1: (.strike_one_at // "-")}]
+    | sort_by(.rel)
+    | .[] | [.rel, .tid, .lane, .state, .s1] | @tsv')"
+  refusal_tsv="$(printf '%s' "$state" | jq -r --arg s "$SINCE" '
+    [.refused[] | select(((.at // "") >= $s))]
+    | sort_by(.at)
+    | .[] | [.at, .task_id, .by_lane, .colliding, (.holder_lane // "?"),
+              (.comment_id | tostring)] | @tsv')"
+  refusals_n="$(printf '%s' "$state" | jq --arg s "$SINCE" \
+    '[.log[] | select(.kind == "duplicate-refusal" and ((.at // "") >= $s))] | length')"
+  qlive="$(room query --live 2>/dev/null || echo '(query --live failed)')"
+
+  # ---- headline numbers ---------------------------------------------------
+  local opened completed expired receipts missing lanes cpd
+  opened="$(m_val "$metrics" claims_opened)"
+  completed="$(m_val "$metrics" claims_completed)"
+  expired="$(m_val "$metrics" claims_expired)"
+  receipts="$(m_val "$metrics" receipts)"
+  missing="$(m_val "$metrics" missing_receipts)"
+  lanes="$(m_val "$metrics" distinct_lanes)"
+  cpd="$(m_val "$metrics" comments_per_day)"
+  local mr_n prs_n done_n reclaim_n
+  mr_n="$(printf '%s\n' "$mr_raw" | sed '1d' | grep -c . || true)"
+  prs_n="$(printf '%s\n' "$prs_tsv" | grep -c . || true)"
+  done_n="$(printf '%s\n' "$done_tsv" | grep -c . || true)"
+  reclaim_n="$(printf '%s\n' "$reclaim_tsv" | grep -c . || true)"
+
+  # ---- render --------------------------------------------------------------
+  local tmpf
+  tmpf="$(mktemp)" || die "mktemp failed"
+  trap 'rm -f "${tmpf:-}"' EXIT
+
+  {
+    printf '# Room digest — week ending %s\n\n' "${now:0:10}"
+    printf 'board: %s · generated: %s · window: %s → %s · by: scripts/room-digest v%s (read-only)\n\n' \
+      "$(board_addr)" "$now" "$SINCE" "$now" "$VERSION"
+
+    printf '## At a glance\n\n'
+    printf '%s opened · %s completed · %s expired/released · %s receipts posted · ' \
+      "$opened" "$completed" "$expired" "$receipts"
+    printf '%s missing (24h SLO) · %s duplicate-claim refusals · ' "$missing" "$refusals_n"
+    printf '%s distinct lanes · %.0f comments/day\n\n' "$lanes" "$cpd"
+
+    printf '## Merged PRs since %s (%s)\n\n' "${SINCE:0:10}" "$prs_n"
+    if [ "$prs_n" -gt 0 ]; then
+      printf '| PR | merged (UTC) | sha | claim | receipt | title |\n| --- | --- | --- | --- | --- | --- |\n'
+      printf '%s\n' "$prs_tsv" | while IFS="$(printf '\t')" read -r n merged sha claim rcpt title; do
+        printf '| #%s | %s | %s | %s | %s | %s |\n' \
+          "$n" "$merged" "$sha" "$claim" "$rcpt" "$(md_cell "$title")"
+      done
+      printf '\n'
+    else
+      printf '(none)\n\n'
+    fi
+
+    printf '## Receipts posted (%s)\n\n' "$done_n"
+    if [ "$done_n" -gt 0 ]; then
+      printf '| at (UTC) | task-id | lane | comment |\n| --- | --- | --- | --- |\n'
+      printf '%s\n' "$done_tsv" | while IFS="$(printf '\t')" read -r at tid lane cid; do
+        printf '| %s | %s | %s | %s |\n' "$at" "$tid" "$lane" "$cid"
+      done
+      printf '\n'
+    else
+      printf '(none)\n\n'
+    fi
+
+    printf '## Lease expirations & reclaims (%s)\n\n' "$reclaim_n"
+    if [ "$reclaim_n" -gt 0 ]; then
+      printf '| at (UTC) | task-id | lane | kind | strike-one at |\n| --- | --- | --- | --- | --- |\n'
+      printf '%s\n' "$reclaim_tsv" | while IFS="$(printf '\t')" read -r rel tid lane _state s1; do
+        local kind="strike-two release"
+        [ "$rel" = "-" ] && kind="strike-one nudge"
+        printf '| %s | %s | %s | %s | %s |\n' "$rel" "$tid" "$lane" "$kind" "$s1"
+      done
+      printf '\n'
+    else
+      printf '(none)\n\n'
+    fi
+
+    printf '## Duplicate-claim refusals (%s)\n\n' "$refusals_n"
+    if [ "$refusals_n" -gt 0 ]; then
+      printf '| at (UTC) | task-id | refused lane | collided on | held by |\n| --- | --- | --- | --- | --- |\n'
+      printf '%s\n' "$refusal_tsv" | while IFS="$(printf '\t')" read -r at tid by col holder cid; do
+        printf '| %s | %s | %s | %s | %s |\n' "$at" "$tid" "$by" "$col" "$holder"
+      done
+      printf '\n'
+    else
+      printf '(none)\n\n'
+    fi
+
+    printf '## Missing receipts — past the 24h SLO (%s)\n\n' "$mr_n"
+    if [ "$mr_n" -gt 0 ]; then
+      printf '```\n%s\n```\n\n' "$(printf '%s\n' "$mr_raw" | sed '1d')"
+    else
+      printf '(none)\n\n'
+    fi
+
+    printf '## Board pressure\n\n'
+    printf 'board_comments=%s threshold=1500 rotation_due=%s\n\n' "$board_comments" "$rotation_due"
+
+    printf '## Open claims now (live)\n\n```\n%s\n```\n\n' "$(printf '%s\n' "$qlive" | head -30)"
+
+    printf '## For John'"'"'s call\n\n'
+    local calls=0
+    if [ "${missing:-0}" -gt 0 ] 2>/dev/null; then
+      printf -- '- %s merged task(s)/PR(s) are past the 24h receipt SLO — lanes owe DONE: + room-receipt blocks.\n' "$missing"
+      calls=1
+    fi
+    if [ "$rotation_due" = "yes" ]; then
+      printf -- '- Board crossed 1500 comments: rotation is DUE (rotation runbook, Wave 3).\n'
+      calls=1
+    elif [ "${board_comments:-0}" -ge 1200 ] 2>/dev/null; then
+      printf -- '- Board at %s/1500 comments — rotation approaching; keep the rotation runbook ready.\n' "$board_comments"
+      calls=1
+    fi
+    if [ "${refusals_n:-0}" -gt 0 ] 2>/dev/null; then
+      printf -- '- %s duplicate-claim refusal(s) recorded this window — lanes collided on task-ids.\n' "$refusals_n"
+      calls=1
+    fi
+    printf -- '- swarm-room-watch is PAUSED since 2026-09-14: decay enforcement (lease sweeps, missing-receipt nudges) is not running. Re-enable is John'"'"'s call.\n'
+    if [ "$calls" -eq 0 ]; then
+      printf -- '- Nothing else needs John'"'"'s call this week.\n'
+    fi
+    printf '\n<!-- trend: week=%s opened=%s completed=%s expired=%s receipts=%s missing=%s refusals=%s comments=%s -->\n' \
+      "${now:0:10}" "$opened" "$completed" "$expired" "$receipts" "$missing" "$refusals_n" "$board_comments"
+  } > "$tmpf"
+
+  if [ "$DRY_RUN" = 1 ]; then
+    if [ -n "$OUT" ]; then
+      printf 'room-digest: PLAN (dry-run): would write %s-byte digest to %s\n' \
+        "$(wc -c < "$tmpf")" "$OUT"
+    else
+      printf 'room-digest: PLAN (dry-run): digest to stdout, nothing written\n'
+    fi
+    cat "$tmpf"
+  elif [ -n "$OUT" ]; then
+    local outdir
+    outdir="$(dirname -- "$OUT")"
+    [ -d "$outdir" ] || die "output directory does not exist: $outdir"
+    mv "$tmpf" "$OUT"
+    trap - EXIT
+    printf 'room-digest: wrote %s\n' "$OUT"
+  else
+    cat "$tmpf"
+  fi
+}
+
+main "$@"
