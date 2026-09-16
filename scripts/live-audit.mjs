@@ -44,6 +44,11 @@ export async function liveAudit({ origin = LIVE_ORIGIN, door = ROOM_DOOR, fetchI
   note(privacy.res.status === 200, 'privacy_status', privacy.res.status);
   note(/Email is not the account key/.test(privacy.text), 'privacy_copy', 'missing account-key sentence');
   note(!/gmail\.readonly/.test(privacy.text), 'privacy_no_mailbox_scope', 'gmail.readonly');
+  const privacyGoogle = await fetchImpl(origin + '/privacy', {
+    redirect: 'manual',
+    headers: { Origin: 'https://accounts.google.com' }
+  });
+  note(privacyGoogle.status === 200, 'privacy_google_origin', privacyGoogle.status);
 
   const ready = await get('/api/ready');
   note(ready.res.status === 200 && ready.json?.status === 'ready', 'ready', ready.res.status);
