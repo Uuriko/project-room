@@ -95,6 +95,12 @@ export async function liveAudit({ origin = LIVE_ORIGIN, door = ROOM_DOOR, fetchI
   note(doorRes.status === 200, 'door_status', doorRes.status);
   note(doorHtml.includes(origin), 'door_live_origin', origin);
   note(!/project-room-staging/.test(doorHtml), 'door_not_staging', 'staging Join href');
+  const llmsUrl = String(door).replace(/\/$/, '') + '/llms.txt';
+  const llmsRes = await timedFetch(llmsUrl, { redirect: 'manual' });
+  const llmsText = await llmsRes.text();
+  note(llmsRes.status === 200, 'door_llms_status', llmsRes.status);
+  note(llmsText.includes(`origin ${origin}`), 'door_llms_origin', llmsText.slice(0, 120));
+  note(!/project-room-staging/.test(llmsText), 'door_llms_not_staging', 'staging origin in llms.txt');
 
   const mcpDeny = await timedFetch(origin + '/mcp', {
     method: 'POST',
