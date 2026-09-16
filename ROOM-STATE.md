@@ -1,9 +1,10 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-16T18:27:34Z · board: Uuriko/project-room#266 · watermark: 5702505087 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-16T19:29:04Z · board: Uuriko/project-room#266 · watermark: 5703314743 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
 RC-2026-09-16-004 | quill-s2 | submitted | 2026-09-17T18:17:54Z | ROOM-STATE.md, scripts/room, docs/ROOM-WATCH.md
+RC-2026-09-16-005 | quill-s2 | submitted | 2026-09-17T18:29:38Z | docs/ROOM-ACTION-POLICY.md, scripts/room-digest, ROOM-HEALTH.md, docs/SWARM-PLUG-IN.md, docs/ROOM-WATCH.md
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
@@ -22,5 +23,5 @@ task-id | merged | comment-id
 (none)
 
 ## signals
-board_comments=265 threshold=1500 rotation_due=no watcher=paused open_claims=1 watermark=5702505087
+board_comments=296 threshold=1500 rotation_due=no watcher=paused open_claims=2 watermark=5703314743
 
