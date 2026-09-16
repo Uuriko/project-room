@@ -3,10 +3,12 @@
 // time, a max-use count (default 1), and a used count. redeem() validates
 // expiry and usage, increments the counter, and refuses expired or
 // exhausted links. All state is caller-owned (a Map); time is injectable
-// for tests. The module is pure and dependency-free. Token generation
-// uses a caller-supplied random source for test determinism. Frozen
-// outputs; malformed inputs throw InviteError. HTTP route wiring is a
+// for tests. The module is pure; default token generation uses node:crypto.
+// Token generation uses a caller-supplied random source for test determinism;
+// when none is supplied, tokens come from crypto.randomBytes (never Math.random).
+// Frozen outputs; malformed inputs throw InviteError. HTTP route wiring is a
 // later slice.
+import { randomBytes as nodeRandomBytes } from "node:crypto";
 class InviteError extends Error { constructor(code, message) { super(message); this.name = "InviteError"; this.code = code; } }
 const fail = (code, message) => { throw new InviteError(code, message); };
 const check = (condition, message) => { if (!condition) fail("invalid_invite", message); };
@@ -18,7 +20,7 @@ export function createInvites({ store, randomBytes, defaultTtlMs } = {}) {
   const ttl = defaultTtlMs ?? 24 * 60 * 60 * 1000;
   check(Number.isFinite(ttl) && ttl > 0, "defaultTtlMs must be positive");
   const invites = store ?? new Map();
-  const gen = randomBytes ?? (() => Math.random().toString(16).slice(2).padEnd(16, "0").slice(0, 16));
+  const gen = randomBytes ?? (() => nodeRandomBytes(8).toString("hex"));
   const nowMs = now => {
     const at = now === undefined || now === null ? Date.now() : new Date(now).getTime();
     check(!Number.isNaN(at), "now must be parseable");

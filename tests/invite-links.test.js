@@ -34,3 +34,17 @@ test("malformed inputs are refused", () => {
   throwsCode(() => invites.issue({ room: "x", maxUses: 0 }), "invalid_invite");
   throwsCode(() => invites.redeem("nope"), "invalid_invite");
 });
+test("default token generation is cryptographically secure, never Math.random", () => {
+  const orig = Math.random;
+  Math.random = () => 0.123456789; // constant: old Math.random default would repeat/collide
+  try {
+    const invites = createInvites();
+    const t1 = invites.issue({ room: "lobby", now: 0 }).token;
+    const t2 = invites.issue({ room: "lobby", now: 0 }).token;
+    assert.match(t1, /^[0-9a-f]{16}$/);
+    assert.match(t2, /^[0-9a-f]{16}$/);
+    assert.notEqual(t1, t2); // constant Math.random would produce identical tokens (or a collision throw)
+  } finally {
+    Math.random = orig;
+  }
+});
