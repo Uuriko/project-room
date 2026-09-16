@@ -1,0 +1,1 @@
+export function buildGovernanceAuditExplanation({findings}){let codes=findings.map(x=>x.category).sort(),counts={};for(let x of codes)counts[x]=(counts[x]||0)+1;return Object.freeze({kind:"governance-audit-explanation/v1",codes:Object.freeze(codes),counts:Object.freeze(counts),total:codes.length})}
