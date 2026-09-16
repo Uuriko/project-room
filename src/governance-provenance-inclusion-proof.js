@@ -1,0 +1,1 @@
+export function buildGovernanceProvenanceInclusionProof({graph,hash,type}){if(!["node","edge"].includes(type))throw Error("type invalid");let found=(type==="node"?graph.nodes:graph.edges).some(x=>x[type+"Hash"]===hash);if(!found)throw Error("missing");return Object.freeze({kind:"governance-provenance-inclusion-proof/v1",graphHash:graph.graphHash,type,hash})}
