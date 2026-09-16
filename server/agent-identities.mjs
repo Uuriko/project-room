@@ -144,6 +144,18 @@ export class AgentIdentities {
         JOIN agent_identities i ON i.identity_id=l.identity_id WHERE l.room_id=? ORDER BY l.linked_at`).all(roomId);
   }
 
+  // Resolves an identity secret globally, without a room: used by the
+  // self-serve agent-room creation path, where no room link exists yet.
+  // Returns { identityId, displayName } or null. Malformed secrets are
+  // null, never an error, so callers cannot distinguish "bad format" from
+  // "unknown secret".
+  resolveGlobalIdentitySecret(secret) {
+    if (!isIdentitySecret(secret)) return null;
+    const row = this.db.prepare("SELECT identity_id AS identityId, display_name AS displayName FROM agent_identities WHERE secret_hash=?")
+      .get(hash(secret));
+    return row ?? null;
+  }
+
   // Resolves an identity secret to the linked room member, or null. Called
   // from RoomStore#authenticate before the room-key path.
   resolveIdentityAuth(secret, roomId) {
