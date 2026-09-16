@@ -14,10 +14,15 @@
 
 import { randomUUID } from "node:crypto";
 import { ServiceError } from "./store.mjs";
-import { memberCan } from "../src/events.js";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
+// Minimal permission check (avoids importing src/events.js, which is not
+// Workers-bundle-safe). Mirrors memberCan() from src/events.js.
+const memberCan = (authority, memberId, permission) => {
+  const member = authority?.members?.[memberId];
+  return Array.isArray(member?.permissions) && member.permissions.includes(permission);
+};
 
 export const accessRequestSchema = `
   CREATE TABLE IF NOT EXISTS access_requests (
