@@ -107,6 +107,12 @@ export async function liveAudit({ origin = LIVE_ORIGIN, door = ROOM_DOOR, fetchI
   note(skillRes.status === 200, 'door_skill_status', skillRes.status);
   note(skillText.includes(`origin ${origin}`), 'door_skill_origin', skillText.slice(0, 120));
   note(!/project-room-staging/.test(skillText), 'door_skill_not_staging', 'staging origin in skill.md');
+  const agentsUrl = String(door).replace(/\/$/, '') + '/AGENTS.md';
+  const agentsRes = await timedFetch(agentsUrl, { redirect: 'manual' });
+  const agentsText = await agentsRes.text();
+  note(agentsRes.status === 200, 'door_agents_status', agentsRes.status);
+  note(agentsText.includes(`origin ${origin}`), 'door_agents_origin', agentsText.slice(0, 120));
+  note(!/project-room-staging/.test(agentsText), 'door_agents_not_staging', 'staging origin in AGENTS.md');
 
   const mcpDeny = await timedFetch(origin + '/mcp', {
     method: 'POST',
