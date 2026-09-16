@@ -111,6 +111,8 @@ test('GET /privacy is public and does not treat email as a Gmail inbox grant', a
   const agentAt = page.indexOf('Copy agent setup');
   assert.ok(googleAt >= 0 && agentAt > googleAt);
   assert.match(page, /JavaScript is required to open Project Room/);
+  assert.match(page, /id="connection-status"[^>]*>Connecting to room service/);
+  assert.doesNotMatch(page, /id="connection-explanation">Connecting to room service/);
 });
 
 test('sign-in help does not call the live host a local pilot', () => {
