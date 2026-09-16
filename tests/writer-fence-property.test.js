@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { STORE_SCHEMA_VERSION, WRITER_FUNCTION, writerVersions, applicationTables, fenceDefinitions, writerFenceDefinitions, registerWriter, installWriterFence, verifyWriterFence } from "../server/writer-fence.mjs";
+import { STORE_SCHEMA_VERSION, WRITER_FUNCTION, writerVersions, applicationTables, unfencedAdditiveTables, fenceDefinitions, writerFenceDefinitions, registerWriter, installWriterFence, verifyWriterFence } from "../server/writer-fence.mjs";
 
 // Property-style tests over synthetic databases (never user data): random fence
 // versions, writer identities and trigger mutations from a fixed-seed generator.
@@ -50,7 +50,8 @@ test("fence definitions form one exact trigger per table and operation, and tabl
     previous = tables;
   }
   assert.equal(new Set(applicationTables).size, applicationTables.length);
-  assert.equal(tablesOf(STORE_SCHEMA_VERSION).length, applicationTables.length, "v34 converges and fences both schema lineages");
+  assert.deepEqual(applicationTables.filter(table => !tablesOf(STORE_SCHEMA_VERSION).includes(table)), [...unfencedAdditiveTables],
+    "v34 converges and fences both schema lineages; only intentionally-unfenced additive tables sit outside the fence");
 });
 
 test("for any fence version, a write passes exactly when the registered writer answers that integer version", t => {

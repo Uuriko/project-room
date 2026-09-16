@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
-import { applicationTables, writerFenceDefinitions, verifyWriterFence, fenceDefinitions } from "../server/writer-fence.mjs";
+import { applicationTables, unfencedAdditiveTables, writerFenceDefinitions, verifyWriterFence, fenceDefinitions } from "../server/writer-fence.mjs";
 
 // Construct a synthetic pre-upgrade database. Never use this fixture on user data.
 test("Node read transactions reject nested and direct writes, retain outer writes and restore mode after failures", t => {
@@ -51,7 +51,8 @@ test("schema upgrade preserves existing records and fences a previously opened c
     assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 34);
     assert.deepEqual(current.db.prepare("SELECT * FROM accounts").all(), before);
     assert.doesNotThrow(() => verifyWriterFence(current.db));
-    assert.equal(writerFenceDefinitions.length, applicationTables.length * 3);
+    assert.equal(writerFenceDefinitions.length, (applicationTables.length - unfencedAdditiveTables.length) * 3,
+      "the v34 fence covers every application table except intentionally-unfenced additive tables");
     assert.throws(() => legacyStatement.run("fixture-account"), /project_room_writer_v34|unsupported database writer/);
     current.createAccount("new-fixture-account");
     assert.equal(current.account("new-fixture-account").active, true);

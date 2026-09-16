@@ -279,6 +279,8 @@ export class InboxClient {
       }
       return typeof v.duplicate === "boolean" && r?.requestId === data.requestId && r.action === data.action && r.sourceId === data.sourceId
         && (["source.share", "source.excerpt"].includes(data.action) ? r.roomId === data.roomId && r.sourceRevision === data.sourceRevision && id(r.messageId) && id(r.eventId) && revision(r.sequence)
+          : ["source.read", "source.unread"].includes(data.action) ? r.sourceRevision === data.expectedRevision
+            && (data.action === "source.unread" ? r.readAt === null : Number.isSafeInteger(r.readAt) && r.readAt > 0)
           : r.revision === data.expectedRevision + 1 && (!data.action.startsWith("draft.") || r.sourceRevision === data.sourceRevision));
     });
   }
