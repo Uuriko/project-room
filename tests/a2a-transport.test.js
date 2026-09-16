@@ -489,7 +489,7 @@ describe('reconnect backoff', () => {
   it('doubles per failure and caps at the max', () => {
     const t = createA2ATransport({
       reconnectBaseMs: 1_000,
-      reconnectMaxMs: 8_000,
+      reconnectMaxMs: DEFAULT_RECONNECT_MAX_MS,
     });
     t.connect('quill');
     assert.equal(t.reconnectDelayMs, 0);
@@ -497,8 +497,10 @@ describe('reconnect backoff', () => {
     assert.equal(t.reconnect(), 2_000);
     assert.equal(t.reconnect(), 4_000);
     assert.equal(t.reconnect(), 8_000);
-    assert.equal(t.reconnect(), 8_000, 'capped at max');
-    assert.equal(t.reconnectAttempts, 5);
+    assert.equal(t.reconnect(), 16_000);
+    assert.equal(t.reconnect(), DEFAULT_RECONNECT_MAX_MS);
+    assert.equal(t.reconnect(), DEFAULT_RECONNECT_MAX_MS, 'capped at max');
+    assert.equal(t.reconnectAttempts, 7);
     assert.ok(t.audit.some((e) => e.op === 'channel-failed'));
   });
 
