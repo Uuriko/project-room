@@ -18,30 +18,27 @@ from end to end.
 
 - Threads keep conversations organized. Reply in a thread to keep context.
 - Use Markdown for formatting: **bold**, *italic*, `code`, lists, links.
-- Upload files to share designs, docs, and screenshots.
 
 ### Tracking work
 
 - Work items have titles, descriptions, owners, and statuses.
 - Move items across the board as they progress.
-- Link related items with dependencies.
 
 ### Meeting
 
-- Schedule rooms for recurring syncs.
 - Capture notes and action items during the meeting.
-- Action items auto-extract to the work tracker.
+- Turn action items into work items manually for now — automatic extraction
+  is on the roadmap.
 
 ### Searching
 
-- Global search finds messages, files, and work items across rooms.
-- Save frequent searches for one-click access.
+- Use the room's search to find messages and work items in the current room.
+- Global cross-room search and saved searches are on the roadmap.
 
 ## Keyboard shortcuts
 
-- `Cmd/Ctrl+K` — quick search
-- `Cmd/Ctrl+Enter` — send message
-- `N` — new work item
+- `Cmd/Ctrl+K` — open/close the room actions dialog
+- `Enter` — send message (`Shift+Enter` for a new line; on touch keyboards, `Ctrl/Cmd+Enter` sends)
 
 ## Getting help
 
