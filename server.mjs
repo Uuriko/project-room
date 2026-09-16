@@ -50,21 +50,27 @@ if (!paused) {
     console.warn(`[growth] snapshot restore skipped: ${error?.message ?? error}`);
   }
 }
-server.listen(port, host, () => console.log(`Project Room ${paused ? "paused" : production ? "invite-only pilot" : "local pilot"}: ${origin}`));
+let growthScheduler = null;
+let growthIntervalMs = 0;
+server.listen(port, host, () => {
+  console.log(`Project Room ${paused ? "paused" : production ? "invite-only pilot" : "local pilot"}: ${origin}`);
+  // C13 readiness note: the listen line above must stay the first stdout write,
+  // because packaging tests treat first stdout data as "server ready".
+  if (!paused) console.log(growthScheduler && growthScheduler.isRunning()
+    ? `[growth] scheduler started (tick every ${growthIntervalMs}ms)`
+    : "[growth] scheduler disabled");
+});
 // Track C C13 — growth scheduler. Drives the C12 watcher on a fixed
 // cadence and logs triggered alert hits (no delivery anywhere). Any
 // failure here only costs alert logging, never boot or shutdown.
-let growthScheduler = null;
 if (!paused) {
   try {
     const growthWatcher = createWatcher({ collector: growthCollector, rules: defaultGrowthRules() });
     const envInterval = process.env.GROWTH_WATCH_INTERVAL_MS;
     const intervalMs = envInterval === undefined || envInterval === "" ? DEFAULT_INTERVAL_MS : Number(envInterval);
+    growthIntervalMs = intervalMs;
     growthScheduler = createScheduler({ watcher: growthWatcher, intervalMs });
     growthScheduler.start();
-    console.log(growthScheduler.isRunning()
-      ? `[growth] scheduler started (tick every ${intervalMs}ms)`
-      : "[growth] scheduler disabled (interval <= 0)");
   } catch (error) {
     growthScheduler = null;
     console.warn(`[growth] scheduler disabled: ${error?.message ?? error}`);
