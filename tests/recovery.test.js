@@ -19,7 +19,7 @@ function fixture(t) {
   return { ...f, directory };
 }
 
-test("online capture preserves all 38 tables, identity boundaries and exact retries through recovery and restart", async t => {
+test("online capture preserves all 39 tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t);
   const { identityId } = f.store.identities.create("Recovery agent");
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
@@ -35,10 +35,12 @@ test("online capture preserves all 38 tables, identity boundaries and exact retr
   f.store.db.prepare(`INSERT INTO room_attachments(room_id,id,uploader_id,filename,media_type,byte_length,sha256,bytes,state,created_at,expires_at,message_id)
     VALUES('commons','recovery-attachment','recovery-uploader','recovery-note.txt','text/plain',11,?,?,'staged',?, ?,NULL)`)
     .run("0".repeat(64), Buffer.from("hello world"), f.now(), f.now() + 1000);
+  // Seed one read marker so the capture comparison covers private_inbox_reads.
+  f.store.inbox.apply(f.owner.token, { action: "source.read", requestId: "recovery-inbox-read", sourceId: "recovery-source", expectedRevision: 1 }, f.owner.session.sessionBinding);
   f.cursor = f.store.room("commons").sequence;
   f.store.markCaughtUp(f.keys.owner, "commons", f.cursor);
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 38);
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 39);
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);
