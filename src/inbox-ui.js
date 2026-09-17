@@ -300,6 +300,9 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     "Last update received: " + when(live.lastUpdateReceivedAt),
     "Last send: " + (live.lastSendResult ? live.lastSendResult.outcome + (live.lastSendResult.code ? " · " + live.lastSendResult.code : "") + " · " + when(live.lastSendResult.at) : "none yet")
   ];
+  // Email has no live path yet: the mailbox is a recorded fixture until routing lands.
+  const emailLines = record => [record.mode === "fixture" ? "Inbound: fixture mailbox · not yet routed" : "Inbound: routed", "Sending: not available",
+    "Last update received: " + when(record.webhookSetAt ?? null).replace("none yet", "fixture only")];
   // WhatsApp has no live path yet: pairing is recorded from a last-four fingerprint,
   // inbound stays unrouted and sending is unavailable until a live adapter lands.
   const whatsappLines = record => ["Pairing: required · link the number", "Inbound: not yet routed", "Sending: not available",
