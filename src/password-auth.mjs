@@ -85,4 +85,10 @@ export function checkPasswordPolicy(password) {
 // has no password set (or no account exists for the email). Verifying against
 // it always costs one full scrypt derivation, so a wrong-password response
 // never reveals whether the email is registered.
-export const DUMMY_PASSWORD_VERIFIER = hashPassword("dummy-password-verifier-placeholder");
+//
+// This is a fixed string literal (not minted at module load) because the
+// Workers runtime forbids random generation during module evaluation; the
+// value is a real scrypt verifier for an unguessable placeholder, so it
+// behaves identically to a minted one.
+export const DUMMY_PASSWORD_VERIFIER =
+  "scrypt$16384$8$1$TQ4ug3qQaXHk4bKZFJ5Dlw$m2yyt62ODf_PX6D77r-zd8oDuFchuzwdfF9TXBDsjuY";
