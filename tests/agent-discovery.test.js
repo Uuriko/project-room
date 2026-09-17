@@ -8,9 +8,9 @@ import { createRoomServer } from "../server/http.mjs";
 import { roomEntry, publicRoomDoorHtml } from "../deploy/room-entry.mjs";
 import {
   agentCard, llmsTxt, llmsFullTxt, kitsTxt, agentCardJson, discoveryDoc, DISCOVERY_PATHS,
-  SHORT_PACKET_FILES, SHORT_PACKET_SYNONYMS, AGENT_CARD_SYNONYMS, HEALTH_ALIAS_PATHS,
+  AFTER_PASTE_SECTION, SHORT_PACKET_FILES, SHORT_PACKET_SYNONYMS, AGENT_CARD_SYNONYMS, HEALTH_ALIAS_PATHS,
   KITS_CATALOG_PATH, KITS_CATALOG_SYNONYMS, KITS_CATALOG_FILES,
-  isHealthAliasPath, AGENT_CARD_A2A_PATH,
+  isHealthAliasPath, A2A_PROTOCOL_VERSION, AGENT_CARD_A2A_PATH,
   ROOM_ORIGIN, ROOM_DOOR, ROOM_PUBLIC_WWW, ROOM_PUBLIC_LOBBY, COMPUTE_DOOR, ROOM_DOCS,
   EDGE_DOOR_HOSTS, isEdgeDoorUrl
 } from "../deploy/agent-discovery.mjs";
@@ -45,16 +45,16 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
     "/room/.well-known/agent-card.json",
     ...SHORT_PACKET_FILES.map(name => `/room/${name}`)
   ]);
-  assert.deepEqual(card.join.map(row => row.id), ["packet", "guest-agent-link", "enrolled-key"]);
+  assert.deepEqual(card.join.map(row => row.id), ["packet", "guest-agent-link", "enrolled-key", "identity-mint", "invite-redeem"]);
   assert.equal(card.join.find(row => row.id === "packet").status, "live");
   assert.equal(card.join.find(row => row.id === "guest-agent-link").status, "live");
   assert.equal(card.join.find(row => row.id === "enrolled-key").status, "live");
   assert.deepEqual(card.firstTools.map(row => row.name), ["room_check_access", "orient"]);
   assert.equal(card.capabilities.remoteMcp, false);
   assert.equal(card.capabilities.guestAgentLinkMint, true);
-  assert.match(card.description, /optional work items/);
+  assert.match(card.description, /Work Items/);
   assert.match(card.description, /receipts/i);
-  assert.match(card.description, /people and AI agents/);
+  assert.match(card.description, /Members/);
   assert.match(card.description, /Not a run factory/);
   assert.match(text, /Agent-native ledger/);
   assert.match(text, /Work Items \+ next actions \+ receipts/);
@@ -77,19 +77,42 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.match(full, /\/kits\.txt/);
   assert.equal(FORBIDDEN.test(text), false);
   assert.equal(FORBIDDEN.test(full), false);
+  assert.match(card.skills.find(row => row.id === "packet").description, /After paste/);
   assert.equal(FORBIDDEN.test(kitsTxt()), false);
   assert.equal(FORBIDDEN.test(agentCardJson()), false);
   assert.equal(JSON.parse(agentCardJson()).protocol, "project-room-discovery");
-  assert.equal(card.protocolVersion, undefined);
-  assert.deepEqual(card.skills.map(row => row.id), ["orient", "room_check_access", "packet", "guest-agent-link", "enrolled-key"]);
-  assert.equal(card.capabilities.streaming, undefined);
-  assert.equal(card.capabilities.roomEventStreaming, true);
-  assert.equal(card.capabilities.a2a, false);
+  assert.equal(card.protocolVersion, A2A_PROTOCOL_VERSION);
+  assert.deepEqual(card.skills.map(row => row.id), ["orient", "room_check_access", "packet", "guest-agent-link", "enrolled-key", "identity-mint", "invite-redeem"]);
+  assert.equal(card.capabilities.streaming, true);
   assert.equal(card.capabilities.pushNotifications, false);
   assert.deepEqual(card.defaultInputModes, ["text/plain"]);
   assert.equal(discoveryDoc(AGENT_CARD_A2A_PATH).body, discoveryDoc("/.well-known/agent.json").body);
   assert.equal(discoveryDoc("/room/.well-known/agent-card.json").body, discoveryDoc("/.well-known/agent.json").body);
   assert.equal(discoveryDoc("/project-room/.well-known/agent-card.json").body, discoveryDoc("/.well-known/agent.json").body);
+});
+
+test("short and full packets tell a pasted agent the next action; kits and door stay off", () => {
+  const text = llmsTxt(), full = llmsFullTxt();
+  assert.match(AFTER_PASTE_SECTION, /^## After paste \(you are the agent\)\n/);
+  assert.match(AFTER_PASTE_SECTION, /Human pasted this packet into chat\. No Room key here\./);
+  assert.match(AFTER_PASTE_SECTION, /Do not call room_check_access or orient \(need guest-agent or enrolled-key\)\./);
+  assert.match(AFTER_PASTE_SECTION, /Waiting for Paste AI draft\./);
+  assert.match(AFTER_PASTE_SECTION, /#join\/ ≠ agent auth\./);
+  for (const packet of [text, full]) {
+    const joinAt = packet.indexOf("## Join\n");
+    const afterAt = packet.indexOf(AFTER_PASTE_SECTION);
+    const routesAt = packet.indexOf("## Routes\n");
+    assert.ok(joinAt >= 0, "Join present");
+    assert.ok(afterAt > joinAt, "After paste follows Join");
+    assert.ok(routesAt > afterAt, "Routes follow After paste");
+    assert.equal(packet.includes(AFTER_PASTE_SECTION), true);
+  }
+  assert.equal(kitsTxt().includes(AFTER_PASTE_SECTION), false, "kits catalog stays packet-off");
+  assert.equal(kitsTxt().includes("## After paste"), false);
+  const packetSkill = agentCard().skills.find(row => row.id === "packet");
+  assert.match(packetSkill.description, /After paste/);
+  assert.match(packetSkill.description, /three-line reply/);
+  assert.doesNotMatch(agentCardJson(), FORBIDDEN);
 });
 
 test("Room Worker serves llms.txt, llms-full.txt, agent.json and /room aliases", async t => {
@@ -236,9 +259,12 @@ test("/room/health aliases return the same JSON as /api/health; bare /health sta
 test("door serves the same discovery bytes and points at origin", async () => {
   const html = await roomEntry(new Request("https://www.trydemigod.com/room")).text();
   assert.match(html, /Connect an agent/);
-  assert.match(html, /<details[^>]*><summary>Connect an agent/);
+  // Door copy is plain language now (see tests/room-entry.test.js for the full set).
+  assert.match(html, /Invite teammates and AI agents to work on the same items together/);
+  assert.match(html, /Rooms are private by default\. Adding an agent never lists the room publicly/);
+  assert.match(html, /choose “Use my AI” and paste the agent packet/);
   assert.match(html, /href="\/room\/llms.txt"/);
-  assert.match(html, />Join</);
+  assert.match(html, /href="\/room\/\.well-known\/agent\.json"/);
   for (const doorPath of [
     "/room/llms.txt", "/room/llms-full.txt", "/room/.well-known/agent.json",
     "/room/skill.md", "/room/agents.md", "/room/AGENTS.md", "/room/CLAUDE.md",
@@ -313,13 +339,17 @@ test("edge door routes use wildcard patterns so query strings never fall through
   assert.doesNotMatch(wrangler, /"pattern": "(?:www\.)?getdasha\.com\/room"/, "exact /room patterns drop query strings");
   assert.match(wrangler, /"pattern": "getdasha\.com\/room\*"/);
   assert.match(wrangler, /"pattern": "www\.getdasha\.com\/room\*"/);
-  // The tradeoff is bounded: /roomful junk now reaches the worker and 403s at the
-  // origin guard instead of 404ing; isEdgeDoorUrl keeps it out of the door rewrite.
+  // The tradeoff is bounded: /roomful junk reaches the worker, which answers a plain
+  // 404 for edge-door hosts (not the origin guard's 403); isEdgeDoorUrl keeps it out of the door rewrite.
   assert.equal(isEdgeDoorUrl("https://www.getdasha.com/roomful"), false);
   assert.equal(isEdgeDoorUrl("https://www.getdasha.com/room?ref=x"), true);
 });
 
-test("custom discovery metadata never implies an unimplemented A2A transport", () => {
+test("A2A agent card conforms to the official A2A 0.3.0 AgentCard shape", () => {
+  // Validated 2026-09-12 against https://a2a-protocol.org/latest/specification/
+  // (the card declares protocolVersion 0.3.0). Required top-level fields:
+  // name, description, url, provider, version, capabilities,
+  // defaultInputModes, defaultOutputModes, skills.
   const card = agentCard();
   for (const field of ["name", "description", "url", "version"]) {
     assert.equal(typeof card[field], "string");
@@ -327,9 +357,7 @@ test("custom discovery metadata never implies an unimplemented A2A transport", (
   }
   assert.equal(typeof card.provider.organization, "string");
   assert.equal(typeof card.provider.url, "string");
-  assert.equal(card.capabilities.streaming, undefined);
-  assert.equal(card.interoperability.a2a, false);
-  assert.match(card.interoperability.note, /No A2A message or task transport/);
+  assert.equal(typeof card.capabilities.streaming, "boolean");
   assert.equal(typeof card.capabilities.pushNotifications, "boolean");
   // Modes are defined as media types in the spec.
   const mime = value => typeof value === "string" && /^[a-z-]+\/[a-z0-9.+-]+$/.test(value);
@@ -341,10 +369,269 @@ test("custom discovery metadata never implies an unimplemented A2A transport", (
     assert.ok(Array.isArray(skill.tags) && skill.tags.length > 0, "skill.tags");
     assert.ok((skill.inputModes ?? []).every(mime) && (skill.outputModes ?? []).every(mime), "skill modes");
   }
-  assert.equal(card.protocolVersion, undefined);
-  for (const text of [llmsTxt(), llmsFullTxt()]) {
-    assert.match(text, /not an A2A compatibility claim/);
-    assert.doesNotMatch(text, /a2a-card|People are a thin viewer|A Work Item\s+is a session/);
+  assert.equal(card.protocolVersion, A2A_PROTOCOL_VERSION);
+});
+
+// ============================================================================
+// B029-2 [quill-s2]: pure A2A agent discovery planner (../src/agent-discovery.mjs)
+//
+// NOTE: the tests above cover deploy/agent-discovery.mjs (the room's public
+// discovery documents). Everything below covers the src/ discovery planner
+// only and must not touch the room-discovery tests above.
+import {
+  createAgentDiscovery,
+  DEFAULT_CACHE_TTL_MS,
+  DISCOVERY_ERROR_CODES,
+} from "../src/agent-discovery.mjs";
+import { EventEmitter } from "node:events";
+
+function fakeCard({ agentId, lanes = [], tools = [], skills = [], capabilities, version = 1 }) {
+  const card = { version, agentId, lanes, tools };
+  if (skills.length > 0) card.skills = skills;
+  if (capabilities !== undefined) card.capabilities = capabilities;
+  return Object.freeze(card);
+}
+
+const PLANNER_CARDS = [
+  fakeCard({ agentId: "alpha", lanes: ["summarize", "translate"], tools: ["gmail-send"], version: 2 }),
+  fakeCard({ agentId: "beta", lanes: ["summarize"], tools: [], version: 5, skills: ["summarize-prose"] }),
+  fakeCard({ agentId: "gamma", lanes: ["translate"], tools: ["gmail-send", "calendar-read"], version: 1 }),
+  fakeCard({ agentId: "delta", lanes: ["deploy"], tools: ["ssh"], version: 9 }),
+];
+
+function fakeRegistry(cards = PLANNER_CARDS) {
+  let listCalls = 0;
+  return {
+    list: () => { listCalls += 1; return cards; },
+    get listCalls() { return listCalls; },
+  };
+}
+
+function manualClock(start = 1_000_000) {
+  let now = start;
+  const fn = () => now;
+  fn.advance = (ms) => { now += ms; };
+  return fn;
+}
+
+class EmittingRegistry extends EventEmitter {
+  constructor(cards = PLANNER_CARDS) {
+    super();
+    this.cards = cards;
+    this.listCalls = 0;
   }
-  assert.match(llmsFullTxt(), /Conversation does not require a Work Item/);
+  list() {
+    this.listCalls += 1;
+    return this.cards;
+  }
+}
+
+/** Assert fn() throws an Error whose code === expected. */
+function assertCoded(fn, expected) {
+  let thrown = null;
+  try {
+    fn();
+  } catch (err) {
+    thrown = err;
+  }
+  assert.ok(thrown instanceof Error, `expected an Error with code ${expected}, got ${thrown}`);
+  assert.equal(typeof thrown.code, "string", "thrown error must carry a string code");
+  assert.equal(thrown.code, expected);
+}
+
+test("B029-2: discover ranks agents by capability coverage ratio", () => {
+  const discovery = createAgentDiscovery({ cardRegistry: fakeRegistry() });
+  const results = discovery.discover({ capabilities: ["summarize", "translate", "gmail-send"] });
+  assert.deepEqual(results.map((r) => r.agentId), ["alpha", "gamma", "beta"]);
+  assert.equal(results[0].score, 1); // alpha covers 3/3
+  assert.equal(results[1].score, 2 / 3); // gamma covers 2/3
+  assert.equal(results[2].score, 1 / 3); // beta covers 1/3
+  assert.deepEqual(results[0].matchedCapabilities, ["gmail-send", "summarize", "translate"]);
+  assert.deepEqual(results[1].matchedCapabilities, ["gmail-send", "translate"]);
+  assert.deepEqual(results[2].matchedCapabilities, ["summarize"]);
+  assert.equal(results[0].card.agentId, "alpha", "each result carries its card");
+});
+
+test("B029-2: capability matching is duck-typed across card shapes", () => {
+  const registry = fakeRegistry([
+    fakeCard({ agentId: "duck", lanes: [], tools: [], capabilities: ["custom-cap"], version: 1 }),
+    fakeCard({ agentId: "lanes", lanes: ["custom-cap"], version: 1 }),
+  ]);
+  const discovery = createAgentDiscovery({ cardRegistry: registry });
+  const results = discovery.discover({ capabilities: ["custom-cap"] });
+  // Equal score and version: tiebreak falls to agentId ascending.
+  assert.deepEqual(results.map((r) => r.agentId), ["duck", "lanes"]);
+});
+
+test("B029-2: tiebreak is version desc, then agentId asc", () => {
+  const registry = fakeRegistry([
+    fakeCard({ agentId: "zeta", lanes: ["summarize"], version: 1 }),
+    fakeCard({ agentId: "eta", lanes: ["summarize"], version: 7 }),
+    fakeCard({ agentId: "theta", lanes: ["summarize"], version: 7 }),
+  ]);
+  const discovery = createAgentDiscovery({ cardRegistry: registry });
+  const results = discovery.discover({ capabilities: ["summarize"] });
+  assert.deepEqual(results.map((r) => r.agentId), ["eta", "theta", "zeta"]);
+});
+
+test("B029-2: discover throws AD_NO_MATCH when no agent matches any capability", () => {
+  const discovery = createAgentDiscovery({ cardRegistry: fakeRegistry() });
+  assertCoded(() => discovery.discover({ capabilities: ["definitely-not-a-capability"] }), "AD_NO_MATCH");
+});
+
+test("B029-2: limit caps the ranked list from the top", () => {
+  const discovery = createAgentDiscovery({ cardRegistry: fakeRegistry() });
+  const results = discovery.discover({ capabilities: ["summarize", "translate", "gmail-send"], limit: 2 });
+  assert.equal(results.length, 2);
+  assert.deepEqual(results.map((r) => r.agentId), ["alpha", "gamma"]);
+});
+
+test("B029-2: excludeAgentIds removes agents from contention", () => {
+  const discovery = createAgentDiscovery({ cardRegistry: fakeRegistry() });
+  const results = discovery.discover({
+    capabilities: ["summarize", "translate", "gmail-send"],
+    excludeAgentIds: ["alpha", "gamma"],
+  });
+  assert.deepEqual(results.map((r) => r.agentId), ["beta"]);
+  // Excluding every contender is a no-match, never an empty silent list.
+  assertCoded(
+    () => discovery.discover({
+      capabilities: ["summarize", "translate", "gmail-send"],
+      excludeAgentIds: ["alpha", "beta", "gamma"],
+    }),
+    "AD_NO_MATCH",
+  );
+});
+
+test("B029-2: skills filter requires every requested skill", () => {
+  const discovery = createAgentDiscovery({ cardRegistry: fakeRegistry() });
+  const results = discovery.discover({ capabilities: ["summarize"], skills: ["summarize-prose"] });
+  assert.deepEqual(results.map((r) => r.agentId), ["beta"]);
+  assertCoded(
+    () => discovery.discover({ capabilities: ["summarize"], skills: ["no-such-skill"] }),
+    "AD_NO_MATCH",
+  );
+});
+
+test("B029-2: findForTask wraps discover for a task description", () => {
+  const discovery = createAgentDiscovery({ cardRegistry: fakeRegistry() });
+  const viaWrapper = discovery.findForTask("write a summary and translate it", ["summarize", "translate"]);
+  const viaDiscover = discovery.discover({ capabilities: ["summarize", "translate"] });
+  assert.deepEqual(viaWrapper.map((r) => r.agentId), viaDiscover.map((r) => r.agentId));
+  assert.equal(viaWrapper[0].agentId, "alpha");
+  assertCoded(() => discovery.findForTask("", ["summarize"]), "AD_INVALID_QUERY");
+  assertCoded(() => discovery.findForTask("   ", ["summarize"]), "AD_INVALID_QUERY");
+  assertCoded(() => discovery.findForTask(42, ["summarize"]), "AD_INVALID_QUERY");
+  assertCoded(() => discovery.findForTask("task", []), "AD_INVALID_QUERY");
+});
+
+test("B029-2: repeated identical queries hit the cache", () => {
+  const clock = manualClock();
+  const registry = fakeRegistry();
+  const discovery = createAgentDiscovery({ cardRegistry: registry, clock });
+  const query = { capabilities: ["summarize", "translate"] };
+  const first = discovery.discover(query);
+  const second = discovery.discover(query);
+  assert.equal(registry.listCalls, 1, "second query must not re-enumerate the registry");
+  assert.deepEqual(second, first);
+  assert.deepEqual(discovery.stats(), { queries: 2, hits: 1, misses: 1 });
+  // Caller-side mutation of a returned array must not corrupt the cache.
+  second.push({ agentId: "spoofed" });
+  const third = discovery.discover(query);
+  assert.equal(third.length, first.length);
+  assert.equal(registry.listCalls, 1);
+});
+
+test("B029-2: cache entries expire after the injected TTL", () => {
+  const clock = manualClock();
+  const registry = fakeRegistry();
+  const discovery = createAgentDiscovery({ cardRegistry: registry, clock, cacheTtlMs: 1000 });
+  discovery.discover({ capabilities: ["summarize"] });
+  clock.advance(999);
+  discovery.discover({ capabilities: ["summarize"] });
+  assert.equal(registry.listCalls, 1, "still fresh just before the TTL");
+  clock.advance(2);
+  discovery.discover({ capabilities: ["summarize"] });
+  assert.equal(registry.listCalls, 2, "re-enumerates once the TTL elapses");
+  assert.deepEqual(discovery.stats(), { queries: 3, hits: 1, misses: 2 });
+});
+
+test("B029-2: default cache TTL is 60s and honors the injected clock", () => {
+  assert.equal(DEFAULT_CACHE_TTL_MS, 60 * 1000);
+  const clock = manualClock();
+  const registry = fakeRegistry();
+  const discovery = createAgentDiscovery({ cardRegistry: registry, clock });
+  discovery.discover({ capabilities: ["summarize"] });
+  clock.advance(60 * 1000);
+  discovery.discover({ capabilities: ["summarize"] });
+  assert.equal(registry.listCalls, 1, "TTL boundary is inclusive");
+  clock.advance(1);
+  discovery.discover({ capabilities: ["summarize"] });
+  assert.equal(registry.listCalls, 2);
+});
+
+test("B029-2: registry change events invalidate the cache", () => {
+  const registry = new EmittingRegistry();
+  const discovery = createAgentDiscovery({ cardRegistry: registry });
+  discovery.discover({ capabilities: ["summarize"] });
+  discovery.discover({ capabilities: ["summarize"] });
+  assert.equal(registry.listCalls, 1);
+  registry.emit("change");
+  discovery.discover({ capabilities: ["summarize"] });
+  assert.equal(registry.listCalls, 2, "change event must drop cached results");
+});
+
+test("B029-2: registries without change events degrade gracefully to TTL-only", () => {
+  const plain = fakeRegistry();
+  assert.equal(typeof plain.on, "undefined");
+  const discovery = createAgentDiscovery({ cardRegistry: plain });
+  discovery.discover({ capabilities: ["summarize"] });
+  assert.equal(plain.listCalls, 1);
+  const throwing = fakeRegistry();
+  throwing.on = () => { throw new Error("boom"); };
+  assert.doesNotThrow(() => createAgentDiscovery({ cardRegistry: throwing }));
+});
+
+test("B029-2: clearCache forces the next query to re-enumerate", () => {
+  const registry = fakeRegistry();
+  const discovery = createAgentDiscovery({ cardRegistry: registry });
+  discovery.discover({ capabilities: ["summarize"] });
+  discovery.discover({ capabilities: ["summarize"] });
+  assert.equal(registry.listCalls, 1);
+  discovery.clearCache();
+  discovery.discover({ capabilities: ["summarize"] });
+  assert.equal(registry.listCalls, 2);
+});
+
+test("B029-2: Map-shaped registries enumerate without list()", () => {
+  const store = new Map([
+    ["alpha", fakeCard({ agentId: "alpha", lanes: ["summarize"], version: 3 })],
+  ]);
+  const discovery = createAgentDiscovery({ cardRegistry: store });
+  const results = discovery.discover({ capabilities: ["summarize"] });
+  assert.deepEqual(results.map((r) => r.agentId), ["alpha"]);
+});
+
+test("B029-2: coded-error contract — every failure throws an Error with a code", () => {
+  assertCoded(() => createAgentDiscovery(), "AD_NO_REGISTRY");
+  assertCoded(() => createAgentDiscovery({ cardRegistry: null }), "AD_NO_REGISTRY");
+  const discovery = createAgentDiscovery({ cardRegistry: fakeRegistry() });
+  assertCoded(() => discovery.discover(null), "AD_INVALID_QUERY");
+  assertCoded(() => discovery.discover("summarize"), "AD_INVALID_QUERY");
+  assertCoded(() => discovery.discover({}), "AD_INVALID_QUERY");
+  assertCoded(() => discovery.discover({ capabilities: [] }), "AD_INVALID_QUERY");
+  assertCoded(() => discovery.discover({ capabilities: ["ok", 42] }), "AD_INVALID_QUERY");
+  assertCoded(() => discovery.discover({ capabilities: ["ok"], limit: 0 }), "AD_INVALID_QUERY");
+  assertCoded(() => discovery.discover({ capabilities: ["ok"], limit: 1.5 }), "AD_INVALID_QUERY");
+  assertCoded(() => discovery.discover({ capabilities: ["ok"], skills: "summarize" }), "AD_INVALID_QUERY");
+  const unsupported = createAgentDiscovery({ cardRegistry: {} });
+  assertCoded(() => unsupported.discover({ capabilities: ["summarize"] }), "AD_REGISTRY_UNSUPPORTED");
+  // Every exported error code is reachable and a string.
+  assert.ok(Array.isArray(DISCOVERY_ERROR_CODES) && DISCOVERY_ERROR_CODES.length >= 4);
+  for (const code of DISCOVERY_ERROR_CODES) {
+    assert.equal(typeof code, "string");
+    assert.match(code, /^AD_/);
+  }
+  // Invalid queries never count toward stats (queries = hits + misses).
+  assert.deepEqual(discovery.stats(), { queries: 0, hits: 0, misses: 0 });
 });

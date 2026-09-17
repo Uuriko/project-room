@@ -26,7 +26,7 @@ export async function runHostedDrill() {
     });
   };
   const alice = await login('user_alice', 'sess_alice', aliceId);
-  const bob = await login('user_bob', 'sess_bob', aliceId);
+  const _bob = await login('user_bob', 'sess_bob', aliceId);
   const welcome = store.room(STARTER_ROOM_ID);
   const aliceMember = Object.entries(welcome.state.members).find(([, m]) => m.permissions?.includes('manage_members') && m.id !== 'welcome-host');
   const bobMember = Object.entries(welcome.state.members).find(([, m]) => m.id.startsWith('member-') && m.id !== aliceMember?.[0] && m.id !== 'welcome-host');
@@ -35,7 +35,7 @@ export async function runHostedDrill() {
   const server = createRoomServer({ store, operatorAccountId: aliceId });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const aliceKey = store.issueAccessKey(STARTER_ROOM_ID, aliceMember[0]);
+  const _aliceKey = store.issueAccessKey(STARTER_ROOM_ID, aliceMember[0]);
   const bobKey = store.issueAccessKey(STARTER_ROOM_ID, bobMember[0]);
   const post = await fetch(origin + `/api/rooms/${STARTER_ROOM_ID}/commands`, {
     method: 'POST',

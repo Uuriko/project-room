@@ -139,3 +139,53 @@ test("a moved marker restarts once; an out-of-order page never appends", async (
   const invalid = view.more(); pending[3].resolve(page([3, 4], { cursor: 1 })); await invalid;
   assert.equal(errors.length, 1); assert.deepEqual(view.brief.history.items.map(i => i.sequence), [2, 3]);
 });
+
+import { groupBriefHistory, briefHistoryGroup, BRIEF_HISTORY_GROUPS } from "../src/return-brief.js";
+
+const item = (sequence, type, data = {}) => ({ sequence, event: { id: `e${sequence}`, type, data } });
+
+test("C6 result-first grouping buckets history by outcome, question, blocker and decision", () => {
+  const items = [
+    item(1, "work.proposed", { workItemId: "w1" }),
+    item(2, "work.completed", { workItemId: "w1" }),
+    item(3, "message.posted", { messageId: "m1", toMemberId: "owner", body: "can you look?" }),
+    item(4, "message.posted", { messageId: "m2", body: "room update" }),
+    item(5, "work.blocked", { workItemId: "w2", reason: "waiting" }),
+    item(6, "owner.decision_recorded", { workItemId: "w1", decision: "approved" }),
+    item(7, "verification.recorded", { workItemId: "w1", result: "pass" }),
+    item(8, "work.blocker_resolved", { workItemId: "w2" })
+  ];
+  const groups = groupBriefHistory(items, "owner");
+  assert.deepEqual(groups.map(([name]) => name), ["outcome", "question", "blocker", "decision", "other"]);
+  const byName = Object.fromEntries(groups.map(([name, list]) => [name, list.map(i => i.sequence)]));
+  assert.deepEqual(byName.outcome, [2, 7]);
+  assert.deepEqual(byName.question, [3]);
+  assert.deepEqual(byName.blocker, [5, 8]);
+  assert.deepEqual(byName.decision, [6]);
+  assert.deepEqual(byName.other, [1, 4]);
+});
+
+test("C6 grouping scopes questions to the viewing member only", () => {
+  const items = [
+    item(1, "message.posted", { messageId: "m1", toMemberId: "guest" }),
+    item(2, "message.posted", { messageId: "m2", toMemberId: "owner" })
+  ];
+  const groups = Object.fromEntries(groupBriefHistory(items, "owner").map(([name, list]) => [name, list.map(i => i.sequence)]));
+  assert.deepEqual(groups.question, [2]);
+  assert.deepEqual(groups.other, [1]);
+  // A different viewer sees no question group at all.
+  const guest = Object.fromEntries(groupBriefHistory(items, "guest").map(([name, list]) => [name, list.map(i => i.sequence)]));
+  assert.deepEqual(guest.question, [1]);
+  assert.deepEqual(guest.other, [2]);
+});
+
+test("C6 grouping renders flat when everything is ordinary volume", () => {
+  const items = [item(1, "message.posted", { messageId: "m1" }), item(2, "work.proposed", { workItemId: "w1" })];
+  assert.deepEqual(groupBriefHistory(items, "owner"), []);
+});
+
+test("C6 grouping handles empty history and unknown event types", () => {
+  assert.deepEqual(groupBriefHistory([], "owner"), []);
+  assert.equal(briefHistoryGroup(item(1, "member.added", {}), "owner"), "other");
+  assert.deepEqual(BRIEF_HISTORY_GROUPS, ["outcome", "question", "blocker", "decision", "other"]);
+});

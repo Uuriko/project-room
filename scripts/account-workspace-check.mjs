@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync } from "node:fs";
@@ -35,7 +34,7 @@ async function setup(t, { mobile = false, member = false } = {}) {
   page.on("pageerror", e => errors.push(e.message)); page.on("dialog", d => d.accept());
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(outside, []); });
   const login = async (p = page, accessKey = key) => {
-    await p.goto(origin + "/?account=1"); await ensureSignIn(p); await p.locator("#access-key").fill(accessKey);
+    await p.goto(origin + "/?account=1"); await p.locator("#access-key").fill(accessKey);
     await p.locator('#auth-form button[type="submit"]').click(); await p.locator("#inbox-panel").waitFor();
   };
   const capture = async name => { mkdirSync("test-results/account-workspace", { recursive: true });
@@ -56,7 +55,7 @@ for (const mobile of [false, true]) test(`account Inbox ${mobile ? "mobile" : "d
   assert.equal(await p.locator("#account-rooms-list button").count(), 0); await f.capture(mobile ? "empty-rooms-mobile" : "empty-rooms-desktop");
   await p.locator("#nav-inbox").click(); await p.reload(); await p.locator("#inbox-reader").waitFor();
   assert.equal(await p.locator("#inbox-draft").inputValue(), "Let’s start with one small idea.");
-  await p.locator("#signout-button").click(); await p.locator("#auth-panel").waitFor();
+  if (await p.locator("#session-menu-button").isVisible()) await p.locator("#session-menu-button").click(); await p.locator("#signout-button").click(); await p.locator("#auth-panel").waitFor();
   assert.equal(await p.locator("#inbox-source-body").textContent(), "");
   assert.equal(await p.evaluate(() => sessionStorage.getItem("project-room:inbox-position:v1")), null);
 });
@@ -91,8 +90,8 @@ test("account-only other-tab replacement clears a held private read and navigati
   await p.locator("#inbox-refresh").click(); await reached;
   const other = await f.context.newPage(); const account = f.store.accountForMember("commons", "owner");
   await other.goto(f.origin + "/?account=1"); await other.locator("#inbox-panel").waitFor();
-  await other.locator("#signout-button").click(); await other.locator("#auth-panel").waitFor();
-  await ensureSignIn(other); await other.locator("#access-key").fill(f.store.issueAccountAccessKey(account.id));
+  if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await other.locator("#signout-button").click(); await other.locator("#auth-panel").waitFor();
+  await other.locator("#access-key").fill(f.store.issueAccountAccessKey(account.id));
   await other.locator('#auth-form button[type="submit"]').click(); await other.locator("#inbox-panel").waitFor();
   await p.locator("#auth-panel").waitFor(); release();
   await p.waitForLoadState("networkidle");
@@ -102,7 +101,7 @@ test("account-only other-tab replacement clears a held private read and navigati
 
 test("legacy member entry does not expose an account Inbox", { timeout: 20000 }, async t => {
   const f = await setup(t), p = f.page;
-  await p.goto(f.origin); await ensureSignIn(p); await p.locator("#access-key").fill(f.keys.guest); await p.locator('#auth-form button[type="submit"]').click();
+  await p.goto(f.origin); await p.locator("#access-key").fill(f.keys.guest); await p.locator('#auth-form button[type="submit"]').click();
   await p.locator("#main").waitFor(); assert.equal(await p.locator("#workspace-nav").isVisible(), false);
 });
 
@@ -128,11 +127,11 @@ test("a lost account-only sign-out response clears private text and leaves a usa
     if (route.request().method() === "DELETE") { await route.fetch(); return route.abort(); }
     return route.continue();
   });
-  await p.locator("#signout-button").click(); await p.locator("#auth-panel").waitFor();
+  if (await p.locator("#session-menu-button").isVisible()) await p.locator("#session-menu-button").click(); await p.locator("#signout-button").click(); await p.locator("#auth-panel").waitFor();
   await p.getByText("Sign-out unconfirmed. Sign in to check your account.", { exact: true }).waitFor();
   assert.equal(await p.locator("#inbox-source-body").textContent(), "");
   assert.equal(await p.locator("#access-key").isEnabled(), true);
-  await ensureSignIn(p); await p.locator("#access-key").fill(f.key); await p.locator('#auth-form button[type="submit"]').click(); await p.locator("#inbox-reader").waitFor();
+  await p.locator("#access-key").fill(f.key); await p.locator('#auth-form button[type="submit"]').click(); await p.locator("#inbox-reader").waitFor();
 });
 
 test("account confirmation failure keeps the draft and reports uncertainty without signing out", { timeout: 20000 }, async t => {

@@ -1,27 +1,18 @@
 import { InboxClient, inboxTextVersion } from "./inbox-client.js";
 import { installInboxSend, installInboxReplyReview } from "./inbox-send-ui.js";
 import { validId } from "./events.js";
-import { messagingConnectionsClient } from './messaging-connections-client.js';
-import { installMessagingConnections, receivingDisclosure } from './messaging-connections-ui.js';
 
 export function installInbox({ account, room, getRoom, onShared, onOpenWork, onAccountEnded = () => room.endAccess(), onRooms = () => {}, onNavigate = () => {} }) {
   const $ = selector => document.querySelector(selector);
   const api = new InboxClient(account, { onAccessEnded: onAccountEnded });
   const drafts = new Map(), positions = new Map();
-  let owner = null, active = false, browsing = false, selected = null, epoch = 0, rows = [], sharing = null, sharingBusy = false, retryShare = null;
+  let owner = null, active = false, browsing = false, selected = null, epoch = 0, rows = [], sharing = null, sharingBusy = false, retryShare = null,
+    nextCursor = null, paging = false, searchQuery = null, searching = false;
   let navigationEpoch = 0;
-  let grantsEpoch = 0;
-  let connectionTurn = 0, connectionBusy = false;
-  let inboxView = 'all';
-  const visibleRows = () => {
-    const query = $('#inbox-search').value.trim().toLocaleLowerCase();
-    return rows.filter(source => (inboxView === 'all' || (inboxView === 'email' ? source.adapter === 'email' : source.adapter === 'message'))
-      && (!query || `${source.sender ?? ''} ${source.subject ?? ''}`.toLocaleLowerCase().includes(query)));
-  };
   const storageKey = "project-room:pending-private-share:v1";
   const positionKey = "project-room:inbox-position:v1";
   let storage; try { storage = sessionStorage; } catch {}
-  let resultPreview = null, resultEpoch = 0;
+  let resultPreview = null, resultEpoch = 0, attachmentEpoch = 0, threadEpoch = 0;
   const text = (selector, value) => { $(selector).textContent = value; };
   const ownerKey = () => {
     const s = account.session;
@@ -29,20 +20,33 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       ? JSON.stringify([s.account.id, s.account.authEpoch, s.sessionRevision, s.sessionBinding]) : null;
   };
   const owns = () => owner !== null && owner === ownerKey();
-  const messagingUI=installMessagingConnections({list:$('#inbox-messaging-list'),status:$('#inbox-messaging-status'),
-    api:messagingConnectionsClient(api),ownerKey:()=>owns()?owner:null});
-  const telegramReceiving=messagingConnectionsClient(api,'telegram');
   const replyUI = installInboxReplyReview({ api, ownerKey: () => owns() ? owner : null });
   const sendUI = installInboxSend({ api, ownerKey: () => owns() ? owner : null, reviewChanges: async () => {
     const id = selected, d = drafts.get(id); if (!d || !owns()) return;
     await review(id, d); if (owns() && selected === id) render();
-  } });
+  }, onChannelSend: () => loadConnections() });
   function persistShare(request = null) {
     // Only operation metadata; never private bodies, addresses, CSRF or access keys.
+    // Sanitize to a whitelist of known-safe fields: a caller bug that attaches
+    // source text must not turn sessionStorage into a private-content leak.
+    // (2026-09-16: flaky "unknown share" browser test caught content in storage.)
+    const sanitize = r => {
+      if (!r || typeof r !== "object") return null;
+      const out = {};
+      for (const k of ["action", "requestId", "sourceId", "sourceRevision", "roomId", "audienceVersion"]) {
+        if (r[k] !== undefined) out[k] = r[k];
+      }
+      if (Array.isArray(r.paragraphs) && r.paragraphs.every(n => Number.isSafeInteger(n))) out.paragraphs = [...r.paragraphs];
+      if (r.selection && Number.isSafeInteger(r.selection.start) && Number.isSafeInteger(r.selection.end)) {
+        out.selection = { start: r.selection.start, end: r.selection.end };
+      }
+      return out;
+    };
+    const clean = request ? sanitize(request) : null;
     retryShare = request;
     try {
       if (!storage) return false;
-      request ? storage.setItem(storageKey, JSON.stringify({ owner, request })) : storage.removeItem(storageKey);
+      clean ? storage.setItem(storageKey, JSON.stringify({ owner, request: clean })) : storage.removeItem(storageKey);
       return true;
     } catch { return false; }
   }
@@ -50,10 +54,9 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     if (retryShare) return retryShare;
     try {
       const saved = JSON.parse(storage?.getItem(storageKey) ?? "null"), r = saved?.request;
-      if (saved?.owner === owner && ["source.share", "source.excerpt", "source.grant"].includes(r?.action) && typeof r.requestId === "string"
+      if (saved?.owner === owner && ["source.share", "source.excerpt"].includes(r?.action) && typeof r.requestId === "string"
         && typeof r.sourceId === "string" && typeof r.roomId === "string"
-        && (r.action !== "source.grant" || Array.isArray(r.memberIds) && r.memberIds.length > 0 && r.memberIds.length <= 20)
-        && (Array.isArray(r.paragraphs) || Number.isSafeInteger(r.selection?.start) && Number.isSafeInteger(r.selection?.end))) return (retryShare = r);
+        && (r.action === "source.share" ? Array.isArray(r.paragraphs) : Number.isSafeInteger(r.selection?.start) && Number.isSafeInteger(r.selection?.end))) return (retryShare = r);
       storage?.removeItem(storageKey);
     } catch { return null; }
     return null;
@@ -94,22 +97,18 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     }
   }
   function reset({ preservePending = false } = {}) {
-    messagingUI.reset();
-    telegramTurn++; $('#inbox-telegram-list').replaceChildren(); text('#inbox-telegram-status','');
-    inboxView = 'all'; $('#inbox-search').value = '';
-    $('#inbox-views').querySelectorAll('button').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.inboxView === 'all')));
-    connectionTurn++; connectionBusy = false;
-    $('#inbox-connections').open = false; $('#inbox-gmail-form').reset(); $('#inbox-gmail-form').hidden = true;
-    $('#inbox-connections').querySelectorAll('button').forEach(button => { button.disabled = false; });
-    $('#inbox-connection-list').replaceChildren(); text('#inbox-connection-status', '');
     navigationEpoch++;
-    grantsEpoch++; $("#inbox-grant-list").replaceChildren(); $("#inbox-grants").open = false;
-    $("#inbox-share-member-list").replaceChildren();
     if (!preservePending) { try { storage?.removeItem(positionKey); } catch {} }
     sendUI.reset({ preservePending });
     replyUI.reset({ preservePending });
     api.reset(); owner = null; epoch++; active = false; browsing = false; selected = null; rows = []; sharing = null; sharingBusy = false;
+    nextCursor = null; paging = false; searchQuery = null; searching = false;
     drafts.clear(); positions.clear(); retryShare = null; if (!preservePending) persistShare();
+    connectionEpoch++; connectionNotes.clear(); connectionRecords.clear(); $("#inbox-connections").hidden = true; $("#inbox-connections").replaceChildren();
+    filters = { channel: "all", connection: "all", grouped: true, unreadOnly: false }; $("#inbox-filters").hidden = true; $("#inbox-group-toggle").checked = true;
+    const unreadToggle = $("#inbox-unread-toggle"); if (unreadToggle) unreadToggle.checked = false;
+    for (const selector of ["#inbox-filter-channel", "#inbox-filter-connection"]) { $(selector).replaceChildren(); $(selector).value = ""; }
+    $("#inbox-connection-form").reset(); $("#inbox-add-connection").open = false; $("#inbox-add-connection").hidden = true; text("#inbox-connection-form-status", ""); text("#inbox-attention-count", "");
     $("#workspace-nav").hidden = true; $("#inbox-panel").hidden = true; $("#inbox-share-dialog").close();
     $("#account-rooms-panel").hidden = true;
     resultPreview = null; resultEpoch++; $("#inbox-result-dialog").close(); $("#inbox-results").hidden = true;
@@ -119,7 +118,9 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     for (const selector of ["#inbox-list", "#inbox-source-body", "#inbox-subject", "#inbox-addresses", "#inbox-draft-status", "#inbox-status", "#inbox-remote-draft", "#inbox-share-paragraphs", "#inbox-share-audience", "#inbox-share-status"]) $(selector).replaceChildren();
     $("#inbox-draft").value = ""; $("#inbox-reader").hidden = true; $("#inbox-conflict").hidden = true;
     $("#inbox-email-details").hidden = true; $("#inbox-email-details").open = false;
-    $("#inbox-email-metadata").replaceChildren(); text("#inbox-source-notice", ""); $("#inbox-source-notice").hidden = true;
+    $("#inbox-email-metadata").replaceChildren(); text("#inbox-source-notice", ""); $("#inbox-source-notice").hidden = true; $("#inbox-addressed").hidden = true;
+    attachmentEpoch++; $("#inbox-attachments").hidden = true; $("#inbox-attachment-list").replaceChildren();
+    threadEpoch++; $("#inbox-thread").hidden = true; $("#inbox-thread-list").replaceChildren();
   }
   function sync() {
     const next = ownerKey();
@@ -133,202 +134,355 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     $("#choose-room").hidden = !getRoom();
   }
   const errorText = error => error.code === "obsolete_inbox" ? "" : error.status === 404 ? "Message unavailable." : "Couldn’t load inbox. Try again.";
+  const channelLabel = { email: "Email", telegram: "Telegram" };
+  const stateLabel = { active: "connected", disconnected: "disconnected", reconnect_required: "reconnect required" };
+  // One group per connection (email, Telegram, ...) plus the sample messages.
+  const groupLabel = c => c ? `${channelLabel[c.channel] ?? c.channel} · ${connectionName(c.id) ?? stateLabel[c.state] ?? c.state}` : "Sample messages";
+  const connectionName = id => { const c = connectionRecords.get(id)?.connection; return c ? (c.identity.displayName || c.identity.handle || c.externalId) : null; };
+  // One list across channels. Filters narrow by channel or connection; grouping
+  // (the default) keeps one section per connection, off gives one flat list.
+  let filters = { channel: "all", connection: "all", grouped: true, unreadOnly: false };
+  const rowChannel = source => source.connection?.channel ?? "sample", rowConnection = source => source.connection?.id ?? "sample";
+  const visibleRows = () => rows.filter(source => (filters.channel === "all" || rowChannel(source) === filters.channel)
+    && (filters.connection === "all" || rowConnection(source) === filters.connection)
+    && (!filters.unreadOnly || !source.readAt));
+  function renderFilters() {
+    $("#inbox-filters").hidden = rows.length === 0;
+    const option = (value, label) => { const o = document.createElement("option"); o.value = value; o.textContent = label; return o; };
+    const present = new Map(rows.map(source => [rowChannel(source), null]));
+    if (!present.has(filters.channel)) filters.channel = "all";
+    $("#inbox-filter-channel").replaceChildren(option("all", "All channels"), ...[...present.keys()].map(key => option(key, key === "sample" ? "Samples" : channelLabel[key] ?? key)));
+    $("#inbox-filter-channel").value = filters.channel;
+    const connections = new Map();
+    for (const source of rows) if (source.connection && !connections.has(source.connection.id)) connections.set(source.connection.id, source.connection);
+    if (filters.connection !== "all" && filters.connection !== "sample" && !connections.has(filters.connection)) filters.connection = "all";
+    $("#inbox-filter-connection").replaceChildren(option("all", "All connections"),
+      ...[...connections.values()].map(c => option(c.id, `${channelLabel[c.channel] ?? c.channel} · ${connectionName(c.id) ?? c.id}`)),
+      ...(rows.some(source => !source.connection) ? [option("sample", "Sample messages")] : []));
+    $("#inbox-filter-connection").value = filters.connection;
+    $("#inbox-group-toggle").checked = filters.grouped;
+  }
+  function row(source) {
+    const button = document.createElement("button"); button.type = "button"; button.className = "inbox-row";
+    button.dataset.sourceId = source.id; button.dataset.channel = rowChannel(source); button.dataset.needsYou = source.needsYou ? "true" : "false";
+    button.dataset.read = source.readAt ? "true" : "false";
+    button.setAttribute("aria-current", selected === source.id ? "true" : "false");
+    const meta = document.createElement("span"), sender = document.createElement("span"), badge = document.createElement("span"), subject = document.createElement("strong");
+    meta.className = "inbox-row-meta"; sender.textContent = source.sender; badge.className = "inbox-channel-badge";
+    badge.textContent = source.connection ? channelLabel[source.connection.channel] ?? source.connection.channel : "Sample";
+    meta.append(badge, sender);
+    if (source.needsYou) { const mark = document.createElement("span"); mark.className = "inbox-needs-you"; mark.textContent = "Needs you"; meta.append(mark); }
+    subject.textContent = source.subject || "(No subject)";
+    if (!source.readAt) subject.style.fontWeight = "700";
+    button.append(meta, subject); button.addEventListener("click", () => open(source.id)); return button;
+  }
   function renderList() {
-    $("#inbox-list").replaceChildren(...visibleRows().map(source => {
-      const button = document.createElement("button"); button.type = "button"; button.className = "inbox-row";
-      button.dataset.sourceId = source.id; button.setAttribute("aria-current", selected === source.id ? "true" : "false");
-      const sender = document.createElement("span"), subject = document.createElement("strong");
-      sender.textContent = source.sender; subject.textContent = source.subject || "(No subject)";
-      button.append(sender, subject); button.addEventListener("click", () => open(source.id)); return button;
-    }));
-  }
-  function changeView() {
-    if (!owns()) return;
-    remember(); epoch++;
-    const visible = visibleRows();
-    if (!visible.some(source => source.id === selected) || !drafts.has(selected)) {
-      selected = null; $('#inbox-reader').hidden = true; $('#inbox-panel').classList.remove('reading');
-      if (visible.length) open(visible[0].id);
-    }
-    renderList();
-    text('#inbox-status', visible.length ? '' : rows.length ? 'No matches in this view.' : 'No messages yet.');
-  }
-  $('#inbox-views').addEventListener('click', event => {
-    const button = event.target.closest('[data-inbox-view]'); if (!button) return;
-    inboxView = button.dataset.inboxView;
-    $('#inbox-views').querySelectorAll('button').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
-    changeView();
-  });
-  $('#inbox-search').addEventListener('input', changeView);
-  document.addEventListener('keydown', event => {
-    if (!active || !owns() || event.defaultPrevented || event.isComposing || event.metaKey || event.ctrlKey || event.altKey
-      || document.querySelector('dialog[open]') || event.target.closest('input,textarea,select,[contenteditable="true"]')) return;
-    if (event.key === '/') { event.preventDefault(); $('#inbox-search').focus(); }
-    if (event.key === 'j' || event.key === 'k') {
-      const visible = visibleRows(), index = visible.findIndex(source => source.id === selected);
-      const next = index < 0 ? 0 : index + (event.key === 'j' ? 1 : -1);
-      if (visible[next]) { event.preventDefault(); open(visible[next].id); }
-    }
-  });
-  let telegramTurn = 0;
-  async function loadTelegram() {
-    if (!owns()) return;
-    const turn=++telegramTurn,capturedOwner=owner;
-    $('#inbox-telegram-list').replaceChildren();
-    try {
-      const [result,receiving]=await Promise.all([api.telegramStatus(),telegramReceiving.receivingStatus().catch(()=>null)]);
-      if (!owns() || capturedOwner!==owner || turn!==telegramTurn) return;
-      text('#inbox-telegram-status',receiving?'':'Receiving permission unavailable. Refresh to check.');
-      $('#inbox-telegram-list').replaceChildren(...result.connections.map(connection=>{
-        const row=document.createElement('div'),label=document.createElement('p');
-        label.textContent='Telegram'+(connection.state==='active'?'':connection.state==='disconnected'?' · Disconnected':' · Setup needed');row.append(label);
-        if(connection.state==='active') for(const action of ['sync','disconnect']) {
-          const button=document.createElement('button');button.type='button';button.className='text-button';
-          button.textContent=action==='sync'?'Sync':'Disconnect';button.setAttribute('aria-label',button.textContent+' Telegram');button.disabled=connectionBusy;
-          button.addEventListener('click',()=>{if(owns()&&capturedOwner===owner&&turn===telegramTurn)telegramAction(action,connection);});row.append(button);
-        }
-        const permission=receiving?.enabled&&receiving.connections.find(p=>p.connectionId===connection.connectionId);
-        if(permission)row.append(receivingDisclosure({doc:document,permission,name:'Telegram',busy:connectionBusy,
-          onAction:action=>{if(owns()&&capturedOwner===owner&&turn===telegramTurn)telegramAction(action,permission);}}));
-        return row;
-      }));
-    } catch {
-      if(owns()&&capturedOwner===owner&&turn===telegramTurn)text('#inbox-telegram-status','Telegram status unavailable.');
-    }
-  }
-  async function telegramAction(action,connection) {
-    if(!owns()||connectionBusy)return;
-    const capturedOwner=owner;connectionBusy=true;telegramTurn++;connectionTurn++;
-    $('#inbox-connections').querySelectorAll('button').forEach(b=>{b.disabled=true;});
-    text('#inbox-telegram-status','Working…');
-    try {
-      const data={connectionId:connection.connectionId,expectedRevision:connection.revision};
-      if(action==='start')data.expectedConnectionRevision=connection.expectedConnectionRevision;
-      const result=await (['start','stop'].includes(action)?telegramReceiving.receivingAction(action,data):api.telegram(action,data));
-      if(!owns()||capturedOwner!==owner)return;
-      if(action==='sync')await load();
-      if(!owns()||capturedOwner!==owner)return;
-      await loadTelegram();
-      if(!owns()||capturedOwner!==owner)return;
-      text('#inbox-telegram-status',action==='start'?'Receiving allowed for 24 hours.':action==='stop'?'Receiving stopped. Saved messages remain.':
-        action==='disconnect'?'Disconnected here. Saved messages remain.':`${result.imported} message${result.imported===1?'':'s'} synced.`);
-    } catch {
-      if(owns()&&capturedOwner===owner){
-        text('#inbox-telegram-status','Action unconfirmed. Refresh before trying again.');
-        const turn=telegramTurn,refresh=document.createElement('button');refresh.type='button';refresh.className='text-button';refresh.textContent='Refresh';
-        refresh.setAttribute('aria-label','Refresh Telegram connections');
-        refresh.addEventListener('click',()=>{if(owns()&&capturedOwner===owner&&turn===telegramTurn)loadTelegram();});
-        $('#inbox-telegram-list').replaceChildren(refresh);
+    const visible = visibleRows(), list = $("#inbox-list");
+    if (!filters.grouped) { list.replaceChildren(...visible.map(row)); }
+    else {
+      const groups = new Map();
+      for (const source of visible) {
+        const key = source.connection ? source.connection.channel + ":" + source.connection.id : "sample";
+        if (!groups.has(key)) groups.set(key, { connection: source.connection ?? null, sources: [] });
+        groups.get(key).sources.push(source);
       }
-    } finally {
-      if(owns()&&capturedOwner===owner){connectionBusy=false;$('#inbox-connections').querySelectorAll('button').forEach(b=>{b.disabled=false;});}
+      list.replaceChildren(...[...groups.entries()].map(([key, group], index) => {
+        const section = document.createElement("section"); section.className = "inbox-group"; section.dataset.connectionId = group.connection?.id ?? "";
+        const heading = document.createElement("h2"); heading.className = "inbox-group-label form-hint"; heading.id = "inbox-group-" + index;
+        heading.textContent = groupLabel(group.connection); section.setAttribute("aria-labelledby", heading.id);
+        section.append(heading, ...group.sources.map(row));
+        return section;
+      }));
     }
+    if (rows.length && !visible.length) text("#inbox-status", "No messages match these filters."); else if (rows.length && $("#inbox-status").textContent === "No messages match these filters.") text("#inbox-status", "");
+    const needing = rows.filter(source => source.needsYou).length;
+    text("#inbox-attention-count", needing ? `(${needing} need you)` : "");
+    // Paged list: a "Show more" button appears while the server has another
+    // page. It is built here so no static markup changes are needed.
+    if (nextCursor) {
+      const moreBtn = document.createElement("button");
+      moreBtn.type = "button"; moreBtn.className = "inbox-show-more"; moreBtn.textContent = "Show more";
+      moreBtn.addEventListener("click", more);
+      list.append(moreBtn);
+    }
+  }
+  // Append the next page without disturbing selection or filters. Rows are
+  // keyed by id so a repeated cursor can never duplicate a row.
+  async function more() {
+    if (!owns() || !nextCursor || paging) return;
+    paging = true; text("#inbox-status", "Loading more…");
+    const turn = ++epoch;
+    try {
+      const result = await api.list({ cursor: nextCursor }); if (!owns() || turn !== epoch) return;
+      const seen = new Set(rows.map(source => source.id));
+      rows.push(...result.sources.filter(source => !seen.has(source.id)));
+      nextCursor = result.nextCursor ?? null;
+      renderFilters(); renderList();
+      text("#inbox-status", rows.length ? "" : "No messages yet.");
+    } catch (error) { if (owns() && turn === epoch) text("#inbox-status", errorText(error)); }
+    paging = false;
+  }
+  $("#inbox-filter-channel").addEventListener("change", () => { filters.channel = $("#inbox-filter-channel").value; if (owns()) renderList(); });
+  $("#inbox-filter-connection").addEventListener("change", () => { filters.connection = $("#inbox-filter-connection").value; if (owns()) renderList(); });
+  $("#inbox-group-toggle").addEventListener("change", () => { filters.grouped = $("#inbox-group-toggle").checked; if (owns()) renderList(); });
+  // The unread filter is built here so no static markup changes are needed.
+  if (!$("#inbox-unread-toggle")) {
+    const label = document.createElement("label"); label.className = "inbox-filter-toggle";
+    const box = document.createElement("input"); box.id = "inbox-unread-toggle"; box.type = "checkbox";
+    label.append(box, document.createTextNode(" Unread only"));
+    $("#inbox-filters").append(label);
+    box.addEventListener("change", () => { filters.unreadOnly = box.checked; if (owns()) renderList(); });
+  }
+  // Full-text search over the account's visible sources, built here so no
+  // static markup changes are needed. Searching replaces the list with the
+  // ranked results; clearing restores the paged list.
+  if (!$("#inbox-search-form")) {
+    const form = document.createElement("form"); form.id = "inbox-search-form"; form.className = "inbox-search";
+    const input = document.createElement("input"); input.id = "inbox-search-input"; input.type = "search";
+    input.placeholder = "Search messages…"; input.setAttribute("aria-label", "Search messages");
+    const go = document.createElement("button"); go.type = "submit"; go.className = "button secondary"; go.textContent = "Search";
+    const clear = document.createElement("button"); clear.type = "button"; clear.id = "inbox-search-clear";
+    clear.className = "button secondary"; clear.textContent = "Clear"; clear.hidden = true;
+    form.append(input, go, clear);
+    $("#inbox-filters").append(form);
+    form.addEventListener("submit", event => { event.preventDefault(); runSearch(input.value); });
+    clear.addEventListener("click", () => { input.value = ""; clearSearch(); });
+  }
+  async function runSearch(query) {
+    if (!owns() || searching) return;
+    const q = query.trim();
+    if (!q) { clearSearch(); return; }
+    searching = true; searchQuery = q; text("#inbox-status", `Searching for “${q}”…`);
+    const turn = ++epoch;
+    try {
+      const result = await api.search({ query: q }); if (!owns() || turn !== epoch) return;
+      rows = result.results.map(r => r.source); nextCursor = null;
+      renderFilters(); renderList();
+      const clear = $("#inbox-search-clear"); if (clear) clear.hidden = false;
+      text("#inbox-status", result.total ? `${result.total} result${result.total === 1 ? "" : "s"} for “${result.query}”.` : `No results for “${result.query}”.`);
+    } catch (error) { if (owns() && turn === epoch) { searchQuery = null; text("#inbox-status", errorText(error)); } }
+    searching = false;
+  }
+  function clearSearch() {
+    if (searchQuery === null) return;
+    searchQuery = null; const clear = $("#inbox-search-clear"); if (clear) clear.hidden = true;
+    load();
+  }
+  // Read/unread toggle next to "Ask room": read state is a marker, not a new
+  // source version, so drafts and their revision pins are unaffected.
+  const readToggle = document.createElement("button");
+  readToggle.type = "button"; readToggle.id = "inbox-read-toggle"; readToggle.className = "button secondary"; readToggle.hidden = true;
+  $("#inbox-ask").before(readToggle);
+  readToggle.addEventListener("click", async () => {
+    const sourceId = selected, d = drafts.get(sourceId);
+    if (!d || d.busy || !owns()) return;
+    const action = d.source.readAt ? "source.unread" : "source.read";
+    readToggle.disabled = true;
+    try {
+      const result = await api.apply({ action, requestId: crypto.randomUUID(), sourceId, expectedRevision: d.source.revision });
+      if (!owns() || drafts.get(sourceId) !== d) return;
+      d.source.readAt = result.receipt.readAt;
+      const listed = rows.find(r => r.id === sourceId);
+      if (listed) listed.readAt = result.receipt.readAt;
+      renderList();
+    } catch (error) {
+      if (!owns() || drafts.get(sourceId) !== d) return;
+      text("#inbox-draft-status", error.code === "stale_inbox_source" ? "Changed elsewhere. Refresh to retry." : "Couldn’t update read state. Try again.");
+    } finally { if (owns() && drafts.get(sourceId) === d) render(); }
+  });
+  // Connection cards: one per configured connection, with the live Telegram facts
+  // (binding state, webhook, last delivery, last send) and the import trigger.
+  let connectionEpoch = 0; const connectionNotes = new Map(), connectionRecords = new Map(), removing = new Set();
+  const when = value => value ? new Date(value).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "none yet";
+  const liveLines = live => !live ? [] : [
+    live.state === "configured" ? "Live: configured" : live.state === "invalid" ? "Live: invalid binding · " + live.invalid.join(", ") : "Live: not configured · set " + live.missing.join(", "),
+    { unset: "Webhook: not registered", set: "Webhook: secret stored " + when(live.webhookSetAt), matches: "Webhook: registered " + when(live.webhookSetAt), differs: "Webhook: stored secret differs from the binding · use Reconnect" }[live.webhook],
+    "Last update received: " + when(live.lastUpdateReceivedAt),
+    "Last send: " + (live.lastSendResult ? live.lastSendResult.outcome + (live.lastSendResult.code ? " · " + live.lastSendResult.code : "") + " · " + when(live.lastSendResult.at) : "none yet")
+  ];
+  // Email has no live path yet: the mailbox is a recorded fixture until routing lands.
+  const emailLines = record => [record.mode === "fixture" ? "Inbound: fixture mailbox · not yet routed" : "Inbound: routed", "Sending: not available",
+    "Last update received: " + when(record.webhookSetAt ?? null).replace("none yet", "fixture only")];
+  function renderConnections(records) {
+    const container = $("#inbox-connections");
+    container.hidden = !records.length;
+    $("#inbox-add-connection").hidden = false;
+    container.replaceChildren(...records.map(record => {
+      const c = record.connection, card = document.createElement("article"); card.className = "inbox-connection-card"; card.dataset.connectionId = c.id;
+      card.dataset.liveState = record.live?.state ?? "fixture"; card.dataset.connectionState = c.state;
+      const heading = document.createElement("h2"); heading.className = "form-hint"; heading.textContent = `${channelLabel[c.channel] ?? c.channel} · ${c.identity.displayName || c.identity.handle || c.externalId}`;
+      const status = document.createElement("p"); status.className = "inbox-connection-state"; status.textContent = stateLabel[c.state] ?? c.state;
+      const facts = document.createElement("ul"); facts.className = "inbox-connection-facts";
+      for (const line of record.live ? liveLines(record.live) : c.channel === "email" ? emailLines(record) : []) { const item = document.createElement("li"); item.textContent = line; facts.append(item); }
+      card.append(heading, status, facts);
+      const actions = document.createElement("div"), note = document.createElement("span");
+      actions.className = "inbox-connection-actions"; note.className = "inbox-connection-note"; note.setAttribute("role", "status"); note.textContent = connectionNotes.get(c.id) ?? "";
+      if (record.live) {
+        const button = document.createElement("button"); button.type = "button"; button.className = "button ghost"; button.textContent = "Reconnect";
+        button.setAttribute("aria-label", "Reconnect " + heading.textContent); button.disabled = c.state !== "active";
+        button.addEventListener("click", () => reconnect(c.id, button, note)); actions.append(button);
+      }
+      if (c.state !== "disconnected") {
+        // Two deliberate clicks, no native dialog: Remove, then Confirm remove (or Keep).
+        const remove = document.createElement("button"), keep = document.createElement("button");
+        remove.type = "button"; remove.className = "button ghost"; remove.dataset.remove = c.id;
+        remove.textContent = removing.has(c.id) ? "Confirm remove" : "Remove"; remove.setAttribute("aria-label", (removing.has(c.id) ? "Confirm remove " : "Remove ") + heading.textContent);
+        keep.type = "button"; keep.className = "text-button"; keep.textContent = "Keep"; keep.hidden = !removing.has(c.id);
+        remove.addEventListener("click", () => { if (removing.has(c.id)) disconnect(c, remove, note); else { removing.add(c.id); renderConnections(records); container.querySelector(`[data-connection-id="${c.id}"] [data-remove]`)?.focus(); } });
+        keep.addEventListener("click", () => { removing.delete(c.id); renderConnections(records); container.querySelector(`[data-connection-id="${c.id}"] [data-remove]`)?.focus(); });
+        actions.append(remove, keep);
+      }
+      actions.append(note); card.append(actions);
+      return card;
+    }));
   }
   async function loadConnections() {
     if (!owns()) return;
-    const turn = ++connectionTurn, capturedOwner = owner;
-    text('#inbox-connection-status', 'Loading…');
+    const turn = ++connectionEpoch;
     try {
-      const result = await api.gmailStatus();
-      if (!owns() || capturedOwner !== owner || turn !== connectionTurn) return;
-      $('#inbox-gmail-form').hidden = !result.enabled;
-      text('#inbox-connection-status', result.enabled ? '' : 'Email connections aren’t enabled on this server.');
-      $('#inbox-connection-list').replaceChildren(...result.connections.map(connection => {
-        const row = document.createElement('div'), label = document.createElement('p');
-        label.textContent = connection.mailbox + (connection.state === 'connected' ? '' : ' · Reconnect');
-        row.append(label);
-        for (const action of connection.state === 'connected' ? ['sync', 'disconnect'] : ['start']) {
-          const button = document.createElement('button'); button.type = 'button'; button.className = 'text-button';
-          button.textContent = { sync: 'Sync', disconnect: 'Disconnect', start: 'Reconnect' }[action];
-          button.setAttribute('aria-label', button.textContent + ' ' + connection.mailbox);
-          button.addEventListener('click', () => connectionAction(action, action === 'start' ? { mailbox: connection.mailbox } : { connectionId: connection.connectionId }));
-          row.append(button);
-        }
-        return row;
-      }));
+      const listed = await api.connections(); if (!owns() || turn !== connectionEpoch) return;
+      const records = [];
+      for (const c of listed.connections) { const record = await api.connection(c.id); if (!owns() || turn !== connectionEpoch) return; records.push(record); }
+      connectionRecords.clear(); for (const record of records) connectionRecords.set(record.connection.id, record);
+      renderConnections(records); if (rows.length) { renderFilters(); renderList(); }
+    } catch { if (owns() && turn === connectionEpoch) renderConnections([]); }
+  }
+  async function disconnect(c, button, note) {
+    if (!owns() || button.disabled) return;
+    button.disabled = true; note.textContent = "Removing…";
+    try {
+      await api.applyConnection({ action: "connection.disconnect", requestId: crypto.randomUUID(), connectionId: c.id, expectedRevision: c.revision }); if (!owns()) return;
+      removing.delete(c.id); connectionNotes.set(c.id, "Removed · saved copies stay in the inbox");
+      await loadConnections(); load();
     } catch (error) {
-      if (owns() && capturedOwner === owner && turn === connectionTurn) {
-        $('#inbox-gmail-form').hidden = true; text('#inbox-connection-status', errorText(error));
-      }
-    }
-  }
-  async function connectionAction(action, data) {
-    if (!owns() || connectionBusy) return;
-    const capturedOwner = owner; connectionBusy = true; connectionTurn++;
-    $('#inbox-connections').querySelectorAll('button').forEach(button => { button.disabled = true; });
-    text('#inbox-connection-status', action === 'start' ? 'Opening Google…' : 'Working…');
-    try {
-      const result = await api.gmail(action, data);
-      if (!owns() || capturedOwner !== owner) return;
-      if (action === 'start') { location.assign(result.authorizationUrl); return; }
-      if (action === 'sync') await load();
-      if (!owns() || capturedOwner !== owner) return;
+      if (!owns()) return;
+      removing.delete(c.id);
+      connectionNotes.set(c.id, error.code === "stale_email_connection" ? "Connection changed elsewhere. Refresh and try again." : error.code === "rate_limited" ? "Too many attempts. Try again in a minute." : "Couldn’t remove. Try again.");
       await loadConnections();
-      if (!owns() || capturedOwner !== owner) return;
-      text('#inbox-connection-status', action === 'disconnect' ? result.providerRevoked ? 'Disconnected. Saved mail remains.' : 'Disconnected here. Google revocation unconfirmed.'
-        : `${result.imported ? `${result.imported} message${result.imported === 1 ? '' : 's'} synced.` : 'Inbox updated.'}${result.complete ? '' : ' Sync again for more.'}`);
-    } catch (error) { if (owns() && capturedOwner === owner) text('#inbox-connection-status', errorText(error)); }
-    finally {
-      if (owns() && capturedOwner === owner) {
-        connectionBusy = false; $('#inbox-connections').querySelectorAll('button').forEach(button => { button.disabled = false; });
-      }
     }
   }
-  $('#inbox-connections').addEventListener('toggle', () => { if ($('#inbox-connections').open && !connectionBusy) { loadConnections(); loadTelegram(); messagingUI.load(); } });
-  $('#inbox-connect-empty').addEventListener('click', () => {
-    $('#inbox-connections').open = true;
-    $('#inbox-connections summary').focus();
+  // Add connection: a bot record for Telegram (bot id, username, name) or a
+  // fixture mailbox for email (address, name). The owner's session is the authority;
+  // the server validates the profile and refuses another account's id.
+  const idPattern = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
+  function connectionProfile(form, accountId) {
+    const value = name => form.elements[name].value.trim(), channel = value("channel"), id = value("id");
+    if (!idPattern.test(id)) throw new Error("Connection id: letters, digits, . _ : - only.");
+    const existing = connectionRecords.get(id)?.connection ?? null, revision = (existing?.revision ?? 0) + 1;
+    if (existing && existing.channel !== channel) throw new Error("That id belongs to a " + (channelLabel[existing.channel] ?? existing.channel) + " connection.");
+    if (channel === "telegram") {
+      const botId = value("bot-id"), username = value("username").replace(/^@/, ""), displayName = value("name") || username;
+      if (!/^\d{1,20}$/.test(botId)) throw new Error("Bot id: the digits before the colon in the BotFather token.");
+      if (!/^[A-Za-z][A-Za-z0-9_]{3,31}$/.test(username)) throw new Error("Bot username: 4 to 32 letters, digits or underscores.");
+      return { revision, profile: { accountId, id, revision, channel, provider: "telegram-bot", externalId: botId,
+        identity: { kind: "bot", id: botId, handle: "@" + username, displayName }, capabilities: { read: true, send: true, threads: true, edit: true } } };
+    }
+    const address = value("address").toLowerCase(), name = value("name") || address;
+    if (!/^[^\s@]{1,64}@[^\s@]{1,255}$/.test(address) || address.length > 320) throw new Error("Address: one mailbox address.");
+    return { revision, profile: { accountId, id, revision, provider: "microsoft-graph", mailboxId: address, identity: { name, address }, aliases: [] } };
+  }
+  $("#inbox-connection-channel").addEventListener("change", () => {
+    const channel = $("#inbox-connection-channel").value;
+    for (const field of document.querySelectorAll("#inbox-connection-form [data-channel]")) { field.hidden = field.dataset.channel !== channel; for (const input of field.querySelectorAll("input")) input.required = !field.hidden; }
+    $("#inbox-connection-id").value = channel === "telegram" ? "telegram-bot" : "mailbox";
   });
-  $('#inbox-gmail-form').addEventListener('submit', event => { event.preventDefault(); connectionAction('start', { mailbox: $('#inbox-gmail-address').value }); });
+  $("#inbox-connection-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    const form = event.currentTarget, submit = form.querySelector("button[type=submit]");
+    if (!owns() || submit.disabled) return;
+    let request;
+    try {
+      const { revision, profile } = connectionProfile(form, account.session.account.id);
+      request = { action: "connection.configure", requestId: crypto.randomUUID(), connectionId: profile.id, expectedRevision: revision - 1, profile };
+    } catch (error) { text("#inbox-connection-form-status", error.message); return; }
+    submit.disabled = true; text("#inbox-connection-form-status", "Adding…");
+    try {
+      const result = await api.applyConnection(request); if (!owns()) return;
+      const c = result.connection;
+      connectionNotes.set(c.id, c.channel === "telegram" ? (result.live?.state === "configured" ? "Added · press Reconnect to register the webhook secret" : "Added · set the Telegram bindings, then Reconnect")
+        : "Added · fixture mailbox, not yet routed");
+      text("#inbox-connection-form-status", "Added " + (c.identity.displayName || c.identity.handle || c.externalId) + ".");
+      form.reset(); $("#inbox-connection-channel").dispatchEvent(new Event("change"));
+      await loadConnections(); $(`.inbox-connection-card[data-connection-id="${c.id}"] h2`)?.scrollIntoView({ block: "nearest" });
+    } catch (error) {
+      if (!owns()) return;
+      text("#inbox-connection-form-status", error.code === "email_mailbox_exists" ? "This account already has a connection for that mailbox or bot."
+        : error.code === "email_mailbox_changed" ? "That id already belongs to a different bot or mailbox." : error.code === "email_connection_limit" ? "Connection limit reached (20)."
+        : error.code === "rate_limited" ? "Too many attempts. Try again in a minute." : error.status && error.status < 500 ? "Not added. Check the fields and try again." : "Not confirmed. Refresh to see whether it was added.");
+    } finally { submit.disabled = false; }
+  });
+  async function reconnect(connectionId, button, note) {
+    if (!owns() || button.disabled) return;
+    button.disabled = true; note.textContent = "Reconnecting…";
+    try {
+      const result = await api.reconnectConnection(connectionId, crypto.randomUUID()); if (!owns()) return;
+      const parts = [result.registered ? "Webhook secret registered" : "", result.imported ? `Imported ${result.imported} ${result.imported === 1 ? "update" : "updates"}` : ""].filter(Boolean);
+      connectionNotes.set(connectionId, parts.length ? parts.join(" · ") : "No new updates yet");
+      await loadConnections(); if (result.imported) load();
+    } catch (error) {
+      if (!owns()) return;
+      connectionNotes.set(connectionId, error.code === "channel_webhook_unavailable" ? "Webhook delivery is not configured here." : error.code === "rate_limited" ? "Too many attempts. Try again in a minute." : "Couldn’t reconnect. Try again.");
+      await loadConnections();
+    }
+  }
   async function load() {
     sync(); if (!owns()) return;
     show("inbox"); text("#inbox-status", "Loading…");
     const turn = ++epoch;
+    loadConnections();
     try {
       const result = await api.list(); if (!owns() || turn !== epoch) return;
-      rows = result.sources; renderList(); const visible = visibleRows();
-      text("#inbox-status", visible.length ? "" : rows.length ? "No matches in this view." : "No messages yet.");
+      rows = result.sources; nextCursor = result.nextCursor ?? null; searchQuery = null;
+      const clear = $("#inbox-search-clear"); if (clear) clear.hidden = true;
+      renderFilters(); renderList(); text("#inbox-status", rows.length ? (visibleRows().length ? "" : "No messages match these filters.") : "No messages yet.");
       $("#inbox-empty").hidden = rows.length > 0;
-      if (selected && drafts.has(selected) && visible.some(source => source.id === selected)) { render(); loadResults(selected); return; }
-      selected = null; $('#inbox-reader').hidden = true; $('#inbox-panel').classList.remove('reading');
+      if (selected && drafts.has(selected)) { render(); loadResults(selected); return; }
       const pending = pendingShare(), saved = savedPosition();
       if (saved && rows.some(r => r.id === saved.sourceId && r.revision === saved.sourceRevision))
         positions.set(saved.sourceId, { sourceRevision: saved.sourceRevision, reader: saved.reader, page: saved.page });
-      if (visible.length) await open(visible.find(r => r.id === pending?.sourceId)?.id ?? visible.find(r => r.id === saved?.sourceId)?.id ?? visible[0].id);
+      if (rows.length) await open(rows.find(r => r.id === pending?.sourceId)?.id ?? rows.find(r => r.id === saved?.sourceId)?.id ?? rows[0].id);
     } catch (error) { if (owns() && turn === epoch) text("#inbox-status", errorText(error)); }
   }
   async function open(sourceId) {
     if (!owns()) return;
     if (selected !== sourceId) $("#inbox-email-details").open = false;
     remember(); selected = sourceId; renderList();
+    threadEpoch++; $("#inbox-thread").hidden = true; $("#inbox-thread-list").replaceChildren();
     $("#inbox-panel").classList.add("reading");
-    if (drafts.has(sourceId)) { render(); loadResults(sourceId); return; }
+    if (drafts.has(sourceId)) { render(); loadResults(sourceId); loadAttachments(sourceId); return; }
     $("#inbox-reader").hidden = true; text("#inbox-status", "Loading…");
     const turn = ++epoch;
     try {
       const result = await api.read(sourceId); if (!owns() || turn !== epoch || selected !== sourceId) return;
       drafts.set(sourceId, { source: result.source, base: result.draft, reviewedSource: result.draft?.sourceRevision ?? result.source.revision,
         body: result.draft?.body ?? "", dirty: false, pending: null, busy: false, conflict: null });
-      text("#inbox-status", ""); render(); remember(); loadResults(sourceId);
+      text("#inbox-status", ""); render(); remember(); loadResults(sourceId); loadAttachments(sourceId);
     } catch (error) { if (owns() && turn === epoch) text("#inbox-status", errorText(error)); }
   }
   function render() {
-    const d = drafts.get(selected); if (!d || !owns() || !visibleRows().some(source => source.id === selected)) return;
-    loadGrants();
+    const d = drafts.get(selected); if (!d || !owns()) return;
     $("#inbox-reader").hidden = false;
     text("#inbox-subject", d.source.subject || "(No subject)");
-    const email = d.source.email;
-    text("#inbox-source-label", email ? "Email · only you" : d.source.adapter === 'message' ? `${({telegram:'Telegram',sms:'SMS',whatsapp:'WhatsApp'})[d.source.provider]} · only you` : "Sample message · only you");
-    $("#inbox-ask").hidden = Boolean(email) && !d.source.capabilities.share && !pendingShare();
-    $("#inbox-email-details").hidden = !email;
+    readToggle.hidden = false;
+    readToggle.textContent = d.source.readAt ? "Mark unread" : "Mark read";
+    readToggle.disabled = d.busy || d.pending;
+    const email = d.source.email, channel = d.source.channel, live = connectionRecords.get(rows.find(r => r.id === selected)?.connection?.id)?.live?.state === "configured";
+    text("#inbox-source-label", email ? "Sample email · only you" : channel ? `${live ? "" : "Sample "}${channelLabel[channel.channel] ?? channel.channel} message · only you` : "Sample message · only you");
+    $("#inbox-ask").hidden = Boolean(email || channel) && !d.source.capabilities.share && !pendingShare();
+    $("#inbox-email-details").hidden = !email && !channel;
     const metadata = email ? ["Mailbox: " + d.source.recipient,
       ...["to", "cc", "bcc"].filter(k => email[k].length).map(k => (k === "to" ? "To" : k.toUpperCase()) + ": " + email[k].join(", ")),
       email.attachmentState === "complete" ? (email.attachmentCount ? `${email.attachmentCount} ${email.attachmentCount === 1 ? "attachment" : "attachments"} · files unavailable` : "No attachments")
         : "Attachments " + (email.attachmentState === "partial" ? "partly listed" : "not loaded") + " · files unavailable",
-      d.source.capabilities.share ? "Sending unavailable" : "Sharing and sending unavailable"] : [];
+      d.source.capabilities.share ? "Sending unavailable" : "Sharing and sending unavailable"]
+      : channel ? ["Bot: " + d.source.recipient, "Chat: " + channel.chat, channel.kind === "channel_post" ? "Channel post" : channel.edited ? "Edited message" : "Message",
+        channel.attachmentCount ? `${channel.attachmentCount} ${channel.attachmentCount === 1 ? "attachment" : "attachments"} · files unavailable` : "No attachments",
+        (d.source.capabilities.send ? "Replies go through the bot" : "Sending unavailable") + (d.source.capabilities.share ? "" : " · sharing unavailable")] : [];
     $("#inbox-email-metadata").replaceChildren(...metadata.map(value => { const p = document.createElement("p"); p.textContent = value; return p; }));
-    const notices = email ? [email.connectionState === "disconnected" ? "Disconnected · saved copy" : email.connectionState === "reconnect_required" ? "Reconnect required · saved copy" : "",
-      email.format === "html" ? "HTML preview unavailable." : !d.source.paragraphs[0] ? "No message text." : ""].filter(Boolean) : [];
+    const link = email ?? channel;
+    const notices = link ? [link.connectionState === "disconnected" ? "Disconnected · saved copy" : link.connectionState === "reconnect_required" ? "Reconnect required · saved copy" : "",
+      link.format === "html" ? "HTML preview unavailable." : !d.source.paragraphs[0] ? "No message text." : ""].filter(Boolean) : [];
+    $("#inbox-addressed").hidden = !d.source.needsYou;
     text("#inbox-source-notice", notices.join(" · ")); $("#inbox-source-notice").hidden = !notices.length;
     text("#inbox-addresses", d.source.sender + " → " + d.source.recipient);
     $("#inbox-source-body").replaceChildren(...d.source.paragraphs.map(value => { const p = document.createElement("p"); p.textContent = value; return p; }));
@@ -413,6 +567,65 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       }
     }
   }
+  // Attachment descriptors for the open source, rendered honestly: names,
+  // types and sizes only, with downloads marked unavailable. Files were
+  // never retained, so there is nothing to offer a download for.
+  async function loadAttachments(sourceId) {
+    const turn = ++attachmentEpoch;
+    $("#inbox-attachments").hidden = true; $("#inbox-attachment-list").replaceChildren();
+    const d = drafts.get(sourceId);
+    const count = d?.source?.email?.attachmentCount ?? d?.source?.channel?.attachmentCount ?? 0;
+    if (!owns() || !getRoom() || !room.ownsAccountSession() || !count) return;
+    try {
+      const value = await api.attachments(sourceId);
+      if (!owns() || selected !== sourceId || turn !== attachmentEpoch) return;
+      const rows = value.attachments;
+      if (!rows.length) return;
+      $("#inbox-attachments").hidden = false;
+      $("#inbox-attachment-list").replaceChildren(...rows.map(a => {
+        const item = document.createElement("li");
+        item.textContent = [a.name ?? "Unnamed attachment", a.contentType, a.size === null ? null : `${a.size} bytes`].filter(Boolean).join(" · ");
+        return item;
+      }));
+    } catch (error) {
+      if (owns() && selected === sourceId && turn === attachmentEpoch && error.status !== 404) {
+        $("#inbox-attachments").hidden = false;
+        text("#inbox-attachment-list", "Attachment details unavailable. Refresh to retry.");
+      }
+    }
+  }
+  // The conversation around the open source: entries indented by reply
+  // depth, each opening its source. Re-clicking the button refreshes it.
+  async function loadThread(sourceId) {
+    const turn = ++threadEpoch;
+    $("#inbox-thread").hidden = true; $("#inbox-thread-list").replaceChildren();
+    if (!owns() || !getRoom() || !room.ownsAccountSession()) return;
+    try {
+      const value = await api.threads({ sourceId });
+      if (!owns() || selected !== sourceId || turn !== threadEpoch) return;
+      const thread = value.threads[0];
+      if (!thread || thread.entries.length < 2) {
+        $("#inbox-thread").hidden = false;
+        text("#inbox-thread-list", "No replies in this conversation yet.");
+        return;
+      }
+      $("#inbox-thread").hidden = false;
+      $("#inbox-thread-list").replaceChildren(...thread.entries.map(({ depth, source }) => {
+        const row = document.createElement("div"), open = document.createElement("button");
+        open.type = "button"; open.className = "text-button";
+        open.style.marginLeft = `${Math.min(depth, 6) * 16}px`;
+        open.textContent = `${source.subject || "(No subject)"} · ${source.sender}`;
+        if (source.id === sourceId) { open.disabled = true; open.textContent += " (this message)"; }
+        else open.addEventListener("click", () => open(source.id));
+        row.append(open); return row;
+      }));
+    } catch (error) {
+      if (owns() && selected === sourceId && turn === threadEpoch && error.status !== 404) {
+        $("#inbox-thread").hidden = false;
+        text("#inbox-thread-list", "Conversation unavailable. Refresh to retry.");
+      }
+    }
+  }
   async function previewResult(sourceId, workItemId) {
     const d = drafts.get(sourceId);
     if (!owns() || !getRoom() || !room.ownsAccountSession() || d?.busy || d?.pending || d?.conflict) return;
@@ -462,56 +675,11 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     d.conflict = null; d.reviewedSource = d.source.revision; d.dirty = true; d.note = choice === "mine" ? "Your draft kept. Save when ready." : "Saved draft selected. Review before saving.";
     render();
   });
-  async function loadGrants() {
-    const sourceId = selected, capturedOwner = owner, turn = ++grantsEpoch;
-    const current = () => owns() && owner === capturedOwner && selected === sourceId && grantsEpoch === turn;
-    const list = $("#inbox-grant-list"); list.replaceChildren();
-    if (!owns() || !sourceId || !$("#inbox-grants").open) return;
-    list.textContent = "Loading…";
-    try {
-      const result = await api.grants(sourceId); if (!current()) return;
-      list.replaceChildren();
-      if (!result.grants.length) list.textContent = "No private shares.";
-      if (result.hasMore) list.textContent = "Latest 100 shares shown.";
-      for (const grant of result.grants) {
-        const row = document.createElement("p"), label = document.createElement("span"), button = document.createElement("button");
-        const expired = grant.expiresAt <= Date.now();
-        label.textContent = `${grant.memberIds.length} recipient${grant.memberIds.length === 1 ? "" : "s"} · ${grant.revoked ? "Revoked" : expired ? "Expired" : "Private share"} `;
-        label.title = grant.memberIds.join(", "); row.append(label);
-        if (!grant.revoked && !expired) {
-          button.type = "button"; button.textContent = "Revoke"; button.className = "button ghost";
-          const request = { action: "grant.revoke", requestId: crypto.randomUUID(), sourceId, grantId: grant.grantId };
-          button.addEventListener("click", async () => {
-            if (!current() || button.disabled) return;
-            button.disabled = true;
-            try { await api.apply(request); if (current()) await loadGrants(); }
-            catch { if (current()) { button.disabled = false; button.textContent = "Retry revoke"; } }
-          }); row.append(button);
-        }
-        list.append(row);
-      }
-    } catch { if (current()) list.textContent = "Couldn’t load private shares. Reopen to retry."; }
-  }
-  $("#inbox-grants").addEventListener("toggle", loadGrants);
-  function updateShareChoice() {
-    if (!sharing || !owns()) return;
-    const privateShare = $("#inbox-share-scope").value === "private";
-    $("#inbox-share-members").hidden = !privateShare;
-    text("#inbox-share-title", privateShare ? "Share privately" : "Share with room");
-    text("#inbox-share-boundary", privateShare ? "Only selected recipients and you. Expires in 7 days; copies can’t be recalled."
-      : "Selected text becomes room history, including for future members.");
-    const count = document.querySelectorAll("#inbox-share-member-list input:checked").length;
-    const hasText = sharing.source.adapter !== "synthetic" ? Boolean(sharing.selection) : Boolean($("#inbox-share-paragraphs input:checked"));
-    $("#inbox-share-confirm").disabled = sharingBusy || (!sharing.request && (!hasText || privateShare && (count === 0 || count > 20)));
-  }
-  $("#inbox-share-scope").addEventListener("change", updateShareChoice);
-  $("#inbox-share-members").addEventListener("change", updateShareChoice);
   async function ask() {
     if (!owns() || !selected) return;
-    const d = drafts.get(selected); if (d?.source.adapter === "email" && !d.source.capabilities.share && !pendingShare()) return;
+    const d = drafts.get(selected); if (d && d.source.adapter !== "synthetic" && !d.source.capabilities.share && !pendingShare()) return;
     if (!getRoom()) { show("rooms"); return; }
     $("#inbox-share-dialog").showModal(); text("#inbox-share-status", "Loading…");
-    sharing = null; $("#inbox-share-scope").disabled = true; $("#inbox-share-member-list").replaceChildren();
     $("#inbox-share-confirm").disabled = true; $("#inbox-share-paragraphs").replaceChildren();
     const pending = pendingShare(), sourceId = pending?.sourceId ?? selected, turn = ++epoch;
     try {
@@ -519,13 +687,6 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       if (!owns() || turn !== epoch || !$("#inbox-share-dialog").open) return;
       if (source.source.revision !== context.sourceRevision) throw new Error("Source changed");
       sharing = { source: source.source, context, request: pending };
-      $("#inbox-share-scope").value = pending?.action === "source.grant" ? "private" : "room";
-      $("#inbox-share-scope").disabled = Boolean(pending);
-      $("#inbox-share-member-list").replaceChildren(...context.members.map(member => {
-        const label = document.createElement("label"), input = document.createElement("input");
-        input.type = "checkbox"; input.value = member.id; input.checked = pending?.memberIds?.includes(member.id) ?? false;
-        input.disabled = Boolean(pending); label.append(input, document.createTextNode(member.displayName + (member.kind === "agent" ? " (agent)" : ""))); return label;
-      }));
       text("#inbox-share-audience", context.roomTitle + " · " + context.members.map(m => m.displayName + (m.kind === "agent" ? " (agent)" : "")).join(", "));
       $("#inbox-share-paragraphs").replaceChildren(...(pending ? [] : source.source.paragraphs).map((value, index) => {
         const label = document.createElement("label"), input = document.createElement("input"), span = document.createElement("span");
@@ -533,7 +694,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
         input.disabled = Boolean(pending); span.textContent = value; label.append(input, span); return label;
       }));
       if (!pending && source.source.adapter !== "synthetic") {
-        if (source.source.adapter==='email'&&!source.source.capabilities.share) throw new Error("Sharing unavailable");
+        if (!source.source.capabilities.share) throw new Error("Sharing unavailable");
         const selectionOwner = sharing;
         const label = document.createElement("p"), input = document.createElement("textarea"), preview = document.createElement("pre");
         label.id = "inbox-excerpt-label"; label.textContent = "Select text to share";
@@ -551,56 +712,38 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
         const select = () => {
           if (sharing !== selectionOwner || !owns() || sharing.request || sharingBusy) return;
           const start = input.selectionStart, end = input.selectionEnd, value = input.value.slice(start, end);
-          const body = (source.source.adapter==='message'?'Shared message excerpt\n\n':"Shared email excerpt\n\n") + value;
+          const body = (source.source.adapter === "email" ? "Shared email excerpt" : "Shared message excerpt") + "\n\n" + value;
           const valid = Boolean(value.trim()) && value.isWellFormed() && body.length <= 4000;
           sharing.selection = valid ? { start, end } : null;
           preview.textContent = valid ? body : ""; preview.hidden = !valid;
           text("#inbox-share-status", body.length > 4000 ? "Select a shorter excerpt." : "");
-          updateShareChoice();
+          $("#inbox-share-confirm").disabled = !valid;
         };
         for (const event of ["select", "keyup", "mouseup", "touchend"]) input.addEventListener(event, select);
-        const all = document.createElement("button");
-        all.type = "button"; all.id = "inbox-excerpt-all"; all.textContent = "All text";
-        all.title = "Select the message text only; attachments and recipients are not included";
-        all.addEventListener("click", () => {
-          if (sharing !== selectionOwner || !owns() || sharing.request || sharingBusy) return;
-          input.focus(); input.setSelectionRange(0, input.value.length); select();
-        });
-        $("#inbox-share-paragraphs").replaceChildren(label, all, input, preview);
+        $("#inbox-share-paragraphs").replaceChildren(label, input, preview);
       }
       text("#inbox-share-status", pending ? "Share unconfirmed. Retry the original selection." : "");
       $("#inbox-share-confirm").textContent = pending ? "Confirm share" : "Share";
-      updateShareChoice();
+      $("#inbox-share-confirm").disabled = !pending;
     } catch (error) { if (owns() && turn === epoch) text("#inbox-share-status", "Couldn’t load sharing context. Close and try again."); }
   }
-  $("#inbox-share-paragraphs").addEventListener("change", event => {
-    if (!event.target.matches('input[type="checkbox"]')) return;
-    updateShareChoice();
+  $("#inbox-share-paragraphs").addEventListener("change", () => {
+    $("#inbox-share-confirm").disabled = !$("#inbox-share-paragraphs input:checked");
   });
   $("#inbox-share-confirm").addEventListener("click", async () => {
     if (!sharing || sharingBusy || !owns()) return;
     const current = sharing, c = current.context;
-    const privateShare = $("#inbox-share-scope").value === "private";
-    const memberIds = [...document.querySelectorAll("#inbox-share-member-list input:checked")].map(el => el.value);
-    if (!current.request && privateShare && (memberIds.length === 0 || memberIds.length > 20)) return;
     if (!current.request && current.source.adapter !== "synthetic" && !current.selection) return;
-    current.request ??= { action: privateShare ? "source.grant" : current.source.adapter !== "synthetic" ? "source.excerpt" : "source.share", requestId: crypto.randomUUID(), sourceId: current.source.id,
-      ...(privateShare ? { memberIds } : {}),
+    current.request ??= { action: current.source.adapter !== "synthetic" ? "source.excerpt" : "source.share", requestId: crypto.randomUUID(), sourceId: current.source.id,
       sourceRevision: c.sourceRevision, roomId: c.roomId, audienceVersion: c.audienceVersion,
       ...(current.source.adapter !== "synthetic" ? { selection: current.selection }
         : { paragraphs: [...document.querySelectorAll("#inbox-share-paragraphs input:checked")].map(el => Number(el.value)) }) };
     const retained = persistShare(current.request); sharingBusy = true; $("#inbox-share-confirm").disabled = true;
-    $("#inbox-share-scope").disabled = true;
-    for (const el of document.querySelectorAll("#inbox-share-member-list input")) el.disabled = true;
-    for (const el of document.querySelectorAll("#inbox-share-paragraphs input, #inbox-share-paragraphs textarea, #inbox-share-paragraphs button")) el.disabled = true;
+    for (const el of document.querySelectorAll("#inbox-share-paragraphs input, #inbox-share-paragraphs textarea")) el.disabled = true;
     text("#inbox-share-status", "Sharing…");
     try {
       const result = await api.apply(current.request); if (!owns() || sharing !== current) return;
-      persistShare(); $("#inbox-share-dialog").close(); sharing = null; sharingBusy = false;
-      if (current.request.action === "source.grant") {
-        text("#inbox-status", "Shared privately"); $("#inbox-grants").open = true; await loadGrants(); return;
-      }
-      show("rooms");
+      persistShare(); $("#inbox-share-dialog").close(); sharing = null; sharingBusy = false; show("rooms");
       const navigation = navigationEpoch;
       text("#inbox-status", "Shared"); await onShared(result.receipt, () => owns() && navigation === navigationEpoch
         && !active && !browsing && getRoom()?.room.id === result.receipt.roomId);
@@ -613,10 +756,11 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
         persistShare(); current.request = null; sharing = null; text("#inbox-share-status", "Not shared. Close and try again.");
       } else { text("#inbox-share-status", retained ? "Share unconfirmed. Retry the original selection." : "Share unconfirmed. Keep this tab open and retry.");
         $("#inbox-share-confirm").textContent = "Confirm share"; $("#inbox-share-confirm").disabled = false; }
-    } finally { if (sharing === current || sharing === null) sharingBusy = false; }
+    } finally { sharingBusy = false; } // Only one share is in flight at a time; a dialog reopened mid-flight must not stay locked.
   });
   $("#inbox-share-close").addEventListener("click", () => $("#inbox-share-dialog").close());
   $("#inbox-ask").addEventListener("click", ask);
+    $("#inbox-thread-toggle").addEventListener("click", () => { if (selected) loadThread(selected); });
   $("#nav-inbox").addEventListener("click", load);
   $("#nav-rooms").addEventListener("click", () => show("rooms"));
   $("#inbox-refresh").addEventListener("click", async () => {

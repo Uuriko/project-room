@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Simulated human journeys against the real local service and disposable data.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -54,9 +53,17 @@ async function setup(t, mobile = false, simulate = false) {
   page.on("dialog", dialog => dialog.accept());
   await page.route("**/*", route => { if (new URL(route.request().url()).origin !== origin) { external.push(route.request().url()); return route.abort(); } return route.continue(); });
   await page.goto(origin + "/?room=commons");
-  await ensureSignIn(page); await page.locator("#access-key").fill(accountKey); await page.locator('#auth-form button[type="submit"]').click();
+  await page.locator("#access-key").fill(accountKey); await page.locator('#auth-form button[type="submit"]').click();
   await page.locator("#main").waitFor({ state: "visible" });
-  const inbox = async () => { await page.locator("#nav-inbox").click(); await page.locator("#inbox-reader").waitFor({ state: "visible" }); };
+  // Opening the inbox lists the connections and opens the first message, two independent round
+  // trips; on a phone the opened reader covers the sidebar. Settle both before any sidebar step:
+  // the reader rendered, and the connection list rendered (the product unhides the add-connection
+  // control exactly then, whether or not any connection exists), or a step-back probe can pass an
+  // instant before the reader appears, and a late connection render re-lists the rows mid-click.
+  const inbox = async () => {
+    await page.locator("#nav-inbox").click(); await page.locator("#inbox-reader").waitFor({ state: "visible" });
+    await page.locator("#inbox-add-connection:not([hidden])").waitFor({ state: "attached" });
+  };
   const pick = async id => {
     if (mobile && await page.locator("#inbox-back").isVisible()) await page.locator("#inbox-back").click();
     await page.locator(`[data-source-id="${id}"]`).click();
@@ -165,7 +172,7 @@ test("reply comparison clears already visible original and unsaved text when ano
   await p.locator("#inbox-reply-original summary").click();
   assert.equal(await p.locator("#inbox-reply-original-body").textContent(), f.recorded.plan.expected.body);
   const other = await p.context().newPage(); await other.goto(f.origin + "/?room=commons");
-  await other.locator("#main").waitFor(); await other.locator("#signout-button").click(); await p.locator("#auth-panel").waitFor();
+  await other.locator("#main").waitFor(); if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await other.locator("#signout-button").click(); await p.locator("#auth-panel").waitFor();
   assert.equal(await p.locator("#inbox-reply-dialog").isVisible(), false);
   for (const id of ["inbox-reply-local-body", "inbox-reply-original-body", "inbox-reply-body"])
     assert.equal(await p.locator("#" + id).textContent(), "");
@@ -401,9 +408,9 @@ test("provider preview cannot repopulate private content after another tab chang
   await p.route("**/reply-review?view=reply-review-v4", async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); });
   await p.locator("#inbox-reply-open").click(); await started;
   const other = await p.context().newPage(); await other.goto(f.origin + "/?room=commons");
-  await other.locator("#main").waitFor(); await other.locator("#signout-button").click(); await other.locator("#auth-panel").waitFor();
+  await other.locator("#main").waitFor(); if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await other.locator("#signout-button").click(); await other.locator("#auth-panel").waitFor();
   const guest = f.store.accountForMember("commons", "guest");
-  await ensureSignIn(other); await other.locator("#access-key").fill(f.store.issueAccountAccessKey(guest.id)); await other.locator('#auth-form button[type="submit"]').click();
+  await other.locator("#access-key").fill(f.store.issueAccountAccessKey(guest.id)); await other.locator('#auth-form button[type="submit"]').click();
   await other.locator("#main").waitFor(); await p.locator("#auth-panel").waitFor(); release(); await p.waitForLoadState("networkidle");
   assert.equal(await p.locator("#inbox-reply-dialog").isVisible(), false);
   assert.equal(await p.locator("#inbox-reply-body").textContent(), ""); assert.equal(await p.locator("#inbox-reply-addresses").textContent(), "");
@@ -426,86 +433,17 @@ test("opt-in sample mailbox review is usable from account Inbox without entering
   const sample = await createInboxSandbox({ includeEmailReview: true }), browser = await chromium.launch({ headless: true });
   t.after(async () => { await browser.close(); await sample.close(); rmSync(sample.directory, { recursive: true, force: true }); });
   const page = await browser.newPage(); page.setDefaultTimeout(9000);
-  await page.goto(sample.accountUrl); await ensureSignIn(page); await page.locator("#access-key").fill(sample.accountKey); await page.locator('#auth-form button[type="submit"]').click();
+  await page.goto(sample.accountUrl); await page.locator("#access-key").fill(sample.accountKey); await page.locator('#auth-form button[type="submit"]').click();
   await page.locator("#inbox-list").getByText("A small collaboration", { exact: true }).click();
   await page.locator("#inbox-reply-open").click(); await page.locator("#inbox-reply-confirm:not([disabled])").waitFor();
   await page.locator("#inbox-reply-confirm").click(); await page.locator("#inbox-reply-status").filter({ hasText: "Reviewed · not sent" }).waitFor();
   assert.equal(await page.locator("#main").isVisible(), false); assert.equal(sample.provider.submits, 0);
 });
-for (const mobile of [false, true]) test(`email all text ${mobile ? "mobile" : "desktop"}: explicit review, exact body and oversized refusal`, { timeout: 40000 }, async t => {
-  const f = await setup(t, mobile), p = f.page, mail = seedEmail(f);
-  const body = "Please review 🪷\n\nThe complete message.";
-  mail.raw.message.body.content = body;
-  const id = mail.importMessage(); await f.inbox(); await f.pick(id);
-  await p.locator("#inbox-ask").click(); await p.locator("#inbox-excerpt-all").waitFor();
-  assert.equal(await p.getByText("Selected text becomes room history, including for future members.", { exact: true }).isVisible(), true);
-  const before = f.store.room("commons").state.messages.length;
-  assert.equal(await p.locator("#inbox-share-confirm").isEnabled(), false);
-  if (mobile) await p.locator("#inbox-excerpt-all").tap();
-  else { await p.locator("#inbox-excerpt-all").focus(); await p.keyboard.press("Enter"); }
-  assert.equal(await p.locator("#inbox-excerpt-preview").textContent(), "Shared email excerpt\n\n" + body);
-  assert.equal(f.store.room("commons").state.messages.length, before, "selection does not post");
-  await p.locator("#inbox-share-confirm").click(); await p.locator("#inbox-share-dialog").waitFor({ state: "hidden" });
-  const posted = f.store.room("commons").state.messages.at(-1);
-  assert.equal(posted.body, "Shared email excerpt\n\n" + body);
-  assert.doesNotMatch(JSON.stringify(posted), /observer@example.test|brief.txt/);
-  mail.raw.message.body.content = "x".repeat(4000); mail.importMessage();
-  await f.inbox(); await f.pick(id); await p.locator("#inbox-ask").click();
-  await p.locator("#inbox-excerpt-all").click();
-  assert.equal(await p.locator("#inbox-share-confirm").isEnabled(), false);
-  assert.equal(await p.locator("#inbox-excerpt-preview").isVisible(), false);
-  assert.equal(await p.locator("#inbox-share-status").textContent(), "Select a shorter excerpt.");
-  assert.equal(f.store.room("commons").state.messages.length, before + 1);
-  await selectExcerpt(p, "xxx");
-  assert.equal(await p.locator("#inbox-share-confirm").isEnabled(), true);
-});
-for (const mobile of [false, true]) test(`private sharing ${mobile ? "mobile" : "desktop"}: selected agent, no room post, reload and revoke`, { timeout: 40000 }, async t => {
-  const f = await setup(t, mobile), p = f.page;
-  await f.inbox(); await f.pick("note"); const before = f.store.room("commons").sequence;
-  await p.locator("#inbox-ask").click(); await p.locator("#inbox-share-paragraphs input").first().check();
-  await p.locator("#inbox-share-scope").selectOption("private");
-  assert.equal(await p.locator("#inbox-share-confirm").isEnabled(), false);
-  await p.locator('#inbox-share-member-list input[value="producer"]').check();
-  await p.locator("#inbox-share-confirm").click(); await p.locator("#inbox-share-dialog").waitFor({ state: "hidden" });
-  assert.equal(await p.locator("#inbox-panel").isVisible(), true);
-  const row = f.store.db.prepare("SELECT receipt_json FROM private_inbox_commands WHERE json_extract(request_json,'$.action')='source.grant'").get();
-  const grant = JSON.parse(row.receipt_json);
-  assert.deepEqual(grant.members.map(m => m.memberId), ["producer"]);
-  assert.equal(f.store.room("commons").sequence, before);
-  assert.doesNotMatch(f.store.inbox.readGrant(f.keys.producer, "commons", grant.grantId).body, /4200/);
-  assert.throws(() => f.store.inbox.readGrant(f.keys.reviewer, "commons", grant.grantId), { status: 404 });
-  await p.reload(); await f.inbox(); await f.pick("note");
-  await p.locator("#inbox-grants summary").click(); await p.locator("#inbox-grant-list").getByRole("button", { name: "Revoke", exact: true }).click();
-  await p.locator("#inbox-grant-list").getByText("1 recipient · Revoked", { exact: true }).waitFor();
-  assert.throws(() => f.store.inbox.readGrant(f.keys.producer, "commons", grant.grantId), { status: 404 });
-  assert.equal(f.store.room("commons").sequence, before);
-  assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-});
-test("private sharing uncertain response retains exact recipients after reload", { timeout: 40000 }, async t => {
-  const f = await setup(t), p = f.page; await f.inbox(); await f.pick("note");
-  await p.locator("#inbox-ask").click(); await p.locator("#inbox-share-scope").selectOption("private");
-  await p.locator("#inbox-share-paragraphs input").first().check();
-  await p.locator('#inbox-share-member-list input[value="producer"]').check();
-  const requests = [];
-  await p.route("**/api/inbox/commands", async route => {
-    const request = route.request().postDataJSON(); if (request.action !== "source.grant") return route.continue();
-    requests.push(request); const response = await route.fetch();
-    if (requests.length === 1) return route.abort();
-    return route.fulfill({ response });
-  });
-  await p.locator("#inbox-share-confirm").click(); await p.getByText("Share unconfirmed. Retry the original selection.", { exact: true }).waitFor();
-  await p.reload(); await f.inbox(); await f.pick("note"); await p.locator("#inbox-ask").click();
-  await p.locator("#inbox-share-confirm:not([disabled])").waitFor();
-  assert.equal(await p.locator("#inbox-share-scope").isEnabled(), false);
-  assert.equal(await p.locator('#inbox-share-member-list input[value="reviewer"]').isEnabled(), false);
-  await p.locator("#inbox-share-confirm").click(); await p.locator("#inbox-share-dialog").waitFor({ state: "hidden" });
-  assert.equal(requests.length, 2); assert.deepEqual(requests[0], requests[1]);
-  assert.equal(f.store.db.prepare("SELECT count(*) n FROM private_inbox_commands WHERE json_extract(request_json,'$.action')='source.grant'").get().n, 1);
-});
 async function selectExcerpt(page, value) {
   const field = page.locator("#inbox-excerpt-text"); await field.focus();
   await field.press("ControlOrMeta+A"); await field.press("ArrowLeft");
   await page.keyboard.down("Shift");
+  // eslint-disable-next-line no-unused-vars -- one key press per character; the character itself is not needed
   for (const point of value) await page.keyboard.press("ArrowRight");
   await page.keyboard.up("Shift");
   await page.locator("#inbox-share-confirm:not([disabled])").waitFor();
@@ -618,7 +556,7 @@ for (const mobile of [false, true]) test(`email reader ${mobile ? "mobile" : "de
   const f = await setup(t, mobile, true), p = f.page, mail = seedEmail(f), before = f.store.room("commons");
   mail.raw.message.body.content = '<img src="https://example.invalid/tracker">\n\nCould we make this simpler?';
   const id = mail.importMessage(); await f.inbox(); await f.pick(id);
-  assert.equal(await p.locator("#inbox-source-label").textContent(), "Email · only you");
+  assert.equal(await p.locator("#inbox-source-label").textContent(), "Sample email · only you");
   assert.equal(await p.locator("#inbox-source-body").textContent(), mail.raw.message.body.content);
   assert.equal(await p.locator("#inbox-source-body img").count(), 0);
   assert.equal(await p.locator("#inbox-ask").isVisible(), true);
@@ -778,10 +716,10 @@ test("sample reply: a late preview cannot reopen private text after another tab 
   await p.route("**/send-context", async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); });
   await p.locator("#inbox-send-preview").click(); await started;
   const other = await p.context().newPage(); await other.goto(f.origin + "/?room=commons");
-  await other.locator("#main").waitFor(); await other.locator("#signout-button").click();
+  await other.locator("#main").waitFor(); if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await other.locator("#signout-button").click();
   await other.locator("#auth-panel").waitFor();
   const guest = f.store.accountForMember("commons", "guest"), key = f.store.issueAccountAccessKey(guest.id);
-  await ensureSignIn(other); await other.locator("#access-key").fill(key); await other.locator('#auth-form button[type="submit"]').click();
+  await other.locator("#access-key").fill(key); await other.locator('#auth-form button[type="submit"]').click();
   await other.locator("#main").waitFor(); await p.locator("#auth-panel").waitFor(); release();
   await p.waitForLoadState("networkidle");
   assert.equal(await p.locator("#inbox-send-dialog").isVisible(), false);
@@ -796,7 +734,7 @@ test("sample launcher: an empty room owner can sign in and finish a sample reply
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   page.setDefaultTimeout(9000); const errors = [];
   page.on("pageerror", error => errors.push(error.message));
-  await page.goto(sample.url); await ensureSignIn(page); await page.locator("#access-key").fill(sample.accountKey); await page.locator('#auth-form button[type="submit"]').click();
+  await page.goto(sample.url); await page.locator("#access-key").fill(sample.accountKey); await page.locator('#auth-form button[type="submit"]').click();
   await page.locator("#inbox-reader").waitFor();
   assert.equal(await page.locator("#main").isVisible(), false);
   await page.locator("#inbox-draft").fill("Let’s try one small idea.");
@@ -827,7 +765,7 @@ test("sample arrival: two samples and existing localhost cookies coexist in one 
   for (const sample of [first, second]) {
     const page = await context.newPage(); pages.push(page); page.setDefaultTimeout(9000);
     page.on("pageerror", error => errors.push(error.message));
-    await page.goto(sample.url); await ensureSignIn(page); await page.locator("#access-key").fill(sample.accountKey); await page.locator('#auth-form button[type="submit"]').click();
+    await page.goto(sample.url); await page.locator("#access-key").fill(sample.accountKey); await page.locator('#auth-form button[type="submit"]').click();
     await page.locator("#inbox-reader").waitFor();
   }
   const [a, b] = pages;
@@ -837,7 +775,7 @@ test("sample arrival: two samples and existing localhost cookies coexist in one 
   assert.equal(await b.locator("#inbox-draft").inputValue(), "");
   await a.reload(); await a.locator("#inbox-reader").waitFor();
   assert.equal(await a.locator("#inbox-draft").inputValue(), "Only in the first sample");
-  await b.locator("#signout-button").click(); await b.locator("#auth-panel").waitFor();
+  if (await b.locator("#session-menu-button").isVisible()) await b.locator("#session-menu-button").click(); await b.locator("#signout-button").click(); await b.locator("#auth-panel").waitFor();
   await a.reload(); await a.locator("#inbox-reader").waitFor();
   assert.equal(await a.locator("#inbox-draft").inputValue(), "Only in the first sample");
   const cookies = await context.cookies();
@@ -881,7 +819,7 @@ for (const mobile of [false, true]) test(`inbox continuity ${mobile ? "mobile" :
   assert.equal(new URL(p.url()).hash, "#pr-view/inbox", "private source IDs are not shared in the URL");
   await p.locator("#nav-rooms").click(); await f.inbox();
   await p.waitForFunction(({ mobile, top }) => Math.abs((mobile ? scrollY : document.querySelector("#inbox-reader").scrollTop) - top) < 3, { mobile, top });
-  await p.locator("#signout-button").click(); await p.locator("#auth-panel").waitFor();
+  if (await p.locator("#session-menu-button").isVisible()) await p.locator("#session-menu-button").click(); await p.locator("#signout-button").click(); await p.locator("#auth-panel").waitFor();
   assert.equal(await p.evaluate(() => sessionStorage.getItem("project-room:inbox-position:v1")), null);
 });
 
@@ -1012,10 +950,10 @@ test("real inbox: another tab changing the browser account clears private conten
   await p.route("**/api/inbox/sources/held?view=email-excerpt-v1", async route => { const response = await route.fetch(); reached(); await held; await route.fulfill({ response }); });
   const read = p.locator('[data-source-id="held"]').click(); await started; await read;
   const other = await p.context().newPage(); await other.goto(f.origin + "/?room=commons");
-  await other.locator("#main").waitFor({ state: "visible" }); await other.locator("#signout-button").click();
+  await other.locator("#main").waitFor({ state: "visible" }); if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await other.locator("#signout-button").click();
   await other.locator("#auth-panel").waitFor({ state: "visible" });
   const guest = f.store.accountForMember("commons", "guest"), key = f.store.issueAccountAccessKey(guest.id);
-  await ensureSignIn(other); await other.locator("#access-key").fill(key); await other.locator('#auth-form button[type="submit"]').click(); await other.locator("#main").waitFor({ state: "visible" });
+  await other.locator("#access-key").fill(key); await other.locator('#auth-form button[type="submit"]').click(); await other.locator("#main").waitFor({ state: "visible" });
   await p.locator("#auth-panel").waitFor({ state: "visible" }); release();
   await p.waitForLoadState("networkidle");
   assert.equal(await p.locator("#inbox-draft").inputValue(), "");

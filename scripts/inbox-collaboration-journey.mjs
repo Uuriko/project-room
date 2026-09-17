@@ -10,7 +10,6 @@ import { chromium } from "playwright";
 import { createInboxSandbox } from "./inbox-sandbox.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
-import { ensureSignIn } from './browser-signin-helper.mjs';
 
 export async function createInboxCollaborationJourney({ mobile = false } = {}) {
   const sample = await createInboxSandbox(), { store, provider } = sample;
@@ -53,7 +52,7 @@ export async function createInboxCollaborationJourney({ mobile = false } = {}) {
       });
       const p = await context.newPage(); p.setDefaultTimeout(9000);
       p.on("pageerror", error => errors.push(error.message)); p.on("dialog", d => d.accept());
-      await p.goto(url); await ensureSignIn(p); await p.locator("#access-key").fill(key); await p.locator('#auth-form button[type="submit"]').click();
+      await p.goto(url); await p.locator("#access-key").fill(key); await p.locator('#auth-form button[type="submit"]').click();
       return p;
     }
     const capture = async (name, p = page) => {
@@ -71,7 +70,10 @@ export async function createInboxCollaborationJourney({ mobile = false } = {}) {
       await card.locator(`[data-action="${name}"]`).click(); await p.locator("#action-dialog").waitFor();
     };
     async function inbox() {
-      await page.locator("#nav-inbox").click(); await page.locator("#inbox-reader").waitFor();
+      // Settle the inbox's initial load (first message opened, connection list rendered) before the
+      // step-back probe: on a phone the opened reader covers the sidebar.
+      await page.locator("#nav-inbox").click(); await page.locator("#inbox-reader").waitFor({ state: "visible" });
+      await page.locator("#inbox-add-connection:not([hidden])").waitFor({ state: "attached" });
       if (mobile && await page.locator("#inbox-back").isVisible()) await page.locator("#inbox-back").click();
       await page.locator(`[data-source-id="${sourceId}"]`).click(); await page.locator("#inbox-reader").waitFor();
     }

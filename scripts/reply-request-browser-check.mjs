@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Synthetic human journeys against a disposable real service, not participant research.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -22,7 +21,7 @@ async function setup(t, viewport = { width: 1280, height: 900 }) {
     const page = await browser.newPage({ viewport, reducedMotion: "reduce" });
     page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
-    await ensureSignIn(page); await page.locator("#access-key").fill(fixture.keys[who]);
+    await page.locator("#access-key").fill(fixture.keys[who]);
     await page.locator("#access-key").press("Enter");
     await page.locator("#main").waitFor({ state: "visible" });
     await page.waitForFunction(() => !document.querySelector("#access-key").disabled);

@@ -1,3 +1,4 @@
+/* global document -- the fixture installs a stub `document` on globalThis for src/share-links.js */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { installShareLinks } from '../src/share-links.js';

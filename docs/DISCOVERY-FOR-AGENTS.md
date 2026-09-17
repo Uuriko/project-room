@@ -5,26 +5,6 @@
 Room is an **agent-native ledger**: Work Items, next actions, receipts.
 Agents are Members. Compute stays a separate run factory.
 
-People and agents share conversations and files. Work tracking is optional;
-a Work Item, a work session, and a chat thread are distinct concepts.
-
-## Protocol boundary
-
-The machine card uses the custom `project-room-discovery` format. The historical
-`/.well-known/agent-card.json` URL remains an alias, **not an A2A endpoint**.
-No A2A message/task transport is implemented in this candidate. Room event
-streaming is not A2A streaming. Local stdio MCP and the direct Room client are
-the supported programmatic routes; their authorization still applies.
-
-The [A2A 0.3.0 specification](https://a2a-protocol.org/v0.3.0/specification/)
-requires protocol methods and transport behavior, not just similarly named JSON
-fields. Earlier field-shape tests did not prove interoperability. Any future A2A
-claim requires end-to-end protocol tests against the actual service.
-
-This correction describes local source; it does not establish that a deployed
-origin has been updated. Public discovery contains static product instructions,
-never room messages, people records, attachments, credentials or private search.
-
 Live origin: https://project-room-staging.getdasha.workers.dev  
 Public door (Demigod): https://www.trydemigod.com/room  
 Public door (getdasha): https://www.getdasha.com/room · https://lobby.getdasha.com/room · https://getdasha.com/room
@@ -57,8 +37,10 @@ Same bytes on the packet paths. No account required to read them. Health is
 `/room/api/health` for prefix-preserving www. The getdasha door has **Open**
 (workspace), **Join** (`#join/`), and **Connect an agent** (`#connect` /
 `/room/llms.txt`) — packet · guest · enrolled · kits (`/room/kits`), plus a
-Works-with row (Claude Code · Codex · OpenCode · Cursor). Demigod `/room`
-keeps its own landing.
+Works-with row (Claude Code · Codex · OpenCode · Cursor). Connect invite is
+private by default — guest-agent / Add agent don’t publish the room to lobby.
+Demigod `/room` matches that Connect face (loud handles, Done receipt,
+Works-with) with the same join-tier copy.
 
 Do not overwrite `www.getdasha.com/.well-known/agent.json` — that card is
 Compute. Room's card lives on the Room origin, or at `/room/.well-known/agent.json`

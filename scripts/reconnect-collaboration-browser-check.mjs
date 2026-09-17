@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Scripted protocol participants + simulated human browser. No model invocation.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -48,7 +47,7 @@ for (const touch of [false, true]) test(`simultaneous attention ${touch ? 'touch
   const page = await browser.newPage({ viewport: touch ? { width: 390, height: 844 } : { width: 1280, height: 900 },
     isMobile: touch, hasTouch: touch, reducedMotion: 'reduce' });
   page.setDefaultTimeout(8000); page.on('pageerror', error => errors.push(error.message));
-  await page.goto(origin); await ensureSignIn(page); await page.locator("#access-key").fill(f.keys.owner);
+  await page.goto(origin); await page.locator('#access-key').fill(f.keys.owner);
   await page.locator('#auth-form button[type=submit]').click(); await page.locator('#main').waitFor({ state: 'visible' });
   await page.locator('#contribution-open').focus();
   assert.equal(await page.locator('#contribution-open').getAttribute('data-step'), `request:${questions[0].requestMessageId}`);
@@ -190,7 +189,7 @@ for (const crowded of [false, true]) for (const touch of [false, true]) test(`${
   const pageForOwner = async login => {
     const page = await context.newPage(); page.setDefaultTimeout(8000); page.on('pageerror', error => errors.push(error.message));
     await page.goto(origin);
-    if (login) { await ensureSignIn(page); await page.locator("#access-key").fill(f.keys.owner); await page.locator('#auth-form button[type=submit]').click(); }
+    if (login) { await page.locator('#access-key').fill(f.keys.owner); await page.locator('#auth-form button[type=submit]').click(); }
     await page.locator('#main').waitFor({ state: 'visible' }); return page;
   };
   let page = await pageForOwner(true);
@@ -348,7 +347,7 @@ for (const crowded of [false, true]) for (const touch of [false, true]) test(`${
   }
   assert.deepEqual(errors, []);
   await page.locator('#cancel-action').click();
-  await page.locator('#signout-button').click(); await page.locator('#auth-panel').waitFor({ state: 'visible' });
+  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator('#signout-button').click(); await page.locator('#auth-panel').waitFor({ state: 'visible' });
   for (const id of ['decision-review-label', 'decision-review-by', 'decision-review-text', 'decision-review-version']) {
     assert.equal(await page.locator(`#${id}`).textContent(), '', 'sign-out clears review context');
   }

@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Simulated human journeys against disposable first-party data, not human research.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -29,8 +28,8 @@ async function setup(t, viewport = { width: 1440, height: 1000 }) {
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   const login = async (key = f.keys.owner) => {
     await page.locator("#auth-panel").waitFor({ state: "visible" });
-    await ensureSignIn(page); await page.locator("#access-key").fill(key);
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.locator("#access-key").fill(key);
+    await page.getByRole("button", { name: "Enter room", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
   };
   await login();

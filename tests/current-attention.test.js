@@ -74,6 +74,18 @@ test("instruction changes and clear notify during working without manufacturing 
   assert.equal((await f.pull()).items[0].id, cleared.items[0].id);
 });
 
+test("an open handoff is triage addressed to the Room owner: it reaches the owner's inbox, not the producer's", async t => {
+  const f = fixture(t); f.work(); f.mutate(T.WORK_ACCEPTED); f.mutate(T.WORK_STARTED);
+  f.send("agent", T.WORK_HANDOFF_RECORDED, { workItemId: "work", expectedRevision: f.store.room("commons").state.workItems.work.revision,
+    doneSummary: "half the draft", nextAction: "Reassign the rest", limitReason: "context window exhausted" });
+  assert.equal((await f.pull()).items.filter(n => n.subject === "work").length, 0, "the producer is not the addressee");
+  const ownerClient = { snapshot: async () => f.store.snapshot(f.keys.owner, "commons"), changes: async (after, limit) => f.store.eventsAfter(f.keys.owner, "commons", after, limit) };
+  const ownerPull = await f.pull({ client: ownerClient, directory: join(f.directory, "owner-pull") });
+  const handoff = ownerPull.items.find(n => n.subject === "work");
+  assert.ok(handoff, "the owner's inbox surfaces the open handoff");
+  assert.equal(handoff.workItemId, "work"); assert.equal(handoff.next.action, "triaged_handoff"); assert.equal(handoff.next.memberId, "owner");
+});
+
 test("obsolete work acknowledgement cannot clear a newer condition and irrelevant work stays quiet", async t => {
   const f = fixture(t); f.work(); f.work("unrelated", { accountableMemberId: "other" });
   const old = (await f.pull()).items[0]; assert.equal(old.next.action, "accept");

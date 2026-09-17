@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Simulated human UI, actual scripted MCP. Disposable rooms; no model or external work.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -36,8 +35,8 @@ async function setup(t, touch = false) {
   t.after(async () => { await agent.close(); await browser.close(); server.closeStreams(); server.closeAllConnections();
     await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   await page.goto(origin);
-  await ensureSignIn(page); await page.locator("#access-key").fill(f.keys.owner);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.locator("#access-key").fill(f.keys.owner);
+  await page.getByRole("button", { name: "Enter room", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
   const card = page.locator(`[data-work-record-id="${id}"]`), dialog = page.locator("#action-dialog");
   const save = page.locator("#action-form button[type=submit]"), scope = page.locator("#action-fields [name=scope]");
@@ -168,8 +167,8 @@ test("human help expiry retires its label without new events and guest cannot pu
   assert.equal(f.store.room("commons").sequence, sequence); assert.equal((await f.list()).length, 0);
   f.page.on("dialog", dialog => dialog.accept());
   await f.page.getByRole("button", { name: "Sign out", exact: true }).click();
-  await ensureSignIn(f.page); await f.page.locator("#access-key").fill(f.keys.guest);
-  await f.page.getByRole("button", { name: "Continue", exact: true }).click();
+  await f.page.locator("#access-key").fill(f.keys.guest);
+  await f.page.getByRole("button", { name: "Enter room", exact: true }).click();
   await f.page.locator("#main").waitFor({ state: "visible" });
   assert.equal(await f.card.locator("[data-action=help]").count(), 0);
   assert.equal(await f.card.locator('[data-action="end-help"]').count(), 0);

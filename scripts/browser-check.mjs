@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Real browser + local HTTP service; all identities, messages, and keys are disposable fixtures.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -52,8 +51,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
       await p.goto(origin);
       await p.locator("#auth-panel").waitFor({ state: "visible" });
       assert.equal(await p.locator("#message-list").textContent(), "");
-      await ensureSignIn(p); await p.locator("#access-key").fill(key);
-      await p.getByRole("button", { name: "Continue", exact: true }).click();
+      await p.locator("#access-key").fill(key);
+      await p.getByRole("button", { name: "Enter room", exact: true }).click();
       await p.locator("#main").waitFor({ state: "visible" });
     };
     await login(page, owner); await login(other, human);
@@ -174,8 +173,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await page.locator("#message-list").textContent(), "");
     assert.equal(await page.locator("#search-list").textContent(), "");
     assert.equal(await input.inputValue(), "");
-    await ensureSignIn(page); await page.locator("#access-key").fill(rotated);
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.locator("#access-key").fill(rotated);
+    await page.getByRole("button", { name: "Enter room", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
     assert.equal(await input.inputValue(), "");
     assert.deepEqual(errors, []);
@@ -197,7 +196,17 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const origin = `http://127.0.0.1:${server.address().port}`;
     let browser, page;
+    let finished = false;
     t.after(async () => {
+      if (page && !finished) {
+        // The gate stalled: name the brief's state in the job log (an annotation on
+        // Actions) so the next red run is diagnosable without the step log.
+        const state = await page.evaluate(() => ({ status: document.querySelector("#rb-status")?.textContent, boundary: document.querySelector("#rb-history-boundary")?.textContent,
+          ack: document.querySelector("#rb-ack-button")?.textContent, ackDisabled: document.querySelector("#rb-ack-button")?.disabled, busy: document.querySelector("#return-brief-panel")?.getAttribute("aria-busy"),
+          connection: document.querySelector("#connection-status")?.textContent, history: document.querySelectorAll("#rb-history-list .rb-event").length })).catch(error => ({ unavailable: error.message }));
+        const note = `return brief ${label} did not finish; cursor ${store.snapshot(human, "commons").cursor}, sequence ${store.room("commons").sequence}, page ${JSON.stringify(state)}`;
+        console.log(process.env.GITHUB_ACTIONS === "true" ? `::warning file=scripts/browser-check.mjs,title=return brief ${label} stalled::${note.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A")}` : note);
+      }
       if (page && await page.locator("#main").isVisible().catch(() => false)) {
         mkdirSync("test-results", { recursive: true });
         await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" })).catch(() => {});
@@ -210,17 +219,19 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const context = await browser.newContext({ viewport, reducedMotion: "reduce" });
     // CI load headroom: warm, this whole test completes in about 2 seconds, but on a
     // busy shared runner (40 sequential browser files, 2 vCPU) a single Playwright
-    // call can be starved past the 30s default timeout - observed failing twice on
-    // mobile at ~31s (d3713b1, 967b0ea). Not reproducible under local CPU
-    // saturation; the bump keeps individual waits below the 90s test budget rather
-    // than masking a real hang with a longer test timeout.
-    context.setDefaultTimeout(60000);
+    // call can be starved past the default timeout - observed failing twice on
+    // mobile at ~31s (d3713b1, 967b0ea), then three times at ~61s against the 60s
+    // bump (6b3d566 attempts 1-3, both viewport variants), then at ~76s against
+    // the 75s bump (b60f13ee, desktop variant). Not reproducible under
+    // local CPU saturation; the bump keeps individual waits below the 90s test
+    // budget rather than masking a real hang with a longer test timeout.
+    context.setDefaultTimeout(85000);
     page = await context.newPage();
     const errors = [];
     page.on("pageerror", error => errors.push(error.message));
     await page.goto(origin);
-    await ensureSignIn(page); await page.locator("#access-key").fill(human);
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.locator("#access-key").fill(human);
+    await page.getByRole("button", { name: "Enter room", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
 
     // The rail entry opens to live current sections and a frozen first page of history.
@@ -283,7 +294,43 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     // The explicit ack acknowledges exactly H; reading never did.
     assert.equal(store.snapshot(human, "commons").cursor, 0);
     await page.locator("#rb-ack-button").click();
-    await page.waitForFunction(() => document.querySelector("#rb-history-boundary").textContent.includes("nothing new"));
+    // The saved position is the durable claim. On a starved runner a request in this
+    // flow can fail (room refreshes are coalesced, so any in-flight failure rejects the
+    // acknowledgement's refresh too), and the brief then deliberately stops in one of
+    // its explicit states instead of reloading on its own: "Position saved. Refresh to
+    // see the latest changes." (saved, view stale) or "Saving could not be confirmed.
+    // Refresh to check your position before retrying." (not saved). Waiting only for
+    // "nothing new" then stalls for the whole budget, which is how this test went red
+    // on CI at every budget tried. Accept those states, prove exactly what each one
+    // claims, and take the product's own recovery: Refresh, then retry the ack only
+    // when the position was never saved. The connection label is not a gate here - a
+    // failed refresh leaves it at "interrupted" until the next stream open.
+    const settled = () => page.evaluate(() => {
+      const status = document.querySelector("#rb-status").textContent, boundary = document.querySelector("#rb-history-boundary").textContent;
+      if (boundary.includes("nothing new")) return "acknowledged";
+      if (status.startsWith("Position saved.")) return "saved-stale";
+      if (status.startsWith("Saving could not be confirmed.")) return "unsaved";
+      if (status.startsWith("Catch-up could not load.")) return "unloaded";
+      return null;
+    });
+    const awaitSettled = () => page.waitForFunction(() => {
+      const status = document.querySelector("#rb-status").textContent;
+      return document.querySelector("#rb-history-boundary").textContent.includes("nothing new") || /^(Position saved\.|Saving could not be confirmed\.|Catch-up could not load\.)/.test(status);
+    }, null, { timeout: 30000 });
+    await awaitSettled();
+    for (let attempt = 0; await settled() !== "acknowledged"; attempt++) {
+      assert.ok(attempt < 4, `return brief recovery did not converge: ${await settled()}`);
+      const outcome = await settled(), cursor = store.snapshot(human, "commons").cursor;
+      if (outcome === "saved-stale") {
+        assert.equal(cursor, 60, "a saved position is exactly H");
+        assert.equal(await page.locator("#rb-ack-button").textContent(), "Refresh brief before acknowledging");
+        assert.equal(await page.locator("#rb-ack-button").isDisabled(), true, "no second acknowledgement before the brief is refreshed");
+      } else if (outcome === "unsaved") assert.equal(cursor, 0, "an unconfirmed save never moved the marker");
+      await page.locator("#rb-refresh-button").click();
+      await page.waitForFunction(() => document.querySelector("#return-brief-panel").getAttribute("aria-busy") === "false" && !document.querySelector("#rb-status").textContent.startsWith("Loading"), null, { timeout: 30000 });
+      if (store.snapshot(human, "commons").cursor === 0 && !(await page.locator("#rb-ack-button").isDisabled())) await page.locator("#rb-ack-button").click();
+      await awaitSettled();
+    }
     assert.equal(store.snapshot(human, "commons").cursor, 60);
     await page.locator("#rb-attention-list", { hasText: "Read the briefing" }).waitFor(); // unresolved work survives catch-up
     assert.equal(await page.locator("#rb-ack-button").isDisabled(), true);
@@ -293,6 +340,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.waitForFunction(() => document.querySelectorAll("#rb-history-list .rb-event").length === 1);
     assert.match(await page.locator("#rb-history-list").textContent(), /after the marker/);
     assert.deepEqual(errors, []);
+    finished = true;
   });
 }
 
@@ -324,8 +372,8 @@ for (const outcome of ["success", "failure"]) {
     page.on("pageerror", error => errors.push(error.message));
     const enter = async () => {
       await page.locator("#auth-panel").waitFor({ state: "visible" });
-      await ensureSignIn(page); await page.locator("#access-key").fill(key);
-      await page.getByRole("button", { name: "Continue", exact: true }).click();
+      await page.locator("#access-key").fill(key);
+      await page.getByRole("button", { name: "Enter room", exact: true }).click();
       await page.locator("#main").waitFor({ state: "visible" });
       await page.waitForFunction(() => document.querySelector("#rb-current-boundary").textContent.includes("as of event"));
     };

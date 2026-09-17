@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Simulated accountable human, actual scripted MCP helper and reviewer. No models.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -73,7 +72,7 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
   const page = await browser.newPage({ viewport: touch ? { width: 390, height: 844 } : { width: 1280, height: 900 },
     isMobile: touch, hasTouch: touch, reducedMotion: 'reduce' });
   page.setDefaultTimeout(8000); page.on('pageerror', error => errors.push(error.message));
-  await page.goto(origin); await ensureSignIn(page); await page.locator("#access-key").fill(f.keys.owner);
+  await page.goto(origin); await page.locator('#access-key').fill(f.keys.owner);
   await page.locator('#auth-form button[type=submit]').click(); await page.locator('#main').waitFor({ state: 'visible' });
   mkdirSync('test-results', { recursive: true }); const prefix = `test-results/${multiple ? 'help-alternatives' : 'help-contribution'}-${touch ? 'touch' : 'desktop'}`;
   await page.locator('#contribution-open').click();
@@ -225,7 +224,7 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
   const markers = Object.fromEntries(['owner', 'producer', 'reviewer'].map(member => [member,
     f.store.db.prepare('SELECT sequence FROM cursors WHERE room_id=? AND member_id=?').get('commons', member)?.sequence ?? 0]));
   assert.deepEqual(markers, { owner: 0, producer: 0, reviewer: 0 }); assert.deepEqual(errors, []);
-  await page.locator('#cancel-action').click(); await page.locator('#signout-button').click();
+  await page.locator('#cancel-action').click(); if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator('#signout-button').click();
   await page.locator('#auth-panel').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#action-text-body').textContent(), '');
   writeFileSync(`${prefix}.json`, JSON.stringify({ simulatedHuman: true, scriptedMcp: true, nativeModels: false,

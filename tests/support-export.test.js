@@ -3,7 +3,7 @@
 // credentials, hashes, request bodies, message text, or member details.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -89,7 +89,8 @@ test("export endpoint is owner-only and leak-free", async t => {
     assert.ok(["access", "not_found", "conflict", "rate_limited", "unavailable", "internal", "input"].includes(entry.category));
   }
   const serialized = JSON.stringify(bundle);
-  for (const secret of [secretBody, invite.code, invite.codeHash, ownerKey, otherKey]) {
+  const inviteHash = store.db.prepare("SELECT code_hash FROM agent_invite_codes WHERE room_id=?").get("commons").code_hash;
+  for (const secret of [secretBody, invite.code, inviteHash, invite.inviteId, ownerKey, otherKey]) {
     assert.ok(!serialized.includes(secret), "export must not contain secrets, hashes, or message bodies");
   }
   const keys = deepKeys(bundle).map(k => k.toLowerCase());

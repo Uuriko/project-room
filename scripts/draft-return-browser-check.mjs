@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Simulated human journeys: disposable rooms, no real users or outside requests.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -39,7 +38,7 @@ async function setup(t, { humanWork = false, mobile = false } = {}) {
   await page.goto(origin);
   const login = async (key = f.keys.owner) => {
     await page.locator("#auth-panel").waitFor({ state: "visible" });
-    await ensureSignIn(page); await page.locator("#access-key").fill(key); await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.locator("#access-key").fill(key); await page.getByRole("button", { name: "Enter room", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
   };
   await login();
@@ -166,12 +165,12 @@ test("posted draft returns to its exact conversation record and work link preser
 
 test("mobile guest draft is discoverable by the returning accountable member without implying work completion", { timeout: 30000 }, async t => {
   const f = await setup(t, { humanWork: true, mobile: true }), { page } = f, before = f.snapshot();
-  await page.locator("#signout-button").click(); await f.login(f.keys.guest);
+  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click(); await f.login(f.keys.guest);
   await f.open(); await f.input.fill(f.answer("Guest contribution: start the agenda with an owner and one decision."));
   await f.submit.click(); await f.dialog.waitFor({ state: "hidden" });
   const posted = f.snapshot().state.messages.findLast(message => message.proposal);
   assert.equal(posted.authorId, "guest"); assert.equal(posted.proposal.attribution, "manual-unverified");
-  await page.locator("#signout-button").click(); await f.login(f.keys.owner);
+  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click(); await f.login(f.keys.owner);
   assert.equal(await f.card.locator(".work-details").evaluate(node => node.open), false);
   await f.card.getByRole("link", { name: "View latest draft", exact: true }).click();
   await page.waitForFunction(id => document.activeElement?.dataset.messageRecordId === id, posted.id);

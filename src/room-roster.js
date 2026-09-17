@@ -142,7 +142,6 @@ export function capabilitySummary(access) {
   ];
   if (access === "contribute") return [...chat, "Post work drafts for human review.", "Offer help on invited work."];
   if (access === "review") return [...chat, "Post work drafts for human review.", "Review work."];
-  if (access === "max") return [...chat, "Steer, coordinate claims, contribute and review work.", "No human administration or external-write permission."];
   return chat;
 }
 

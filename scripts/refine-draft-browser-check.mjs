@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Simulated people in isolated rooms, including real browser failure recovery.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -24,7 +23,7 @@ for (const mobile of [false, true]) test(`refine draft ${mobile ? "mobile" : "de
   page.on("pageerror", e => errors.push(e.message));
   page.on("request", r => { if (r.method() === "POST" && r.url().endsWith("/commands")) commands.push(r.postDataJSON()); });
   await page.route("**/*", route => { if (new URL(route.request().url()).origin === config.origin) return route.continue(); external.push(route.request().url()); return route.abort(); });
-  const login = async () => { await ensureSignIn(page); await page.locator("#access-key").fill(config.token); await page.getByRole("button", { name: "Continue", exact: true }).click(); await page.locator("#main").waitFor(); };
+  const login = async () => { await page.locator("#access-key").fill(config.token); await page.getByRole("button", { name: "Enter room", exact: true }).click(); await page.locator("#main").waitFor(); };
   await page.goto(config.origin); await login();
   const open = async id => { await page.locator('[data-portable-original="' + id + '"]').click(); await page.locator("#portable-dialog").waitFor(); };
   const close = () => page.locator("#portable-close").click();
@@ -89,7 +88,7 @@ for (const mobile of [false, true]) test(`refine draft ${mobile ? "mobile" : "de
   assert.equal(await page.locator("#message-input").inputValue(), "Keep my conversation draft.");
   assert.ok(f.evidence().cursors.every(c => c.sequence === 0));
   page.on("dialog", dialog => dialog.accept());
-  await page.locator("#signout-button").click(); await page.locator("#auth-panel").waitFor();
+  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click(); await page.locator("#auth-panel").waitFor();
   assert.equal(await page.locator("#portable-original-body").textContent(), "");
   await login(); await open("source-b");
   assert.equal(await page.locator("#portable-result").inputValue(), "A different draft.\nChecks: none.");

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatShareInvitation, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, reuseVisibleRoom } from "../src/share-links.js";
+import { formatShareInvitation, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, requestFailureMessage, reuseVisibleRoom } from "../src/share-links.js";
 
 test("invitation note formatting is bounded plain text with an exact URL-only fallback", () => {
   const url = "https://room.example/#join/synthetic";
@@ -55,6 +55,14 @@ test("invitation transport errors give an honest, actionable same-request retry 
     assert.doesNotMatch(invitationFailureMessage(error), /signal is aborted/);
   }
   assert.equal(invitationFailureMessage(new Error("Ask for a new link.")), "Ask for a new link.");
+});
+
+test("general request failures hide raw transport and parser text but keep service messages", () => {
+  for (const error of [new DOMException("signal is aborted without reason", "AbortError"), new DOMException("timed out", "TimeoutError"),
+    new TypeError("Failed to fetch"), new SyntaxError("Unexpected token '<', \"<html>\" is not valid JSON")]) {
+    assert.equal(requestFailureMessage(error), "The connection was interrupted and the result could not be confirmed");
+  }
+  assert.equal(requestFailureMessage(new Error("Membership is inactive.")), "Membership is inactive.");
 });
 
 test("invitation management recovery distinguishes listing, creation and cancellation", () => {

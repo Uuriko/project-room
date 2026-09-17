@@ -62,7 +62,7 @@ test("exact email excerpt shares only selected normalized text and returns a rev
   assert.equal(result.selected().status, "no_native_result"); result.complete(); result.review(); result.decide();
   f.share(result.adoption()); assert.equal(f.read().draft.body, result.body); assert.equal(f.read().draft.origin.unchanged, true);
   assert.equal(f.store.inbox.sends(f.auth.token, request.sourceId, f.auth.sessionBinding).sends.length, 0);
-  assert.throws(() => f.store.inbox.sendContext(f.auth.token, request.sourceId, f.auth.sessionBinding), { code: "email_sending_unavailable" });
+  assert.throws(() => f.store.inbox.sendContext(f.auth.token, request.sourceId, f.auth.sessionBinding), { code: "channel_sending_unavailable" });
   const before = auditRecovery(f.store), backup = await backupRoom(f.filename, f.directory), restored = new RoomStore(backup.filename, { readOnly: true });
   try { assert.deepEqual(auditRecovery(restored), before); } finally { restored.close(); }
   f.store.close(); f.store = new RoomStore(f.filename);
@@ -83,7 +83,7 @@ test("email selections reject invalid offsets, empty or oversized text, HTML and
   assert.throws(() => f.share(stale), { code: "stale_inbox_source" });
   f.raw.message.changeKey = "html-version"; f.raw.options.attachmentObservation.messageRevision = f.raw.message.changeKey;
   f.raw.message.body = { contentType: "html", content: "<p>HTML</p>" }; f.apply(f.page());
-  assert.throws(() => f.share(f.excerpt()), { code: "email_sharing_unavailable" });
+  assert.throws(() => f.share(f.excerpt()), { code: "channel_sharing_unavailable" });
 });
 test("saved email can be deliberately shared after disconnect; failed journal writes leave no room excerpt", t => {
   const f = fixture(t); f.configure(); f.apply(f.page());
@@ -155,7 +155,7 @@ test("fixture email import reuses private Inbox storage without changing rooms o
   assert.equal(f.store.inbox.list(f.auth.token, f.auth.sessionBinding, { includeEmail: true }).sources[0].subject, f.raw.message.subject);
   assert.deepEqual(f.store.room("commons"), before);
   assert.deepEqual(f.store.email.verify(), { connections: 1, folders: 1, sources: 1 });
-  assert.equal(auditRecovery(f.store).schemaVersion, 33);
+  assert.equal(auditRecovery(f.store).schemaVersion, 34);
 });
 test("exact page retries and unchanged observations do not create another source revision", t => {
   const f = fixture(t); f.configure(); const request = f.page(), original = f.apply(request);
@@ -254,7 +254,7 @@ test("account bindings, epoch changes and room-agent credentials cannot import a
   const auth = f.store.loginAccountSession(slot.token, f.store.issueAccountAccessKey(guest.id), 0);
   assert.throws(() => f.store.email.state(slot.token, f.raw.connection.id, f.raw.message.parentFolderId, auth.sessionBinding), { status: 404 });
   assert.throws(() => f.store.email.apply(slot.token, { action: "connection.configure", requestId: "other", connectionId: f.raw.connection.id,
-    expectedRevision: 0, profile: f.raw.connection }, auth.sessionBinding), { code: "email_account_mismatch" });
+    expectedRevision: 0, profile: f.raw.connection }, auth.sessionBinding), { code: "channel_account_mismatch" });
   f.store.changeAccountAccess(f.account.id, { expectedRevision: 0, active: false, reason: "End fixture access" });
   assert.throws(() => f.apply(request), { status: 401 });
   f.store.changeAccountAccess(f.account.id, { expectedRevision: 1, active: true, reason: "Restore fixture access" });
@@ -274,13 +274,13 @@ test("connection identity cannot silently change mailboxes or duplicate one acco
 test("ordinary Inbox commands cannot import, overwrite channel origin, send or share unqualified email", t => {
   const f = fixture(t); f.configure(); f.apply(f.page()); f.draft("Email draft");
   const sourceId = f.envelope().sourceId, command = { action: "source.import", requestId: "manual-import", sourceId, expectedRevision: 1, data: { adapter: "email", envelope: f.envelope() } };
-  assert.throws(() => f.store.inbox.apply(f.auth.token, command, f.auth.sessionBinding), { code: "email_importer_required" });
-  assert.throws(() => f.store.inbox.importSource(f.auth.token, command, f.auth.sessionBinding), { code: "email_importer_required" });
+  assert.throws(() => f.store.inbox.apply(f.auth.token, command, f.auth.sessionBinding), { code: "channel_importer_required" });
+  assert.throws(() => f.store.inbox.importSource(f.auth.token, command, f.auth.sessionBinding), { code: "channel_importer_required" });
   assert.throws(() => f.store.inbox.apply(f.auth.token, { ...command, action: "source.save", data: { adapter: "synthetic", sender: "a", recipient: "b", subject: "c", paragraphs: ["d"] } }, f.auth.sessionBinding), { code: "inbox_source_origin_changed" });
-  assert.throws(() => f.store.inbox.sendContext(f.auth.token, sourceId, f.auth.sessionBinding), { code: "email_sending_unavailable" });
+  assert.throws(() => f.store.inbox.sendContext(f.auth.token, sourceId, f.auth.sessionBinding), { code: "channel_sending_unavailable" });
   const audience = f.store.inbox.shareContext(f.auth.token, sourceId, "commons", f.auth.sessionBinding);
   assert.throws(() => f.store.inbox.apply(f.auth.token, { action: "source.share", requestId: "share-email", sourceId, sourceRevision: 1,
-    roomId: "commons", audienceVersion: audience.audienceVersion, paragraphs: [0] }, f.auth.sessionBinding), { code: "email_sharing_unavailable" });
+    roomId: "commons", audienceVersion: audience.audienceVersion, paragraphs: [0] }, f.auth.sessionBinding), { code: "channel_sharing_unavailable" });
 });
 test("bounded malformed or out-of-scope observations roll back without consuming sync progress", t => {
   const f = fixture(t); f.configure(); const before = auditRecovery(f.store), envelope = f.envelope();

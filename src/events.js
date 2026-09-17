@@ -5,30 +5,26 @@ import { REPLY_CANCELLED, prepareReplyPost, recordReplyPost, cancelReplyRequest 
 import { WORK_HELP_UPDATED, helpFromEvent } from "./work-help.js";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, helpOfferFromEvent } from "./help-offers.js";
 import { SESSION_EVENT_TYPES, applySessionFields } from "./work-item-session.js";
-import { transitionRequestRun } from "./request-run-policy.js";
-import { transitionAutomation, isAutomationDispatch, prepareAutomationDispatch } from "./automation-policy.js";
 
 export const EVENT_TYPES = Object.freeze({
   ROOM_CREATED: "room.created",
   ROOM_CHARTER_UPDATED: CHARTER_TYPE,
+  ROOM_POLICY_SET: "room.policy_set",
+  ROOM_SPEND_ALLOWANCE_SET: "room.spend_allowance_set",
+  ROOM_ARCHIVED: "room.archived",
   MEMBER_ADDED: "member.added",
   MEMBER_JOINED_VIA_INVITATION: "member.joined_via_invitation",
   MEMBER_ACCESS_CHANGED: "member.access_changed",
   MEMBER_STATUS_UPDATED: "member.status_updated",
   NOTIFICATION_PREFERENCES_SET: "notifications.preferences_set",
+  MEMBER_MUTE_SET: "member.mute_set",
   MESSAGE_POSTED: "message.posted",
   MESSAGE_EDITED: "message.edited",
   MESSAGE_DELETED: "message.deleted",
   REPLY_REQUEST_CANCELLED: REPLY_CANCELLED,
-  REQUEST_RUN_CLAIMED: "request_run.claimed",
-  REQUEST_RUN_STOP_REQUESTED: "request_run.stop_requested",
-  REQUEST_RUN_FINISHED: "request_run.finished",
-  AUTOMATION_CREATED: "automation.created",
-  AUTOMATION_UPDATED: "automation.updated",
-  AUTOMATION_ENABLED: "automation.enabled",
-  AUTOMATION_ACCEPTED: "automation.accepted",
-  AUTOMATION_PAUSED: "automation.paused",
   MESSAGE_REACTION_SET: "message.reaction_set",
+  MESSAGE_PINNED: "message.pinned",
+  MESSAGE_UNPINNED: "message.unpinned",
   WORK_PROPOSED: "work.proposed",
   WORK_HELP_UPDATED,
   HELP_OFFER_OPENED,
@@ -45,12 +41,79 @@ export const EVENT_TYPES = Object.freeze({
   CLAIM_RELEASED: "claim.released",
   VERIFICATION_RECORDED: "verification.recorded",
   OWNER_DECISION_RECORDED: "owner.decision_recorded",
+  DECISION_RECORDED: "decision.recorded",
   SESSION_STARTED: SESSION_EVENT_TYPES.STARTED,
   SESSION_STATUS_CHANGED: SESSION_EVENT_TYPES.STATUS_CHANGED,
   SESSION_STOP_REQUESTED: SESSION_EVENT_TYPES.STOP_REQUESTED,
   SESSION_STOPPED: SESSION_EVENT_TYPES.STOPPED,
-  CAPABILITIES_ADVERTISED: "capabilities.advertised"
+  CAPABILITIES_ADVERTISED: "capabilities.advertised",
+  OWNERSHIP_TRANSFERRED: "ownership.transferred"
 });
+
+// Room policy (issue #6 A4): the owner can make independent review and/or an
+// owner decision mandatory for every work item proposed afterwards. The policy
+// is event-sourced (room.policy_set) and lives on the projection; work recorded
+// before a flip keeps the requirements it was recorded with. Off is the default
+// and the pre-policy behaviour: the proposer chooses per item.
+export const ROOM_POLICY_FIELDS = Object.freeze(["requireIndependentReview", "requireOwnerDecision"]);
+
+export function roomPolicy(state) {
+  const stored = state?.room?.policy ?? {};
+  return Object.fromEntries(ROOM_POLICY_FIELDS.map(field => [field, stored[field] === true]));
+}
+
+// Room lifecycle (issue #6 A2). `kind` is a creation-time attribute: the
+// personal / organization badge until a real organization model (D1) exists;
+// rooms created before it read as personal. Archive is an owner-only event
+// (room.archived) that turns the room read-only: reads, streams and export
+// continue, and no further event of any type is accepted for that room. A
+// member leaves by ending their own access (member.access_changed on
+// themself, permissions unchanged, active false) without needing
+// manage_members; the owner cannot leave.
+export const ROOM_KINDS = Object.freeze(["personal", "organization"]);
+export const roomKind = room => (ROOM_KINDS.includes(room?.kind) ? room.kind : "personal");
+export const isRoomArchived = state => typeof state?.room?.archivedAt === "string";
+export function isLeaveRequest(state, incoming) {
+  const member = Object.hasOwn(state.members, String(incoming.data?.memberId)) && state.members[incoming.data.memberId];
+  return Boolean(member) && incoming.actorId === member.id && member.active === true && incoming.data.active === false
+    && Array.isArray(incoming.data.permissions) && JSON.stringify(incoming.data.permissions) === JSON.stringify(member.permissions);
+}
+
+// Room spend allowance (issue #6 C3): the owner can cap what agent sessions
+// in this room may spend over a rolling period. Event-sourced
+// (room.spend_allowance_set) and carried on the projection;
+// server/spend-allowance.mjs refuses session starts that would commit more
+// than the allowance. allowanceCents null clears it. No allowance is the
+// default and the pre-allowance behaviour: sessions bound only themselves.
+export const SPEND_ALLOWANCE_LIMITS = Object.freeze({ allowanceCents: 100000000, periodDays: 365 });
+
+export function spendAllowance(state) {
+  const stored = state?.room?.spendAllowance;
+  if (!stored || !Number.isSafeInteger(stored.allowanceCents) || stored.allowanceCents < 0) return null;
+  return { allowanceCents: stored.allowanceCents, periodDays: stored.periodDays, revision: stored.revision, setById: stored.setById, setAt: stored.setAt };
+}
+
+function setSpendAllowance(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.kind !== "human" || actor.id !== state.room.ownerId) throw new Error("Only the Room owner may set the spend allowance");
+  const { allowanceCents, periodDays } = incoming.data;
+  const clearing = allowanceCents === null;
+  if (!clearing && (!Number.isSafeInteger(allowanceCents) || allowanceCents < 0 || allowanceCents > SPEND_ALLOWANCE_LIMITS.allowanceCents)) {
+    throw new Error(`allowanceCents must be an integer of cents from 0 to ${SPEND_ALLOWANCE_LIMITS.allowanceCents}, or null to remove the allowance`);
+  }
+  if (!clearing && (!Number.isSafeInteger(periodDays) || periodDays < 1 || periodDays > SPEND_ALLOWANCE_LIMITS.periodDays)) {
+    throw new Error(`periodDays must be an integer from 1 to ${SPEND_ALLOWANCE_LIMITS.periodDays}`);
+  }
+  if (clearing && periodDays != null) throw new Error("Removing the allowance takes no period");
+  const previous = state.room.spendAllowance ?? null;
+  state.room.spendAllowance = {
+    allowanceCents: clearing ? null : allowanceCents,
+    periodDays: clearing ? null : periodDays,
+    revision: (previous?.revision ?? 0) + 1,
+    setById: incoming.actorId,
+    setAt: incoming.at
+  };
+}
 
 export const PERMISSIONS = Object.freeze(["steer", "decide", "manage_members", "manage_claims", "accept_work", "complete_work", "verify", "write_external"]);
 
@@ -122,33 +185,6 @@ export function replay(events) {
   return events.reduce((state, next) => applyEvent(state, next), emptyRoomState());
 }
 
-export function applyRequestRun(state, incoming) {
-  const { requestMessageId, ...data } = incoming.data;
-  if (!validId(requestMessageId)) throw new Error("Invalid request selection");
-  const action = { "request_run.claimed": "claim", "request_run.stop_requested": "request_stop", "request_run.finished": "finish" }[incoming.type];
-  const limits = state.replyRequests?.[requestMessageId]?.automation;
-  if (action === "claim" && limits && (data.maxRuntimeMs > limits.maxRuntimeMs || data.maxOutputBytes > limits.maxOutputBytes))
-    throw new Error("Run exceeds accepted automation limits");
-  const run = transitionRequestRun({ run: state.requestRuns?.[requestMessageId] ?? null,
-    request: state.replyRequests?.[requestMessageId], actor: state.members[incoming.actorId],
-    ownerId: state.room.ownerId, instructionsRevision: state.room.charter?.revision ?? 0 }, action, data, incoming.at);
-  state.requestRuns ??= {};
-  state.requestRuns[requestMessageId] = run;
-}
-
-export function applyAutomation(state, incoming) {
-  const { automationId, ...data } = incoming.data;
-  if (!validId(automationId)) throw new Error("Invalid automation selection");
-  const action = { "automation.created": "create", "automation.updated": "update", "automation.enabled": "enable",
-    "automation.accepted": "accept", "automation.paused": "pause" }[incoming.type];
-  const result = transitionAutomation({ automation: state.automations?.[automationId] ?? null,
-    actorId: incoming.actorId, roomOwnerId: state.room.ownerId, members: state.members,
-    automationCount: Object.keys(state.automations ?? {}).length, requests: state.replyRequests, runs: state.requestRuns },
-  action, action === "create" ? { ...data, automationId } : data, incoming.at);
-  state.automations ??= {};
-  state.automations[automationId] = result.automation;
-}
-
 export function applyEvent(current, incoming) {
   const state = structuredClone(current);
   validateEnvelope(incoming);
@@ -167,29 +203,29 @@ export function applyEvent(current, incoming) {
   if (incoming.type !== EVENT_TYPES.ROOM_CREATED) {
     if (!state.room) throw new Error("Room must be created before other events");
     if (incoming.roomId !== state.room.id) throw new Error("Event belongs to a different Room");
+    if (isRoomArchived(state)) throw new Error("Room is archived");
   }
 
   const handlers = {
     [EVENT_TYPES.ROOM_CREATED]: createRoom,
     [EVENT_TYPES.ROOM_CHARTER_UPDATED]: updateCharter,
+    [EVENT_TYPES.ROOM_POLICY_SET]: setRoomPolicy,
+    [EVENT_TYPES.ROOM_SPEND_ALLOWANCE_SET]: setSpendAllowance,
+    [EVENT_TYPES.ROOM_ARCHIVED]: archiveRoom,
+    [EVENT_TYPES.OWNERSHIP_TRANSFERRED]: transferOwnership,
     [EVENT_TYPES.MEMBER_ADDED]: addMember,
     [EVENT_TYPES.MEMBER_JOINED_VIA_INVITATION]: joinMemberViaInvitation,
     [EVENT_TYPES.MEMBER_ACCESS_CHANGED]: changeMemberAccess,
     [EVENT_TYPES.MEMBER_STATUS_UPDATED]: updateMemberStatus,
     [EVENT_TYPES.NOTIFICATION_PREFERENCES_SET]: setNotificationPreferences,
+    [EVENT_TYPES.MEMBER_MUTE_SET]: setMemberMute,
     [EVENT_TYPES.MESSAGE_POSTED]: postMessage,
     [EVENT_TYPES.MESSAGE_EDITED]: editMessage,
     [EVENT_TYPES.MESSAGE_DELETED]: deleteMessage,
     [EVENT_TYPES.REPLY_REQUEST_CANCELLED]: cancelReplyRequest,
-    [EVENT_TYPES.REQUEST_RUN_CLAIMED]: applyRequestRun,
-    [EVENT_TYPES.REQUEST_RUN_STOP_REQUESTED]: applyRequestRun,
-    [EVENT_TYPES.REQUEST_RUN_FINISHED]: applyRequestRun,
-    [EVENT_TYPES.AUTOMATION_CREATED]: applyAutomation,
-    [EVENT_TYPES.AUTOMATION_UPDATED]: applyAutomation,
-    [EVENT_TYPES.AUTOMATION_ENABLED]: applyAutomation,
-    [EVENT_TYPES.AUTOMATION_ACCEPTED]: applyAutomation,
-    [EVENT_TYPES.AUTOMATION_PAUSED]: applyAutomation,
     [EVENT_TYPES.MESSAGE_REACTION_SET]: setMessageReaction,
+    [EVENT_TYPES.MESSAGE_PINNED]: pinMessage,
+    [EVENT_TYPES.MESSAGE_UNPINNED]: unpinMessage,
     [EVENT_TYPES.WORK_PROPOSED]: proposeWork,
     [EVENT_TYPES.WORK_HELP_UPDATED]: (state, incoming) => {
       const help = helpFromEvent(state, incoming);
@@ -209,6 +245,7 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.CLAIM_RELEASED]: releaseClaim,
     [EVENT_TYPES.VERIFICATION_RECORDED]: recordVerification,
     [EVENT_TYPES.OWNER_DECISION_RECORDED]: recordOwnerDecision,
+    [EVENT_TYPES.DECISION_RECORDED]: recordDecision,
     [EVENT_TYPES.SESSION_STARTED]: applySession,
     [EVENT_TYPES.SESSION_STATUS_CHANGED]: applySession,
     [EVENT_TYPES.SESSION_STOP_REQUESTED]: applySession,
@@ -242,21 +279,21 @@ function validateEnvelope(incoming) {
   for (const [key, value] of Object.entries(incoming.data)) {
     if (value === null) continue;
     if (key.endsWith("Id") && !validId(value)) throw new Error(`Invalid ${key}`);
-    const fileOnlyBody = key === 'body' && value === '' && incoming.type === EVENT_TYPES.MESSAGE_POSTED
-      && Array.isArray(incoming.data.attachments) && incoming.data.attachments.length > 0;
-    if (typeof value === "string" && (value.length > 4096 || !value.trim() && !fileOnlyBody)) throw new Error(`Invalid ${key}`);
+    if (typeof value === "string" && (value.length > 4096 || !value.trim())) throw new Error(`Invalid ${key}`);
     if (["expectedRevision", "expectedMemberRevision"].includes(key) && (!Number.isSafeInteger(value) || value < 0)) throw new Error(`Invalid ${key}`);
-    if (["independentVerificationRequired", "ownerDecisionRequired", "active"].includes(key) && typeof value !== "boolean") throw new Error(`Invalid ${key}`);
+    if (["independentVerificationRequired", "ownerDecisionRequired", "active", ...ROOM_POLICY_FIELDS].includes(key) && typeof value !== "boolean") throw new Error(`Invalid ${key}`);
     if (["permissions", "paths", "checksClaimed", "capabilities"].includes(key) && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !v.trim() || v.length > 512))) throw new Error(`Invalid ${key}`);
+    // Legacy events (v11-v18) used data.outputs as a plain string; keep that shape valid for strict replay.
+    if (key === "outputs" && typeof value !== "string" && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !v.trim() || v.length > 512))) throw new Error(`Invalid ${key}`);
     if (key === "preferences" && (Array.isArray(value) || typeof value !== "object" || Object.entries(value).some(([k, v]) => typeof k !== "string" || typeof v !== "string" || k.length > 64 || v.length > 64))) throw new Error(`Invalid ${key}`);
-    if (key === 'attachments' && incoming.type !== EVENT_TYPES.MESSAGE_POSTED) throw new Error('Attachments belong to messages');
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "attachments", "definition"].includes(key)) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
 function createRoom(state, incoming) {
   if (state.room) throw new Error("Room already exists");
   requireFields(incoming.data, ["roomId", "title", "purpose", "ownerId"]);
+  if (incoming.data.kind !== undefined && !ROOM_KINDS.includes(incoming.data.kind)) throw new Error("Room kind must be personal or organization");
   if (incoming.roomId !== incoming.data.roomId) throw new Error("Room event id mismatch");
   if (incoming.actorId !== incoming.data.ownerId) throw new Error("Room must be created by its owner");
   state.room = { id: incoming.data.roomId, ...incoming.data, createdAt: incoming.at };
@@ -264,8 +301,74 @@ function createRoom(state, incoming) {
 
 function updateCharter(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
-  if (actor.kind !== "human" || actor.id !== state.room.ownerId) throw new Error("Only the Room owner may change room instructions");
+  // Room-scoped owner power: an agent owner may set instructions, so the
+  // gate is ownership, not humanity. Account-bound powers (spend
+  // allowance, access review, connection sponsorship) stay human-only.
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may change room instructions");
   state.room.charter = charterFromEvent(incoming, state.room.charter ?? null);
+}
+
+function setRoomPolicy(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may set room policy");
+  for (const field of ROOM_POLICY_FIELDS) {
+    if (typeof incoming.data[field] !== "boolean") throw new Error(`Room policy requires ${field} as true or false`);
+  }
+  const previous = state.room.policy ?? null;
+  state.room.policy = {
+    requireIndependentReview: incoming.data.requireIndependentReview,
+    requireOwnerDecision: incoming.data.requireOwnerDecision,
+    revision: (previous?.revision ?? 0) + 1,
+    setById: incoming.actorId,
+    setAt: incoming.at
+  };
+}
+
+function archiveRoom(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may archive the room");
+  if (incoming.data.reason != null && (typeof incoming.data.reason !== "string" || incoming.data.reason.length > 280)) throw new Error("Archive reason must be 280 characters or fewer");
+  state.room.archivedAt = incoming.at;
+  state.room.archivedById = incoming.actorId;
+  if (incoming.data.reason) state.room.archiveReason = incoming.data.reason;
+}
+
+// Ownership is transferable: the current owner appoints an existing active
+// member (human or agent) as the new owner. Only the owner can transfer, so
+// there is no privilege escalation; the transfer is reversible by another
+// transfer. The event log is the audit trail; the projection keeps only
+// scalar current/previous-owner fields, never a history array.
+// Ownership implies full authority, so the new owner receives
+// the whole permission set (a bootstrap owner's set), whatever its kind —
+// otherwise an agent owner would be a figurehead unable to administer
+// membership. An agent that ceases to be the owner is stripped of
+// manage_members/decide on the way out, because non-owner agents can never
+// hold those (validatePermissions). A human ex-owner keeps its snapshot;
+// the new owner can demote it explicitly.
+function transferOwnership(state, incoming) {
+  requireFields(incoming.data, ["toMemberId"]);
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may transfer ownership");
+  // Unknown and inactive targets share one error so member enumeration is
+  // impossible; the module maps it to a bare 404.
+  const target = Object.hasOwn(state.members, incoming.data.toMemberId) && state.members[incoming.data.toMemberId];
+  if (!target || target.active === false) throw new Error("Unknown member");
+  if (target.id === state.room.ownerId) throw new Error("Already the room owner");
+  if (incoming.data.reason != null && (typeof incoming.data.reason !== "string" || incoming.data.reason.length > 280)) {
+    throw new Error("Transfer reason must be 280 characters or fewer");
+  }
+  const previous = state.room.ownerId;
+  const previousOwner = state.members[previous];
+  target.permissions = [...PERMISSIONS];
+  target.revision += 1;
+  if (previousOwner && previousOwner.kind === "agent") {
+    previousOwner.permissions = previousOwner.permissions.filter(p => !["manage_members", "decide"].includes(p));
+    previousOwner.revision += 1;
+  }
+  state.room.ownerId = target.id;
+  state.room.previousOwnerId = previous;
+  state.room.ownershipTransferredAt = incoming.at;
+  state.room.ownershipRevision = (state.room.ownershipRevision ?? 0) + 1;
 }
 
 function addMember(state, incoming) {
@@ -276,7 +379,7 @@ function addMember(state, incoming) {
   if (isBootstrapOwner && incoming.actorId !== memberId) throw new Error("Only the owner may bootstrap membership");
   if (!isBootstrapOwner) requirePermission(state, incoming.actorId, "manage_members");
   if (!["human", "agent"].includes(incoming.data.kind)) throw new Error("Member kind must be human or agent");
-  validatePermissions(incoming.data.permissions, incoming.data.kind);
+  validatePermissions(incoming.data.permissions, incoming.data.kind, isBootstrapOwner);
   if (!isBootstrapOwner && incoming.data.authorityPolicyVersion === MEMBERSHIP_AUTHORITY_POLICY_VERSION) {
     requireScopedMemberAdministration(state, incoming.actorId, memberId, null, incoming.data.permissions);
   } else if (incoming.data.authorityPolicyVersion != null && incoming.data.authorityPolicyVersion !== 1) {
@@ -285,7 +388,7 @@ function addMember(state, incoming) {
   if (incoming.data.accountableHumanId && (!isBootstrapOwner || incoming.data.accountableHumanId !== memberId)) {
     if (requireMember(state, incoming.data.accountableHumanId).kind !== "human") throw new Error("Accountable sponsor must be a human member");
   }
-  if (isBootstrapOwner && (incoming.data.kind !== "human" || !incoming.data.permissions.includes("manage_members"))) throw new Error("Owner must retain membership administration");
+  if (isBootstrapOwner && !incoming.data.permissions.includes("manage_members")) throw new Error("Owner must retain membership administration");
   // Round-2 #101: a member record may be bound to a global agent identity.
   if (incoming.data.identityId != null
     && (typeof incoming.data.identityId !== "string" || incoming.data.identityId.length > 64)) throw new Error("identityId must be a short string");
@@ -333,13 +436,16 @@ function joinMemberViaInvitation(state, incoming) {
   };
 }
 
-function validatePermissions(permissions, kind) {
+function validatePermissions(permissions, kind, isOwner = false) {
   if (!Array.isArray(permissions) || permissions.some(p => !PERMISSIONS.includes(p)) || new Set(permissions).size !== permissions.length) throw new Error("Invalid permissions");
-  if (kind === "agent" && permissions.some(p => ["manage_members", "decide"].includes(p))) throw new Error("Human administration cannot be delegated to an agent");
+  // Human administration cannot be delegated to an agent — except to the
+  // room owner itself: ownership implies full authority, so a bootstrap or
+  // appointed agent owner holds the whole set like a human owner does.
+  if (!isOwner && kind === "agent" && permissions.some(p => ["manage_members", "decide"].includes(p))) throw new Error("Human administration cannot be delegated to an agent");
 }
 
 function changeMemberAccess(state, incoming) {
-  requirePermission(state, incoming.actorId, "manage_members");
+  if (!isLeaveRequest(state, incoming)) requirePermission(state, incoming.actorId, "manage_members");
   requireFields(incoming.data, ["memberId", "expectedMemberRevision", "permissions", "active"]);
   const member = Object.hasOwn(state.members, incoming.data.memberId) && state.members[incoming.data.memberId];
   if (!member) throw new Error("Unknown member");
@@ -354,20 +460,6 @@ function changeMemberAccess(state, incoming) {
   member.active = incoming.data.active;
   member.permissions = [...incoming.data.permissions];
   member.revision += 1;
-  invalidateAutomationConsent(state, member.id, incoming.at);
-}
-
-export function invalidateAutomationConsent(state, memberId, at) {
-  // Access restoration must never silently revive previously accepted automation.
-  for (const automation of Object.values(state.automations ?? {})) {
-    if ((automation.ownerId === memberId || automation.definition.recipientId === memberId)
-      && (automation.ownerEnabled || automation.recipientAccepted)) {
-      automation.ownerEnabled = false;
-      automation.recipientAccepted = false;
-      automation.revision += 1;
-      automation.updatedAt = at;
-    }
-  }
 }
 
 // A member's status message ("working on X"). Members set their own;
@@ -375,16 +467,19 @@ export function invalidateAutomationConsent(state, memberId, at) {
 // target. Bounded length, no HTML — rendered as text.
 function updateMemberStatus(state, incoming) {
   requireFields(incoming.data, ["message"]);
+  requireMember(state, incoming.actorId);
   const targetId = incoming.data.memberId ?? incoming.actorId;
   const member = Object.hasOwn(state.members, targetId) && state.members[targetId];
   if (!member) throw new Error("Unknown member");
+  if (member.active === false) throw new Error("Member access revoked");
   if (incoming.actorId !== member.id && incoming.actorId !== state.room.ownerId) {
     throw new Error("Members may only set their own status message");
   }
   const message = String(incoming.data.message ?? "");
   if (message.length > 140) throw new Error("Status message must be 140 characters or fewer");
+  // A status line is presence, not authority: it must not move member.revision,
+  // which pins open help invitations/offers and concurrent member.access_changed.
   member.statusMessage = message;
-  member.revision += 1;
 }
 
 const NOTIFICATION_CHANNELS = ["mentions", "replies", "work_updates", "announcements"];
@@ -399,12 +494,40 @@ function setNotificationPreferences(state, incoming) {
     if (!NOTIFICATION_CHANNELS.includes(channel)) throw new Error(`Unknown notification channel: ${channel}`);
     if (!NOTIFICATION_LEVELS.includes(level)) throw new Error(`Unknown notification level: ${level}`);
   }
+  // Preferences are private delivery settings, not authority: only member.added
+  // and member.access_changed move member.revision.
   member.notificationPreferences = { ...(member.notificationPreferences ?? defaultNotificationPreferences()), ...prefs };
-  member.revision += 1;
 }
 
-function defaultNotificationPreferences() {
+export function defaultNotificationPreferences() {
   return { mentions: "all", replies: "all", work_updates: "all", announcements: "all" };
+}
+
+// Mute (issue #6 E4): a member hides another member's or agent's messages for
+// themselves. It is a personal preference recorded like notification
+// preferences (member.mute_set on the actor's own member record), never
+// authority: the muted member keeps every permission, nothing is addressed
+// at them, and the choice is reversible with muted:false. Clients collapse a
+// muted author's messages and notification feeds skip them (server/moderation.mjs).
+function setMemberMute(state, incoming) {
+  requireFields(incoming.data, ["memberId", "muted"]);
+  const actor = requireMember(state, incoming.actorId);
+  const target = knownMember(state, incoming.data.memberId);
+  if (typeof incoming.data.muted !== "boolean") throw new Error("Mute requires muted as true or false");
+  if (target.id === actor.id) throw new Error("You cannot mute yourself");
+  if (target.id === state.room.ownerId) throw new Error("The Room owner cannot be muted; the owner is the appeal path for moderation");
+  const muted = new Set(actor.mutedMemberIds ?? []);
+  if (incoming.data.muted) muted.add(target.id); else muted.delete(target.id);
+  // A preference never moves member.revision (which pins open invitations and access changes).
+  if (muted.size) actor.mutedMemberIds = [...muted].sort(); else delete actor.mutedMemberIds;
+}
+
+export function mutedMemberIds(state, viewerId) {
+  return state?.members?.[viewerId]?.mutedMemberIds ?? [];
+}
+
+export function isMutedBy(state, viewerId, authorId) {
+  return viewerId != null && authorId != null && mutedMemberIds(state, viewerId).includes(authorId);
 }
 
 function requireScopedMemberAdministration(state, actorId, targetId, currentTarget, nextPermissions) {
@@ -419,24 +542,10 @@ function requireScopedMemberAdministration(state, actorId, targetId, currentTarg
 
 function postMessage(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
-  let dispatch;
-  if (isAutomationDispatch(incoming.data)) {
-    const { messageId, automationId, automationRevision, automationSlot } = incoming.data;
-    dispatch = prepareAutomationDispatch(state, incoming.actorId, { messageId, automationId, automationRevision, automationSlot }, incoming.at);
-    const expected = { ...dispatch.message, requestPolicyVersion: 1 };
-    if (stableStringify(incoming.data) !== stableStringify(expected)) throw new Error("Automation message differs from accepted scope");
-  }
-  if (!incoming.data.attachments?.length) requireFields(incoming.data, ["body"]);
+  requireFields(incoming.data, ["body"]);
   const requestMode = prepareReplyPost(state, incoming);
   if (incoming.data.toMemberId) (requestMode === "respond" ? knownMember : requireMember)(state, incoming.data.toMemberId);
   if (typeof incoming.data.body !== "string") throw new Error("Message body must be text");
-  const attachments = incoming.data.attachments;
-  if (attachments !== undefined && (!Array.isArray(attachments) || attachments.length > 4
-    || new Set(attachments.map(file => file?.id)).size !== attachments.length
-    || attachments.some(file => !file || Object.keys(file).sort().join(',') !== 'byteLength,filename,id,mediaType,sha256'
-      || !validId(file.id) || typeof file.filename !== 'string' || !file.filename.trim()
-      || typeof file.mediaType !== 'string' || !Number.isSafeInteger(file.byteLength) || file.byteLength < 0
-      || typeof file.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(file.sha256)))) throw new Error('Invalid message attachments');
   if (incoming.data.workItemId) requireWorkItem(state, incoming.data.workItemId);
   const proposal = proposalContext(incoming.data, state.workItems[incoming.data.workItemId]);
   if (incoming.data.replyToId && !state.messages.some(m => m.id === incoming.data.replyToId)) throw new Error("Reply must reference a message in this Room");
@@ -449,13 +558,9 @@ function postMessage(state, incoming) {
     replyToId: incoming.data.replyToId || null,
     toMemberId: incoming.data.toMemberId || null,
     createdAt: incoming.at,
-    ...(attachments?.length ? { attachments: structuredClone(attachments) } : {}),
     ...(proposal ? { proposal } : {})
   });
   recordReplyPost(state, incoming, requestMode);
-  if (dispatch) {
-    state.automations[incoming.data.automationId] = dispatch.automation;
-  }
 }
 
 function findEditableMessage(state, incoming) {
@@ -480,8 +585,11 @@ function editMessage(state, incoming) {
 function deleteMessage(state, incoming) {
   const { message } = findEditableMessage(state, incoming);
   message.body = null;
+  // Deletion hides every earlier version too; the tombstone keeps only who/when.
+  message.editHistory = [];
   message.deletedAt = incoming.at;
   message.deletedBy = incoming.actorId;
+  dropPinsForMessage(state, message.id); // issue #6 B2: the tombstone drops the pin too
   message.revision = (message.revision ?? 0) + 1;
 }
 
@@ -505,14 +613,24 @@ function proposeWork(state, incoming) {
   if (state.workItems[incoming.data.workItemId]) throw new Error("Work Item already exists");
   requireMember(state, incoming.data.accountableMemberId);
   if (incoming.data.mode && !["read", "write"].includes(incoming.data.mode)) throw new Error("Invalid work mode");
-  if (incoming.data.independentVerificationRequired && !incoming.data.verifierMemberId) throw new Error("Independent work requires a verifier");
-  if (incoming.data.ownerDecisionRequired && !incoming.data.humanDecisionMakerId) throw new Error("Owner decision requires a decision-maker");
+  // Room policy overrides the proposer's choice: altered client fields cannot
+  // disable a mandatory gate. The recorded event keeps what the client sent;
+  // the projection (and every replay) applies the policy in force at this point
+  // of the log, so earlier items are untouched by a later flip.
+  const policy = roomPolicy(state);
+  const independentVerificationRequired = policy.requireIndependentReview || incoming.data.independentVerificationRequired === true;
+  const ownerDecisionRequired = policy.requireOwnerDecision || incoming.data.ownerDecisionRequired === true;
+  const humanDecisionMakerId = incoming.data.humanDecisionMakerId || (policy.requireOwnerDecision ? state.room.ownerId : null);
+  if (independentVerificationRequired && !incoming.data.verifierMemberId) {
+    throw new Error(policy.requireIndependentReview ? "Room policy requires independent review: name a verifier" : "Independent work requires a verifier");
+  }
+  if (ownerDecisionRequired && !humanDecisionMakerId) throw new Error("Owner decision requires a decision-maker");
   if (incoming.data.verifierMemberId) requireMember(state, incoming.data.verifierMemberId);
-  if (incoming.data.humanDecisionMakerId) {
-    const decisionMaker = requireMember(state, incoming.data.humanDecisionMakerId);
+  if (humanDecisionMakerId) {
+    const decisionMaker = requireMember(state, humanDecisionMakerId);
     if (decisionMaker.kind !== "human") throw new Error("Decision-maker must be a human member");
   }
-  if (incoming.data.independentVerificationRequired && incoming.data.accountableMemberId === incoming.data.verifierMemberId) {
+  if (independentVerificationRequired && incoming.data.accountableMemberId === incoming.data.verifierMemberId) {
     throw new Error("Independent verification requires a different accountable member and verifier");
   }
   if (incoming.data.sourceMessageId && !state.messages.some((message) => message.id === incoming.data.sourceMessageId)) {
@@ -525,9 +643,9 @@ function proposeWork(state, incoming) {
     definitionOfDone: incoming.data.definitionOfDone,
     accountableMemberId: incoming.data.accountableMemberId,
     verifierMemberId: incoming.data.verifierMemberId || null,
-    independentVerificationRequired: incoming.data.independentVerificationRequired === true,
-    ownerDecisionRequired: incoming.data.ownerDecisionRequired === true,
-    humanDecisionMakerId: incoming.data.humanDecisionMakerId || null,
+    independentVerificationRequired,
+    ownerDecisionRequired,
+    humanDecisionMakerId,
     mode: incoming.data.mode || "read",
     sourceMessageId: incoming.data.sourceMessageId || null,
     // The proposer is the envelope actor alone (disposition 5557850637): replay recovers it
@@ -605,7 +723,9 @@ function advertiseCapabilities(state, incoming) {
     if (!clean.includes(trimmed)) clean.push(trimmed);
   }
   member.capabilities = clean;
-  commitMutation(member, incoming);
+  // Advertising capabilities is self-description, not an authority change, so it
+  // leaves member.revision alone (open help invitations/offers are pinned to it).
+  member.updatedAt = incoming.at;
 }
 
 function recordHandoff(state, incoming) {
@@ -628,6 +748,9 @@ function recordHandoff(state, incoming) {
   }
   item.handoff = {
     open: true, eventId: incoming.id, at: incoming.at, actorId: incoming.actorId,
+    // An open handoff is triage work addressed to the Room owner, so needs-me
+    // views and attention inboxes can surface it to a named member.
+    triageMemberId: state.room.ownerId,
     doneSummary: incoming.data.doneSummary,
     evidenceUrl: incoming.data.evidenceUrl ?? null, evidenceVersion: incoming.data.evidenceVersion ?? null,
     nextAction: incoming.data.nextAction, limitReason: incoming.data.limitReason,
@@ -826,6 +949,30 @@ function applySession(state, incoming) {
   commitMutation(item, incoming);
 }
 
+
+// Decision register (backlog F2): promoting a conversation point into policy is
+// an explicit, source-backed act. The reducer only validates - the event itself
+// is the record, so replay and the work-item projection are untouched. A
+// suggestion stays a suggestion until a human with the decide permission
+// records it against an exact message.
+function recordDecision(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  requirePermission(state, incoming.actorId, "decide");
+  if (actor.kind !== "human") throw new Error("Only a human member may record a decision");
+  requireFields(incoming.data, ["sourceMessageId", "statement"]);
+  if (!state.messages.some(m => m.id === incoming.data.sourceMessageId)) {
+    throw new Error("Decision must reference a message in this Room");
+  }
+  const statement = String(incoming.data.statement);
+  if (statement !== statement.trim() || statement.length > 500) {
+    throw new Error("Decision statement must be trimmed text up to 500 characters");
+  }
+  if (incoming.data.note !== undefined && incoming.data.note !== null
+    && (typeof incoming.data.note !== "string" || incoming.data.note !== incoming.data.note.trim() || incoming.data.note.length > 500)) {
+    throw new Error("Decision note must be trimmed text up to 500 characters");
+  }
+}
+
 function recordOwnerDecision(state, incoming) {
   const item = mutableWorkItem(state, incoming, [WORK_STATES.COMPLETED]);
   const actor = requireMember(state, incoming.actorId);
@@ -956,4 +1103,65 @@ function stableStringify(value) {
     return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+// Pinned messages (issue #6 B2). A pin is a room-visible bookmark on one
+// existing message: any active member can pin or unpin, the room keeps at most
+// PIN_LIMIT pins, and the pinned list is ordered by when each pin was placed.
+// Pins reference message ids only; a deleted message (tombstone) drops out of
+// the pinned list under the same rules that hide its body everywhere else
+// (deleteMessage calls dropPinsForMessage). Event-sourced: message.pinned /
+// message.unpinned append to the room log and the projection carries
+// state.pins = [{ messageId, pinnedById, pinnedAt }]. Both reducers are
+// idempotent so an exact retry, or a replay of a duplicate, changes nothing.
+// The HTTP surface lives in server/pins.mjs.
+export const PIN_LIMIT = 50;
+
+// Command field allowlist for server/store.mjs validateCommand.
+export const PIN_COMMAND_SHAPES = Object.freeze({
+  [EVENT_TYPES.MESSAGE_PINNED]: "messageId",
+  [EVENT_TYPES.MESSAGE_UNPINNED]: "messageId"
+});
+
+function pinTarget(incoming) {
+  const messageId = incoming.data?.messageId;
+  if (typeof messageId !== "string" || !messageId.trim()) throw new Error("Missing required field: messageId");
+  return messageId;
+}
+
+function pinMessage(state, incoming) {
+  requireMember(state, incoming.actorId);
+  const messageId = pinTarget(incoming);
+  const message = state.messages.find(m => m.id === messageId);
+  if (!message) throw new Error("Pin must reference a message in this Room");
+  if (message.deletedAt || message.body == null) throw new Error("A deleted message cannot be pinned");
+  state.pins ??= [];
+  if (state.pins.some(pin => pin.messageId === messageId)) return; // idempotent
+  if (state.pins.length >= PIN_LIMIT) throw new Error(`Pin capacity reached: ${PIN_LIMIT} pinned messages per room; unpin one first`);
+  state.pins.push({ messageId, pinnedById: incoming.actorId, pinnedAt: incoming.at });
+}
+
+function unpinMessage(state, incoming) {
+  requireMember(state, incoming.actorId);
+  const messageId = pinTarget(incoming);
+  if (!state.pins?.length) return; // idempotent
+  state.pins = state.pins.filter(pin => pin.messageId !== messageId);
+}
+
+function dropPinsForMessage(state, messageId) {
+  if (state.pins?.some(pin => pin.messageId === messageId)) state.pins = state.pins.filter(pin => pin.messageId !== messageId);
+}
+
+export function isPinned(state, messageId) {
+  return Boolean(state?.pins?.some(pin => pin.messageId === messageId));
+}
+
+// Ordered pinned list joined with the live message. Tombstoned or missing
+// messages are filtered defensively even though the reducer already drops them.
+export function pinnedMessages(state) {
+  const byId = new Map((state?.messages ?? []).map(message => [message.id, message]));
+  return (state?.pins ?? []).flatMap(pin => {
+    const message = byId.get(pin.messageId);
+    return message && !message.deletedAt && message.body != null ? [{ ...pin, message }] : [];
+  });
 }

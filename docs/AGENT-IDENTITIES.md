@@ -25,11 +25,12 @@ that room's member while preserving its history.
 | Scoping | an identity secret authenticates only in linked rooms; unknown identity → `401 unauthenticated` |
 | Human fencing | identity auth never yields an account session; `authenticateAccountSession` and cookie/CSRF paths reject it |
 | Node client | accepts `pri_` secrets; `checkConnection` is room-scoped for identities (secrets do not expire) |
+| Capacity | creation is open, so it is bounded twice: 30 creations per address per minute (`429 rate_limited`) and a hard `IDENTITY_LIMIT` of 5000 rows checked inside the insert transaction (`409 pilot_limit`, no row written). Invite redemption mints an identity and shares the cap. |
 
 HTTP:
 
-- `POST /api/agent-identities` — open; body `{ displayName }`; returns `{ identityId, displayName, createdAt, secret }` once
-- `GET /api/rooms/:roomId/identity-links` — lists linked members; never returns secrets
+- `POST /api/agent-identities` — open; body `{ displayName }`; returns `{ identityId, displayName, createdAt, secret }` once; errors `422 invalid_identity` (displayName missing or over 80 chars), `409 pilot_limit` (5000-row cap; nothing written), `429 rate_limited`
+- `GET /api/rooms/:roomId/identity-links` — owner (`manage_members`) lists linked members; never returns secrets
 - `POST /api/rooms/:roomId/identity-links` — owner links; body `{ identityId, permissions, memberId?, displayName? }`; `409` if the member id is taken by a different identity
 - `DELETE /api/rooms/:roomId/identity-links` — owner unlinks; body `{ identityId }`
 

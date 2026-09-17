@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Simulated human flows in disposable loopback rooms. No external work or evidence is fetched.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -49,7 +48,7 @@ async function setup(t, { action = "complete", mobile = false, live = true } = {
   await page.goto(origin);
   const login = async (role = "owner") => {
     await page.locator("#auth-panel").waitFor({ state: "visible" });
-    await ensureSignIn(page); await page.locator("#access-key").fill(f.keys[role]); await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.locator("#access-key").fill(f.keys[role]); await page.getByRole("button", { name: "Enter room", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
   };
   await login(action === "verify" ? "human-reviewer" : "owner");
@@ -147,7 +146,7 @@ test("closed unknown save warns on leave and sign-out without deleting a decline
   assert.equal(await page.evaluate(() => { const event = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(event); return event.defaultPrevented; }), true);
   let warning;
   page.once("dialog", async dialog => { warning = dialog.message(); await dialog.dismiss(); });
-  await page.locator("#signout-button").click(); assert.match(warning, /pending retry.*may already be saved/);
+  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click(); assert.match(warning, /pending retry.*may already be saved/);
   assert.equal(await page.locator("#main").isVisible(), true); await page.locator("#resume-action").click(); await f.unknown();
 });
 

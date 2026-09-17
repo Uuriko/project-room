@@ -1,11 +1,10 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Quiet Focus A3/A4 evidence: keyboard-operable disclosures, usable narrow
 // composer, composer-local send failure with Send-as-retry, and explicit
 // disconnected/reconnecting states. Real browser + local HTTP service;
 // all identities, messages, and keys are disposable fixtures.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
@@ -35,8 +34,8 @@ test("A3/A4: keyboard disclosures, narrow composer, composer-local failure + ret
   page.on("pageerror", error => errors.push(error.message));
   await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await ensureSignIn(page); await page.locator("#access-key").fill(owner);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.locator("#access-key").fill(owner);
+  await page.getByRole("button", { name: "Enter room", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
 
   // A3 keyboard: focus a disclosure summary, toggle with Enter; opening must not
@@ -60,8 +59,12 @@ test("A3/A4: keyboard disclosures, narrow composer, composer-local failure + ret
   await input.pressSequentially("line two");
   assert.equal(await input.inputValue(), "line one\nline two", "Shift+Enter inserts a newline");
   await input.press("Control+Enter");
-  await page.getByText("line one", { exact: false }).waitFor();
+  // The stream can deliver the posted message before the command acknowledgement
+  // resolves, so wait for the acknowledgement's effect (an empty composer) instead
+  // of asserting it the instant the text appears.
+  await page.waitForFunction(() => document.querySelector("#message-input").value === "");
   assert.equal(await input.inputValue(), "", "Ctrl+Enter sends and clears after ack");
+  await page.getByText("line one", { exact: false }).waitFor();
 
   // A4: simulated failure leaves the draft intact with the error at the composer; Send retries.
   await page.route("**/api/rooms/commons/commands", route => route.abort("failed"));
@@ -77,8 +80,10 @@ test("A3/A4: keyboard disclosures, narrow composer, composer-local failure + ret
   // Successful retry clears the draft only after acknowledgement.
   await page.unroute("**/api/rooms/commons/commands");
   await page.locator('#message-form button[type="submit"]').click();
-  await page.getByText("send this through an outage", { exact: true }).waitFor();
+  await page.waitForFunction(() => document.querySelector("#message-input").value === "");
   assert.equal(await input.inputValue(), "", "draft clears after ack");
+  await page.getByText("send this through an outage", { exact: true }).waitFor();
+  await composerStatus.waitFor({ state: "hidden" });
   assert.equal(await composerStatus.isVisible(), false, "composer error clears after ack");
 
   assert.deepEqual(errors, []);
@@ -103,8 +108,8 @@ test("A4: a stream that cannot connect is labeled reconnecting, never silently o
   await page.route("**/api/rooms/commons/stream**", route => route.abort("failed"));
   await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await ensureSignIn(page); await page.locator("#access-key").fill(owner);
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.locator("#access-key").fill(owner);
+  await page.getByRole("button", { name: "Enter room", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
   await page.waitForFunction(() => /Reconnecting|interrupted|unavailable/.test(document.querySelector("#connection-status").textContent), null, { timeout: 15000 });
   const statusText = await page.locator("#connection-status").textContent();

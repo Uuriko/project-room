@@ -23,7 +23,7 @@ async function serve(t) {
 }
 
 test("provider heartbeat dashboard (round-2 #118)", async t => {
-  const { origin, ownerKey, store, get } = await serve(t);
+  const { ownerKey, store, get } = await serve(t);
   const cmd = (token, type, data) => store.command(token, "commons", { id: randomUUID(), type, data });
 
   // Two agent providers; one idle, one with a live session heartbeat.

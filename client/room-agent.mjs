@@ -188,6 +188,67 @@ export async function redeemAgentInvite(origin, code, displayName, { fetchImpl =
   }
   return value;
 }
+// Self-serve access request (unauthenticated): an identity without room
+// membership asks to join. The roomId, identityId, displayName and
+// requestedPermissions are required; note is optional. Returns the pending
+// request; the agent polls GET /api/access-requests/:id?identityId=... for
+// the owner's decision.
+export async function requestAccess(origin, { roomId, identityId, displayName, requestedPermissions, note, requestId } = {}, { fetchImpl = globalThis.fetch, signal } = {}) {
+  let service;
+  try { service = assertServiceOrigin(origin); }
+  catch { throw new RoomClientError(0, "invalid_config", "Use a fixed HTTPS origin or an isolated loopback development origin"); }
+  let response;
+  try {
+    response = await fetchImpl(`${service}/api/access-requests`, {
+      method: "POST", redirect: "error", credentials: "omit",
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roomId, identityId, displayName, requestedPermissions,
+        ...(note === undefined ? {} : { note }), ...(requestId === undefined ? {} : { requestId }) }),
+    });
+  } catch (error) {
+    if (error instanceof RoomClientError) throw error;
+    throw new RoomClientError(0, "service_unavailable", "Could not complete the request. Check the service address and retry.");
+  }
+  let value;
+  try { value = await response.json(); } catch { value = null; }
+  if (!response.ok) throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room request failed");
+  if (typeof value?.requestId !== "string" || typeof value?.status !== "string") {
+    throw new RoomClientError(200, "invalid_response", "Room returned an invalid access request");
+  }
+  return value;
+}
+// Self-serve room creation: a self-minted identity creates a fresh room and
+// becomes its owner. The identity secret travels in the Authorization bearer
+// header, never in the JSON body. The client-chosen roomId is the
+// idempotency key: retrying with the same parameters returns duplicate:true.
+export async function createAgentRoom(origin, identitySecret, { roomId, title, purpose, kind, displayName } = {}, { fetchImpl = globalThis.fetch, signal } = {}) {
+  let service;
+  try { service = assertServiceOrigin(origin); }
+  catch { throw new RoomClientError(0, "invalid_config", "Use a fixed HTTPS origin or an isolated loopback development origin"); }
+  if (typeof identitySecret !== "string" || !identitySecret.startsWith("pri_")) {
+    throw new RoomClientError(0, "invalid_config", "A valid identity secret is required");
+  }
+  let response;
+  try {
+    response = await fetchImpl(`${service}/api/agent-rooms`, {
+      method: "POST", redirect: "error", credentials: "omit",
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
+      headers: { Authorization: `Bearer ${identitySecret}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ roomId, title, purpose, kind, displayName }),
+    });
+  } catch (error) {
+    if (error instanceof RoomClientError) throw error;
+    throw new RoomClientError(0, "service_unavailable", "Could not complete the request. Check the service address and retry.");
+  }
+  let value;
+  try { value = await response.json(); } catch { value = null; }
+  if (!response.ok) throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room request failed");
+  if (typeof value?.roomId !== "string" || typeof value?.ownerMemberId !== "string") {
+    throw new RoomClientError(200, "invalid_response", "Room returned an invalid created room");
+  }
+  return value;
+}
 export class RoomAgentClient {
   #origin;
   #roomId;
@@ -201,10 +262,29 @@ export class RoomAgentClient {
     this.#origin = origin; this.#roomId = roomId; this.#token = token; this.#fetch = fetchImpl;
     this.#memberId = memberId;
   }
+  // Every service request shares one fetch posture: redirects are errors (a
+  // redirect could carry the bearer elsewhere), no ambient credentials, and a
+  // 15s deadline that a caller-supplied signal narrows but never removes.
+  #fetchRaw(path, { method = "GET", headers = {}, body, signal } = {}) {
+    return this.#fetch(`${this.#origin}${path}`, {
+      method, redirect: "error", credentials: "omit", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
+      headers: { Authorization: `Bearer ${this.#token}`, ...headers },
+      ...(body === undefined ? {} : { body })
+    });
+  }
+  // Maps a non-2xx service response to a RoomClientError, keeping the
+  // service's own error code and Retry-After when present.
+  #requestError(response, value, fallback = "Room request failed") {
+    const retry = response.headers?.get("retry-after");
+    const parsed = retry == null ? NaN : /^\d+$/.test(retry) ? Number(retry) * 1000 : Date.parse(retry) - Date.now();
+    return new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? fallback, Number.isFinite(parsed) ? Math.max(0, parsed) : null, {
+      status: value?.status, reason: value?.reason, hint: value?.hint, next: value?.next
+    });
+  }
   async #fetchPath(path, body, signal, helpContext = false, offerContext = false) {
-    const response = await this.#fetch(`${this.#origin}${path}`, {
-      method: body === undefined ? "GET" : "POST", redirect: "error", credentials: "omit", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
-      headers: { Authorization: `Bearer ${this.#token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+    const response = await this.#fetchRaw(path, {
+      method: body === undefined ? "GET" : "POST", signal,
+      headers: { ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         ...(helpContext ? { "X-Project-Room-Help-Context": "1" } : {}),
         ...(offerContext ? { "X-Project-Room-Offer-Context": "1" } : {}) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) })
@@ -214,24 +294,14 @@ export class RoomAgentClient {
       if (response.ok && (error instanceof TypeError || ["AbortError", "TimeoutError"].includes(error.name))) throw error;
       if (response.ok) throw new RoomClientError(response.status, "invalid_response", "Invalid Room response");
     }
-    if (!response.ok) {
-      const retry = response.headers?.get("retry-after");
-      const parsed = retry == null ? NaN : /^\d+$/.test(retry) ? Number(retry) * 1000 : Date.parse(retry) - Date.now();
-      throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room request failed", Number.isFinite(parsed) ? Math.max(0, parsed) : null, {
-        status: value?.status, reason: value?.reason, hint: value?.hint, next: value?.next
-      });
-    }
+    if (!response.ok) throw this.#requestError(response, value);
     return value;
   }
   async #deletePath(path, body, signal) {
-    const response = await this.#fetch(`${this.#origin}${path}`, {
-      method: "DELETE", redirect: "error", credentials: "omit", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
-      headers: { Authorization: `Bearer ${this.#token}`, "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    });
+    const response = await this.#fetchRaw(path, { method: "DELETE", signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     let value;
     try { value = await response.json(); } catch { value = null; }
-    if (!response.ok) throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room request failed");
+    if (!response.ok) throw this.#requestError(response, value);
     return value;
   }
   async #request(suffix = "", body, signal, helpContext = false, offerContext = false) {
@@ -240,7 +310,7 @@ export class RoomAgentClient {
     if (this.#memberId) await this.checkConnection({ signal });
     const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal, helpContext, offerContext);
     const snapshotRead = suffix === "" || suffix === "?view=work";
-    if (this.#memberId && (snapshotRead || suffix.startsWith("/automations?") || suffix === "/charter" || suffix.startsWith("/charter?") || suffix.startsWith("/work-context?") || suffix.startsWith("/work-discussion?") || suffix.startsWith("/work-result?") || suffix.startsWith("/return-brief?") || /^\/reply-(requests|context|history)\?/.test(suffix))) {
+    if (this.#memberId && (snapshotRead || suffix === "/charter" || suffix.startsWith("/charter?") || suffix.startsWith("/work-context?") || suffix.startsWith("/work-discussion?") || suffix.startsWith("/work-result?") || suffix.startsWith("/return-brief?") || /^\/reply-(requests|context|history)\?/.test(suffix))) {
       if (value?.roomId !== this.#roomId || value.viewerId !== this.#memberId || value.viewerAccountId !== null
         || value.viewerAuthEpoch !== null || value.viewerSessionBinding !== null || value.viewerSessionRevision !== null) {
         throw new RoomClientError(200, "identity_mismatch", "Room response does not match the configured agent");
@@ -295,38 +365,6 @@ export class RoomAgentClient {
       checkedAt: new Date(Date.now()).toISOString(), expiresAt: null, scope: "room", externalExecution: false };
   }
   snapshot({ signal } = {}) { return this.#request("", undefined, signal); }
-  async privateContexts(options={}) {
-    const sequence=id=>{const m=typeof id==='string'&&/^grant-([1-9][0-9]{0,15})-[a-f0-9]{64}$/.exec(id);return m&&Number.isSafeInteger(Number(m[1]))?Number(m[1]):null;};
-    if(!this.#memberId||!options||typeof options!=='object'||Array.isArray(options)||Object.keys(options).some(k=>!['before','signal'].includes(k))
-      ||options.before!==undefined&&sequence(options.before)===null)throw new RoomClientError(422,'invalid_private_context','Choose one private context page');
-    const {before,signal}=options;
-    const value=await this.#request('/private-context'+(before===undefined?'':'?before='+encodeURIComponent(before)),undefined,signal);
-    const exact=(v,keys)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===keys.length&&keys.every(k=>Object.hasOwn(v,k));
-    let ceiling=before===undefined?Number.MAX_SAFE_INTEGER:sequence(before);
-    if(!exact(value,['contractVersion','roomId','viewerId','viewerSessionBinding','shares','next'])||value.contractVersion!==1
-      ||value.roomId!==this.#roomId||value.viewerId!==this.#memberId||value.viewerSessionBinding!==null
-      ||!Array.isArray(value.shares)||value.shares.length>25||!value.shares.every(g=>{
-        if(!exact(g,['grantId','expiresAt','permissions']))return false;
-        const n=sequence(g.grantId);
-        if(n===null||n>=ceiling||!Number.isSafeInteger(g.expiresAt)||g.expiresAt<=Date.now()
-          ||!Array.isArray(g.permissions)||g.permissions.length!==1||g.permissions[0]!=='read')return false;
-        ceiling=n;return true;
-      })||value.next!==null&&(value.shares.length!==25||value.next!==value.shares.at(-1).grantId))
-      throw new RoomClientError(200,'invalid_response','Private context page did not match the selected recipient');
-    return value;
-  }
-  async privateContext(grantId,{signal}={}) {
-    if(!this.#memberId||!validId(grantId))throw new RoomClientError(422,'invalid_private_context','Choose one private share for the configured agent');
-    const value=await this.#request(`/private-context/${encodeURIComponent(grantId)}`,undefined,signal);
-    const keys=['contractVersion','grantId','roomId','body','expiresAt','permissions','viewerId','viewerSessionBinding'];
-    if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length!==keys.length||!keys.every(k=>Object.hasOwn(value,k))
-      ||value.contractVersion!==1||value.grantId!==grantId||value.roomId!==this.#roomId||value.viewerId!==this.#memberId||value.viewerSessionBinding!==null
-      ||typeof value.body!=='string'||!value.body.trim()||value.body.length>4000||!value.body.isWellFormed()
-      ||!Number.isSafeInteger(value.expiresAt)||value.expiresAt<=Date.now()
-      ||!Array.isArray(value.permissions)||value.permissions.length!==1||value.permissions[0]!=='read')
-      throw new RoomClientError(200,'invalid_response','Private context did not match the selected share and recipient');
-    return value;
-  }
   async replyRead(name, args = {}, { signal } = {}) {
     const route = replyRoute(name);
     if (!route || !validReplyArguments(name, args)) throw new Error("Invalid request read selection");
@@ -588,7 +626,7 @@ export class RoomAgentClient {
     const value = await this.#inviteAdmin("/agent-invites", { permissions, profile,
       ...(expiresInMinutes === undefined ? {} : { expiresInMinutes }),
       ...(displayName === undefined ? {} : { displayName }) }, { signal });
-    if (typeof value?.code !== "string" || typeof value?.codeHash !== "string") {
+    if (typeof value?.code !== "string" || typeof value?.inviteId !== "string") {
       throw new RoomClientError(200, "invalid_response", "Room returned an invalid invite code");
     }
     return value;
@@ -598,8 +636,34 @@ export class RoomAgentClient {
     if (!Array.isArray(value?.invites)) throw new RoomClientError(200, "invalid_response", "Room returned an invalid invite list");
     return value;
   }
-  revokeAgentInvite(codeHash, { signal } = {}) {
-    return this.#deletePath(`/api/rooms/${encodeURIComponent(this.#roomId)}/agent-invites`, { codeHash }, signal);
+  revokeAgentInvite(inviteId, { signal } = {}) {
+    return this.#deletePath(`/api/rooms/${encodeURIComponent(this.#roomId)}/agent-invites`, { inviteId }, signal);
+  }
+  // Self-serve access requests. Listing and deciding are owner-only (the
+  // server enforces manage_members); the request itself is unauthenticated
+  // via the standalone requestAccess() below.
+  async #accessAdmin(suffix, body, { signal } = {}) {
+    const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal);
+    if (value?.roomId !== this.#roomId) {
+      throw new RoomClientError(200, "invalid_response", "Room response does not match the configured room");
+    }
+    return value;
+  }
+  accessRequests({ status } = {}, { signal } = {}) {
+    const query = status === undefined ? "" : `?status=${encodeURIComponent(status)}`;
+    return this.#accessAdmin(`/access-requests${query}`, undefined, { signal });
+  }
+  decideAccessRequest(requestId, { decision, permissions, note } = {}, { signal } = {}) {
+    return this.#accessAdmin(`/access-requests/${encodeURIComponent(requestId)}/decide`,
+      { decision, ...(permissions === undefined ? {} : { permissions }), ...(note === undefined ? {} : { note }) }, { signal });
+  }
+  // Ownership appointment: the current room owner transfers ownership to an
+  // existing active member (human or agent). Owner-only; the transfer is
+  // reversible and audited in the room's event log.
+  transferOwnership(toMemberId, { reason, signal } = {}) {
+    if (typeof toMemberId !== "string" || !toMemberId) throw new RoomClientError(0, "invalid_config", "Choose the member to appoint as owner");
+    return this.#request("/ownership/transfer",
+      { toMemberId, ...(reason === undefined ? {} : { reason }) }, signal);
   }
   // W4-57 M6: sanitized support-export bundle (owner-only). Whitelisted
   // scalar fields only — safe to hand to support without redaction.
@@ -616,22 +680,20 @@ export class RoomAgentClient {
     return this.command({ id: randomUUID(), type: "notifications.preferences_set", data: { preferences } }, { signal });
   }
   // Round-2 #106/#107: export returns NDJSON text; import posts it back.
-  // These bypass #request because the payloads are NDJSON, not JSON.
+  // These bypass #request because the payloads are NDJSON, not JSON, but
+  // share the hardened fetch posture and error mapping of every other path.
   async exportRoom({ signal } = {}) {
-    const response = await this.#fetch(`${this.#origin}/api/rooms/${encodeURIComponent(this.#roomId)}/export`, {
-      headers: { Authorization: `Bearer ${this.#token}` }, signal: signal ?? AbortSignal.timeout(15000)
-    });
-    if (!response.ok) throw new RoomClientError(response.status, "request_failed", "Room export failed");
+    const response = await this.#fetchRaw(`/api/rooms/${encodeURIComponent(this.#roomId)}/export`, { signal });
+    if (!response.ok) throw this.#requestError(response, await response.json().catch(() => null), "Room export failed");
     return response.text();
   }
   async importRoom(ndjson, { signal } = {}) {
     if (typeof ndjson !== "string" || !ndjson.trim()) throw new Error("Import needs NDJSON text");
-    const response = await this.#fetch(`${this.#origin}/api/rooms/${encodeURIComponent(this.#roomId)}/import`, {
-      method: "POST", headers: { Authorization: `Bearer ${this.#token}`, "Content-Type": "application/x-ndjson" },
-      body: ndjson, signal: signal ?? AbortSignal.timeout(15000)
+    const response = await this.#fetchRaw(`/api/rooms/${encodeURIComponent(this.#roomId)}/import`, {
+      method: "POST", signal, headers: { "Content-Type": "application/x-ndjson" }, body: ndjson
     });
     const value = await response.json().catch(() => null);
-    if (!response.ok) throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room import failed");
+    if (!response.ok) throw this.#requestError(response, value, "Room import failed");
     return value;
   }
   capabilities({ search, signal } = {}) {

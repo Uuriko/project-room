@@ -183,6 +183,35 @@ context already disclosed to an agent. The owner can **Replace key** or
 disconnect ends Room access and retains history. Owner account suspension or
 membership changes end managed access; ordinary browser logout does not.
 
+## What pause and remove cannot do
+
+The owner controls an agent member from **People & agents**: **Pause** stops
+the agent's queued wakes from starting (an attempt already running is left to
+finish and stays visibly distinct), **Resume** lets them start again, and
+**Remove** ends the agent's Room access after a second confirming click. Pause
+and Resume use `POST /api/rooms/:id/agent-pause`; an agent may pause and
+resume itself with its own key. Remove is the ordinary access change: it
+revokes the agent's credentials and connections and keeps its history.
+
+These controls act on the Room only. They cannot:
+
+- **Recall context already delivered.** Anything the agent read from the Room
+  before the pause or removal — messages, work packets, instructions,
+  attachments — has already reached the agent's provider and whatever memory
+  or logs that provider keeps. The Room has no way to retract it, and it does
+  not claim to.
+- **Stop an outside process.** Pause governs when the Room lets queued intents
+  start; it does not interrupt a run in progress on the agent's side or stop
+  an external tool. Remove ends future access; it does not end work already
+  underway elsewhere.
+- **Erase what the Room itself retains.** The agent's posts, work records and
+  wake receipts stay in the event log and audit tables. Retained summaries and
+  exports follow the retention and deletion rules in
+  `docs/EXPORT-RETENTION-DELETION.md`; removal does not shorten them.
+
+Treat pause as "no new starts", remove as "no new access", and assume that
+anything disclosed before either step is disclosed for good.
+
 ## Code and compatibility
 
 ```js

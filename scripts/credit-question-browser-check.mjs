@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Simulated human browser + real scripted MCP subprocess. No external AI inference.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -40,8 +39,8 @@ for (const mobile of [false, true]) test(`credit question ${mobile ? "mobile" : 
     if (new URL(route.request().url()).origin === owner.origin) return route.continue();
     outside.push(route.request().url()); return route.abort();
   });
-  await page.goto(owner.origin); await ensureSignIn(page); await page.locator("#access-key").fill(reviewer);
-  await page.getByRole("button", { name: "Continue", exact: true }).click(); await page.locator("#main").waitFor();
+  await page.goto(owner.origin); await page.locator("#access-key").fill(reviewer);
+  await page.getByRole("button", { name: "Enter room", exact: true }).click(); await page.locator("#main").waitFor();
   const input = page.locator("#message-input"), card = page.locator('[data-work-record-id="' + workId + '"]');
   await input.fill("Keep ordinary room writing.");
   await page.locator("#composer-options > summary").click(); await page.locator("#remember-drafts").check();
@@ -110,7 +109,7 @@ for (const mobile of [false, true]) test(`credit question ${mobile ? "mobile" : 
   assert.deepEqual(f.store.room("commons").state.workItems, before);
   assert.deepEqual(f.store.room("commons").state.members, beforeMembers);
   await page.locator("#thread-back").click(); assert.equal(await input.inputValue(), "Keep ordinary room writing.");
-  page.once("dialog", dialog => dialog.accept()); await page.locator("#signout-button").click();
+  page.once("dialog", dialog => dialog.accept()); if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click();
   await page.locator("#auth-panel").waitFor();
   assert.equal(await page.evaluate(() => sessionStorage.getItem("project-room:drafts:v3")), null);
   assert.deepEqual(errors, []); assert.deepEqual(outside, []);

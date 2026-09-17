@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Agent-operated usability regression, not evidence from human participants.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -36,8 +35,8 @@ for (const touch of [false, true]) {
     await owner.locator('#auth-panel').waitFor({ state: 'visible' });
     assert.equal(await owner.locator('#identity-label').textContent(), 'Not signed in');
     assert.equal(await owner.locator('#auth-error').textContent(), '', 'a normal signed-out visit is not an error');
-    await ensureSignIn(owner); await owner.locator("#access-key").fill(ownerKey);
-    await owner.getByRole('button', { name: "Continue", exact: true }).click();
+    await owner.locator('#access-key').fill(ownerKey);
+    await owner.getByRole('button', { name: 'Enter room', exact: true }).click();
     await owner.locator('#main').waitFor({ state: 'visible' });
     await owner.locator('#invite-people-button').click();
     await owner.locator('#share-link-create').click();
@@ -49,8 +48,6 @@ for (const touch of [false, true]) {
     await guest.locator('#join-link-submit').click();
     await guest.locator('#main').waitFor({ state: 'visible' });
     assert.equal(await guest.locator('#identity-label').textContent(), 'Maya');
-    assert.equal(await guest.getByRole('textbox', { name: 'Message the room', exact: true }).count(), 1, 'composer has a persistent accessible name');
-    assert.equal(await guest.locator('#message-input').getAttribute('placeholder'), 'Message the room…');
     assert.equal(await guest.locator('#new-work-button').isVisible(), false);
     assert.equal(await guest.locator('#composer-work-button').isVisible(), false);
     assert.match(await guest.locator('#work-list').textContent(), /Suggest work in the conversation/);
@@ -134,7 +131,7 @@ for (const touch of [false, true]) {
       data: { memberId: 'second-maya', displayName: 'Maya', kind: 'human', permissions: [] } });
     await owner.waitForFunction(() => document.querySelector('.message-meta strong')?.textContent.includes('guest-'));
     await guest.waitForFunction(() => document.querySelector('#identity-label')?.textContent.includes('guest-'));
-    await guest.locator('#signout-button').click();
+    if (await guest.locator("#session-menu-button").isVisible()) await guest.locator("#session-menu-button").click(); await guest.locator('#signout-button').click();
     await guest.locator('#auth-panel').waitFor({ state: 'visible' });
     assert.equal(await guest.locator('#identity-label').getAttribute('title'), null, 'sign-out clears private attribution');
     assert.deepEqual(errors, []);

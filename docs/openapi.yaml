@@ -1,17 +1,26 @@
 openapi: 3.1.0
 info:
   title: Project Room Agent API
-  version: 1.0.0
+  version: 0.1.0
   description: |
-    Agent-facing HTTP surface of Project Room. Send credentials only in
-    `Authorization: Bearer <credential>`. Never put credentials in URLs.
-    `auth` and `x-project-room-auth` select browser cookie mode (room/account);
-    they are not credential fields. Every error
-    uses the shape documented in docs/ERROR-TAXONOMY.md.
-    This spec covers the agent surface; browser-UI-only routes are omitted.
+    Agent-facing HTTP surface of Project Room. Agents authenticate with
+    `Authorization: Bearer <redacted>` (a room or agent key, `bearerAuth`);
+    browsers hold the `room_session` cookie (`queryAuth`). The `?auth=`
+    query parameter (or `X-Project-Room-Auth` header) never carries a key:
+    it only selects which browser cookie a room route reads — `room`
+    (default) or `account` — and any other value is 422 `invalid_auth_mode`.
+    Every error uses the shape documented in docs/ERROR-TAXONOMY.md.
+    This spec covers the agent surface; browser-UI-only routes are omitted
+    unless they answer without a credential. Every route the server serves
+    anonymously carries `security: []` here: tests/invite-only-boundary.test.js
+    derives the open-route inventory from those entries and
+    `scripts/open-routes.mjs --check` requires docs/ROUTE-AUTH-TABLE.md and
+    docs/INVITE-ONLY-CHECKLIST.md to list each of them. Account-session
+    (browser cookie) routes declare `accountSession`.
 servers:
   - url: https://room.example.com
 security:
+  - queryAuth: []
   - bearerAuth: []
 paths:
   /api/rooms/{roomId}/commands:
@@ -23,6 +32,12 @@ paths:
         same id with the same input returns the original receipt (200);
         with different input returns 409 idempotency_conflict.
         201 on first commit, 200 on idempotent duplicate.
+        Room lifecycle (issue #6 A2): `room.archived` (data: optional
+        `reason`, 280 characters) is owner-only and makes the room read
+        only — reads, streams and export continue, every later command
+        answers 409 room_archived. `member.access_changed` targeted at the
+        caller with unchanged permissions and `active: false` is a leave and
+        needs no manage_members; the owner cannot leave.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -83,18 +98,45 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/RoomEvent'
+                  next:
+                    type: integer
+                    description: Sequence of the last event returned (`after` when the page is empty); pass it back as `after`
+                  hasMore:
+                    type: boolean
+                    description: True when the room has events beyond `next`
+        '409': { description: cursor_ahead - `after` exceeds the room's sequence; fetch a fresh snapshot }
+        '422': { description: "invalid_cursor - `after`, `limit`, `actor`, `since` or `until` is malformed" }
   /api/rooms/{roomId}/stream:
     get:
       summary: Server-sent events stream
-      description: Live event stream. Resume with Last-Event-ID header or ?after=.
+      description: Live event stream. Resume with Last-Event-ID header or ?after= (the header wins when both are sent). A consumer whose unsent bytes exceed the per-connection cap (64 KiB) receives a final `stream_lagging` event, is closed alone, and resumes by reconnecting with Last-Event-ID. Because EventSource cannot set headers, this route also accepts the account-session selectors in the query string; src/client.js opens `/stream?after=N&auth=account&binding=<sessionBinding>` for a signed-in browser.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - name: Last-Event-ID
+          in: header
+          description: Resume after this sequence (set by EventSource on reconnect)
+          schema: { type: integer, minimum: 0 }
+        - name: after
+          in: query
+          description: Resume after this sequence when Last-Event-ID is absent
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: auth
+          in: query
+          description: Cookie selector, `room` (default) or `account`; same meaning as the X-Project-Room-Auth header. Never a key.
+          schema: { type: string, enum: [room, account] }
+        - name: binding
+          in: query
+          description: Account mode only - the account session binding, standing in for X-Session-Binding (must match the header when both are sent; required in account mode)
+          schema: { type: string }
       responses:
         '200':
           description: text/event-stream
           content:
             text/event-stream:
               schema: { type: string }
+        '409': { description: cursor_ahead - the resume sequence exceeds the room's sequence }
+        '422': { description: "invalid_cursor, invalid_auth_mode, invalid_session_binding or session_binding_required" }
+        '429': { description: stream_limit - close another room connection before opening more }
   /api/rooms/{roomId}/presence:
     get:
       summary: Who is around
@@ -130,21 +172,39 @@ paths:
                               status: { type: string }
   /api/rooms/{roomId}/export:
     get:
-      summary: Export the event log as JSONL
-      description: One {sequence, event} per line, ordered. Same visibility as the events route (members only).
+      summary: Export the event log as JSONL, or as a readable HTML page
+      description: >-
+        Default (format=jsonl): one {sequence, event} per line, ordered. Same
+        visibility as the events route (members only). The body is materialised
+        in full before the response starts and is framed by Content-Length: a
+        failure while reading history is a JSON error response, never a
+        truncated 200, and a client that receives fewer bytes than
+        Content-Length has an incomplete download, not a shorter export.
+        format=html renders the same event walk as one self-contained,
+        script-free HTML document for people (members, messages, work items,
+        evidence links; deleted messages shown as deleted without their text),
+        with every value HTML-escaped and a Content-Security-Policy that allows
+        only the document's own fixed style block. Same auth and framing rule.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - name: format
+          in: query
+          description: jsonl (default) or html; anything else is 422 invalid_format
+          schema: { type: string, enum: [jsonl, html], default: jsonl }
       responses:
         '200':
-          description: NDJSON export
+          description: NDJSON export (Content-Length set; the last byte is a newline) or, with format=html, the readable page (Content-Length set; ends with an "End of export" marker)
           content:
             application/x-ndjson:
               schema: { type: string }
+            text/html:
+              schema: { type: string }
+        '422':
+          description: Unknown or repeated format
   /api/rooms/{roomId}/import:
     post:
-      summary: Online import unavailable
-      description: Event exports are not authority backups. Online history replacement is disabled; recovery requires operator review and isolated storage.
-      deprecated: true
+      summary: Import a JSONL event-log export
+      description: Owner-only. Replaces the room's event log with the export's events after validating sequences and replaying the projection. Pending invitations are lost on restore.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -153,8 +213,15 @@ paths:
           application/x-ndjson:
             schema: { type: string }
       responses:
-        '409':
-          description: recovery_requires_maintenance; no room data changed
+        '200':
+          description: Import result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  imported: { type: integer }
+                  sequence: { type: integer }
   /api/rooms/{roomId}/messages/{messageId}/thread:
     get:
       summary: Threaded replies
@@ -178,7 +245,13 @@ paths:
   /api/rooms/{roomId}/search:
     get:
       summary: Full-text search over messages and work items
-      description: Case-insensitive substring match. Deleted messages are excluded.
+      description: |
+        Case-insensitive substring match. Deleted messages are excluded.
+        `kind=pinned` searches only messages the room has pinned (issue #6 B2,
+        the `pins` route), in the same order as the other kinds. Messages whose
+        author the caller has muted (`member.mute_set`, see docs/MODERATION.md)
+        are excluded server-side for every `kind`; nobody else's results
+        change. Work items have no author and are never filtered by mute.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: q
@@ -187,7 +260,7 @@ paths:
           schema: { type: string, minLength: 1, maxLength: 80 }
         - name: kind
           in: query
-          schema: { type: string, enum: [all, messages, work], default: all }
+          schema: { type: string, enum: [all, messages, work, pinned], default: all }
       responses:
         '200':
           description: Search results
@@ -200,14 +273,80 @@ paths:
                   query: { type: string }
                   messages: { type: array, items: { type: object } }
                   workItems: { type: array, items: { type: object } }
+  /api/rooms/{roomId}/pins:
+    get:
+      summary: List pinned messages
+      description: |
+        Issue #6 B2. The room's pinned messages in the order they were pinned,
+        joined with the live message (author, body, createdAt). Members only;
+        membership is re-checked on every call. Deleted messages (tombstones)
+        never appear. At most 50 pins per room.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Ordered pinned list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PinnedList'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+    post:
+      summary: Pin or unpin one message
+      description: |
+        Any active member may pin or unpin a live message. Appends a
+        `message.pinned` / `message.unpinned` event through the single write
+        path; a request for the state the room is already in appends nothing
+        and answers `changed: false`. `requestId` is an optional client
+        idempotency key for the underlying command (same rules as the
+        `commands` route). Answers 201 when an event was appended and 200
+        when the room was already in the requested state or `requestId`
+        replayed an earlier command. Pinning a deleted message is 409
+        `message_deleted` (the same pin through `commands` is 409
+        `command_rejected`); the 51st pin is 409 `command_rejected` (pin capacity).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messageId, pinned]
+              properties:
+                messageId: { type: string }
+                pinned: { type: boolean }
+                requestId: { type: string, description: Optional idempotency key for the command }
+      responses:
+        '201':
+          description: Event appended (`changed: true`); body is the resulting pinned list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PinResult'
+        '200':
+          description: Already in the requested state, or an idempotent `requestId` replay (`changed: false`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PinResult'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+        '404':
+          description: No such message in this room (message_not_found)
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/InvalidInput'
   /api/agent-identities:
     post:
-      security: []
       summary: Create a multi-room agent identity
       description: >-
         Creates a stable cross-room agent identity and returns its secret once
         (pri_...). The secret is stored only as a salted hash; it grants access
         only to rooms the identity is linked into via identity-links.
+      security: []
       requestBody:
         required: true
         content:
@@ -229,74 +368,24 @@ paths:
                   displayName: { type: string }
                   createdAt: { type: string, format: date-time }
                   secret: { type: string, description: "Returned once; store it securely" }
-  /api/agent-invites/redeem:
-    post:
-      security: []
-      summary: Redeem a one-time agent invitation
-      description: The invitation code is a credential. Send it only in the JSON body. Returns an identity secret once; store it securely.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [code, displayName]
-              properties:
-                code: { type: string, writeOnly: true }
-                displayName: { type: string }
-      responses:
-        '201': { description: Linked identity and one-time secret }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/InvalidInput' }
-  /api/rooms/{roomId}/agent-invites:
-    parameters:
-      - $ref: '#/components/parameters/RoomId'
-    get:
-      summary: List agent invitation history
-      description: Requires membership administration. Does not return invitation codes.
-      responses:
-        '200': { description: Room ID and invitation records }
-    post:
-      summary: Create a scoped agent invitation
-      description: Requires membership administration. Choose a profile or explicit permissions, never both. Delegation cannot exceed the issuer's authority or grant membership administration or decide.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              oneOf:
-                - required: [profile]
-                - required: [permissions]
-              properties:
-                profile: { type: string, enum: [chat, contribute, review, max] }
-                permissions:
-                  type: array
-                  minItems: 1
-                  uniqueItems: true
-                  items: { type: string }
-                expiresInMinutes: { type: integer }
-                displayName: { type: string }
-      responses:
-        '201': { description: One-time code, code hash, scope and expiration }
-        '422': { $ref: '#/components/responses/InvalidInput' }
-    delete:
-      summary: Revoke an unused agent invitation
-      description: Requires membership administration. Does not revoke an already enrolled member.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [codeHash]
-              properties:
-                codeHash: { type: string, pattern: '^[a-f0-9]{64}$' }
-      responses:
-        '200': { description: Invitation revoked }
+        '409':
+          description: >-
+            Identity table cap reached (error.code pilot_limit). The 5000-row
+            cap is checked inside the insert transaction, so no row is written;
+            the route is unauthenticated and this cap, not the rate limit, is the
+            hard bound on how many identities can exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+        '429':
+          description: Per-address creation rate limit (error.code rate_limited); retry after a minute
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
   /api/rooms/{roomId}/identity-links:
     get:
       summary: List agent identity links
@@ -352,6 +441,68 @@ paths:
                 identityId: { type: string }
       responses:
         '200': { description: Identity unlinked }
+  /api/rooms/{roomId}/agent-pause:
+    get:
+      summary: Inspect a member's wake pause
+      description: >-
+        The caller's own wake-queue pause state, pending and running wakes and
+        recent outcomes. The signed-in room owner may name another member with
+        memberId and also receives the room's paused roster. No credentials.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: memberId
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Pause state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  viewerId: { type: string }
+                  memberId: { type: string }
+                  pause: { type: [object, "null"] }
+                  pending: { type: array, items: { type: object } }
+                  running: { type: array, items: { type: object } }
+                  paused: { type: array, items: { type: object }, description: Owner only }
+        '403': { description: owner_required - only the signed-in owner inspects another member }
+        '404': { description: member_not_found - memberId names no member of this room }
+        '422': { description: invalid_member (malformed memberId) or invalid_pause_selection (unknown or repeated query key) }
+    post:
+      summary: Pause or resume a member's queued wakes
+      description: >-
+        Draft class - nothing is sent, launched or spent. Pausing stops new
+        attempts from starting; an attempt already running finishes. A member
+        acts on its own row; the signed-in room owner (manage_members) acts on
+        any member's. A removed member's row is inert (409 member_inactive).
+        Idempotent per requestId: every recorded command retains one receipt.
+        At the member's wake receipt cap a pause that changes state is still
+        recorded (stop always works), while a pause of an already-paused
+        member and every resume answer 409 wake_limit; exact retries still
+        return their receipt.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, memberId, requestId]
+              properties:
+                action: { type: string, enum: [pause, resume] }
+                memberId: { type: string }
+                requestId: { type: string }
+                reason: { type: [string, "null"], maxLength: 200, description: Required (may be null) when action is pause }
+      responses:
+        '201': { description: Command recorded; body as GET plus receipt (receipt.alreadyPaused / receipt.wasPaused say whether the state changed) }
+        '200': { description: Duplicate requestId; historical receipt }
+        '403': { description: owner_required }
+        '409': { description: member_inactive, wake_limit (this member's wake receipts are at capacity) or idempotency_conflict }
+        '422': { description: invalid_pause_command }
   /api/rooms/{roomId}/provider-heartbeats:
     get:
       summary: Provider heartbeat dashboard
@@ -395,6 +546,134 @@ paths:
                         firstResultAt: { type: string, format: date-time, nullable: true }
                         minutesToFirstClaim: { type: integer, nullable: true }
                         minutesToFirstResult: { type: integer, nullable: true }
+  /api/rooms/{roomId}/spend-allowance:
+    get:
+      summary: Room spend allowance and ledger
+      description: >-
+        Issue #6 C3. The owner-set spend allowance (or null) with the spend
+        ledger over its period (30 days when none is set): spent (reported),
+        reserved (live sessions' remaining declared caps), held (closed
+        attempts that never reported spend keep their cap), committed,
+        headroom and the excess. Every member can read it - each figure
+        derives from work-session state members already see. Takes no
+        query parameters.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Allowance and ledger
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpendAllowanceReport'
+        '422': { description: invalid_spend_allowance (unexpected query parameter) }
+    post:
+      summary: Set or remove the room spend allowance
+      description: >-
+        Owner only; every other member receives 403 owner_required before any
+        command is built. Records room.spend_allowance_set with allowanceCents
+        (integer cents, 0 freezes starts) over periodDays (1-365, default 30),
+        or allowanceCents null to remove the allowance. requestId is an
+        optional idempotency key: the same id with the same input returns the
+        original receipt (200), with different input 409 idempotency_conflict.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [allowanceCents]
+              additionalProperties: false
+              properties:
+                allowanceCents: { type: [integer, 'null'], minimum: 0, maximum: 100000000 }
+                periodDays: { type: integer, minimum: 1, maximum: 365, default: 30 }
+                requestId: { type: string }
+      responses:
+        '201':
+          description: Committed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandReceipt'
+        '200':
+          description: Idempotent duplicate
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandReceipt'
+        '403': { description: owner_required }
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422': { description: invalid_spend_allowance }
+  /api/rooms/{roomId}/usage:
+    get:
+      summary: Room usage summary
+      description: >-
+        Read-only per-room usage for a period (default 30 days, `days` capped at
+        365): active human members and agent members (agents are principals,
+        never human seats), managed identities linked here, work sessions
+        started and stopped in the period, spend agents reported on those
+        sessions, and the bounded pilot caps with remaining headroom. Every
+        member can read it - each figure derives from data members already see.
+        Unreported spend is "unknown", never zero. Counts only; no member
+        details, credentials or hashes. The room spend allowance ledger rides
+        along as `spendAllowance` (allowance, spent, reserved, held, headroom
+        over the allowance's own period, 30 days without one) so a member
+        reads it in one place; GET /spend-allowance returns the same figures.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: days
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 365, default: 30 }
+      responses:
+        '200':
+          description: Usage summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  period:
+                    type: object
+                    properties:
+                      days: { type: integer }
+                      since: { type: string, format: date-time }
+                      until: { type: string, format: date-time }
+                  members:
+                    type: object
+                    properties:
+                      humans: { type: integer }
+                      agents: { type: integer }
+                      inactive: { type: integer }
+                      agentIdentities: { type: integer }
+                  sessions:
+                    type: object
+                    properties:
+                      started: { type: integer }
+                      stopped: { type: integer }
+                      budgetStops: { type: integer }
+                  spend:
+                    type: object
+                    properties:
+                      reportedCents: { oneOf: [{ type: integer }, { type: string, enum: [unknown] }] }
+                      sessionsReported: { type: integer }
+                      sessionsUnreported: { type: integer }
+                  spendAllowance:
+                    $ref: '#/components/schemas/SpendAllowanceLedger'
+                  caps:
+                    type: object
+                    description: members, events, workItems and projectionBytes, each { used, limit, remaining }.
+                    additionalProperties:
+                      type: object
+                      properties:
+                        used: { type: integer }
+                        limit: { type: integer }
+                        remaining: { type: integer }
+        '422': { description: invalid_usage_period }
   /api/rooms/{roomId}/invitations:
     get:
       summary: Invite-link analytics
@@ -416,6 +695,244 @@ paths:
                   revoked: { type: integer }
                   expired: { type: integer }
                   conversionRate: { type: number, nullable: true }
+    post:
+      summary: Issue a targeted membership invitation
+      description: >-
+        Signed-in account session only (403 account_session_required for
+        bearer keys), member with invite rights. Exactly `{ requestId,
+        invitationToken, intendedAccountId, intendedMemberId, displayName,
+        role (moderator | member | guest), expiresAt,
+        expectedIssuerMemberRevision }`; only the token hash is stored. See
+        docs/INVITATION-AUDIT.md.
+      security:
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, invitationToken, intendedAccountId, intendedMemberId, displayName, role, expiresAt, expectedIssuerMemberRevision]
+              properties:
+                requestId: { type: string }
+                invitationToken: { type: string }
+                intendedAccountId: { type: string }
+                intendedMemberId: { type: string }
+                displayName: { type: string }
+                role: { type: string, enum: [moderator, member, guest] }
+                expiresAt: { type: integer }
+                expectedIssuerMemberRevision: { type: integer }
+      responses:
+        '201': { description: Invitation issued and journaled }
+        '200': { description: Exact retry of a journaled issuance }
+        '403': { description: account_session_required or access_denied }
+        '409': { description: idempotency_conflict, stale revision or token_conflict }
+        '422': { description: invalid_invitation }
+  /api/rooms/{roomId}/access-review:
+    get:
+      summary: Owner access review (read-only)
+      description: |
+        Periodic access-review report for one room: active members and their grants,
+        guests with expiry and status, invitation links with remaining joins, pending
+        one-time agent invite codes (unredeemed and unrevoked, by hash-free inviteId),
+        agent identities and connections with state, and last activity per member.
+        Owner-only (the room owner's account session or room key; other members get
+        403 owner_required). Shares the per-credential read allowance of every room
+        read. The report never carries a token, secret or hash; removed members are
+        absent. `node scripts/access-review.mjs` prints the same object from a store
+        file or from this route.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Access review report
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  format: { type: string, enum: [project-room-access-review-v1] }
+                  roomId: { type: string }
+                  roomTitle: { type: string }
+                  ownerId: { type: string }
+                  generatedAt: { type: string, format: date-time }
+                  lastActivityAt: { type: string, format: date-time, nullable: true }
+                  counts:
+                    type: object
+                    properties:
+                      members: { type: integer }
+                      guests: { type: integer }
+                      shareLinks: { type: integer }
+                      pendingInvites: { type: integer }
+                      agentIdentities: { type: integer }
+                      agentConnections: { type: integer }
+                  members:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        memberId: { type: string }
+                        displayName: { type: string }
+                        kind: { type: string, enum: [human, agent] }
+                        role: { type: string, nullable: true }
+                        permissions: { type: array, items: { type: string } }
+                        revision: { type: integer }
+                        accountableHumanId: { type: string, nullable: true }
+                        identityId: { type: string, nullable: true }
+                        accountBound: { type: boolean }
+                        membershipOrigin: { type: string, enum: [bootstrap, added, invitation] }
+                        joinedAt: { type: string, format: date-time, nullable: true }
+                        liveAccessKeys: { type: integer, description: Count of unexpired, unrevoked keys; never the keys }
+                        latestAccessKeyExpiresAt: { type: string, format: date-time, nullable: true }
+                        lastActivityAt: { type: string, format: date-time, nullable: true }
+                  guests:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        memberId: { type: string }
+                        displayName: { type: string }
+                        kind: { type: string, enum: [human, agent] }
+                        permissions: { type: array, items: { type: string } }
+                        joinedAt: { type: string, format: date-time, nullable: true }
+                        expiresAt: { type: string, format: date-time, nullable: true }
+                        status: { type: string, enum: [active, expired] }
+                        lastActivityAt: { type: string, format: date-time, nullable: true }
+                  shareLinks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        role: { type: string }
+                        permissions: { type: array, items: { type: string } }
+                        issuerMemberId: { type: string }
+                        createdAt: { type: string, format: date-time }
+                        expiresAt: { type: string, format: date-time }
+                        maxJoins: { type: integer }
+                        joins: { type: integer }
+                        remainingJoins: { type: integer }
+                        status: { type: string, enum: [active, full, expired, cancelled, authority_changed] }
+                  pendingInvites:
+                    type: array
+                    description: One-time agent invite codes neither redeemed nor revoked; never the code or its stored hash
+                    items:
+                      type: object
+                      properties:
+                        inviteId: { type: string, description: Short hash-free handle that DELETE /agent-invites takes }
+                        displayName: { type: string, nullable: true }
+                        permissions: { type: array, items: { type: string } }
+                        inviterMemberId: { type: string }
+                        createdAt: { type: string, format: date-time }
+                        expiresAt: { type: string, format: date-time }
+                        status: { type: string, enum: [active, expired] }
+                  agentIdentities:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        identityId: { type: string }
+                        displayName: { type: string }
+                        memberId: { type: string }
+                        linkedAt: { type: string, format: date-time }
+                        memberActive: { type: boolean }
+                        lastActivityAt: { type: string, format: date-time, nullable: true }
+                  agentConnections:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        memberId: { type: string }
+                        displayName: { type: string }
+                        generation: { type: integer }
+                        memberRevision: { type: integer }
+                        permissions: { type: array, items: { type: string } }
+                        sponsorMemberId: { type: string }
+                        createdAt: { type: string, format: date-time }
+                        updatedAt: { type: string, format: date-time }
+                        expiresAt: { type: string, format: date-time }
+                        status: { type: string, enum: [key_issued, expired, revoked, access_changed, disconnected] }
+                        firstActionAt: { type: string, format: date-time, nullable: true }
+                        lastActivityAt: { type: string, format: date-time, nullable: true }
+        '403':
+          description: Not the room owner (owner_required)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+  /api/rooms/{roomId}/access-requests:
+    get:
+      summary: List access requests (owner)
+      description: >-
+        Owner-only (manage_members grant). Lists pending access requests by
+        default; pass ?status=approved|denied|expired|pending|decided to
+        filter. Approval links the identity via the standard identity-link
+        path; denial records a reason.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: status, in: query, schema: { type: string, enum: [pending, approved, denied, expired, decided] } }
+      responses:
+        '200': { description: The room's access requests }
+        '403': { description: access_denied (manage_members required) }
+  /api/rooms/{roomId}/access-requests/{id}/decide:
+    post:
+      summary: Decide an access request (owner)
+      description: >-
+        Owner-only (manage_members grant). Approve links the identity as a
+        member with the granted permissions (narrowed or equal to what was
+        requested); deny records a reason. The decision is appended to the
+        room's audit trail.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approve, deny] }
+                permissions: { type: array, items: { type: string } }
+                note: { type: string, maxLength: 500 }
+      responses:
+        '200': { description: The decided request (and the new member on approve) }
+        '403': { description: access_denied (manage_members required) }
+        '404': { description: not_found }
+        '409': { description: request_conflict (already decided) or request_expired }
+        '422': { description: invalid_request }
+  /api/rooms/{roomId}/ownership/transfer:
+    post:
+      summary: Transfer room ownership (owner)
+      description: >-
+        Owner-only. The current owner appoints an existing active member
+        (human or agent) as the new room owner. The new owner receives the
+        full permission set; an agent that ceases to be owner is stripped of
+        administration powers. Reversible by a later transfer; the
+        ownership.transferred event is the audit trail (the projection keeps
+        only the current owner, previous owner, transfer count and
+        timestamp). Unknown and inactive targets share a bare 404
+        so members cannot be enumerated.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [toMemberId]
+              properties:
+                toMemberId: { type: string }
+                reason: { type: string, maxLength: 280 }
+      responses:
+        '200': { description: "{ roomId, ownerId, previousOwnerId, sequence }" }
+        '403': { description: owner_required }
+        '404': { description: unknown_member (target is not an active member) }
+        '422': { description: invalid_transfer or command_rejected }
   /api/rooms/{roomId}/capabilities:
     get:
       summary: Capability registry
@@ -513,7 +1030,16 @@ paths:
           in: query
           schema: { type: boolean, default: false }
       responses:
-        '200': { description: Work context }
+        '200':
+          description: |
+            Work context. Includes `accessSummary` (version 1): the read-only
+            "what this agent can access" preview - conversation scope and the
+            linked source message id (never its thread, replies, quoted mentions
+            or imported excerpts), current evidence references and versions
+            (not retrieved), the declared session budget with undeclared bounds
+            as "unknown", participant ids, and the same `omitted` list as
+            `context.omitted`. It lists nothing the caller cannot already read
+            through this view and grants nothing. See docs/WORK-CONTEXT.md.
         '404': { $ref: '#/components/responses/NotFound' }
   /api/rooms/{roomId}/work-result:
     get:
@@ -542,9 +1068,29 @@ paths:
           schema: { type: integer }
         - name: limit
           in: query
-          schema: { type: integer, minimum: 1, maximum: 50 }
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
       responses:
         '200': { description: Digest; fetching never acknowledges }
+  /api/rooms/{roomId}/notifications:
+    get:
+      summary: Per-member notification feed (read model)
+      description: |
+        Items derived from the event tail after the caller's own read cursor and
+        filtered by the caller's notificationPreferences (docs/NOTIFICATIONS.md).
+        Kinds: mention, reply, assignment, work_update. One item per
+        (messageId|workItemId, kind); items expire when POST /cursor passes them.
+        Reading writes nothing, enqueues no wake and delivers nothing. Membership is
+        rechecked on every read; ended access returns 401/403 with no items.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200': { description: Feed with unread count, cursor, sequence, basis and items; fetching never acknowledges }
+        '401': { description: Credential expired, revoked or access ended }
+        '403': { description: Membership inactive }
+        '422': { description: invalid_notification_selection (unknown or repeated query key) or invalid_notification_limit }
   /api/rooms/{roomId}/cursor:
     post:
       summary: Move the durable read cursor
@@ -557,23 +1103,1780 @@ paths:
           application/json:
             schema:
               type: object
+              required: [sequence]
               properties:
-                sequence: { type: integer }
+                sequence: { type: integer, minimum: 0 }
       responses:
         '200': { description: Cursor stored }
+        '422': { description: "invalid_cursor - body is not exactly `{ sequence }`, or sequence is negative or beyond the room's sequence" }
+  /api/rooms/{roomId}/reports:
+    post:
+      summary: Report a message to the room owner
+      description: |
+        Moderation (issue #6 E4). Any active member reports a message written
+        by someone else with a short reason (at most 280 characters of plain
+        text). The report is a private record, not a room event: it never
+        appears in events, stream, snapshot or export, and only the room owner
+        can list it. One report per (reporter, message): repeating it returns
+        the first receipt with `duplicate: true` (200). At most 20 reports per
+        reporter per hour (429 `report_limit`). 422 `invalid_report` for a bad
+        shape or a self-report; 404 `message_not_found` for a message not in
+        this room.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messageId, reason]
+              additionalProperties: false
+              properties:
+                messageId: { type: string }
+                reason: { type: string, minLength: 1, maxLength: 280 }
+      responses:
+        '201':
+          description: Report recorded; the receipt names only the reporter's own report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportReceipt'
+        '200':
+          description: Already reported by this member; the first receipt is returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportReceipt'
+    get:
+      summary: List reports (room owner only)
+      description: |
+        Owner-only read of every report in the room, newest first, with the
+        reporter's member id, the reported message's author and the message as
+        it stands now (body null once deleted; `message` null when the message
+        is no longer in the room). Any other member receives 403
+        `owner_required`; the reporter identity is never served to them.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Reports visible to the owner
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  viewerId: { type: string }
+                  evaluatedAt: { type: integer }
+                  reports:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        messageId: { type: string }
+                        reason: { type: string }
+                        createdAt: { type: integer }
+                        reporterId: { type: string }
+                        authorId: { type: string }
+                        message:
+                          type: [object, 'null']
+                          properties:
+                            authorId: { type: string }
+                            body: { type: [string, 'null'] }
+                            createdAt: { type: string, format: date-time }
+                            deletedAt: { type: [string, 'null'], format: date-time }
+        '403':
+          description: owner_required
+  /api/health:
+    get:
+      summary: Liveness
+      description: >-
+        Open (also HEAD). Returns `{ status: "ok", mode }`; operational
+        metadata only. The Public Host aliases are served identically.
+      security: []
+      responses:
+        '200': { description: "{ status: ok, mode }" }
+  /api/version:
+    get:
+      summary: Deployed revision
+      description: Open (also HEAD). `{ status, mode, sourceRevision, buildId }`; no room data.
+      security: []
+      responses:
+        '200': { description: "{ status, mode, sourceRevision, buildId }" }
+  /api/ready:
+    get:
+      summary: Readiness
+      description: "Open (also HEAD). 200 `{ status: ready }` once the store answers; 503 `{ status: unavailable }` otherwise."
+      security: []
+      responses:
+        '200': { description: "{ status: ready }" }
+        '503': { description: "{ status: unavailable }" }
+  /api/guest-agent-links:
+    get:
+      summary: Guest-agent link contract document
+      description: >-
+        Open (also HEAD): the static contract for guest-agent credentials
+        (status, kind, permissions, access, ttl). Contains no room data.
+        `POST` on this path mints a link and requires a room credential.
+      security: []
+      responses:
+        '200': { description: Static contract document }
+  /api/work-item-sessions:
+    get:
+      summary: Work-item session contract document
+      description: "Open (also HEAD): the static contract for work-item sessions (status, schemaBump, writer, fields). Contains no room data."
+      security: []
+      responses:
+        '200': { description: Static contract document }
+  /api/account-session:
+    get:
+      summary: Browser account-session slot
+      description: >-
+        Open by design: a browser without an `account_session` cookie
+        receives an anonymous slot (Set-Cookie; 20 per address per minute)
+        and `{ authenticated: false, account: null, csrf, sessionBinding }`.
+        The slot grants nothing until `POST` signs in with an account access
+        key; `POST` (sign in) and `DELETE` (sign out) below require the slot
+        cookie plus CSRF.
+      security: []
+      responses:
+        '200': { description: Account session view; never account data for an anonymous caller }
+        '429': { description: rate_limited }
+    post:
+      summary: Sign an account browser slot in
+      description: >-
+        Account-level write: the anonymous slot cookie from `GET` plus
+        `Origin` and `X-CSRF-Token` (the slot's `csrf`) are required. The
+        body carries the account access key and the slot's current
+        `sessionRevision`; the slot is compare-and-swapped to the account
+        for at most eight hours and its CSRF token and session binding
+        change. An existing `room_session` cookie for the same browser is
+        revoked. 10 per address and slot per minute.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accountAccessKey, expectedSessionRevision]
+              properties:
+                accountAccessKey: { type: string }
+                expectedSessionRevision: { type: integer }
+      responses:
+        '201': { description: "{ authenticated: true, account: { id, revision, authEpoch }, csrf, sessionBinding, sessionRevision, expiresAt, authenticatedUntil }" }
+        '401': { description: account_session_required (no slot cookie) or a wrong account key }
+        '403': { description: origin_denied or csrf_denied }
+        '409': { description: Stale expectedSessionRevision }
+        '422': { description: invalid_login }
+        '429': { description: rate_limited }
+    delete:
+      summary: Sign an account browser slot out
+      description: >-
+        Account-level write (slot cookie, `Origin`, `X-CSRF-Token`). Body is
+        `{ expectedSessionRevision }`; the slot returns to anonymous with a
+        new CSRF token and binding.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedSessionRevision]
+              properties:
+                expectedSessionRevision: { type: integer }
+      responses:
+        '200': { description: Anonymous account session view }
+        '401': { description: account_session_required }
+        '403': { description: origin_denied or csrf_denied }
+        '409': { description: Stale expectedSessionRevision }
+        '422': { description: invalid_logout }
+  /api/agent-invites/redeem:
+    post:
+      summary: Redeem an agent invite code
+      description: >-
+        Open: the invite code is the credential (RM- plus 16 Crockford
+        base32 symbols; only a hash is stored). Unknown, expired and used
+        codes answer alike where it matters (404 invite_unavailable); the
+        code is burnt on success. 20 per address per minute.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, displayName]
+              properties:
+                code: { type: string }
+                displayName: { type: string, maxLength: 80 }
+      responses:
+        '201': { description: Member created; the room credential is returned once }
+        '404': { description: invite_unavailable }
+        '409': { description: invite_already_used, invite_authority_changed or pilot_limit }
+        '410': { description: invite_revoked or invite_expired }
+        '422': { description: invalid_invite or invalid_invite_name }
+        '429': { description: rate_limited }
+  /api/access-requests:
+    post:
+      summary: Request room access (self-serve)
+      description: >-
+        Open: an already self-minted identity asks to join a room. The
+        request sits in a pending queue for the owner to approve or deny;
+        nothing is auto-approved. Idempotent on the client-supplied
+        requestId. Unknown identities and rooms answer with a bare 404.
+        5 requests per identity per hour.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roomId, identityId, displayName, requestedPermissions, requestId]
+              properties:
+                roomId: { type: string }
+                identityId: { type: string }
+                displayName: { type: string, maxLength: 80 }
+                requestedPermissions: { type: array, items: { type: string } }
+                note: { type: string, maxLength: 500 }
+                requestId: { type: string, maxLength: 64 }
+      responses:
+        '201': { description: Pending request created (or the existing one on idempotent retry) }
+        '404': { description: not_found (unknown identity or room) }
+        '409': { description: request_conflict (requestId already in use) or already_member }
+        '422': { description: invalid_request }
+        '429': { description: rate_limited }
+  /api/agent-rooms:
+    post:
+      summary: Create a room self-serve (agent identity)
+      description: >-
+        A self-minted identity creates a fresh room and becomes its owner.
+        The pri_ identity secret travels in the Authorization bearer header,
+        never in the JSON body. The client-chosen roomId is the idempotency
+        key: retrying with the same parameters returns duplicate:true; a
+        different room under that id is 409 room_exists. 3 creations per
+        identity per 24h; 20 per address per minute.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roomId, title, purpose, kind, displayName]
+              properties:
+                roomId: { type: string, maxLength: 64 }
+                title: { type: string, maxLength: 120 }
+                purpose: { type: string, maxLength: 1000 }
+                kind: { type: string, enum: [personal, organization] }
+                displayName: { type: string, maxLength: 80 }
+      responses:
+        '201': { description: "{ roomId, ownerMemberId, identityId, duplicate: false }" }
+        '200': { description: Idempotent retry (duplicate:true) }
+        '401': { description: unauthenticated (unknown identity secret) }
+        '409': { description: room_exists or pilot_limit }
+        '422': { description: invalid_room_request }
+        '429': { description: rate_limited }
+  /api/access-requests/{id}:
+    get:
+      summary: Check an access request's status
+      description: >-
+        Open: the caller supplies the identityId as a query param; only the
+        requesting identity can see its own request (others get 404).
+      security: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: identityId, in: query, required: true, schema: { type: string } }
+      responses:
+        '200': { description: The request with its status (pending, approved, denied, expired) }
+        '404': { description: not_found }
+        '422': { description: invalid_request }
+  /api/share-links/preview:
+    post:
+      summary: Preview a human invitation link
+      description: >-
+        Open: the link token is the credential. Discloses the room title and
+        access description only, never message bodies, member lists or
+        credentials. 30 per address per minute.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [linkToken]
+              properties:
+                linkToken: { type: string }
+      responses:
+        '200': { description: "{ access, identity, link, room: { id, title } }" }
+        '410': { description: link_unavailable (unknown, expired, cancelled or exhausted) }
+        '422': { description: invalid_link or wrong_link_kind }
+        '429': { description: rate_limited }
+  /api/invitations/preview:
+    post:
+      summary: Preview a membership invitation
+      description: Open; the invitation token is the credential. Room title and role only. 30 per address per minute.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [invitationToken]
+              properties:
+                invitationToken: { type: string }
+      responses:
+        '200': { description: Invitation preview }
+        '404': { description: invitation_not_found }
+        '422': { description: invalid_invitation }
+        '429': { description: rate_limited }
+  /api/guest-agent-links/preview:
+    post:
+      summary: Preview a guest-agent link
+      description: Open; the `gt_` link token is the credential. Room title and access only. 30 per address per minute.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [linkToken]
+              properties:
+                linkToken: { type: string }
+      responses:
+        '200': { description: Link preview }
+        '410': { description: link_unavailable }
+        '422': { description: invalid_link or wrong_link_kind }
+        '429': { description: rate_limited }
+  /api/guest-agent-links/join:
+    post:
+      summary: Join as a guest agent
+      description: >-
+        Open; the `gt_` link token is the credential. Returns the linked guest
+        member's `read_chat` access. 20 per address per minute.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [linkToken]
+              properties:
+                linkToken: { type: string }
+      responses:
+        '200': { description: "{ ...preview, memberId, access: read_chat }" }
+        '410': { description: link_unavailable }
+        '422': { description: invalid_link or wrong_link_kind }
+        '429': { description: rate_limited }
+  /api/session:
+    post:
+      summary: Browser room sign-in
+      description: >-
+        Open: the access key in the body is the credential. Sets the
+        `room_session` cookie on success; 401 on a wrong key. 10 per address
+        per minute. `GET` and `DELETE` below require the session (or a room
+        bearer key).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accessKey]
+              properties:
+                accessKey: { type: string }
+      responses:
+        '201': { description: Session view; Set-Cookie room_session }
+        '401': { description: Wrong access key }
+        '422': { description: invalid_login }
+        '429': { description: rate_limited }
+    get:
+      summary: Current session view
+      description: >-
+        Room mode (default): the `room_session` cookie or a room bearer key
+        returns `{ authMode: room, member, roomId, csrf, sessionBinding,
+        credentialKind, expiresAt, ... }`. Account mode (`?room=<id>` or
+        `x-project-room-auth: account`): the signed-in `account_session`
+        cookie plus `X-Session-Binding` returns the account's member view
+        of that room. Bearer authorization is refused in account mode (403
+        access_denied).
+      parameters:
+        - name: room
+          in: query
+          description: Selects account mode and the room to view
+          schema: { type: string }
+      responses:
+        '200': { description: Session view }
+        '401': { description: unauthenticated (no or expired session) }
+        '403': { description: access_denied }
+        '422': { description: session_binding_required in account mode }
+    delete:
+      summary: Sign out
+      description: >-
+        Room mode revokes the room session (or the bearer key that made the
+        call); account mode signs the account slot out. Browser sessions
+        need `Origin` and `X-CSRF-Token`.
+      parameters:
+        - name: room
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: "{ signedOut: true }" }
+        '401': { description: unauthenticated }
+        '403': { description: origin_denied or csrf_denied }
+  /api/account-rooms:
+    get:
+      summary: List the account's current rooms
+      description: |
+        Browser account-session route (account_session cookie plus
+        X-Session-Binding). Bounded pages of the memberships the account holds
+        right now; a left or revoked membership is gone on the next read.
+        Each entry carries `kind` (personal or organization) and
+        `archived` / `archivedAt`; archived rooms stay listed and readable.
+      security:
+        - accountSession: []
+      parameters:
+        - name: after
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: "{ contractVersion: 1, viewer, rooms: [{ id, title, memberId, kind, archived, archivedAt }], nextCursor }"
+        '401': { description: unauthenticated }
+        '422': { description: invalid_room or session_binding_required }
+    post:
+      summary: Create a room for the signed-in account
+      description: |
+        Issue #6 A2. Account-session write (X-CSRF-Token, Origin,
+        X-Session-Binding), 10 per minute per account. The account must hold
+        an active human membership that owns a room or carries manage_members
+        (403 room_creation_denied otherwise; provisional room-key accounts are
+        bound to one room). The caller becomes member `owner` of the new
+        room with every permission. The client-chosen `roomId` is the
+        idempotency key: the same request returns the same room with
+        `duplicate: true`; a different room under that id is 409
+        room_exists. 409 pilot_limit at 100 memberships.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roomId, title, purpose, kind, displayName]
+              properties:
+                roomId: { type: string, maxLength: 64 }
+                title: { type: string, maxLength: 120 }
+                purpose: { type: string, maxLength: 1000 }
+                kind: { type: string, enum: [personal, organization] }
+                displayName: { type: string, maxLength: 80 }
+      responses:
+        '201': { description: "{ contractVersion: 1, viewer, room: { id, title, memberId, kind, archived, archivedAt }, duplicate: false }" }
+        '200': { description: Idempotent replay of the same request (duplicate true) }
+        '403': { description: csrf_denied, origin_denied or room_creation_denied }
+        '409': { description: room_exists or pilot_limit }
+        '422': { description: invalid_room_request }
+        '429': { description: rate_limited }
+  /api/inbox/connections:
+    get:
+      summary: List the account's channel connections
+      description: |
+        Unified inbox (docs/UNIFIED-INBOX.md). Browser account-session route:
+        authenticated by the account_session cookie plus X-Session-Binding,
+        never by a room or agent bearer key. Returns the generic connection
+        record for every email and Telegram connection the account owns.
+      security:
+        - accountSession: []
+      responses:
+        '200':
+          description: Connection records
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contractVersion: { type: integer, enum: [1] }
+                  viewer: { type: object }
+                  connections:
+                    type: array
+                    items: { $ref: '#/components/schemas/ChannelConnection' }
+        '401': { description: account_session_required }
+  /api/inbox/connections/{id}:
+    get:
+      summary: Read one channel connection
+      description: Account-session route. 404 channel_connection_not_found for another account's connection.
+      security:
+        - accountSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: |
+            Connection record plus mode (always fixture), webhook (secret hash
+            stored), webhookSetAt, syncAvailable (loopback client) and, for
+            Telegram connections, `live`: the deployment's binding state and
+            per-connection live facts. `live` names bindings and states only;
+            it never carries a token, a secret or a hash.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contractVersion: { type: integer, enum: [1] }
+                  viewer: { type: object }
+                  connection: { $ref: '#/components/schemas/ChannelConnection' }
+                  mode: { type: string, enum: [fixture] }
+                  webhook: { type: boolean }
+                  webhookSetAt: { type: [string, 'null'], format: date-time }
+                  syncAvailable: { type: boolean }
+                  live:
+                    oneOf:
+                      - { type: 'null' }
+                      - $ref: '#/components/schemas/TelegramLiveStatus'
+        '404': { description: channel_connection_not_found }
+  /api/inbox/connections/{id}/reconnect:
+    post:
+      summary: Owner-authenticated live import trigger (Telegram)
+      description: |
+        Account-session write (X-CSRF-Token, Origin, X-Session-Binding) for the
+        connection's owner; unlike the loopback-only sync route it works from
+        any client, including the hosted Worker. Rate limited to 30 per minute
+        per account. Body is `{ requestId }`.
+
+        1. When `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET` are set and
+           the active connection's stored webhook hash differs from the
+           binding's SHA-256, the hash is (re)stored through the
+           `connection.webhook` journal action (`registered: true`). The
+           secret itself is never stored or returned.
+        2. Updates the webhook route already verified are drained through the
+           same sync path as `/sync` (`updates: null`), one page per request;
+           `receipt.complete: false` means more remain. The same requestId
+           returns the journaled receipt (200, `duplicate: true`).
+
+        Today the drain reads the in-memory webhook inbox; once the durable
+        webhook journal lands it drains that instead, unchanged.
+      security:
+        - accountSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId]
+              properties:
+                requestId: { type: string, maxLength: 100 }
+      responses:
+        '201':
+          description: A page was imported (possibly empty); connection record plus live status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contractVersion: { type: integer, enum: [1] }
+                  viewer: { type: object }
+                  connection: { $ref: '#/components/schemas/ChannelConnection' }
+                  mode: { type: string, enum: [fixture] }
+                  webhook: { type: boolean }
+                  webhookSetAt: { type: [string, 'null'], format: date-time }
+                  syncAvailable: { type: boolean }
+                  live: { $ref: '#/components/schemas/TelegramLiveStatus' }
+                  registered: { type: boolean, description: The binding's webhook secret hash was stored by this request }
+                  receipt: { type: [object, 'null'], description: page.apply receipt, null when no webhook inbox is wired }
+                  duplicate: { type: boolean }
+                  source: { type: [string, 'null'], enum: [webhook, journal, 'null'] }
+                  imported: { type: [integer, 'null'], description: Sources imported by this page }
+        '200': { description: Exact retry of a journaled import, or a registration with no webhook inbox to drain }
+        '401': { description: account_session_required }
+        '403': { description: csrf_denied or origin_denied }
+        '404': { description: channel_connection_not_found (including another account's connection) }
+        '409': { description: channel_sync_unsupported (not a Telegram connection) or channel_webhook_unavailable (nothing to register and no webhook inbox) }
+        '422': { description: invalid_channel_update (body shape) }
+        '429': { description: rate_limited }
+  /api/inbox/connections/commands:
+    post:
+      summary: Add, update or remove one of the account's channel connections
+      description: |
+        Unified inbox UI (docs/UNIFIED-INBOX.md, "Connection lifecycle").
+        Account-session route with CSRF and origin checks (`protectWrite`),
+        30 requests per minute per account, works off loopback. The body is
+        exactly one connections-journal request: `connection.configure` (add
+        a Telegram bot or fixture mailbox profile, or update / re-activate an
+        existing one; `profile.accountId` must be the caller's account) or
+        `connection.disconnect` ("Remove": the record stays, state becomes
+        disconnected, saved copies remain readable). `connection.webhook` and
+        `page.apply` are refused: webhook hashes come from the deployment's
+        bindings via the reconnect route, imports from the import authority.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [action, requestId, connectionId, expectedRevision, profile]
+                  properties:
+                    action: { type: string, enum: [connection.configure] }
+                    requestId: { type: string }
+                    connectionId: { type: string }
+                    expectedRevision: { type: integer, minimum: 0, description: Current record revision (0 to add) }
+                    profile:
+                      description: Generic ChannelConnection without `state` at revision expectedRevision + 1, or the Graph-shaped email profile (accountId, id, revision, provider microsoft-graph, mailboxId, identity {name, address}, aliases)
+                      type: object
+                - type: object
+                  required: [action, requestId, connectionId, expectedRevision]
+                  properties:
+                    action: { type: string, enum: [connection.disconnect] }
+                    requestId: { type: string }
+                    connectionId: { type: string }
+                    expectedRevision: { type: integer, minimum: 1 }
+      responses:
+        '201':
+          description: Applied. The connection record as GET /api/inbox/connections/{id} returns it (with `live`), plus the receipt.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contractVersion: { type: integer, enum: [1] }
+                  viewer: { type: object }
+                  connection: { $ref: '#/components/schemas/ChannelConnection' }
+                  mode: { type: string, enum: [fixture] }
+                  webhook: { type: boolean }
+                  webhookSetAt: { type: [string, 'null'], format: date-time }
+                  syncAvailable: { type: boolean }
+                  live:
+                    oneOf:
+                      - { type: 'null' }
+                      - $ref: '#/components/schemas/TelegramLiveStatus'
+                  receipt:
+                    type: object
+                    properties:
+                      requestId: { type: string }
+                      action: { type: string, enum: [connection.configure, connection.disconnect] }
+                      connectionId: { type: string }
+                      revision: { type: integer }
+                      state: { type: string, enum: [active, disconnected] }
+                  duplicate: { type: boolean }
+        '200': { description: The same requestId was applied before (duplicate true) }
+        '401': { description: account_session_required }
+        '403': { description: csrf_denied or origin_denied }
+        '404': { description: channel_connection_not_found (disconnecting another account's or an unknown connection) }
+        '409': { description: stale_email_connection (revision moved), email_mailbox_exists, email_mailbox_changed, email_connection_limit, idempotency_conflict }
+        '422': { description: invalid_channel_connection (not configure/disconnect), channel_account_mismatch (profile for another account), invalid_email_import (profile shape) }
+        '429': { description: rate_limited }
+  /api/inbox/channel-sends:
+    post:
+      summary: Dispatch or reconcile a queued Inbox reply through the channel transport
+      description: |
+        Reply from the Inbox (docs/UNIFIED-INBOX.md, "Send"). Account-session
+        route with CSRF (`protectWrite`), 30 per minute per account. The
+        attempt must already exist in the send journal (`send.reserve` over
+        POST /api/inbox/commands). The server picks the transport for the
+        source's connection: the live Telegram `sendMessage` transport when
+        TELEGRAM_BOT_TOKEN and TELEGRAM_WEBHOOK_SECRET are set, otherwise an
+        inert fixture sender that answers "accepted" without leaving the
+        process. `dispatch` moves queued -> unknown -> accepted | rejected
+        (or leaves unknown when Telegram is unreachable); `reconcile` replays
+        the recorded receipt for an unknown or accepted attempt. Email sources,
+        samples and disconnected connections have no transport. The same
+        `channelSend` descriptor (and `simulationAvailable`) is returned by
+        GET /api/inbox/sources/{id}/sends and /send-context so the browser
+        knows which transport, if any, applies before it offers a reply.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, sourceId, sendId]
+              properties:
+                action: { type: string, enum: [dispatch, reconcile] }
+                sourceId: { type: string }
+                sendId: { type: string }
+      responses:
+        '200':
+          description: The source's send list, the attempt, the transport descriptor and the connection's last send result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contractVersion: { type: integer, enum: [1] }
+                  viewer: { type: object }
+                  sourceId: { type: string }
+                  sends: { type: array, items: { type: object, description: Send journal entry (id, sourceId, revision, status, envelope, providerId, createdAt, updatedAt) } }
+                  send: { type: object, description: The attempt after this call }
+                  simulationAvailable: { type: boolean }
+                  channelSend: { $ref: '#/components/schemas/ChannelSendDescriptor' }
+                  lastSendResult:
+                    type: [object, 'null']
+                    properties:
+                      at: { type: string, format: date-time }
+                      outcome: { type: string, enum: [accepted, rejected, failed] }
+                      code: { type: [string, 'null'], description: fixture, network, rate_limited, server_error, unauthorized or the slugged Telegram description }
+        '401': { description: account_session_required }
+        '403': { description: csrf_denied or origin_denied }
+        '404': { description: inbox_source_not_found or inbox_send_not_found }
+        '409': { description: channel_sending_unavailable (no transport for this source), channel_connection_unavailable (Telegram refused the bot token), inbox_transport_mismatch }
+        '422': { description: invalid_inbox_send }
+        '429': { description: rate_limited }
+  /api/inbox/connections/{id}/sync:
+    post:
+      summary: Import one recorded Telegram page
+      description: |
+        Account-session write (X-CSRF-Token, Origin). Loopback clients only
+        (403 channel_sync_local_only) and fixture-mode connections only. Body is
+        { requestId, updates }: `updates` is a recorded array of Telegram Update
+        objects, or null to import updates the webhook already verified. The
+        same requestId returns the journaled receipt (200, duplicate true).
+      security:
+        - accountSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, updates]
+              properties:
+                requestId: { type: string }
+                updates:
+                  type: [array, 'null']
+                  items: { type: object }
+      responses:
+        '201': { description: Page imported; receipt lists per-source revisions }
+        '200': { description: Exact retry of a journaled sync }
+        '403': { description: csrf_denied or channel_sync_local_only }
+        '409': { description: channel_sync_unsupported, channel_sync_unavailable, channel_webhook_unavailable or a stale cursor }
+        '422': { description: invalid_channel_update }
+  /api/inbox/webhooks/{connectionId}:
+    post:
+      summary: Provider webhook delivery (Telegram)
+      description: |
+        No account session. X-Telegram-Bot-Api-Secret-Token is compared in
+        constant time with the SHA-256 the owner stored through the
+        connection.webhook import action; unknown connections and wrong secrets
+        share one 401. The body is a single Telegram Update or
+        { updates: [...] }. Accepted updates are journaled durably in the store
+        (pending_channel_updates) until the owner imports them through the sync
+        route; a redelivered update_id is a no-op. Nothing is fetched or sent.
+        409 channel_webhook_unavailable when the deployment has no webhook inbox;
+        409 channel_webhook_backlog once 500 updates are pending for the connection.
+        The JSON body may be up to 64 KB (a reply embeds the replied-to message;
+        every other route keeps 16 KB), 413 too_large above it. 60 deliveries per
+        minute per verified connection (429 rate_limited, counted after the secret
+        matches and before anything is journaled, so Telegram's shared egress
+        addresses never share one budget), behind a guard of 1200 requests per
+        minute per client address for unverified traffic.
+      security: []
+      parameters:
+        - name: connectionId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '202': { description: "{ contractVersion, connectionId, received, pending }; a malformed message-kind update is journaled as failed, not refused" }
+        '401': { description: channel_webhook_denied }
+        '409': { description: channel_webhook_unavailable or channel_webhook_backlog }
+        '413': { description: too_large (body above 64 KB) }
+        '422': { description: invalid_channel_update }
+        '429': { description: rate_limited (60 per minute per verified connection; 1200 per minute per address) }
+  /api/inbox:
+    get:
+      summary: The account's private inbox
+      description: >-
+        Account-session read (docs/ACTIVITY-INBOX.md, docs/UNIFIED-INBOX.md).
+        Every `/api/inbox*` route refuses bearer authorization with 401
+        account_session_required and needs the `account_session` cookie plus
+        `X-Session-Binding`. `?view=email-text-v1` or `email-excerpt-v1`
+        includes channel sources; any other view is 422 unsupported_inbox_view.
+      security:
+        - accountSession: []
+      parameters:
+        - name: view
+          in: query
+          schema: { type: string, enum: [email-text-v1, email-excerpt-v1] }
+        - name: cursor
+          in: query
+          description: Opaque page cursor from a previous response's nextCursor.
+          schema: { type: string }
+        - name: limit
+          in: query
+          description: Page size, 1..100. Default 25.
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, sources, nextCursor }" }
+        '401': { description: account_session_required }
+        '422': { description: unsupported_inbox_view or session_binding_required or invalid_cursor or invalid_limit }
+  /api/inbox/search:
+    get:
+      summary: Full-text search over the account's visible inbox sources
+      description: >-
+        Account-session read. Searches subject and body text (the same
+        reading projection the UI shows; never cursors, headers, HTML, or
+        mailbox IDs) with BM25 ranking. `?view=email-excerpt-v1` includes
+        channel sources; without it only synthetic samples are searched.
+        `sourceId` scopes the search to one source. At most 200 results;
+        `total` counts every match.
+      security:
+        - accountSession: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Search query, non-empty, up to 500 characters.
+          schema: { type: string, maxLength: 500 }
+        - name: view
+          in: query
+          schema: { type: string, enum: [email-text-v1, email-excerpt-v1] }
+        - name: sourceId
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          description: Max results, 1..200. Default 25.
+          schema: { type: integer, minimum: 1, maximum: 200 }
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, query, results: [{ source, score }], total }" }
+        '401': { description: account_session_required }
+        '422': { description: invalid_search_query or invalid_limit or unsupported_inbox_view }
+  /api/inbox/threads:
+    get:
+      summary: Conversation/thread view over the account's visible inbox sources
+      description: >-
+        Account-session read. Groups sources into threads: email by
+        conversation (threadId) with replies resolved through In-Reply-To
+        internet message ids; channel sources by their threadId with
+        replies resolved through the channel's own message ids. Dangling
+        or cyclic references become top-level; they never throw.
+        `?view=email-excerpt-v1` includes channel sources; without it only
+        synthetic samples thread. `sourceId` scopes to the one thread
+        containing that source. At most 50 threads; `total` counts every
+        thread. Entries carry the same source projection as the list, with
+        a depth for indenting replies.
+      security:
+        - accountSession: []
+      parameters:
+        - name: view
+          in: query
+          schema: { type: string, enum: [email-text-v1, email-excerpt-v1] }
+        - name: sourceId
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          description: Max threads, 1..50. Default 25.
+          schema: { type: integer, minimum: 1, maximum: 50 }
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, threads: [{ threadId, messageCount, depth, firstAt, lastAt, entries: [{ depth, source }] }], total }" }
+        '401': { description: account_session_required }
+        '422': { description: invalid_limit or unsupported_inbox_view }
+  /api/inbox/sources/{sourceId}/attachments:
+    get:
+      summary: List one inbox source's attachment descriptors
+      description: >-
+        Account-session read. Attachment descriptors are metadata only
+        (id, kind, name, contentType, size, inline); the system never
+        retains attachment bytes. `?view=email-excerpt-v1` includes
+        channel sources; without it they 404 like the list hides them.
+        Another account's source 404s. Unknown attachment ids 404 on the
+        item route.
+      security:
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+        - name: view
+          in: query
+          schema: { type: string, enum: [email-text-v1, email-excerpt-v1] }
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, sourceId, attachments: [{ id, kind, name, contentType, size, inline }] }" }
+        '401': { description: account_session_required }
+        '404': { description: inbox_source_not_found }
+        '422': { description: unsupported_inbox_view }
+  /api/inbox/sources/{sourceId}/attachments/{attachmentId}:
+    get:
+      summary: Verify one attachment's descriptor membership
+      description: >-
+        Account-session read. Confirms the attachment id is a member of
+        the source's descriptor set and returns the descriptor plus a
+        retrieval handle. Retrieval is currently unavailable
+        (attachment_bytes_not_retained): byte download needs a live
+        provider fetch with the account's credentials, a future slice
+        that reuses this auth, ownership, and membership path.
+      security:
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+        - name: attachmentId
+          in: path
+          required: true
+          description: Opaque provider attachment id from the descriptor list.
+          schema: { type: string }
+        - name: view
+          in: query
+          schema: { type: string, enum: [email-text-v1, email-excerpt-v1] }
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, sourceId, attachment, retrieval: { available, reason, detail } }" }
+        '401': { description: account_session_required }
+        '404': { description: inbox_source_not_found or inbox_attachment_not_found }
+        '422': { description: unsupported_inbox_view }
+  /api/inbox/sources/{sourceId}:
+    get:
+      summary: Read one inbox source and its private draft
+      description: >-
+        Account-session read. `?view=email-text-v1` returns the email text
+        view, `email-excerpt-v1` the excerpt view. 404 for another account's
+        source.
+      security:
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+        - name: view
+          in: query
+          schema: { type: string, enum: [email-text-v1, email-excerpt-v1] }
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, source, draft }" }
+        '404': { description: Source not found for this account }
+        '422': { description: unsupported_inbox_view }
+  /api/inbox/sources/{sourceId}/share-context:
+    get:
+      summary: Audience for sharing a source into a room
+      description: >-
+        Account-session read. `roomId` (exactly one) names a room the account
+        is a member of; the response carries the `audienceVersion` a
+        `source.share` or `source.excerpt` command must echo.
+      security:
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+        - name: roomId
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: "{ contractVersion, viewer, sourceId, sourceRevision, roomId, roomTitle, audienceVersion, audience, members }" }
+        '403': { description: Not a member of the room }
+        '422': { description: invalid_room }
+  /api/inbox/sources/{sourceId}/room-results:
+    get:
+      summary: Room results that can answer a source
+      description: >-
+        Account-session read. `roomId` is required; `workItemId` (at most
+        one) narrows to one work item. Results carry the `resultVersion` a
+        `draft.adopt` command must echo.
+      security:
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+        - name: roomId
+          in: query
+          required: true
+          schema: { type: string }
+        - name: workItemId
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: "{ contractVersion, viewer, sourceId, roomId, sourceRevision, results }" }
+        '422': { description: invalid_room or invalid_inbox_result }
+  /api/inbox/sources/{sourceId}/send-context:
+    get:
+      summary: What a send from this source would use
+      description: >-
+        Account-session read. 409 channel_sending_unavailable when the
+        source's channel cannot send. `simulationAvailable` is true only on a
+        loopback service started with the synthetic transport.
+      security:
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      responses:
+        '200': { description: Send context plus simulationAvailable }
+        '409': { description: channel_sending_unavailable }
+  /api/inbox/sources/{sourceId}/sends:
+    get:
+      summary: Send attempts recorded for a source
+      description: Account-session read of the durable send journal for one source.
+      security:
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      responses:
+        '200': { description: "{ contractVersion, viewer, sourceId, sends, simulationAvailable }" }
+  /api/inbox/sources/{sourceId}/reply-review:
+    get:
+      summary: Reply review context
+      description: >-
+        Account-session read. `view` is required and must be exactly one of
+        reply-review-v1 to reply-review-v4 (docs/REPLY-UPDATE-REVIEW-2026-09-09.md);
+        no other query parameter is accepted.
+      security:
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+        - name: view
+          in: query
+          required: true
+          schema: { type: string, enum: [reply-review-v1, reply-review-v2, reply-review-v3, reply-review-v4] }
+      responses:
+        '200': { description: "{ contractVersion, view, viewer, sourceId, attempt, comparison, update }" }
+        '422': { description: unsupported_inbox_view }
+  /api/inbox/commands:
+    post:
+      summary: Apply one private inbox command
+      description: >-
+        Account-session write (`Origin`, `X-CSRF-Token`, `X-Session-Binding`;
+        60 per account per minute). Body is `{ requestId, action, sourceId,
+        ...action fields }` with exactly the fields the action takes:
+        `source.save` (expectedRevision, data), `draft.save`
+        (expectedRevision, sourceRevision, body), `draft.adopt`
+        (expectedRevision, sourceRevision, roomId, workItemId,
+        shareRequestId, resultVersion), `source.share` (sourceRevision,
+        roomId, audienceVersion, paragraphs), `source.excerpt`
+        (sourceRevision, roomId, audienceVersion, selection) and the
+        `send.*` transitions. `source.read` and `source.unread` take only
+        (expectedRevision) and record or clear the account's read marker:
+        the receipt carries `sourceRevision` and `readAt` (`null` when
+        unread) and no new source version is created. `source.import`, the transport-only `send.*`
+        outcomes and the reply-driver `reply.*` transitions are refused here
+        (403 channel_importer_required, inbox_transport_required,
+        reply_driver_required). The same requestId returns the journaled
+        receipt (200, duplicate true); a different body is 409
+        idempotency_conflict. See docs/PRIVATE-INBOX-FOUNDATION-2026-09-08.md.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, action, sourceId]
+              properties:
+                requestId: { type: string }
+                action: { type: string }
+                sourceId: { type: string }
+      responses:
+        '201': { description: "{ contractVersion: 1, viewer, receipt: { requestId, action, sourceId, ... }, duplicate: false }" }
+        '200': { description: Exact retry of a journaled command (duplicate true) }
+        '403': { description: csrf_denied, or a transition reserved for the importer, transport or reply driver }
+        '409': { description: idempotency_conflict, inbox_limit or a stale revision }
+        '422': { description: invalid_inbox_request, invalid_inbox_source, invalid_inbox_draft, invalid_inbox_result or invalid_inbox_share }
+        '429': { description: rate_limited }
+  /api/inbox/review:
+    post:
+      summary: Record a reply review
+      description: >-
+        Account-session write (CSRF; 60 per account per minute). Body is a
+        `reply.review` or `reply.update.review` transition
+        (requestId, sourceId, attemptId / updateId, expectedRevision, ...);
+        anything else is 422 invalid_reply_review. The receipt names the
+        reviewed attempt (attemptId, revision, reviewVersion) or update
+        (updateId, attemptId, revision, reviewVersion).
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, action, sourceId]
+              properties:
+                requestId: { type: string }
+                action: { type: string, enum: [reply.review, reply.update.review] }
+                sourceId: { type: string }
+      responses:
+        '201': { description: "{ contractVersion, viewer, receipt, duplicate: false }" }
+        '200': { description: Exact retry (duplicate true) }
+        '409': { description: idempotency_conflict, reply_update_unresolved or a stale revision }
+        '422': { description: invalid_reply_review }
+  /api/inbox/simulation:
+    post:
+      summary: Drive the synthetic send transport (local only)
+      description: >-
+        Account-session write (CSRF; 60 per account per minute). Available
+        only to loopback clients (403 inbox_simulation_local_only) of a
+        service started with the synthetic transport (409
+        inbox_simulation_unavailable). Body is exactly `{ action: dispatch |
+        reconcile, sourceId, sendId }` for an existing sample send.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, sourceId, sendId]
+              properties:
+                action: { type: string, enum: [dispatch, reconcile] }
+                sourceId: { type: string }
+                sendId: { type: string }
+      responses:
+        '200': { description: "{ ...sends view, simulationAvailable: true, send }" }
+        '403': { description: inbox_simulation_local_only or csrf_denied }
+        '409': { description: inbox_simulation_unavailable }
+        '422': { description: invalid_inbox_send }
+  /api/share-links/join:
+    post:
+      summary: Join a room through a human invitation link
+      description: >-
+        Account-level write: the anonymous or signed-in `account_session`
+        slot cookie plus `Origin`, `X-CSRF-Token` and `X-Session-Binding`
+        are required; the link token in the body is the room-side
+        credential. Exactly `{ linkToken, displayName (1-80 chars),
+        redemptionId (UUID v4), expectedSessionRevision }`. A retry with the
+        same redemptionId returns the earlier join (200); an existing
+        `room_session` cookie for a human member of the same room is adopted
+        instead (roomMode true). 20 per address per minute.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [linkToken, displayName, redemptionId, expectedSessionRevision]
+              properties:
+                linkToken: { type: string }
+                displayName: { type: string, maxLength: 80 }
+                redemptionId: { type: string, format: uuid }
+                expectedSessionRevision: { type: integer }
+      responses:
+        '201': { description: Joined; the account session now opens the room }
+        '200': { description: Duplicate redemption or existing membership }
+        '401': { description: No account slot cookie }
+        '403': { description: origin_denied or csrf_denied }
+        '409': { description: session_binding_changed, join_changed or pilot_limit }
+        '410': { description: link_unavailable }
+        '422': { description: invalid_join or session_binding_required }
+        '429': { description: rate_limited }
+  /api/invitations/accept:
+    post:
+      summary: Accept a targeted membership invitation
+      description: >-
+        Account-level write for a signed-in account session (`Origin`,
+        `X-CSRF-Token`). Exactly `{ invitationToken, redemptionId,
+        expectedRevision }` with expectedRevision 0; the invitation must
+        name this account. 20 per session and token per minute. See
+        docs/INVITATION-AUDIT.md.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [invitationToken, redemptionId, expectedRevision]
+              properties:
+                invitationToken: { type: string }
+                redemptionId: { type: string, format: uuid }
+                expectedRevision: { type: integer, enum: [0] }
+      responses:
+        '201': { description: Membership created and journaled }
+        '200': { description: Exact acceptance replay }
+        '401': { description: Signed-in account session required }
+        '403': { description: csrf_denied }
+        '404': { description: invitation_unavailable }
+        '409': { description: Invitation revoked, expired or already accepted }
+        '422': { description: invalid_invitation_acceptance }
+        '429': { description: rate_limited }
+  /api/guest-agent-links:
+    post:
+      summary: Mint a guest-agent credential (room named in the body)
+      description: >-
+        Same operation as POST /api/rooms/{roomId}/guest-agent-links with
+        the room in the body: a room bearer key, or a browser room or
+        account session (`x-project-room-auth: account` or `?auth=account`)
+        with `Origin` and `X-CSRF-Token`. Owner with `manage_members` only.
+        Body: `{ roomId, requestId, linkToken (ga1.…), expectedOwnerRevision,
+        displayName? }`. 30 per address per minute. See docs/GUEST-AGENT-LINKS.md.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roomId, requestId, linkToken, expectedOwnerRevision]
+              properties:
+                roomId: { type: string }
+                requestId: { type: string }
+                linkToken: { type: string }
+                expectedOwnerRevision: { type: integer }
+                displayName: { type: string }
+      responses:
+        '201': { description: Guest-agent member created; the link is the credential }
+        '200': { description: Exact retry of a journaled mint }
+        '401': { description: unauthenticated }
+        '403': { description: owner_required, access_denied or csrf_denied }
+        '409': { description: stale_member_revision, membership_ended or pilot_limit }
+        '422': { description: invalid_link }
+        '429': { description: rate_limited }
+  /api/rooms/{roomId}:
+    get:
+      summary: Room snapshot
+      description: >-
+        Current projection for a member: `{ roomId, sequence, state, charter,
+        cursor, viewerId, ... }`. `?view=work` (the only view) returns the
+        work-focused snapshot (`snapshotView`, `snapshotVersion`). Header
+        `x-project-room-help-context: 1` (with `view=work`) adds help
+        context; `x-project-room-offer-context: 1` (full view only) adds
+        offer context. Room routes accept a room bearer key, a browser room
+        session, or a signed-in account session with `?auth=account`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: view
+          in: query
+          schema: { type: string, enum: [work] }
+      responses:
+        '200': { description: Snapshot }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_snapshot_view, invalid_help_context or invalid_offer_context }
+  /api/rooms/{roomId}/agent-connections:
+    get:
+      summary: Owner's agent connections
+      description: >-
+        Signed-in room owner's account session only (403 owner_required for
+        anyone else, bearer keys included). Lists issued, rotated and
+        disconnected agent connections without key material. See
+        docs/AGENT-CONNECTION.md.
+      security:
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: "{ connections }" }
+        '403': { description: owner_required }
+    post:
+      summary: Create, rotate or disconnect an agent connection
+      description: >-
+        Owner account session plus CSRF. `action` is create (`displayName`,
+        `access` preset, `keyHash`, `expiresAt`), rotate (`expectedGeneration`,
+        `expectedMemberRevision`, `keyHash`, `expiresAt`) or disconnect
+        (`expectedGeneration`, `expectedMemberRevision`); every action takes
+        `requestId`, `memberId` and `expectedOwnerRevision`. The server stores
+        only the SHA-256 key hash the browser generated; expiry is at most 30
+        days. The same requestId returns the earlier receipt (200).
+      security:
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, requestId, memberId, expectedOwnerRevision]
+              properties:
+                action: { type: string, enum: [create, rotate, disconnect] }
+                requestId: { type: string }
+                memberId: { type: string }
+                expectedOwnerRevision: { type: integer }
+      responses:
+        '201': { description: "{ receipt, connection, duplicate: false }" }
+        '200': { description: Exact retry (duplicate true) }
+        '403': { description: owner_required or csrf_denied }
+        '409': { description: idempotency_conflict, stale_member_revision, connection_changed, token_conflict, unsupported_agent_scope or pilot_limit }
+        '422': { description: invalid_connection or invalid_expiry }
+  /api/rooms/{roomId}/agent-invites:
+    get:
+      summary: Audit the room's one-time agent invite codes
+      description: >-
+        Member with `manage_members`. Raw codes are never stored and the
+        stored hash never leaves the server; each row shows `inviteId` (an
+        8-hex-character hash-free handle, what `DELETE` takes), permissions,
+        profile, displayName, createdBy, createdAt, expiresAt, redeemedAt,
+        revokedAt and status. See docs/AGENT-IDENTITIES.md.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: "{ roomId, invites: [...] }" }
+        '403': { description: access_denied }
+    post:
+      summary: Mint a one-time agent invite code
+      description: >-
+        Member with `manage_members`; a non-owner cannot grant permissions it
+        does not hold (403 invite_scope_exceeded). Body names either
+        `permissions` (unique room permissions, never manage_members or
+        decide) or a `profile` (chat, contribute, review), plus optional
+        `expiresInMinutes` and `displayName`. The raw code (RM-…) is
+        returned once.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                permissions: { type: array, items: { type: string } }
+                profile: { type: string, enum: [chat, contribute, review] }
+                expiresInMinutes: { type: integer }
+                displayName: { type: string }
+      responses:
+        '201': { description: "{ code, inviteId, roomId, permissions, profile, displayName, createdAt, expiresAt }" }
+        '403': { description: access_denied or invite_scope_exceeded }
+        '409': { description: pilot_limit }
+        '422': { description: invalid_invite or invalid_invite_scope }
+    delete:
+      summary: Revoke an unredeemed agent invite code
+      description: Member with `manage_members`. Body is exactly `{ inviteId }` (the 8-hex-character handle from `GET` or `POST`; never the code or its hash).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [inviteId]
+              properties:
+                inviteId: { type: string, pattern: '^[a-f0-9]{8}$' }
+      responses:
+        '200': { description: "{ inviteId, revoked: true }" }
+        '403': { description: access_denied }
+        '404': { description: invite_unavailable (unknown, redeemed or already revoked) }
+        '409': { description: invite_ambiguous (more than one active invite shares the handle) }
+        '422': { description: invalid_invite }
+  /api/rooms/{roomId}/charter:
+    get:
+      summary: Room instructions (charter)
+      description: >-
+        Member read of the room's instructions at the current or a past
+        `?revision=N` (docs/ROOM-INSTRUCTIONS.md). No other query parameter
+        is accepted.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: revision
+          in: query
+          schema: { type: integer, minimum: 0 }
+      responses:
+        '200': { description: "{ contractVersion, roomId, evaluatedThrough, currentRevision, currentEventId, authority, revision, eventId, charter, viewer* }" }
+        '404': { description: No such revision }
+        '422': { description: invalid_charter_revision }
+  /api/rooms/{roomId}/diagnostics:
+    get:
+      summary: Recent request failures for the room
+      description: >-
+        Signed-in room owner's account session only (403 owner_required).
+        Returns the in-memory list of failed requests for this room:
+        operationId, time, status, code, category and route template only
+        (docs/SAFE-DIAGNOSTICS.md); never bodies or credentials.
+      security:
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: "{ diagnostics: [...] }" }
+        '403': { description: owner_required }
+  /api/rooms/{roomId}/diagnostics-export:
+    get:
+      summary: Sanitized support-export bundle
+      description: >-
+        Room owner with `manage_members`, by room bearer key or signed-in
+        account session (the CLI uses the bearer). Whitelisted scalar fields
+        only; served as an attachment.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: "{ format, exportedAt, service: { sourceRevision, buildId, mode }, room, diagnostics }" }
+        '403': { description: owner_required }
+  /api/rooms/{roomId}/guest-agent-links:
+    post:
+      summary: Mint a guest-agent credential
+      description: >-
+        Owner with `manage_members`: room bearer key, or browser room or
+        account session with CSRF. Body: `{ requestId, linkToken (ga1.…),
+        expectedOwnerRevision, displayName?, roomId? }`; the link token the
+        caller generated becomes the guest agent's read_chat credential and
+        only its hash is stored. 30 per address per minute. `GET` on the
+        top-level path is the open contract document.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, linkToken, expectedOwnerRevision]
+              properties:
+                requestId: { type: string }
+                linkToken: { type: string }
+                expectedOwnerRevision: { type: integer }
+                displayName: { type: string }
+                roomId: { type: string }
+      responses:
+        '201': { description: Guest-agent member created }
+        '200': { description: Exact retry of a journaled mint }
+        '403': { description: owner_required or csrf_denied }
+        '409': { description: stale_member_revision, membership_ended or pilot_limit }
+        '422': { description: invalid_link }
+        '429': { description: rate_limited }
+  /api/rooms/{roomId}/invitations/{invitationId}/revoke:
+    post:
+      summary: Revoke a targeted membership invitation
+      description: >-
+        Signed-in account session only (403 account_session_required for
+        bearer keys); the issuer or a member with `manage_members`. Body is
+        exactly `{ expectedRevision, reason }`; the revocation is journaled
+        with its reason.
+      security:
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: invitationId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedRevision, reason]
+              properties:
+                expectedRevision: { type: integer }
+                reason: { type: string, maxLength: 4096 }
+      responses:
+        '200': { description: Revoked invitation view }
+        '403': { description: account_session_required or access_denied }
+        '404': { description: invitation_unavailable }
+        '409': { description: Stale expectedRevision or already revoked }
+        '422': { description: invalid_invitation_change }
+  /api/rooms/{roomId}/reminders:
+    get:
+      summary: The member's private reminders
+      description: Member read of the caller's own reminders in this room (docs/PRIVATE-REMINDERS-CHECKPOINT-2026-09-07.md); never another member's.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: "{ roomId, viewer*, evaluatedAt, reminders }" }
+    post:
+      summary: Schedule or cancel a private reminder
+      description: >-
+        Member write. Exactly `{ requestId, workItemId, expectedRevision,
+        action: schedule | cancel }` plus `dueAt` (UTC ms, within one year)
+        when scheduling. The same requestId returns the earlier receipt
+        (200, duplicate true).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, workItemId, expectedRevision, action]
+              properties:
+                requestId: { type: string }
+                workItemId: { type: string }
+                expectedRevision: { type: integer }
+                action: { type: string, enum: [schedule, cancel] }
+                dueAt: { type: integer }
+      responses:
+        '201': { description: "{ ...reminders view, receipt: { requestId, workItemId, revision, state, dueAt }, duplicate: false }" }
+        '200': { description: Exact retry (duplicate true) }
+        '404': { description: work_not_found }
+        '409': { description: idempotency_conflict, stale_reminder, work_resolved, reminder_limit or reminder_inactive }
+        '422': { description: invalid_reminder or invalid_reminder_time }
+  /api/rooms/{roomId}/reply-requests:
+    get:
+      summary: Reply requests addressed to or sent by the member
+      description: >-
+        Member read (docs/REPLY-REQUESTS-FOUNDATION-CHECKPOINT-2026-09-08.md).
+        Optional `direction` and `status` filters, each at most once; any
+        other parameter is 422 invalid_reply_selection.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: direction
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: "{ contractVersion, roomId, viewer*, evaluatedThrough, selection, requests, scope }" }
+        '422': { description: invalid_reply_selection }
+  /api/rooms/{roomId}/reply-context:
+    get:
+      summary: One reply request with its thread context
+      description: Member read. `requestMessageId` is required; `cursor` and `limit` page the context.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: requestMessageId
+          in: query
+          required: true
+          schema: { type: string }
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200': { description: Selected request and context }
+        '404': { description: reply_request_not_found }
+        '422': { description: invalid_reply_selection }
+  /api/rooms/{roomId}/reply-history:
+    get:
+      summary: Resolved reply requests
+      description: Member read. Optional `direction`, `cursor`, `checkpoint` and `limit`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: direction
+          in: query
+          schema: { type: string }
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: checkpoint
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200': { description: "{ contractVersion, roomId, viewer*, selection, evaluatedThrough, roomCreatedEventId, page, scope }" }
+        '422': { description: invalid_reply_selection }
+  /api/rooms/{roomId}/share-links:
+    get:
+      summary: Human invitation links for the room
+      description: >-
+        Signed-in browser session of a human member with `manage_members`:
+        the room-key cookie or the account session (`?auth=account`). Bearer
+        keys are refused with 403 `access_denied`. Tokens are never returned,
+        only link views. See docs/SHAREABLE-GUEST-LINKS.md.
+      security:
+        - roomSession: []
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: "{ links }" }
+        '401': { description: unauthenticated }
+        '403': { description: access_denied }
+    post:
+      summary: Create a human invitation link
+      description: >-
+        Browser session (room-key cookie or account session) of a human member
+        with `manage_members` plus CSRF; bearer keys are refused with 403
+        `access_denied`. Exactly `{ requestId, linkToken, expiresAt (within
+        seven days), maxJoins (1-25), expectedMemberRevision }`; the caller
+        generates the token and the server stores its hash.
+      security:
+        - roomSession: []
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, linkToken, expiresAt, maxJoins, expectedMemberRevision]
+              properties:
+                requestId: { type: string }
+                linkToken: { type: string }
+                expiresAt: { type: integer }
+                maxJoins: { type: integer, minimum: 1, maximum: 25 }
+                expectedMemberRevision: { type: integer }
+      responses:
+        '201': { description: "{ link, duplicate: false }" }
+        '200': { description: Exact retry (duplicate true) }
+        '403': { description: access_denied (bearer key, or no manage_members) }
+        '409': { description: idempotency_conflict, stale_member_revision, token_conflict or pilot_limit }
+        '422': { description: invalid_link or invalid_expiry }
+  /api/rooms/{roomId}/share-links-cancel:
+    post:
+      summary: Cancel a human invitation link
+      description: Browser session (room-key cookie or account session) of a human member with `manage_members` plus CSRF; bearer keys are refused with 403 `access_denied`. Body is exactly `{ linkId }`; cancelling twice is idempotent.
+      security:
+        - roomSession: []
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [linkId]
+              properties:
+                linkId: { type: string }
+      responses:
+        '200': { description: "{ link }" }
+        '403': { description: access_denied (bearer key, or no manage_members) }
+        '410': { description: link_unavailable }
+        '422': { description: invalid_link }
+  /api/rooms/{roomId}/work-changes:
+    get:
+      summary: Change list for one work item
+      description: Member read, derived at read time (never a write). `workItemId` is required; `since` is a basis revision.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: workItemId
+          in: query
+          required: true
+          schema: { type: string }
+        - name: since
+          in: query
+          schema: { type: integer, minimum: 0 }
+      responses:
+        '200': { description: "{ historyVersion, workItemId, revision, changes }" }
+        '404': { description: work_not_found }
+        '422': { description: invalid_history_selection }
+  /api/rooms/{roomId}/work-discussion:
+    get:
+      summary: Discussion thread for one work item
+      description: Member read (docs/WORK-DISCUSSION.md). `workItemId` is required; `cursor`, `since` and `limit` page the thread.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: workItemId
+          in: query
+          required: true
+          schema: { type: string }
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: since
+          in: query
+          schema: { type: integer, minimum: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 0 }
+      responses:
+        '200': { description: "{ contractVersion, roomId, workItemId, viewer*, selection, discussion, current, scope }" }
+        '404': { description: work_not_found }
+        '422': { description: invalid_discussion }
 components:
   securitySchemes:
+    queryAuth:
+      type: apiKey
+      in: cookie
+      name: room_session
+      description: >-
+        Browser room session cookie (`room_session`; `__Host-` prefixed over
+        https, namespaced per deployment). Room routes read it by default;
+        `?auth=account` or `X-Project-Room-Auth: account` selects the
+        `account_session` cookie instead (then `X-Session-Binding`, or
+        `?binding=` on the stream, is required). The `auth` selector accepts
+        only `room` or `account` (422 `invalid_auth_mode`) and never carries
+        a credential: keys go in `Authorization: Bearer` (`bearerAuth`).
     bearerAuth:
       type: http
       scheme: bearer
-      description: "Room key, linked identity secret, or guest-agent credential in Authorization: Bearer <credential>"
+      description: "API key as Authorization: Bearer <redacted>"
+    accountSession:
+      type: apiKey
+      in: cookie
+      name: account_session
+      description: Browser account session (plus X-Session-Binding; X-CSRF-Token on writes). Never a room or agent bearer key.
+    roomSession:
+      type: apiKey
+      in: cookie
+      name: room_session
+      description: Browser session created from a human Room access key (X-CSRF-Token on writes). Never a bearer key.
   parameters:
     RoomId:
       name: roomId
       in: path
       required: true
       schema: { type: string }
+    SourceId:
+      name: sourceId
+      in: path
+      required: true
+      schema: { type: string }
   schemas:
+    ReportReceipt:
+      type: object
+      description: The reporter's own receipt. It names no other member.
+      properties:
+        roomId: { type: string }
+        viewerId: { type: string }
+        evaluatedAt: { type: integer }
+        duplicate: { type: boolean }
+        report:
+          type: object
+          properties:
+            id: { type: string }
+            messageId: { type: string }
+            reason: { type: string }
+            createdAt: { type: integer }
+    ChannelSendDescriptor:
+      type: [object, 'null']
+      description: Which transport replies to this source go through. Null when the deployment has none (email, samples, disconnected connections).
+      required: [provider, mode]
+      properties:
+        provider: { type: string, enum: [telegram-bot] }
+        mode: { type: string, enum: [live, fixture], description: live once the Telegram bindings are set; fixture answers locally and sends nothing }
+    TelegramLiveStatus:
+      type: object
+      description: Live Telegram facts for the connection card. Binding names and states only; never values or hashes.
+      properties:
+        contractVersion: { type: integer, enum: [1] }
+        channel: { type: string, enum: [telegram] }
+        state: { type: string, enum: [not_configured, invalid, configured], description: Deployment binding state }
+        bindings: { type: array, items: { type: string }, description: Binding names the deployment reads (TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET, TELEGRAM_API_BASE) }
+        missing: { type: array, items: { type: string } }
+        invalid: { type: array, items: { type: string } }
+        webhook: { type: string, enum: [unset, set, matches, differs], description: Stored webhook secret hash versus the binding }
+        webhookSetAt: { type: [string, 'null'], format: date-time }
+        lastUpdateReceivedAt: { type: [string, 'null'], format: date-time, description: Last verified webhook delivery in this process }
+        receivedUpdates: { type: integer }
+        lastSendResult:
+          type: [object, 'null']
+          properties:
+            at: { type: string, format: date-time }
+            outcome: { type: string, enum: [accepted, rejected, failed] }
+            code: { type: [string, 'null'] }
+        importAvailable: { type: boolean, description: A webhook inbox is wired so the trigger can drain updates }
     CommandEnvelope:
       type: object
       required: [id, type, data]
@@ -583,7 +2886,7 @@ components:
           description: Client-generated idempotency key (UUID)
         type:
           type: string
-          description: Event type, e.g. message.posted, message.edited, message.deleted, notifications.preferences_set, capabilities.advertised
+          description: Event type, e.g. message.posted, message.edited, message.deleted, message.pinned, message.unpinned, notifications.preferences_set, capabilities.advertised
         data:
           type: object
           description: Event payload; validated per event type
@@ -603,6 +2906,74 @@ components:
         actorId: { type: string }
         at: { type: string, format: date-time }
         data: { type: object }
+    PinnedList:
+      type: object
+      description: Pinned messages in pin order (issue #6 B2). Tombstoned messages are excluded.
+      required: [roomId, sequence, limit, count, pins]
+      properties:
+        roomId: { type: string }
+        sequence: { type: integer, description: Room sequence the list was read at }
+        limit: { type: integer, description: Maximum pins per room (50) }
+        count: { type: integer }
+        pins:
+          type: array
+          items:
+            type: object
+            required: [messageId, pinnedById, pinnedAt, authorId, body, createdAt]
+            properties:
+              messageId: { type: string }
+              pinnedById: { type: string }
+              pinnedAt: { type: string, format: date-time }
+              authorId: { type: string }
+              body: { type: string }
+              createdAt: { type: string, format: date-time }
+              workItemId: { type: [string, 'null'] }
+              replyToId: { type: [string, 'null'] }
+    PinResult:
+      description: Body of POST /api/rooms/{roomId}/pins on 201 (event appended) and 200 (already in that state or requestId replayed)
+      allOf:
+        - $ref: '#/components/schemas/PinnedList'
+        - type: object
+          required: [messageId, pinned, changed]
+          properties:
+            messageId: { type: string }
+            pinned: { type: boolean }
+            changed: { type: boolean, description: true when this call appended an event (201); false on 200 }
+            event:
+              type: object
+              description: Command receipt when a command was issued; absent when the room was already in the requested state
+              properties:
+                id: { type: string }
+                sequence: { type: integer }
+                duplicate: { type: boolean }
+    ChannelConnection:
+      type: object
+      description: Generic unified-inbox connection record (docs/UNIFIED-INBOX.md); extra keys are rejected on input.
+      required: [accountId, id, revision, channel, provider, externalId, identity, capabilities, state]
+      properties:
+        accountId: { type: string }
+        id: { type: string }
+        revision: { type: integer, minimum: 1 }
+        channel: { type: string, enum: [email, telegram] }
+        provider: { type: string, enum: [microsoft-graph, telegram-bot] }
+        externalId: { type: string, description: Mailbox id or bot id }
+        identity:
+          type: object
+          required: [kind, id, handle, displayName]
+          properties:
+            kind: { type: string, enum: [mailbox, user, bot, chat, group, channel] }
+            id: { type: string }
+            handle: { type: string }
+            displayName: { type: string }
+        capabilities:
+          type: object
+          required: [read, send, threads, edit]
+          properties:
+            read: { type: boolean }
+            send: { type: boolean }
+            threads: { type: boolean }
+            edit: { type: boolean }
+        state: { type: string, enum: [active, disconnected, reconnect_required] }
     ErrorBody:
       type: object
       properties:
@@ -617,6 +2988,45 @@ components:
         next:
           type: array
           items: { type: object }
+    SpendAllowanceReport:
+      allOf:
+        - type: object
+          properties:
+            roomId: { type: string }
+            evaluatedThrough: { type: integer }
+        - $ref: '#/components/schemas/SpendAllowanceLedger'
+    SpendAllowanceLedger:
+      description: The allowance and its ledger; also nested as spendAllowance in the usage summary.
+      type: object
+      properties:
+        allowance:
+          type: [object, 'null']
+          properties:
+            allowanceCents: { type: integer }
+            periodDays: { type: integer }
+            revision: { type: integer }
+            setById: { type: string }
+            setAt: { type: string, format: date-time }
+        period:
+          type: object
+          properties:
+            days: { type: integer }
+            since: { type: string, format: date-time }
+            until: { type: string, format: date-time }
+        spentCents: { type: integer }
+        reservedCents: { type: integer }
+        heldCents: { type: integer }
+        committedCents: { type: integer }
+        headroomCents: { type: [integer, 'null'], description: allowance minus committed, floored at 0; null without an allowance }
+        overCents: { type: integer }
+        sessions:
+          type: object
+          properties:
+            live: { type: integer }
+            unreserved: { type: integer }
+            attemptsCounted: { type: integer }
+            attemptsUnreported: { type: integer }
+            attemptsHeld: { type: integer }
   responses:
     Conflict:
       description: The world moved — re-read, then decide; never blind-retry

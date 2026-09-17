@@ -1,6 +1,29 @@
 import { verifyWorkResult } from "./work-packet.js";
 import { validateCharterRead } from "./room-charter.js";
-import { validId } from "./events.js";
+
+// C2: the read-only "what this agent can access" preview must describe exactly the
+// selected work the browser asked about and repeat the server's own omission list;
+// anything else is a mismatched response, never a wider or narrower grant.
+export function verifyAccessSummary(value, { roomId, workItemId }) {
+  const invalid = () => { const error = new Error("Access preview does not match the selected work"); error.code = "invalid_response"; return error; };
+  const summary = value?.accessSummary, work = value?.work, conversation = summary?.conversation;
+  if (value?.contractVersion !== 1 || value.roomId !== roomId || work?.id !== workItemId || !Number.isFinite(Date.parse(value.evaluatedAt))
+    || summary?.version !== 1 || summary.membership !== "room") throw invalid();
+  if (!Array.isArray(summary.omitted) || !Array.isArray(value.context?.omitted) || summary.omitted.length !== value.context.omitted.length
+    || summary.omitted.some((entry, index) => typeof entry !== "string" || entry !== value.context.omitted[index])) throw invalid();
+  if (!conversation || !Array.isArray(conversation.sourceMessageIds) || conversation.deliveredByDefault !== false
+    || conversation.sourceMessageIds.some(id => id !== work.sourceMessageId)
+    || (conversation.scope === "none") !== (work.sourceMessageId == null)
+    || !["not_linked", "unavailable", "deleted", "available"].includes(conversation.sourceAvailability)
+    || (conversation.sourceAvailability === "not_linked") !== (work.sourceMessageId == null)) throw invalid();
+  if (!Array.isArray(summary.evidence?.records) || summary.evidence.retrieved !== false
+    || summary.evidence.records.some(entry => !["receipt", "verification", "decision", "handoff"].includes(entry?.record)
+      || (work[entry.record]?.evidenceVersion ?? null) !== entry.evidenceVersion)) throw invalid();
+  if (!summary.budget || typeof summary.budget !== "object" || ["maxRuntimeMs", "maxAttempts", "maxConcurrent", "maxSpendCents", "spendCents"]
+    .some(key => !(summary.budget[key] === "unknown" || Number.isSafeInteger(summary.budget[key])))) throw invalid();
+  if (!Array.isArray(summary.participantIds) || summary.externalExecution !== false || summary.credentials !== "none") throw invalid();
+  return summary;
+}
 
 const accountSessionError = message => {
   const error = new Error(message);
@@ -62,17 +85,11 @@ export class AccountClient {
     }
   }
   async login(accountAccessKey) {
-    return this.loginExchange('/api/account-session', { accountAccessKey });
-  }
-  async loginProvider(token) {
-    return this.loginExchange('/api/provider-session', { token });
-  }
-  async loginExchange(path, credentials) {
     const session = this.currentSession("signing in");
     const generation = ++this.generation;
     try {
-      const loggedIn = await this.request(path, { method: "POST", session,
-        data: { ...credentials, expectedSessionRevision: session.sessionRevision } });
+      const loggedIn = await this.request("/api/account-session", { method: "POST", session,
+        data: { accountAccessKey, expectedSessionRevision: session.sessionRevision } });
       if (!this.owns(generation, session)) return null;
       if (!loggedIn?.authenticated || !loggedIn.account || loggedIn.sessionRevision !== session.sessionRevision + 1) {
         this.invalidate(generation, session);
@@ -97,31 +114,6 @@ export class AccountClient {
     if (!this.owns(generation, session)) return null;
     if (!value?.authenticated || !sameAccountSession(value, session)) { this.invalidate(generation, session); return false; }
     return true; // Keep object identity and generation: Room and Inbox own these.
-  }
-  async refreshProvider(token) {
-    const session = this.currentSession('renewing sign-in', { authenticated: true }), generation = this.generation;
-    try {
-      const refreshed = await this.request('/api/provider-session/refresh', { method: 'POST', session, data: { token } });
-      if (!this.owns(generation, session)) return null;
-      if (!refreshed?.authenticated || !sameAccountSession(refreshed, session)
-        || refreshed.csrf !== session.csrf || !Number.isSafeInteger(refreshed.expiresAt)
-        || !Number.isSafeInteger(refreshed.authenticatedUntil)) {
-        this.invalidate(generation, session);
-        throw accountSessionError('Sign-in renewal could not be confirmed');
-      }
-      // Existing Room/Inbox owners retain this exact object. A late response can
-      // neither switch identity nor move its expiry backward.
-      session.expiresAt = Math.max(session.expiresAt, refreshed.expiresAt);
-      session.authenticatedUntil = Math.max(session.authenticatedUntil, refreshed.authenticatedUntil);
-      return session;
-    } catch (error) {
-      if (!this.owns(generation, session)) return null;
-      // Renewal never switches browser identity. A lost response can therefore
-      // preserve drafts, but confirmed loss of access must invalidate them.
-      if ([401, 403].includes(error.status) || ['session_binding_changed', 'stale_session_revision'].includes(error.code))
-        this.invalidate(generation, session);
-      throw error;
-    }
   }
   async rooms(after = null) {
     const session = this.currentSession("listing rooms", { authenticated: true }), generation = this.generation;
@@ -166,13 +158,6 @@ export class AccountClient {
       }
       throw error;
     }
-  }
-  async createRoom(request) {
-    const session = this.currentSession('creating a room', { authenticated: true }), generation = this.generation;
-    const result = await this.request('/api/account-rooms', { method: 'POST', session, data: request });
-    if (!this.owns(generation, session)) return null;
-    if (!validId(result?.roomId) || typeof result.duplicate !== 'boolean') throw new Error('Room creation could not be confirmed.');
-    return result;
   }
   previewInvitation(invitationToken) {
     // Preview deliberately sends neither the current account cookie nor its CSRF/binding.
@@ -240,7 +225,6 @@ export class RoomClient {
     this.generation = 0;
     this.accountOwnership = null;
     this.streamRetryDelay = 1000;
-    this.fileTransfers = new Set();
   }
   setAccountClient(accountClient) {
     if (this.accountClient === accountClient) return this;
@@ -253,162 +237,19 @@ export class RoomClient {
     if (hadSession) this.onAccessEnded();
     return this;
   }
-  async request(path, { method = "GET", data, authMode = this.session?.authMode, authSession = this.session, offerContext = false, maxResponseBytes = null } = {}) {
+  async request(path, { method = "GET", data, authMode = this.session?.authMode, authSession = this.session, offerContext = false } = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10000);
-    let reader;
-    if (maxResponseBytes !== null) this.fileTransfers.add(controller);
     try {
       const response = await this.fetcher(path, { method, credentials: "same-origin", signal: controller.signal,
         headers: { ...(data === undefined ? {} : { "Content-Type": "application/json" }), ...(authSession?.csrf ? { "X-CSRF-Token": authSession.csrf } : {}),
           ...(offerContext ? { "X-Project-Room-Offer-Context": "1" } : {}),
           ...(authMode === "account" ? { "X-Project-Room-Auth": "account", ...(authSession?.sessionBinding ? { "X-Session-Binding": authSession.sessionBinding } : {}) } : {}) },
         ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
-      let body;
-      if (maxResponseBytes === null) body = await response.json();
-      else {
-        if (!response.body?.getReader) throw new Error('File status unavailable');
-        reader = response.body.getReader();
-        const chunks = []; let length = 0;
-        while (true) {
-          const { done, value } = await reader.read();
-          if (controller.signal.aborted) throw new DOMException('Recovery cancelled', 'AbortError');
-          if (done) break;
-          length += value.byteLength;
-          if (length > maxResponseBytes) throw new Error('File status response is too large');
-          chunks.push(value);
-        }
-        const raw = new Uint8Array(length); let offset = 0;
-        for (const chunk of chunks) { raw.set(chunk, offset); offset += chunk.length; }
-        body = JSON.parse(new TextDecoder().decode(raw));
-      }
+      const body = await response.json();
       if (!response.ok) { const error = new Error(body.error?.message || "Request failed"); error.status = response.status; error.code = body.error?.code; throw error; }
       return body;
-    } finally {
-      clearTimeout(timer);
-      if (maxResponseBytes !== null) {
-        controller.abort(); this.fileTransfers.delete(controller);
-        if (reader) { try { await reader.cancel(); } catch {} reader.releaseLock(); }
-      }
-    }
-  }
-  async restoreAttachment(item, pendingMessageId = null) {
-    const session = this.session, generation = this.generation;
-    if (!session || !this.ownsAccountSession()) throw accountSessionError('Reopen the Room before restoring files');
-    const receipt = await this.request(this.path(`/attachments/${encodeURIComponent(item.id)}/status`), { authSession: session, maxResponseBytes: 4096 });
-    if (session !== this.session || generation !== this.generation || !this.ownsAccountSession()) throw new DOMException('Recovery cancelled', 'AbortError');
-    if (receipt.id !== item.id || receipt.roomId !== session.roomId || receipt.uploaderId !== session.member.id
-      || receipt.filename !== item.file.name || receipt.byteLength !== item.file.size
-      || receipt.mediaType !== (item.file.type || 'application/octet-stream') || !/^[a-f0-9]{64}$/.test(receipt.sha256)
-      || item.expectedSha256 && receipt.sha256 !== item.expectedSha256)
-      throw new Error('Saved file could not be verified');
-    if (receipt.state !== 'staged' && !(pendingMessageId && receipt.messageId === pendingMessageId && ['committed', 'deleted'].includes(receipt.state)))
-      throw new Error('File unavailable. Remove it and choose it again.');
-    return receipt;
-  }
-  async uploadAttachment(id, file, { signal } = {}) {
-    if (!validId(id) || !(file instanceof Blob) || typeof file.name !== 'string' || !file.name.trim()
-      || file.size > 1048576) throw new Error('Choose a file up to 1 MiB');
-    const session = this.session, generation = this.generation;
-    const owns = () => this.session === session && this.generation === generation && this.ownsAccountSession();
-    if (!session || !owns()) throw accountSessionError('Reopen the Room before uploading');
-    const controller = new AbortController(); this.fileTransfers.add(controller);
-    const abort = () => controller.abort();
-    signal?.addEventListener('abort', abort, { once: true });
-    if (signal?.aborted) abort();
-    const timer = setTimeout(abort, 10000);
-    const current = () => {
-      if (!owns() || controller.signal.aborted) throw new DOMException('Upload cancelled', 'AbortError');
-    };
-    let reader;
-    try {
-      current();
-      const bytes = new Uint8Array(await file.arrayBuffer()); current();
-      const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2, '0')).join('');
-      current();
-      const mediaType = file.type || 'application/octet-stream';
-      const response = await this.fetcher(`/api/rooms/${encodeURIComponent(session.roomId)}/attachments/${encodeURIComponent(id)}`, {
-        method: 'PUT', credentials: 'same-origin', signal: controller.signal, body: bytes,
-        headers: { 'Content-Type': mediaType, 'X-File-Name': encodeURIComponent(file.name),
-          ...(session.csrf ? { 'X-CSRF-Token': session.csrf } : {}),
-          ...(session.sessionBinding ? { 'X-Session-Binding': session.sessionBinding } : {}),
-          ...(session.authMode === 'account' ? { 'X-Project-Room-Auth': 'account' } : {}) }
-      });
-      current();
-      if (!response.ok) { const error = new Error(response.status === 413 ? 'File is too large' : 'Upload failed. Retry the same file.'); error.status = response.status; throw error; }
-      if (!response.body?.getReader) throw new Error('Upload receipt unavailable');
-      reader = response.body.getReader();
-      const chunks = []; let length = 0;
-      while (true) {
-        const { done, value } = await reader.read(); current();
-        if (done) break;
-        length += value.byteLength;
-        if (length > 4096) throw new Error('Upload receipt is too large');
-        chunks.push(value);
-      }
-      const raw = new Uint8Array(length); let offset = 0;
-      for (const chunk of chunks) { raw.set(chunk, offset); offset += chunk.length; }
-      const receipt = JSON.parse(new TextDecoder().decode(raw));
-      if (receipt?.id !== id || receipt.roomId !== session.roomId || receipt.uploaderId !== session.member.id
-        || receipt.filename !== file.name || receipt.mediaType !== mediaType || receipt.byteLength !== bytes.length
-        || receipt.sha256 !== sha256 || !['staged', 'committed'].includes(receipt.state)
-        || !Number.isSafeInteger(receipt.createdAt) || !Number.isSafeInteger(receipt.expiresAt) || receipt.expiresAt <= receipt.createdAt)
-        throw new Error('Upload could not be verified. Retry the same file.');
-      current(); return receipt;
-    } finally {
-      controller.abort();
-      if (reader) { try { await reader.cancel(); } catch {} reader.releaseLock(); }
-      clearTimeout(timer); signal?.removeEventListener('abort', abort); this.fileTransfers.delete(controller);
-    }
-  }
-  async downloadAttachment(file, { signal } = {}) {
-    if (!validId(file?.id) || !Number.isSafeInteger(file.byteLength) || file.byteLength < 0 || file.byteLength > 1048576
-      || !/^[a-f0-9]{64}$/.test(file.sha256 ?? '')) throw new Error('Invalid file reference');
-    const session = this.session, generation = this.generation;
-    const owns = () => this.session === session && this.generation === generation && this.ownsAccountSession();
-    if (!session || !owns()) throw accountSessionError('Reopen the Room before downloading');
-    const controller = new AbortController();
-    this.fileTransfers.add(controller);
-    const abort = () => controller.abort();
-    signal?.addEventListener('abort', abort, { once: true });
-    if (signal?.aborted) abort();
-    const timer = setTimeout(abort, 10000);
-    let reader;
-    try {
-      const response = await this.fetcher(`/api/rooms/${encodeURIComponent(session.roomId)}/attachments/${encodeURIComponent(file.id)}`, {
-        credentials: 'same-origin', signal: controller.signal,
-        headers: { ...(session.sessionBinding ? { 'X-Session-Binding': session.sessionBinding } : {}),
-          ...(session.authMode === 'account' ? { 'X-Project-Room-Auth': 'account' } : {}) }
-      });
-      if (!owns() || controller.signal.aborted) throw new DOMException('Download cancelled', 'AbortError');
-      if (!response.ok) {
-        // Do not parse an unbounded error body or expose server-provided markup.
-        const error = new Error(response.status === 404 ? 'File unavailable' : 'Download failed');
-        error.status = response.status; throw error;
-      }
-      const length = response.headers.get('content-length');
-      if (length !== null && (!/^\d+$/.test(length) || Number(length) !== file.byteLength)) throw new Error('File size did not match');
-      if (!response.body?.getReader) throw new Error('Download stream unavailable');
-      reader = response.body.getReader();
-      const bytes = new Uint8Array(file.byteLength);
-      let offset = 0;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (!owns() || controller.signal.aborted) throw new DOMException('Download cancelled', 'AbortError');
-        if (done) break;
-        if (!(value instanceof Uint8Array) || offset + value.length > bytes.length) throw new Error('File size did not match');
-        bytes.set(value, offset); offset += value.length;
-      }
-      if (offset !== bytes.length) throw new Error('File size did not match');
-      const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2, '0')).join('');
-      if (!owns() || controller.signal.aborted) throw new DOMException('Download cancelled', 'AbortError');
-      if (hash !== file.sha256) throw new Error('File could not be verified');
-      return new Blob([bytes], { type: 'application/octet-stream' });
-    } finally {
-      controller.abort();
-      if (reader) { try { await reader.cancel(); } catch {} reader.releaseLock(); }
-      clearTimeout(timer); signal?.removeEventListener('abort', abort); this.fileTransfers.delete(controller);
-    }
+    } finally { clearTimeout(timer); }
   }
   async restore(roomId = null) {
     this.disconnect(); this.sequence = 0; this.session = null; this.accountOwnership = null;
@@ -480,6 +321,25 @@ export class RoomClient {
     if (generation === this.generation && this.session === session) this.endAccess();
   }
   path(suffix = "") { return `/api/rooms/${encodeURIComponent(this.session.roomId)}${suffix}`; }
+  // BUILD-01 F2 follow-up: the readable room export for people. A plain link
+  // cannot carry the account session binding, so the page fetches it with the
+  // same headers as every other room read and receives the file as a Blob to
+  // hand to the browser. Anything but a 200 text/html body is an error.
+  async exportHtml() {
+    if (!this.session) throw accountSessionError("Open the Room before exporting it");
+    if (this.session.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); throw accountSessionError("Account session changed; reopen the Room before exporting"); }
+    const { authMode, sessionBinding, roomId } = this.session;
+    const response = await this.fetcher(this.path("/export?format=html"), { method: "GET", credentials: "same-origin",
+      headers: authMode === "account" ? { "X-Project-Room-Auth": "account", ...(sessionBinding ? { "X-Session-Binding": sessionBinding } : {}) } : {} });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      const error = new Error(body?.error?.message || "Room export failed"); error.status = response.status; error.code = body?.error?.code;
+      if ([401, 403].includes(response.status) || (authMode === "account" && error.code === "session_binding_changed")) this.endAccess();
+      throw error;
+    }
+    if (!/^text\/html/i.test(response.headers?.get("content-type") ?? "")) { const error = new Error("Room returned an unexpected export"); error.status = response.status; error.code = "invalid_response"; throw error; }
+    return { blob: await response.blob(), filename: `room-${roomId}-export.html` };
+  }
   ownsAccountSession() {
     if (this.session?.authMode !== "account") return true;
     const owner = this.accountOwnership;
@@ -600,6 +460,40 @@ export class RoomClient {
       throw error;
     }
   }
+  // E4 moderation: POST reports a message (own receipt only); GET lists reports (owner only).
+  async reports(request = null) {
+    if (!this.session) return null;
+    if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+    const generation = this.generation, session = this.session;
+    try {
+      const result = await this.request(this.path("/reports"), request ? { method: "POST", data: request } : {});
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsResponse(result, session)) { this.endAccess(); return null; }
+      return result;
+    } catch (error) {
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+      if (error.status === 401 || error.code === "session_binding_changed") this.handleFailure(error);
+      throw error;
+    }
+  }
+  async notifications() {
+    // B4: read-only feed; a 401/403 ends access exactly like the sibling reads.
+    if (!this.session) return null;
+    if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+    const generation = this.generation, session = this.session;
+    try {
+      const result = await this.request(this.path("/notifications"));
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsResponse(result, session)) { this.endAccess(); return null; }
+      return result;
+    } catch (error) {
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+      if ([401, 403].includes(error.status) || error.code === "session_binding_changed") this.handleFailure(error);
+      throw error;
+    }
+  }
   async charter(revision) {
     if (!this.session) return null;
     if (!this.ownsAccountSession()) { this.endAccess(); return null; }
@@ -630,6 +524,25 @@ export class RoomClient {
       await verifyWorkResult(value, { roomId: session.roomId, workItemId, completionEventId, draftMessageId });
       if (generation !== this.generation || session !== this.session) return null;
       if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+      return value;
+    } catch (error) {
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+      if ([401, 403].includes(error.status) || error.code === "session_binding_changed") this.handleFailure(error);
+      throw error;
+    }
+  }
+  // C2: one read-only GET of the selected-work view, used to preview what an agent
+  // can access before a run. It never starts, claims or acknowledges anything.
+  async workContext(workItemId) {
+    if (!this.session) return null;
+    if (!this.ownsAccountSession()) { this.endAccess(); return null; }
+    const generation = this.generation, session = this.session;
+    try {
+      const value = await this.request(this.path(`/work-context?${new URLSearchParams({ workItemId })}`));
+      if (generation !== this.generation || session !== this.session) return null;
+      if (!this.ownsResponse(value, session)) { this.endAccess(); return null; }
+      verifyAccessSummary(value, { roomId: session.roomId, workItemId });
       return value;
     } catch (error) {
       if (generation !== this.generation || session !== this.session) return null;
@@ -695,8 +608,6 @@ export class RoomClient {
     else this.onStatus("Connection interrupted · refresh to recover; no peer activity inferred");
   }
   disconnect() {
-    for (const controller of this.fileTransfers) controller.abort();
-    this.fileTransfers.clear();
     this.generation++; clearTimeout(this.streamRetry); this.streamRetry = null; this.streamRetryDelay = 1000;
     this.stream?.close(); this.stream = null;
   }

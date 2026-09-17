@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Real browser commands against disposable loopback rooms only. No external agent runs.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -43,8 +42,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     });
     const page = await context.newPage();
     await page.goto(origin);
-    await ensureSignIn(page); await page.locator("#access-key").fill(fixture.keys.owner);
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.locator("#access-key").fill(fixture.keys.owner);
+    await page.getByRole("button", { name: "Enter room", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
     const snapshot = () => fixture.store.snapshot(fixture.keys.owner, "commons");
     const baseline = snapshot();

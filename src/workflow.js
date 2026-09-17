@@ -11,6 +11,27 @@ export function reusableWorkDefinition(work) {
   return definition;
 }
 
+// Reusable work recipes (F7): the room's own recorded definitions offered as
+// starting points for new work. Content only, like a reuse - never state,
+// assignment, permission, result or source relationship. Most recently
+// updated first, duplicates of the same definition collapsed, capped.
+export function workRecipeOptions(workItems, { limit = 8 } = {}) {
+  if (!workItems || typeof workItems !== "object" || Array.isArray(workItems)) throw new Error("Work list unavailable");
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) throw new Error("Invalid recipe limit");
+  const seen = new Set(), recipes = [];
+  const items = Object.values(workItems).sort((a, b) => String(b?.updatedAt ?? "").localeCompare(String(a?.updatedAt ?? "")));
+  for (const item of items) {
+    let definition;
+    try { definition = reusableWorkDefinition(item); } catch { continue; }
+    const key = `${definition.title}\n${definition.definitionOfDone}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    recipes.push({ workItemId: item.id, ...definition });
+    if (recipes.length >= limit) break;
+  }
+  return recipes;
+}
+
 // A parsed 2xx alone is not proof that this exact proposal was recorded.
 export function confirmsWorkProposal(receipt, command, roomId, memberId) {
   const entry = receipt?.event, data = entry?.data;
@@ -47,7 +68,7 @@ export async function confirmsWorkAction(receipt, command, roomId, memberId) {
   const entry = receipt?.event;
   const actions = [T.WORK_ACCEPTED, T.WORK_STARTED, T.WORK_BLOCKED, T.WORK_BLOCKER_RESOLVED,
     T.WORK_COMPLETED, T.CLAIM_ACQUIRED, T.CLAIM_RELEASED, T.VERIFICATION_RECORDED, T.OWNER_DECISION_RECORDED, T.WORK_HELP_UPDATED,
-    T.HELP_OFFER_OPENED, T.HELP_OFFER_UPDATED, T.SESSION_STOP_REQUESTED];
+    T.HELP_OFFER_OPENED, T.HELP_OFFER_UPDATED];
   const same = (a, b) => a === b || (a && b && typeof a === "object" && typeof b === "object"
     && Array.isArray(a) === Array.isArray(b) && Object.keys(a).length === Object.keys(b).length
     && Object.keys(a).every(key => Object.hasOwn(b, key) && same(a[key], b[key])));
@@ -91,7 +112,10 @@ export function terminalWork(item) {
 
 // A shared description for people and clients, never a grant or a dispatch command.
 // In-progress work has an actor but does not create another attention request.
-export function nextWorkStep(item, now = Date.now()) {
+// `ownerId` is optional: an open handoff is triage addressed to the Room owner; the
+// handoff record names that member itself, and `ownerId` only covers records that
+// predate the field. Existing callers that omit it keep their previous result.
+export function nextWorkStep(item, now = Date.now(), ownerId = null) {
   const step = (action, label, memberId = null, role = null, needsAttention = false) => ({
     action, label, memberId, role, needsAttention,
     workItemId: item.id, workRevision: item.revision,
@@ -100,7 +124,7 @@ export function nextWorkStep(item, now = Date.now()) {
   });
   const accountable = (action, label, attention = true) => step(action, label, item.accountableMemberId, "accountable", attention);
   if (item.state === S.SUPERSEDED || item.supersededBy) return step("superseded", "Continue in the replacement work item");
-  if (item.handoff?.open) return step("triaged_handoff", "Handoff open - owner triage: reassign, resume or supersede", null, "owner", true);
+  if (item.handoff?.open) return step("triaged_handoff", "Handoff open - owner triage: reassign, resume or supersede", item.handoff.triageMemberId ?? ownerId ?? null, "owner", true);
   if (item.state === S.PROPOSED) return accountable("accept", "Accept the assignment");
   if ([S.ACCEPTED, S.WORKING].includes(item.state) && item.mode === "write"
       && (!activeClaim(item, now) || item.claim.holderId !== item.accountableMemberId)) {
@@ -169,4 +193,97 @@ export function workActions(item, member, now = Date.now()) {
 export function doneChip(item) {
   if (!item || item.state === "superseded" || item.supersededBy) return "";
   return terminalWork(item) ? `<span class="done-chip" title="Finished and verified">✓ Done</span>` : "";
+}
+
+// F3: derived per-item change list from the item's own revision events.
+// Read-time only: the event log is the record; this assigns each revision
+// event the revision it produced (proposal is revision 0) so a viewer holding
+// an older basis can see exactly what changed since. No new event types, so
+// strict replay and historical recovery are unaffected.
+const WORK_REVISION_TYPES_FOR_CHANGES = [
+  T.WORK_ACCEPTED, T.WORK_STARTED, T.WORK_BLOCKED, T.WORK_BLOCKER_RESOLVED,
+  T.WORK_COMPLETED, T.WORK_SUPERSEDED, T.CLAIM_ACQUIRED, T.CLAIM_RELEASED,
+  T.VERIFICATION_RECORDED, T.OWNER_DECISION_RECORDED, T.DECISION_RECORDED,
+  T.SESSION_STARTED, T.SESSION_STATUS_CHANGED, T.SESSION_STOP_REQUESTED, T.SESSION_STOPPED,
+  T.WORK_HANDOFF_RECORDED
+];
+const WORK_CHANGE_TYPES = new Set([T.WORK_PROPOSED, ...WORK_REVISION_TYPES_FOR_CHANGES]);
+export function workItemChanges(events) {
+  if (!Array.isArray(events)) throw new Error("Work history must be a list");
+  const changes = [];
+  let revision = -1;
+  for (const event of events) {
+    if (!event || !WORK_CHANGE_TYPES.has(event.type)) continue;
+    if (event.type === T.WORK_PROPOSED) revision = 0; else revision += 1;
+    const data = event.data ?? {};
+    changes.push({
+      revision,
+      type: event.type,
+      actorId: event.actorId ?? null,
+      at: event.at ?? null,
+      ...(typeof data.reason === "string" && data.reason ? { reason: data.reason } : {}),
+      ...(typeof data.summary === "string" && data.summary ? { summary: data.summary } : {}),
+      ...(typeof data.decision === "string" && data.decision ? { decision: data.decision } : {}),
+      ...(typeof data.status === "string" && data.status ? { status: data.status } : {}),
+      ...(typeof data.result === "string" && data.result ? { result: data.result } : {}),
+      ...(typeof data.supersededBy === "string" && data.supersededBy ? { supersededBy: data.supersededBy } : {}),
+      ...(data.claim && typeof data.claim === "object" ? { claim: { repository: data.claim.repository ?? "", ref: data.claim.ref ?? "" } } : {}),
+      ...(typeof data.repository === "string" && data.repository ? { claim: { repository: data.repository, ref: typeof data.ref === "string" ? data.ref : "" } } : {})
+    });
+  }
+  return changes;
+}
+export function changeDescription(entry) {
+  switch (entry.type) {
+    case T.WORK_PROPOSED: return "Work proposed";
+    case T.WORK_ACCEPTED: return "Accepted";
+    case T.WORK_STARTED: return "Work started";
+    case T.WORK_BLOCKED: return entry.reason ? `Blocked: ${entry.reason}` : "Blocked";
+    case T.WORK_BLOCKER_RESOLVED: return "Blocker resolved";
+    case T.WORK_COMPLETED: return "Completion reported";
+    case T.WORK_SUPERSEDED: return entry.supersededBy ? "Superseded by replacement work" : "Superseded";
+    case T.CLAIM_ACQUIRED: return entry.claim?.repository ? `Scope claimed: ${entry.claim.repository}:${entry.claim.ref}` : "Scope claimed";
+    case T.CLAIM_RELEASED: return "Scope released";
+    case T.VERIFICATION_RECORDED: return entry.result ? `Verification: ${entry.result}` : "Verification recorded";
+    case T.OWNER_DECISION_RECORDED:
+    case T.DECISION_RECORDED: return entry.decision ? `Decision: ${entry.decision}` : "Decision recorded";
+    case T.SESSION_STARTED: return "Native session started";
+    case T.SESSION_STATUS_CHANGED: return entry.status ? `Native session: ${entry.status}` : "Native session updated";
+    case T.SESSION_STOP_REQUESTED: return "Native session stop requested";
+    case T.SESSION_STOPPED: return "Native session stopped";
+    case T.WORK_HANDOFF_RECORDED: return "Handoff recorded";
+    default: return "Updated";
+  }
+}
+
+// F4: line comparison between a resubmitted native result and the exact
+// previous version it names. Derived at read time; the versions themselves
+// stay pinned by completion event + sha256. Oversized texts fail closed to a
+// summary rather than pretending to compare.
+const DIFF_LINE_LIMIT = 400;
+export function diffResultLines(before, after) {
+  if (typeof before !== "string" || typeof after !== "string") throw new Error("Compare exact result text");
+  const a = before.split("\n"), b = after.split("\n");
+  if (a.length > DIFF_LINE_LIMIT || b.length > DIFF_LINE_LIMIT) return null;
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Uint32Array(n + 1));
+  for (let i = m - 1; i >= 0; i--) for (let j = n - 1; j >= 0; j--) {
+    dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  }
+  const rows = [];
+  let i = 0, j = 0;
+  while (i < m && j < n) {
+    if (a[i] === b[j]) { rows.push({ type: "same", text: a[i] }); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { rows.push({ type: "removed", text: a[i] }); i++; }
+    else { rows.push({ type: "added", text: b[j] }); j++; }
+  }
+  while (i < m) rows.push({ type: "removed", text: a[i++] });
+  while (j < n) rows.push({ type: "added", text: b[j++] });
+  return rows;
+}
+export function diffResultSummary(rows) {
+  const removed = rows.filter(row => row.type === "removed");
+  const added = rows.filter(row => row.type === "added");
+  const changedBytes = removed.concat(added).reduce((total, row) => total + row.text.length, 0);
+  return { removedLines: removed.length, addedLines: added.length, changedBytes };
 }

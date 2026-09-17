@@ -72,122 +72,6 @@ test("direct, MCP and CLI share one request/clarification/answer journey with ex
   auditRecovery(f.store);
 });
 
-test('human and agent hearts are appreciation, own reactions only, with exact retries', async t => {
-  const f = await fixture(t), q = f.open(), messageId = q.command.data.messageId;
-  const before = structuredClone(f.store.room('commons').state.workItems);
-  f.store.command(f.keys.owner, 'commons', { id: 'human-heart', type: 'message.reaction_set', data: { messageId, reaction: 'heart', active: true } });
-  const input = { requestId: 'agent-heart', messageId, reaction: 'heart', active: true };
-  const first = await f.client.replyAction('room_react_message', input);
-  assert.equal(first.status, 'recorded'); assert.equal(first.approvalGranted, false);
-  const adapter = await f.mcp(), retry = (await adapter.call('room_react_message', input)).result.structuredContent;
-  assert.equal(retry.duplicate, true); assert.equal(retry.eventId, first.eventId);
-  const message = () => f.store.room('commons').state.messages.find(m => m.id === messageId);
-  assert.deepEqual(message().reactions.heart, ['owner', 'producer']);
-  await f.client.replyAction('room_react_message', { ...input, requestId: 'remove-agent-heart', active: false });
-  assert.deepEqual(message().reactions.heart, ['owner']);
-  assert.deepEqual(f.store.room('commons').state.workItems, before);
-  assert.equal(validReplyArguments('room_react_message', { ...input, memberId: 'owner' }), false);
-  assert.equal(validReplyArguments('room_react_message', { ...input, reaction: 'approve' }), false);
-  f.store.issueAccessKey('commons', 'producer');
-  await assert.rejects(f.client.replyAction('room_react_message', { ...input, requestId: 'revoked-heart' }), { status: 401 });
-});
-
-test("ordinary agent chat crosses direct, MCP and CLI without creating requests or work", async t => {
-  const f = await fixture(t), before = f.store.snapshot(f.keys.owner, "commons");
-  const input = { requestId: "ordinary-root", body: "Here is a useful observation for the room." };
-  const posted = await f.client.replyAction("room_post_message", input);
-  assert.equal(posted.status, "recorded");
-  assert.equal(posted.requestMessageId, null);
-  assert.equal(posted.appliedRequestRevision, null);
-  assert.equal(posted.next, null);
-  const adapter = await f.mcp();
-  const retry = (await adapter.call("room_post_message", input)).result.structuredContent;
-  assert.equal(retry.duplicate, true);
-  assert.equal(retry.eventId, posted.eventId);
-  const addressed = await f.cli("room_post_message", {
-    requestId: "ordinary-addressed", body: "An observation, not a formal request.", toMemberId: "reviewer"
-  });
-  assert.equal(addressed.code, 0, addressed.err);
-  assert.equal(JSON.parse(addressed.out).status, "recorded");
-  const after = f.store.snapshot(f.keys.owner, "commons");
-  assert.equal(after.sequence, before.sequence + 2);
-  assert.deepEqual(after.state.workItems, before.state.workItems);
-  assert.deepEqual(after.state.replyRequests, before.state.replyRequests);
-  assert.equal(after.cursor, before.cursor);
-  const message = after.state.messages.find(item => item.id === posted.messageId);
-  assert.equal(message.authorId, "producer");
-  assert.equal(message.body, input.body);
-  assert.equal(message.replyToId, null);
-  await assert.rejects(f.client.replyAction("room_post_message", { ...input, body: "Changed" }), { code: "idempotency_conflict" });
-  auditRecovery(f.store);
-});
-
-test("request run controls share direct MCP and CLI receipts without answering or executing", async t => {
-  const f = await fixture(t), q = f.open(), requestMessageId = q.command.data.messageId;
-  const before = f.store.snapshot(f.keys.owner, "commons").state.workItems;
-  const context = await f.client.replyContext(requestMessageId);
-  assert.equal(context.current.runContractVersion, 1); assert.equal(context.current.run, null);
-  const input = { requestId: "claim-run", requestMessageId, expectedRevision: 0, runId: "external-run",
-    contextEventId: context.current.contextEventId, instructionsRevision: context.current.instructionsRevision,
-    maxRuntimeMs: 10000, maxOutputBytes: 4096 };
-  const adapter = await f.mcp();
-  const claimed = (await adapter.call("room_claim_request_run", input)).result.structuredContent;
-  assert.equal(claimed.status, "recorded"); assert.equal(claimed.processStarted, false);
-  assert.equal(claimed.appliedRunRevision, 1); assert.equal(claimed.duplicate, false);
-  const current = await f.client.replyContext(requestMessageId);
-  assert.equal(current.current.run.runId, input.runId);
-  const stopped = await f.cli("room_stop_request_run", { requestId: "stop-run", requestMessageId, runId: input.runId, expectedRevision: 1 });
-  assert.equal(stopped.code, 0, stopped.err);
-  assert.equal(JSON.parse(stopped.out).appliedRunRevision, 2);
-  const retry = await f.client.replyAction("room_claim_request_run", input);
-  assert.equal(retry.eventId, claimed.eventId); assert.equal(retry.duplicate, true); assert.equal(retry.currentStateVerified, false);
-  const finished = await f.client.replyAction("room_finish_request_run", { requestId: "finish-run", requestMessageId, runId: input.runId, expectedRevision: 2, status: "cancelled" });
-  assert.equal(finished.appliedRunRevision, 3);
-  assert.equal((await f.client.replyContext(requestMessageId)).current.run.status, "cancelled");
-  assert.equal(f.store.room("commons").state.replyRequests[requestMessageId].status, "open");
-  assert.deepEqual(f.store.snapshot(f.keys.owner, "commons").state.workItems, before);
-  await assert.rejects(f.client.replyAction("room_claim_request_run", { ...input, maxRuntimeMs: 9000 }), { code: "idempotency_conflict" });
-  for (const extra of [{ actorId: "owner" }, { command: "/bin/sh" }, { token: "secret" }]) assert.equal(validReplyArguments("room_claim_request_run", { ...input, ...extra }), false);
-  auditRecovery(f.store);
-});
-
-test("selected run metadata rejects wrong identity, malformed bounds and unknown contract versions", async t => {
-  const f = await fixture(t), q = f.open(), requestMessageId = q.command.data.messageId;
-  await f.client.replyAction("room_claim_request_run", { requestId: "claim", requestMessageId, expectedRevision: 0, runId: "run", contextEventId: q.receipt.event.id, instructionsRevision: 0, maxRuntimeMs: 10000, maxOutputBytes: 4096 });
-  const source = await f.client.replyContext(requestMessageId), selection = { name: "room_read_request", args: { requestMessageId }, roomId: "commons" };
-  for (const corrupt of [value => { value.current.run.memberId = "owner"; }, value => { value.current.run.requestMessageId = "other"; },
-    value => { value.current.run.maxRuntimeMs = 300001; }, value => { value.current.run.deadlineAt = value.current.run.startedAt; },
-    value => { value.current.run.usedRunIds.push("run"); }, value => { value.current.run.secret = "not allowed"; },
-    value => { value.current.runContractVersion = 2; }, value => { delete value.current.run; }]) {
-    const value = structuredClone(source); corrupt(value);
-    assert.throws(() => validateReplyRead(value, selection), { code: "invalid_response" });
-  }
-  const legacy = structuredClone(source); delete legacy.current.run; delete legacy.current.runContractVersion;
-  assert.equal(validateReplyRead(legacy, selection).current.run, undefined, "legacy absence remains unknown, not an idle run");
-});
-
-test("ordinary chat preserves uncertain writes and refuses action or identity injection", async t => {
-  const f = await fixture(t), input = { requestId: "chat-lost", body: "Posted once despite a lost confirmation." };
-  const lossy = new RoomAgentClient({ ...f.config, fetchImpl: async (url, options) => {
-    const response = await fetch(url, options);
-    if (url.endsWith("/commands")) throw new TypeError("Lost chat confirmation");
-    return response;
-  } });
-  await assert.rejects(lossy.replyAction("room_post_message", input), /Lost chat confirmation/);
-  const sequence = f.store.room("commons").sequence;
-  const receipt = await f.client.replyAction("room_post_message", input);
-  assert.equal(receipt.duplicate, true);
-  assert.equal(f.store.room("commons").sequence, sequence);
-  for (const extra of [{ actorId: "owner" }, { requestKind: "reply" }, { replyToId: "other" }, { token: "secret" }, { responseOutcome: "answered" }]) {
-    assert.equal(validReplyArguments("room_post_message", { ...input, ...extra }), false);
-  }
-  assert.equal(validReplyArguments("room_post_message", { ...input, body: " " }), false);
-  assert.equal(validReplyArguments("room_post_message", { ...input, body: "a".repeat(4097) }), false);
-  f.store.issueAccessKey("commons", "producer");
-  await assert.rejects(f.client.replyAction("room_post_message", { requestId: "revoked-chat", body: "No longer allowed" }), { status: 401 });
-  assert.equal(f.store.room("commons").sequence, sequence);
-});
-
 test("HTTP rejects unknown, duplicate, mixed and malformed selections; each read reauthenticates", async t => {
   const f = await fixture(t), q = f.open(), headers = { Authorization: "Bearer " + f.keys.producer };
   const query = async (route, suffix, extraHeaders = {}) => fetch(f.origin + "/api/rooms/commons/" + route + "?" + suffix, { headers: { ...headers, ...extraHeaders } });
@@ -255,7 +139,7 @@ test("read validators refuse changed identity, window, body, lineage and answer 
 });
 
 test("reply tool schemas are finite and partial/null bundles cannot be silently converted", () => {
-  assert.equal(replyTools.length, 20);
+  assert.equal(replyTools.length, 7);
   for (const name of ["room_respond_to_request", "room_request_reply", "room_cancel_request"]) {
     assert.equal(validReplyArguments(name, {}), false);
     assert.equal(validReplyArguments(name, { token: "secret" }), false);

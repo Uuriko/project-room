@@ -18,11 +18,15 @@
           </div>
         </div>
         <div class="topbar-actions">
-          <button id="project-help-button" class="button ghost icon-button" type="button" aria-label="About Project Room and getting started" title="Help">?</button>
           <span id="identity-label">Checking session…</span>
           <button id="invite-people-button" class="button primary" type="button" hidden>Invite</button>
           <button id="refresh-button" class="button ghost icon-button" type="button" aria-label="Refresh connection" title="Refresh connection"><span aria-hidden="true">↻</span></button>
-          <button id="signout-button" class="button ghost" type="button" hidden>Sign out</button>
+          <div class="session-menu" id="session-menu">
+            <button id="session-menu-button" class="button ghost icon-button" type="button" aria-expanded="false" aria-controls="session-menu-panel" aria-label="Session and account actions"><span aria-hidden="true">⋮</span></button>
+            <div id="session-menu-panel" class="session-menu-panel">
+              <button id="signout-button" class="button ghost" type="button" hidden>Sign out</button>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -31,15 +35,9 @@
         <details id="connection-details"><summary aria-label="Connection details">Details</summary><p id="connection-explanation">Connecting to room service…</p></details>
       </div>
       <section id="auth-panel" class="auth-panel panel" aria-labelledby="auth-title" hidden>
-        <h1 id="auth-title" class="welcome-wordmark" tabindex="-1">Project <span>Room</span></h1>
-        <button id="copy-agent-setup" class="button agent-setup-button" type="button">Copy agent setup <span aria-hidden="true">↗</span></button>
-        <p id="agent-setup-status" class="form-hint" role="status"></p>
-        <div id="provider-join" hidden>
-          <button id="provider-join-button" class="button primary" type="button">Join</button>
-          <p id="provider-join-status" class="form-hint" role="status"></p>
-        </div>
-        <details id="key-access"><summary id="sign-in-entry" class="button primary">Sign in</summary>
-        <div id="auth-kind" class="auth-kind" role="radiogroup" aria-label="What are you signing in with?">
+        <h1 id="auth-title" tabindex="-1">Welcome.</h1>
+        <p id="auth-lead" class="form-hint">Paste your room key. Same browser as last time? You may already be in.</p>
+        <div id="auth-kind" class="auth-kind" role="group" aria-label="What are you signing in with?">
           <button type="button" id="auth-kind-room" class="button ghost" aria-pressed="true">Room key</button>
           <button type="button" id="auth-kind-account" class="button ghost" aria-pressed="false">Account key</button>
         </div>
@@ -49,93 +47,95 @@
             <input id="access-key" type="password" autocomplete="off" spellcheck="false" required maxlength="128" placeholder="Paste your key" aria-describedby="auth-error">
             <button type="button" id="access-key-reveal" class="button ghost" aria-pressed="false">Show</button>
           </div>
-          <label for="auth-key-file">Open key file<input id="auth-key-file" type="file" aria-describedby="auth-error"></label>
           <button class="button primary" type="submit">Enter room</button>
+          <p id="auth-error" class="status form-status" role="alert"></p>
         </form>
         <label class="invite-paste" for="invite-link">Have an invite?</label>
         <input id="invite-link" type="text" autocomplete="off" spellcheck="false" maxlength="512" placeholder="Paste the invite link">
-        <details class="access-help"><summary>Help</summary>
-          <p id="auth-lead" class="form-hint">Use a key or an invitation from the room owner.</p>
+        <p id="auth-guest-note" class="form-hint">Guest invites last about eight hours in that browser. Room keys last until they are replaced.</p>
+        <details class="access-help"><summary>Need access?</summary>
           <p id="auth-description">Ask the room owner for an invite link or room key.</p>
           <p id="auth-hint" class="form-hint">Keep your key private. Lost guest access? Ask for a new invite.</p>
-          <p id="auth-guest-note" class="form-hint">Guest access lasts about eight hours in that browser.</p>
         </details>
-        </details>
-        <p id="auth-error" class="status form-status" role="alert"></p>
+        <details class="return-help"><summary>Returning to the room?</summary><p>Use the same browser to resume an active session. Members can sign in again with their current key. If guest access has expired, ask the owner for a fresh invitation; joining again creates a new guest identity. Your earlier messages stay in the room.</p></details>
       </section>
 
-      <dialog id="project-help" class="project-help" aria-labelledby="project-help-title">
-        <header><h2 id="project-help-title">Project Room</h2><button id="project-help-close" class="button ghost icon-button" type="button" aria-label="Close help">×</button></header>
-        <p>A shared place for people and AI agents to talk, think, and get things done.</p>
-        <h3>Get started</h3>
-        <p>Sign in, open a room, and say hello. Create your own from Rooms → New room.</p>
-        <h3>Bring your agent</h3>
-        <p>Copy the setup prompt into your favorite agent. In a room, use Add agent to choose its access. You stay in control.</p>
-        <details><summary>Setup prompt</summary><label class="sr-only" for="agent-setup-prompt">Agent setup prompt</label><textarea id="agent-setup-prompt" readonly rows="10" spellcheck="false"></textarea><button id="help-copy-agent-setup" class="button" type="button">Copy prompt</button></details>
-        <h3>Need help signing in?</h3>
-        <p id="project-help-signin">Use a private account key or a room invitation. Ask the room owner for access. Never paste a human account key into an agent chat.</p>
-        <p class="form-hint">Inbox messages stay private unless you choose to share them. Connecting email is separate from signing in.</p>
-      </dialog>
-
       <nav id="workspace-nav" class="workspace-nav" aria-label="Workspace" hidden>
-        <button id="nav-inbox" type="button" aria-current="false">Inbox</button>
+        <button id="nav-inbox" type="button" aria-current="false">Inbox <span id="inbox-attention-count"></span></button>
         <button id="nav-rooms" type="button" aria-current="page">Rooms</button>
         <button id="choose-room" type="button" class="text-button" hidden>Switch room</button>
       </nav>
       <p id="account-status" class="form-hint" role="status" hidden></p>
       <section id="account-rooms-panel" class="auth-panel panel" aria-labelledby="account-rooms-title" hidden>
         <h1 id="account-rooms-title">Rooms</h1>
-        <form id="create-room-form">
-          <label class="sr-only" for="create-room-name">New room name</label>
-          <input id="create-room-name" maxlength="80" required placeholder="Room name" autocomplete="off">
-          <button class="button primary" type="submit">New room</button>
-          <p id="create-room-status" class="form-hint" role="status"></p>
-        </form>
         <p id="account-rooms-status" role="status"></p>
         <div id="account-rooms-list"></div>
         <button id="account-rooms-more" class="text-button" type="button" hidden>More</button>
         <p class="form-hint">Join a room through its invitation.</p>
+        <details id="account-room-create" class="account-room-create">
+          <summary>New room</summary>
+          <form id="account-room-form" class="account-room-form" autocomplete="off">
+            <label for="account-room-title">Room name</label>
+            <input id="account-room-title" name="title" type="text" maxlength="120" required>
+            <label for="account-room-purpose">Purpose</label>
+            <textarea id="account-room-purpose" name="purpose" rows="2" maxlength="1000" required></textarea>
+            <label for="account-room-kind">Kind</label>
+            <select id="account-room-kind" name="kind"><option value="personal">Personal</option><option value="organization">Organization</option></select>
+            <label for="account-room-name">Your name in this room</label>
+            <input id="account-room-name" name="displayName" type="text" maxlength="80" required>
+            <div class="account-room-actions">
+              <button id="account-room-submit" class="button" type="submit">Create room</button>
+              <p id="account-room-status" class="status form-status" role="status"></p>
+            </div>
+          </form>
+          <p class="form-hint">Creating a room needs membership administration in one of your rooms. Archived rooms stay readable and exportable.</p>
+        </details>
       </section>
       <section id="inbox-panel" class="inbox-panel" aria-label="Your inbox" hidden>
         <aside class="inbox-sidebar">
           <header><h1 id="inbox-heading" tabindex="-1">Inbox</h1><button id="inbox-refresh" class="button ghost icon-button" type="button" aria-label="Refresh inbox">↻</button></header>
-          <div id="inbox-views" class="inbox-views" role="group" aria-label="Inbox view">
-            <button type="button" data-inbox-view="all" aria-pressed="true">All</button>
-            <button type="button" data-inbox-view="email" aria-pressed="false">Email</button>
-            <button type="button" data-inbox-view="messages" aria-pressed="false">Messages</button>
-          </div>
-          <input id="inbox-search" type="search" placeholder="Search" maxlength="200" autocomplete="off" aria-label="Search downloaded senders and subjects" title="Search downloaded senders and subjects. Shortcut: /">
           <p id="inbox-status" role="status"></p>
-          <details id="inbox-connections">
-            <summary>Connections</summary>
-            <p id="inbox-connection-status" class="form-hint" role="status"></p>
-            <form id="inbox-gmail-form" hidden>
-              <label for="inbox-gmail-address">Gmail address</label>
-              <input id="inbox-gmail-address" type="email" required autocomplete="email" maxlength="254">
-              <button class="button secondary" type="submit">Connect Gmail</button>
-              <p class="form-hint">Read-only. Messages stay private.</p>
-            </form>
-            <div id="inbox-connection-list"></div>
-            <div id="inbox-telegram-list"></div>
-            <div id="inbox-messaging-list"></div>
-            <p id="inbox-messaging-status" class="form-hint" role="status"></p>
-            <p id="inbox-telegram-status" class="form-hint" role="status"></p>
-            <details class="messaging-setup"><summary>Messaging services</summary>
-              <p class="form-hint">Telegram supports connected bot chats. Slack and SMS setup is in progress.</p>
-              <p class="form-hint">Messages stay private. Personal chat history isn’t connected automatically.</p>
-            </details>
-          </details>
+          <div id="inbox-filters" class="inbox-filters" role="group" aria-label="Filter messages" hidden>
+            <label>Channel <select id="inbox-filter-channel"></select></label>
+            <label>Connection <select id="inbox-filter-connection"></select></label>
+            <label class="inbox-filter-toggle"><input id="inbox-group-toggle" type="checkbox" checked> Group by connection</label>
+          </div>
           <div id="inbox-list" aria-label="Messages"></div>
-          <div id="inbox-empty"><button id="inbox-connect-empty" class="text-button" type="button">Connect email</button></div>
+          <p id="inbox-empty" class="form-hint">Sample inbox. Add a connection below. Email connections are local fixtures for now, with no real mailbox behind them. Telegram can go live once the deployment's bot token and webhook secret bindings are set; until then nothing arrives and replies stay on this server as samples.</p>
+          <section id="inbox-connections" class="inbox-connections" aria-label="Connections" hidden></section>
+          <details id="inbox-add-connection" class="inbox-add-connection" hidden>
+            <summary>Add connection</summary>
+            <form id="inbox-connection-form" class="inbox-connection-form">
+              <label for="inbox-connection-channel">Channel</label>
+              <select id="inbox-connection-channel" name="channel"><option value="telegram">Telegram bot</option><option value="email">Email mailbox (fixture)</option></select>
+              <label for="inbox-connection-id">Connection id</label>
+              <input id="inbox-connection-id" name="id" type="text" value="telegram-bot" maxlength="128" required autocomplete="off">
+              <div data-channel="telegram">
+                <label for="inbox-connection-bot-id">Bot id</label>
+                <input id="inbox-connection-bot-id" name="bot-id" type="text" inputmode="numeric" maxlength="20" placeholder="digits before the colon in the token" required autocomplete="off">
+                <label for="inbox-connection-username">Bot username</label>
+                <input id="inbox-connection-username" name="username" type="text" maxlength="33" placeholder="your_room_bot" required autocomplete="off">
+              </div>
+              <div data-channel="email" hidden>
+                <label for="inbox-connection-address">Mailbox address</label>
+                <input id="inbox-connection-address" name="address" type="email" maxlength="320" placeholder="you@example.test" autocomplete="off">
+              </div>
+              <label for="inbox-connection-name">Display name <span class="form-hint">(optional)</span></label>
+              <input id="inbox-connection-name" name="name" type="text" maxlength="200" autocomplete="off">
+              <p class="form-hint">Never paste a bot token or a webhook secret here; those are deployment bindings.</p>
+              <div class="inbox-draft-actions"><span id="inbox-connection-form-status" role="status"></span><button class="button secondary" type="submit">Add</button></div>
+            </form>
+          </details>
         </aside>
         <button id="inbox-back" class="text-button inbox-back" type="button">← Inbox</button>
         <article id="inbox-reader" class="inbox-reader" hidden>
-          <header class="inbox-source-heading"><div><span id="inbox-source-label" class="form-hint">Sample message · only you</span><h2 id="inbox-subject"></h2></div><button id="inbox-ask" class="button secondary" type="button">Ask room</button></header>
+          <header class="inbox-source-heading"><div><span id="inbox-source-label" class="form-hint">Sample message · only you</span> <span id="inbox-addressed" class="inbox-needs-you" hidden>Addressed to you</span><h2 id="inbox-subject"></h2></div><button id="inbox-ask" class="button secondary" type="button">Ask room</button> <button id="inbox-thread-toggle" class="button secondary" type="button">Conversation</button></header>
           <p id="inbox-addresses" class="form-hint"></p>
           <details id="inbox-email-details" class="form-hint" hidden><summary>Details</summary><div id="inbox-email-metadata"></div></details>
+          <section id="inbox-attachments" class="form-hint" aria-label="Attachments" hidden><h3>Attachments</h3><ul id="inbox-attachment-list"></ul><p class="form-hint">Names and sizes only — file downloads are unavailable.</p></section>
+          <section id="inbox-thread" class="form-hint" aria-label="Conversation" hidden><h3>Conversation</h3><div id="inbox-thread-list"></div></section>
           <p id="inbox-source-notice" class="form-hint" hidden></p>
           <div id="inbox-source-body" class="inbox-source-body"></div>
-          <details id="inbox-grants"><summary>Private shares</summary><div id="inbox-grant-list"></div></details>
           <section id="inbox-results" class="inbox-results" aria-label="Related room work" hidden><h3>From the room</h3><div id="inbox-result-list"></div></section>
           <form id="inbox-draft-form" class="inbox-draft-form">
             <label for="inbox-draft">Private reply draft</label>
@@ -165,9 +165,7 @@
       </section>
       <dialog id="inbox-share-dialog" class="inbox-share-dialog" aria-labelledby="inbox-share-title">
         <h2 id="inbox-share-title">Share with room</h2><p id="inbox-share-audience"></p>
-        <label for="inbox-share-scope">Share with</label><select id="inbox-share-scope"><option value="room">Room</option><option value="private">Selected people &amp; agents</option></select>
-        <fieldset id="inbox-share-members" hidden><legend>Recipients</legend><div id="inbox-share-member-list"></div></fieldset>
-        <p id="inbox-share-boundary" class="form-hint">Selected text becomes room history, including for future members.</p>
+        <p class="form-hint">Selected text becomes room history, including for future members.</p>
         <div id="inbox-share-paragraphs"></div><p id="inbox-share-status" role="status"></p>
         <div class="inbox-draft-actions"><button id="inbox-share-close" class="button ghost" type="button">Close</button><button id="inbox-share-confirm" class="button primary" type="button" disabled>Share</button></div>
       </dialog>
@@ -207,7 +205,9 @@
           <header class="room-heading">
             <div>
               <h1 id="room-title" tabindex="-1">Project Room</h1>
-              <details id="room-about" class="room-about"><summary>About</summary><p class="room-purpose"></p><button id="room-instructions-open" class="button ghost" type="button" hidden>Room instructions</button><button id="automations-open" class="button ghost" type="button">Automations</button></details>
+              <span id="room-kind-badge" class="room-kind-badge" hidden></span>
+              <details id="room-about" class="room-about"><summary>About</summary><p class="room-purpose"></p><button id="room-instructions-open" class="button ghost" type="button" hidden>Room instructions</button><div class="room-lifecycle-actions"><button id="room-archive-button" class="button ghost" type="button" hidden>Archive room</button><button id="room-leave-button" class="button ghost" type="button" hidden>Leave room</button></div></details>
+              <p id="room-archived-note" class="room-archived-note" role="status" hidden></p>
             </div>
             <div class="room-heading-actions">
               <div class="room-presence-summary">
@@ -225,11 +225,18 @@
           <details id="return-brief-panel" class="panel return-brief-panel">
             <summary>
               <span id="return-brief-heading">Catch me up</span>
-              <span class="catchup-signals"><span id="catchup-count"></span><small id="reminder-count" hidden></small></span>
+              <span class="catchup-signals"><span id="catchup-count"></span><small id="notification-count" hidden></small><small id="reminder-count" hidden></small></span>
             </summary>
             <div class="return-brief-body">
               <p id="summary-grid" class="sr-only"></p>
               <p id="rb-status" class="rb-note" role="status" aria-live="polite"></p>
+              <section id="notification-panel" aria-labelledby="notification-heading" hidden>
+                <h3 id="notification-heading">Notifications</h3>
+                <p id="notification-status" class="rb-note" role="status"></p>
+                <ul id="notification-list" class="rb-list notification-list"></ul>
+                <div class="rb-actions"><button id="notification-read-button" class="button secondary" type="button" disabled>Mark read</button></div>
+                <p class="rb-note">Mentions, replies and work that names you, filtered by your notification preferences. Reading runs no one; marking read moves your caught-up marker.</p>
+              </section>
               <section id="reminder-panel" aria-label="Your reminders" hidden>
                 <h3 id="reminder-due-heading">Your reminders</h3>
                 <p id="reminder-load-error" class="rb-note" role="status"></p>
@@ -244,12 +251,12 @@
                 <ul id="rb-attention-list" class="rb-list"></ul>
                 <button id="rb-show-all" class="text-button" type="button" aria-expanded="false" aria-controls="rb-attention-list" hidden>Show all</button>
                 <details id="rb-involving-section">
-                <summary id="rb-involving-heading">Ongoing</summary>
+                <summary id="rb-involving-heading" class="section-summary"><span class="section-label"><strong>Ongoing</strong></span></summary>
                 <ul id="rb-involving-list" class="rb-list"></ul>
                 </details>
               </section>
               <details id="rb-history-section">
-                <summary id="rb-history-heading">Updates <span id="rb-history-count"></span></summary>
+                <summary id="rb-history-heading" class="section-summary"><span class="section-label"><strong>Updates</strong></span><span id="rb-history-count" class="count-chip"></span></summary>
                 <p id="rb-current-boundary" class="rb-boundary"></p>
                 <p id="rb-history-boundary" class="rb-boundary"></p>
                 <ul id="rb-history-list" class="rb-list rb-history"></ul>
@@ -272,7 +279,7 @@
             </div>
             <form id="search-form" class="conversation-search" role="search" aria-label="Search this room">
               <label class="sr-only" for="message-search">Search messages and work</label>
-              <div class="search-row"><input id="message-search" type="search" maxlength="200" placeholder="Search room…" autocomplete="off" aria-controls="search-results"><button id="search-mentions" class="button ghost" type="button" aria-pressed="false">Mentioned you</button><button id="clear-search" class="button ghost" type="button" hidden>Clear</button></div>
+              <div class="search-row"><input id="message-search" type="search" maxlength="200" placeholder="Search room…" autocomplete="off" aria-controls="search-results"><button id="search-mentions" class="button ghost" type="button" aria-pressed="false">Mentioned you</button><button id="search-pinned" class="button ghost" type="button" aria-pressed="false">Pinned only</button><button id="clear-search" class="button ghost" type="button" hidden>Clear</button></div>
             </form>
             <section id="search-results" class="search-results" aria-label="Messages and work search results" hidden>
               <p id="search-count" role="status"></p>
@@ -284,10 +291,13 @@
             </div>
             <p id="conversation-announcement" class="sr-only" role="status" aria-live="polite"></p>
             <div id="room-guide" class="room-guide" hidden>
-              <p id="room-guide-copy" role="status" aria-live="polite"></p>
-              <button type="button" id="room-guide-next" class="button ghost">Next</button>
-              <button type="button" id="room-guide-dismiss" class="button ghost">Skip</button>
+              <p>This is the chat. Write below. Type <kbd>@</kbd> to address a person or agent. Invite people. Plug AI agents in from <strong>People</strong> — they join this conversation like anyone else. Inbox uses <strong>Account key</strong>.</p>
+              <button type="button" id="room-guide-dismiss" class="button ghost">Got it</button>
             </div>
+            <details id="pinned-panel" class="pinned-panel" hidden>
+              <summary id="pinned-heading" class="section-summary"><span class="section-label"><strong>Pinned</strong></span><span id="pinned-count" class="count-chip"></span></summary>
+              <ol id="pinned-list" class="pinned-list" aria-labelledby="pinned-heading"></ol>
+            </details>
             <ol id="message-list" class="message-list" tabindex="0" aria-label="Conversation messages"></ol>
             <button id="new-messages-button" class="new-messages-button" type="button" hidden></button>
             <div id="reply-bar" class="reply-bar" hidden><span id="reply-context"></span><span class="reply-bar-actions"><button id="reply-mention" type="button" class="button ghost" hidden aria-pressed="false">Also @</button><button id="cancel-reply" type="button" class="button ghost">Cancel reply</button></span></div>
@@ -305,21 +315,17 @@
                 <button id="request-exit" class="button ghost" type="button">Back to chat</button>
               </div>
               <div class="composer-row">
-                <button id="attach-file" class="button ghost" type="button" aria-label="Attach files" title="Attach files">+</button>
-                <input id="file-picker" type="file" multiple hidden>
-                <textarea id="message-input" rows="2" maxlength="4000" placeholder="Message the room…" aria-describedby="draft-hint" aria-controls="mention-list" required></textarea>
+                <textarea id="message-input" rows="2" maxlength="4000" placeholder="Write to the room… @ to address someone" aria-describedby="draft-hint" aria-controls="mention-list" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" required></textarea>
                 <button class="button primary icon-button" type="submit" aria-label="Send" title="Send"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>
               </div>
               <ul id="mention-list" class="mention-list" role="listbox" aria-label="People and agents" hidden></ul>
-              <div id="composer-files" aria-label="Attached files"></div>
-              <p id="file-upload-status" class="sr-only" role="status"></p>
               <p id="composer-status" class="status form-status" role="status"></p>
-              <details id="composer-options" class="conversation-boundaries"><summary>Options</summary>
+              <details id="composer-options" class="conversation-boundaries"><summary class="section-summary"><span class="section-label"><strong>Options</strong></span></summary>
                 <p id="draft-hint" class="form-hint">Enter to send · Shift + Enter for a new line</p>
                 <button id="request-reply" class="button ghost" type="button" hidden>Request a reply</button>
                 <label class="form-hint draft-recovery-toggle"><input id="remember-drafts" type="checkbox" aria-describedby="draft-recovery-status"> Remember drafts</label>
                 <p id="draft-recovery-status" class="form-hint" role="status">This tab only. Use a trusted device. Clears after 12 hours or sign-out.</p>
-                <p>Use @ to address someone. Visible to everyone here. Addressing an agent doesn’t run it or grant access.</p>
+                <p>Visible to everyone here. Addressing an agent doesn’t run it or grant access.</p>
               </details>
             </form>
             <span id="cursor-label" class="sr-only"></span>
@@ -328,10 +334,24 @@
 
         <aside class="context-rail">
           <details id="people-panel" class="panel presence-panel">
-            <summary id="presence-title">People & agents</summary>
+            <summary id="presence-title" class="section-summary"><span class="section-label"><strong>People & agents</strong></span></summary>
             <button id="connect-agent-button" class="button secondary" type="button" hidden>Add agent</button>
             <p id="people-hint" class="form-hint"></p>
             <div id="presence-list" class="presence-list"></div>
+          </details>
+          <details id="spend-panel" class="panel presence-panel spend-panel" data-spend-allowance="none">
+            <summary class="section-summary"><span class="section-label"><strong>Agent spend</strong></span><span id="spend-summary" class="summary-note"></span></summary>
+            <p id="spend-figures" class="form-hint"></p>
+            <form id="spend-allowance-form" class="spend-allowance-form" hidden>
+              <label>Allowance (USD) <input id="spend-allowance-input" type="number" min="0" max="1000000" step="0.01" inputmode="decimal" required></label>
+              <label>Over (days) <input id="spend-period-input" type="number" min="1" max="365" step="1" value="30" required></label>
+              <div class="spend-allowance-actions">
+                <button class="button secondary" type="submit">Set allowance</button>
+                <button id="spend-allowance-remove" class="button ghost" type="button" hidden>Remove</button>
+              </div>
+              <p class="form-status form-hint" role="status"></p>
+            </form>
+            <p id="spend-note" class="form-hint"></p>
           </details>
 
 
@@ -345,6 +365,9 @@
               </div>
               <button id="new-work-button" class="button secondary" type="button">New</button>
             </div>
+            <div id="recipe-strip" class="recipe-strip" hidden></div>
+            <button id="recipe-preview-toggle" class="button ghost" type="button" hidden>Preview recipes</button>
+            <div id="recipe-preview" class="recipe-preview" hidden></div>
             <button id="resume-action" class="button secondary pending-save" type="button" hidden>Check pending save</button>
             <dialog id="work-dialog" aria-labelledby="new-work-title">
             <form id="new-work-form" class="new-work-form" hidden>
@@ -352,21 +375,23 @@
               <input id="source-message-id" type="hidden">
               <div id="source-context" class="source-context" hidden></div>
               <p id="work-reuse-hint" class="form-hint" hidden>Only outcome and done criteria copied.</p>
+              <label id="work-recipe-field" hidden>Start from a recipe <select id="work-recipe-select"><option value="">Blank outcome</option></select></label>
               <label>Outcome <textarea id="work-title-input" rows="1" maxlength="4096" required></textarea></label>
               <label>Done when… <textarea id="work-done-input" rows="2" maxlength="4096" required></textarea></label>
               <label>Owner <select id="assignee-select" required></select></label>
               <label id="verifier-field">Reviewer <select id="verifier-select" required aria-describedby="reviewer-unavailable"></select></label>
               <div id="reviewer-unavailable" class="reviewer-unavailable" hidden>
-                <p>No independent reviewer available. Change the owner or turn off review.</p>
+                <p id="reviewer-unavailable-text">No independent reviewer available. Change the owner or turn off review.</p>
                 <button id="review-settings-button" class="button secondary" type="button">Review settings</button>
               </div>
-              <details id="work-options"><summary>Review & permissions <span id="work-options-summary"></span></summary>
+              <details id="work-options"><summary class="section-summary"><span class="section-label"><strong>Review & permissions</strong></span><span id="work-options-summary" class="summary-note"></span></summary>
               <label>Mode <select id="work-mode-select"><option value="read">Read / think / review</option><option value="write">Authorized external write</option></select></label>
               <fieldset class="work-checks" aria-describedby="work-checks-help">
                 <legend>Required to finish</legend>
                 <label class="check-option"><input id="require-verification" type="checkbox" checked><span>Independent review</span></label>
                 <label class="check-option"><input id="require-decision" type="checkbox" checked><span>Owner approval</span></label>
                 <p id="work-checks-help" class="form-hint">Evidence is always required.</p>
+                <p id="work-policy-note" class="form-hint" hidden></p>
               </fieldset>
               </details>
               <p class="form-hint">Creates a record, not permission to act elsewhere.</p>
@@ -379,17 +404,66 @@
               </div>
             </form>
             </dialog>
+            <dialog id="decision-dialog" aria-labelledby="decision-title">
+            <form id="decision-form">
+              <h2 id="decision-title">Record decision</h2>
+              <p id="decision-source" class="source-context"></p>
+              <label>Decision <textarea id="decision-statement-input" rows="2" maxlength="500" required></textarea></label>
+              <label>Note (optional) <input id="decision-note-input" maxlength="500"></label>
+              <p class="form-hint">Records a source-backed decision in the room history. A suggestion becomes policy only through this act.</p>
+              <p id="decision-status" class="status form-status" role="alert"></p>
+              <div class="form-actions">
+                <button id="close-decision" class="button ghost" type="button">Cancel</button>
+                <button class="button primary" type="submit">Save decision</button>
+              </div>
+            </form>
+            </dialog>
+            <dialog id="report-dialog" aria-labelledby="report-title">
+            <form id="report-form">
+              <h2 id="report-title">Report to the room owner</h2>
+              <p id="report-source" class="source-context"></p>
+              <label>Why are you reporting this? <textarea id="report-reason-input" rows="2" maxlength="280" required></textarea></label>
+              <p class="form-hint">Only the room owner sees your report and your name. Nothing is posted to the room or sent outside it. To stop seeing this person's messages yourself, use Mute instead.</p>
+              <p id="report-status" class="status form-status" role="alert"></p>
+              <div class="form-actions">
+                <button id="close-report" class="button ghost" type="button">Cancel</button>
+                <button class="button primary" type="submit">Send report</button>
+              </div>
+            </form>
+            </dialog>
             <div id="work-list" class="work-list"></div>
             <div id="room-results-list" class="work-list" aria-label="Completed results" hidden></div>
           </section>
 
           <details id="record-panel" class="panel record-panel">
-            <summary class="panel-header">
-              <span><strong id="record-title">History</strong></span>
+            <summary class="panel-header section-summary">
+              <span class="section-label"><strong id="record-title">History</strong></span>
               <span id="event-count" class="count-chip"></span>
             </summary>
+            <details id="decision-section">
+              <summary class="panel-header section-summary"><span class="section-label"><strong>Decisions</strong></span><span id="decision-count" class="count-chip"></span></summary>
+              <ul id="decision-list" class="rb-list"></ul>
+            </details>
+            <details id="reports-section" hidden>
+              <summary class="panel-header section-summary"><span class="section-label"><strong>Reports</strong></span><span id="report-count" class="count-chip"></span></summary>
+              <p class="form-hint">Messages members reported to you. Only the room owner sees this list and who reported.</p>
+              <p id="report-list-status" class="status form-status" role="status"></p>
+              <button id="report-refresh" class="button secondary" type="button">Refresh reports</button>
+              <ul id="report-list" class="rb-list"></ul>
+            </details>
             <ol id="event-list" class="event-list"></ol>
+            <div class="record-actions"><button id="record-export-html" class="button ghost" type="button">Export as HTML</button><p id="record-export-status" class="form-hint" role="status"></p></div>
             <p class="prototype-note">Pilot. Chat and members live here. Agents you add are named people in this room, not a hosted AI runtime.</p>
+          </details>
+          <details id="usage-panel" class="panel usage-panel">
+            <summary class="panel-header section-summary">
+              <span class="section-label"><strong id="usage-title">Usage</strong></span>
+              <span id="usage-period" class="count-chip"></span>
+            </summary>
+            <p id="usage-status" class="form-hint" role="status"></p>
+            <div id="usage-grid" class="usage-grid"></div>
+            <div class="usage-actions"><button id="usage-refresh" class="button ghost" type="button" hidden>Refresh usage</button></div>
+            <p class="form-hint">Read-only. Spend is what agents reported for their sessions; unreported spend stays unknown, never zero.</p>
           </details>
         </aside>
       </main>
@@ -414,6 +488,22 @@
         <label>When to ask for help<textarea name="escalation" rows="2" maxlength="1000"></textarea></label>
         <p class="form-hint">Optional · 1,000 characters each. Clear all fields to remove.</p>
       </form>
+      <section id="room-policy" class="room-policy" aria-labelledby="room-policy-title" hidden>
+        <h3 id="room-policy-title">Review policy</h3>
+        <p id="room-policy-current" class="room-policy-current"></p>
+        <div id="room-policy-owner" hidden>
+          <label for="room-policy-select">Every new outcome in this room needs</label>
+          <select id="room-policy-select" aria-describedby="room-policy-help">
+            <option value="none">Nothing extra · the proposer chooses</option>
+            <option value="review">Independent review</option>
+            <option value="decision">Owner decision</option>
+            <option value="both">Independent review and owner decision</option>
+          </select>
+          <div class="instructions-actions"><button id="room-policy-apply" class="button secondary" type="button">Apply policy</button></div>
+        </div>
+        <p id="room-policy-help" class="form-hint"></p>
+        <p id="room-policy-status" class="form-hint" role="status"></p>
+      </section>
       <p id="room-instructions-status" class="form-hint" role="status"></p>
       <div class="instructions-actions">
         <button id="room-instructions-save" class="button primary" type="submit" form="room-instructions-form">Save</button>
@@ -423,7 +513,7 @@
         <button id="room-instructions-close" class="button secondary" type="button">Close</button>
       </div>
     </dialog>
-    <dialog id="result-dialog" aria-labelledby="result-title"><h2 id="result-title">Result</h2><p id="result-status" class="form-hint" role="status"></p><pre id="result-body"></pre><div class="portable-actions"><button id="close-result" type="button" class="button secondary">Close</button><button id="result-original" type="button" class="button ghost" hidden>Original</button></div></dialog>
+    <dialog id="result-dialog" aria-labelledby="result-title"><h2 id="result-title">Result</h2><p id="result-status" class="form-hint" role="status"></p><pre id="result-body"></pre><div id="result-diff" hidden></div><div class="portable-actions"><button id="close-result" type="button" class="button secondary">Close</button><button id="result-original" type="button" class="button ghost" hidden>Original</button></div></dialog>
     <dialog id="action-dialog" aria-labelledby="action-title" aria-describedby="action-context">
       <form id="action-form">
         <h2 id="action-title"></h2>
@@ -531,8 +621,6 @@
         <p id="agent-roster-hint" class="form-hint"></p>
         <p id="agent-packet-today" class="form-hint" hidden>Use my AI, then paste the draft. No key in chat.</p>
         <ul id="agent-capabilities" class="form-hint agent-capabilities"></ul>
-        <label>Setup<select id="agent-setup-preset"><option value="max">Max</option><option value="moderate" selected>Moderate</option><option value="low">Low</option><option value="none">None</option><option value="custom">Custom</option></select></label>
-        <p id="agent-preset-hint" class="form-hint">Contribute work · 7 days</p>
         <details id="agent-connect-more"><summary>More</summary>
           <label>How they connect<select id="agent-connect-route" aria-describedby="agent-route-hint">
             <option value="packet">Chat packet — no Room key</option>
@@ -542,7 +630,7 @@
           <p id="agent-route-hint" class="form-hint"></p>
           <p id="agent-access-hint" class="form-hint"></p>
           <div class="share-settings">
-            <label>Access<select id="agent-connect-access"><option value="chat">Read & chat</option><option value="contribute" selected>Contribute work</option><option value="review">Review work</option><option value="max">Max agent access</option></select></label>
+            <label>Access<select id="agent-connect-access"><option value="chat">Read & chat</option><option value="contribute">Contribute work</option><option value="review">Review work</option></select></label>
             <label>Expires in<select id="agent-connect-expiry"><option value="1">1 day</option><option value="7" selected>7 days</option><option value="30">30 days</option></select></label>
           </div>
         </details>
@@ -587,12 +675,14 @@
         <div class="share-settings"><label>Link expires in<select id="share-link-expiry"><option value="1">1 hour</option><option value="24" selected>24 hours</option><option value="168">7 days</option></select></label>
         <label>Maximum new guests<input id="share-link-limit" type="number" min="1" max="25" value="10" required></label></div>
         </details>
+        <label class="share-purpose">Purpose · optional<select id="share-link-purpose"><option value="">Whole room</option></select></label>
         <button id="share-link-create" class="button primary" type="submit">Create link</button>
       </form>
       <div id="share-link-result" hidden>
         <label for="share-link-url">Ready to share</label><input id="share-link-url" type="text" readonly autocomplete="off" spellcheck="false">
         <button id="share-link-copy" class="button primary" type="button">Copy link</button><button id="share-link-another" class="button ghost" type="button">New link</button>
         <p class="form-hint">Save before closing. This link is shown once.</p>
+        <p id="share-purpose-note" class="form-hint" hidden></p>
         <details id="share-note"><summary>Add a note</summary>
           <label for="share-note-text">Note · optional</label>
           <textarea id="share-note-text" rows="3" maxlength="600" autocomplete="off" spellcheck="false" placeholder="What would you like a hand with?" aria-describedby="share-note-hint"></textarea>
@@ -625,25 +715,6 @@
       <p id="join-link-status" class="form-status" role="status" aria-live="polite"></p>
       <button id="join-link-retry" class="button primary" type="button" hidden>Retry</button>
       <button id="join-link-signout" class="button ghost" type="button" hidden>Sign out of expired guest session</button>
-    </dialog>
-    <dialog id="automations-dialog" aria-labelledby="automations-title">
-      <header class="automation-heading"><h2 id="automations-title">Automations</h2><button id="automations-close" class="button ghost" type="button">Close</button></header>
-      <p class="form-hint">Shared prompts. Run manually; background scheduling is off.</p>
-      <div class="automation-layout"><nav id="automation-list" aria-label="Saved automations"></nav><section>
-        <div id="automation-detail"></div><button id="automation-new" class="button ghost" type="button">New automation</button>
-        <form id="automation-form" hidden>
-          <label for="automation-title">Name</label><input id="automation-title" required maxlength="80">
-          <label for="automation-recipient">Recipient</label><select id="automation-recipient" required></select>
-          <label for="automation-prompt">Prompt</label><textarea id="automation-prompt" required maxlength="4096" rows="4"></textarea>
-          <details><summary>Limits</summary><div class="automation-limits">
-            <label>Runs<input id="automation-runs" type="number" min="1" max="100" value="10" required></label>
-            <label>Seconds per run<input id="automation-runtime" type="number" min="1" max="300" value="30" required></label>
-            <label>Output bytes<input id="automation-output" type="number" min="1" max="1048576" value="65536" required></label>
-          </div></details>
-          <button class="button primary" type="submit">Save</button><button id="automation-form-cancel" class="button ghost" type="button">Cancel</button>
-        </form>
-      </section></div>
-      <p id="automation-status" class="form-status visible" role="status"></p><button id="automation-retry" class="button primary" type="button" hidden>Retry</button>
     </dialog>
   </body>
 </html>

@@ -25,7 +25,7 @@ The coarse categories (`errorCategory` in `src/agent-error.mjs`):
 | `conflict` | 409 | The world moved: stale revision, claimed session, duplicate requestId with different input | See below — never silently retry the same input |
 | `input` | 422 | Fields refused: bad shape, bad enum, over limits | Fix the refused fields; keep any earlier uncertain `requestId` |
 | `rate_limited` | 429 | Too fast | Wait for `Retry-After`, retry the exact request |
-| `unavailable` | 503 | Maintenance | Wait; reconcile afterward |
+| `unavailable` | 503 | Maintenance, or `storage_unavailable`: the store refused the write (disk full, read-only or I/O failure) and rolled it back | Wait for `Retry-After`; retry the exact request; reconcile afterward |
 | `internal` | 5xx | Server error; nothing is claimed | Reconcile or retry the exact command |
 
 ## The conflicts that matter most to agents
@@ -38,6 +38,13 @@ new command. Do not silently rebase an approval or review.
 session. Coordinate with them (post a message) or ask a claim manager.
 Do not hammer the endpoint; claims go stale after 10 minutes without a
 heartbeat and become takeable.
+
+**`spend_allowance_exceeded`** (409) — the room owner set a spend allowance
+and this start (or this spend report) would commit more than is left. Read
+`GET /api/rooms/:id/spend-allowance` for spent, reserved, held and headroom,
+declare a smaller `budget.maxSpendCents`, or ask the owner. A related
+`422 spend_allowance_budget_required` means the room has an allowance and
+the start declared no `maxSpendCents` to reserve.
 
 **`idempotency_conflict`** — this `requestId` was already used with
 *different* input. Recover the original input; never invent a replacement

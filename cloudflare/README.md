@@ -56,6 +56,29 @@ and visitor-address adapters, not a second product.
 - `*.test-fixture.mjs` exposes synthetic setup for local tests ONLY. Never use
   these files, or `compatibility-worker.mjs`, as deployment entrypoints.
 
+## Runtime limits and logs
+
+`wrangler.jsonc` must stay comment-free: `browser.check.mjs`, `recovery-switch.check.mjs`,
+`scripts/runtime-package.mjs` and `tests/asset-packaging.test.js` read it with `JSON.parse`.
+The rationale for its `limits` and `observability` values lives here instead.
+
+- `limits.cpu_ms` is 1000. The Durable Object constructor verifies the whole audit
+  history on every cold start (provenance repair, invitation audit, help-history
+  audit). `node scripts/measure-cold-start.mjs` measured that constructor at about
+  60-70 ms wall-clock for a 10,000-event room under Node, so the earlier 50 ms cap
+  could fail the first request after each isolate restart. 1000 ms is roughly 15x
+  that measurement and still 30x below the Paid-plan default of 30,000 ms, so a
+  runaway request is still stopped quickly. The key only applies to the Standard
+  usage model (Free plan is a fixed 10 ms); the platform maximum is 300,000.
+- `observability.enabled` is true with `head_sampling_rate` 1 so console output
+  (for example the one-time "Operator bootstrap skipped" warning) and uncaught
+  errors are kept in Workers Logs for seven days. Logging every request fits the
+  included 20M events/month at pilot volume; lower the sampling rate if that
+  changes. No request bodies or credentials are logged.
+- An invalid or expired `ROOM_BOOTSTRAP_*` window is logged once per isolate and
+  skipped; the Worker keeps serving an empty workspace instead of failing every
+  request. Fix or remove both settings; nothing is provisioned until they are valid.
+
 ## Reproduce
 
 Use Node 24.19+ and pnpm. From `cloudflare/`:

@@ -1,18 +1,21 @@
-// Synthetic qualification driver. Real providers require a separately reviewed
+// Fixture qualification driver. Real providers require a separately reviewed
 // adapter, credentials, capabilities and external-send authority.
 import { createHash } from "node:crypto";
 import { ServiceError } from "./store.mjs";
+import { previewProvider } from "./inbox-outbox.mjs";
 
 const operation = (kind, value) => kind + "-" + createHash("sha256").update(JSON.stringify(value)).digest("hex");
 export class SyntheticInboxTransport {
   constructor(inbox, adapter) {
-    if (adapter?.kind !== "synthetic" || typeof adapter.submit !== "function" || typeof adapter.lookup !== "function")
-      throw new TypeError("A synthetic submit/lookup adapter is required");
+    if (typeof adapter?.kind !== "string" || !adapter.kind || typeof adapter.submit !== "function" || typeof adapter.lookup !== "function")
+      throw new TypeError("A submit/lookup adapter with a provider kind is required");
     this.inbox = inbox; this.adapter = adapter;
   }
   current(token, sourceId, sendId, binding) {
     const view = this.inbox.sends(token, sourceId, binding), send = view.sends.find(s => s.id === sendId);
     if (!send) throw new ServiceError(404, "inbox_send_not_found", "Reply attempt not found.");
+    // An attempt only ever reaches the transport for its own provider.
+    if (previewProvider(send.envelope) !== this.adapter.kind) throw new ServiceError(409, "inbox_transport_mismatch", "This reply belongs to a different provider.");
     return send;
   }
   correlation(send) { return operation("reply", [send.envelope.accountId, send.id, send.envelope.previewVersion]); }
@@ -52,4 +55,31 @@ export class SyntheticInboxTransport {
       throw error;
     }
   }
+}
+
+// Inert stand-in for a channel provider whose live bindings are not set. It
+// records what would have been sent and answers "accepted" so the reply
+// journey can be exercised end to end; nothing leaves the process and the
+// browser labels every outcome a sample. `mode = "rejected"` rehearses a
+// definitive provider refusal.
+export class FixtureChannelSender {
+  #sent = new Map(); #status; #scope; #now;
+  mode = "accepted";
+  constructor({ kind, status = null, accountId = null, connectionId = null, now = () => Date.now() }) {
+    if (typeof kind !== "string" || !kind) throw new TypeError("A provider kind is required");
+    this.kind = kind; this.#status = status; this.#scope = { accountId, connectionId }; this.#now = now;
+  }
+  async submit({ operationId, envelope }) {
+    const prior = this.#sent.get(operationId);
+    if (prior && prior.previewVersion !== envelope.previewVersion) throw new ServiceError(409, "conflicting_inbox_observation", "This operation key already recorded a different reply.");
+    if (!prior) {
+      const outcome = this.mode === "rejected" ? "rejected" : "accepted";
+      this.#sent.set(operationId, { operationId, previewVersion: envelope.previewVersion, outcome, providerId: outcome === "accepted" ? "fixture:" + operationId : null,
+        ...(outcome === "rejected" ? { code: "fixture_rejected" } : {}) });
+      this.#status?.sent(this.#scope.accountId, this.#scope.connectionId, { at: this.#now(), outcome, code: "fixture" });
+    }
+    return structuredClone(this.#sent.get(operationId));
+  }
+  async lookup({ operationId }) { const receipt = this.#sent.get(operationId); return receipt ? structuredClone(receipt) : null; }
+  get submits() { return this.#sent.size; }
 }

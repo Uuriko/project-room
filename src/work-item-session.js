@@ -79,6 +79,50 @@ export function budgetCard(budget) {
   for (const key of SESSION_BUDGET_KEYS) card[key] = budget?.[key] ?? "unknown";
   return Object.freeze(card);
 }
+// G1: attempt contract. Every session start records an attributable attempt:
+// input version (the work revision it started against), performer, the declared
+// environment and the limits in force; a stop closes the attempt with its
+// outcome and output references. The ledger derives during replay - historical
+// events carry no attempt fields and derive nulls, never errors.
+export function validateAttemptEnvironment(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || !value.trim() || value.length > 200)
+    throw new Error("Environment is a string of 1-200 characters");
+  return value;
+}
+
+export function validateAttemptOutputs(value) {
+  if (value === undefined || value === null) return null;
+  // Legacy session stops carried outputs as one free-text string; replay keeps it.
+  if (typeof value === "string") {
+    if (!value.trim() || value.length > 500) throw new Error("Outputs are 1-10 references, each a string of 1-500 characters");
+    return [value];
+  }
+  if (!Array.isArray(value) || !value.length || value.length > 10
+    || value.some(ref => typeof ref !== "string" || !ref.trim() || ref.length > 500))
+    throw new Error("Outputs are 1-10 references, each a string of 1-500 characters");
+  return [...value];
+}
+
+export function attemptLedger(item) {
+  const list = Array.isArray(item?.attempts) ? item.attempts : [];
+  return Object.freeze(list.filter(a => a && typeof a === "object" && !Array.isArray(a)
+    && Number.isSafeInteger(a.attempt) && a.attempt >= 1
+    && typeof a.performer === "string" && typeof a.startedAt === "string")
+    .map(a => Object.freeze({
+      attempt: a.attempt,
+      performer: a.performer,
+      startedAt: a.startedAt,
+      inputRevision: Number.isSafeInteger(a.inputRevision) ? a.inputRevision : null,
+      environment: typeof a.environment === "string" ? a.environment : null,
+      limits: a.limits && typeof a.limits === "object" && !Array.isArray(a.limits) ? Object.freeze({ ...a.limits }) : null,
+      endedAt: typeof a.endedAt === "string" ? a.endedAt : null,
+      outcome: a.outcome === "done" || a.outcome === "failed" ? a.outcome : null,
+      outputs: Array.isArray(a.outputs) ? Object.freeze(a.outputs.filter(o => typeof o === "string")) : null,
+      usageCents: Number.isSafeInteger(a.usageCents) ? a.usageCents : null
+    })));
+}
+
 // The tripped limit name when a live session has blown its budget, else null.
 // Spend only trips where spend is actually reported — unknown spend is not
 // evidence of anything.
@@ -107,7 +151,7 @@ export function sessionRecord(item) {
   const attempts = Number.isSafeInteger(item.attempt_count) && item.attempt_count >= 0 ? item.attempt_count : 0;
   const spend = Number.isSafeInteger(item.spend_cents) && item.spend_cents >= 0 ? item.spend_cents : null;
   return { status, stop_requested_at: stop, heartbeat_at: heartbeat, worker_member_id: worker,
-    started_at: started, attempt_count: attempts, budget, spend_cents: spend };
+    started_at: started, attempt_count: attempts, budget, spend_cents: spend, attempts: attemptLedger(item) };
 }
 
 // The member currently holding a live claim on this session, or null when the
@@ -119,7 +163,7 @@ export function sessionWorker(item, nowMs = Date.now()) {
   return session.worker_member_id;
 }
 
-export function sessionCard(item) {
+export function sessionCard(item, cancellation = null) {
   const session = sessionRecord(item);
   return {
     workItemId: item.id,
@@ -136,35 +180,64 @@ export function sessionCard(item) {
     budget: budgetCard(session.budget),
     started_at: session.started_at,
     attempt_count: session.attempt_count,
-    spendCents: session.spend_cents ?? "unknown"
+    spendCents: session.spend_cents ?? "unknown",
+    attempts: session.attempts,
+    receipts: attemptReceipts(item),
+    cancellation
   };
 }
 
-// Compact human-facing session state. A ledger update is not process telemetry.
-export function sessionRunView(item, member, nowMs = Date.now()) {
-  const session = sessionRecord(item);
-  if (session.status === "queued" && !session.stop_requested_at) return null;
-  const terminal = isTerminalSession(session.status);
-  const stale = !terminal && session.status !== "queued" && sessionWorker(item, nowMs) === null;
-  const canStop = !terminal && !session.stop_requested_at && member?.active === true
-    && !item.supersededBy && item.state !== "superseded"
-    && (member.permissions?.includes("steer") || member.id === item.accountableMemberId && member.permissions?.includes("accept_work"));
-  return { label: terminal ? session.status === "done" ? "Run ended" : "Run failed"
-    : session.stop_requested_at ? "Stop requested" : stale ? "Run unconfirmed"
-      : session.status === "suspended" ? "Run suspended" : "Run in progress",
-    detail: terminal ? "Run status only; results are reviewed separately."
-      : session.stop_requested_at ? "Waiting for runner confirmation."
-        : stale ? "No recent update. Execution is unconfirmed." : "Last reported by the runner.",
-    workerMemberId: session.worker_member_id, updatedAt: session.heartbeat_at, canStop: Boolean(canStop) };
-}
-
-export function listWorkItemSessions(workItems, status = null) {
+export function listWorkItemSessions(workItems, status = null, { members = null, nowMs = Date.now() } = {}) {
   if (status != null && !isSessionStatus(status)) throw new RangeError("Choose one session status");
   return Object.values(workItems ?? {})
     .filter(item => item && typeof item === "object" && item.supersededBy == null && item.state !== "superseded")
-    .map(sessionCard)
+    .map(item => {
+      const worker = sessionRecord(item).worker_member_id;
+      const workerActive = members && worker ? members[worker]?.active !== false : true;
+      return sessionCard(item, cancellationState(item, { nowMs, workerActive }));
+    })
     .filter(card => status == null || card.status === status)
     .sort((a, b) => a.workItemId < b.workItemId ? -1 : 1);
+}
+
+// W4-41 G6: output and usage receipts. Exact output references and measured
+// usage are linked per attempt and kept separate from budget estimates. A
+// done attempt with missing artifacts or unknown usage reads as an
+// unverified success - it cannot present as a success claim.
+export function attemptReceipts(item) {
+  const session = sessionRecord(item);
+  return Object.freeze(session.attempts.map(a => Object.freeze({
+    attempt: a.attempt,
+    outcome: a.outcome,
+    outputs: a.outputs, // exact references; null = missing artifacts
+    usageCents: a.usageCents ?? null, // measured at close; null = unknown
+    estimateCents: a.limits?.maxSpendCents ?? null, // the estimate, kept apart from measurement
+    successClaim: a.outcome !== "done" ? "not-claimed"
+      : (Array.isArray(a.outputs) && a.outputs.length > 0 && Number.isSafeInteger(a.usageCents) ? "verified" : "unverified")
+  })));
+}
+
+// W4-42 G7: meaningful cancellation. The four stops stay distinct, and
+// silence is never read as termination: a stale heartbeat is "unresponsive"
+// (process state unknown), which is exactly what a lost worker looks like.
+// Read-time derivation only; nothing historical is rewritten.
+export function cancellationState(item, { nowMs = Date.now(), workerActive = true } = {}) {
+  const session = sessionRecord(item);
+  const stopped = TERMINAL.has(session.status);
+  const unresponsive = !stopped && typeof session.heartbeat_at === "string"
+    && Number.isFinite(nowMs) && nowMs - Date.parse(session.heartbeat_at) > SESSION_HEARTBEAT_STALE_MS;
+  return Object.freeze({
+    // A polite signal was sent; the run may still be live.
+    stopRequested: !stopped && session.stop_requested_at !== null,
+    // A budget wire forbids further dispatch (name of the tripped limit).
+    dispatchDisabled: stopped ? null : budgetLimitExceeded(item, nowMs),
+    // The worker's access was revoked while a run shows live.
+    accessRevoked: !stopped && workerActive === false && session.worker_member_id !== null,
+    // An actual stop event landed (done/failed). The only termination proof.
+    runtimeStopped: stopped,
+    // Silence: heartbeat stale. Never infer termination from this.
+    unresponsive
+  });
 }
 
 export function workItemSessionContract() {
@@ -173,7 +246,7 @@ export function workItemSessionContract() {
     schemaBump: false,
     writer: 27,
     workItemFields: Object.freeze(["status", "stop_requested_at", "heartbeat_at", "worker_member_id",
-      "started_at", "attempt_count", "budget", "spend_cents"]),
+      "started_at", "attempt_count", "budget", "spend_cents", "attempts"]),
     statuses: SESSION_STATUS_LIST,
     events: SESSION_EVENT_LIST,
     workStateSeparate: true,
@@ -189,7 +262,9 @@ export function sessionCommandType(item, action, nextStatus) {
   if (action === "request_stop") return SESSION_EVENT_TYPES.STOP_REQUESTED;
   if (action !== "set_status") throw new Error("Choose set_status or request_stop");
   if (!isSessionStatus(nextStatus)) throw new Error("Choose a session status");
-  if (session.status === SESSION_STATUSES.QUEUED && nextStatus === SESSION_STATUSES.PROCESSING) {
+  // A finished (done/failed) session may be started again: that is a retry, so
+  // it goes through session.started and counts another attempt.
+  if ((session.status === SESSION_STATUSES.QUEUED || TERMINAL.has(session.status)) && nextStatus === SESSION_STATUSES.PROCESSING) {
     return SESSION_EVENT_TYPES.STARTED;
   }
   if (TERMINAL.has(nextStatus)) return SESSION_EVENT_TYPES.STOPPED;
@@ -207,17 +282,32 @@ export function applySessionFields(item, incoming) {
   const session = sessionRecord(item);
   const at = incoming.at;
   if (incoming.type === SESSION_EVENT_TYPES.STARTED) {
-    if (session.status !== SESSION_STATUSES.QUEUED || session.stop_requested_at) {
+    // A first start needs a queued session with no stop pending. A session that
+    // already finished (done/failed) may start again as a retry: attempt_count
+    // grows, heartbeat/stop/worker fields reset, and a declared maxAttempts is
+    // enforced here so the budget is unreachable by no path. A retry that
+    // declares no budget keeps the previous one — silence never widens a limit.
+    const retry = TERMINAL.has(session.status);
+    if (!retry && (session.status !== SESSION_STATUSES.QUEUED || session.stop_requested_at)) {
       throw new Error(`Invalid session transition from ${session.status}`);
     }
+    const budget = incoming.data?.budget == null && retry ? session.budget : validateSessionBudget(incoming.data?.budget);
+    const attempts = session.attempt_count + 1;
+    if (budget?.maxAttempts && attempts > budget.maxAttempts) {
+      throw new Error(`Invalid session retry: attempt ${attempts} exceeds the attempt budget of ${budget.maxAttempts}`);
+    }
+    const environment = validateAttemptEnvironment(incoming.data?.environment);
     item.status = SESSION_STATUSES.PROCESSING;
     item.stop_requested_at = null;
     item.heartbeat_at = at;
     item.worker_member_id = incoming.actorId;
     item.started_at = at;
-    item.attempt_count = session.attempt_count + 1;
-    item.budget = validateSessionBudget(incoming.data?.budget);
+    item.attempt_count = attempts;
+    item.budget = budget;
     item.spend_cents = null;
+    (Array.isArray(item.attempts) ? item.attempts : (item.attempts = [])).push({
+      attempt: attempts, performer: incoming.actorId, startedAt: at, inputRevision: item.revision,
+      environment, limits: budget, endedAt: null, outcome: null, outputs: null });
     return;
   }
   if (incoming.type === SESSION_EVENT_TYPES.STATUS_CHANGED) {
@@ -243,11 +333,60 @@ export function applySessionFields(item, incoming) {
     if (!TERMINAL.has(next)) throw new Error("Stopped session status must be done or failed");
     if (TERMINAL.has(session.status)) throw new Error(`Invalid session transition from ${session.status}`);
     item.status = next;
+    const outputs = validateAttemptOutputs(incoming.data?.outputs);
+    const attemptsList = Array.isArray(item.attempts) ? item.attempts : [];
+    const openAttempt = attemptsList.findLast(a => a && typeof a === "object" && a.endedAt == null) ?? null;
     item.stop_requested_at = session.stop_requested_at;
     item.heartbeat_at = at;
     item.worker_member_id = null;
     reportSpend(item, incoming);
+    // G6: capture measured usage at close; a later attempt resets item spend.
+    if (openAttempt) { openAttempt.endedAt = at; openAttempt.outcome = next; openAttempt.outputs = outputs;
+      openAttempt.usageCents = Number.isSafeInteger(item.spend_cents) ? item.spend_cents : null; }
     return;
   }
   throw new Error(`Unsupported event type: ${incoming.type}`);
+}
+
+// Issue #6 C3: the room spend ledger behind a room-level allowance. Derived
+// from the projection alone, so the server check, the read route and the
+// browser card all compute the same figures from the same state.
+//
+// - spentCents is the spend agents reported: measured usage at close for
+//   attempts that closed inside the period, plus the latest cumulative
+//   report of every live session (a live session always counts, however old).
+// - reservedCents is what live sessions may still spend under their declared
+//   maxSpendCents; a live session that declared no cap reserves nothing and
+//   is counted in sessions.unreserved so the gap is visible, never assumed zero.
+// - heldCents keeps the declared cap of every closed attempt in the period
+//   that never reported spend: unknown spend is held at its reservation, so
+//   it can never free allowance for the next start. Attempts with neither a
+//   report nor a cap are counted in sessions.attemptsUnreported and add nothing.
+export function spendLedger(state, { nowMs = Date.now(), periodDays = 30 } = {}) {
+  const since = nowMs - periodDays * 86400000;
+  const ledger = { periodDays, since: new Date(since).toISOString(), until: new Date(nowMs).toISOString(),
+    spentCents: 0, reservedCents: 0, heldCents: 0, committedCents: 0,
+    sessions: { live: 0, unreserved: 0, attemptsCounted: 0, attemptsUnreported: 0, attemptsHeld: 0 } };
+  for (const item of Object.values(state?.workItems ?? {})) {
+    if (!item || typeof item !== "object") continue;
+    const session = sessionRecord(item);
+    for (const attempt of session.attempts) {
+      if (attempt.endedAt === null) continue; // the open attempt is the live session below
+      if (Date.parse(attempt.endedAt) < since) continue;
+      ledger.sessions.attemptsCounted++;
+      if (attempt.usageCents !== null) ledger.spentCents += attempt.usageCents;
+      else if (Number.isSafeInteger(attempt.limits?.maxSpendCents)) { ledger.heldCents += attempt.limits.maxSpendCents; ledger.sessions.attemptsHeld++; }
+      else ledger.sessions.attemptsUnreported++;
+    }
+    if (!RUNNING.has(session.status)) continue;
+    ledger.sessions.live++;
+    ledger.sessions.attemptsCounted++;
+    const reported = session.spend_cents; // a live run that has not reported yet is covered by its reservation
+    if (reported !== null) ledger.spentCents += reported;
+    const cap = session.budget?.maxSpendCents ?? null;
+    if (cap === null) ledger.sessions.unreserved++;
+    else ledger.reservedCents += Math.max(0, cap - (reported ?? 0));
+  }
+  ledger.committedCents = ledger.spentCents + ledger.reservedCents + ledger.heldCents;
+  return ledger;
 }

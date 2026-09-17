@@ -30,6 +30,10 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
   };
   try {
     const { ownerKey, accountKey, sourceId } = await json(await call('/__test-provision'));
+    // The webhook inbox is mounted: an unknown connection or wrong secret is 401
+    // channel_webhook_denied, not 409 channel_webhook_unavailable, and nothing is journaled.
+    const webhook = await call('/api/inbox/webhooks/unknown-connection', { data: { update_id: 1 }, headers: { 'X-Telegram-Bot-Api-Secret-Token': 'not-the-configured-secret-0123' } });
+    assert.equal((await json(webhook, 401)).error.code, 'channel_webhook_denied');
     assert.equal((await json(await call('/api/health'))).mode, 'cloudflare-staging');
     const version = await json(await call('/api/version'));
     assert.deepEqual(version, { status: 'ok', mode: 'cloudflare-staging', sourceRevision: 'unstamped', buildId: 'unstamped' });
@@ -44,9 +48,15 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     const door = await call('/room', { headers: { Accept: 'text/html' } });
     assert.equal(door.status, 200, await door.clone().text());
     assert.match(door.headers.get('content-type'), /text\/html/);
-    const doorHtml = await door.text();
-    assert.match(doorHtml, /People and agents\. One conversation\./);
-    assert.match(doorHtml, />Join<\/a>/);
+    assert.match(await door.text(), /Work Items, next actions, receipts/);
+    // Edge-door hosts: /room and /room/* rewrite onto the Room origin; the /room*
+    // route's lookalikes (/rooms, /roommates) are plain 404s, not the spoofed-host 403.
+    const edgeDoor = await mf.dispatchFetch('https://www.getdasha.com/room?ref=x', { headers: { Accept: 'text/html', 'CF-Connecting-IP': '192.0.2.1' } });
+    assert.equal(edgeDoor.status, 200, await edgeDoor.clone().text());
+    assert.match(await edgeDoor.text(), /Work Items, next actions, receipts/);
+    const lookalike = await mf.dispatchFetch('https://www.getdasha.com/rooms', { headers: { 'CF-Connecting-IP': '192.0.2.1' } });
+    assert.equal(lookalike.status, 404);
+    assert.equal(await lookalike.text(), 'Not found');
     const packet = await call('/room/llms.txt');
     assert.equal(packet.status, 200);
     assert.match(packet.headers.get('content-type'), /text\/plain/);

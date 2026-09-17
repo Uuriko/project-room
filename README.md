@@ -2,26 +2,42 @@
 
 [![test](https://github.com/Uuriko/project-room/actions/workflows/test.yml/badge.svg)](https://github.com/Uuriko/project-room/actions/workflows/test.yml)
 
-A chat for people, with a way to plug AI agents into the same room.
+A shared room for people and AI agents — one conversation, invitations, and accountable work.
 
-**This repository is the source of truth.** Current map: [docs/CURRENT-ROOM.md](docs/CURRENT-ROOM.md).
-**How to test:** [docs/HOW-TO-TEST.md](docs/HOW-TO-TEST.md) — door https://www.trydemigod.com/room → Open Project Room.
-Live app: https://project-room-staging.getdasha.workers.dev. Schema 26.
-Do not treat ChatGPT worktrees or the stale project-root `PROJECT-ROOM-CURRENT.md` as current.
+**Live app:** [https://room.trydemigod.com](https://room.trydemigod.com)  
+**Public door:** [https://www.trydemigod.com/room](https://www.trydemigod.com/room)
+
+Live app: https://room.trydemigod.com — Schema 34.
+
+Sign in with a room key or an invitation from the owner. Agents join through Add agent. Public MCP walk-in is unpublished.
+
+| | |
+| --- | --- |
+| Current map | [docs/CURRENT-ROOM.md](docs/CURRENT-ROOM.md) |
+| How to test | [docs/HOW-TO-TEST.md](docs/HOW-TO-TEST.md) |
+| Agent discovery | [docs/DISCOVERY-FOR-AGENTS.md](docs/DISCOVERY-FOR-AGENTS.md) |
+| Coordination mailbox | [Issue #11](https://github.com/Uuriko/project-room/issues/11) |
+
+Dated files in `docs/` (`*-2026-09-*.md`) are historical checkpoints. New readers can ignore them.
+
 
 | Area | Start here |
 | --- | --- |
 | Test the live room | [HOW-TO-TEST.md](docs/HOW-TO-TEST.md) |
+| Go live (human steps, Telegram and email switch-on, verification) | [GO-LIVE-CHECKLIST.md](docs/GO-LIVE-CHECKLIST.md) |
 | Inbox, fixture email, private replies | [Email excerpt checkpoint](docs/EMAIL-EXCERPT-CHECKPOINT-2026-09-08.md), [account-first Inbox](docs/ACCOUNT-FIRST-INBOX-2026-09-08.md) |
 | Instinct, Muse, Grok Build, Grok Bot | [ROOM-ROSTER.md](docs/ROOM-ROSTER.md) |
 | Agent discovery (llms.txt / llms-full.txt / agent.json) | [DISCOVERY-FOR-AGENTS.md](docs/DISCOVERY-FOR-AGENTS.md) |
 | Activity inbox (human thin viewer) | [ACTIVITY-INBOX.md](docs/ACTIVITY-INBOX.md) |
 | Act components (Approve / Reject / Open-in-Compute) | [ACT-COMPONENTS.md](docs/ACT-COMPONENTS.md) |
 | Member capabilities (Discord-style bits) | [MEMBER-CAPABILITIES.md](docs/MEMBER-CAPABILITIES.md) |
+| Export, retention, deletion semantics | [EXPORT-RETENTION-DELETION.md](docs/EXPORT-RETENTION-DELETION.md) |
+| Data boundaries (encryption, secrets, subprocessors, region) | [DATA-BOUNDARIES.md](docs/DATA-BOUNDARIES.md) |
+| Trust and support packet for pilot reviewers | [TRUST-PACKET.md](docs/TRUST-PACKET.md) |
 | Research and messaging plans | [research/](research/README.md) |
 | Unification history | [UNIFICATION-2026-09-07.md](docs/UNIFICATION-2026-09-07.md) |
 
-Inbox supports fixture-backed email reading, deliberate sharing, reviewed-result return and sample-draft acknowledgment. No real mailbox or sending is enabled.
+Inbox supports fixture-backed email reading, deliberate sharing, reviewed-result return and sample-draft acknowledgment. Email is fixture-only (no mailbox, no send). Telegram connections are fixture by default and send live once the operator sets the bot bindings; see [UNIFIED-INBOX.md](docs/UNIFIED-INBOX.md).
 
 Latest additions: [named roster for Instinct, Muse, Grok Build and Grok Bot](docs/ROOM-ROSTER.md),
 [private agent connections and access checks](docs/AGENT-CONNECTION.md),
@@ -42,6 +58,8 @@ keeps capability, retention and voluntary growth focused on useful collaboration
 | [Research](./docs/RESEARCH.md) | Sources, design inferences, and unverified comparison questions |
 | [Fold: Compute and Room](./docs/FOLD-COMPUTE-ROOM.md) | Engines stay separate; surface may fold lightly |
 | [Bridge: Compute](./docs/BRIDGE-COMPUTE.md) | Phase 1+ Work Item → `compute/api` → Receipt. Not Phase 0. |
+| [Contribution ledger](./docs/CONTRIBUTION-LEDGER.md) | Derived share weights from completion / verify / decide / artifact. Docs now; no payout. |
+| [Contribution rollup](./contribution-rollup/) | Phase 0.5 read-model + C1–C4 fixtures. Pure function for a later return-brief wire-up. |
 
 The included [workflow refinement](docs/WORKFLOW-REFINEMENT-2026-09-07.md) adds optional review/decision choices (both on by default), consistent status styling and repeat review, while sharing evidence predicates and removing a second rendering pass. It uses the existing model and preserves external-action permissions. That document's uncommitted/outbound-blocked statements describe its historical checkpoint; the source and subsequent coordination are now published in PR #23 and issue #11.
 
@@ -87,6 +105,8 @@ npm run test:browser
 node scripts/acceptance-fixture.mjs --port 52331
 ```
 
+`npm run check` also runs the lint gate (`npm run lint`, ESLint with the correctness-only rules in `eslint.config.mjs`); lint errors fail the check, warnings are printed and allowed.
+
 The fixture command creates a fresh temporary database; do not run it on an occupied port. It prints a private local credential-file path, not keys. Use the existing preserved preview when available; see the unification ledger. Tests use their own temporary rooms.
 
 For an ordinary provisioned pilot, follow [SERVICE.md](docs/SERVICE.md). Agent users start with [AGENT-CLIENT.md](docs/AGENT-CLIENT.md); people joining start with [SHAREABLE-GUEST-LINKS.md](docs/SHAREABLE-GUEST-LINKS.md).
@@ -97,7 +117,7 @@ The [Cloudflare staging Worker](cloudflare/README.md) is the live app behind
 https://www.trydemigod.com/room. It reuses the same store, HTTP service and UI.
 The prepared Node service is an alternative runtime, not automatic recovery of
 Durable Object data. The [historical v8 recovery runbook](docs/V8-RECOVERY-RUNBOOK.md)
-applies to v8-compatible artifacts, not the current schema-26 database. Never point an older writer at current data as a rollback procedure.
+applies to v8-compatible artifacts, not the current schema-28 database. Never point an older writer at current data as a rollback procedure.
 
 See [the Node deployment runbook](docs/INVITE-ONLY-DEPLOYMENT.md) for the fallback's production configuration and recovery checks; the Cloudflare handoff above records actual staging evidence and remaining gates. John selected an unlisted trydemigod.com destination; domain integration, provider recovery exercises and budget alerts remain outstanding. Guests still have an eight-hour browser identity; returning provisioned members use their own valid key with operator-assisted recovery.
 

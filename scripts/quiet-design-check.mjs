@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync } from "node:fs";
@@ -25,14 +24,20 @@ for (const touch of [false, true]) {
     page.setDefaultTimeout(8000);
     const errors = []; page.on("pageerror", e => errors.push(e.message));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
-    await ensureSignIn(page); await page.locator("#access-key").fill(fixture.keys.owner);
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.locator("#access-key").fill(fixture.keys.owner);
+    await page.getByRole("button", { name: "Enter room", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
     await page.waitForFunction(() => !document.querySelector("#access-key").disabled);
     for (const id of ["people-panel", "composer-options", "work-options"]) {
       assert.equal(await page.locator("#" + id).evaluate(e => e.open), false, id + " starts quiet");
     }
     assert.equal(await page.locator(".work-details").first().evaluate(e => e.open), false);
+    // C3 rest state, before any screenshot (Chromium 151 captures reset touch
+    // emulation): quiet on pointer devices, always visible on touch.
+    const restAction = page.locator('[data-message-record-id="test-request"] [data-message-action="work"]');
+    await restAction.waitFor({ state: "attached" });
+    const restOpacity = await restAction.evaluate(e => getComputedStyle(e).opacity);
+    assert.equal(restOpacity, touch ? "1" : "0", touch ? "touch: secondary actions always visible" : "desktop: secondary actions quiet at rest");
     mkdirSync("test-results", { recursive: true });
     const input = page.locator("#message-input");
     assert.equal(await page.evaluate(() => navigator.maxTouchPoints > 0), touch);
@@ -82,18 +87,36 @@ for (const touch of [false, true]) {
     await page.locator("#cancel-work-button").click();
 
     const card = page.locator('[data-work-record-id="test-handoff"]');
+    // C2: the primary work line comes first and expanded details never compete with it.
+    const nextStep = card.locator(".work-next-step");
+    await nextStep.waitFor({ state: "visible" });
+    assert.equal(await card.locator(".work-details").evaluate(e => e.open), false, "details stay closed while the Next line is visible");
+    assert.equal(await card.evaluate(article => {
+      const order = [".work-next-step", ".work-details", ".work-actions"].map(sel => [...article.children].findIndex(el => el.matches(sel)));
+      return order[0] > -1 && order[0] < order[1] && order[1] < order[2];
+    }), true, "Next line precedes details and secondary actions");
+    const nextY = await nextStep.evaluate(e => e.getBoundingClientRect().y);
     await card.locator(".work-details > summary").click();
     await card.locator(".work-details > summary").focus();
+    assert.equal(await nextStep.isVisible(), true, "Next line survives expanded details");
+    assert.equal(await nextStep.evaluate(e => e.getBoundingClientRect().y), nextY, "expanded details do not move the primary line");
     fixture.store.command(fixture.keys.owner, "commons", { id: crypto.randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: "quiet-update", body: "An unrelated update." } });
     await page.locator('[data-message-record-id="quiet-update"]').waitFor();
     assert.equal(await card.locator(".work-details").evaluate(e => e.open), true);
     assert.equal(await page.evaluate(() => document.activeElement.dataset.focusKey), "work-details:test-handoff");
+    if (!touch) {
+      const reveal = page.locator('[data-message-record-id="quiet-update"] [data-message-action="work"]');
+      await reveal.evaluate(e => e.focus());
+      assert.equal(await reveal.evaluate(e => document.activeElement === e), true, "keyboard focus lands on the action");
+      assert.equal(await reveal.evaluate(e => getComputedStyle(e).opacity), "1", "keyboard focus reveals the action");
+      await reveal.evaluate(e => e.blur());
+    }
     await page.evaluate(() => document.documentElement.style.fontSize = "200%");
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, "doubled text reflows");
     await input.scrollIntoViewIfNeeded();
     await page.screenshot({ path: `test-results/quiet-${label}-large-text-viewport.png` });
     await page.screenshot({ path: `test-results/quiet-${label}-large-text.png`, fullPage: true });
-    await page.locator("#signout-button").click();
+    if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click();
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(await page.locator("#work-dialog").evaluate(e => e.open), false);
     for (const id of ["people-panel", "composer-options", "work-options"]) assert.equal(await page.locator("#" + id).evaluate(e => e.open), false);

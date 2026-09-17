@@ -1,7 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import { Buffer } from "node:buffer";
-import { validId, applyAutomation, applyRequestRun, invalidateAutomationConsent } from "../src/events.js";
-import { isAutomationDispatch, prepareAutomationDispatch } from "../src/automation-policy.js";
+import { validId } from "../src/events.js";
 import { prepareReplyPost, recordReplyPost, cancelReplyRequest, replyContextOwners, REPLY_CANCELLED } from "../src/reply-requests.js";
 
 export const REPLY_PAGE_LIMIT = 20, REPLY_MAX_PAGE_LIMIT = 50, REPLY_PAGE_BYTES = 65536;
@@ -145,8 +144,7 @@ export class ReplyRequests {
           contextEventId: context.id, contextSequence: context.sequence, answerBasis,
           actions: { reply: true, answer: Boolean(answerBasis), decline: Boolean(answerBasis),
             cancel: open && (auth.member.id === request.requesterId || auth.member.kind === "human" && auth.member.id === state.room.ownerId) },
-          workItemId: request.workItemId, instructionsRevision: state.room.charter?.revision ?? 0,
-          runContractVersion: 1, run: structuredClone(state.requestRuns?.[request.id] ?? null) } });
+          workItemId: request.workItemId, instructionsRevision: state.room.charter?.revision ?? 0 } });
       }
       return result;
     });
@@ -163,7 +161,6 @@ function readMessage(message) {
 function compare(actual, expected) {
   check(Object.hasOwn(actual, "replyRequests") === Object.hasOwn(expected, "replyRequests"));
   check(isDeepStrictEqual(actual.replyRequests, expected.replyRequests));
-  check(isDeepStrictEqual(actual.automations, expected.automations));
   // Once requests exist, every immutable message link can affect their context.
   // Reactions/proposal metadata remain the responsibility of their own audits.
   if (expected.replyRequests) check(isDeepStrictEqual(actual.messages.map(exactMessage), expected.messages));
@@ -186,29 +183,12 @@ export function auditReplyRequests(state, history, checkpoint = null) {
     if (e.type === "member.access_changed") {
       check(projected.members[data.memberId] && typeof data.active === "boolean");
       projected.members[data.memberId].active = data.active;
-      invalidateAutomationConsent(projected, data.memberId, e.at);
     }
-    if (e.type.startsWith('automation.')) applyAutomation(projected, e);
-    if (e.type === 'room.charter_updated') projected.room.charter = { revision: data.expectedRevision + 1 };
-    if (e.type === 'work.handoff_recorded' && data.haltAll) {
-      projected.agentHalts ??= {}; projected.agentHalts[e.actorId] = true;
-    }
-    if (e.type === 'work.halt_cleared' && projected.agentHalts) delete projected.agentHalts[data.memberId];
-    if (e.type.startsWith('request_run.')) applyRequestRun(projected, e);
     if (e.type === "work.proposed") { check(validId(data.workItemId)); projected.workItems[data.workItemId] = {}; }
     if (e.type === "message.posted") {
-      let dispatch;
-      if (isAutomationDispatch(data)) {
-        const { messageId, automationId, automationRevision, automationSlot } = data;
-        dispatch = prepareAutomationDispatch(projected, e.actorId, { messageId, automationId, automationRevision, automationSlot }, e.at);
-        check(isDeepStrictEqual(data, { ...dispatch.message, requestPolicyVersion: 1 }));
-      }
       const mode = prepareReplyPost(projected, e), messageId = data.messageId || e.id;
       check(validId(messageId) && !ids.has(messageId)); ids.add(messageId);
-      // Full event replay and attachment audit validate the file metadata/bytes.
-      // Ordinary file-only posts are valid; reply-request modes still require text.
-      const fileOnly = !mode && data.body === '' && Array.isArray(data.attachments) && data.attachments.length > 0;
-      check(validId(e.actorId) && typeof data.body === "string" && data.body.length <= 4096 && (data.body.trim().length > 0 || fileOnly));
+      check(validId(e.actorId) && typeof data.body === "string" && data.body.length <= 4096 && data.body.trim().length > 0);
       for (const key of ["messageId", "workItemId", "replyToId", "toMemberId"]) check(data[key] == null || validId(data[key]));
       check(!data.replyToId || projected.messages.some(message => message.id === data.replyToId));
       if (mode || projected.replyRequests) {
@@ -221,7 +201,6 @@ export function auditReplyRequests(state, history, checkpoint = null) {
       projected.messages.push({ id: messageId, authorId: e.actorId, body: data.body,
         workItemId: data.workItemId || null, replyToId: data.replyToId || null, toMemberId: data.toMemberId || null, createdAt: e.at });
       recordReplyPost(projected, e, mode); posts.set(row.sequence, e.id);
-      if (dispatch) projected.automations[data.automationId] = dispatch.automation;
     }
     if (e.type === REPLY_CANCELLED) cancelReplyRequest(projected, e);
     if (checkpoint && row.sequence === checkpoint.sequence) {

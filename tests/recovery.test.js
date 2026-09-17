@@ -19,15 +19,35 @@ function fixture(t) {
   return { ...f, directory };
 }
 
-test("online capture preserves all 31 tables, identity boundaries and exact retries through recovery and restart", async t => {
+test("online capture preserves all 41 tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t);
   const { identityId } = f.store.identities.create("Recovery agent");
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
   f.store.invites.create(f.keys.owner, "commons", { permissions: ["steer"] });
+  f.store.wakeQueue.enqueue(f.keys.owner, "commons", { requestId: "recovery-wake", queueKey: "recipe:recovery", intent: { recipe: "recovery" }, dueAt: f.now(), maxAttempts: 3 });
+  f.store.attention.mutate(f.keys.owner, "commons", { requestId: "recovery-attention", quietStart: 22 * 60, quietEnd: 7 * 60, delivery: "immediate", digestHour: null });
+  f.store.channelUpdates.record(f.emailProfile.accountId, f.emailProfile.id, [{ update_id: 1, message: { text: "journaled webhook update" } }], { backlog: 500 });
+  f.store.wakeQueue.pause(f.keys.owner, "commons", { requestId: "recovery-pause", reason: "inspecting" });
+  f.store.command(f.keys.agent, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: "recovery-reported", body: "synthetic message the owner reports" } });
+  f.store.moderation.report(f.keys.owner, "commons", { messageId: "recovery-reported", reason: "recovery fixture report" });
+  // The v34 convergence fences room_attachments: seed one staged row so the
+  // capture comparison covers the table (no store API stages attachments yet).
+  f.store.db.prepare(`INSERT INTO room_attachments(room_id,id,uploader_id,filename,media_type,byte_length,sha256,bytes,state,created_at,expires_at,message_id)
+    VALUES('commons','recovery-attachment','recovery-uploader','recovery-note.txt','text/plain',11,?,?,'staged',?, ?,NULL)`)
+    .run("0".repeat(64), Buffer.from("hello world"), f.now(), f.now() + 1000);
+  // Seed one read marker so the capture comparison covers private_inbox_reads.
+  f.store.inbox.apply(f.owner.token, { action: "source.read", requestId: "recovery-inbox-read", sourceId: "recovery-source", expectedRevision: 1 }, f.owner.session.sessionBinding);
   f.cursor = f.store.room("commons").sequence;
   f.store.markCaughtUp(f.keys.owner, "commons", f.cursor);
+  // Seed one access request so the capture comparison covers access_requests.
+  f.store.db.prepare(`INSERT INTO access_requests(request_id,room_id,identity_id,display_name,requested_permissions,note,status,created_at)
+    VALUES('recovery-access-request','commons',?,?,?,'recovery note','pending',?)`)
+    .run(identityId, "Recovery agent", JSON.stringify(["read"]), f.now());
+  // Seed one agent-room ownership record so the capture covers agent_room_ownership.
+  f.store.db.prepare(`INSERT INTO agent_room_ownership(identity_id,room_id,created_at) VALUES(?,?,?)`)
+    .run(identityId, "commons", f.now());
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 31);
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 41);
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);
@@ -140,4 +160,37 @@ test("v8 readonly verification refuses a v7 marker rather than migrating the bac
   const f = fixture(t); f.store.db.exec("PRAGMA user_version=7");
   assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /schema|version|migration/i);
   assert.equal(f.store.db.prepare("PRAGMA user_version").get().user_version, 7);
+});
+
+test("read-only open accepts a v34 backup written before the additive wake queue and attention tables", t => {
+  const f = fixture(t);
+  const rooms = f.store.db.prepare("SELECT id,sequence FROM rooms ORDER BY id").all();
+  const objects = () => f.store.db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'wake_queue%' OR name LIKE 'private_attention%' ORDER BY name").all().map(row => row.name);
+  const additive = objects();
+  assert.ok(additive.includes("wake_queue") && additive.includes("private_attention_prefs"));
+  // A half-present additive schema is a damaged file, not an older one.
+  f.store.db.exec("DROP TABLE wake_queue_commands; DROP TABLE private_attention_commands");
+  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /Wake queue schema requires operator reconciliation/);
+  f.store.db.exec("DROP TABLE wake_queue; DROP TABLE private_attention_prefs; DROP TABLE wake_queue_pause");
+  assert.deepEqual(objects(), [], "fixture now matches a pre-W4-45 file");
+  const older = new RoomStore(f.filename, { readOnly: true, now: f.now });
+  try {
+    assert.deepEqual(older.db.prepare("SELECT id,sequence FROM rooms ORDER BY id").all(), rooms);
+    assert.equal(older.room("commons").state.room.id, "commons");
+    assert.equal(older.wakeQueue.verifySchema({ allowAbsent: true }), false);
+    assert.equal(older.attention.verifySchema({ allowAbsent: true }), false);
+    assert.throws(() => older.wakeQueue.verifySchema(), /Wake queue schema/, "a writable open still requires the tables");
+  } finally { older.close(); }
+  assert.deepEqual(objects(), [], "read-only verification is not migration");
+  // Only the additive tables are optional: a wrong schema marker still fails.
+  f.store.db.exec("PRAGMA user_version=27");
+  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v34/);
+  f.store.db.exec("PRAGMA user_version=34");
+  // A writable open recreates the additive tables and then verifies them strictly.
+  const upgraded = new RoomStore(f.filename, { now: f.now });
+  try {
+    assert.equal(upgraded.wakeQueue.verifySchema(), true);
+    assert.equal(upgraded.attention.verifySchema(), true);
+  } finally { upgraded.close(); }
+  assert.deepEqual(objects(), additive, "the service, not read-only verification, restores the additive schema");
 });

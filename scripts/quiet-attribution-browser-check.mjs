@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Simulated local readers, not human research or identity verification.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -28,7 +27,7 @@ for (const touch of [false, true]) test(`quiet attribution ${touch ? 'touch' : '
     isMobile: touch, hasTouch: touch, reducedMotion: 'reduce' }), errors = [];
   page.on('pageerror', error => errors.push(error.message)); page.setDefaultTimeout(8000);
   await page.goto(`http://127.0.0.1:${server.address().port}`);
-  await ensureSignIn(page); await page.locator("#access-key").fill(f.keys.owner); await page.locator('#auth-form button[type=submit]').click();
+  await page.locator('#access-key').fill(f.keys.owner); await page.locator('#auth-form button[type=submit]').click();
   await page.locator('#main').waitFor({ state: 'visible' });
   const record = id => page.locator(`[data-message-record-id="${id}"]`);
   const next = page.locator('[data-work-record-id="naming-work"] .work-next-step');

@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Simulated human interaction in disposable local rooms, never a user study.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -30,7 +29,7 @@ async function setup(t, { mobile = false, review = false } = {}) {
   const page = await browser.newPage({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 }, isMobile: mobile, hasTouch: mobile, reducedMotion: "reduce" });
   const errors = [], outside = []; page.on("pageerror", e => errors.push(e.message)); page.setDefaultTimeout(8000);
   await page.route("**/*", route => { if (new URL(route.request().url()).origin !== origin) { outside.push(route.request().url()); return route.abort(); } return route.continue(); });
-  await page.goto(origin); await ensureSignIn(page); await page.locator("#access-key").fill(f.keys[review ? "human-checker" : "owner"]); await page.getByRole("button", { name: "Continue", exact: true }).click(); await page.locator("#main").waitFor({ state: "visible" });
+  await page.goto(origin); await page.locator("#access-key").fill(f.keys[review ? "human-checker" : "owner"]); await page.getByRole("button", { name: "Enter room", exact: true }).click(); await page.locator("#main").waitFor({ state: "visible" });
   const open = async () => {
     if (review) await page.locator(`[data-work-record-id='${workItemId}'] [data-action='verify']`).click();
     else await page.locator("[data-message-id='native-draft'][data-message-action='result']").click();

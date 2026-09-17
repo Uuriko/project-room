@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Simulated local people. Search must not submit, acknowledge or create work.
 import './discovery-contribution-browser-check.mjs';
 import test from 'node:test';
@@ -34,7 +33,7 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
     hasTouch: touch, isMobile: touch, reducedMotion: 'reduce' });
   page.setDefaultTimeout(8000); const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}`);
-  await ensureSignIn(page); await page.locator("#access-key").fill(f.keys.owner); await page.locator('#auth-form button[type=submit]').click();
+  await page.locator('#access-key').fill(f.keys.owner); await page.locator('#auth-form button[type=submit]').click();
   await page.locator('#main').waitFor({ state: 'visible' });
   const search = page.locator('#message-search'), hits = page.locator('#search-list');
   const workHit = id => hits.locator(`[data-open-work="${id}"]`);
@@ -102,7 +101,7 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   assert.equal(await page.evaluate(() => document.activeElement.id), 'message-search');
   await search.fill('Orbit');
   await page.locator('#message-input').fill('');
-  await page.locator('#signout-button').click(); await page.locator('#auth-panel').waitFor({ state: 'visible' });
+  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator('#signout-button').click(); await page.locator('#auth-panel').waitFor({ state: 'visible' });
   assert.equal(await search.inputValue(), ''); assert.equal(await hits.textContent(), '');
   assert.equal(f.store.db.prepare('SELECT sequence FROM cursors WHERE room_id=? AND member_id=?').get('commons', 'owner')?.sequence ?? 0, 0);
   assert.deepEqual(errors, []);

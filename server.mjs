@@ -1,18 +1,20 @@
 import { mkdirSync, statSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { RoomStore } from "./server/store.mjs";
 import { createRoomServer } from "./server/http.mjs";
+import { telegramConfig } from "./server/channel-adapters/telegram-config.mjs";
+import { defaultServerArgs } from "./server/boot-options.mjs";
 import { deploymentConfig } from "./server/deployment.mjs";
 import { createServer } from "node:http";
 import { maintenanceEnabled, maintenanceReply } from "./server/maintenance.mjs";
-import { assertProductionReady } from './server/production-gates.mjs';
-import { openJoinContract } from './server/open-contract.mjs';
+import { growthCollector } from "./src/growth-emit.js";
+import { loadFromFile, saveToFile } from "./src/growth-persistence.js";
+import { createWatcher } from "./src/growth-watch.js";
+import { createScheduler, defaultGrowthRules, DEFAULT_INTERVAL_MS } from "./src/growth-scheduler.js";
+import { createGrowthHttp } from "./src/growth-http.js";
 
-const { host, port, origin, filename, production } = deploymentConfig();
+const { host, port, origin, filename, production, streamInterval } = deploymentConfig();
 const paused = maintenanceEnabled(process.env.ROOM_MAINTENANCE);
-const productionGates = paused ? { production: false, providerAuth: null, operatorAccountId: null }
-  : assertProductionReady(process.env, origin, { ship: openJoinContract().ship });
-const providerAuth = null;
 process.umask(0o077);
 let havePilotDb = false;
 try { havePilotDb = statSync(filename).isFile(); }
@@ -20,27 +22,22 @@ catch (error) { if (error?.code !== "ENOENT") throw error; }
 if (!paused && production && !havePilotDb) throw new Error("Provision a persistent pilot database before startup");
 if (!paused) mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
 const store = paused ? null : new RoomStore(filename);
-let gmailRuntime = null, telegramRuntime = null, twilioRuntime = null, webhookPort = null;
-if (store && ['ROOM_GMAIL_CLIENT_FILE', 'ROOM_GMAIL_KEY_FILE', 'ROOM_GMAIL_VAULT_FILE'].some(name => process.env[name])) {
-  try {
-    const { createGmailRuntime } = await import('./server/gmail-runtime.mjs');
-    gmailRuntime = createGmailRuntime({ store, origin });
-  } catch (error) { store.close(); throw error; }
-}
-if (store && ['ROOM_TELEGRAM_REGISTRY_FILE','ROOM_TELEGRAM_QUEUE_FILE','ROOM_TELEGRAM_KEY_FILE','ROOM_TELEGRAM_ACCOUNT_ID','ROOM_TELEGRAM_CONNECTION_ID','ROOM_TELEGRAM_RECEIVE_GRANTS_FILE','ROOM_TELEGRAM_POLL_INTERVAL_MS'].some(name=>process.env[name])) {
-  try {
-    const { createTelegramRuntime } = await import('./server/telegram-runtime.mjs');
-    telegramRuntime = createTelegramRuntime({store});
-  } catch (error) { gmailRuntime?.close(); store.close(); throw error; }
-}
-if (store && ['ROOM_TWILIO_REGISTRY_FILE','ROOM_TWILIO_KEY_FILE','ROOM_TWILIO_ACCOUNT_ID','ROOM_TWILIO_CONNECTION_ID','ROOM_TWILIO_RECEIVE_GRANTS_FILE','ROOM_TWILIO_WEBHOOK_PATH','ROOM_TWILIO_WEBHOOK_PORT'].some(name=>process.env[name])) {
-  try {
-    const {createTwilioRuntime,twilioWebhookPort}=await import('./server/twilio-runtime.mjs');
-    webhookPort=twilioWebhookPort();
-    twilioRuntime=createTwilioRuntime({store});
-  }catch(error){telegramRuntime?.close();gmailRuntime?.close();store.close();throw error;}
-}
-if (store && production && !store.db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) { twilioRuntime?.close(); telegramRuntime?.close(); gmailRuntime?.close(); store.close(); throw new Error("Provision a room before deployment"); }
+if (store && production && !store.db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) { store.close(); throw new Error("Provision a room before deployment"); }
+// Track C C13/C14 — growth scheduler state. Declared before the server is
+// created so the C14 read-only HTTP surface can close over live status via
+// a getter evaluated per request (the scheduler itself starts after listen).
+let growthScheduler = null;
+let growthIntervalMs = 0;
+// Track C C14 — read-only growth HTTP surface (GET /growth/summary,
+// /growth/digest, /growth/health). Pure reads over the collector and the
+// scheduler-status getter: no emission, no mutation, no timers. Null in
+// paused (maintenance) mode, where the minimal handler takes over.
+const growthHttp = paused ? null : createGrowthHttp({
+  collector: growthCollector,
+  getSchedulerStatus: () => growthScheduler
+    ? { running: growthScheduler.isRunning(), tickCount: growthScheduler.getTickCount(), intervalMs: growthIntervalMs }
+    : { running: false, tickCount: 0, intervalMs: growthIntervalMs }
+});
 const server = paused ? createServer((req, res) => {
   try {
     const url = new URL(req.url, origin);
@@ -50,29 +47,65 @@ const server = paused ? createServer((req, res) => {
     const reply = maintenanceReply(url.pathname);
     res.writeHead(reply.status, reply.headers); res.end(req.method === "HEAD" ? undefined : reply.body);
   } catch { res.writeHead(400, { "Cache-Control": "no-store" }); res.end(); }
-}) : createRoomServer({ store, origin, trustedLocalProxy: production, providerAuth, gmailConnections: gmailRuntime?.connections, telegramConnections: telegramRuntime?.connections, twilioConnections: twilioRuntime?.connections, operatorAccountId: productionGates.operatorAccountId });
+}) : createRoomServer(defaultServerArgs({ store, origin, streamInterval, trustedLocalProxy: production, telegram: telegramConfig(process.env), growth: growthHttp }));
+// Track C C11 — growth collector persistence. The snapshot lives in its own
+// JSON file next to the store file; it never touches the store schema. Any
+// failure here only costs analytics history, never boot or shutdown.
+const growthSnapshotPath = process.env.GROWTH_SNAPSHOT_PATH || join(dirname(filename), "growth-snapshot.json");
+if (!paused) {
+  try {
+    const { restored, collector, exportedAt } = loadFromFile(growthSnapshotPath);
+    if (restored) {
+      const stored = collector.query({ limit: collector.stats().capacity });
+      let replayed = 0;
+      for (const envelope of stored) {
+        if (growthCollector.record(envelope).ok) replayed += 1;
+      }
+      console.log(`[growth] restored ${replayed} events from snapshot${exportedAt ? ` (${exportedAt})` : ""}`);
+    }
+  } catch (error) {
+    console.warn(`[growth] snapshot restore skipped: ${error?.message ?? error}`);
+  }
+}
+// (growthScheduler / growthIntervalMs are declared above, before server creation,
+// so the C14 surface can close over them via a per-request status getter.)
+server.listen(port, host, () => {
+  console.log(`Project Room ${paused ? "paused" : production ? "invite-only pilot" : "local pilot"}: ${origin}`);
+  // C13 readiness note: the listen line above must stay the first stdout write,
+  // because packaging tests treat first stdout data as "server ready".
+  if (!paused) console.log(growthScheduler && growthScheduler.isRunning()
+    ? `[growth] scheduler started (tick every ${growthIntervalMs}ms)`
+    : "[growth] scheduler disabled");
+});
+// Track C C13 — growth scheduler. Drives the C12 watcher on a fixed
+// cadence and logs triggered alert hits (no delivery anywhere). Any
+// failure here only costs alert logging, never boot or shutdown.
+if (!paused) {
+  try {
+    const growthWatcher = createWatcher({ collector: growthCollector, rules: defaultGrowthRules() });
+    const envInterval = process.env.GROWTH_WATCH_INTERVAL_MS;
+    const intervalMs = envInterval === undefined || envInterval === "" ? DEFAULT_INTERVAL_MS : Number(envInterval);
+    growthIntervalMs = intervalMs;
+    growthScheduler = createScheduler({ watcher: growthWatcher, intervalMs });
+    growthScheduler.start();
+  } catch (error) {
+    growthScheduler = null;
+    console.warn(`[growth] scheduler disabled: ${error?.message ?? error}`);
+  }
+}
 let closing = false;
-function close(exitCode=0) {
+function close() {
   if (closing) return;
   closing = true;
+  if (!paused) {
+    try { growthScheduler?.stop(); }
+    catch (error) { console.warn(`[growth] scheduler stop failed: ${error?.message ?? error}`); }
+    try { saveToFile(growthSnapshotPath, growthCollector); }
+    catch (error) { console.warn(`[growth] snapshot write failed: ${error?.message ?? error}`); }
+  }
   server.closeStreams?.();
-  twilioRuntime?.close();
-  const drained=telegramRuntime?.stopReceiving();
-  server.close(async () => { await drained;telegramRuntime?.close(); gmailRuntime?.close(); store?.close(); process.exit(exitCode); });
+  server.close(() => { store?.close(); process.exit(0); });
   server.closeIdleConnections();
 }
-process.on("SIGINT", () => close());
-process.on("SIGTERM", () => close());
-const listen=(target,p,h)=>new Promise((resolve,reject)=>{
-  target.once('error',reject);target.listen(p,h,()=>{target.removeListener('error',reject);resolve();});
-});
-try{
-  if(webhookPort!==null)await listen(twilioRuntime.webhook,webhookPort,'127.0.0.1');
-  await listen(server,port,host);
-  if(!closing)telegramRuntime?.startReceiving();
-  console.log(`Project Room ${paused ? "paused" : production ? "invite-only pilot" : "local pilot"}: ${origin}`);
-}catch{
-  server.closeAllConnections();server.close();twilioRuntime?.close();await telegramRuntime?.stopReceiving();telegramRuntime?.close();gmailRuntime?.close();store?.close();
-  throw new Error('Project Room listener startup failed');
-}
-for(const target of [server,twilioRuntime?.webhook].filter(Boolean))target.on('error',()=>close(1));
+process.on("SIGINT", close);
+process.on("SIGTERM", close);

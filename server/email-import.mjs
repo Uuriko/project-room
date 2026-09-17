@@ -1,5 +1,8 @@
-// Account-owned fixture import. No OAuth credentials, network driver or send grant.
-import { emailConnection, readEmailEnvelope, emailDigest, emailInput, emailOpaqueId, emailText, exactEmailFields } from "./email-envelope.mjs";
+// Account-owned fixture import for every channel connection (email, Telegram).
+// No OAuth credentials, bot tokens, network driver or send grant.
+import { emailConnection, emailDigest, emailInput, emailOpaqueId, emailText, exactEmailFields } from "./email-envelope.mjs";
+import { channelProfile, connectionState, isEmailProfile, profileExternalId, toChannelProfile } from "./channel-connection.mjs";
+import { adapterForChannel, readChannelEnvelope } from "./channel-adapters/index.mjs";
 import { validId } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 
@@ -8,6 +11,12 @@ const require = (condition, code = "invalid_email_import") => { if (!condition) 
 const revision = value => Number.isSafeInteger(value) && value >= 0;
 const same = (a, b) => a === undefined || b === undefined ? a === b : emailDigest(a) === emailDigest(b);
 export const emailImportLimits = Object.freeze({ journalBytes: 16 * 1024 * 1024, commands: 5000 });
+// Email profiles keep their Graph shape; every other channel uses the generic record.
+const anyProfile = value => isEmailProfile(value) ? emailConnection(value) : channelProfile(value);
+const viewer = auth => ({ accountId: auth.account.id, authEpoch: auth.account.authEpoch, sessionBinding: auth.sessionBinding, sessionRevision: auth.sessionRevision });
+// Table naming: private_email_connections predates multi-channel support and now
+// holds every channel connection (store.connections). provider/mailbox_id carry the
+// generic provider/externalId; the channel lives in data_json. No schema bump.
 export const emailImportSchema = `
   CREATE TABLE private_email_connections (
     account_id TEXT NOT NULL REFERENCES accounts(id), id TEXT NOT NULL, provider TEXT NOT NULL, mailbox_id TEXT NOT NULL,
@@ -25,17 +34,23 @@ export const emailImportSchema = `
   CREATE TRIGGER private_email_commands_no_update BEFORE UPDATE ON private_email_commands BEGIN SELECT RAISE(ABORT,'email receipts are immutable'); END;
   CREATE TRIGGER private_email_commands_no_delete BEFORE DELETE ON private_email_commands BEGIN SELECT RAISE(ABORT,'email receipts are retained'); END;
 `;
+// Contract violations in any channel envelope surface as one 422, never a raw TypeError.
 function validate(request, legacy = false) {
+  try { validateRequest(request, legacy); }
+  catch (error) { if (error?.name !== "EmailContractError") throw error; require(false); }
+}
+function validateRequest(request, legacy = false) {
   emailInput(request);
   const common = ["action", "requestId", "connectionId", "expectedRevision"], fields = {
-    "connection.configure": [...common, "profile"], "connection.disconnect": common,
+    "connection.configure": [...common, "profile"], "connection.disconnect": common, "connection.webhook": [...common, "secretHash"],
     "page.apply": [...common, "connectionRevision", "folderId", "expectedCursor", "cursor", "complete", "reset", "observations"]
   }[request?.action];
   require(fields && exactEmailFields(request, fields) && validId(request.requestId) && validId(request.connectionId) && revision(request.expectedRevision));
   if (request.action === "connection.configure") {
-    emailConnection(request.profile);
+    anyProfile(request.profile);
     require(request.profile.id === request.connectionId && request.profile.revision === request.expectedRevision + 1);
   }
+  if (request.action === "connection.webhook") require(typeof request.secretHash === "string" && /^[a-f0-9]{64}$/.test(request.secretHash));
   if (request.action === "page.apply") {
     require(revision(request.connectionRevision) && request.connectionRevision > 0 && typeof request.complete === "boolean" && typeof request.reset === "boolean");
     emailOpaqueId(request.folderId); emailText(request.cursor, 16384);
@@ -47,7 +62,7 @@ function validate(request, legacy = false) {
       require(exactEmailFields(observation, observation?.kind === "message" ? legacySource ? ["kind", "envelope"] : ["kind", "envelope", "expectedSourceRevision"] : ["kind", "messageId"]));
       if (observation.kind === "message" && !legacySource) require(revision(observation.expectedSourceRevision));
       require(["message", "absent"].includes(observation.kind));
-      const id = observation.kind === "message" ? readEmailEnvelope(observation.envelope).message.id : emailOpaqueId(observation.messageId);
+      const id = observation.kind === "message" ? readChannelEnvelope(observation.envelope).message.id : emailOpaqueId(observation.messageId);
       require(!ids.has(id), "ambiguous_email_observation"); ids.add(id);
     }
   }
@@ -64,14 +79,20 @@ function plan(request, { accountId, authEpoch, at, connection, folder, source, m
     if ((connection?.profile.revision ?? 0) !== request.expectedRevision) fail("stale_email_connection", "Connection changed. Refresh before editing.");
     let next;
     if (request.action === "connection.configure") {
-      require(request.profile.accountId === accountId, "email_account_mismatch");
-      if (connection && (connection.profile.provider !== request.profile.provider || connection.profile.mailboxId !== request.profile.mailboxId))
+      require(request.profile.accountId === accountId, "channel_account_mismatch");
+      if (connection && (connection.profile.provider !== request.profile.provider || profileExternalId(connection.profile) !== profileExternalId(request.profile)))
         fail("email_mailbox_changed", "Use the existing connection only for its original mailbox.");
       if (mailbox && mailbox !== request.connectionId) fail("email_mailbox_exists", "This account already has a connection for that mailbox.");
       if (!connection && connectionCount >= 20) fail("email_connection_limit", "Connection capacity reached.");
       next = { profile: request.profile, state: "active", mode: "fixture", authEpoch, updatedAt: at };
+    } else if (request.action === "connection.webhook") {
+      // Only the SHA-256 of the owner-chosen webhook secret is retained. The
+      // connection revision does not move: envelopes stay valid.
+      if (!connection) fail("channel_connection_not_found", "Connection not found.", 404);
+      if (connection.state !== "active" || connection.authEpoch !== authEpoch) fail("email_connection_changed", "Connection changed. Reconnect before configuring a webhook.");
+      next = { ...connection, webhook: { secretHash: request.secretHash, updatedAt: at } };
     } else {
-      if (!connection) fail("email_connection_not_found", "Connection not found.", 404);
+      if (!connection) fail("channel_connection_not_found", "Connection not found.", 404);
       next = { ...connection, profile: { ...connection.profile, revision: request.expectedRevision + 1 }, state: "disconnected", updatedAt: at };
     }
     return { connection: next, sources: [], receipt: { ...receipt, revision: next.profile.revision, state: next.state } };
@@ -88,17 +109,17 @@ function plan(request, { accountId, authEpoch, at, connection, folder, source, m
   for (const observation of request.observations) {
     if (observation.kind === "absent") { target.delete(observation.messageId); continue; }
     const envelope = observation.envelope;
-    require(same(envelope.connection, connection.profile) && envelope.message.folderId === request.folderId, "email_observation_scope_changed");
+    require(same(envelope.connection, connection.profile) && adapterForChannel(envelope.channel).scope(envelope) === request.folderId, "channel_observation_scope_changed");
     const previous = source(envelope.sourceId);
     if ((!legacy || Object.hasOwn(observation, "expectedSourceRevision")) && (previous?.revision ?? 0) !== observation.expectedSourceRevision)
       fail("stale_email_source", "This message changed during import. Fetch it again before retrying.");
-    if (previous && (previous.data.adapter !== "email" || previous.data.envelope.connection.id !== request.connectionId))
+    if (previous && (previous.data.adapter !== envelope.channel || previous.data.envelope.connection.id !== request.connectionId))
       fail("email_source_collision", "An existing source has a different origin.");
     const unchanged = previous?.data.envelope.sourceVersion === envelope.sourceVersion;
     const sourceRevision = (previous?.revision ?? 0) + (unchanged ? 0 : 1);
-    const inboxRequestId = unchanged ? null : "email-" + emailDigest([accountId, request.requestId, envelope.sourceId]);
+    const inboxRequestId = unchanged ? null : envelope.channel + "-" + emailDigest([accountId, request.requestId, envelope.sourceId]);
     if (!unchanged) sources.push({ action: "source.import", requestId: inboxRequestId, sourceId: envelope.sourceId,
-      expectedRevision: sourceRevision - 1, data: { adapter: "email", envelope } });
+      expectedRevision: sourceRevision - 1, data: { adapter: envelope.channel, envelope } });
     imports.push({ sourceId: envelope.sourceId, sourceRevision, inboxRequestId }); target.add(envelope.message.id);
   }
   if (target.size > 1000) fail("email_folder_limit", "Folder pilot capacity reached.");
@@ -114,6 +135,31 @@ export class EmailImport {
     const row = this.db.prepare("SELECT data_json FROM private_email_connections WHERE account_id=? AND id=?").get(accountId, id);
     return row ? JSON.parse(row.data_json) : null;
   }
+  // A journaled receipt for an exact retry; null when the request ID is unused.
+  priorReceipt(accountId, requestId) {
+    const row = this.db.prepare("SELECT receipt_json FROM private_email_commands WHERE account_id=? AND request_id=?").get(accountId, requestId);
+    return row ? JSON.parse(row.receipt_json) : null;
+  }
+  // Generic connection record for any channel; never the stored secret hash or cursors.
+  record(connection, authEpoch) { return { ...toChannelProfile(connection.profile), state: connectionState(connection, authEpoch) }; }
+  connections(token, binding) {
+    return this.store.readTransaction(() => {
+      const auth = this.store.inbox.auth(token, binding);
+      const connections = this.db.prepare("SELECT data_json FROM private_email_connections WHERE account_id=? ORDER BY id").all(auth.account.id)
+        .map(row => this.record(JSON.parse(row.data_json), auth.account.authEpoch));
+      return { contractVersion: 1, viewer: viewer(auth), connections };
+    });
+  }
+  connectionRecord(token, id, binding) {
+    return this.store.readTransaction(() => {
+      const auth = this.store.inbox.auth(token, binding);
+      if (!validId(id)) fail("channel_connection_not_found", "Connection not found.", 404);
+      const connection = this.connection(auth.account.id, id);
+      if (!connection) fail("channel_connection_not_found", "Connection not found.", 404);
+      return { contractVersion: 1, viewer: viewer(auth), connection: this.record(connection, auth.account.authEpoch), mode: connection.mode,
+        webhook: Boolean(connection.webhook), webhookSetAt: connection.webhook ? new Date(connection.webhook.updatedAt).toISOString() : null };
+    });
+  }
   folder(accountId, connectionId, folderId) {
     const row = this.db.prepare("SELECT data_json FROM private_email_folders WHERE account_id=? AND connection_id=? AND folder_id=?").get(accountId, connectionId, folderId);
     return row ? JSON.parse(row.data_json) : null;
@@ -122,7 +168,7 @@ export class EmailImport {
     return this.store.readTransaction(() => {
       require(validId(connectionId)); emailOpaqueId(folderId);
       const auth = this.store.inbox.auth(token, binding), connection = this.connection(auth.account.id, connectionId);
-      if (!connection) fail("email_connection_not_found", "Connection not found.", 404);
+      if (!connection) fail("channel_connection_not_found", "Connection not found.", 404);
       const folder = this.folder(auth.account.id, connectionId, folderId);
       const needsReset = !folder || folder.connectionRevision !== connection.profile.revision;
       const canImport = connection.state === "active" && connection.authEpoch === auth.account.authEpoch;
@@ -156,12 +202,12 @@ export class EmailImport {
           return row ? { revision: row.revision, data: this.store.inbox.version(accountId, sourceId, row.revision) } : null;
         },
         mailbox: request.profile ? this.db.prepare("SELECT id FROM private_email_connections WHERE account_id=? AND provider=? AND mailbox_id=?")
-          .get(accountId, request.profile.provider, request.profile.mailboxId)?.id : null,
+          .get(accountId, request.profile.provider, profileExternalId(request.profile))?.id : null,
         connectionCount: this.db.prepare("SELECT count(*) n FROM private_email_connections WHERE account_id=?").get(accountId).n });
       if (output.connection) {
         const c = output.connection;
         this.db.prepare(`INSERT INTO private_email_connections VALUES(?,?,?,?,?) ON CONFLICT(account_id,id) DO UPDATE SET data_json=excluded.data_json`)
-          .run(accountId, request.connectionId, c.profile.provider, c.profile.mailboxId, JSON.stringify(c));
+          .run(accountId, request.connectionId, c.profile.provider, profileExternalId(c.profile), JSON.stringify(c));
       }
       for (const source of output.sources) this.store.inbox.importSource(token, source, binding);
       if (output.folder) this.db.prepare(`INSERT INTO private_email_folders VALUES(?,?,?,?) ON CONFLICT(account_id,connection_id,folder_id) DO UPDATE SET data_json=excluded.data_json`)
@@ -187,7 +233,7 @@ export class EmailImport {
         const accountConnections = [...connections.values()].filter(c => c.profile.accountId === row.account_id);
         const output = plan(request, { accountId: row.account_id, authEpoch: row.auth_epoch, at: row.at, connection: connections.get(key), folder: folders.get(folderKey),
           source: id => sources.get(JSON.stringify([row.account_id, id])), connectionCount: accountConnections.length,
-          mailbox: request.profile ? accountConnections.find(c => c.profile.provider === request.profile.provider && c.profile.mailboxId === request.profile.mailboxId)?.profile.id : null }, true);
+          mailbox: request.profile ? accountConnections.find(c => c.profile.provider === request.profile.provider && profileExternalId(c.profile) === profileExternalId(request.profile))?.profile.id : null }, true);
         check(same(output.receipt, JSON.parse(row.receipt_json)));
         if (output.connection) connections.set(key, output.connection);
         if (output.folder) folders.set(folderKey, output.folder);
@@ -206,7 +252,7 @@ export class EmailImport {
       check(actualConnections.length === connections.size);
       for (const row of actualConnections) {
         const expected = connections.get(JSON.stringify([row.account_id, row.id]));
-        check(expected && row.provider === expected.profile.provider && row.mailbox_id === expected.profile.mailboxId && same(JSON.parse(row.data_json), expected));
+        check(expected && row.provider === expected.profile.provider && row.mailbox_id === profileExternalId(expected.profile) && same(JSON.parse(row.data_json), expected));
       }
       const actualFolders = this.db.prepare("SELECT * FROM private_email_folders").all();
       check(actualFolders.length === folders.size);

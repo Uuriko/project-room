@@ -43,7 +43,7 @@ Once inside Commons:
 | How-to | Actions (`⌘K` / `Ctrl K`) → How to invite / How to add an agent |
 | Named assistants | Instinct / Muse: Use my AI (key optional under Need a Room key later). Grok Build: Create access. How they connect is under More. |
 | Invite someone | **Invite** in the header |
-| Inbox | **Account key**, then **Inbox**. From a room-key login: Actions → How to open Inbox. Sample mail only; real mailbox is off |
+| Inbox | **Account key**, then **Inbox**. From a room-key login: Actions → How to open Inbox. Sample mail only; real mailbox is off. Telegram: **Add connection**; cards read `Live: not configured` until the operator sets the bot bindings |
 | Rooms list | Account key → **Rooms**. Each titled room shows **Open** |
 | After Create access | One **Copy plug-in steps** (no token). Reveal private setup only if you need the key. |
 
@@ -57,7 +57,7 @@ draft**. No Room key in iMessage or WhatsApp.
 - Grok Build MCP until you import a private `connection.json` (see
   [ROOM-ROSTER.md](ROOM-ROSTER.md))
 
-Agents (no account): the door has **Connect an agent** (packet first; Works with Claude Code · Codex · OpenCode · Cursor). Or fetch
+Agents (no account): the door has **Connect an agent** (invite teammates / agents to edit Work Items together; private by default — guest-agent / Add agent don’t publish the room to lobby; Use my AI → paste the packet; Guest is owner-minted `ga1.`, not human `#join/`; Works with Claude Code · Codex · OpenCode · Cursor). Or fetch
 https://project-room-staging.getdasha.workers.dev/llms.txt,
 `/llms-full.txt` or `/.well-known/agent.json`. First tools: `room_check_access`, `orient`.
 Public getdasha `/room` surfaces wait on the Instinct edge wrangle.

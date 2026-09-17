@@ -15,8 +15,8 @@ export const ROOM_TEMPLATES = [
       escalation: "Blockers older than one cycle escalate to the Room owner."
     },
     workItems: [
-      { title: "Post today's standup", definitionOfDone: "Shipped / next / blockers posted in the room.", mode: "write" },
-      { title: "Clear flagged blockers", definitionOfDone: "Every blocker has an owner and a next step, or is escalated.", mode: "write" }
+      { title: "Post today's standup", definitionOfDone: "Shipped / next / blockers posted in the room.", mode: "read" },
+      { title: "Clear flagged blockers", definitionOfDone: "Every blocker has an owner and a next step, or is escalated.", mode: "read" }
     ],
     suggestedRoles: ["owner", "member"]
   },
@@ -31,8 +31,8 @@ export const ROOM_TEMPLATES = [
       escalation: "Unresolved requests older than 24h escalate to the Room owner."
     },
     workItems: [
-      { title: "Triage new requests", definitionOfDone: "Every unowned request has an owner and a first response.", mode: "write" },
-      { title: "Write the weekly support summary", definitionOfDone: "Volume, top issues, and repeat-request themes posted.", mode: "write" }
+      { title: "Triage new requests", definitionOfDone: "Every unowned request has an owner and a first response.", mode: "read" },
+      { title: "Write the weekly support summary", definitionOfDone: "Volume, top issues, and repeat-request themes posted.", mode: "read" }
     ],
     suggestedRoles: ["owner", "triage-agent", "responder"]
   },
@@ -47,9 +47,9 @@ export const ROOM_TEMPLATES = [
       escalation: "Any red checklist item blocks launch and escalates to the Room owner."
     },
     workItems: [
-      { title: "Freeze the launch checklist", definitionOfDone: "Checklist posted and acknowledged by every owner.", mode: "write" },
-      { title: "Draft launch comms", definitionOfDone: "Announcement copy approved by the Room owner.", mode: "write" },
-      { title: "Verify rollback plan", definitionOfDone: "Rollback steps rehearsed or reviewed; owner sign-off recorded.", mode: "write" }
+      { title: "Freeze the launch checklist", definitionOfDone: "Checklist posted and acknowledged by every owner.", mode: "read" },
+      { title: "Draft launch comms", definitionOfDone: "Announcement copy approved by the Room owner.", mode: "read" },
+      { title: "Verify rollback plan", definitionOfDone: "Rollback steps rehearsed or reviewed; owner sign-off recorded.", mode: "read" }
     ],
     suggestedRoles: ["owner", "launch-lead", "comms"]
   },
@@ -64,8 +64,8 @@ export const ROOM_TEMPLATES = [
       escalation: "Lane collisions or stuck claims escalate to the Room owner."
     },
     workItems: [
-      { title: "Claim lanes", definitionOfDone: "Every active agent has a posted lane claim.", mode: "write" },
-      { title: "Post work receipts", definitionOfDone: "Completed work has a receipt (PR, commit, or artifact link).", mode: "write" }
+      { title: "Claim lanes", definitionOfDone: "Every active agent has a posted lane claim.", mode: "read" },
+      { title: "Post work receipts", definitionOfDone: "Completed work has a receipt (PR, commit, or artifact link).", mode: "read" }
     ],
     suggestedRoles: ["owner", "lane-agent"]
   }

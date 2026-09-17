@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync, readFileSync, statSync } from "node:fs";
@@ -26,8 +25,8 @@ async function setup(t, mobile = false) {
     await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
     f.store.close(); rmSync(f.directory, { recursive: true, force: true }); assert.deepEqual(errors, []); assert.deepEqual(outside, []);
   });
-  await page.goto(origin); await ensureSignIn(page); await page.locator("#access-key").fill(f.keys.owner);
-  await page.getByRole("button", { name: "Continue", exact: true }).click(); await page.locator("#main").waitFor({ state: "visible" });
+  await page.goto(origin); await page.locator("#access-key").fill(f.keys.owner);
+  await page.getByRole("button", { name: "Enter room", exact: true }).click(); await page.locator("#main").waitFor({ state: "visible" });
   await page.locator("#people-panel > summary").click();
   const open = async () => { await page.locator("#connect-agent-button").click(); await page.locator("#agent-connect-dialog").waitFor({ state: "visible" }); };
   const create = async () => { await page.locator("#agent-connect-name").fill("Synthetic Claude"); await page.locator("#agent-create").click(); };
@@ -36,32 +35,6 @@ async function setup(t, mobile = false) {
   return { ...f, page, origin, open, create, config, capture };
 }
 
-for (const mobile of [false, true]) test(`setup presets ${mobile ? "mobile" : "desktop"}: defaults, none, custom and bounded max`, { timeout: 30000 }, async t => {
-  const f = await setup(t, mobile), p = f.page; await f.open();
-  assert.equal(await p.locator("#agent-setup-preset").inputValue(), "moderate");
-  assert.equal(await p.locator("#agent-connect-access").inputValue(), "contribute");
-  for (const [preset, access, expiry] of [["max", "max", "30"], ["low", "chat", "1"], ["moderate", "contribute", "7"]]) {
-    await p.locator("#agent-setup-preset").selectOption(preset);
-    assert.equal(await p.locator("#agent-connect-access").inputValue(), access);
-    assert.equal(await p.locator("#agent-connect-expiry").inputValue(), expiry);
-  }
-  await p.locator("#agent-connect-name").fill("Preset agent");
-  await p.locator("#agent-setup-preset").selectOption("none");
-  assert.equal(await p.locator("#agent-create").isVisible(), false);
-  assert.equal(await p.locator("#agent-key-later").isVisible(), false);
-  await p.locator("#agent-connect-name").press("Enter");
-  assert.equal(f.store.db.prepare("SELECT count(*) n FROM agent_connections").get().n, 0);
-  await p.locator("#agent-setup-preset").selectOption("custom");
-  assert.equal(await p.locator("#agent-connect-access").isVisible(), true);
-  await p.locator("#agent-connect-access").selectOption("review");
-  await p.locator("#agent-connect-expiry").selectOption("7");
-  assert.equal(await p.locator("#agent-setup-preset").inputValue(), "custom");
-  await p.locator("#agent-setup-preset").selectOption("max");
-  await p.locator("#agent-create").click(); await p.locator("#agent-setup").waitFor({ state: "visible" });
-  const agent = Object.values(f.store.room("commons").state.members).find(m => m.displayName === "Preset agent");
-  assert.deepEqual(agent.permissions, ["steer", "manage_claims", "accept_work", "complete_work", "verify"]);
-  assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-});
 test("browser owner issues digest-only setup; a real external client imports, reads, rotates and loses access", { timeout: 30000 }, async t => {
   const f = await setup(t), requests = [];
   f.page.on("request", request => { if (request.url().endsWith("/agent-connections") && request.method() === "POST") requests.push(request.postDataJSON()); });
@@ -177,7 +150,7 @@ test("retained setup warns before sign-out; expiry prevents reveal or copy", { t
   await f.page.locator("#agent-connect-close").click();
   let warning;
   f.page.once("dialog", dialog => { warning = dialog.message(); return dialog.dismiss(); });
-  await f.page.locator("#signout-button").click(); assert.match(warning, /private setup/);
+  if (await f.page.locator("#session-menu-button").isVisible()) await f.page.locator("#session-menu-button").click(); await f.page.locator("#signout-button").click(); assert.match(warning, /private setup/);
   await f.open();
   await f.page.evaluate(() => { const now = Date.now(); Date.now = () => now + 31 * 86400000; });
   await f.page.locator("#agent-private-details > summary").click();

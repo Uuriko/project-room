@@ -4,8 +4,6 @@ const id = value => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,
 const revision = value => Number.isSafeInteger(value) && value >= 0;
 const boundedText = (value, max) => typeof value === "string" && value.isWellFormed() && value.length <= max;
 const hash = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
-const exact = (v, keys) => v && typeof v === "object" && !Array.isArray(v)
-  && Object.keys(v).length === keys.length && keys.every(k => Object.hasOwn(v, k));
 function validReplyReview(value, sourceId, view = "reply-review-v1") {
   if (value.view !== view || value.sourceId !== sourceId) return false;
   if (view !== "reply-review-v1" && (value.attempt === null ? value.comparison !== null
@@ -42,14 +40,59 @@ function validReplyTarget(a, update = false) {
     && o.to.length + o.cc.length + o.bcc.length > 0 && !o.differences.some(v => ["draft_state", "thread", "from", "sender", "attachments"].includes(v));
   return (!a.canReview || supported) && (!r?.current || a.canReview) && (a.status !== "draft_reviewed" || r !== null);
 }
+const connectionStates = ["active", "disconnected", "reconnect_required"], channels = { email: "Email", telegram: "Telegram" };
+const validConnectionRef = c => c === null || (id(c?.id) && Object.hasOwn(channels, c.channel) && boundedText(c.provider, 64)
+  && connectionStates.includes(c.state) && Object.keys(c).length === 4);
+const isoTime = v => v === null || (typeof v === "string" && v.length <= 40 && Number.isFinite(Date.parse(v)));
+const liveStates = ["not_configured", "invalid", "configured"], webhookStates = ["unset", "set", "matches", "differs"];
+// Live status carries binding names and states only; a value or hash in it is a contract violation.
+export const validLive = live => live === null || (live?.contractVersion === 1 && live.channel === "telegram" && liveStates.includes(live.state)
+  && [live.bindings, live.missing, live.invalid].every(list => Array.isArray(list) && list.length <= 8 && list.every(n => /^[A-Z][A-Z0-9_]{1,63}$/.test(n)))
+  && webhookStates.includes(live.webhook) && isoTime(live.webhookSetAt) && isoTime(live.lastUpdateReceivedAt) && revision(live.receivedUpdates)
+  && (live.lastSendResult === null || (isoTime(live.lastSendResult.at) && ["accepted", "rejected", "failed"].includes(live.lastSendResult.outcome)
+    && (live.lastSendResult.code === null || boundedText(live.lastSendResult.code, 64))))
+  && typeof live.importAvailable === "boolean");
+export const validConnectionRecord = (v, connectionId) => v.connection?.id === connectionId && validConnection(v.connection, v.viewer.accountId)
+  && v.mode === "fixture" && typeof v.webhook === "boolean" && isoTime(v.webhookSetAt ?? null) && typeof v.syncAvailable === "boolean" && validLive(v.live ?? null);
+const validSendResult = r => r === null || (isoTime(r?.at) && ["accepted", "rejected", "failed"].includes(r.outcome) && (r.code === null || boundedText(r.code, 64)));
+// Which transport, if any, this deployment replies through for a channel source: the live
+// provider or the inert fixture. Email has none until an outbound email slice exists.
+const channelSendProviders = ["telegram-bot"];
+export const validChannelSend = c => c === null || (channelSendProviders.includes(c?.provider) && ["fixture", "live"].includes(c.mode) && Object.keys(c).length === 2);
+// The owner's connection commands: add or update a profile, or disconnect. Nothing else travels here.
+export function validConnectionCommand(r) {
+  if (!r || typeof r !== "object" || !id(r.requestId) || !id(r.connectionId) || !revision(r.expectedRevision)) return false;
+  if (r.action === "connection.disconnect") return Object.keys(r).length === 4;
+  if (r.action !== "connection.configure" || Object.keys(r).length !== 5) return false;
+  const p = r.profile;
+  return p?.id === r.connectionId && p.revision === r.expectedRevision + 1 && (Object.hasOwn(p, "mailboxId")
+    ? p.provider === "microsoft-graph" && boundedText(p.mailboxId, 2048) && boundedText(p.identity?.name, 1024) && boundedText(p.identity?.address, 320) && Array.isArray(p.aliases)
+    : validConnection({ ...p, state: "active" }, p.accountId));
+}
+export function validConnection(c, accountId) {
+  return c?.accountId === accountId && id(c.id) && revision(c.revision) && c.revision > 0 && Object.hasOwn(channels, c.channel)
+    && boundedText(c.provider, 64) && boundedText(c.externalId, 2048) && connectionStates.includes(c.state)
+    && ["kind", "id", "handle", "displayName"].every(k => boundedText(c.identity?.[k], 2048)) && Object.keys(c.identity).length === 4
+    && ["read", "send", "threads", "edit"].every(k => typeof c.capabilities?.[k] === "boolean") && Object.keys(c.capabilities).length === 4
+    && Object.keys(c).length === 9;
+}
 function validSource(source, sourceId, accountId) {
   if (source?.id !== sourceId || !revision(source.revision) || !source.revision) return false;
-  if (source.adapter === 'message') return ['telegram', 'sms', 'whatsapp'].includes(source.provider) && source.accountId === accountId && id(source.connectionId)
-    && ['sender', 'recipient', 'subject'].every(k => boundedText(source[k], 240))
-    && Array.isArray(source.paragraphs) && source.paragraphs.length === 1 && boundedText(source.paragraphs[0], 4096);
   if (source.adapter === "synthetic") return ["sender", "recipient", "subject"].every(k => boundedText(source[k], 240))
     && Array.isArray(source.paragraphs) && source.paragraphs.length <= 20 && source.paragraphs.every(p => boundedText(p, 4000));
   const e = source.email, c = source.capabilities;
+  if (typeof source.needsYou !== "boolean") return false;
+  if (source.adapter === "telegram") {
+    const ch = source.channel;
+    // `send` may be true on an active bot connection; the deployment's transport is negotiated separately.
+    return ch?.view === "channel-excerpt-v1" && ch.accountId === accountId && ch.channel === "telegram" && boundedText(ch.provider, 64)
+      && connectionStates.includes(ch.connectionState) && ch.format === "text" && ["message", "edited_message", "channel_post"].includes(ch.kind)
+      && typeof ch.edited === "boolean" && boundedText(ch.chat, 2048) && revision(ch.attachmentCount) && ch.attachmentCount <= 20
+      && ["sender", "recipient", "subject"].every(k => boundedText(source[k], 2048)) && c?.draft === true && typeof c.send === "boolean"
+      && (!c.send || ch.connectionState === "active")
+      && Array.isArray(source.paragraphs) && source.paragraphs.length === 1 && boundedText(source.paragraphs[0], 16384) && !source.paragraphs[0].includes("\r")
+      && c.share === Boolean(source.paragraphs[0].trim());
+  }
   return source.adapter === "email" && e?.view === "email-excerpt-v1" && e.accountId === accountId
     && ["text", "html"].includes(e.format) && ["active", "disconnected", "reconnect_required"].includes(e.connectionState)
     && ["sender", "recipient"].every(k => boundedText(source[k], 320)) && boundedText(source.subject, 4096)
@@ -72,13 +115,22 @@ async function validResult(proof, body, version, sourceRevision, roomId, workIte
     && version === (await inboxTextVersion(canonical(proof))).slice(7);
 }
 async function validEnvelope(p, accountId, sourceId) {
-  if (!p || p.adapter !== "synthetic" || p.accountId !== accountId || p.sourceId !== sourceId
+  if (!p || !["synthetic", "telegram"].includes(p.adapter) || p.accountId !== accountId || p.sourceId !== sourceId
     || !revision(p.authEpoch) || ![p.sourceRevision, p.draftRevision].every(n => revision(n) && n > 0)
-    || ![p.from, p.subject].every(v => typeof v === "string" && v.length <= 240)
-    || !Array.isArray(p.to) || p.to.length !== 1 || typeof p.to[0] !== "string" || p.to[0].length > 240
+    || ![p.from, p.subject].every(v => typeof v === "string" && v.length <= 2048)
+    || !Array.isArray(p.to) || p.to.length !== 1 || typeof p.to[0] !== "string" || p.to[0].length > 2048
     || typeof p.body !== "string" || !p.body.trim() || p.body.length > 4000 || !Array.isArray(p.attachments) || p.attachments.length) return false;
-  const envelope = { adapter: p.adapter, accountId: p.accountId, authEpoch: p.authEpoch, sourceId: p.sourceId,
-    sourceRevision: p.sourceRevision, draftRevision: p.draftRevision, from: p.from, to: p.to, subject: p.subject, body: p.body, attachments: p.attachments };
+  const common = { accountId: p.accountId, authEpoch: p.authEpoch, sourceId: p.sourceId, sourceRevision: p.sourceRevision, draftRevision: p.draftRevision };
+  let envelope;
+  if (p.adapter === "synthetic") {
+    if (p.from.length > 240 || p.subject.length > 240 || p.to[0].length > 240) return false;
+    envelope = { adapter: p.adapter, ...common, from: p.from, to: p.to, subject: p.subject, body: p.body, attachments: p.attachments };
+  } else {
+    // Telegram replies name the bot connection and its target chat; field order matches the server preview.
+    const t = p.target;
+    if (p.provider !== "telegram-bot" || p.subject !== "" || !["chatId", "replyToMessageId", "threadId"].every(k => boundedText(t?.[k], 64)) || Object.keys(t).length !== 3) return false;
+    envelope = { adapter: p.adapter, provider: p.provider, ...common, from: p.from, to: p.to, subject: p.subject, body: p.body, attachments: p.attachments, target: t };
+  }
   return p.previewVersion === (await inboxTextVersion(JSON.stringify(envelope))).slice(7);
 }
 async function validSend(send, accountId, sourceId) {
@@ -89,7 +141,7 @@ async function validSend(send, accountId, sourceId) {
     && await validEnvelope(send.envelope, accountId, sourceId);
 }
 async function validSends(v, sourceId) {
-  if (v.sourceId !== sourceId || typeof v.simulationAvailable !== "boolean" || !Array.isArray(v.sends)) return false;
+  if (v.sourceId !== sourceId || typeof v.simulationAvailable !== "boolean" || !Array.isArray(v.sends) || !validChannelSend(v.channelSend ?? null)) return false;
   const seen = new Set();
   for (const send of v.sends) {
     if (!send || seen.has(send.id) || !await validSend(send, v.viewer.accountId, sourceId)) return false;
@@ -126,31 +178,73 @@ export class InboxClient {
       throw error;
     }
   }
-  gmailStatus() { return this.request('/connections/gmail', {}, v => typeof v.enabled === 'boolean' && Array.isArray(v.connections)
-    && v.connections.length <= 20 && v.connections.every(c => id(c.connectionId) && boundedText(c.mailbox, 320)
-      && ['connected', 'disconnected', 'reconnect_required'].includes(c.state))); }
-  telegramStatus() { return this.request('/connections/telegram', {}, v => typeof v.enabled === 'boolean' && Array.isArray(v.connections)
-    && v.connections.length <= 20 && v.connections.every(c => exact(c, ['connectionId', 'revision', 'state'])
-      && id(c.connectionId) && revision(c.revision)
-      && ['active','disconnected','missing','reauthorize'].includes(c.state))); }
-  telegram(action,data) {
-    if (!['sync','disconnect'].includes(action) || !id(data?.connectionId) || !revision(data.expectedRevision) || data.expectedRevision < 1)
-      throw fail('invalid_telegram_action','Choose a connection action.');
-    return this.request('/connections/telegram/'+action,{method:'POST',data},v => v.connectionId === data.connectionId
-      && v.revision === data.expectedRevision + (action === 'disconnect' ? 1 : 0)
-      && (action === 'sync' ? revision(v.imported) : v.state === 'disconnected'));
+  // One row of the list/search projection, as returned by the server.
+  validSourceSummary(s) {
+    return id(s.id) && revision(s.revision) && s.revision > 0
+      && typeof s.subject === "string" && ["synthetic", "email", "telegram"].includes(s.adapter) && validConnectionRef(s.connection ?? null)
+      && (s.adapter === "synthetic") === ((s.connection ?? null) === null) && typeof s.needsYou === "boolean" && (!s.needsYou || s.adapter !== "synthetic")
+      && ["sender", "recipient"].every(k => typeof s[k] === "string");
   }
-  gmail(action, data) {
-    if (!['start', 'sync', 'disconnect'].includes(action)) throw fail('invalid_gmail_action', 'Choose a connection action.');
-    return this.request('/connections/gmail/' + action, { method: 'POST', data }, v => {
-      if (!id(v.connectionId)) return false;
-      if (action === 'start') {
-        try { const url = new URL(v.authorizationUrl); return url.origin === 'https://accounts.google.com' && url.pathname === '/o/oauth2/v2/auth' && !url.username && !url.password; } catch { return false; }
-      }
-      return action === 'sync' ? revision(v.imported) && typeof v.complete === 'boolean' : v.state === 'disconnected' && typeof v.providerRevoked === 'boolean';
-    });
+  list({ cursor = null, limit = null } = {}) {
+    const params = new URLSearchParams({ view: "email-excerpt-v1" });
+    if (cursor !== null && cursor !== undefined) params.set("cursor", cursor);
+    if (limit !== null && limit !== undefined) params.set("limit", String(limit));
+    return this.request(`?${params}`, {}, v => Array.isArray(v.sources) && v.sources.every(s => this.validSourceSummary(s))
+      && (v.nextCursor === null || typeof v.nextCursor === "string"));
   }
-  list() { return this.request("?view=email-excerpt-v1", {}, v => Array.isArray(v.sources) && v.sources.every(s => id(s.id) && revision(s.revision) && s.revision > 0 && typeof s.subject === "string")); }
+  // Full-text search over the account's visible sources. Results are
+  // { source, score } pairs, best first; total counts all matches.
+  threads({ sourceId = null, limit = null } = {}) {
+    const params = new URLSearchParams({ view: "email-excerpt-v1" });
+    if (sourceId !== null && sourceId !== undefined) params.set("sourceId", sourceId);
+    if (limit !== null && limit !== undefined) params.set("limit", String(limit));
+    return this.request(`/threads?${params}`, {}, v => Number.isSafeInteger(v.total) && v.total >= 0
+      && Array.isArray(v.threads) && v.threads.every(t => typeof t.threadId === "string"
+        && Number.isSafeInteger(t.messageCount) && t.messageCount > 0 && Number.isSafeInteger(t.depth) && t.depth >= 0
+        && typeof t.firstAt === "string" && typeof t.lastAt === "string"
+        && Array.isArray(t.entries) && t.entries.every(e => Number.isSafeInteger(e.depth) && e.depth >= 0 && this.validSourceSummary(e.source))));
+  }
+  // Attachment descriptors for one source: metadata only, never bytes.
+  // The single-attachment call also verifies descriptor membership and
+  // carries the retrieval handle a future byte-fetch will use.
+  attachments(sourceId) {
+    return this.request(`/sources/${encodeURIComponent(sourceId)}/attachments?view=email-excerpt-v1`, {},
+      v => v.sourceId === sourceId && Array.isArray(v.attachments)
+        && v.attachments.every(a => typeof a.id === "string" && typeof a.kind === "string"
+          && (a.name === null || typeof a.name === "string") && (a.contentType === null || typeof a.contentType === "string")
+          && (a.size === null || Number.isSafeInteger(a.size)) && typeof a.inline === "boolean"));
+  }
+  attachment(sourceId, attachmentId) {
+    return this.request(`/sources/${encodeURIComponent(sourceId)}/attachments/${encodeURIComponent(attachmentId)}?view=email-excerpt-v1`, {},
+      v => v.sourceId === sourceId && typeof v.attachment?.id === "string" && v.attachment.id === attachmentId
+        && v.retrieval?.available === false && typeof v.retrieval?.reason === "string");
+  }
+  search({ query, sourceId = null, limit = null } = {}) {
+    const params = new URLSearchParams({ view: "email-excerpt-v1", q: query });
+    if (sourceId !== null && sourceId !== undefined) params.set("sourceId", sourceId);
+    if (limit !== null && limit !== undefined) params.set("limit", String(limit));
+    return this.request(`/search?${params}`, {}, v => typeof v.query === "string" && Number.isSafeInteger(v.total) && v.total >= 0
+      && Array.isArray(v.results) && v.results.every(r => typeof r.score === "number" && r.score > 0 && this.validSourceSummary(r.source)));
+  }
+  // Owner-managed connection records: add or update a bot/mailbox profile, or disconnect ("Remove").
+  applyConnection(request) {
+    const data = structuredClone(request);
+    if (!validConnectionCommand(data)) return Promise.reject(fail("invalid_channel_connection", "Choose a supported connection command."));
+    return this.request("/connections/commands", { method: "POST", data }, v => validConnectionRecord(v, data.connectionId) && typeof v.duplicate === "boolean"
+      && v.receipt?.requestId === data.requestId && v.receipt.action === data.action && v.receipt.connectionId === data.connectionId
+      && v.receipt.revision === data.expectedRevision + 1 && v.receipt.state === (data.action === "connection.configure" ? "active" : "disconnected"));
+  }
+  connections() { return this.request("/connections", {}, v => Array.isArray(v.connections) && v.connections.every(c => validConnection(c, v.viewer.accountId))); }
+  connection(connectionId) {
+    return this.request("/connections/" + encodeURIComponent(connectionId), {}, v => validConnectionRecord(v, connectionId));
+  }
+  // Owner-authenticated live import trigger (re-registers the webhook secret when
+  // the deployment's Telegram bindings are set, then drains verified updates).
+  reconnectConnection(connectionId, requestId) {
+    return this.request("/connections/" + encodeURIComponent(connectionId) + "/reconnect", { method: "POST", data: { requestId } },
+      v => validConnectionRecord(v, connectionId) && typeof v.registered === "boolean" && typeof v.duplicate === "boolean"
+        && (v.imported === null || revision(v.imported)) && [null, "webhook", "journal", "recording"].includes(v.source));
+  }
   read(sourceId) {
     return this.request("/sources/" + encodeURIComponent(sourceId) + "?view=email-excerpt-v1", {}, v => validSource(v.source, sourceId, v.viewer.accountId)
       && (v.draft === null || revision(v.draft?.revision) && v.draft.revision > 0 && revision(v.draft.sourceRevision)
@@ -162,16 +256,16 @@ export class InboxClient {
         && /^[a-f0-9]{64}$/.test(v.audienceVersion) && typeof v.roomTitle === "string"
         && Array.isArray(v.members) && v.members.every(m => id(m.id) && typeof m.displayName === "string" && ["human", "agent"].includes(m.kind)));
   }
-  grants(sourceId) {
-    return this.request("/sources/" + encodeURIComponent(sourceId) + "/grants", {}, v => v.sourceId === sourceId
-      && typeof v.hasMore === "boolean" && Array.isArray(v.grants) && v.grants.length <= 100 && v.grants.every(g => id(g.grantId) && id(g.roomId)
-        && Array.isArray(g.memberIds) && g.memberIds.length > 0 && g.memberIds.length <= 20 && g.memberIds.every(id)
-        && revision(g.expiresAt) && typeof g.revoked === "boolean"));
-  }
   sendContext(sourceId) {
     return this.request("/sources/" + encodeURIComponent(sourceId) + "/send-context", {}, async v => v.sourceId === sourceId
-      && typeof v.simulationAvailable === "boolean" && v.preview?.authEpoch === v.viewer.authEpoch
+      && typeof v.simulationAvailable === "boolean" && validChannelSend(v.channelSend ?? null) && v.preview?.authEpoch === v.viewer.authEpoch
       && await validEnvelope(v.preview, v.viewer.accountId, sourceId));
+  }
+  // Dispatch or reconcile a queued channel reply through the deployment's transport (live or fixture).
+  channelSend(action, sourceId, sendId) {
+    return this.request("/channel-sends", { method: "POST", data: { action, sourceId, sendId } }, async v =>
+      validChannelSend(v.channelSend) && v.channelSend !== null && await validSends(v, sourceId) && v.send?.id === sendId
+      && await validSend(v.send, v.viewer.accountId, sourceId) && validSendResult(v.lastSendResult ?? null));
   }
   sends(sourceId) { return this.request("/sources/" + encodeURIComponent(sourceId) + "/sends", {}, v => validSends(v, sourceId)); }
   replyReview(sourceId) {
@@ -211,14 +305,6 @@ export class InboxClient {
     const data = structuredClone(request);
     return this.request("/commands", { method: "POST", data }, async v => {
       const r = v.receipt;
-      if (["source.grant", "grant.revoke"].includes(data.action)) {
-        if (typeof v.duplicate !== "boolean" || r?.requestId !== data.requestId || r.action !== data.action || r.sourceId !== data.sourceId) return false;
-        if (data.action === "grant.revoke") return r.grantId === data.grantId && r.revoked === true;
-        return id(r.grantId) && r.roomId === data.roomId && r.sourceRevision === data.sourceRevision
-          && boundedText(r.body, 4000) && revision(r.expiresAt) && revision(r.roomSequence)
-          && Array.isArray(r.members) && r.members.length === data.memberIds.length
-          && r.members.every((m, i) => m.memberId === data.memberIds[i] && revision(m.revision));
-      }
       if (data.action.startsWith("send.")) {
         if (!["send.reserve", "send.cancel"].includes(data.action) || typeof v.duplicate !== "boolean"
           || r?.requestId !== data.requestId || r.action !== data.action || r.sourceId !== data.sourceId
@@ -235,6 +321,8 @@ export class InboxClient {
       }
       return typeof v.duplicate === "boolean" && r?.requestId === data.requestId && r.action === data.action && r.sourceId === data.sourceId
         && (["source.share", "source.excerpt"].includes(data.action) ? r.roomId === data.roomId && r.sourceRevision === data.sourceRevision && id(r.messageId) && id(r.eventId) && revision(r.sequence)
+          : ["source.read", "source.unread"].includes(data.action) ? r.sourceRevision === data.expectedRevision
+            && (data.action === "source.unread" ? r.readAt === null : Number.isSafeInteger(r.readAt) && r.readAt > 0)
           : r.revision === data.expectedRevision + 1 && (!data.action.startsWith("draft.") || r.sourceRevision === data.sourceRevision));
     });
   }

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { chromium } from "playwright";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
+import { ROOM_ORIGIN, COMPUTE_DOOR } from "../deploy/agent-discovery.mjs";
 
 for (const touch of [false, true]) {
   test(`public /room door ${touch ? "mobile" : "desktop"}: Join + Connect, not the llms packet`, { timeout: 60000 }, async t => {
@@ -31,17 +31,39 @@ for (const touch of [false, true]) {
     await page.goto(`${origin}/room`);
     assert.equal(await page.title(), "Project Room");
     assert.match(await page.locator("h1").innerText(), /Project Room/);
-    assert.equal(await page.locator(".lead").innerText(), 'People and agents. One conversation.');
+    assert.match(await page.locator(".lead").innerText(), /Work Items, next actions, receipts/);
+    assert.match(await page.locator(".join-note").innerText(), /Joining as a person or an agent is free/);
+    const open = page.getByRole("link", { name: "Open", exact: true });
     const joinLink = page.getByRole("link", { name: "Join", exact: true });
-    const connect = page.locator('summary', {hasText:'Connect an agent'});
-    assert.equal(await joinLink.getAttribute("href"), ROOM_ORIGIN);
-    const guide=page.getByRole('link',{name:'Connection guide',exact:true});
-    assert.equal(await guide.isVisible(),false);
+    const connect = page.getByRole("link", { name: "Connect an agent", exact: true });
+    assert.equal(await open.getAttribute("href"), ROOM_ORIGIN);
+    assert.equal(await joinLink.getAttribute("href"), `${ROOM_ORIGIN}/#join/`);
+    assert.equal(await connect.getAttribute("href"), "#connect");
     await connect.click();
-    assert.equal(await guide.isVisible(),true);
-    assert.equal(await guide.getAttribute('href'),'/room/llms.txt');
-    await page.locator('summary',{hasText:'Have an invite?'}).click();
-    assert.equal(await page.getByText('Open your invite link to join that room.',{exact:true}).isVisible(),true);
+    await page.locator("#connect").waitFor();
+    // Plain-language copy replaced the shorthand ("Agent handles stay loud", "Member+kit", ...).
+    assert.match(await page.locator("body").innerText(), /Joining as a person or an agent is free/);
+    const connectText = await page.locator("#connect").innerText();
+    assert.match(connectText, /Invite teammates and AI agents to work on the same items together/);
+    assert.match(connectText, /Rooms are private by default\. Adding an agent never lists the room publicly/);
+    assert.match(connectText, /choose “Use my AI” and paste the agent packet/);
+    assert.match(connectText, /Never paste a room key into a chat/);
+    assert.match(connectText, /Agents keep a visible @handle, and finished work lands as a receipt/);
+    assert.match(connectText, /short-lived guest agent link \(it starts with ga1\.\)/);
+    assert.match(connectText, /enrolls a lasting agent with its own key/);
+    assert.match(connectText, /one to research, one to edit, one to plan/);
+    assert.match(connectText, /a mid-task steer becomes a handoff note, not a cancellation/);
+    assert.doesNotMatch(connectText, /marketplace|Agent handles stay loud|Member\+kit|frontier member/i);
+    // One packet link; the other links point at genuinely different documents.
+    assert.equal(await page.getByRole("link", { name: "Read the agent packet (llms.txt)" }).getAttribute("href"), "/room/llms.txt");
+    assert.equal(await page.locator('#connect a[href="/room/llms.txt"]').count(), 1);
+    assert.equal(await page.getByRole("link", { name: "Full packet" }).getAttribute("href"), "/room/llms-full.txt");
+    assert.equal(await page.getByRole("link", { name: "Machine card (agent.json)" }).getAttribute("href"), "/room/.well-known/agent.json");
+    assert.equal(await page.getByRole("link", { name: "Kits catalog" }).getAttribute("href"), "/room/kits");
+    assert.match(await page.locator(".works-with").innerText(), /Works with Claude Code, Codex, OpenCode, Cursor/);
+    assert.equal(await page.locator(".works-with a").count(), 0);
+    assert.equal(await page.locator(".compute a").first().getAttribute("href"), COMPUTE_DOOR);
+    assert.equal(await page.getByRole("link", { name: "github.com/Uuriko/project-room" }).getAttribute("href"), "https://github.com/Uuriko/project-room");
     assert.equal(await page.locator("script").count(), 0);
     assert.doesNotMatch(await page.content(), /# Project Room|Bearer |ROOM_AGENT_TOKEN/i);
     const workspace = await page.request.get(`${origin}/`);

@@ -30,6 +30,8 @@ Threads are a projection of immutable `replyToId` links, not a new message colle
 
 `message.reaction_set` adds or removes the caller's ID from one allowed reaction on an existing room message. Its data is `{messageId,reaction,active}`; actor identity is derived at the service boundary. Exact command retries return their original receipt, including after a later change, without reapplying old intent. Invalid references, inactive membership, or invalid data leave the projection and history unchanged. Reactions consume the ordinary write budget and event limits.
 
+`message.pinned` and `message.unpinned` (issue #6 B2) take `{messageId}`; any active member may pin or unpin a live message in this room. The projection keeps `pins[]` in the order pins were placed (at most 50 per room, refused as a capacity conflict beyond that), pinning an already pinned message or unpinning an unpinned one changes nothing, and `message.deleted` drops the pin with the tombstone. `GET /api/rooms/:id/pins` returns the ordered list joined with the live messages; `POST` with `{messageId, pinned}` pins or unpins without appending an event when the room is already in that state. Pins never change work, permissions, or a caught-up cursor.
+
 The client isolates late command and snapshot responses from a later session. Access ending clears thread drafts, search results, private rendered content, and pending reaction requests. It does not claim to remove information someone has already copied outside the application.
 
 ## Verification

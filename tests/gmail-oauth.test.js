@@ -1,154 +1,227 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
-import { GmailOAuth, GMAIL_READ_SCOPE, GMAIL_CALLBACK_PATH } from '../server/gmail-oauth.mjs';
+// Tests for src/gmail-oauth.mjs — pure OAuth connection logic for Gmail.
+// No network calls, no real credentials: randomness and time are injected.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import {
+  GOOGLE_AUTHORIZE_URL,
+  GOOGLE_TOKEN_URL,
+  OAUTH_PURPOSES,
+  scopesFor,
+  buildAuthorizeUrl,
+  buildTokenExchangeRequest,
+  parseTokenResponse,
+  connectionRecord,
+  newPkcePair,
+} from "../src/gmail-oauth.mjs";
 
-const redirectUri = `http://127.0.0.1:4173${GMAIL_CALLBACK_PATH}`;
-const context = { accountId: 'account-a', sessionBinding: 'binding-a', authEpoch: 1, connectionId: 'gmail-a', revision: 1 };
-const mailbox = 'pilot@example.com';
-const grant = { access_token: 'access-fixture', refresh_token: 'refresh-fixture', token_type: 'Bearer', expires_in: 3600, scope: GMAIL_READ_SCOPE };
-const json = value => new Response(JSON.stringify(value));
-function fixture(responder) {
-  let now = 100000;
-  const calls = [];
-  const oauth = new GmailOAuth({ clientId: 'client-fixture', clientSecret: 'secret-fixture', redirectUri,
-    now: () => now, fetchImpl: async (url, init) => {
-      calls.push({ url, init });
-      return responder ? responder(url, init, calls.length) : json(calls.length === 1 ? grant : { emailAddress: mailbox });
-    } });
-  const begin = () => new URL(oauth.begin({ context, mailbox }).authorizationUrl);
-  const callback = auth => `${redirectUri}?state=${auth.searchParams.get('state')}&code=code-fixture`;
-  return { oauth, calls, begin, callback, advance: ms => { now += ms; } };
-}
+const FIXED_NOW = Date.parse("2026-09-16T08:00:00.000Z");
+const fixedClock = () => FIXED_NOW;
+const fixedRandom = bytes => Buffer.alloc(bytes, 0xab); // -> "ababab..."
+const deps = { random: fixedRandom, clock: fixedClock };
 
-test('requests read-only consent, pins PKCE, validates mailbox, never fetches messages', async () => {
-  const f = fixture();
-  const auth = f.begin();
-  assert.equal(auth.origin, 'https://accounts.google.com');
-  assert.equal(auth.searchParams.get('scope'), GMAIL_READ_SCOPE);
-  assert.equal(auth.searchParams.get('include_granted_scopes'), 'false');
-  assert.equal(auth.searchParams.get('code_challenge_method'), 'S256');
-  assert.ok(!auth.href.includes('secret-fixture'));
-  const result = await f.oauth.complete({ callbackUrl: f.callback(auth), getContext: () => context });
-  assert.equal(result.mailbox, mailbox);
-  assert.equal(result.refreshToken, 'refresh-fixture');
-  assert.equal(f.calls.length, 2);
-  assert.equal(f.calls[0].url, 'https://oauth2.googleapis.com/token');
-  const body = new URLSearchParams(f.calls[0].init.body);
-  assert.equal(createHash('sha256').update(body.get('code_verifier')).digest('base64url'), auth.searchParams.get('code_challenge'));
-  assert.equal(f.calls[1].url, 'https://gmail.googleapis.com/gmail/v1/users/me/profile');
-  assert.ok(f.calls.every(call => call.init.redirect === 'error' && call.init.signal));
-  await assert.rejects(f.oauth.complete({ callbackUrl: f.callback(auth), getContext: () => context }), { code: 'gmail_state_invalid' });
+const READ = "https://www.googleapis.com/auth/gmail.readonly";
+const SEND = "https://www.googleapis.com/auth/gmail.send";
+const COMPOSE = "https://www.googleapis.com/auth/gmail.compose";
+
+const baseAuth = {
+  clientId: "12345.apps.googleusercontent.com",
+  redirectUri: "https://app.example.com/oauth/callback",
+  scopes: [READ, SEND],
+};
+
+test("scopesFor maps each purpose to its Gmail scope URL", () => {
+  assert.deepEqual(scopesFor("mail.read"), [READ]);
+  assert.deepEqual(scopesFor("mail.send"), [SEND]);
+  assert.deepEqual(scopesFor("mail.compose"), [COMPOSE]);
+  assert.deepEqual([...OAUTH_PURPOSES].sort(), ["mail.compose", "mail.read", "mail.send"]);
+  assert.throws(() => scopesFor("mail.delete"), { code: "GMAIL_UNKNOWN_PURPOSE" });
+  assert.throws(() => scopesFor(""), { code: "GMAIL_UNKNOWN_PURPOSE" });
 });
 
-for (const field of ['accountId', 'sessionBinding', 'authEpoch', 'connectionId', 'revision']) {
-  test(`rejects changed ${field} before exchanging code`, async () => {
-    const f = fixture(); const auth = f.begin();
-    const changed = { ...context, [field]: typeof context[field] === 'number' ? 2 : 'other' };
-    await assert.rejects(f.oauth.complete({ callbackUrl: f.callback(auth), getContext: () => changed }), { code: 'gmail_session_changed' });
-    assert.equal(f.calls.length, 0);
+test("buildAuthorizeUrl produces the full Google authorization URL", () => {
+  const url = new URL(buildAuthorizeUrl({ ...baseAuth, state: "state-123", codeChallenge: "chal-xyz" }, deps));
+  assert.equal(`${url.origin}${url.pathname}`, GOOGLE_AUTHORIZE_URL);
+  const p = url.searchParams;
+  assert.equal(p.get("response_type"), "code");
+  assert.equal(p.get("client_id"), baseAuth.clientId);
+  assert.equal(p.get("redirect_uri"), baseAuth.redirectUri);
+  assert.equal(p.get("scope"), `${READ} ${SEND}`);
+  assert.equal(p.get("access_type"), "offline");
+  assert.equal(p.get("prompt"), "consent");
+  assert.equal(p.get("state"), "state-123");
+  assert.equal(p.get("code_challenge"), "chal-xyz");
+  assert.equal(p.get("code_challenge_method"), "S256");
+});
+
+test("buildAuthorizeUrl honors custom accessType/prompt and omits PKCE when absent", () => {
+  const url = new URL(buildAuthorizeUrl({ ...baseAuth, accessType: "online", prompt: "select_account" }, deps));
+  assert.equal(url.searchParams.get("access_type"), "online");
+  assert.equal(url.searchParams.get("prompt"), "select_account");
+  assert.equal(url.searchParams.get("code_challenge"), null);
+  assert.equal(url.searchParams.get("code_challenge_method"), null);
+});
+
+test("buildAuthorizeUrl generates a state when none is given", () => {
+  const a = new URL(buildAuthorizeUrl(baseAuth, deps)).searchParams.get("state");
+  const b = new URL(buildAuthorizeUrl(baseAuth, { ...deps, random: bytes => Buffer.alloc(bytes, 0xcd) })).searchParams.get("state");
+  assert.ok(a && a.startsWith("st_"), "auto state is an opaque ref");
+  assert.notEqual(a, b, "state derives from injected randomness");
+});
+
+test("buildAuthorizeUrl allows http only for localhost", () => {
+  for (const redirectUri of ["http://localhost:3000/cb", "http://127.0.0.1/cb", "https://app.example.com/cb"]) {
+    const url = new URL(buildAuthorizeUrl({ ...baseAuth, redirectUri }, deps));
+    assert.equal(url.searchParams.get("redirect_uri"), new URL(redirectUri).toString());
+  }
+});
+
+test("buildAuthorizeUrl rejects bad input with coded errors", () => {
+  assert.throws(() => buildAuthorizeUrl({ ...baseAuth, redirectUri: "http://app.example.com/cb" }, deps),
+    { code: "GMAIL_INVALID_REDIRECT" });
+  assert.throws(() => buildAuthorizeUrl({ ...baseAuth, redirectUri: "not-a-url" }, deps),
+    { code: "GMAIL_INVALID_REDIRECT" });
+  assert.throws(() => buildAuthorizeUrl({ ...baseAuth, redirectUri: "" }, deps),
+    { code: "GMAIL_INVALID_REDIRECT" });
+  assert.throws(() => buildAuthorizeUrl({ ...baseAuth, scopes: [] }, deps),
+    { code: "GMAIL_EMPTY_SCOPES" });
+  assert.throws(() => buildAuthorizeUrl({ ...baseAuth, scopes: "   " }, deps),
+    { code: "GMAIL_EMPTY_SCOPES" });
+  assert.throws(() => buildAuthorizeUrl({ ...baseAuth, clientId: "" }, deps),
+    { code: "GMAIL_INVALID_CLIENT_ID" });
+  assert.throws(() => buildAuthorizeUrl({ ...baseAuth, scopes: ["notaurl"] }, deps),
+    { code: "GMAIL_INVALID_SCOPE" });
+});
+
+test("buildTokenExchangeRequest returns a POST shape without fetching", () => {
+  const req = buildTokenExchangeRequest({
+    clientId: baseAuth.clientId,
+    redirectUri: baseAuth.redirectUri,
+    code: "4/0-auth-code",
+    codeVerifier: "verifier-abc",
   });
-}
-
-test('state expiry and superseded attempts fail without network', async () => {
-  const f = fixture(); const old = f.begin(); const current = f.begin();
-  await assert.rejects(f.oauth.complete({ callbackUrl: f.callback(old), getContext: () => context }), { code: 'gmail_state_invalid' });
-  f.advance(600000);
-  await assert.rejects(f.oauth.complete({ callbackUrl: f.callback(current), getContext: () => context }), { code: 'gmail_state_invalid' });
-  assert.equal(f.calls.length, 0);
+  assert.deepEqual(Object.keys(req).sort(), ["body", "headers", "method", "url"]);
+  assert.equal(req.url, GOOGLE_TOKEN_URL);
+  assert.equal(req.method, "POST");
+  assert.equal(req.headers["content-type"], "application/x-www-form-urlencoded");
+  const body = new URLSearchParams(req.body);
+  assert.equal(body.get("grant_type"), "authorization_code");
+  assert.equal(body.get("code"), "4/0-auth-code");
+  assert.equal(body.get("redirect_uri"), baseAuth.redirectUri);
+  assert.equal(body.get("client_id"), baseAuth.clientId);
+  assert.equal(body.get("code_verifier"), "verifier-abc");
+  assert.equal(body.get("client_secret"), null);
 });
 
-test('rejects malformed, duplicate and cross-origin callbacks', async () => {
-  const f = fixture(); const auth = f.begin();
-  for (const url of [f.callback(auth).replace('127.0.0.1', 'evil.example'), `${f.callback(auth)}&state=x`, `${f.callback(auth)}&code=x`, `${f.callback(auth)}#fragment`])
-    await assert.rejects(f.oauth.complete({ callbackUrl: url, getContext: () => context }), { code: 'gmail_callback_invalid' });
-  assert.equal(f.calls.length, 0);
+test("buildTokenExchangeRequest passes a client-secret ref through opaquely", () => {
+  const req = buildTokenExchangeRequest({
+    clientId: baseAuth.clientId,
+    redirectUri: baseAuth.redirectUri,
+    code: "4/0-auth-code",
+    codeVerifier: "verifier-abc",
+    clientSecretRef: "vault://gmail/client-secret",
+  });
+  assert.equal(new URLSearchParams(req.body).get("client_secret"), "vault://gmail/client-secret");
 });
 
-test('denied consent consumes state and never exchanges tokens', async () => {
-  const f = fixture(); const auth = f.begin();
-  await assert.rejects(f.oauth.complete({ callbackUrl: `${f.callback(auth)}&error=access_denied`, getContext: () => context }), { code: 'gmail_consent_denied' });
-  assert.equal(f.calls.length, 0);
+test("buildTokenExchangeRequest validates its inputs", () => {
+  const good = { clientId: baseAuth.clientId, redirectUri: baseAuth.redirectUri, code: "c", codeVerifier: "v" };
+  assert.throws(() => buildTokenExchangeRequest({ ...good, code: "" }), { code: "GMAIL_INVALID_CODE" });
+  assert.throws(() => buildTokenExchangeRequest({ ...good, codeVerifier: "" }), { code: "GMAIL_INVALID_VERIFIER" });
+  assert.throws(() => buildTokenExchangeRequest({ ...good, redirectUri: "http://evil.example.com/" }),
+    { code: "GMAIL_INVALID_REDIRECT" });
+  assert.throws(() => buildTokenExchangeRequest({ ...good, clientId: "" }), { code: "GMAIL_INVALID_CLIENT_ID" });
 });
 
-test('rejects expanded scopes and missing refresh credentials before profile read', async () => {
-  for (const [token, code] of [[{ ...grant, scope: `${GMAIL_READ_SCOPE} https://mail.google.com/` }, 'gmail_scope_mismatch'], [{ ...grant, refresh_token: undefined }, 'gmail_token_invalid']]) {
-    const f = fixture(() => json(token)); const auth = f.begin();
-    await assert.rejects(f.oauth.complete({ callbackUrl: f.callback(auth), getContext: () => context }), { code });
-    assert.equal(f.calls.length, 1);
-  }
+test("parseTokenResponse normalizes a full token response into opaque refs", () => {
+  const raw = {
+    access_token: "ya29.raw-access-secret",
+    token_type: "Bearer",
+    expires_in: 3600,
+    refresh_token: "1//raw-refresh-secret",
+    scope: `${READ} ${SEND}`,
+  };
+  const parsed = parseTokenResponse(raw, { accessType: "offline" }, deps);
+  assert.match(parsed.accessTokenRef, /^gat_[0-9a-f]+$/);
+  assert.match(parsed.refreshTokenRef, /^grt_[0-9a-f]+$/);
+  assert.equal(parsed.expiresAt, "2026-09-16T09:00:00.000Z", "expiresAt = clock + expires_in");
+  assert.deepEqual(parsed.scopesGranted, [READ, SEND]);
+  assert.equal(parsed.tokenType, "Bearer");
+  assert.equal(parsed.needsReconsent, false);
+  assert.doesNotMatch(JSON.stringify(parsed), /ya29\.raw-access-secret|raw-refresh-secret/,
+    "raw token values never enter the normalized shape");
 });
 
-test('wrong mailbox is not connected', async () => {
-  const f = fixture((url, init, n) => json(n === 1 ? grant : { emailAddress: 'other@example.com' }));
-  await assert.rejects(f.oauth.complete({ callbackUrl: f.callback(f.begin()), getContext: () => context }), { code: 'gmail_mailbox_mismatch' });
+test("parseTokenResponse flags a missing refresh_token for re-consent", () => {
+  const parsed = parseTokenResponse({ access_token: "ya29.x", expires_in: 3599 }, { accessType: "offline" }, deps);
+  assert.equal(parsed.refreshTokenRef, null);
+  assert.equal(parsed.needsReconsent, true);
+  assert.equal(parsed.expiresAt, "2026-09-16T08:59:59.000Z");
+  assert.deepEqual(parsed.scopesGranted, []);
+  assert.equal(parsed.tokenType, "Bearer", "token_type defaults to Bearer");
+  const online = parseTokenResponse({ access_token: "ya29.x", expires_in: 100 }, { accessType: "online" }, deps);
+  assert.equal(online.needsReconsent, false, "online access never expects a refresh token");
 });
 
-test('session invalidated during exchange prevents profile request', async () => {
-  const f = fixture(); let checks = 0;
-  await assert.rejects(f.oauth.complete({ callbackUrl: f.callback(f.begin()), getContext: () => ++checks === 1 ? context : { ...context, authEpoch: 2 } }), { code: 'gmail_session_changed' });
-  assert.equal(f.calls.length, 1);
+test("parseTokenResponse rejects bad responses", () => {
+  assert.throws(() => parseTokenResponse({}, {}, deps), { code: "GMAIL_BAD_TOKEN_RESPONSE" });
+  assert.throws(() => parseTokenResponse(null, {}, deps), { code: "GMAIL_BAD_TOKEN_RESPONSE" });
+  assert.throws(() => parseTokenResponse("nope", {}, deps), { code: "GMAIL_BAD_TOKEN_RESPONSE" });
+  assert.throws(() => parseTokenResponse({ access_token: "ya29.x" }, {}, deps),
+    { code: "GMAIL_BAD_TOKEN_RESPONSE" }, "expires_in is required");
+  assert.throws(() => parseTokenResponse({ access_token: "ya29.x", expires_in: "soon" }, {}, deps),
+    { code: "GMAIL_BAD_TOKEN_RESPONSE" });
 });
 
-test('provider errors and oversized responses do not expose secrets', async () => {
-  for (const response of [() => { throw new Error('access-fixture secret-fixture'); }, () => new Response('secret-fixture', { status: 400 }), () => new Response('x'.repeat(65537))]) {
-    const f = fixture(response);
-    await assert.rejects(f.oauth.complete({ callbackUrl: f.callback(f.begin()), getContext: () => context }), error => {
-      assert.ok(!error.message.includes('fixture')); return true;
-    });
-  }
+test("connectionRecord builds the storage shape with refs only", () => {
+  const record = connectionRecord({
+    accountId: "user@gmail.com",
+    scopesGranted: [READ, SEND, READ],
+    expiresAt: "2026-09-16T09:00:00.000Z",
+    hasRefreshToken: true,
+    accessTokenRef: "gat_abc123",
+    refreshTokenRef: "grt_def456",
+  }, deps);
+  assert.deepEqual(record, {
+    provider: "gmail",
+    accountId: "user@gmail.com",
+    scopes: [READ, SEND],
+    status: "connected",
+    connectedAt: "2026-09-16T08:00:00.000Z",
+    tokenMeta: {
+      expiresAt: "2026-09-16T09:00:00.000Z",
+      hasRefreshToken: true,
+      accessTokenRef: "gat_abc123",
+      refreshTokenRef: "grt_def456",
+    },
+  });
+  assert.throws(() => connectionRecord({ accountId: "", scopesGranted: [READ] }, deps),
+    { code: "GMAIL_INVALID_ACCOUNT" });
+  assert.throws(() => connectionRecord({ accountId: "user@gmail.com", scopesGranted: [] }, deps),
+    { code: "GMAIL_EMPTY_SCOPES" });
 });
 
-test('parallel replay exchanges only once', async () => {
-  const f = fixture(); const callbackUrl = f.callback(f.begin());
-  const outcomes = await Promise.allSettled([1, 2].map(() => f.oauth.complete({ callbackUrl, getContext: () => context })));
-  assert.equal(outcomes.filter(result => result.status === 'fulfilled').length, 1);
-  assert.equal(f.calls.length, 2);
+test("token values stay opaque from token response through the stored record", () => {
+  const parsed = parseTokenResponse({
+    access_token: "ya29.planted-raw-access",
+    expires_in: 3600,
+    refresh_token: "1//planted-raw-refresh",
+  }, { accessType: "offline" }, deps);
+  const record = connectionRecord({
+    accountId: "user@gmail.com",
+    scopesGranted: parsed.scopesGranted.length ? parsed.scopesGranted : [READ],
+    expiresAt: parsed.expiresAt,
+    hasRefreshToken: parsed.refreshTokenRef !== null,
+    accessTokenRef: parsed.accessTokenRef,
+    refreshTokenRef: parsed.refreshTokenRef,
+  }, deps);
+  assert.doesNotMatch(JSON.stringify(record), /planted-raw-access|planted-raw-refresh/);
 });
 
-test('requires HTTPS except exact loopback and fixed callback path', () => {
-  for (const uri of ['http://example.com', 'http://localhost:4173', 'https://example.com/wrong', `${redirectUri}?x=1`])
-    assert.throws(() => new GmailOAuth({ clientId: 'client', clientSecret: 'secret', redirectUri: uri }), { code: 'gmail_configuration_invalid' });
-});
-
-test('starting a replacement attempt during exchange invalidates the old attempt', async () => {
-  let f;
-  f = fixture(() => { f.begin(); return json(grant); });
-  await assert.rejects(f.oauth.complete({ callbackUrl: f.callback(f.begin()), getContext: () => context }), { code: 'gmail_state_invalid' });
-  assert.equal(f.calls.length, 1);
-});
-
-test('authority changing during profile read prevents returning credentials', async () => {
-  const f = fixture(); let checks = 0;
-  await assert.rejects(f.oauth.complete({ callbackUrl: f.callback(f.begin()), getContext: () => ++checks < 3 ? context : { ...context, revision: 2 } }), { code: 'gmail_session_changed' });
-  assert.equal(f.calls.length, 2);
-});
-
-test('refresh retains original narrow scope and refresh token when Google omits them', async () => {
-  const f = fixture(() => json({ access_token: 'renewed-token', token_type: 'Bearer', expires_in: 3600 }));
-  const result = await f.oauth.refresh({ refreshToken: 'old-refresh', scope: GMAIL_READ_SCOPE });
-  assert.equal(result.refreshToken, 'old-refresh'); assert.equal(result.scope, GMAIL_READ_SCOPE);
-  assert.equal(new URLSearchParams(f.calls[0].init.body).get('grant_type'), 'refresh_token');
-  assert.equal(f.calls[0].init.redirect, 'error');
-});
-
-test('refresh accepts rotation but rejects broadened or malformed grants', async () => {
-  const f = fixture(() => json({ ...grant, refresh_token: 'rotated-refresh' }));
-  assert.equal((await f.oauth.refresh({ refreshToken: 'old', scope: GMAIL_READ_SCOPE })).refreshToken, 'rotated-refresh');
-  for (const value of [{ ...grant, scope: 'https://mail.google.com/' }, { ...grant, expires_in: -1 }, { ...grant, refresh_token: '' }]) {
-    const bad = fixture(() => json(value));
-    await assert.rejects(bad.oauth.refresh({ refreshToken: 'old', scope: GMAIL_READ_SCOPE }));
-  }
-});
-
-test('revocation uses a fixed POST body and never claims success after provider failure', async () => {
-  const f = fixture(() => new Response(null, { status: 200 }));
-  assert.equal(await f.oauth.revoke('refresh-secret'), true);
-  assert.equal(f.calls[0].url, 'https://oauth2.googleapis.com/revoke');
-  assert.equal(f.calls[0].init.method, 'POST');
-  assert.equal(f.calls[0].init.redirect, 'error');
-  assert.equal(new URLSearchParams(f.calls[0].init.body).get('token'), 'refresh-secret');
-  for (const respond of [() => new Response('secret', { status: 500 }), () => { throw new Error('secret'); }]) {
-    assert.equal(await fixture(respond).oauth.revoke('refresh-secret'), false);
-  }
+test("newPkcePair derives a valid S256 challenge from injected randomness", () => {
+  const { verifier, challenge } = newPkcePair({}, deps);
+  assert.equal(verifier, Buffer.alloc(32, 0xab).toString("base64url"));
+  assert.equal(verifier.length, 43, "32 bytes -> 43 base64url chars, inside the 43..128 range");
+  assert.equal(challenge, createHash("sha256").update(verifier, "ascii").digest("base64url"));
+  assert.throws(() => newPkcePair({ bytes: 16 }, deps), { code: "GMAIL_INVALID_PKCE" });
 });

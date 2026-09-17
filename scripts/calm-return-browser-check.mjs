@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Simulated human return journeys, not retention evidence or real user feedback.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -51,8 +50,8 @@ for (const mobile of [false, true]) {
     page.on("pageerror", error => errors.push(error.message));
     page.on("request", request => { if (request.method() !== "GET" && request.url().includes("/api/rooms/")) writes.push(new URL(request.url()).pathname); });
     await page.clock.install({ time: now });
-    await page.goto(origin); await ensureSignIn(page); await page.locator("#access-key").fill(f.keys.owner);
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.goto(origin); await page.locator("#access-key").fill(f.keys.owner);
+    await page.getByRole("button", { name: "Enter room", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
     const panel = page.locator("#return-brief-panel"), summary = panel.locator(":scope > summary");
     const attention = id => page.locator(`#rb-attention-list [data-open-work="${id}"]`);
@@ -135,6 +134,22 @@ for (const mobile of [false, true]) {
     assert.equal(snapshot().cursor, 0); assert.deepEqual(writes, []);
     assert.equal(await page.locator("#message-input").inputValue(), "A draft to keep while catching up.");
     failBrief = false; await page.locator("#rb-refresh-button").click(); await ready();
+
+    // Result-first catch-up (C6): the refreshed history groups by outcome,
+    // blocker and remaining volume, and each grouped line still opens its exact
+    // supporting record. The completed/blocked events are on the second page,
+    // so page the frozen window first - grouping covers every loaded page.
+    await page.locator("#rb-history-section > summary").click();
+    const moreBrief = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/return-brief"));
+    await page.locator("#rb-more-button").click(); await moreBrief;
+    await page.waitForFunction(() => document.querySelector("#return-brief-panel").getAttribute("aria-busy") === "false");
+    const groupLabels = await page.locator("#rb-history-list .rb-group-label").allTextContents();
+    assert.deepEqual(groupLabels.map(text => text.replace(/\s*\(\d+\)$/, "")), ["Results", "Blockers", "Other updates"]);
+    const resultsGroup = page.locator("#rb-history-list .rb-group", { has: page.locator(".rb-group-label", { hasText: "Results" }) });
+    assert.equal(await resultsGroup.locator('[data-open-work="return-0"]').count(), 1, "the result line keeps its exact work-record link");
+    assert.equal(await resultsGroup.locator('[data-brief-key^="history:"]').count(), 1);
+    const blockersGroup = page.locator("#rb-history-list .rb-group", { has: page.locator(".rb-group-label", { hasText: "Blockers" }) });
+    assert.equal(await blockersGroup.locator('[data-open-work="return-0"]').count(), 1, "the blocker line keeps its exact work-record link");
     await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; scrollTo(0, 0); });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), true);
     assert.equal(await summary.evaluate(node => getComputedStyle(node).fontSize), "32px");
@@ -147,7 +162,7 @@ for (const mobile of [false, true]) {
     }), true, "large-text acknowledgement remains reachable without horizontal scrolling");
     await capture("large-text-controls"); await page.evaluate(() => document.documentElement.style.fontSize = "");
     page.once("dialog", dialog => dialog.accept()); // Explicit synthetic consent to discard our draft.
-    await page.locator("#signout-button").click(); await page.locator("#auth-panel").waitFor({ state: "visible" });
+    if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click(); await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(await page.locator("#catchup-count").textContent(), "");
     assert.equal(await page.locator("#rb-attention-list").textContent(), "");
     assert.equal(await page.locator("#reminder-count").textContent(), "");

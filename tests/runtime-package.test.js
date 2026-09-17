@@ -12,11 +12,6 @@ import { candidateRuntimeFixture } from "../scripts/candidate-runtime-fixture.mj
 import { frozenRecoveryFixture } from "../scripts/frozen-runtime-fixture.mjs";
 
 const repository = fileURLToPath(new URL("../", import.meta.url));
-const gmailPackageFiles = ['src/gmail-callback.js', ...['gmail-runtime', 'gmail-connections', 'gmail-oauth', 'gmail-mail-reader', 'gmail-email', 'mail-credential-vault'].map(name => `server/${name}.mjs`)];
-gmailPackageFiles.push('src/messaging-connections-client.js','src/messaging-connections-ui.js');
-gmailPackageFiles.push('server/twilio-runtime.mjs');
-gmailPackageFiles.push('server/messaging-receive-grants.mjs');
-gmailPackageFiles.push(...['telegram-runtime','telegram-scheduler','telegram-connection-registry','telegram-connections','telegram-receiver','telegram-inbox-import','telegram-receive-queue','telegram-receive-tick','telegram-bot-reader','twilio-message-reader','twilio-inbox-import','twilio-connection-registry','twilio-webhook','twilio-connections','slack-event-reader'].map(name=>`server/${name}.mjs`));
 
 test("exact-commit runtime package verifies cold, excludes private state and preserves populated committed-schema data", async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-package-"));
@@ -26,7 +21,7 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   const receipt = createRuntimePackage({ repository, commit, destination });
   const committedSchema = Number(/STORE_SCHEMA_VERSION = (\d+)/.exec(execFileSync("git", ["show", commit + ":server/writer-fence.mjs"], { cwd: repository, encoding: "utf8" }))[1]);
   assert.equal(receipt.schemaVersion, committedSchema); assert.deepEqual(publicAssets, assetPaths);
-assert.equal(receipt.files, 47 + gmailPackageFiles.filter(path => existsSync(join(destination, path))).length + ["src/inbox-client.js", "src/inbox-ui.js", "src/inbox-send-ui.js", "server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "server/agent-identities.mjs", "server/agent-invites.mjs", "src/agent-connections.js", "src/agent-error.mjs", "client/mcp-stdio.mjs", "scripts/agent-mcp.mjs", "client/work-actions.mjs", "server/work-discussion.mjs", "server/text-results.mjs", "client/attention-inbox.mjs", "src/room-charter.js", "src/room-instructions.js", "src/reply-requests.js", "server/reply-requests.mjs", "client/reply-actions.mjs", "scripts/agent-replies.mjs", "scripts/agent-doctor.mjs", "client/request-notices.mjs", "src/work-help.js", "server/work-help.mjs", "src/help-offers.js", "client/help-actions.mjs", "server/inbox.mjs", "server/inbox-outbox.mjs", "server/inbox-transport.mjs", "server/email-envelope.mjs", "server/graph-email.mjs", "server/email-import.mjs", "server/graph-fixture-sync.mjs", "server/graph-reply-draft.mjs", "server/graph-reply-journal.mjs", "server/graph-reply-update-review.mjs", "server/version.mjs", "scripts/stamp-version.mjs", "src/room-roster.js", "deploy/agent-discovery.mjs", "deploy/room-entry.mjs", "server/guest-agent-links.mjs", "src/work-item-session.js", "src/board.js", "src/work-templates.js", "src/room-templates.js", "server/diagnostics.mjs", "scripts/release-evidence.mjs", "client/mcp-public.mjs", "server/open-contract.mjs", "server/attachments.mjs", "src/request-run-policy.js", "src/automation-policy.js", "server/clerk-verifier.mjs", "server/provider-onboarding.mjs", "server/account-room-create.mjs", "server/provider-config.mjs"].filter(path => existsSync(join(destination, path))).length);
+  assert.equal(receipt.files, 47 + ["src/inbox-client.js", "src/inbox-ui.js", "src/inbox-send-ui.js", "server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "server/agent-identities.mjs", "server/agent-invites.mjs", "src/agent-connections.js", "src/agent-error.mjs", "client/mcp-stdio.mjs", "scripts/agent-mcp.mjs", "client/work-actions.mjs", "server/work-discussion.mjs", "server/text-results.mjs", "client/attention-inbox.mjs", "src/room-charter.js", "src/room-instructions.js", "src/reply-requests.js", "server/reply-requests.mjs", "client/reply-actions.mjs", "scripts/agent-replies.mjs", "scripts/agent-doctor.mjs", "client/request-notices.mjs", "src/work-help.js", "server/work-help.mjs", "src/help-offers.js", "client/help-actions.mjs", "server/inbox.mjs", "server/inbox-outbox.mjs", "server/inbox-transport.mjs", "server/email-envelope.mjs", "server/graph-email.mjs", "server/email-import.mjs", "server/graph-fixture-sync.mjs", "server/graph-reply-draft.mjs", "server/graph-reply-journal.mjs", "server/graph-reply-update-review.mjs", "server/version.mjs", "scripts/stamp-version.mjs", "src/room-roster.js", "deploy/agent-discovery.mjs", "deploy/room-entry.mjs", "server/guest-agent-links.mjs", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/board.js", "src/work-templates.js", "src/room-templates.js", "server/diagnostics.mjs", "scripts/release-evidence.mjs", "server/action-classes.mjs", "server/wake-queue.mjs", "server/attention.mjs", "server/moderation.mjs", "server/channel-connection.mjs", "server/channel-import.mjs", "server/channel-adapters/index.mjs", "server/channel-adapters/email.mjs", "server/channel-adapters/telegram.mjs", "server/channel-adapters/gmail.mjs", "server/channel-adapters/whatsapp.mjs", "server/mime-message.mjs", "server/email-routing-inbound.mjs", "server/channel-journal.mjs", "server/channel-adapters/telegram-config.mjs", "server/channel-adapters/telegram-transport.mjs", "scripts/telegram-set-webhook.mjs", "server/boot-options.mjs", "server/room-export-html.mjs", "server/access-review.mjs", "server/usage-summary.mjs", "server/notifications.mjs", "server/spend-allowance.mjs", "server/pins.mjs", "server/room-lifecycle.mjs", "server/attachment-schema.mjs", "server/access-requests.mjs", "server/identity-ratelimit.mjs", "server/agent-rooms.mjs", "server/inbox-search.mjs", "server/inbox-threads.mjs", "src/growth-emit.js", "src/growth-events.js", "src/growth-collector.js", "src/growth-mentions.js", "src/growth-fanout.js", "src/growth-persistence.js", "src/growth-summary.js", "src/growth-compare.js", "src/growth-alerts.js", "src/growth-watch.js", "src/growth-scheduler.js", "src/growth-http.js", "src/growth-digest.js"].filter(path => existsSync(join(destination, path))).length);
   assert.equal(existsSync(join(destination, ".git")), false);
   assert.equal(existsSync(join(destination, "node_modules")), false);
   for (const path of ["server.mjs", "src/app.js", "cloudflare/room.mjs"]) {
@@ -48,15 +43,7 @@ assert.equal(receipt.files, 47 + gmailPackageFiles.filter(path => existsSync(joi
         command: buildWorkCommand("room_accept_work", { requestId: "cold-package", workItemId: "work", expectedRevision: 0 }) }));`;
     const cold = spawnSync(process.execPath, ["--input-type=module", "-e", program], { cwd: directory, env: { PATH: "/unavailable" }, encoding: "utf8" });
     assert.equal(cold.status, 0, cold.stderr);
-    const replySource = join(destination, "client/reply-actions.mjs");
-    const hasOrdinaryChat = existsSync(replySource) && readFileSync(replySource, "utf8").includes('"room_post_message"');
-    const hasRequestRuns = existsSync(replySource) && readFileSync(replySource, "utf8").includes('"room_claim_request_run"');
-    const hasAutomationReads = existsSync(replySource) && readFileSync(replySource, "utf8").includes('"room_list_automations"');
-    const hasAutomationWrites = existsSync(replySource) && readFileSync(replySource, "utf8").includes('"room_create_automation"');
-    const hasReactions = existsSync(replySource) && readFileSync(replySource, "utf8").includes('"room_react_message"');
-    const hasPrivateContext = readFileSync(join(destination,'client/mcp-stdio.mjs'),'utf8').includes('room_read_private_context');
-    const hasPrivateDiscovery = readFileSync(join(destination,'client/mcp-stdio.mjs'),'utf8').includes('room_list_private_context');
-    assert.deepEqual(JSON.parse(cold.stdout), { tools: hasPrivateDiscovery ? 47 : hasPrivateContext ? 46 : hasReactions ? 45 : hasAutomationWrites ? 44 : hasAutomationReads ? 38 : hasRequestRuns ? 36 : hasOrdinaryChat ? 33 : existsSync(join(destination, "client/help-actions.mjs")) ? 32 : 27, helper: "function",
+    assert.deepEqual(JSON.parse(cold.stdout), { tools: existsSync(join(destination, "client/help-actions.mjs")) ? 32 : 27, helper: "function",
       command: { id: "cold-package", type: "work.accepted", data: { workItemId: "work", expectedRevision: 0 } } });
   }
   assert.throws(() => verifyRuntimePackage(destination, { expectedCommit: "0".repeat(40) }));
@@ -161,11 +148,8 @@ test("uncommitted candidate packages cold in an isolated synthetic commit, inclu
   const directory = mkdtempSync(join(tmpdir(), "room-candidate-package-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const candidate = candidateRuntimeFixture(repository, directory), destination = join(directory, "runtime");
-  const receipt = createRuntimePackage({ ...candidate, destination }); assert.equal(receipt.files, 133);
+  const receipt = createRuntimePackage({ ...candidate, destination }); assert.equal(receipt.files, 144);
   const program = `
-    import { handlePublicMcpMessage } from ${JSON.stringify(pathToFileURL(join(destination, "client/mcp-public.mjs")).href)};
-    import { openJoinContract } from ${JSON.stringify(pathToFileURL(join(destination, "server/open-contract.mjs")).href)};
-    if (openJoinContract().ship !== false || handlePublicMcpMessage({jsonrpc:"2.0",id:1,method:"tools/list"}).result.tools.length !== 5) throw new Error("Missing gated MCP runtime");
     import { RoomStore } from ${JSON.stringify(pathToFileURL(join(destination, "server/store.mjs")).href)};
     import { SyntheticInboxTransport } from ${JSON.stringify(pathToFileURL(join(destination, "server/inbox-transport.mjs")).href)};
     import { initialRoom } from ${JSON.stringify(pathToFileURL(join(destination, "server/bootstrap.mjs")).href)};
@@ -182,8 +166,6 @@ test("uncommitted candidate packages cold in an isolated synthetic commit, inclu
     const key = store.issueAccessKey("commons", "owner"), client = {
       snapshot: async () => store.snapshot(key, "commons"), changes: async (after, limit) => store.eventsAfter(key, "commons", after, limit)
     };
-    const upload = store.attachments.stage(key, "commons", { id: "cold-file", filename: "test.bin", mediaType: "application/octet-stream", bytes: new Uint8Array([0,255]) });
-    if (upload.state !== "staged" || store.attachments.readStaged(key, "commons", "cold-file").bytes[1] !== 255) throw new Error("Missing attachment staging runtime");
     const config = { client, origin: "http://127.0.0.1:12345", roomId: "commons", directory: ${JSON.stringify(join(directory, "observer"))}, version: 3 };
     const first = await currentAttention(config), second = await currentAttention(config);
     console.log(JSON.stringify({ version: second.schemaVersion, pending: second.pending, unchanged: JSON.stringify(first.items) === JSON.stringify(second.items) }));

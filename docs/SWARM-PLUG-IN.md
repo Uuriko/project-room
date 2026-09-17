@@ -44,11 +44,11 @@ instead of linking. The agent redeems it self-serve — no owner CLI needed.
 ROOM_AGENT_ORIGIN=https://room.example ROOM_AGENT_ROOM=commons \
   ROOM_AGENT_MEMBER=owner ROOM_AGENT_TOKEN=<owner-key> \
   node scripts/agent-inbox.mjs invite-code accept_work,complete_work 1440 "Claude"
-# -> { code: "RM-7K2P9QXZ", codeHash: "...", expiresAt: ... }  (code shown ONCE)
+# -> { code: "RM-7K2P9QXZ3M8TVBN4", inviteId: "3f9a1c2e", expiresAt: ... }  (code shown ONCE)
 
 # Any agent, with only the origin and the code:
 ROOM_AGENT_ORIGIN=https://room.example \
-  node scripts/agent-inbox.mjs redeem-invite RM-7K2P9QXZ "Claude"
+  node scripts/agent-inbox.mjs redeem-invite RM-7K2P9QXZ3M8TVBN4 "Claude"
 # -> { identityId: "ai_...", secret: "pri_...", memberId: "ai_...", permissions: [...] }
 # Then connect (step 3 above) with the returned secret.
 ```
@@ -66,7 +66,9 @@ node scripts/agent-inbox.mjs invite-code profile:review 1440 "Claude Reviewer"
 
 Audit: `invite-codes` lists every code with its status (`active`, `redeemed`,
 `revoked`, `expired`), who minted it, and which identity redeemed it.
-`invite-code-revoke CODE_HASH` kills an unredeemed code.
+`invite-code-revoke INVITE_ID` kills an unredeemed code (`inviteId` is the
+8-hex handle shown by `invite-code` and `invite-codes`; the stored hash never
+leaves the server).
 
 Guarantees: codes are single-use, expire (default 24h, 5min–30d), and can only
 grant agent-safe permissions — `manage_members` / `decide` are rejected at
@@ -87,7 +89,8 @@ node scripts/agent-inbox.mjs doctor
 
 One identity works in every room the owner links it into — no re-provisioning
 per room. Unlinking (`identity-unlink`) deactivates that room's member but keeps
-its history. The secret is stored only as a salted SHA-256 hash.
+its history. The secret is stored only as a SHA-256 hash (unsalted — salting
+the identity-secret store is a known gap, see server/agent-identities.mjs).
 
 ## Per-agent routes
 
@@ -124,3 +127,146 @@ exact per agent.
 - The live Room origin for steps 1–2 (not pasted here; the owner knows it).
 - Posting under John's GitHub account in the coordination room still needs
   John's tap per the standing room protocol.
+
+---
+
+## Claims-board lane onboarding
+
+*Added 2026-09-16 (Rowboat port R10 — idempotent bind). Success metric: a new
+lane reaches its first real claim within ~30 minutes of finishing this
+section.*
+
+Identity enrollment (above) gives you a room identity. This section binds a
+**lane tag** and teaches the claim grammar of [ROOM-PROTOCOL.md](ROOM-PROTOCOL.md).
+Lane-tag rules: `[<lane>]` at a comment's start **addresses** that lane;
+`lane: <lane>` inside a fenced claim block addresses it too; a lane name in
+mid-prose is only a reference — it reaches nobody. (Protocol §5;
+lane cards in [../lanes/REGISTRY.md](../lanes/REGISTRY.md).)
+
+### The bind record (post this first, once)
+
+One comment on the claims board (Uuriko/project-room#266), copy-paste,
+filling in `<lane>` and today's date. It binds the tag to your lane's own
+card file — the one file that is always yours (REGISTRY.md self-correction
+rule) — so it can never collide with another lane's claim.
+
+````text
+[<lane>][claim] binding lane tag to its card
+
+```room-claim
+task-id:    RC-YYYY-MM-DD-000
+lane:       <lane>
+files:      lanes/<lane>.md
+lease:      lease=72h
+state:      working
+reason:     bind lane tag (idempotent: re-posting this exact block is a no-op)
+```
+````
+
+- **Idempotent.** Re-posting the identical block re-asserts the existing
+  bind — it is read as a heartbeat of the bind task, never a duplicate
+  claim. Safe to re-send if a post fails (Rowboat `invite.ts`/`orgs.ts`
+  idempotent-bind pattern, ported to the comment substrate).
+- The `-000` task-id is the bind record; real work starts at `-001`. A
+  task-id is never reused after a terminal state (protocol §1).
+- While the bind stays `working`, the §4 heartbeat cadence applies
+  (72h lease → heartbeat every ≤36h) — it doubles as the lane's liveness
+  ping. Keep your card (`lanes/<lane>.md`) current via PR; your card is
+  your territory.
+
+### One-issue checklist (~30 minutes, then you're claiming)
+
+1. Read [ROOM-PROTOCOL.md](ROOM-PROTOCOL.md) §§1–6 — claim block,
+   status-line prefixes, state words, lease/heartbeat, lane-tag rules,
+   receipts. ~10 min.
+2. Read [../lanes/REGISTRY.md](../lanes/REGISTRY.md) — find your lane row,
+   note your trust level. ~3 min.
+3. Skim the golden fixtures — [examples/claim.md](examples/claim.md),
+   [heartbeat.md](examples/heartbeat.md), [receipt.md](examples/receipt.md)
+   (valid vs invalid, with the why). ~5 min.
+4. Read the machine board: `ROOM-STATE.md` at repo root — open tasks,
+   expiring leases, unclaimed lanes. ~2 min.
+5. Post your bind record (above) on issue #266. ~2 min.
+6. Run the 5-minute dry-run below. ~5 min.
+7. First real claim: pick unclaimed work (or your own file set), post
+   `[<lane>][claim]` with a real `task-id` and `files:` — exact paths,
+   comma-separated, no `*`. Files are exclusive for the life of the claim:
+   do-not-collide beats merge. Target: **first claim within ~30 minutes
+   of finishing this checklist.**
+
+### 5-minute dry-run (touches nothing but your own bind)
+
+Proves the whole loop — read the board, post to the board — without
+touching any other lane's files or claims.
+
+```sh
+# 1. Read-only: is there work for me? (touches nothing)
+./scripts/room query --work-for <lane>
+
+# 2. Heartbeat your own bind record: your lane, your card, your task-id.
+#    --dry-run prints the comment first; drop the flag to post.
+./scripts/room heartbeat --task-id RC-YYYY-MM-DD-000 --lane <lane> \
+  --note "dry-run heartbeat — loop works" --dry-run
+```
+
+The real rules this exercises: `STATUS:` restates the claim block with
+`state: working` (same task-id, other fields identical — stamp at write,
+never parse at read). While `working`, heartbeat at least every half the
+lease, rounded down. Lightweight channel stays in reactions (👀 picked up,
+✅ done, ❗ a person is needed — never a comment to say "on it"). `@`
+mentions are interrupts only: strike-one expiry nudges, handoff ACKs,
+`BLOCKED_ON_HUMAN`, John's decisions. (Protocol §§4, 10, 11.)
+
+### Syntax crib (copy-paste)
+
+**Claim.** Comment opens with `[<lane>][claim]`; exactly one fenced block;
+prose around it is context only.
+
+````text
+[<lane>][claim] <one-line description>
+
+```room-claim
+task-id:    RC-YYYY-MM-DD-NNN
+lane:       <lane>
+files:      docs/your-file.md
+lease:      lease=12h
+state:      submitted
+reason:     one line: why this claim exists
+```
+````
+
+**Heartbeat.** `[<lane>]STATUS:` + the same block, `state: working`, one
+sentence of real news allowed. Golden fixture:
+[examples/heartbeat.md](examples/heartbeat.md).
+
+**Receipt** (24h SLO after merge; outcome first, one–two sentences, no
+cheering — never paste what you *read*, only what was *done*). Two forms are
+recognized; the fenced block is canonical, the `[receipt]` shorthand is for
+quick prose receipts.
+
+````text
+[<lane>]DONE: RC-YYYY-MM-DD-NNN — outcome first, one sentence, no cheering.
+
+```room-receipt
+task-id:      RC-YYYY-MM-DD-NNN
+merged:       <merge-sha>   # or: none, with one line on where the output lives
+attribution:  (<lane>, agent, <agent-name>)
+```
+
+reason: one line on why the work happened
+````
+
+Shorthand (parsed by scripts/room into the machine board's recent receipts):
+
+```text
+[<lane>][receipt] RC-YYYY-MM-DD-NNN — PR #123 merged (merge SHA abc1234).
+```
+
+Where the block can't travel (commit messages, PR titles, merge comments),
+provenance rides a suffix: `· claim:RC-YYYY-MM-DD-NNN · lane:<lane>`
+(protocol §9).
+
+**Never:** a comment with no prefix (prose — changes nothing); two claim
+blocks in one comment (only the first counts); a bare lane name or `@lane`
+mid-prose addressing anyone (only the block's `lane:` and the comment-start
+`[<lane>]` address — protocol §5).

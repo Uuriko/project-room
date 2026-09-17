@@ -2,7 +2,7 @@
 
 The `contract` job in `.github/workflows/test.yml` runs `npm run check`
 (`node scripts/check.mjs`). Despite the name, it is not only a syntax
-check — it is four gates:
+check — it is eight steps, run in this order:
 
 1. **`node --check` on every JS file** — `server.mjs`, everything under
    `src/`, `server/`, `client/`, `scripts/`, `tests/`, and `cloudflare/*.mjs`.
@@ -21,10 +21,25 @@ check — it is four gates:
 3. **`scripts/check-no-shadow-imports.mjs`** — no local file may shadow an
    npm package name or a Node builtin. Prevents the "wrong module loaded"
    class of bugs (added in #89).
-4. **`node --test`** — the full unit suite. The browser suite
+4. **`scripts/route-docs-check.mjs`** — every `/api` route template
+   `server/http.mjs` can match is described in `docs/openapi.yaml` (with
+   its security scheme), and nothing described there has gone unserved.
+   Added after the 2026-09-14 re-audit found 23 of 64 templates documented.
+5. **`scripts/check-schema-version.mjs`** — the store schema number has one
+   source (`STORE_SCHEMA_VERSION` in `server/writer-fence.mjs`); the README,
+   `docs/CURRENT-ROOM.md`, `docs/SERVICE.md` and the writer fence must agree.
+6. **`scripts/lint.mjs`** — ESLint with the correctness-only rules in
+   `eslint.config.mjs` (`no-undef`, `no-unused-vars`, `no-dupe-keys`, …).
+   Errors fail the gate, warnings are printed; it is skipped with a notice
+   when the `eslint` devDependency is not installed (no `npm ci`). The CI
+   `lint` job runs the same script standalone (`npm run lint`).
+7. **`scripts/open-routes.mjs --check`** — every `security: []` route in
+   `docs/openapi.yaml` is named in `docs/ROUTE-AUTH-TABLE.md` and
+   `docs/INVITE-ONLY-CHECKLIST.md` §1, so no open route is undocumented.
+8. **`node --test`** — the full unit suite. The browser suite
    (`test:browser`) runs in a separate job.
 
 If `contract` is green but `browser` is red, the failure is in the
 Playwright UI checks, not in the API contract. If `contract` is red, start
 with the gate that failed — in that order, syntax, coverage, shadows,
-units.
+route docs, schema version, lint, open routes, units.

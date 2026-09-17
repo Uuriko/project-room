@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Synthetic browser fixtures. These checks do not stand in for physical-device or human AT runs.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -37,18 +36,74 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await page.goto(origin);
     const login = async key => {
       await page.locator("#auth-panel").waitFor({ state: "visible" });
-      await ensureSignIn(page); await page.locator("#access-key").fill(key);
-      await page.getByRole("button", { name: "Continue", exact: true }).click();
+      await page.locator("#access-key").fill(key);
+      await page.getByRole("button", { name: "Enter room", exact: true }).click();
       await page.locator("#main").waitFor({ state: "visible" });
       await page.waitForFunction(() => !document.querySelector("#access-key").disabled);
     };
     await login(owner);
     const input = page.locator("#message-input"), status = page.locator("#composer-status");
-    assert.equal(await input.getAttribute("placeholder"), "Message the room…");
+    assert.match(await input.getAttribute("placeholder"), /Write to the room/);
+
+    // @-mention autocomplete is a real listbox: rows are options, the textarea points at the active one.
+    const mentionList = page.locator("#mention-list");
+    assert.equal(await input.getAttribute("aria-expanded"), "false");
+    assert.equal(await input.getAttribute("aria-autocomplete"), "list");
+    await input.click();
+    await page.keyboard.type("Hi @");
+    await mentionList.waitFor({ state: "visible" });
+    assert.equal(await mentionList.getAttribute("role"), "listbox");
+    const options = mentionList.locator('[role="option"]');
+    assert.ok(await options.count() >= 2, "an empty @ query lists every active member");
+    assert.equal(await mentionList.locator("button, [aria-selected]:not([role='option'])").count(), 0, "aria-selected only on options, no nested buttons");
+    assert.equal(await options.first().getAttribute("aria-selected"), "true");
+    assert.equal(await options.first().getAttribute("id"), "mention-option-0");
+    assert.equal(await input.getAttribute("aria-expanded"), "true");
+    assert.equal(await input.getAttribute("aria-activedescendant"), "mention-option-0");
+    await page.keyboard.press("ArrowDown");
+    assert.equal(await input.getAttribute("aria-activedescendant"), "mention-option-1");
+    assert.equal(await options.nth(1).getAttribute("aria-selected"), "true");
+    assert.equal(await options.first().getAttribute("aria-selected"), "false");
+    await page.keyboard.press("Escape");
+    await mentionList.waitFor({ state: "hidden" });
+    assert.equal(await input.getAttribute("aria-expanded"), "false");
+    assert.equal(await input.getAttribute("aria-activedescendant"), null);
+    assert.equal(await input.inputValue(), "Hi @");
+    await page.keyboard.type("may");
+    await mentionList.waitFor({ state: "visible" });
+    assert.equal(await options.count(), 1);
+    await mentionList.locator("[data-mention-id='maya']").click();
+    await mentionList.waitFor({ state: "hidden" });
+    assert.match(await input.inputValue(), /@Maya/);
+    assert.equal(await page.locator("#message-to-select").inputValue(), "maya");
+    assert.equal(await page.evaluate(() => document.activeElement.id), "message-input");
+    await input.fill("");
     const like = page.locator('[data-message-record-id="topic"] button[data-reaction="like"]');
     assert.equal(await like.isVisible(), true);
     await like.click();
     await page.waitForFunction(() => document.querySelector('[data-message-record-id="topic"] button[data-reaction="like"][aria-pressed="true"]'));
+
+    // Error toasts persist until dismissed and can be selected/copied; successes still auto-clear.
+    await page.route("**/api/rooms/commons/commands", route => route.fulfill({
+      status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "unavailable", message: "Reaction store unavailable" } })
+    }));
+    const toast = page.locator("#status");
+    await like.click();
+    await page.waitForFunction(() => document.querySelector("#status").classList.contains("error"));
+    assert.match(await toast.locator(".status-text").textContent(), /Reaction store unavailable/);
+    assert.equal(await toast.getAttribute("role"), "alert");
+    assert.equal(await toast.getAttribute("aria-live"), "assertive");
+    assert.deepEqual(await toast.evaluate(node => [getComputedStyle(node).pointerEvents, getComputedStyle(node).userSelect]), ["auto", "text"]);
+    const dismiss = toast.getByRole("button", { name: "Dismiss error" });
+    assert.equal(await dismiss.isVisible(), true);
+    assert.equal(await toast.evaluate(node => { const range = document.createRange(); range.selectNodeContents(node.querySelector(".status-text")); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); const text = selection.toString(); selection.removeAllRanges(); return text; }).then(t => /Reaction store unavailable/.test(t)), true, "error text is selectable");
+    await dismiss.click();
+    assert.equal(await toast.textContent(), "");
+    assert.equal(await toast.evaluate(node => node.classList.contains("visible")), false);
+    assert.equal(await toast.getAttribute("role"), "status");
+    await page.unroute("**/api/rooms/commons/commands");
+    await page.locator('[data-message-record-id="topic"] button[data-reaction="like"]').click();
+    await page.waitForFunction(() => document.querySelector('[data-message-record-id="topic"] button[data-reaction="like"][aria-pressed="false"]'));
     await page.locator("#search-mentions").click();
     assert.equal(await page.locator("#search-mentions").getAttribute("aria-pressed"), "true");
     assert.match(await page.locator("#search-results").textContent(), /Ping @Room owner/);
@@ -58,7 +113,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await page.locator('[data-message-record-id="topic"] [data-message-action="thread"]').click();
     assert.match(await input.getAttribute("placeholder"), /Reply in this thread/);
     await page.locator("#thread-back").click();
-    assert.equal(await input.getAttribute("placeholder"), "Message the room…");
+    assert.match(await input.getAttribute("placeholder"), /Write to the room/);
     await page.locator("#composer-options > summary").click();
     await page.locator("#remember-drafts").check();
     const waitForFailure = () => page.waitForFunction(() => !document.querySelector("#message-input").disabled && document.querySelector("#composer-status").classList.contains("error"));
@@ -139,21 +194,6 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     assert.equal(await page.locator("#message-form").getAttribute("aria-busy"), null);
     await page.unroute("**/api/rooms/commons/commands");
     await page.locator("#clear-search").click();
-
-    // The open mention picker must also leave IME confirmation and repeated keys alone.
-    await input.fill("@Ma");
-    await input.focus();
-    await page.locator("#mention-list").waitFor({ state: "visible" });
-    for (const options of [{ isComposing: true }, { keyCode: 229 }, { repeat: true }]) {
-      const prevented = await input.evaluate((element, options) => {
-        const key = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true, ...options });
-        element.dispatchEvent(key); return key.defaultPrevented;
-      }, options);
-      assert.equal(prevented, false, "mention picker does not consume composition/repeat");
-      assert.equal(await input.inputValue(), "@Ma");
-    }
-    await input.press("Enter");
-    assert.equal(await input.inputValue(), "@Maya ", "deliberate Enter still selects the mention");
 
     // A composition-confirmation key is not a send shortcut, including the legacy IME signal.
     await input.fill("検討中の文章");

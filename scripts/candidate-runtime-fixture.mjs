@@ -13,12 +13,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('client/request-notices.mjs');
   paths.add('src/work-help.js'); paths.add('server/work-help.mjs');
   paths.add('client/help-actions.mjs');
+  paths.add('server/action-classes.mjs');
   paths.add('server/inbox.mjs');
-  paths.add('server/twilio-inbox-import.mjs');
-  paths.add('server/twilio-connection-registry.mjs');
-  paths.add('server/twilio-webhook.mjs');
-  paths.add('server/twilio-connections.mjs');
-  paths.add('server/twilio-runtime.mjs');
   paths.add('server/inbox-outbox.mjs'); paths.add('server/inbox-transport.mjs'); paths.add('server/version.mjs');
   paths.add('scripts/stamp-version.mjs');
   paths.add('server/email-envelope.mjs'); paths.add('server/graph-email.mjs'); paths.add('server/email-import.mjs');
@@ -28,20 +24,30 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/graph-reply-update-review.mjs');
   paths.add('src/inbox-client.js'); paths.add('src/inbox-ui.js');
   paths.add('src/inbox-send-ui.js');
-  paths.add('src/messaging-connections-client.js');paths.add('src/messaging-connections-ui.js');
   paths.add('src/room-roster.js');
   paths.add('deploy/agent-discovery.mjs');
   paths.add('deploy/room-entry.mjs');
   paths.add('server/guest-agent-links.mjs');
   paths.add('server/agent-invites.mjs');
-  paths.add('server/account-room-create.mjs');
-  paths.add('server/provider-config.mjs');
-  paths.add('src/work-item-session.js'); paths.add('src/request-run-policy.js'); paths.add('src/automation-policy.js');
+  paths.add('src/work-item-session.js');
+  paths.add('src/work-recipes.js');
   paths.add('src/board.js');
   paths.add('src/work-templates.js');
   paths.add('src/room-templates.js');
   paths.add('server/diagnostics.mjs');
+  paths.add('server/access-review.mjs');
+  paths.add('server/wake-queue.mjs');
+  paths.add('server/attention.mjs');
+  paths.add('server/room-lifecycle.mjs');
+paths.add('server/attachment-schema.mjs');
+  paths.add('server/moderation.mjs');
   paths.add('scripts/release-evidence.mjs');
+  paths.add('server/usage-summary.mjs');
+  paths.add('server/notifications.mjs');
+  for (const path of ['server/channel-connection.mjs', 'server/channel-import.mjs', 'server/channel-adapters/index.mjs', 'server/channel-adapters/email.mjs', 'server/channel-adapters/telegram.mjs', 'server/channel-adapters/gmail.mjs', 'server/channel-adapters/whatsapp.mjs', 'server/mime-message.mjs', 'server/email-routing-inbound.mjs', 'server/channel-journal.mjs', 'server/room-export-html.mjs']) paths.add(path);
+  for (const path of ['server/channel-adapters/telegram-config.mjs', 'server/channel-adapters/telegram-transport.mjs', 'scripts/telegram-set-webhook.mjs']) paths.add(path);
+  paths.add('server/spend-allowance.mjs');
+  paths.add('server/pins.mjs');
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
   // No private state, credentials, docs or real checkout Git metadata.
   for (const path of paths) {

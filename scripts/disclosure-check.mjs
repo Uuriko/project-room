@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Quiet Focus A1/A2 evidence: a background snapshot must not collapse an open
 // disclosure, steal focus, or clear a draft. Real browser + local HTTP service;
 // all identities, messages, and keys are disposable fixtures.
@@ -42,8 +41,8 @@ test("background updates preserve open disclosures, focus, draft and recipient",
   const login = async (p, key) => {
     await p.goto(origin);
     await p.locator("#auth-panel").waitFor({ state: "visible" });
-    await ensureSignIn(p); await p.locator("#access-key").fill(key);
-    await p.getByRole("button", { name: "Continue", exact: true }).click();
+    await p.locator("#access-key").fill(key);
+    await p.getByRole("button", { name: "Enter room", exact: true }).click();
     await p.locator("#main").waitFor({ state: "visible" });
   };
   await login(page, owner); await login(other, human);

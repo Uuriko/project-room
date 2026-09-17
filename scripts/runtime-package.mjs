@@ -14,11 +14,8 @@ const v12Assets = [...v11Assets, "src/reply-requests.js"];
 const v13Assets = [...v12Assets, "src/work-help.js"];
 const v14Assets = [...v13Assets, "src/help-offers.js"];
 const inboxAssets = [...v14Assets, "src/inbox-client.js", "src/inbox-ui.js"];
-const v30Assets = [...inboxAssets, "src/inbox-send-ui.js", "src/room-roster.js", "src/work-item-session.js"];
-const v31Assets = [...v30Assets, "src/request-run-policy.js"];
-const v32Assets = [...v31Assets, "src/automation-policy.js"];
-export const publicAssets = [...v32Assets,'src/messaging-connections-client.js','src/messaging-connections-ui.js'];
-const assetsFor = (schema, inbox, sendUI = false) => schema >= 32 ? v32Assets : schema === 31 ? v31Assets : schema === 8 ? v8Assets : schema <= 10 ? v9Assets : schema === 11 ? v11Assets : schema === 12 ? v12Assets : schema === 13 ? v13Assets : inbox && schema >= 15 ? sendUI ? v30Assets : inboxAssets : v14Assets;
+export const publicAssets = [...inboxAssets, "src/inbox-send-ui.js", "src/room-roster.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js"];
+const assetsFor = (schema, inbox, sendUI = false) => schema === 8 ? v8Assets : schema <= 10 ? v9Assets : schema === 11 ? v11Assets : schema === 12 ? v12Assets : schema === 13 ? v13Assets : inbox && schema >= 15 ? sendUI ? publicAssets : inboxAssets : v14Assets;
 const required = [...v8Assets, "server.mjs", "package.json", "package-lock.json",
   ...["backup", "bootstrap", "claim-scopes", "deployment", "http", "invitation-evidence", "invitation-journal", "reminders",
     "return-brief", "return-selectors", "share-links", "store", "work-context", "writer-fence"].map(name => `server/${name}.mjs`),
@@ -37,6 +34,12 @@ optional.push("src/work-help.js", "server/work-help.mjs");
 optional.push("src/help-offers.js");
 optional.push("client/help-actions.mjs");
 optional.push("server/inbox.mjs");
+optional.push("server/inbox-search.mjs"); // full-text search index (imported by server/inbox.mjs; pure, no imports of its own)
+optional.push("server/inbox-threads.mjs"); // thread builder (imported by server/inbox.mjs; pure, no imports of its own)
+// NOTE: server/thread-tree.mjs stays OUT of the closure. inbox-threads.mjs
+// already groups, nests, and flattens threads; importing both would duplicate
+// the reply-tree logic. thread-tree.mjs remains available for a future
+// collapse/expand UI slice.
 optional.push("server/inbox-outbox.mjs", "server/inbox-transport.mjs", "server/version.mjs");
 optional.push("scripts/stamp-version.mjs");
 optional.push("server/email-envelope.mjs", "server/graph-email.mjs", "server/email-import.mjs");
@@ -46,52 +49,37 @@ optional.push("server/graph-reply-journal.mjs");
 optional.push("server/graph-reply-update-review.mjs");
 optional.push("src/inbox-client.js", "src/inbox-ui.js");
 optional.push("src/inbox-send-ui.js");
-optional.push('src/messaging-connections-client.js','src/messaging-connections-ui.js');
 optional.push("src/room-roster.js");
 optional.push("deploy/agent-discovery.mjs", "deploy/room-entry.mjs", "server/guest-agent-links.mjs");
 optional.push("server/agent-identities.mjs");
 optional.push("server/agent-invites.mjs");
-optional.push("src/work-item-session.js", "src/request-run-policy.js");
-optional.push("src/automation-policy.js");
+optional.push("src/work-item-session.js");
 optional.push("src/board.js");
 optional.push("src/work-templates.js");
 optional.push("src/room-templates.js");
 optional.push("scripts/release-evidence.mjs");
-optional.push("client/mcp-public.mjs", "server/open-contract.mjs");
-optional.push("server/attachments.mjs");
-optional.push("server/clerk-verifier.mjs", "server/provider-onboarding.mjs");
-optional.push("server/account-room-create.mjs");
-optional.push("server/provider-config.mjs");
-optional.push("server/production-gates.mjs");
-optional.push("server/operator-account-id.mjs");
-optional.push('server/twilio-runtime.mjs');
-optional.push('server/messaging-receive-grants.mjs');
+optional.push("src/work-loops.js");
+optional.push("src/work-recipes.js");
+optional.push("server/action-classes.mjs");
+optional.push("server/room-lifecycle.mjs");
+optional.push("server/attachment-schema.mjs");
+optional.push("server/wake-queue.mjs");
+optional.push("server/attention.mjs");
+optional.push("server/moderation.mjs");
+optional.push("server/channel-connection.mjs", "server/channel-import.mjs", "server/channel-adapters/index.mjs", "server/channel-adapters/email.mjs", "server/channel-adapters/telegram.mjs", "server/channel-adapters/gmail.mjs", "server/channel-adapters/whatsapp.mjs");
+optional.push("server/mime-message.mjs", "server/email-routing-inbound.mjs", "server/channel-journal.mjs");
+optional.push("server/agent-rooms.mjs"); // agent room ownership service (imported by server/http.mjs)
+optional.push("server/room-export-html.mjs");
+optional.push("server/access-review.mjs");
+optional.push("server/access-requests.mjs", "server/identity-ratelimit.mjs");
+optional.push("server/usage-summary.mjs");
+optional.push("server/channel-adapters/telegram-config.mjs", "server/channel-adapters/telegram-transport.mjs", "scripts/telegram-set-webhook.mjs");
+optional.push("server/boot-options.mjs"); // imported by server.mjs: default boot args incl. ChannelWebhookInbox
+optional.push("server/pins.mjs");
+optional.push("server/notifications.mjs");
+optional.push("server/spend-allowance.mjs");
+optional.push("src/growth-emit.js", "src/growth-events.js", "src/growth-collector.js", "src/growth-mentions.js", "src/growth-fanout.js", "src/growth-persistence.js", "src/growth-summary.js", "src/growth-compare.js", "src/growth-alerts.js", "src/growth-watch.js", "src/growth-scheduler.js", "src/growth-http.js", "src/growth-digest.js");
 const allowed = new Set([...required, ...optional]);
-for (const path of ['src/gmail-callback.js', ...['gmail-runtime', 'gmail-connections', 'gmail-oauth', 'gmail-mail-reader', 'gmail-email', 'mail-credential-vault'].map(name => `server/${name}.mjs`)]) allowed.add(path);
-for (const name of ['telegram-runtime','telegram-scheduler','telegram-connection-registry','telegram-connections','telegram-receiver','telegram-inbox-import','telegram-receive-queue','telegram-receive-tick','telegram-bot-reader','twilio-message-reader','twilio-inbox-import','twilio-connection-registry','twilio-webhook','twilio-connections','slack-event-reader']) allowed.add(`server/${name}.mjs`);
-const gmailAssets = (assets, files) => [...assets,...['src/gmail-callback.js','src/messaging-connections-client.js','src/messaging-connections-ui.js'].filter(path=>files.has(path))];
-function externalDependencies(files) {
-  const pkg = JSON.parse(files.get('package.json'));
-  const entries = Object.entries(pkg.dependencies ?? {});
-  if (!entries.length) return [];
-  const lock = JSON.parse(files.get('package-lock.json'));
-  check(entries.length >= 1 && entries.length <= 2 && pkg.dependencies['postal-mime'] === '3.0.0'
-    && entries.every(([name,version]) => name === 'postal-mime' && version === '3.0.0' || name === 'twilio' && version === '6.1.1'));
-  const locked = lock.packages?.['node_modules/postal-mime'];
-  check(lock.packages?.['']?.dependencies?.['postal-mime'] === '3.0.0'
-    && locked?.version === '3.0.0' && locked.resolved === 'https://registry.npmjs.org/postal-mime/-/postal-mime-3.0.0.tgz'
-    && locked.integrity === 'sha512-Z4a9ar2Bv3YpK3IXag+Yda30k7bMZfpRuUGyqtHnZ2pjHG8Bl62EhZIk4n1dzv00gfzP9g+94e9kd8+XmjVWLA=='
-    && !Object.keys(locked.dependencies ?? {}).length);
-  const result = [{ name: 'postal-mime', version: locked.version, integrity: locked.integrity }];
-  if (pkg.dependencies.twilio) {
-    const runtimePackages = Object.fromEntries(Object.entries(lock.packages).filter(([name,value]) => name && !value.dev).sort(([a],[b]) => a.localeCompare(b)));
-    // Pin the complete transitive runtime lock, not only the top-level SDK version.
-    check(sha256(JSON.stringify(runtimePackages)) === 'd311008d796205908b83ea86d026674fde9f57a4028931ece3072e4fa8b3a9c6'
-      && lock.packages[''].dependencies.twilio === '6.1.1');
-    result.push({name:'twilio',version:'6.1.1',integrity:lock.packages['node_modules/twilio'].integrity});
-  }
-  return result;
-}
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 const check = condition => { if (!condition) throw new Error("Runtime package does not match its exact allowlisted contract"); };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -102,7 +90,7 @@ function runtimeMetadata(files) {
   const schema = /export const STORE_SCHEMA_VERSION = (\d+);/.exec(files.get("server/writer-fence.mjs").toString());
   const pkg = JSON.parse(files.get("package.json"));
   const config = JSON.parse(files.get("cloudflare/wrangler.jsonc"));
-  check(["8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33"].includes(schema?.[1]) && typeof pkg.engines?.node === "string");
+  check(["8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34"].includes(schema?.[1]) && typeof pkg.engines?.node === "string");
   return { schemaVersion: Number(schema[1]), node: pkg.engines.node, cloudflare: { compatibilityDate: config.compatibility_date,
     compatibilityFlags: config.compatibility_flags, durableObjects: config.durable_objects, migrations: config.migrations } };
 }
@@ -126,7 +114,6 @@ export function createRuntimePackage({ repository, commit, destination }) {
   check(required.every(path => entries.some(entry => entry.path === path)));
   const files = new Map(entries.map(entry => [entry.path, git("cat-file", "blob", entry.object)]));
   const runtime = runtimeMetadata(files);
-  const dependencies = externalDependencies(files);
   check(isAbsolute(destination) && destination === resolve(destination));
   const parent = realpathSync(dirname(destination)), output = join(parent, basename(destination));
   mkdirSync(output, { mode: 0o700 }); // Existing paths are never reused or overwritten.
@@ -134,8 +121,7 @@ export function createRuntimePackage({ repository, commit, destination }) {
     mkdirSync(dirname(join(output, path)), { recursive: true, mode: 0o700 });
     writeFileSync(join(output, path), bytes, { mode: 0o600, flag: "wx" });
   }
-  const manifest = { format: 1, sourceCommit: commit, sourceTree: tree, runtime, publicAssets: gmailAssets(assetsFor(runtime.schemaVersion, files.has("src/inbox-ui.js"), files.has("src/inbox-send-ui.js")), files),
-    ...(dependencies.length ? { dependencies, dependencyInstallation: 'Required separately with npm ci --omit=dev --ignore-scripts; package verification checks source and lock, not installed modules.' } : {}),
+  const manifest = { format: 1, sourceCommit: commit, sourceTree: tree, runtime, publicAssets: assetsFor(runtime.schemaVersion, files.has("src/inbox-ui.js"), files.has("src/inbox-send-ui.js")),
     files: [...files].map(([path, bytes]) => ({ path, bytes: bytes.length, sha256: sha256(bytes) })),
     limitation: "Content consistency only; not trusted provenance, recovery freshness, hosted readiness or publication approval." };
   // Last write is the completion marker. A partial directory is not a package.
@@ -160,7 +146,7 @@ export function verifyRuntimePackage(directory, { expectedCommit } = {}) {
   const raw = readFileSync(join(root, manifestName)), manifest = JSON.parse(raw);
   check(manifest.format === 1 && hashPattern.test(manifest.sourceCommit) && hashPattern.test(manifest.sourceTree)
     && (!expectedCommit || manifest.sourceCommit === expectedCommit) && Array.isArray(manifest.files)
-    && same(manifest.publicAssets, gmailAssets(assetsFor(manifest.runtime?.schemaVersion, manifest.files.some(f => f.path === "src/inbox-ui.js"), manifest.files.some(f => f.path === "src/inbox-send-ui.js")), new Set(manifest.files.map(f => f.path)))));
+    && same(manifest.publicAssets, assetsFor(manifest.runtime?.schemaVersion, manifest.files.some(f => f.path === "src/inbox-ui.js"), manifest.files.some(f => f.path === "src/inbox-send-ui.js"))));
   const listed = manifest.files.map(entry => entry.path);
   check(new Set(listed).size === listed.length && same([...listed].sort(), listed) && required.every(path => listed.includes(path))
     && same(actual.sort(), [...listed, manifestName].sort()));
@@ -170,8 +156,6 @@ export function verifyRuntimePackage(directory, { expectedCommit } = {}) {
     const bytes = readFileSync(join(root, entry.path));
     check(bytes.length === entry.bytes && sha256(bytes) === entry.sha256); files.set(entry.path, bytes);
   }
-  const dependencies = externalDependencies(files);
-  check(same(manifest.dependencies ?? [], dependencies));
   // Check this codebase's literal imports, including dynamic literal imports.
   // This is not a complete JavaScript dependency parser; cold runtime tests and
   // source review remain required, especially if a computed loader is added.
@@ -180,8 +164,6 @@ export function verifyRuntimePackage(directory, { expectedCommit } = {}) {
     for (const match of bytes.toString().matchAll(/(?<!["'.])(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)["']([^"']+)["']/g)) {
       const specifier = match[1];
       if (specifier.startsWith("node:") || specifier.startsWith("cloudflare:")) continue;
-      if (specifier === 'postal-mime' && path === 'server/gmail-email.mjs' && dependencies.some(d=>d.name==='postal-mime')) continue;
-      if (specifier === 'twilio' && path === 'server/twilio-message-reader.mjs' && dependencies.some(d=>d.name==='twilio')) continue;
       check(specifier.startsWith(".") && files.has(posix.normalize(posix.join(posix.dirname(path), specifier))));
     }
   }

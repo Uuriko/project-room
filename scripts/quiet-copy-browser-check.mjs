@@ -5,7 +5,6 @@ import { rmSync } from "node:fs";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { ensureSignIn } from './browser-signin-helper.mjs';
 
 async function setup(t, viewport) {
   const fixture = createAcceptanceFixture();
@@ -33,17 +32,12 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     assert.equal(await page.locator(".connection-bar").isVisible(), false);
     assert.equal(await page.locator("#identity-label").isVisible(), false);
     assert.equal(await page.locator("#auth-error").textContent(), "");
-    assert.equal(await page.getByLabel("Room key", { exact: true }).isVisible(), false);
-    assert.equal(await page.locator('#sign-in-entry').isVisible(), true);
-    await ensureSignIn(page);
     assert.equal(await page.getByLabel("Room key", { exact: true }).isVisible(), true);
     assert.equal(await page.locator("#auth-description").isVisible(), false);
     assert.match(await page.locator("#auth-guest-note").textContent(), /eight hours/);
-    assert.equal(await page.locator('#refresh-button').isVisible(), false);
-    await page.reload();
+    await page.locator("#refresh-button").click();
     await page.waitForFunction(() => document.querySelector("#connection-status").dataset.state === "signed-out");
     assert.equal(await page.locator("#auth-error").textContent(), "", "normal signed-out refresh is not an error");
-    await ensureSignIn(page);
     await page.locator("#skip-link").focus(); await page.keyboard.press("Enter");
     assert.equal(await page.evaluate(() => document.activeElement.id), "auth-title");
     const help = page.locator(".access-help > summary");
@@ -76,13 +70,12 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     assert.match(await page.locator("#share-link-dialog").innerText(), /Send this link to a person/);
     await page.screenshot({ path: `test-results/quiet-copy-${label}-invite.png` });
     await page.locator("#share-link-close").click();
-    await page.locator("#signout-button").click();
+    if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click();
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     await page.evaluate(() => document.documentElement.style.fontSize = "200%");
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
-    await ensureSignIn(page); await help.click();
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
-      JSON.stringify(await page.evaluate(()=>[...document.querySelectorAll('body *')].filter(e=>e.getBoundingClientRect().right>innerWidth+1).map(e=>({tag:e.tagName,id:e.id,width:e.getBoundingClientRect().width})))));
+    await help.click();
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
     await page.screenshot({ path: `test-results/quiet-copy-${label}-large-text.png`, fullPage: true });
     assert.deepEqual(errors, []);
   });
@@ -92,11 +85,10 @@ test("quiet copy: account entry is not an error, actual service failure remains 
   const { page, errors, origin } = await setup(t, { width: 1280, height: 900 });
   await page.goto(`${origin}/?room=commons`);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  assert.equal(await page.locator("#auth-title").textContent(), "Project Room");
-  await ensureSignIn(page);
+  assert.equal(await page.locator("#auth-title").textContent(), "Open this room");
   assert.equal(await page.locator("#auth-kind-room").evaluate(node => node.classList.contains("suggested")), true);
   assert.equal(await page.locator("#auth-panel").getByLabel("Account key", { exact: true }).isVisible(), true);
-  assert.equal(await page.getByRole("button", { name: "Continue", exact: true }).isVisible(), true);
+  assert.equal(await page.getByRole("button", { name: "Open room", exact: true }).isVisible(), true);
   assert.equal(await page.locator("#auth-error").textContent(), "");
   assert.equal(await page.locator(".connection-bar").isVisible(), false);
   await page.route("**/api/session", route => route.abort("failed"));
@@ -106,10 +98,5 @@ test("quiet copy: account entry is not an error, actual service failure remains 
   assert.match(await page.locator("#auth-error").textContent(), /Can’t reach the room.*refreshing/);
   assert.equal(await page.getByRole("button", { name: "Refresh connection" }).isVisible(), true);
   await page.screenshot({ path: "test-results/quiet-copy-service-error.png" });
-  await page.unroute('**/api/session');
-  await page.getByRole('button',{name:'Refresh connection'}).click();
-  await page.waitForFunction(()=>document.querySelector('#connection-status').dataset.state==='signed-out');
-  assert.equal(await page.locator('#auth-error').textContent(),'');
-  assert.equal(await page.locator('#refresh-button').isVisible(),false);
   assert.deepEqual(errors, []);
 });

@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Simulated human journey on a disposable database; no production traffic.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -41,8 +40,8 @@ test('actual Node entrypoint pauses without touching populated data, then resume
   await page.screenshot({ path: 'test-results/recovery-paused-desktop.png' });
   assert.deepEqual(auditRecovery(fixture.store), before);
   await page.goto('about:blank'); await stop(); await start(false);
-  await page.goto(origin); await ensureSignIn(page); await page.locator("#access-key").fill(fixture.keys.owner);
-  await page.getByRole('button', { name: "Continue", exact: true }).click();
+  await page.goto(origin); await page.locator('#access-key').fill(fixture.keys.owner);
+  await page.getByRole('button', { name: 'Enter room', exact: true }).click();
   await page.locator('#main').waitFor({ state: 'visible' });
   assert.equal(fixture.store.room('commons').sequence, fixture.cursor);
   const after = auditRecovery(fixture.store);

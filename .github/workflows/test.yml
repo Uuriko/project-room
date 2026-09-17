@@ -18,7 +18,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      - run: npm ci # `npm run check` now includes the lint gate, which needs the eslint devDependency.
       - run: npm run check
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm run lint
   browser:
     runs-on: ubuntu-latest
     steps:
@@ -31,7 +41,12 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - name: Run conversation, composer recovery, Quiet Focus, accessibility, and session browser gates
-        run: npm run test:browser
+        # Same suites as test:browser, plus a junit file under test-results/ for the step below.
+        run: npm run test:browser:ci
+      - name: Report failing browser tests as annotations and job summary
+        # Readable through the GitHub API (check-run annotations, job summary) even when the raw log is not.
+        if: always()
+        run: node scripts/report-test-failures.mjs test-results/browser-junit.xml
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -57,7 +72,7 @@ jobs:
         working-directory: cloudflare
         env:
           WRANGLER_SEND_METRICS: "false"
-        run: node --test compatibility.check.mjs store.check.mjs http.check.mjs bootstrap.check.mjs reminder-upgrade.check.mjs maintenance.check.mjs recovery-switch.check.mjs browser.check.mjs
+        run: node --test compatibility.check.mjs store.check.mjs http.check.mjs bootstrap.check.mjs reminder-upgrade.check.mjs agent-upgrade.check.mjs maintenance.check.mjs recovery-switch.check.mjs browser.check.mjs
       - name: Build exact assets and validate the deployment bundle
         working-directory: cloudflare
         env:

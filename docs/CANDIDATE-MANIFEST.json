@@ -1,0 +1,49 @@
+{
+  "contractVersion": 1,
+  "runtime": {
+    "node": ">=24.19.0",
+    "ci": "24"
+  },
+  "storeSchemaVersion": 27,
+  "assets": {
+    "index.html": "sha256:a97f5b0c619438524ba77f4ab757493851965765979ece6df815032c9b9bfe92",
+    "src/agent-connections.js": "sha256:9f65f12731d5f54c12adca19ded38d2b9fb63e732c4a8d8f10f4166665643ae4",
+    "src/app.js": "sha256:8f268d202a470dfb3cf5efa1c9311777639a9ce98d540380de10290b752a0ed3",
+    "src/client.js": "sha256:f1fb1491a3f113cce52396a668efecf45a17641be86f6b4ec4c620e04749b20e",
+    "src/conversation.js": "sha256:2f31b9c4f0f69dfd7dc2fce0727eef43f3c1d8cf24c679f6eeedad1da518095f",
+    "src/events.js": "sha256:e8b9b798f59bde9dbbf931c9b337f2b9ad5cf037ab8cf7b57fb15e87da0f3e86",
+    "src/help-offers.js": "sha256:1f04d85618cfadc4118d73911f81e3ac08d3f324eeb011bd338655bbaaa4489c",
+    "src/inbox-client.js": "sha256:f052306bd756c82c388cad081bf9a1ee2ba4800cd1e744ae4477d3ca4af60782",
+    "src/inbox-send-ui.js": "sha256:1e522a4bdc03a03d5f497ce7411b3bfff7ab207520c33cfceb7233f9ddaa1abb",
+    "src/inbox-ui.js": "sha256:1fe47e1b00fd588d87d0537260e39bb16a945884b8c140b94b70426d5472f668",
+    "src/portable-work.js": "sha256:2522a6b2c61bfeed5585d7b8382b47e0df45707ef6df1037a3ac747b3a22affc",
+    "src/reminder-time.js": "sha256:fdf4caefab0ccaa0291bdd74e2e97fa169e2ea791c233fef5b2ff002735016b7",
+    "src/reminders.js": "sha256:b1a57316743260616b3925384d5e37cbc04ee9dd311fad9198d18e2dc46b6800",
+    "src/reply-requests.js": "sha256:f830c6dbf760c0458ef2b63c24b5ff965ced833cdb1f8a082e8f45a327b5353a",
+    "src/return-brief.js": "sha256:4e6bd12228008a54194b8a555d57c51786b79f6201c4ddf6b5356e5f9b48a50f",
+    "src/room-charter.js": "sha256:8d82cdddc4ab1219cd425bd8b0abdd995e5bf5357b03c3d33cb432476d0bc922",
+    "src/room-instructions.js": "sha256:b385c7a0da5d9d65218b1b6c238cc52c6eab38e20ad4cbc28ce38b458a31832c",
+    "src/room-roster.js": "sha256:4d66d4671d7a8fade0beac02a800f02d126c3eeae0c8dc131efcd87b79d94f17",
+    "src/share-links.js": "sha256:eda285c862ab243533ef91d36ac633bbd35cf9874283e6cd453259c912def0ce",
+    "src/styles.css": "sha256:a6ea0169d8e4cd7a4d875f58957300982f546aae57748bcdd6c81d290e5bdab2",
+    "src/work-help.js": "sha256:5a7795f5ea12f5f16ab16efe3b978c9945928e46afd801446938bdd5914ef5ac",
+    "src/work-item-session.js": "sha256:1cc97e2368dab50e1149b01df36bc62a53c80eb113c78ed061b8a83391affc63",
+    "src/work-packet.js": "sha256:b5d951281d34f76737311abbcdb610b0834cbbed40ce13a43b6e7557a59d3984",
+    "src/work-selectors.js": "sha256:e13849514c49d6dbd841a410c7140972a262be70eb7558d317b16aa6abaca7c3",
+    "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
+    "src/workflow.js": "sha256:eb0e8647a93c1bfba7ac66f96ab1ae7488152cf0fb3f0cd880439cdbad450b53"
+  },
+  "deployment": {
+    "cloudflare/bootstrap.mjs": "sha256:9ae0961d55502f9313dbb763a30f04a1534b0ab9f64b4e227a1cf5127eb320a9",
+    "cloudflare/build-assets.mjs": "sha256:1790b0797f373c2f395a959e3d49499c8318d275e9cb1759d898ecb2c69ac310",
+    "cloudflare/package.json": "sha256:4172622b90a7547fd7cf8e7de7850744e3a168a2675784920e335d68d7e8512c",
+    "cloudflare/pnpm-lock.yaml": "sha256:6bcfe8631205bf002a0efe4fd59e434b356bd103a1593b02e2cee5bfcfdc8bf7",
+    "cloudflare/room.mjs": "sha256:5bccbed8836410622537cc852214b9893b4fb211de7ad1801e1e3dc568dffb12",
+    "cloudflare/storage.mjs": "sha256:3a5210933f0effecfdf6dea33b3a095dbdabe2192f318c60c0329a2826b41568",
+    "cloudflare/wrangler.jsonc": "sha256:57101b216cea1d006d5f989b004f2b272f533f69b054816781736460f81a128c"
+  },
+  "packages": {
+    "package-lock.json": "sha256:4fa2de4c761761b195619dcf594b75333a268cd5296c06c65965096f2d6a7e70",
+    "package.json": "sha256:ca62f516d192fd5f72a585a39fc3256ae92599acb631f0ed0aa2e291f357484f"
+  }
+}

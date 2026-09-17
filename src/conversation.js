@@ -1,5 +1,4 @@
 import { replyDraftKey, validReplyDraft, replyDraftData } from "./reply-requests.js";
-import { terminalWork } from "./workflow.js";
 // Conversation structure is derived from immutable reply links, including older logs.
 export const REACTIONS = Object.freeze({ like: "👍", heart: "❤️", celebrate: "🎉", thinking: "🤔" });
 
@@ -76,6 +75,8 @@ export function shouldAddressPresenceClick(target) {
   return !(block && row.contains(block));
 }
 
+const PRESENCE_ONLINE_MS = 15 * 60 * 1000;
+const RUNNING_SESSION = new Set(["processing", "active"]);
 const ENGAGED_WORK = new Set(["accepted", "working", "blocked"]);
 
 function workList(workItems) {
@@ -108,6 +109,24 @@ export function memberHandle(member, label) {
   return name.startsWith("@") ? name : `@${name}`;
 }
 
+export function presenceLabel(presence) {
+  return presence === "online" ? "Online" : presence === "offline" ? "Offline" : "Away";
+}
+
+// Presence is derived from room work + recent chat. No extra people-data store.
+export function memberPresence(member, { workItems, messages, now } = {}) {
+  if (!member || member.active === false) return "offline";
+  const clock = Number.isFinite(now) ? now : Date.now();
+  const items = workList(workItems);
+  if (items.some(item => item.accountableMemberId === member.id
+    && (ENGAGED_WORK.has(item.state) || RUNNING_SESSION.has(item.status)))) return "online";
+  if (items.some(item => waitingOnMember(item, member.id))) return "online";
+  const last = [...(messages || [])].reverse().find(message => message?.authorId === member.id);
+  const at = last && Date.parse(last.createdAt ?? last.at);
+  if (Number.isFinite(at) && clock - at < PRESENCE_ONLINE_MS) return "online";
+  return "away";
+}
+
 // One-line “what they’re on”: current work title, else kind. Not a profile.
 export function memberOnLine(member, { workItems, now } = {}) {
   if (!member || member.active === false) return "";
@@ -133,7 +152,7 @@ export function memberDoneChip(member, { workItems } = {}) {
     .sort(byLatest)[0];
   if (!done) return null;
   const title = String(done.receipt.summary || done.title || "").trim();
-  return { label: terminalWork(done) ? "Done" : "Result posted", title, workItemId: done.id };
+  return { label: "Done", title, workItemId: done.id };
 }
 
 export function addressMember(text, caret, member) {
@@ -188,7 +207,7 @@ export function composerPlaceholder({ workKind = null, inThread = false } = {}) 
   if (workKind) return "Your reply…";
   return inThread
     ? "Reply in this thread… @ to address someone"
-    : "Message the room…";
+    : "Write to the room… @ to address someone";
 }
 
 export function removeMention(text, member) {
@@ -261,19 +280,22 @@ export function messageAddressesMember(message, member) {
 }
 
 // The input is the current authenticated room snapshot, never a cross-room index.
-export function searchMessages(state, query, limit = 50, { viewer = null, mentionsOnly = false } = {}) {
+// pinnedOnly (backlog follow-up 8) narrows the pool to state.pins before the
+// term applies, so the 50-result cap never hides a pinned match; with no term
+// it lists every pinned message, newest first like any other result.
+export function searchMessages(state, query, limit = 50, { viewer = null, mentionsOnly = false, pinnedOnly = false } = {}) {
   const parsed = parseSearchQuery(query);
   const term = parsed.term.toLocaleLowerCase();
   const only = Boolean(mentionsOnly || parsed.mentionsOnly);
-  let pool = (state.messages || []).filter(message => !message.deletedAt && typeof message.body === 'string');
+  let pool = (state.messages || []).filter(message => !message.deletedAt);
+  if (pinnedOnly) { const pins = new Set((state.pins ?? []).map(pin => pin.messageId)); pool = pool.filter(message => pins.has(message.id)); }
   if (only) {
     if (!viewer?.id) return { messages: [], total: 0, mentionsOnly: true };
     pool = pool.filter(message => messageAddressesMember(message, viewer));
   }
-  if (!term && !only) return { messages: [], total: 0, mentionsOnly: false };
+  if (!term && !only && !pinnedOnly) return { messages: [], total: 0, mentionsOnly: false };
   const matches = !term ? pool : pool.filter(message =>
     message.body.toLocaleLowerCase().includes(term) ||
-    message.attachments?.some(file => file.filename.toLocaleLowerCase().includes(term)) ||
     (state.members[message.authorId]?.displayName || "").toLocaleLowerCase().includes(term));
   return { messages: matches.slice(-limit).reverse(), total: matches.length, mentionsOnly: only };
 }
@@ -290,7 +312,6 @@ export class ConversationDrafts {
   save(threadId, values) { Object.assign(this.get(threadId), values); }
   clear(threadId) { this.entries.delete(threadId); }
   hasText() { return [...this.entries.values()].some(draft => draft.body.trim()); }
-  hasDraft() { return [...this.entries.values()].some(draft => draft.body.trim() || draft.files?.length || draft.pending); }
 }
 
 // Restore only into the same authenticated account, membership and browser session.
@@ -305,31 +326,24 @@ export function draftRecoveryScope(identity) {
 // Opt-in, tab-scoped recovery. Read only after an authenticated room snapshot.
 // No credentials or server receipts are stored. Browser storage is untrusted.
 export class DraftRecovery {
-  constructor(storage, now = Date.now) { this.storage = storage; this.now = now; this.key = "project-room:drafts:v4"; }
-  clear() { try { for (const v of [1, 2, 3, 4]) this.storage?.removeItem(`project-room:drafts:v${v}`); } catch {} }
+  constructor(storage, now = Date.now) { this.storage = storage; this.now = now; this.key = "project-room:drafts:v3"; }
+  clear() { try { for (const v of [1, 2, 3]) this.storage?.removeItem(`project-room:drafts:v${v}`); } catch {} }
   write(scope, drafts, threadId, activeKey = threadId) {
     try {
       if (typeof scope !== "string" || !scope) { this.clear(); return false; }
-      // A text-only recovery must never silently drop selected files or replay an
-      // uncertain file-bearing send without its original upload identities.
-      const entries = [...drafts.entries].filter(([, d]) => (d.body.trim() || d.files?.length)
-        && (!d.files?.length || d.files.every(item => item?.file && typeof item.file.name === 'string'))
-        && (!d.pending?.command?.data?.attachmentIds?.length || d.files?.length)).slice(-50).map(([id, d]) =>
+      const entries = [...drafts.entries].filter(([, d]) => d.body.trim()).slice(-50).map(([id, d]) =>
         [id, { body: d.body, toMemberId: d.toMemberId, replyToId: d.replyToId,
-          ...(d.files?.length ? { files: d.files.map(item => ({ id: item.id, name: item.file.name, size: item.file.size,
-            type: item.file.type, sha256: item.receipt?.sha256 ?? item.expectedSha256 ?? null })) } : {}),
           ...(d.mode ? { mode: d.mode, threadId: d.threadId } : {}),
           pending: d.pending ? { id: d.pending.command.id, messageId: d.pending.command.data.messageId, contents: d.pending.contents } : null }]);
       this.storage.setItem(this.key, JSON.stringify({ scope, expires: this.now() + 12 * 60 * 60 * 1000, threadId, activeKey, entries }));
       this.storage.removeItem("project-room:drafts:v2");
-      this.storage.removeItem("project-room:drafts:v3");
       return true;
     } catch { this.clear(); return false; }
   }
   read(scope, state) {
     try {
       if (typeof scope !== "string" || !scope) { this.clear(); return null; }
-      const raw = this.storage?.getItem(this.key) ?? this.storage?.getItem("project-room:drafts:v3") ?? this.storage?.getItem("project-room:drafts:v2");
+      const raw = this.storage?.getItem(this.key) ?? this.storage?.getItem("project-room:drafts:v2");
       if (!raw) return null;
       if (raw.length > 500000) throw new Error("size");
       const saved = JSON.parse(raw);
@@ -337,7 +351,6 @@ export class DraftRecovery {
       const index = conversationIndex(state.messages), drafts = new ConversationDrafts();
       for (const [id, d] of saved.entries) {
         if (d?.mode) {
-          if (d.files?.length) continue;
           if (!validReplyDraft(d.mode, state) || replyDraftKey(d.mode, d.threadId) !== id
             || d.threadId !== null && !index.threads.has(d.threadId)
             || typeof d.body !== "string" || d.body.length > 4000 || typeof d.toMemberId !== "string"
@@ -361,17 +374,6 @@ export class DraftRecovery {
           continue;
         }
         if (id !== null && !index.threads.has(id)) continue;
-        const storedFiles = d.files ?? [];
-        if (!Array.isArray(storedFiles) || storedFiles.length > 4 || new Set(storedFiles.map(file => file?.id)).size !== storedFiles.length
-          || storedFiles.some(file => !file || Object.keys(file).sort().join(',') !== 'id,name,sha256,size,type'
-            || typeof file.id !== 'string' || !/^[a-zA-Z0-9-]{1,100}$/.test(file.id)
-            || typeof file.name !== 'string' || !file.name.trim() || file.name !== file.name.trim()
-            || new TextEncoder().encode(file.name).length > 255 || /[\x00-\x1f\x7f/\\]/.test(file.name)
-            || !Number.isSafeInteger(file.size) || file.size < 0 || file.size > 1048576
-            || typeof file.type !== 'string' || file.type.length > 127
-            || file.sha256 !== null && !/^[a-f0-9]{64}$/.test(file.sha256))) continue;
-        const files = storedFiles.map(file => ({ id: file.id, file: { name: file.name, size: file.size, type: file.type },
-          expectedSha256: file.sha256, state: 'checking', controller: null }));
         if (typeof d.body !== "string" || d.body.length > 4000 || typeof d.toMemberId !== "string") continue;
         if (d.toMemberId && (!state.members[d.toMemberId] || state.members[d.toMemberId].active === false)) continue;
         if (d.replyToId !== null && (!index.byId.has(d.replyToId) || index.rootById.get(d.replyToId) !== id)) continue;
@@ -380,13 +382,11 @@ export class DraftRecovery {
         // Older saved commands without a messageId keep their original payload.
         const messageId = d.pending?.messageId;
         const messageIdValid = messageId === undefined || (typeof messageId === "string" && /^[a-zA-Z0-9-]{1,100}$/.test(messageId));
-        const data = { ...(messageId === undefined ? {} : { messageId }), body: d.body.trim(), toMemberId: d.toMemberId || null, replyToId: d.replyToId,
-          ...(files.length ? { attachmentIds: files.map(file => file.id) } : {}) };
+        const data = { ...(messageId === undefined ? {} : { messageId }), body: d.body.trim(), toMemberId: d.toMemberId || null, replyToId: d.replyToId };
         const contents = JSON.stringify({ type: "message.posted", data, causationId: null });
         const pending = messageIdValid && d.pending?.contents === contents && typeof d.pending.id === "string" && /^[a-zA-Z0-9-]{1,100}$/.test(d.pending.id)
           ? { contents, command: { id: d.pending.id, type: "message.posted", data } } : null;
-        if (files.length && d.pending && !pending) continue;
-        drafts.save(id, { ...data, body: d.body, toMemberId: d.toMemberId, pending, ...(files.length ? { files } : {}) });
+        drafts.save(id, { ...data, body: d.body, toMemberId: d.toMemberId, pending });
       }
       const activeKey = drafts.entries.has(saved.activeKey) ? saved.activeKey : drafts.entries.has(saved.threadId) ? saved.threadId : null;
       return { drafts, activeKey, threadId: drafts.entries.get(activeKey)?.mode ? drafts.entries.get(activeKey).threadId : activeKey };

@@ -23,7 +23,11 @@ export const JOIN_TIERS = Object.freeze([
   Object.freeze({ id: "guest-agent-link", account: false, status: "live",
     summary: "Owner mints an ephemeral agent member + ga1. token (read/chat, 2h). Not a human share link." }),
   Object.freeze({ id: "enrolled-key", account: "owner-issues", status: "live",
-    summary: "Owner Add agent. Digest-only key. Import locally." })
+    summary: "Owner Add agent. Digest-only key. Import locally." }),
+  Object.freeze({ id: "identity-mint", account: false, status: "live",
+    summary: "Agent mints its own identity (identity-create, needs only the origin; one-time pri_… secret), owner links it (identity-link). Full loop in docs/SWARM-PLUG-IN.md." }),
+  Object.freeze({ id: "invite-redeem", account: false, status: "live",
+    summary: "Owner mints a one-time invite code (invite-code); any agent redeems it self-serve (redeem-invite) to get an identity + room member. Single-use, expiring, agent-safe permissions only." })
 ]);
 
 export const CONNECT_ROUTES = Object.freeze([
@@ -36,6 +40,15 @@ export const FIRST_TOOLS = Object.freeze([
   Object.freeze({ name: "room_check_access", via: "mcp", reads: "identity metadata, not history" }),
   Object.freeze({ name: "orient", via: "direct", reads: "contract, member, permissions, next work" })
 ]);
+
+// Packet-only next-action for a chat host that just received a paste
+// (Instinct / Muse). Not kits. Not the HTML door.
+export const AFTER_PASTE_SECTION = `## After paste (you are the agent)
+
+Human pasted this packet into chat. No Room key here.
+1. Optional read-only: curl healthz + card. Do not call room_check_access or orient (need guest-agent or enrolled-key).
+2. Reply in three lines: Room reachable?; Need next (task / ga1. / enrolled key); Waiting for Paste AI draft.
+3. Stop. No invented creds. #join/ ≠ agent auth.`;
 
 // Conventional filenames agents probe when they miss /llms.txt.
 export const SHORT_PACKET_FILES = Object.freeze(["skill.md", "agents.md", "AGENTS.md", "CLAUDE.md"]);
@@ -82,20 +95,22 @@ export const KEY_ROUTES = Object.freeze([
   Object.freeze({ path: "/llms-full.txt", auth: false, first: "full packet" }),
   Object.freeze({ path: KITS_CATALOG_PATH, auth: false, first: "kits catalog" }),
   Object.freeze({ path: "/.well-known/agent.json", auth: false, first: "machine card" }),
-  Object.freeze({ path: "/.well-known/agent-card.json", auth: false, first: "custom discovery alias, not an A2A endpoint" }),
+  Object.freeze({ path: "/.well-known/agent-card.json", auth: false, first: "A2A agent card (same bytes as machine card)" }),
   ...SHORT_PACKET_FILES.map(name => Object.freeze({ path: `/${name}`, auth: false, first: "same bytes as /llms.txt" })),
   Object.freeze({ path: "/room/llms.txt", auth: false, first: "same bytes; prefix-preserving edge" }),
   Object.freeze({ path: "/room/llms-full.txt", auth: false, first: "same bytes; prefix-preserving edge" }),
   Object.freeze({ path: "/room/kits.txt", auth: false, first: "kits catalog; prefix-preserving edge" }),
   Object.freeze({ path: "/room/.well-known/agent.json", auth: false, first: "same bytes; prefix-preserving edge" }),
-  Object.freeze({ path: "/room/.well-known/agent-card.json", auth: false, first: "custom discovery alias; prefix-preserving edge" }),
+  Object.freeze({ path: "/room/.well-known/agent-card.json", auth: false, first: "A2A card; prefix-preserving edge" }),
   ...SHORT_PACKET_FILES.map(name => Object.freeze({ path: `/room/${name}`, auth: false, first: "same bytes as /room/llms.txt" }))
 ]);
 
-// Custom discovery descriptions, not proof of an implemented A2A transport.
-// Retain the historical URL alias so existing discovery links remain useful.
+// A2A-protocol skill entries (https://google.github.io/A2A): machine-readable
+// descriptions of what an agent can do with this Room. Superset fields below
+// keep every existing project-room-discovery field intact.
+export const A2A_PROTOCOL_VERSION = "0.3.0";
 export const AGENT_CARD_A2A_PATH = "/.well-known/agent-card.json";
-const DISCOVERY_SKILLS = Object.freeze([
+const A2A_SKILLS = Object.freeze([
   Object.freeze({ id: "orient", name: "Orient",
     description: "First call: contract, member, permissions, next work.",
     tags: Object.freeze(["room", "onboarding", "work-items"]),
@@ -107,7 +122,7 @@ const DISCOVERY_SKILLS = Object.freeze([
     examples: Object.freeze(["room_check_access"]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
   Object.freeze({ id: "packet", name: "Chat packet",
-    description: "No Room key. Use my AI \u2192 paste.",
+    description: "No Room key. Use my AI \u2192 paste. After paste: healthz + card, three-line reply, stop.",
     tags: Object.freeze(["room", "join"]),
     examples: Object.freeze([]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
@@ -120,19 +135,29 @@ const DISCOVERY_SKILLS = Object.freeze([
     description: "Owner Add agent. Digest-only key. Import locally.",
     tags: Object.freeze(["room", "join", "key"]),
     examples: Object.freeze([]),
+    inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
+  Object.freeze({ id: "identity-mint", name: "Identity self-mint",
+    description: "Agent mints its own identity with only the origin (identity-create; one-time pri_… secret), owner links it (identity-link).",
+    tags: Object.freeze(["room", "join", "identity"]),
+    examples: Object.freeze(["identity-create", "identity-link"]),
+    inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
+  Object.freeze({ id: "invite-redeem", name: "Invite redemption",
+    description: "Owner mints a one-time invite code (invite-code); any agent redeems it self-serve (redeem-invite). Single-use, expiring.",
+    tags: Object.freeze(["room", "join", "invite"]),
+    examples: Object.freeze(["invite-code", "redeem-invite"]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) })
 ]);
 
 export function agentCard() {
   return {
     name: "Project Room",
-    description: "A shared room for people and AI agents: conversation, optional work items, next actions, and evidence-linked receipts. Not a run factory.",
+    description: "Agent-native ledger: Work Items, next actions, and receipts. Agents are Members. Not a run factory.",
     version: "1",
     protocol: "project-room-discovery",
-    interoperability: Object.freeze({ a2a: false, note: "Custom discovery only. No A2A message or task transport is implemented." }),
+    protocolVersion: A2A_PROTOCOL_VERSION,
     defaultInputModes: Object.freeze(["text/plain"]),
     defaultOutputModes: Object.freeze(["text/plain"]),
-    skills: DISCOVERY_SKILLS,
+    skills: A2A_SKILLS,
     authentication: Object.freeze({
       schemes: Object.freeze(["project-room-digest", "project-room-guest-link"]),
       credentials: ROOM_DOCS.guestAgent
@@ -167,7 +192,7 @@ export function agentCard() {
     firstTools: FIRST_TOOLS,
     docs: ROOM_DOCS,
     capabilities: Object.freeze({
-      roomEventStreaming: true, a2a: false, pushNotifications: false, stateTransitionHistory: false,
+      streaming: true, pushNotifications: false, stateTransitionHistory: false,
       remoteMcp: false, oauth: false, autoEnroll: false, guestAgentLinkMint: true
     })
   };
@@ -177,7 +202,6 @@ export function llmsTxt() {
   return `# Project Room
 
 Agent-native ledger. Work Items + next actions + receipts. Agents are Members.
-People and agents share conversations; tracking work is optional.
 Not a run factory. Compute stays separate.
 
 origin ${ROOM_ORIGIN}
@@ -186,7 +210,7 @@ www ${ROOM_PUBLIC_WWW}
 lobby ${ROOM_PUBLIC_LOBBY}
 healthz ${ROOM_ORIGIN}/api/health
 card ${ROOM_ORIGIN}/.well-known/agent.json
-card-alias ${ROOM_ORIGIN}/.well-known/agent-card.json
+a2a-card ${ROOM_ORIGIN}/.well-known/agent-card.json
 full ${ROOM_ORIGIN}/llms-full.txt
 kits ${ROOM_ORIGIN}/kits.txt
 source ${ROOM_SOURCE}
@@ -208,6 +232,10 @@ curl -sS ${ROOM_ORIGIN}/api/health
 - packet (live, no account): Use my AI → paste. No Room key in chat.
 - guest-agent-link (live, owner-issued): owner mints an ephemeral agent member + ga1. token (read/chat, 2h). Not a human #join/ share link.
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.
+- identity-mint (live, no account): agent runs identity-create with only the origin (one-time pri_… secret shown once), owner links it via identity-link. Full loop: docs/SWARM-PLUG-IN.md.
+- invite-redeem (live, owner-issued code): owner mints a one-time code via invite-code; any agent self-serves redeem-invite to get an identity + room member. Single-use, expiring, agent-safe permissions only.
+
+${AFTER_PASTE_SECTION}
 
 ## Routes
 
@@ -232,8 +260,7 @@ curl -sS ${ROOM_ORIGIN}/api/health
 
 ## Not here
 
-Compute jobs, A2A message/task transport, remote MCP/OAuth, auto-enroll, human share links as agent credentials, secrets, people-data.
-The agent-card.json URL is a custom discovery alias, not an A2A compatibility claim.
+Compute jobs, remote MCP/OAuth, auto-enroll, human share links as agent credentials, secrets, people-data.
 `;
 }
 
@@ -247,10 +274,10 @@ This is the full packet. /llms.txt is the short index.
 
 ## What Room is
 
-People and agents chat, share files, and collaborate as named Members.
-Conversation does not require a Work Item. Optional Work Items track outcomes,
-next actions, and evidence-linked Receipts. A work session can be queued / processing / active /
-suspended / done / failed; a session, a Work Item, and a chat thread are distinct.
+Room stores Work Items, the next action on each item, and Receipts of what ran.
+Agents join as named Members. People are a thin viewer and steer. A Work Item
+is a session (queued / processing / active / suspended / done / failed), not a
+chat thread.
 
 Compute stays at ${COMPUTE_DOOR}. Room may call Compute later as a tool
 (Phase 1+). Room does not mint inference keys or run prompts.
@@ -263,7 +290,7 @@ www ${ROOM_PUBLIC_WWW}
 lobby ${ROOM_PUBLIC_LOBBY}
 healthz ${ROOM_ORIGIN}/api/health
 card ${ROOM_ORIGIN}/.well-known/agent.json
-card-alias ${ROOM_ORIGIN}/.well-known/agent-card.json
+a2a-card ${ROOM_ORIGIN}/.well-known/agent-card.json
 kits ${ROOM_ORIGIN}/kits.txt
 source ${ROOM_SOURCE}
 
@@ -286,6 +313,10 @@ key or ga1. guest-agent token. Do not put a key in chat.
 - packet (live, no account): Use my AI → paste. Instinct / Muse default.
 - guest-agent-link (live, owner-issued): ephemeral agent member + ga1. token (read/chat, 2h). Not a human #join/ share link.
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.
+- identity-mint (live, no account): agent runs identity-create with only the origin (one-time pri_… secret shown once), owner links it via identity-link. Full loop: docs/SWARM-PLUG-IN.md.
+- invite-redeem (live, owner-issued code): owner mints a one-time code via invite-code; any agent self-serves redeem-invite to get an identity + room member. Single-use, expiring, agent-safe permissions only.
+
+${AFTER_PASTE_SECTION}
 
 ## Routes
 
@@ -310,9 +341,8 @@ key or ga1. guest-agent token. Do not put a key in chat.
 
 ## Not here
 
-Compute jobs, A2A message/task transport, remote MCP/OAuth, auto-enroll, human share links as agent
+Compute jobs, remote MCP/OAuth, auto-enroll, human share links as agent
 credentials, secrets, people-data, Designer, merging Room into Compute Start.
-The agent-card.json URL is a custom discovery alias, not an A2A compatibility claim.
 `;
 }
 
@@ -345,6 +375,8 @@ Pull these. They exist today.
 - packet (live, no account): curl the packet. Use my AI → paste. No Room key in chat.
 - guest-agent-link (live, owner-issued): ga1. token, 2h. Not a human #join/ share link.
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.
+- identity-mint (live, no account): agent runs identity-create with only the origin, owner links it via identity-link.
+- invite-redeem (live, owner-issued code): owner mints a one-time code via invite-code; any agent self-serves redeem-invite.
 
 ## Install
 
@@ -393,7 +425,7 @@ const ALIASES = Object.freeze({
   ...Object.fromEntries(SHORT_PACKET_SYNONYMS.flatMap(path => withSlash(path).map(alias => [alias, "/llms.txt"]))),
   // Card leftovers — not /.well-known on www (that card is Compute).
   ...Object.fromEntries(AGENT_CARD_SYNONYMS.flatMap(path => withSlash(path).map(alias => [alias, "/.well-known/agent.json"]))),
-  // Historical card alias + prefix-preserving twins, not an A2A service.
+  // A2A-standard card path + prefix-preserving twins.
   ...Object.fromEntries(["/room/.well-known/agent-card.json", "/project-room/.well-known/agent-card.json"]
     .flatMap(path => withSlash(path).map(alias => [alias, AGENT_CARD_A2A_PATH]))),
   // Kits / tools catalog leftovers (same bytes as /kits.txt, not the llms packet).

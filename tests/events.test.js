@@ -528,3 +528,34 @@ function fixedEvent(id, type, actorId, data) {
     data
   };
 }
+
+// Only member.added and member.access_changed move member.revision: status lines,
+// notification preferences and capability advertisements are not authority changes.
+test("status, preferences and capabilities leave member.revision where access control pinned it", () => {
+  let state = baseState();
+  assert.equal(state.members.codex.revision, 0);
+  state = applyEvent(state, fixedEvent("codex-status", EVENT_TYPES.MEMBER_STATUS_UPDATED, "codex", { message: "parsing feeds" }));
+  state = applyEvent(state, fixedEvent("codex-prefs", EVENT_TYPES.NOTIFICATION_PREFERENCES_SET, "codex", { preferences: { mentions: "none" } }));
+  state = applyEvent(state, fixedEvent("codex-caps", EVENT_TYPES.CAPABILITIES_ADVERTISED, "codex", { capabilities: ["parsing"] }));
+  assert.equal(state.members.codex.statusMessage, "parsing feeds");
+  assert.equal(state.members.codex.notificationPreferences.mentions, "none");
+  assert.deepEqual(state.members.codex.capabilities, ["parsing"]);
+  assert.equal(state.members.codex.updatedAt, "2026-09-05T10:00:00.000Z");
+  assert.equal(state.members.codex.revision, 0);
+  // An owner access change prepared before those events is not stale.
+  state = applyEvent(state, fixedEvent("codex-access", EVENT_TYPES.MEMBER_ACCESS_CHANGED, "potter",
+    { memberId: "codex", expectedMemberRevision: 0, permissions: ["accept_work", "complete_work"], active: true }));
+  assert.equal(state.members.codex.revision, 1);
+});
+
+test("deleting a message removes every earlier version as well as the current one", () => {
+  let state = baseState();
+  state = applyEvent(state, fixedEvent("del-post", EVENT_TYPES.MESSAGE_POSTED, "maya", { messageId: "del-me", body: "first" }));
+  state = applyEvent(state, fixedEvent("del-edit", EVENT_TYPES.MESSAGE_EDITED, "maya", { messageId: "del-me", body: "second", expectedMessageRevision: 0 }));
+  assert.equal(state.messages.find(m => m.id === "del-me").editHistory.length, 1);
+  state = applyEvent(state, fixedEvent("del-delete", EVENT_TYPES.MESSAGE_DELETED, "maya", { messageId: "del-me", expectedMessageRevision: 1 }));
+  const tombstone = state.messages.find(m => m.id === "del-me");
+  assert.equal(tombstone.body, null); assert.deepEqual(tombstone.editHistory, []);
+  assert.equal(tombstone.deletedBy, "maya"); assert.equal(tombstone.revision, 2);
+  assert.equal(JSON.stringify(tombstone).includes("first"), false);
+});

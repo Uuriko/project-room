@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Synthetic recovery regressions in disposable loopback rooms, not human-study evidence.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -44,8 +43,8 @@ async function setup(t, { touch = false, clipboard = false } = {}) {
 async function ownerPage(page, origin, fixture) {
   await page.goto(origin);
   await page.locator('#auth-panel').waitFor({ state: 'visible' });
-  await ensureSignIn(page); await page.locator("#access-key").fill(fixture.keys.owner);
-  await page.getByRole('button', { name: "Continue", exact: true }).click();
+  await page.locator('#access-key').fill(fixture.keys.owner);
+  await page.getByRole('button', { name: 'Enter room', exact: true }).click();
   await page.locator('#main').waitFor({ state: 'visible' });
   await page.locator('#invite-people-button').click();
 }

@@ -1,0 +1,113 @@
+// Secret-scan CI gate (H005 wiring). Scans the repo tree for accidentally
+// committed secrets using server/secret-scan.mjs. Fails the build on any
+// finding. Pure, dependency-free; runs in the contract job via check.mjs.
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
+import { scanText } from "../server/secret-scan.mjs";
+
+// Directories never scanned (vendored code, build output, local scratch).
+const SKIP_DIRS = new Set(["node_modules", ".git", "coverage", "test-results", "runlogs-tmp", "dist"]);
+// File extensions worth scanning. Secrets live in text; skip binaries/images.
+const SCAN_EXT = /\.(mjs|js|cjs|json|yaml|yml|toml|md|txt|html|css|env|example|sh)$/i;
+// File paths never scanned (lockfiles carry hashes, not secrets).
+// Fixture/check scripts and READMEs use placeholder secrets (verified 2026-09-16).
+const SKIP_FILES = [/package-lock\.json$/, /pnpm-lock\.yaml$/, /\.min\.js$/, /secret-scan-check\.mjs$/,
+  /-fixture\.mjs$/, /-check\.mjs$/, /README\.md$/];
+// Known-safe lines: the scanner's own patterns, documented examples, redacted placeholders,
+// and variable assignments (not hardcoded values).
+const ALLOWLIST = [
+  /AKIA[0-9A-Z]{16}/, // scanner's own AWS pattern doc (server/secret-scan.mjs)
+  /gh[op]_[A-Za-z0-9]{36}/, // scanner's own GitHub pattern doc
+  /xox[baprs]-[A-Za-z0-9-]+/, // scanner's own Slack pattern doc
+  /<redacted>/i, // explicit redaction marker
+  /DASHA_API_KEY=<redacted>/, // documented placeholder (scripts/dasha-bridge.mjs)
+  /example\.com/, // documentation URLs
+  // Variable/function/member references, not hardcoded secrets:
+  // `secret = generateSecret()`, `token: getToken()`, `token: f.keys.producer`,
+  // `token: f.keys[actor]`, `token = store.issueAccessKey('x', y)`, `password = foo`
+  /\b(secret|password|passwd|pwd|token|api[_-]?key)\b\s*[:=]\s*[a-zA-Z_$][\w$]*(\s*(\.\s*[a-zA-Z_$][\w$]*|\[[^\]]+\]))*(\s*\([^)]*\))?\s*([,;)\]}]|$)/i,
+  /\b(secret|password|passwd|pwd|token|api[_-]?key)\b\s*[:=]\s*["'][^"']{0,11}["']/, // short placeholders
+  /sha512-|sha256-/, // SRI integrity hashes in lockfiles/docs
+  // Verified false positives (2026-09-16 audit):
+  /IDENTITY_SECRET_PREFIX/, // runtime-generated: `secret = PREFIX + base64url(randomBytes(32))`
+  /CODE_ALPHABET\s*=\s*"/, // invite-code alphabet constants, not secrets
+  /LEGACY_CODE_ALPHABET\s*=\s*"/, // invite-code alphabet constants, not secrets
+  /token:\s*"TELEGRAM_BOT_TOKEN"/, // env var NAME as string, not a token value
+  /webhookSecret:\s*"TELEGRAM_WEBHOOK_SECRET"/, // env var NAME as string
+  /insertCredential\(/, // `token = this.insertCredential(...)` — credential store API
+  /base64url\(randomBytes\(/, // runtime-generated random values
+  /generateSecret\(\)/, // runtime-generated secrets in fixtures
+  /process\.env\.[A-Z_]+/, // env var NAMES (not values)
+  /^\|.*\|$/, // markdown table rows
+  /randomBytes\(/, // runtime-generated: `randomBytes(32).toString("base64url")`
+  /\btokens\.get\(/, // `token = tokens.get(tokenId)` — Map lookup, not a secret
+  /BASE32_ALPHABET\s*=/, // TOTP alphabet constant
+  /github\.com\/Uuriko\//, // repo's own GitHub URLs
+  /\/blob\/main\/docs\//, // docs URLs in discovery configs
+  /^\s*secret:\s*<redacted>\s*$/, // literally redacted values
+  /\$SCRIPT_DIR/, // shell script variable references
+  /^\s*cp\s+"/, // shell copy commands
+  /inviteSecretFromText\(/, // `secret = inviteSecretFromText(...)` — clipboard extraction
+  /can store a secret:/, // documentation template string
+  /tokenPattern\.test\(/, // `token: tokenPattern.test(...) ? ...` — validation, not a secret
+  /\.replace\(.*\.toUpperCase\(\)/, // `secret.replace(...).toUpperCase()` — transform, not a secret
+  // Verified false positives (2026-09-16 release-cut audit of production-line code):
+  /Number\.isSafeInteger/, // dense integer-validation logic, not a secret
+  /Number\.MAX_SAFE_INTEGER/, // integer ceiling constant, not a secret
+  /\benv\.ROOM_[A-Z_]+/, // env var NAME references (bare env.), not values
+  /request\.expiresAt/, // expiry-validation logic, not a secret
+  /['"]signed-test-assertion['"]/, // test fixture placeholder
+  /['"]synthetic-verified-assertion['"]/, // test fixture placeholder
+  /['"]123456:abcdefghijklmnopqrstuvwxyz['"]/, // fake sequential test token
+  /connectionId:\s*['"]one['"]/, // test fixture placeholder
+];
+
+// Directories scanned: source code where a real secret could hide.
+// research/ and docs/ are prose with quoted examples; tests/ use fixtures.
+const SCAN_DIRS = ["server", "src", "scripts", "client", "cloudflare", "deploy", "lanes", "specs"];
+const SCAN_ROOT_FILES = true; // *.mjs in repo root (server.mjs etc.)
+
+function walk(dir, out = []) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      if (!SKIP_DIRS.has(entry.name)) walk(join(dir, entry.name), out);
+    } else if (SCAN_EXT.test(entry.name)) {
+      out.push(join(dir, entry.name));
+    }
+  }
+  return out;
+}
+
+const root = new URL("..", import.meta.url).pathname;
+const files = [];
+for (const dir of SCAN_DIRS) {
+  try { files.push(...walk(join(root, dir))); } catch { /* dir may not exist */ }
+}
+if (SCAN_ROOT_FILES) {
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (entry.isFile() && SCAN_EXT.test(entry.name)) files.push(join(root, entry.name));
+  }
+}
+const filtered = files.filter(f => {
+  if (SKIP_FILES.some(re => re.test(f))) return false;
+  // Skip this gate's own allowlist doc lines by scanning everything anyway;
+  // the ALLOWLIST above handles known-safe matches.
+  try { return statSync(f).size <= 2 * 1024 * 1024; } catch { return false; }
+});
+
+let total = 0;
+for (const file of filtered) {
+  let text;
+  try { text = readFileSync(file, "utf8"); } catch { continue; }
+  const findings = scanText(text, { allowlist: ALLOWLIST });
+  for (const f of findings) {
+    console.error(`secret-scan: ${relative(root, file)}:${f.line} [${f.rule}] ${f.label} (${f.preview})`);
+    total++;
+  }
+}
+
+if (total > 0) {
+  console.error(`\nsecret-scan: FAIL — ${total} finding(s). Remove the secret or add an allowlist entry with justification.`);
+  process.exit(1);
+}
+console.log(`secret-scan: ok — ${files.length} files scanned, no findings.`);

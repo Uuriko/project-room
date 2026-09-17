@@ -1,42 +1,17 @@
-const roomRoutes = new Set("commands events stream cursor return-brief work-context work-discussion work-result work-sessions presence capabilities onboarding-funnel export import charter reply-requests reply-context reply-history invitations share-links share-links-cancel reminders agent-connections guest-agent-links diagnostics diagnostics-export search provider-heartbeats identity-links agent-invites".split(" "));
-
-// Match complete known route shapes, never guess whether a segment is an ID.
-export function diagnosticRoute(requestUrl, roomId, origin = "http://localhost") {
-  if (!roomId) return null;
-  let pathname;
-  try { pathname = new URL(requestUrl, origin).pathname; } catch { return null; }
-  const prefix = `/api/rooms/${encodeURIComponent(roomId)}`;
-  if (pathname === prefix) return "/api/rooms/:roomId";
-  if (!pathname.startsWith(prefix + "/")) return null;
-  const rest = pathname.slice(prefix.length + 1);
-  if (roomRoutes.has(rest)) return `/api/rooms/:roomId/${rest}`;
-  if (/^messages\/[^/]+\/thread$/.test(rest)) return "/api/rooms/:roomId/messages/:item/thread";
-  if (/^attachments\/[^/]+$/.test(rest)) return "/api/rooms/:roomId/attachments/:item";
-  if (/^attachments\/[^/]+\/status$/.test(rest)) return "/api/rooms/:roomId/attachments/:item/status";
-  if (/^invitations\/[^/]+\/revoke$/.test(rest)) return "/api/rooms/:roomId/invitations/:item/revoke";
-  return "/api/rooms/:roomId/:unknown";
-}
-
 // Bounded, room-scoped diagnostic records for support exports. Records carry
 // only operation metadata: never credentials, request bodies, message text or
 // member details. Routes are stored with the room id templated out.
 export class DiagnosticsLog {
-  constructor(capacity = 200, roomCapacity = 100) {
+  constructor(capacity = 200) {
     if (!Number.isInteger(capacity) || capacity < 1 || capacity > 10000) throw new Error("Diagnostics capacity must be an integer from 1 to 10000");
     this.capacity = capacity;
-    if (!Number.isInteger(roomCapacity) || roomCapacity < 1 || roomCapacity > 1000) throw new Error("Diagnostic room capacity must be an integer from 1 to 1000");
-    this.roomCapacity = roomCapacity;
     this.records = new Map();
   }
   record({ operationId, at, status, code, category, route, roomId }) {
     if (typeof roomId !== "string" || !roomId) return;
     const entry = { operationId, at, status, code, category, route };
     let list = this.records.get(roomId);
-    // Write-recency eviction bounds distinct rooms, including invented IDs.
-    if (list) this.records.delete(roomId);
-    else if (this.records.size >= this.roomCapacity) this.records.delete(this.records.keys().next().value);
-    if (!list) list = [];
-    this.records.set(roomId, list);
+    if (!list) { list = []; this.records.set(roomId, list); }
     list.push(entry);
     if (list.length > this.capacity) list.splice(0, list.length - this.capacity);
   }

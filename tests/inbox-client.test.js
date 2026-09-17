@@ -6,31 +6,6 @@ import { InboxClient, inboxTextVersion } from "../src/inbox-client.js";
 const session = { authenticated: true, account: { id: "owner", authEpoch: 2 }, sessionRevision: 4, sessionBinding: "a".repeat(64), csrf: "csrf" };
 const viewer = { accountId: "owner", authEpoch: 2, sessionRevision: 4, sessionBinding: session.sessionBinding };
 const reply = value => ({ ok: true, json: async () => value });
-test('Gmail controls reject foreign redirects and stale account status', async () => {
-  const base = { contractVersion: 1, viewer, connectionId: 'gmail-test' };
-  for (const authorizationUrl of ['https://evil.example/', 'https://accounts.google.com.evil.example/o/oauth2/v2/auth', 'https://accounts.google.com/other'])
-    await assert.rejects(setup(async () => reply({ ...base, authorizationUrl })).client.gmail('start', { mailbox: 'pilot@example.com' }), { code: 'invalid_inbox_response' });
-  assert.ok(await setup(async () => reply({ ...base, authorizationUrl: 'https://accounts.google.com/o/oauth2/v2/auth?state=fixture' })).client.gmail('start', { mailbox: 'pilot@example.com' }));
-  await assert.rejects(setup(async () => reply({ contractVersion: 1, viewer: { ...viewer, accountId: 'other' }, enabled: true, connections: [] })).client.gmailStatus(), { code: 'obsolete_inbox' });
-});
-test("private grant receipts must confirm exact source, room and recipients", async () => {
-  const request = { action: "source.grant", requestId: "grant-request", sourceId: "mail", sourceRevision: 1,
-    roomId: "room", audienceVersion: "a".repeat(64), paragraphs: [0], memberIds: ["agent"] };
-  const receipt = { action: request.action, requestId: request.requestId, sourceId: request.sourceId, sourceRevision: 1,
-    grantId: "grant-id", roomId: "room", body: "Selected", members: [{ memberId: "agent", revision: 0 }], expiresAt: 10, roomSequence: 1 };
-  const response = { contractVersion: 1, viewer, duplicate: false, receipt };
-  assert.equal((await setup(async () => reply(response)).client.apply(request)).receipt.grantId, "grant-id");
-  for (const mutate of [r => r.members.push({ memberId: "extra", revision: 0 }), r => r.members[0].memberId = "other",
-    r => r.sourceRevision++, r => r.roomId = "other", r => r.body = "x".repeat(4001)]) {
-    const value = structuredClone(response); mutate(value.receipt);
-    await assert.rejects(setup(async () => reply(value)).client.apply(request), { code: "invalid_inbox_response" });
-  }
-  const revoke = { action: "grant.revoke", requestId: "revoke", sourceId: "mail", grantId: "grant-id" };
-  const revoked = { contractVersion: 1, viewer, duplicate: true, receipt: { ...revoke, revoked: true } };
-  assert.ok(await setup(async () => reply(revoked)).client.apply(revoke));
-  revoked.receipt.grantId = "other";
-  await assert.rejects(setup(async () => reply(revoked)).client.apply(revoke), { code: "invalid_inbox_response" });
-});
 function setup(fetcher) {
   const account = new AccountClient({ fetcher }); account.session = structuredClone(session);
   let ended = 0; const client = new InboxClient(account, { onAccessEnded: () => ended++ });
@@ -69,14 +44,14 @@ test("provider review client negotiates a narrow view and validates its content,
 });
 test("email reader negotiates bounded account-qualified excerpt support without sending", async () => {
   const source = { id: "mail", revision: 1, adapter: "email", sender: "from@example.test", recipient: "me@example.test", subject: "", paragraphs: ["Plain text"],
-    capabilities: { draft: true, share: true, send: false }, email: { view: "email-excerpt-v1", accountId: "owner", format: "text", connectionState: "active",
+    capabilities: { draft: true, share: true, send: false }, needsYou: true, email: { view: "email-excerpt-v1", accountId: "owner", format: "text", connectionState: "active",
       to: ["me@example.test"], cc: [], bcc: [], attachmentState: "not_loaded", attachmentCount: 0 } };
   const f = setup(async path => {
     assert.equal(path, "/api/inbox/sources/mail?view=email-excerpt-v1");
     return reply({ contractVersion: 1, viewer, source, draft: null });
   });
   assert.equal((await f.client.read("mail")).source.email.format, "text");
-  for (const change of [s => s.email.accountId = "other", s => s.capabilities.send = true,
+  for (const change of [s => s.email.accountId = "other", s => s.capabilities.send = true, s => delete s.needsYou, s => s.needsYou = "yes",
     s => s.capabilities.share = false, s => s.email.view = "email-text-v1", s => s.email.format = "html", s => s.paragraphs = ["A\r\nB"],
     s => s.paragraphs = ["x".repeat(262145)], s => s.email.attachmentCount = -1]) {
     const invalid = structuredClone(source); change(invalid);

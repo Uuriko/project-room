@@ -19,16 +19,6 @@ function fixture(t) {
   return { store, ownerKey, session, secret, key, request, apply, change, setNow: value => now = value };
 }
 
-test("max setup uses a fixed agent-safe scope, rejects overrides and replays exactly", t => {
-  const f = fixture(t), request = { ...f.request, access: "max" };
-  const result = f.apply(request);
-  assert.deepEqual(f.store.authenticate(f.key.token).member.permissions, ["steer", "manage_claims", "accept_work", "complete_work", "verify"]);
-  assert.equal(f.apply(request).duplicate, true);
-  assert.throws(() => f.apply({ ...request, permissions: ["manage_members", "decide", "write_external"] }), { code: "invalid_connection" });
-  assert.throws(() => f.apply({ ...request, access: "none" }), { code: "invalid_connection" });
-  assert.doesNotThrow(() => f.store.agentConnections.verify());
-  assert.equal(result.connection.status, "key_issued");
-});
 test("owner enrollment, rotation and disconnection retain exact original receipts without secrets or resurrection", t => {
   const f = fixture(t), first = f.apply(f.request), roomBeforeRotate = f.store.room("commons").sequence;
   assert.equal(first.connection.status, "key_issued");

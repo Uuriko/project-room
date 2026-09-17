@@ -31,7 +31,6 @@ function attachments(message, observation) {
     }) };
 }
 export function normalizeGraphEmail(connection, message, { idType, attachmentObservation = null } = {}) {
-  requireEmail(emailConnection(connection).provider === 'microsoft-graph', 'invalid_email_connection');
   emailInput({ connection, message, attachmentObservation });
   requireEmail(idType === "immutable", "email_immutable_ids_required");
   requireEmail(message && !Object.hasOwn(message, "@removed") && message.body, "email_hydration_required");
@@ -52,7 +51,6 @@ export function normalizeGraphEmail(connection, message, { idType, attachmentObs
 export function graphFolderChanges(connectionValue, folderId, page, { idType } = {}) {
   emailInput(page);
   const connection = emailConnection(connectionValue); emailOpaqueId(folderId);
-  requireEmail(connection.provider === 'microsoft-graph', 'invalid_email_connection');
   requireEmail(idType === "immutable", "email_immutable_ids_required");
   requireEmail(page && Array.isArray(page.value) && page.value.length <= 1000, "invalid_email_delta");
   const next = page["@odata.nextLink"], delta = page["@odata.deltaLink"];

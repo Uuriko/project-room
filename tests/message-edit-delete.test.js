@@ -62,7 +62,8 @@ test("message edit/delete tombstones (round-2 #111)", async t => {
   assert.equal(message.body, null);
   assert.ok(message.deletedAt);
   assert.equal(message.deletedBy, "agent");
-  assert.equal(message.editHistory.length, 2);
+  // Deletion removes every earlier version as well as the current one.
+  assert.equal(message.editHistory.length, 0);
 
   // Editing a deleted message is rejected.
   assert.throws(() => store.command(agentKey, "commons", { id: randomUUID(), type: T.MESSAGE_EDITED,

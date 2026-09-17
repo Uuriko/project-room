@@ -240,3 +240,21 @@ test("registered service refuses incomplete offer commands without writes", t =>
   }), error => error.status === 422);
   assert.equal(auditRecovery(f.store).dataSha256, before);
 });
+
+// The offerer's status line, preferences or capabilities are not a change of
+// standing: an offer pinned to their member revision stays current.
+test("an offerer's status, preferences and capabilities do not retire their offer", () => {
+  const f = fixture(); f.commit(f.offerEvent());
+  assert.equal(f.context().canSelect, true); assert.equal(f.state.members.helper.revision, 0);
+  f.send("member.status_updated", "helper", { message: "drafting options" });
+  f.send("capabilities.advertised", "helper", { capabilities: ["drafting"] });
+  f.send("notifications.preferences_set", "helper", { preferences: { replies: "all" } });
+  assert.equal(f.state.members.helper.revision, 0);
+  assert.equal(f.context().invitationCurrent, true); assert.equal(f.context().canSelect, true);
+  assert.equal(f.context().status, "offered");
+  // The accountable member's own status line leaves the invitation, and so the offer, current.
+  f.send("member.status_updated", "producer", { message: "reviewing offers" });
+  assert.equal(f.context().canSelect, true);
+  f.send("member.access_changed", "owner", { memberId: "helper", expectedMemberRevision: 0, active: true, permissions: [] });
+  assert.equal(f.context().status, "unavailable", "only an access change retires the offer");
+});

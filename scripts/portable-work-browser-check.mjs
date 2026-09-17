@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Simulated human journeys in real browsers against isolated, synthetic rooms.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -31,8 +30,8 @@ for (const mobile of [false, true]) {
     const touchEmulation = mobile ? await context.newCDPSession(page) : null;
     page.on("pageerror", error => errors.push(error.message));
     page.on("request", request => { if (request.method() === "POST" && request.url().endsWith("/commands")) writes.push(request.postDataJSON()); });
-    await page.goto(origin); await ensureSignIn(page); await page.locator("#access-key").fill(f.keys.owner);
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.goto(origin); await page.locator("#access-key").fill(f.keys.owner);
+    await page.getByRole("button", { name: "Enter room", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
     const snapshot = () => f.store.snapshot(f.keys.owner, "commons");
     const before = snapshot();
@@ -195,11 +194,11 @@ for (const mobile of [false, true]) {
     await page.locator("#packet-copy").click(); await page.locator("#portable-close").click();
     let confirmations = 0;
     page.on("dialog", dialog => { confirmations++; assert.match(dialog.message(), /clear unsent drafts/); return dialog.accept(); });
-    await page.locator("#signout-button").click(); await page.locator("#auth-panel").waitFor({ state: "visible" });
+    if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click(); await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(confirmations, 1, "a closed portable draft alone warns before sign-out");
     assert.equal(await page.locator("#packet-preview").inputValue(), "");
     assert.equal(await page.locator("#portable-status").textContent(), "");
-    await ensureSignIn(page); await page.locator("#access-key").fill(f.keys.owner); await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.locator("#access-key").fill(f.keys.owner); await page.getByRole("button", { name: "Enter room", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" }); await open(true);
     assert.equal(await page.locator("#portable-result").inputValue(), "", "sign-out cleared the private draft and retry map");
     await page.locator("#portable-close").click(); await open();

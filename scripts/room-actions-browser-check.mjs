@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Simulated-human navigation checks. Disposable data; no outside services.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -26,7 +25,7 @@ async function setup(t, { mobile = false, role = "owner" } = {}) {
     return route.continue();
   });
   page.on("pageerror", error => errors.push(error.message));
-  await page.goto(origin); await ensureSignIn(page); await page.locator("#access-key").fill(f.keys[role]); await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.goto(origin); await page.locator("#access-key").fill(f.keys[role]); await page.getByRole("button", { name: "Enter room", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
   page.on("request", request => { if (request.method() !== "GET" && new URL(request.url()).pathname.startsWith("/api/rooms/")) writes.push(new URL(request.url()).pathname); });
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(external, []); assert.deepEqual(writes, []); });

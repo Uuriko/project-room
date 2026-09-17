@@ -22,14 +22,13 @@ const observerState = directory => {
 };
 
 // Preserve historical switch proofs. Neither schema12 package is a schema13 fallback.
-for (const version of [8, 12, 33]) test(`schema${version} frozen packages switch candidate → pause → fallback → candidate on the same populated Workers object`, { timeout: 90000 }, async t => {
+for (const version of [8, 12]) test(`historical schema${version} packages switch candidate → pause → fallback → candidate on the same populated Workers object`, { timeout: 90000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), `room-v${version}-switch-`));
   let fixture, mf;
   try {
     const retained = version === 12 && (process.env.ROOM_RECOVERY_CANDIDATE_PACKAGE !== undefined
       || process.env.ROOM_RECOVERY_FALLBACK_PACKAGE !== undefined);
-    const fallback = version === 33 ? 'b3728f09caeae96fccbec7d29ee54fa3f1e5fb04'
-      : version === 12 ? '4d22189ccdebc56db23397e6cc75b07eff0e3c2c' : baseline;
+    const fallback = version === 12 ? '4d22189ccdebc56db23397e6cc75b07eff0e3c2c' : baseline;
     let packages;
     if (retained) {
       // Explicit paired paths opt into actual retained artifacts. Never rewrite,
@@ -43,8 +42,7 @@ for (const version of [8, 12, 33]) test(`schema${version} frozen packages switch
         return [label, { path, receipt }];
       }));
     } else {
-      const candidate = version === 33 ? { repository, commit: '0db9f41a8f873bc3be759c0391abe0945b9f70e4' }
-        : version === 12 ? { repository, commit: v12HelpBaseline }
+      const candidate = version === 12 ? { repository, commit: v12HelpBaseline }
         : { repository, commit: v8ConnectionBaseline };
       packages = new Map([['candidate', candidate], ['baseline', { repository, commit: fallback }]].map(([label, source]) => {
         const path = join(directory, label);
@@ -52,7 +50,7 @@ for (const version of [8, 12, 33]) test(`schema${version} frozen packages switch
       }));
     }
     assert.notEqual(packages.get('candidate').receipt.sourceCommit, packages.get('baseline').receipt.sourceCommit);
-    const differingRuntime = version === 33 ? 'server/http.mjs' : version === 12 ? 'server/store.mjs' : 'cloudflare/room.mjs';
+    const differingRuntime = version === 12 ? 'server/store.mjs' : 'cloudflare/room.mjs';
     assert.notDeepEqual(readFileSync(join(packages.get('candidate').path, differingRuntime)),
       readFileSync(join(packages.get('baseline').path, differingRuntime)), 'The actual application runtimes must differ');
     const candidatePath = packages.get('candidate').path;
@@ -60,19 +58,6 @@ for (const version of [8, 12, 33]) test(`schema${version} frozen packages switch
     const { auditRecovery } = await import(pathToFileURL(join(candidatePath, 'server/recovery.mjs')));
     const { applicationTables } = await import(pathToFileURL(join(candidatePath, 'server/writer-fence.mjs')));
     fixture = createRecoveryFixture(join(directory, 'seed.sqlite'));
-    let providerProof = null;
-    if (version === 33) {
-      const { loginWithProvider } = await import(pathToFileURL(join(candidatePath, 'server/provider-onboarding.mjs')));
-      const { createAccountRoom } = await import(pathToFileURL(join(candidatePath, 'server/account-room-create.mjs')));
-      const slot = fixture.store.createAccountSessionSlot(), issuer = 'https://recovery.example.test';
-      const login = await loginWithProvider(fixture.store, { issuer, token: 'synthetic-verified-assertion',
-        verify: async () => ({ iss: issuer, sub: 'user_recovery', sid: 'sess_recovery', exp: Math.floor(fixture.store.now() / 1000) + 900 }),
-        slotToken: slot.token, expectedRevision: 0 });
-      const request = { requestId: 'recovery-private-room', title: 'Recovery private room' };
-      const room = createAccountRoom(fixture.store, slot.token, login.session.sessionBinding, request);
-      providerProof = { token: slot.token, binding: login.session.sessionBinding, accountId: login.session.account.id,
-        welcome: login.roomId, privateRoom: room.roomId, request };
-    }
     const requestRetries = [];
     if (version === 12) {
       for (const status of ['open', 'answered', 'declined', 'cancelled']) {
@@ -97,10 +82,9 @@ for (const version of [8, 12, 33]) test(`schema${version} frozen packages switch
       joinRequest: fixture.joinRequest, reminders: fixture.reminders, redemptionId: randomUUID(), requestRetries,
       nativeBody: fixture.nativeBody, nativeCommand: fixture.nativeCommand, nativeCompletion: fixture.nativeCompletion,
       charterCommand: fixture.charterCommand, charterSaved: fixture.charterSaved,
-      requests: version === 12 ? fixture.store.room('commons').state.replyRequests : null, providerProof };
+      requests: version === 12 ? fixture.store.room('commons').state.replyRequests : null };
     const rows = applicationTables.flatMap(table => fixture.store.db.prepare(`SELECT * FROM ${table}`).all()
-      .map(row => ({ table, columns: Object.keys(row), values: Object.values(row).map(value =>
-        value instanceof Uint8Array ? { fixtureBlob: [...value] } : value) })));
+      .map(row => ({ table, columns: Object.keys(row), values: Object.values(row) })));
     const persistence = join(directory, 'persistence'); mkdirSync(persistence);
     const origin = 'https://room.example.test';
     const scripts = new Map();
@@ -111,7 +95,6 @@ for (const version of [8, 12, 33]) test(`schema${version} frozen packages switch
         import assert from 'node:assert/strict';
         import entry, { ProjectRoom as RuntimeRoom } from ${JSON.stringify(join(pkg.path, 'cloudflare/room.mjs'))};
         import { auditRecovery } from ${JSON.stringify(join(candidatePath, 'server/recovery.mjs'))};
-        ${version === 33 ? `import { createAccountRoom } from ${JSON.stringify(join(candidatePath, 'server/account-room-create.mjs'))};` : ''}
         export class ProjectRoom extends RuntimeRoom {
           fetch(request) {
             const path = new URL(request.url).pathname;
@@ -120,8 +103,7 @@ for (const version of [8, 12, 33]) test(`schema${version} frozen packages switch
               this.store.transaction(() => {
                 for (const row of JSON.parse(this.env.SEED_ROWS)) {
                   const sql = 'INSERT INTO ' + row.table + '(' + row.columns.join(',') + ') VALUES(' + row.columns.map(() => '?').join(',') + ')';
-                  this.store.db.prepare(sql).run(...row.values.map(value =>
-                    value?.fixtureBlob ? new Uint8Array(value.fixtureBlob) : value));
+                  this.store.db.prepare(sql).run(...row.values);
                 }
               });
               return Response.json({ seeded: true });
@@ -131,16 +113,6 @@ for (const version of [8, 12, 33]) test(`schema${version} frozen packages switch
               permit: this.store.db.prepare('SELECT version FROM room_writer_permit WHERE singleton=1').get().version });
             if (path === '/__recovery-identities') {
               const f = JSON.parse(this.env.IDENTITY_PROOF), store = this.store;
-              ${version === 33 ? `
-              const provider = f.providerProof;
-              const welcome = store.authenticateAccountSession(provider.token, provider.welcome, provider.binding);
-              assert.equal(welcome.account.id, provider.accountId);
-              assert.deepEqual(welcome.member.permissions, []);
-              const privateAccess = store.authenticateAccountSession(provider.token, provider.privateRoom, provider.binding);
-              assert.equal(privateAccess.member.id, store.room(provider.privateRoom).state.room.ownerId);
-              assert.equal(Object.keys(store.room(provider.privateRoom).state.members).length, 1);
-              assert.deepEqual(createAccountRoom(store, provider.token, provider.binding, provider.request), { roomId: provider.privateRoom, duplicate: true });
-              ` : ''}
               assert.equal(store.authenticate(f.validSession.token).member.id, 'owner');
               assert.equal(store.authenticateAccountSession(f.owner.token, 'commons', f.owner.session.sessionBinding).account.id, f.owner.session.account.id);
               assert.equal(store.authenticateAccountSession(f.guestSlot.token, 'commons', f.guest.session.sessionBinding).member.id, f.guest.session.member.id);

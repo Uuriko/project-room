@@ -58,6 +58,7 @@ export function auditRecovery(store) {
     store.shareLinks.verify(); store.reminders.verifySchema(); store.agentConnections.verify();
     store.inbox.verify();
     store.email.verify();
+    store.channelUpdates.verifySchema(); store.channelUpdates.verify();
     const reminders = store.db.prepare("SELECT * FROM private_reminders").all();
     const receipts = store.db.prepare("SELECT * FROM private_reminder_commands").all();
     const byWork = new Map();
@@ -101,9 +102,8 @@ export function auditRecovery(store) {
       byWork.delete(key);
     }
     requireState(byWork.size === 0);
-    const attachmentRows = store.attachments.audit();
     const contents = applicationTables.map(table => {
-      const rows = (table === 'room_attachments' ? attachmentRows : store.db.prepare(`SELECT * FROM ${table}`).all()).map(canonical).sort();
+      const rows = store.db.prepare(`SELECT * FROM ${table}`).all().map(canonical).sort();
       return { table, rows: rows.length, sha256: digest(rows) };
     });
     return { contractVersion: 1, schemaVersion: STORE_SCHEMA_VERSION, platform,

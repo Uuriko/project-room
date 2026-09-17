@@ -39,6 +39,19 @@ test("operator account-key provisioning creates no membership and rotation ends 
   assert.equal(store.db.prepare("SELECT count(*) AS n FROM member_accounts WHERE account_id=?").get("pilot-human").n, 0);
 });
 
+test("provisioning creates the database without group or world read access", t => {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-provision-mode-"));
+  const filename = join(directory, "room.sqlite");
+  const script = fileURLToPath(new URL("../scripts/provision.mjs", import.meta.url));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  // Run under a permissive umask so the script's own setting is what protects the file.
+  const result = spawnSync("sh", ["-c", `umask 022 && "${process.execPath}" "${script}" --init --print-key`], {
+    env: { ...process.env, ROOM_DB: filename }, encoding: "utf8"
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(statSync(filename).mode & 0o077, 0, "database file is private to the service account");
+});
+
 test("keys are withheld from non-terminal stdout unless explicitly requested", t => {
   const directory = mkdtempSync(join(tmpdir(), "project-room-provision-redact-"));
   const filename = join(directory, "room.sqlite");

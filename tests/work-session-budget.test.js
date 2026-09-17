@@ -74,12 +74,10 @@ test("a claimed budget is visible on the card; undeclared quotas read 'unknown'"
 });
 
 test("a runaway session is stopped by its runtime limit on the next interaction", async t => {
-  const { store, propose, claim, mutate, card, request, agentKey } = await serve(t);
-  let now = Date.now();
-  store.now = () => now;
+  const { propose, claim, mutate, card, request, agentKey } = await serve(t);
   const workItemId = propose("runaway run");
   assert.equal((await claim(workItemId, { budget: { maxRuntimeMs: 1 } })).status, 201);
-  now += 2;
+  // The 1ms budget has elapsed by the time the worker heartbeats again.
   const beat = await mutate(workItemId, 1, { status: "active" });
   assert.equal(beat.status, 409);
   assert.equal(beat.json?.error?.code, "budget_exceeded");
@@ -134,4 +132,26 @@ test("budgets are rejected off the start transition and on malformed input", asy
   assert.equal(late.json?.error?.code, "invalid_session_budget");
   const badSpend = await mutate(workItemId, session.revision, { status: "active", spendCents: -5 });
   assert.equal(badSpend.status, 422);
+});
+
+test("maxAttempts is enforced across retries: a finished session restarts until the attempt budget is spent", async t => {
+  const { propose, claim, mutate, card } = await serve(t);
+  const workItemId = propose("flaky run");
+  assert.equal((await claim(workItemId, { budget: { maxAttempts: 2 } })).status, 201);
+  assert.equal((await mutate(workItemId, 1, { status: "failed" })).status, 201);
+  assert.equal((await card(workItemId)).status, "failed");
+  // Second attempt: a retry from the terminal status goes through session.started and keeps the budget.
+  const retry = await mutate(workItemId, 2, { status: "processing" });
+  assert.equal(retry.status, 201, JSON.stringify(retry.json));
+  assert.equal(retry.json.event.type, T.SESSION_STARTED);
+  let session = await card(workItemId);
+  assert.equal(session.attempt_count, 2); assert.equal(session.status, "processing");
+  assert.deepEqual(session.budget, { maxRuntimeMs: "unknown", maxAttempts: 2, maxConcurrent: "unknown", maxSpendCents: "unknown" });
+  assert.equal((await mutate(workItemId, 3, { status: "done" })).status, 201);
+  // Third attempt exceeds the budget and is refused with a clear reason; nothing changes.
+  const refused = await mutate(workItemId, 4, { status: "processing" });
+  assert.equal(refused.status, 409, JSON.stringify(refused.json));
+  assert.match(refused.json?.error?.message ?? "", /attempt 3 exceeds the attempt budget of 2/);
+  session = await card(workItemId);
+  assert.equal(session.attempt_count, 2); assert.equal(session.status, "done");
 });

@@ -4,7 +4,15 @@ export function consumeJoinFragment() {
   if (!location.hash.startsWith("#join/")) return null;
   const value = location.hash.slice(6);
   history.replaceState(history.state, "", location.pathname + location.search);
-  return { token: tokenPattern.test(value) ? value : null };
+  // Optional purpose: #join/<token>/<kind>/<id> points the guest at the question or
+  // result they were invited to help with. The fragment never leaves the browser,
+  // so the link exports nothing else from the private room.
+  const segments = value.split("/");
+  let focus = null;
+  if (segments.length === 3 && ["work", "message"].includes(segments[1])) {
+    try { focus = { kind: segments[1], id: decodeURIComponent(segments[2]) }; } catch { focus = null; }
+  }
+  return { token: tokenPattern.test(segments[0]) ? segments[0] : null, focus };
 }
 const newToken = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 const date = value => new Date(value).toLocaleString();
@@ -21,6 +29,10 @@ export function setShareLinkStatus(element, text) {
 
 const interrupted = error => error?.name === "AbortError" || error?.name === "TimeoutError" || error instanceof TypeError;
 export const canRetryInvitation = error => interrupted(error) || error?.status === 429 || error?.status >= 500;
+// Raw transport text ("signal is aborted without reason", "Unexpected token '<'") is not a user message.
+export function requestFailureMessage(error) {
+  return interrupted(error) || error instanceof SyntaxError ? "The connection was interrupted and the result could not be confirmed" : error.message;
+}
 export function invitationFailureMessage(error) {
   if (interrupted(error)) {
     return "The connection was interrupted. We could not confirm the result. Your entries are kept; try again here to check or finish the same request.";
@@ -46,8 +58,10 @@ export async function reuseVisibleRoom(client, roomId, visibleSession) {
 }
 
 export function installShareLinks({ client, accountClient, getState, getSession, openRoom,
+  listPurposes = () => [], onJoinedRoom = null,
   setConnectionStatus = text => { $("#connection-status").textContent = text; } }) {
   let managementVersion = 0, listVersion = 0, joinVersion = 0, joinSecret = null, redemptionId = null, joining = false, pendingCreate = null;
+  let joinFocus = null;
   let joined = null, previewRoomId = null;
   let managementSession = null, managementGeneration = null, currentLink = null, expiryTimer = null, copyRevision = 0, copying = false;
   const manager = $("#share-link-dialog"), joinDialog = $("#join-link-dialog");
@@ -63,6 +77,14 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   const ownsManagement = () => managementSession && managementSession === getSession()
     && managementGeneration === client.generation && managementSession === client.session && client.ownsAccountSession() && canManage();
   const managementCurrent = (version, generation) => version === managementVersion && generation === client.generation && manager.open && ownsManagement();
+  const escHtml = value => value.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  function refreshPurposes() {
+    const select = $("#share-link-purpose"), previous = select.value;
+    const items = listPurposes();
+    select.innerHTML = `<option value="">Whole room</option>` + items.map(p =>
+      `<option value="${escHtml(p.id)}">${p.done ? "Result" : "Question"} · ${escHtml(p.title)}</option>`).join("");
+    select.value = items.some(p => p.id === previous) ? previous : "";
+  }
   function updateCopyControls() {
     $("#share-link-copy").disabled = copying || !currentLink;
     $("#share-note-copy").disabled = copying || !currentLink || !$("#share-note-text").value.trim()
@@ -74,6 +96,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     $("#share-link-url").value = ""; delete $("#share-link-url").dataset.linkId;
     $("#share-note-text").value = ""; $("#share-note-preview").value = "";
     $("#share-note").open = false; $("#share-note-result").hidden = true;
+    $("#share-purpose-note").hidden = true;
     $("#share-link-result").hidden = true; $("#share-link-form").hidden = false;
     status(message); updateCopyControls();
     if (heldFocus && manager.open && ownsManagement()) $("#share-link-create").focus();
@@ -94,8 +117,11 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     const duration = hours === 168 ? "7 days" : `${hours} ${hours === 1 ? "hour" : "hours"}`;
     $("#share-settings-summary").textContent = `${duration} · ${Number.isInteger(limit) && limit >= 1 && limit <= 25 ? `${limit} ${limit === 1 ? "guest" : "guests"}` : "Choose a guest limit"}`;
   }
+  let creating = false;
   function creationBusy(value) {
-    for (const id of ["share-link-create", "share-link-expiry", "share-link-limit"]) $("#" + id).disabled = value;
+    creating = value;
+    // The close control is held too: dismissing mid-request would orphan a shown-once link.
+    for (const id of ["share-link-create", "share-link-expiry", "share-link-limit", "share-link-close"]) $("#" + id).disabled = value;
   }
   function updateSwitchWarning() {
     const currentRoom = getSession()?.roomId ?? getState()?.room?.id;
@@ -173,11 +199,13 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     managementSession = getSession(); managementGeneration = generation;
     if (!ownsManagement()) return;
     $("#share-local-note").hidden = !["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
+    refreshPurposes();
     manager.showModal(); $("#share-link-create").focus();
     // Link-list feedback never owns the newer creation/clipboard status.
     await list(version, generation).catch(() => {});
   });
-  $("#share-link-close").addEventListener("click", () => manager.close());
+  $("#share-link-close").addEventListener("click", () => { if (!creating) manager.close(); });
+  manager.addEventListener("cancel", event => { if (creating) event.preventDefault(); });
   manager.addEventListener("close", () => { resetManagement(); if (!$("#invite-people-button").hidden) $("#invite-people-button").focus(); });
   $("#share-link-another").addEventListener("click", () => {
     clearResult(); $("#share-link-create").focus();
@@ -201,7 +229,10 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       clearResult();
       currentLink = { id: result.link.id, expiresAt: result.link.expiresAt, memberRevision: request.expectedMemberRevision };
       if (!checkResult()) return;
-      $("#share-link-url").value = `${location.origin}/#join/${request.linkToken}`;
+      const purposeItem = listPurposes().find(p => p.id === $("#share-link-purpose").value) ?? null;
+      $("#share-link-url").value = `${location.origin}/#join/${request.linkToken}${purposeItem ? `/work/${encodeURIComponent(purposeItem.id)}` : ""}`;
+      $("#share-purpose-note").hidden = !purposeItem;
+      if (purposeItem) $("#share-purpose-note").textContent = `Opens "${purposeItem.title}" after they join. Nothing else in the room is shared.`;
       $("#share-link-url").dataset.linkId = result.link.id;
       $("#share-link-result").hidden = false;
       $("#share-link-form").hidden = true;
@@ -246,7 +277,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   async function open(fragment) {
     if (joining) { joinStatus("Finish the current join before opening another invitation."); return; }
     const retryHadFocus = document.activeElement === $("#join-link-retry");
-    const version = ++joinVersion; joinSecret = fragment.token; redemptionId = crypto.randomUUID(); joined = null; previewRoomId = null;
+    const version = ++joinVersion; joinSecret = fragment.token; redemptionId = crypto.randomUUID(); joined = null; joinFocus = fragment.focus ?? null; previewRoomId = null;
     $("#join-link-form").reset(); $("#join-link-form").hidden = true;
     $("#join-link-retry").hidden = true;
     $("#join-access-details").open = false; $("#join-switch-warning").hidden = true;
@@ -293,7 +324,10 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       if (version !== joinVersion) return;
       await openRoom(joined.roomId, joined.roomMode === true, joined.session);
       if (version !== joinVersion) return;
-      joinDialog.close(); $("#message-input").focus();
+      const focus = joinFocus; joinFocus = null;
+      joinDialog.close();
+      if (focus && onJoinedRoom) onJoinedRoom(focus);
+      else $("#message-input").focus();
     } catch (error) {
       if (version !== joinVersion) return;
       failed = true;
@@ -330,7 +364,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   $("#join-link-close").addEventListener("click", () => { if (!joining) joinDialog.close(); });
   joinDialog.addEventListener("cancel", event => { if (joining) event.preventDefault(); });
   joinDialog.addEventListener("close", () => {
-    joinVersion++; joinSecret = null; redemptionId = null; joined = null; previewRoomId = null; $("#join-link-form").reset();
+    joinVersion++; joinSecret = null; redemptionId = null; joined = null; joinFocus = null; previewRoomId = null; $("#join-link-form").reset();
     $("#join-link-retry").hidden = true;
     if (!getState()) {
       $("#auth-panel").hidden = false;

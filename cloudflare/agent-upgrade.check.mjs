@@ -9,17 +9,16 @@ import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
 import { createRuntimePackage } from '../scripts/runtime-package.mjs';
 import { STORE_SCHEMA_VERSION } from '../server/writer-fence.mjs';
-import { frozenRecoveryFixture, v8ConnectionBaseline, v9TextBaseline, v10CharterBaseline, v11ReplyBaseline, v12HelpBaseline, v13OfferBaseline, v14InboxBaseline, v15AdoptionBaseline, v16SendBaseline, v17EmailBaseline, v18EmailSourceBaseline, v19EmailExcerptBaseline, v20ReplyJournalBaseline, v21ReplyReviewBaseline, v22ReplyUpdateBaseline, v23ReplyAcknowledgmentBaseline, v24ReplyResolutionBaseline, v26IdentitiesBaseline } from '../scripts/frozen-runtime-fixture.mjs';
+import { frozenRecoveryFixture, v8ConnectionBaseline, v9TextBaseline, v10CharterBaseline, v11ReplyBaseline, v12HelpBaseline, v13OfferBaseline, v14InboxBaseline, v15AdoptionBaseline, v16SendBaseline, v17EmailBaseline, v18EmailSourceBaseline, v19EmailExcerptBaseline, v20ReplyJournalBaseline, v21ReplyReviewBaseline, v22ReplyUpdateBaseline, v23ReplyAcknowledgmentBaseline, v24ReplyResolutionBaseline, v26IdentitiesBaseline, v27LifecycleBaseline } from '../scripts/frozen-runtime-fixture.mjs';
 
-for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline], [10, v10CharterBaseline], [11, v11ReplyBaseline], [12, v12HelpBaseline], [13, v13OfferBaseline], [14, v14InboxBaseline], [15, v15AdoptionBaseline], [16, v16SendBaseline], [17, v17EmailBaseline], [18, v18EmailSourceBaseline], [19, v19EmailExcerptBaseline], [20, v20ReplyJournalBaseline], [21, v21ReplyReviewBaseline], [22, v22ReplyUpdateBaseline], [23, v23ReplyAcknowledgmentBaseline], [24, v24ReplyResolutionBaseline], [25, '33c817a911ebb9fb0310592cac77d8e61380541d'], [26, v26IdentitiesBaseline], [27, "b1ec4f0c0b72f2a6967acdec33345ae713c1b53e"], [28, "37f5e4d08758fac857ef5298f5c656efd98f000f"], [29, "a008732e5a514699bd07114ffb8cf5f53047f0cd"]]) test(`real Workers v${sourceVersion}→v${STORE_SCHEMA_VERSION} permit replacement, rollback, old-writer refusal and restart`, { timeout: 60000 }, async () => {
+for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline], [10, v10CharterBaseline], [11, v11ReplyBaseline], [12, v12HelpBaseline], [13, v13OfferBaseline], [14, v14InboxBaseline], [15, v15AdoptionBaseline], [16, v16SendBaseline], [17, v17EmailBaseline], [18, v18EmailSourceBaseline], [19, v19EmailExcerptBaseline], [20, v20ReplyJournalBaseline], [21, v21ReplyReviewBaseline], [22, v22ReplyUpdateBaseline], [23, v23ReplyAcknowledgmentBaseline], [24, v24ReplyResolutionBaseline], [25, '33c817a911ebb9fb0310592cac77d8e61380541d'], [26, v26IdentitiesBaseline], [27, v27LifecycleBaseline]]) test(`real Workers v${sourceVersion}→v${STORE_SCHEMA_VERSION} permit replacement, rollback, old-writer refusal and restart`, { timeout: 60000 }, async () => {
   const directory = mkdtempSync(join(tmpdir(), 'room-agent-worker-upgrade-')), repository = fileURLToPath(new URL('../', import.meta.url));
   const destination = join(directory, 'old'); let f, mf;
   try {
     createRuntimePackage({ repository, commit: baseline, destination });
     f = (await frozenRecoveryFixture(repository, destination, baseline))(join(directory, 'seed.sqlite'));
     const tables = f.store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all().map(row => row.name);
-    const columns = Object.fromEntries(tables.map(table => [table, f.store.db.prepare(`PRAGMA table_info(${table})`).all().map(row => row.name)]));
-    const rows = tables.flatMap(table => f.store.db.prepare(`SELECT * FROM ${table}`).all().map(row => ({ table, columns: Object.keys(row), values: Object.values(row).map(value => ArrayBuffer.isView(value) ? { testBinary: Buffer.from(value.buffer, value.byteOffset, value.byteLength).toString('base64') } : value) })));
+    const rows = tables.flatMap(table => f.store.db.prepare(`SELECT * FROM ${table}`).all().map(row => ({ table, columns: Object.keys(row), values: Object.values(row) })));
     const source = `
       import assert from 'node:assert/strict';
       import { createHash, randomBytes } from 'node:crypto';
@@ -37,11 +36,12 @@ for (const [sourceVersion, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBa
           const current=()=>new RoomStore(null,{database:new DurableDatabase(this.ctx.storage),storagePlatform:durableStorage});
           const version=()=>durableStorage.version(this.old), permit=()=>sql.exec('SELECT version FROM room_writer_permit').one().version;
           const catalog=()=>sql.exec("SELECT name,sql FROM sqlite_master WHERE name NOT GLOB '_cf_*' ORDER BY name").toArray();
-          const data=()=>Object.fromEntries(JSON.parse(this.env.TABLES).map(table=>[table,sql.exec('SELECT '+${JSON.stringify(columns)}[table].join(',')+' FROM '+table).toArray()]));
+          // v28 adds rooms.archived_at (null for every pre-v28 room), so the rooms rows compare column-wise.
+          const data=()=>Object.fromEntries(JSON.parse(this.env.TABLES).map(table=>[table,sql.exec(table==='rooms'?'SELECT id,sequence,projection FROM rooms':'SELECT * FROM '+table).toArray()]));
           const oldWrite=()=>this.cached.run(f.session.account.id);
           if(path==='/seed') {
             const old=new OldStore(null,{database:this.old,storagePlatform:oldStorage});
-            old.transaction(()=>{for(const row of JSON.parse(this.env.ROWS))this.old.prepare('INSERT INTO '+row.table+'('+row.columns.join(',')+') VALUES('+row.columns.map(()=>'?').join(',')+')').run(...row.values.map(value=>value&&typeof value==='object'&&Object.hasOwn(value,'testBinary')?Uint8Array.from(Buffer.from(value.testBinary,'base64')).buffer:value));});
+            old.transaction(()=>{for(const row of JSON.parse(this.env.ROWS))this.old.prepare('INSERT INTO '+row.table+'('+row.columns.join(',')+') VALUES('+row.columns.map(()=>'?').join(',')+')').run(...row.values);});
             assert.equal(oldWrite().changes,1); assert.equal(version(),${sourceVersion}); assert.equal(permit(),0);
             return Response.json({seeded:true});
           }

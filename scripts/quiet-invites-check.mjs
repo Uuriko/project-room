@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Synthetic UI regressions; no human-participant findings are inferred.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -28,8 +27,8 @@ for (const touch of [false, true]) {
     const page = await context.newPage(); page.setDefaultTimeout(10000);
     const errors = []; page.on('pageerror', error => errors.push(error.message));
     await page.goto(origin);
-    await ensureSignIn(page); await page.locator("#access-key").fill(fixture.keys.owner);
-    await page.getByRole('button', { name: "Continue", exact: true }).click();
+    await page.locator('#access-key').fill(fixture.keys.owner);
+    await page.getByRole('button', { name: 'Enter room', exact: true }).click();
     await page.locator('#main').waitFor({ state: 'visible' });
     await page.waitForFunction(() => document.querySelector('#connection-status').textContent === 'Connected');
     assert.equal(await page.locator('#connection-details').evaluate(el => el.open), false);

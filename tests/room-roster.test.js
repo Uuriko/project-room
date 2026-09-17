@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import {
-  ROOM_ROSTER, rosterById, rosterSelection, suggestedConfigDir, rosterNameTaken,
+  ROOM_ROSTER, rosterById, rosterSelection, rosterNameTaken,
   grokBuildToml, mcpJson, importCommand, roomRosterMain, capabilitySummary,
   setupChecklist, routeHint, placeholderSnippetPaths, routeFromDisplayName,
   claudeMcpAddCommand, reconnectCopy
@@ -148,10 +148,9 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /id="invite-link"/);
   assert.match(html, /Paste your key/);
   assert.match(html, /id="room-guide"/);
-  assert.match(html, /id="room-guide-copy" role="status" aria-live="polite"/);
+  assert.match(html, /Inbox uses <strong>Account key<\/strong>/);
   assert.match(html, /id="people-hint"/);
-  assert.match(html, /placeholder="Message the room…"/);
-  assert.match(html, /for="message-input">Message the room<\/label>/);
+  assert.match(html, /Write to the room/);
   assert.match(html, /id="auth-guest-note"/);
   assert.match(html, /eight hours in that browser/);
   assert.match(html, /id="share-link-intro"/);
@@ -171,12 +170,11 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /How to invite someone/);
   assert.match(app, /How to add an agent/);
   assert.match(app, /How to open Inbox/);
-  assert.match(html, /id="sign-in-entry" class="button primary">Sign in/);
-  assert.doesNotMatch(html, /id="key-access" open/);
+  assert.match(app, /Open this room/);
   assert.match(app, /data-empty-write/);
   assert.match(app, /data-empty-work/);
   assert.match(app, /Completed results appear here after work is finished/);
-  assert.match(app, /Write below\. Type @ to address a person or agent/);
+  assert.match(html, /This is the chat/);
   assert.match(html, /@ to address someone/);
   assert.match(html, /id="mention-list"/);
   assert.match(html, />Add agent</);
@@ -191,7 +189,7 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /syncComposerChrome/);
   assert.match(app, /dismissRoomGuide/);
   assert.match(app, /escapeChatAction, messageCluster/);
-  assert.match(app, /kindLabel, memberStatus, memberHandle, memberDoneChip, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills/);
+  assert.match(app, /kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills/);
   assert.match(app, /replyAuthorToAddress/);
   assert.match(app, /shouldAddressPresenceClick\(e\.target\)/);
   assert.match(app, /grouped-time/);
@@ -235,8 +233,7 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(css, /--room-rule/);
   assert.match(css, /\.member-status/);
   assert.match(css, /\.done-chip/);
-  assert.doesNotMatch(css, /\.presence-dot/);
-  assert.doesNotMatch(app, /memberPresence|presenceLabel|data-presence=/);
+  assert.match(css, /\.presence-dot/);
   assert.match(css, /\.member-handle-agent/);
   assert.match(css, /\.agent-roster \.button \{ width: auto; min-height: 44px;/);
   assert.match(css, /\.composer-toolbar select \{[^}]*min-height: 44px/);

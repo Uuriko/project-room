@@ -1,4 +1,3 @@
-import { ensureSignIn } from "./browser-signin-helper.mjs";
 // Synthetic human journeys, not a human usability or retention study.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -20,7 +19,7 @@ async function setup(t, { mobile = false, seeded = false, actor = "owner", noStr
   page.setDefaultTimeout(7000); const errors = [], outside = [];
   page.on("pageerror", e => errors.push(e.message));
   await page.route("**/*", route => { const url = new URL(route.request().url()); if (url.origin !== origin) { outside.push(url.href); return route.abort(); } if (noStream && url.pathname.endsWith("/stream")) return route.abort(); return route.continue(); });
-  await page.goto(origin); await ensureSignIn(page); await page.locator("#access-key").fill(f.keys[actor]); await page.getByRole("button", { name: "Continue", exact: true }).click(); await page.locator("#main").waitFor({ state: "visible" });
+  await page.goto(origin); await page.locator("#access-key").fill(f.keys[actor]); await page.getByRole("button", { name: "Enter room", exact: true }).click(); await page.locator("#main").waitFor({ state: "visible" });
   const open = async () => { await page.locator("#room-about").evaluate(el => { el.open = true; }); await page.locator("#room-instructions-open").click(); };
   const edit = async () => { await open(); if (await page.locator("#room-instructions-edit").isVisible()) await page.locator("#room-instructions-edit").click(); };
   const field = name => page.locator(`#room-instructions-form [name='${name}']`);
@@ -56,7 +55,7 @@ test("unknown committed charter retains exact retry through close, later update 
   });
   await f.save.click(); await f.page.getByText("Save not confirmed. Retry the original before making changes.", { exact: true }).waitFor();
   await f.close.click(); f.change("A newer saved version");
-  let warning; f.page.once("dialog", async d => { warning = d.message(); await d.dismiss(); }); await f.page.locator("#signout-button").click(); assert.match(warning, /may already be saved/);
+  let warning; f.page.once("dialog", async d => { warning = d.message(); await d.dismiss(); }); if (await f.page.locator("#session-menu-button").isVisible()) await f.page.locator("#session-menu-button").click(); await f.page.locator("#signout-button").click(); assert.match(warning, /may already be saved/);
   await f.open(); assert.equal(await f.field("purpose").isDisabled(), true);
   for (let i = 0; i < 3; i++) { await f.save.click(); if (i < 2) await f.ready(); }
   await f.dialog.waitFor({ state: "hidden" }); assert.equal(attempts.length, 4); for (const attempt of attempts) assert.deepEqual(attempt, attempts[0]);

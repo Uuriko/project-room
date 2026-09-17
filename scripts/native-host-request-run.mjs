@@ -1,7 +1,7 @@
 // Manual acceptance runner, deliberately excluded from automatic test suites.
 // Uses existing subscription auth; never installs/configures a provider or host.
 import { readFileSync, writeFileSync, openSync, closeSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { roomTools, attentionTools } from "../client/mcp-stdio.mjs";

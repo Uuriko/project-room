@@ -12,7 +12,7 @@ export function createRecoveryFixture(filename) {
   store.initialize(initialRoom());
   // Established v1 fixture route: migrate a pre-invitation/reminder database,
   // retaining its original event envelopes and generating a real checkpoint.
-  store.db.exec("DROP TABLE room_attachments; DROP TABLE private_email_folders; DROP TABLE private_email_commands; DROP TABLE private_email_connections; DROP TABLE private_inbox_drafts; DROP TABLE private_inbox_versions; DROP TABLE private_inbox_sources; DROP TABLE private_inbox_commands; DROP TABLE agent_connection_operations; DROP TABLE agent_connections; DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE membership_invitation_journal; DROP TABLE projection_checkpoints; PRAGMA user_version=1");
+  store.db.exec("DROP TABLE private_email_folders; DROP TABLE private_email_commands; DROP TABLE private_email_connections; DROP TABLE private_inbox_drafts; DROP TABLE private_inbox_versions; DROP TABLE private_inbox_sources; DROP TABLE private_inbox_commands; DROP TABLE agent_connection_operations; DROP TABLE agent_connections; DROP TABLE private_reminder_commands; DROP TABLE private_reminders; DROP TABLE membership_invitation_journal; DROP TABLE projection_checkpoints; PRAGMA user_version=1");
   store.close(); store = new RoomStore(filename, { now: () => now });
   store.initialize(initialRoom("second", "second-owner"));
   const keys = { owner: store.issueAccessKey("commons", "owner"), second: store.issueAccessKey("second", "second-owner") };
@@ -164,7 +164,6 @@ export function createRecoveryFixture(filename) {
     expectedRevision: 3, reviewVersion: replyReceipts.at(-1).attempt.observation.reviewVersion });
   replyReceipts.push(store.inbox.reply(owner.token, replyRequests.at(-1), owner.session.sessionBinding).receipt);
   const cursor = store.room("commons").sequence; store.markCaughtUp(keys.owner, "commons", cursor);
-  store.attachments.stage(keys.owner, "commons", { id: "recovery-file", filename: "fixture.bin", mediaType: "application/octet-stream", bytes: new Uint8Array([0, 255, 7]) });
   return { store, filename, keys, owner, target, validSession, revokedSession, loggedOut, sharedSession, pending, invitation,
     shareRequest, link, linkToken, guestSlot, guest, joinRequest, reminders, command, commandResult, cursor, inboxRequests, inboxReceipts, inboxDraftBody, transportRequests, transportReceipts, replyRequests, replyReceipts,
     enrollmentToken, enrollmentRequest, enrollment, nativeBody, nativeCommand, nativeCompletion, charterCommand, charterSaved, emailProfile, emailPage, emailEnvelope,
