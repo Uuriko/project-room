@@ -27,6 +27,7 @@ import { createMagicLinkMailer, magicLinkUnavailable } from "./magic-links.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { normalizeEmail } from "./account-login-methods.mjs";
 import { createPasskeyAuth, resolvePasskeyParams } from "./account-passkeys.mjs";
+import { hashPassword, verifyPassword, checkPasswordPolicy, DUMMY_PASSWORD_VERIFIER } from "../src/password-auth.mjs";
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -503,6 +504,97 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         });
         setCookie(res, accountCookieName, data.sessionToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
         return json(res, 201, accountView(loggedIn));
+      }
+      // ---- Password auth (slice 2, RC-2026-09-17-011) ----
+      // Email+password login. Signup provisions an `email:<sha256>` account,
+      // links password+magic methods, and upgrades the browser's account
+      // session slot; login verifies against the stored scrypt verifier, or
+      // a dummy verifier when the email is unknown, so a wrong password and
+      // an unknown email answer identically; change rotates the verifier on
+      // an authenticated session. Plaintext passwords never reach the store.
+      const passwordAccountId = normalized => `email:${createHash("sha256").update(normalized).digest("hex")}`;
+      const finishPasswordSlot = (slotToken, accountId, expectedRevision, methodRef) => {
+        const loggedIn = store.loginAccountSessionWithMethod(slotToken, accountId, expectedRevision, {
+          method: { kind: "password", ref: methodRef }
+        });
+        setCookie(res, accountCookieName, slotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
+        return loggedIn;
+      };
+      if (url.pathname === "/api/auth/password/signup") {
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        checkOrigin(req, true);
+        rate(`password-signup:${remoteAddress}`, 10);
+        const data = await body(req);
+        if (!exact(data, ["email", "password", "sessionToken", "sessionRevision"])
+          || typeof data.email !== "string" || typeof data.password !== "string") {
+          reject(422, "invalid_signup", "An email, password, and current session are required");
+        }
+        const normalized = normalizeEmail(data.email);
+        if (!normalized) reject(422, "invalid_email", "A valid email address is required");
+        const policy = checkPasswordPolicy(data.password);
+        if (policy) reject(422, policy.code, policy.message);
+        if (store.accountLogins.findAccountByVerifiedEmail(normalized)) {
+          reject(409, "already_registered", "An account with that email already exists; sign in instead");
+        }
+        const accountId = passwordAccountId(normalized);
+        store.createAccount(accountId, "password-signup");
+        const method = store.accountLogins.linkPasswordMethod(accountId, { email: normalized, verifier: hashPassword(data.password) });
+        store.accountLogins.linkMagicMethod(accountId, { email: normalized });
+        store.accountLogins.touchMethod(accountId, method.id);
+        const loggedIn = finishPasswordSlot(data.sessionToken, accountId, data.sessionRevision, method.id);
+        return json(res, 201, accountView(loggedIn));
+      }
+      if (url.pathname === "/api/auth/password/login") {
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        checkOrigin(req, true);
+        rate(`password-login-ip:${remoteAddress}`, 60);
+        const data = await body(req);
+        if (!exact(data, ["email", "password", "sessionToken", "sessionRevision"])
+          || typeof data.email !== "string" || typeof data.password !== "string") {
+          reject(422, "invalid_login", "An email, password, and current session are required");
+        }
+        const normalized = normalizeEmail(data.email);
+        if (!normalized) reject(422, "invalid_email", "A valid email address is required");
+        rate(`password-login:${normalized}`, 10);
+        const accountId = store.accountLogins.findAccountByVerifiedEmail(normalized);
+        const verifier = accountId ? store.accountLogins.readPasswordVerifier(accountId) : null;
+        // Unknown emails and verifier-less accounts verify against the dummy
+        // so the response never reveals whether the email is registered.
+        if (!verifyPassword(data.password, verifier ?? DUMMY_PASSWORD_VERIFIER)) {
+          reject(401, "invalid_credentials", "Invalid email or password");
+        }
+        const passwordMethod = store.accountLogins.listMethods(accountId).find(m => m.type === "password");
+        store.accountLogins.touchMethod(accountId, passwordMethod.id);
+        const loggedIn = finishPasswordSlot(data.sessionToken, accountId, data.sessionRevision, passwordMethod.id);
+        return json(res, 200, accountView(loggedIn));
+      }
+      if (url.pathname === "/api/auth/password/change") {
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        checkOrigin(req, true);
+        rate(`password-change:${remoteAddress}`, 20);
+        const slotToken = cookie(req, accountCookieName);
+        if (!slotToken) reject(401, "account_session_required", "Sign in before changing the password");
+        let session;
+        try {
+          session = store.authenticateAccountSession(slotToken);
+        } catch (error) {
+          if (error.status !== 401) throw error;
+          reject(401, "invalid_session", "That session is no longer valid; sign in again");
+        }
+        if (!session.account) reject(401, "account_session_required", "Sign in before changing the password");
+        const data = await body(req);
+        if (!exact(data, ["currentPassword", "newPassword"])
+          || typeof data.currentPassword !== "string" || typeof data.newPassword !== "string") {
+          reject(422, "invalid_password_change", "The current and new passwords are required");
+        }
+        const verifier = store.accountLogins.readPasswordVerifier(session.account.id);
+        if (!verifyPassword(data.currentPassword, verifier ?? DUMMY_PASSWORD_VERIFIER)) {
+          reject(401, "invalid_credentials", "The current password is incorrect");
+        }
+        const policy = checkPasswordPolicy(data.newPassword);
+        if (policy) reject(422, policy.code, policy.message);
+        store.accountLogins.setPasswordVerifier(session.account.id, hashPassword(data.newPassword));
+        return json(res, 200, { status: "ok" });
       }
       if (url.pathname === "/api/ready" && ["GET", "HEAD"].includes(req.method)) {
         try {
