@@ -8,6 +8,7 @@ Docs / research only. Muse stay-outs held. Contracts this fold:
 - [ROOM-ARTIFACT-MATURITY.md](../docs/ROOM-ARTIFACT-MATURITY.md)
 - [ROOM-RECEIPT-V1.md](../docs/ROOM-RECEIPT-V1.md) (`principalId`, `authorityClaimed`, `sourceManifest[]`, `reversibility`, `expiration`)
 - Master plan: [ROOM-STEALS-FULL-BUILD-2026-09-17.md](ROOM-STEALS-FULL-BUILD-2026-09-17.md)
+- Architecture spine: [ROOM-COHESIVE-ARCHITECTURE.md](../docs/ROOM-COHESIVE-ARCHITECTURE.md) (Second · Connect · ledger)
 - Catalog optional row: [ROOM-KITS-CATALOG.md](../docs/ROOM-KITS-CATALOG.md) **Interlateral-aligned receipts / authority cards**
 
 ## What Interlateral is

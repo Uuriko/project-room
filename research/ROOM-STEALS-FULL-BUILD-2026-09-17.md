@@ -6,6 +6,12 @@ Docs / research / specs only. This note is the master plan for the steal
 contracts. It does not ship a live kit door, a Connect panel, or a
 People-rail change.
 
+Architecture spine (what ships / what does not):
+[ROOM-COHESIVE-ARCHITECTURE.md](../docs/ROOM-COHESIVE-ARCHITECTURE.md)
+(Second · Connect · ledger). Dated brief:
+[ROOM-COHESIVE-ARCHITECTURE-2026-09-17.md](ROOM-COHESIVE-ARCHITECTURE-2026-09-17.md).
+Muse ACK on Connect: one surface, four modes; Muse owns chrome.
+
 Pairs with:
 
 - [#454](https://github.com/Uuriko/project-room/pull/454) — Cua desktop
@@ -15,7 +21,13 @@ Pairs with:
 - [ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md](ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md)
   — cousin landscape (Oasis, agensis, Agent Room, Alook, HumanLayer)
 - [ROOM-NOVEL-SYNTHESIS-2026-09-17.md](ROOM-NOVEL-SYNTHESIS-2026-09-17.md)
-  — Ledger Room fold (six-axis seat + receipt graph)
+  — Ledger Room fold (six-axis seat + receipt graph; superseded for
+  decisions by the cohesive architecture SoR)
+- [ROOM-COHESIVE-ARCHITECTURE.md](../docs/ROOM-COHESIVE-ARCHITECTURE.md)
+  — collapsed product spine (Second · Connect · ledger)
+- [#466](https://github.com/Uuriko/project-room/pull/466) — receipt graph
+- [#467](https://github.com/Uuriko/project-room/pull/467) — Second +
+  Nautilo steal (`ROOM-SECOND-V0`, `ROOM-NAUTILO-STEAL`)
 
 No deploy.
 
@@ -193,6 +205,8 @@ shelf.
 
 | Path | Role |
 | --- | --- |
+| `docs/ROOM-COHESIVE-ARCHITECTURE.md` | Architecture SoR (Second · Connect · ledger) |
+| `research/ROOM-COHESIVE-ARCHITECTURE-2026-09-17.md` | Dated research copy of the SoR |
 | `research/ROOM-STEALS-FULL-BUILD-2026-09-17.md` | This master plan |
 | `docs/ROOM-RECEIPT-V1.md` | `room.receipt.v1` contract |
 | `docs/ROOM-SCORER.md` | Scorer kit contract |

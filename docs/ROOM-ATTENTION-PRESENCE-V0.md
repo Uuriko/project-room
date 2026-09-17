@@ -2,6 +2,12 @@
 
 17 September 2026. Contract. Docs only. Not a live API.
 
+Architecture spine:
+[ROOM-COHESIVE-ARCHITECTURE.md](ROOM-COHESIVE-ARCHITECTURE.md)
+(Second · Connect · ledger). Connect is **one** surface
+(Wake · Pull · Desktop · Takeover); this note owns the attention +
+presence axes. Muse ACK: Connect chrome / People-rail chips are Muse.
+
 Muse owns People-rail chrome; this is docs/spec only. Does not ship a
 presence dot, an attention chip, or People-rail HTML.
 
@@ -45,6 +51,7 @@ People rail: presence dot + attention chip. Not this PR.
 
 ## Pair with
 
+- [ROOM-COHESIVE-ARCHITECTURE.md](ROOM-COHESIVE-ARCHITECTURE.md) — architecture SoR
 - [ROOM-TRUST-HANDOFF-V0.md](ROOM-TRUST-HANDOFF-V0.md) — identity ≠ authority
 - [ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md](../research/ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md) — Alook axes + Agent Room wake vs pull
 - [CURRENT-ATTENTION.md](CURRENT-ATTENTION.md) — existing pull-mode candidate

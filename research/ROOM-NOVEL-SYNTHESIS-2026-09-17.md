@@ -4,6 +4,14 @@
 Docs / research only. Muse stay-outs held. Does not ship a live kit
 door, Connect panel, People-rail chrome, or client diff.
 
+**Superseded for “what is Room” decisions** by the cohesive
+architecture SoR:
+[ROOM-COHESIVE-ARCHITECTURE.md](../docs/ROOM-COHESIVE-ARCHITECTURE.md)
+(dated copy:
+[ROOM-COHESIVE-ARCHITECTURE-2026-09-17.md](ROOM-COHESIVE-ARCHITECTURE-2026-09-17.md)).
+Keep this note as the pre-collapse synthesis; do not fork ship/no-ship
+calls here.
+
 This fold:
 
 - Receipt graph contract: [ROOM-RECEIPT-GRAPH-V0.md](../docs/ROOM-RECEIPT-GRAPH-V0.md)

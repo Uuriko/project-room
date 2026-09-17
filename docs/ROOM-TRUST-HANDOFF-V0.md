@@ -2,6 +2,11 @@
 
 17 September 2026. Contract. Docs only. Not a live API.
 
+Architecture spine:
+[ROOM-COHESIVE-ARCHITECTURE.md](ROOM-COHESIVE-ARCHITECTURE.md)
+(Second · Connect · ledger). Trust Handoff citations live on the
+receipt graph.
+
 Steal from Interlateral’s agent-to-agent delegation checklist (Stanford
 FutureLaw event report, 13 April 2026). Research:
 [ROOM-INTERLATERAL-RESEARCH-2026-09-17.md](../research/ROOM-INTERLATERAL-RESEARCH-2026-09-17.md).

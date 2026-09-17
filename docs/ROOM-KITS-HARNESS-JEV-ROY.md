@@ -2,6 +2,12 @@
 
 17 September 2026. Contract. Docs only. Not a live `/room/kits` door.
 
+Architecture spine:
+[ROOM-COHESIVE-ARCHITECTURE.md](ROOM-COHESIVE-ARCHITECTURE.md)
+(Second · Connect · ledger). Harness-bridge honesty sits under
+**Connect** (one surface: Wake · Pull · Desktop · Takeover). Muse ACK:
+Connect chrome is Muse.
+
 Master plan:
 [ROOM-STEALS-FULL-BUILD-2026-09-17.md](../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md).
 

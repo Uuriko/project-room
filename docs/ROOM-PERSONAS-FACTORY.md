@@ -2,6 +2,11 @@
 
 17 September 2026. Contract. Docs only until Muse board lane.
 
+Architecture spine:
+[ROOM-COHESIVE-ARCHITECTURE.md](ROOM-COHESIVE-ARCHITECTURE.md)
+(Second · Connect · ledger). Personas/factory spawn `room` seats;
+synthesis ≠ personal Second.
+
 Master plan:
 [ROOM-STEALS-FULL-BUILD-2026-09-17.md](../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md).
 
