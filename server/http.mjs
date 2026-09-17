@@ -18,7 +18,7 @@ import { guestAgentLinkContract } from "./guest-agent-links.mjs";
 import { isSessionStatus, workItemSessionContract } from "../src/work-item-session.js";
 import { accessReviewReport } from "./access-review.mjs";
 import { roomUsageSummary, parseUsageDays } from "./usage-summary.mjs";
-import { AccessRequests, accessRequestSchema } from "./access-requests.mjs";
+import { AccessRequests } from "./access-requests.mjs";
 import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
 import { listPins, setPin } from "./pins.mjs";
 
@@ -90,9 +90,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // transport when the bindings are set, otherwise the inert fixture sender. The
   // browser is told which ("live" or "fixture") so it labels outcomes honestly.
   const channelSenders = new Map(), sendReceipts = new Map();
-  // Self-serve access requests: schema applied here (http.mjs owns the
-  // instance to avoid pulling the module into the Workers bundle via store.mjs).
-  store.db.exec(accessRequestSchema);
+  // access_requests schema is applied in the store open path (server/store.mjs),
+  // so every RoomStore — including store-only recovery fixtures — carries it.
   const accessRequests = new AccessRequests(store);
   const resolveChannelTransport = channelTransports ?? (({ provider, accountId, connectionId }) => {
     if (!channelSendProviders.includes(provider)) return null;
