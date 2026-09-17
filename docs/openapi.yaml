@@ -1296,6 +1296,69 @@ paths:
         '403': { description: origin_denied or csrf_denied }
         '409': { description: Stale expectedSessionRevision }
         '422': { description: invalid_logout }
+  /api/auth/recovery-codes/generate:
+    post:
+      summary: Mint or regenerate the account's recovery-code set (slice 6)
+      description: >-
+        Account-level write (account_session cookie, `Origin`,
+        `X-CSRF-Token`): the authenticated account's recovery-code set is
+        generated (or regenerated — a regeneration invalidates the previous
+        set) and returned exactly once as
+        `{ codes, count, generatedAt, warning }`. Codes are salted SHA-256 at
+        rest and are never logged or re-displayed. 10 per address per minute.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: "{ codes (10, shown once), count, generatedAt, warning }" }
+        '401': { description: unauthenticated }
+        '403': { description: origin_denied or csrf_denied }
+        '429': { description: rate_limited }
+  /api/auth/recovery-codes/redeem:
+    post:
+      summary: Redeem one recovery code to sign a session slot in (slice 6)
+      description: >-
+        Open by design: the account is resolved from the verified email hint
+        in the body (a raw account id is never accepted). A wrong code and an
+        unknown email return the same 401 invalid_recovery_code shape. A
+        successful redeem burns the code, records the method use, and upgrades
+        the caller's anonymous slot via the slot's `sessionToken` +
+        `sessionRevision` (slot cookie, `Origin`, `X-CSRF-Token`). The response
+        carries `{ remaining, session }` so the client can warn when codes
+        run low. 10 per address per minute plus a 10-attempts-per-15-minutes
+        per-email-hint budget.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code, sessionToken, sessionRevision]
+              properties:
+                email: { type: string }
+                code: { type: string }
+                sessionToken: { type: string }
+                sessionRevision: { type: integer }
+      responses:
+        '200': { description: "{ remaining, session (account view) }; the slot is now signed in" }
+        '401': { description: invalid_recovery_code (no set, wrong code, or unknown email — same shape) }
+        '403': { description: origin_denied or csrf_denied }
+        '422': { description: invalid_recovery_redeem or invalid_email }
+        '429': { description: rate_limited }
+  /api/auth/recovery-codes/status:
+    get:
+      summary: Recovery-code set status for the signed-in account (slice 6)
+      description: >-
+        Authenticated read (account_session cookie): reports
+        `{ configured, remaining }` — whether a recovery-code set exists and
+        how many codes are unburned. Codes are never exposed; there is no
+        re-display route.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: "{ configured, remaining (null when no set) }" }
+        '401': { description: unauthenticated }
+        '429': { description: rate_limited }
   /api/agent-invites/redeem:
     post:
       summary: Redeem an agent invite code
