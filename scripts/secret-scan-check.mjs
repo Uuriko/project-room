@@ -27,7 +27,6 @@ const ALLOWLIST = [
   // `token: f.keys[actor]`, `token = store.issueAccessKey('x', y)`, `password = foo`
   /\b(secret|password|passwd|pwd|token|api[_-]?key)\b\s*[:=]\s*[a-zA-Z_$][\w$]*(\s*(\.\s*[a-zA-Z_$][\w$]*|\[[^\]]+\]))*(\s*\([^)]*\))?\s*([,;)\]}]|$)/i,
   /\b(secret|password|passwd|pwd|token|api[_-]?key)\b\s*[:=]\s*["'][^"']{0,11}["']/, // short placeholders
-  /sha512-|sha256-/, // SRI integrity hashes in lockfiles/docs
   // Verified false positives (2026-09-16 audit):
   /IDENTITY_SECRET_PREFIX/, // runtime-generated: `secret = PREFIX + base64url(randomBytes(32))`
   /CODE_ALPHABET\s*=\s*"/, // invite-code alphabet constants, not secrets
@@ -42,7 +41,7 @@ const ALLOWLIST = [
   /randomBytes\(/, // runtime-generated: `randomBytes(32).toString("base64url")`
   /\btokens\.get\(/, // `token = tokens.get(tokenId)` — Map lookup, not a secret
   /BASE32_ALPHABET\s*=/, // TOTP alphabet constant
-  /github\.com\/Uuriko\//, // repo's own GitHub URLs
+  /github\.com\/Uuriko\/[A-Za-z0-9_.-]+\/(pull|issues)\/\d+/, // repo PR/issue URLs (evidence links)
   /\/blob\/main\/docs\//, // docs URLs in discovery configs
   /^\s*secret:\s*<redacted>\s*$/, // literally redacted values
   /\$SCRIPT_DIR/, // shell script variable references
