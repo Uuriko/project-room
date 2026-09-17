@@ -50,6 +50,8 @@ this lane is docs/spec only. Pairs
 | [ROOM-SECOND-V0.md](ROOM-SECOND-V0.md) | Second product spec v0 — personal loyal seat; never Genie in product copy |
 | [ROOM-PERSONAL-GENIE-SEAT-V0.md](ROOM-PERSONAL-GENIE-SEAT-V0.md) | Redirect — **Second** is canonical |
 | [ROOM-ARTIFACT-MATURITY.md](ROOM-ARTIFACT-MATURITY.md) | Five-rung ladder; Room Done defaults to Live Note / Discussion Paper |
+| [ROOM-PLAN-TREE-V0.md](ROOM-PLAN-TREE-V0.md) | Ledger Plan Tree — Mission Envelope as governed plan tree; accept before tools |
+| [ROOM-DEBATE-MODE-V0.md](ROOM-DEBATE-MODE-V0.md) | Proposer vs challenger (+ optional judge) → action-plan receipt |
 | [examples/scorers/](examples/scorers/) | Default scorer stubs (task-compliance, efficiency, procedure-compliance, people-data-safe, orphan-claim) |
 | [ROOM-KITS-CATALOG.md](ROOM-KITS-CATALOG.md) | Optional later rows only — not live doors |
 
@@ -59,6 +61,8 @@ Novel synthesis (pre-collapse): [ROOM-NOVEL-SYNTHESIS-2026-09-17.md](../research
 Cua desktop contract: [ROOM-CUA-DESKTOP.md](ROOM-CUA-DESKTOP.md) ([#454](https://github.com/Uuriko/project-room/pull/454)).
 Second + Nautilo steal specs land in [#467](https://github.com/Uuriko/project-room/pull/467)
 (`ROOM-SECOND-V0`, `ROOM-NAUTILO-STEAL`) and hang off this spine.
+Planning / thinking cousin pass: [NOVEL-PLANNING-THINKING-BUILDS-2026-09-17.md](../research/NOVEL-PLANNING-THINKING-BUILDS-2026-09-17.md)
+(Ledger Plan Tree + Debate Mode).
 
 ## The dated archive
 
