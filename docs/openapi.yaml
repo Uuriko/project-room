@@ -1359,6 +1359,86 @@ paths:
         '200': { description: "{ configured, remaining (null when no set) }" }
         '401': { description: unauthenticated }
         '429': { description: rate_limited }
+  /api/auth/passkey/register/options:
+    post:
+      summary: Begin a passkey registration ceremony for the signed-in account (slice 5)
+      description: >-
+        Authenticated write (account_session cookie, `Origin`,
+        `X-CSRF-Token`): issues a single-use challenge and returns the
+        `navigator.credentials.create()` options plus a `challengeId` the
+        client echoes to /register/finish. Already-registered credentials are
+        excluded so the authenticator will not silently re-register.
+        10/account/min.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: "WebAuthn registration options + challengeId" }
+        '401': { description: unauthenticated }
+        '403': { description: origin_denied or csrf_denied }
+        '422': { description: invalid_passkey_request or passkey_origin_rejected }
+        '429': { description: rate_limited }
+  /api/auth/passkey/register/finish:
+    post:
+      summary: Verify a passkey registration and persist the credential (slice 5)
+      description: >-
+        Authenticated write (account_session cookie, `Origin`,
+        `X-CSRF-Token`): verifies the attestation against the challenge issued
+        by /register/options (single-use, 5-minute TTL, bound to the account)
+        and stores the credential in the account's login methods.
+        Attestation failures answer 401, never 500. 10/account/min.
+      security:
+        - accountSession: []
+      responses:
+        '201': { description: "{ ok: true, credentialId }" }
+        '401': { description: unauthenticated or passkey_verification_failed }
+        '403': { description: origin_denied or csrf_denied }
+        '422': { description: invalid_passkey_response or passkey_origin_rejected }
+        '429': { description: rate_limited }
+  /api/auth/passkey/authenticate/options:
+    post:
+      summary: Begin a passkey authentication ceremony (slice 5)
+      description: >-
+        Open by design: the anonymous first step of the WebAuthn sign-in
+        ceremony (discoverable-credential flow — no allowCredentials). Issues a
+        single-use challenge and returns the `navigator.credentials.get()`
+        options plus a `challengeId` the client echoes to /authenticate/finish.
+        Same-origin POST; grants nothing by itself. 20/address/min.
+      security: []
+      responses:
+        '200': { description: "WebAuthn authentication options + challengeId" }
+        '403': { description: origin_denied }
+        '422': { description: passkey_origin_rejected }
+        '429': { description: rate_limited }
+  /api/auth/passkey/authenticate/finish:
+    post:
+      summary: Verify a passkey assertion and sign the session slot in (slice 5)
+      description: >-
+        Open by design: verifies the assertion against the challenge issued by
+        /authenticate/options (single-use, 5-minute TTL), resolves the account
+        from the credential id, and upgrades the caller's anonymous slot via
+        the slot's `sessionToken` + `sessionRevision` — the same slot-upgrade
+        primitive the other login methods use. Same-origin POST. Assertion
+        failures answer 401, never 500. 10/address/min.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [challengeId, response, sessionToken, sessionRevision]
+              properties:
+                challengeId: { type: string }
+                response: { type: object }
+                sessionToken: { type: string }
+                sessionRevision: { type: integer }
+      responses:
+        '200': { description: "{ authenticated: true, account (account view) }; the slot is now signed in" }
+        '401': { description: passkey_verification_failed (bad challenge, failed assertion, or unknown credential — same shape) }
+        '403': { description: origin_denied }
+        '409': { description: stale_session_revision }
+        '422': { description: invalid_passkey_response or passkey_origin_rejected }
+        '429': { description: rate_limited }
   /api/agent-invites/redeem:
     post:
       summary: Redeem an agent invite code
