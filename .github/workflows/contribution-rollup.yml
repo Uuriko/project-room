@@ -2,9 +2,6 @@ name: contribution-rollup
 
 on:
   pull_request:
-    paths:
-      - "contribution-rollup/**"
-      - ".github/workflows/contribution-rollup.yml"
   push:
     paths:
       - "contribution-rollup/**"

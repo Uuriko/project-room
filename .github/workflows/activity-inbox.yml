@@ -2,9 +2,6 @@ name: activity-inbox
 
 on:
   pull_request:
-    paths:
-      - "activity-inbox/**"
-      - ".github/workflows/activity-inbox.yml"
   push:
     paths:
       - "activity-inbox/**"

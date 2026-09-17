@@ -2,9 +2,6 @@ name: member-capabilities
 
 on:
   pull_request:
-    paths:
-      - "member-capabilities/**"
-      - ".github/workflows/member-capabilities.yml"
   push:
     paths:
       - "member-capabilities/**"
