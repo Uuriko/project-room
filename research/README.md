@@ -19,6 +19,7 @@ truth is in [`docs/`](../docs/), especially [CURRENT-ROOM.md](../docs/CURRENT-RO
 | [PROJECT-ROOM-OPEN-DECISIONS-2026-09-08.md](PROJECT-ROOM-OPEN-DECISIONS-2026-09-08.md) | Open product decisions |
 | [PROJECT-ROOM-RESEARCH-TO-BUILD-PLAN-2026-09-08.md](PROJECT-ROOM-RESEARCH-TO-BUILD-PLAN-2026-09-08.md) | Research-to-build sequence |
 | [PROJECT-ROOM-RESEARCH-DECISION-2026-09-07.md](PROJECT-ROOM-RESEARCH-DECISION-2026-09-07.md) | 7 September research decision |
+| [CUA-FLEET-SPIKE-2026-09-17.md](CUA-FLEET-SPIKE-2026-09-17.md) | Fleet pool/claim/release → Work Item session + Receipt (research only) |
 | [multiplayer-messaging-20260908/](multiplayer-messaging-20260908/) | Collaboration/messaging plan (markdown + DOCX) |
 | [2026-09-07-project-room-v2/](2026-09-07-project-room-v2/) | Earlier sourced report and comparison screenshots |
 | [2026-09-07-project-room/](2026-09-07-project-room/) | First 7 September report source |

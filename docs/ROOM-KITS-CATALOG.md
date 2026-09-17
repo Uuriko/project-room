@@ -37,6 +37,15 @@ existing discovery doors:
 No Mic/Mac Accessibility claim. No people-data. No One / Amore
 affiliation.
 
+## Optional later (not a live door)
+
+Product contracts only. These rows are **not** on `/room/kits` and do
+not change join today (packet, guest-agent, Add agent).
+
+| Kit | Status | Contract |
+| --- | --- | --- |
+| Cua desktop (Driver MCP) | Docs / kit only. Optional later. Not a live catalog door. | [ROOM-CUA-DESKTOP.md](ROOM-CUA-DESKTOP.md) |
+
 ## Later: App Store
 
 A classic store waits on a real install + permissions + review path.
