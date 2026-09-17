@@ -180,7 +180,7 @@ export class InboxClient {
   }
   // One row of the list/search projection, as returned by the server.
   validSourceSummary(s) {
-    return id(s.id) && revision(s.revision) && s.revision > 0
+    return s !== null && typeof s === "object" && id(s.id) && revision(s.revision) && s.revision > 0
       && typeof s.subject === "string" && ["synthetic", "email", "telegram"].includes(s.adapter) && validConnectionRef(s.connection ?? null)
       && (s.adapter === "synthetic") === ((s.connection ?? null) === null) && typeof s.needsYou === "boolean" && (!s.needsYou || s.adapter !== "synthetic")
       && ["sender", "recipient"].every(k => typeof s[k] === "string");
@@ -212,7 +212,7 @@ export class InboxClient {
       v => v.sourceId === sourceId && Array.isArray(v.attachments)
         && v.attachments.every(a => typeof a.id === "string" && typeof a.kind === "string"
           && (a.name === null || typeof a.name === "string") && (a.contentType === null || typeof a.contentType === "string")
-          && (a.size === null || Number.isSafeInteger(a.size)) && typeof a.inline === "boolean"));
+          && (a.size === null || (Number.isSafeInteger(a.size) && a.size >= 0)) && typeof a.inline === "boolean"));
   }
   attachment(sourceId, attachmentId) {
     return this.request(`/sources/${encodeURIComponent(sourceId)}/attachments/${encodeURIComponent(attachmentId)}?view=email-excerpt-v1`, {},
