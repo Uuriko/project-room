@@ -935,3 +935,7 @@ summary { overflow-wrap: anywhere; }
 .pinned-item .pinned-meta { grid-column: 1; color: var(--muted); font-size: .7rem; }
 .pinned-item .text-button { grid-column: 2; grid-row: 1 / span 3; align-self: start; min-height: 44px; font-size: .875rem; }
 @media (max-width: 40rem) { .pinned-panel { margin-inline: .75rem; } }
+.auth-divider { display: flex; align-items: center; gap: .6rem; margin: .9rem 0; color: var(--muted); font-size: .72rem; }
+.auth-divider::before, .auth-divider::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+#google-signin { display: block; text-align: center; text-decoration: none; border-color: var(--line); background: #1a222d; }
+#google-signin:hover { background: #212b38; }
