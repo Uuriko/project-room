@@ -6,6 +6,9 @@ export function providerAccountId(issuer, sub) {
   let origin;
   try { origin = new URL(issuer); } catch { throw new Error('issuer must be an https origin'); }
   if (origin.origin !== issuer || origin.protocol !== 'https:') throw new Error('issuer must be an https origin');
-  if (typeof sub !== 'string' || !/^user_[A-Za-z0-9]{1,100}$/.test(sub)) throw new Error('sub must be a Clerk user_ id');
+  const google = issuer === 'https://accounts.google.com';
+  if (typeof sub !== 'string' || !(google ? /^[1-9][0-9]{0,254}$/.test(sub) : /^user_[A-Za-z0-9]{1,100}$/.test(sub))) {
+    throw new Error(google ? 'sub must be a Google subject' : 'sub must be a Clerk user_ id');
+  }
   return `idp-${createHash('sha256').update(JSON.stringify([issuer, sub])).digest('hex')}`;
 }

@@ -1,0 +1,16 @@
+{
+  // More-specific than demigod-html /* so Join/llms use live ROOM_ORIGIN.
+  "name": "demigod-room-door",
+  "account_id": "5a919d6c1785d47e15e10c24450a8ff7",
+  "main": "room-door.mjs",
+  "compatibility_date": "2026-07-30",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    { "pattern": "www.trydemigod.com/room", "zone_name": "trydemigod.com" },
+    { "pattern": "www.trydemigod.com/room/", "zone_name": "trydemigod.com" },
+    { "pattern": "www.trydemigod.com/room/*", "zone_name": "trydemigod.com" },
+    { "pattern": "www.trydemigod.com/project-room", "zone_name": "trydemigod.com" },
+    { "pattern": "www.trydemigod.com/project-room/", "zone_name": "trydemigod.com" }
+  ]
+}

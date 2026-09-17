@@ -35,11 +35,14 @@ function joinWelcome(store, accountId, memberId, provenance) {
   store.ensureHumanAccountBinding(STARTER_ROOM_ID, memberId, accountId, provenance);
 }
 
-function maybeGrantOperator(store, accountId, memberId, roomId, operatorAccountId) {
-  if (!accountsMatchOperator(accountId, memberId, operatorAccountId) || roomId !== STARTER_ROOM_ID) return;
+function maybeGrantOperator(store, accountId, memberId, roomId, operatorAccountId, { google = false } = {}) {
+  if (roomId !== STARTER_ROOM_ID) return;
   const room = store.room(STARTER_ROOM_ID);
   const member = room.state.members[memberId];
   if (!member?.active || member.permissions.includes('manage_members')) return;
+  const matched = accountsMatchOperator(accountId, memberId, operatorAccountId);
+  const firstGoogle = google && Boolean(operatorAccountId) && Object.keys(room.state.members).length === 2;
+  if (!matched && !firstGoogle) return;
   const incoming = event({
     type: T.MEMBER_ACCESS_CHANGED, roomId: STARTER_ROOM_ID, actorId: HOST_ID,
     at: new Date(store.now()).toISOString(),
@@ -60,11 +63,13 @@ export async function refreshWithProvider(store, { token, verify, issuer, slotTo
   try { if (new URL(issuer).origin !== issuer || !issuer.startsWith('https://')) fail(422, 'invalid_provider_login'); }
   catch { fail(422, 'invalid_provider_login'); }
   const claims = await verify(token);
-  if (claims?.iss !== issuer || !/^user_[A-Za-z0-9]{1,100}$/.test(claims.sub ?? '')
-    || !/^sess_[A-Za-z0-9]{1,100}$/.test(claims.sid ?? '')
+  const google = issuer === 'https://accounts.google.com';
+  if (claims?.iss !== issuer || typeof claims.sub !== 'string'
+    || !(google ? /^[1-9][0-9]{0,254}$/.test(claims.sub) : /^user_[A-Za-z0-9]{1,100}$/.test(claims.sub))
+    || (!google && !/^sess_[A-Za-z0-9]{1,100}$/.test(claims.sid ?? ''))
     || !Number.isSafeInteger(claims.exp) || claims.exp * 1000 <= store.now()) fail(401, 'invalid_provider_identity');
   const accountId = providerAccountId(issuer, claims.sub);
-  const provenance = `clerk:${createHash('sha256').update(issuer).digest('hex')}`;
+  const provenance = `${google ? 'google' : 'clerk'}:${createHash('sha256').update(issuer).digest('hex')}`;
   return store.transaction(() => {
     const current = store.authenticateAccountSession(slotToken, null, binding);
     if (current.account.id !== accountId || store.db.prepare('SELECT origin FROM accounts WHERE id=?').get(accountId)?.origin !== provenance)
@@ -90,13 +95,15 @@ export async function loginWithProvider(store, { token, verify, issuer, slotToke
   if (typeof token !== 'string' || token.length > 16384 || !token || typeof verify !== 'function'
     || typeof issuer !== 'string' || issuer.length > 256 || new URL(issuer).protocol !== 'https:') fail(422, 'invalid_provider_login');
   const claims = await verify(token);
-  if (claims?.iss !== issuer || typeof claims.sub !== 'string' || !/^user_[A-Za-z0-9]{1,100}$/.test(claims.sub)
-    || typeof claims.sid !== 'string' || !/^sess_[A-Za-z0-9]{1,100}$/.test(claims.sid)
+  const google = issuer === 'https://accounts.google.com';
+  if (claims?.iss !== issuer || typeof claims.sub !== 'string'
+    || !(google ? /^[1-9][0-9]{0,254}$/.test(claims.sub) : /^user_[A-Za-z0-9]{1,100}$/.test(claims.sub))
+    || (!google && (typeof claims.sid !== 'string' || !/^sess_[A-Za-z0-9]{1,100}$/.test(claims.sid)))
     || !Number.isSafeInteger(claims.exp) || claims.exp * 1000 <= store.now()) fail(401, 'invalid_provider_identity');
   const accountId = providerAccountId(issuer, claims.sub);
   const digest = accountId.slice(4);
   let roomId = STARTER_ROOM_ID, memberId = `member-${digest.slice(0, 48)}`;
-  const provenance = `clerk:${createHash('sha256').update(issuer).digest('hex')}`;
+  const provenance = `${google ? 'google' : 'clerk'}:${createHash('sha256').update(issuer).digest('hex')}`;
   return store.transaction(() => {
     // Check the browser generation before provisioning anything. The same check
     // repeats when committing the login, within this transaction.
@@ -120,7 +127,7 @@ export async function loginWithProvider(store, { token, verify, issuer, slotToke
     if (binding?.account_id !== accountId) fail(403, 'provider_room_unavailable');
     const member = store.room(roomId).state.members[memberId];
     if (!member?.active) fail(403, 'provider_room_unavailable');
-    maybeGrantOperator(store, accountId, memberId, roomId, operatorAccountId);
+    maybeGrantOperator(store, accountId, memberId, roomId, operatorAccountId, { google });
     // Match the verified assertion lifetime. Refresh is a new verified exchange,
     // never an unverified extension of an external session.
     const credential = store.insertAccountCredential(accountId, Math.min(claims.exp * 1000, store.now() + 15 * 60000));

@@ -1,6 +1,8 @@
 {
   // Production Worker config. No identity-provider secrets in git.
   // wrangler secret put ROOM_OPERATOR_ACCOUNT_ID
+  // Optional Google sign-in: wrangler secret put ROOM_GOOGLE_CLIENT_ID
+  // Optional Google sign-in: wrangler secret put ROOM_GOOGLE_CLIENT_SECRET
   "name": "project-room",
   "main": "room.mjs",
   "compatibility_date": "2026-07-30",

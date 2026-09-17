@@ -21,6 +21,10 @@ test('providerAccountId is issuer+sub sha256 and matches loginWithProvider', asy
   assert.match(expected, /^idp-[a-f0-9]{64}$/);
   assert.throws(() => providerAccountId(issuer, 'potter@trydemigod.com'));
   assert.throws(() => providerAccountId('http://clerk.trydemigod.com', sub));
+  const google = providerAccountId('https://accounts.google.com', '123456789012345678901');
+  assert.match(google, /^idp-[a-f0-9]{64}$/);
+  assert.notEqual(google, expected);
+  assert.throws(() => providerAccountId('https://accounts.google.com', 'user_alice'));
   const slot = store.createAccountSessionSlot();
   const claims = { iss: issuer, sub, sid: 'sess_a', exp: Math.floor(store.now() / 1000) + 120 };
   await loginWithProvider(store, {

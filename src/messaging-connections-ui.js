@@ -1,10 +1,16 @@
 // Compact connection controls. The host supplies validated API responses and
 // an owner key that becomes null immediately when account authority ends.
+export function formatReceivingExpiry(value){
+  const date=new Date(value);
+  if(Number.isNaN(date.getTime()))return 'unknown';
+  return new Intl.DateTimeFormat('en-US',{dateStyle:'medium',timeStyle:'short'}).format(date);
+}
+
 export function receivingDisclosure({doc,permission,name,busy,onAction}) {
   const details=doc.createElement('details'),summary=doc.createElement('summary'),explanation=doc.createElement('p');
   summary.textContent='Receiving';details.append(summary);
   explanation.textContent=permission.state==='active'
-    ?'Allowed until '+new Date(permission.expiresAt).toLocaleString()+'.'
+    ?'Allowed until '+formatReceivingExpiry(permission.expiresAt)+'.'
     :'Allow incoming messages for 24 hours, even after sign-out. No sending or sharing.';
   details.append(explanation);
   const actions=[];
