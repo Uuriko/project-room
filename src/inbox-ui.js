@@ -6,12 +6,13 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   const $ = selector => document.querySelector(selector);
   const api = new InboxClient(account, { onAccessEnded: onAccountEnded });
   const drafts = new Map(), positions = new Map();
-  let owner = null, active = false, browsing = false, selected = null, epoch = 0, rows = [], sharing = null, sharingBusy = false, retryShare = null;
+  let owner = null, active = false, browsing = false, selected = null, epoch = 0, rows = [], sharing = null, sharingBusy = false, retryShare = null,
+    nextCursor = null, paging = false, searchQuery = null, searching = false;
   let navigationEpoch = 0;
   const storageKey = "project-room:pending-private-share:v1";
   const positionKey = "project-room:inbox-position:v1";
   let storage; try { storage = sessionStorage; } catch {}
-  let resultPreview = null, resultEpoch = 0;
+  let resultPreview = null, resultEpoch = 0, attachmentEpoch = 0, threadEpoch = 0;
   const text = (selector, value) => { $(selector).textContent = value; };
   const ownerKey = () => {
     const s = account.session;
@@ -101,6 +102,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     sendUI.reset({ preservePending });
     replyUI.reset({ preservePending });
     api.reset(); owner = null; epoch++; active = false; browsing = false; selected = null; rows = []; sharing = null; sharingBusy = false;
+    nextCursor = null; paging = false; searchQuery = null; searching = false;
     drafts.clear(); positions.clear(); retryShare = null; if (!preservePending) persistShare();
     connectionEpoch++; connectionNotes.clear(); connectionRecords.clear(); $("#inbox-connections").hidden = true; $("#inbox-connections").replaceChildren();
     filters = { channel: "all", connection: "all", grouped: true, unreadOnly: false }; $("#inbox-filters").hidden = true; $("#inbox-group-toggle").checked = true;
@@ -117,6 +119,8 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     $("#inbox-draft").value = ""; $("#inbox-reader").hidden = true; $("#inbox-conflict").hidden = true;
     $("#inbox-email-details").hidden = true; $("#inbox-email-details").open = false;
     $("#inbox-email-metadata").replaceChildren(); text("#inbox-source-notice", ""); $("#inbox-source-notice").hidden = true; $("#inbox-addressed").hidden = true;
+    attachmentEpoch++; $("#inbox-attachments").hidden = true; $("#inbox-attachment-list").replaceChildren();
+    threadEpoch++; $("#inbox-thread").hidden = true; $("#inbox-thread-list").replaceChildren();
   }
   function sync() {
     const next = ownerKey();
@@ -193,6 +197,30 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     if (rows.length && !visible.length) text("#inbox-status", "No messages match these filters."); else if (rows.length && $("#inbox-status").textContent === "No messages match these filters.") text("#inbox-status", "");
     const needing = rows.filter(source => source.needsYou).length;
     text("#inbox-attention-count", needing ? `(${needing} need you)` : "");
+    // Paged list: a "Show more" button appears while the server has another
+    // page. It is built here so no static markup changes are needed.
+    if (nextCursor) {
+      const moreBtn = document.createElement("button");
+      moreBtn.type = "button"; moreBtn.className = "inbox-show-more"; moreBtn.textContent = "Show more";
+      moreBtn.addEventListener("click", more);
+      list.append(moreBtn);
+    }
+  }
+  // Append the next page without disturbing selection or filters. Rows are
+  // keyed by id so a repeated cursor can never duplicate a row.
+  async function more() {
+    if (!owns() || !nextCursor || paging) return;
+    paging = true; text("#inbox-status", "Loading more…");
+    const turn = ++epoch;
+    try {
+      const result = await api.list({ cursor: nextCursor }); if (!owns() || turn !== epoch) return;
+      const seen = new Set(rows.map(source => source.id));
+      rows.push(...result.sources.filter(source => !seen.has(source.id)));
+      nextCursor = result.nextCursor ?? null;
+      renderFilters(); renderList();
+      text("#inbox-status", rows.length ? "" : "No messages yet.");
+    } catch (error) { if (owns() && turn === epoch) text("#inbox-status", errorText(error)); }
+    paging = false;
   }
   $("#inbox-filter-channel").addEventListener("change", () => { filters.channel = $("#inbox-filter-channel").value; if (owns()) renderList(); });
   $("#inbox-filter-connection").addEventListener("change", () => { filters.connection = $("#inbox-filter-connection").value; if (owns()) renderList(); });
@@ -204,6 +232,41 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     label.append(box, document.createTextNode(" Unread only"));
     $("#inbox-filters").append(label);
     box.addEventListener("change", () => { filters.unreadOnly = box.checked; if (owns()) renderList(); });
+  }
+  // Full-text search over the account's visible sources, built here so no
+  // static markup changes are needed. Searching replaces the list with the
+  // ranked results; clearing restores the paged list.
+  if (!$("#inbox-search-form")) {
+    const form = document.createElement("form"); form.id = "inbox-search-form"; form.className = "inbox-search";
+    const input = document.createElement("input"); input.id = "inbox-search-input"; input.type = "search";
+    input.placeholder = "Search messages…"; input.setAttribute("aria-label", "Search messages");
+    const go = document.createElement("button"); go.type = "submit"; go.className = "button secondary"; go.textContent = "Search";
+    const clear = document.createElement("button"); clear.type = "button"; clear.id = "inbox-search-clear";
+    clear.className = "button secondary"; clear.textContent = "Clear"; clear.hidden = true;
+    form.append(input, go, clear);
+    $("#inbox-filters").append(form);
+    form.addEventListener("submit", event => { event.preventDefault(); runSearch(input.value); });
+    clear.addEventListener("click", () => { input.value = ""; clearSearch(); });
+  }
+  async function runSearch(query) {
+    if (!owns() || searching) return;
+    const q = query.trim();
+    if (!q) { clearSearch(); return; }
+    searching = true; searchQuery = q; text("#inbox-status", `Searching for “${q}”…`);
+    const turn = ++epoch;
+    try {
+      const result = await api.search({ query: q }); if (!owns() || turn !== epoch) return;
+      rows = result.results.map(r => r.source); nextCursor = null;
+      renderFilters(); renderList();
+      const clear = $("#inbox-search-clear"); if (clear) clear.hidden = false;
+      text("#inbox-status", result.total ? `${result.total} result${result.total === 1 ? "" : "s"} for “${result.query}”.` : `No results for “${result.query}”.`);
+    } catch (error) { if (owns() && turn === epoch) { searchQuery = null; text("#inbox-status", errorText(error)); } }
+    searching = false;
+  }
+  function clearSearch() {
+    if (searchQuery === null) return;
+    searchQuery = null; const clear = $("#inbox-search-clear"); if (clear) clear.hidden = true;
+    load();
   }
   // Read/unread toggle next to "Ask room": read state is a marker, not a new
   // source version, so drafts and their revision pins are unaffected.
@@ -369,7 +432,9 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     loadConnections();
     try {
       const result = await api.list(); if (!owns() || turn !== epoch) return;
-      rows = result.sources; renderFilters(); renderList(); text("#inbox-status", rows.length ? (visibleRows().length ? "" : "No messages match these filters.") : "No messages yet.");
+      rows = result.sources; nextCursor = result.nextCursor ?? null; searchQuery = null;
+      const clear = $("#inbox-search-clear"); if (clear) clear.hidden = true;
+      renderFilters(); renderList(); text("#inbox-status", rows.length ? (visibleRows().length ? "" : "No messages match these filters.") : "No messages yet.");
       $("#inbox-empty").hidden = rows.length > 0;
       if (selected && drafts.has(selected)) { render(); loadResults(selected); return; }
       const pending = pendingShare(), saved = savedPosition();
@@ -382,15 +447,16 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     if (!owns()) return;
     if (selected !== sourceId) $("#inbox-email-details").open = false;
     remember(); selected = sourceId; renderList();
+    threadEpoch++; $("#inbox-thread").hidden = true; $("#inbox-thread-list").replaceChildren();
     $("#inbox-panel").classList.add("reading");
-    if (drafts.has(sourceId)) { render(); loadResults(sourceId); return; }
+    if (drafts.has(sourceId)) { render(); loadResults(sourceId); loadAttachments(sourceId); return; }
     $("#inbox-reader").hidden = true; text("#inbox-status", "Loading…");
     const turn = ++epoch;
     try {
       const result = await api.read(sourceId); if (!owns() || turn !== epoch || selected !== sourceId) return;
       drafts.set(sourceId, { source: result.source, base: result.draft, reviewedSource: result.draft?.sourceRevision ?? result.source.revision,
         body: result.draft?.body ?? "", dirty: false, pending: null, busy: false, conflict: null });
-      text("#inbox-status", ""); render(); remember(); loadResults(sourceId);
+      text("#inbox-status", ""); render(); remember(); loadResults(sourceId); loadAttachments(sourceId);
     } catch (error) { if (owns() && turn === epoch) text("#inbox-status", errorText(error)); }
   }
   function render() {
@@ -498,6 +564,65 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     } catch (error) {
       if (owns() && selected === sourceId && turn === resultEpoch && error.status !== 404) {
         $("#inbox-results").hidden = false; text("#inbox-result-list", "Room results unavailable. Refresh to retry.");
+      }
+    }
+  }
+  // Attachment descriptors for the open source, rendered honestly: names,
+  // types and sizes only, with downloads marked unavailable. Files were
+  // never retained, so there is nothing to offer a download for.
+  async function loadAttachments(sourceId) {
+    const turn = ++attachmentEpoch;
+    $("#inbox-attachments").hidden = true; $("#inbox-attachment-list").replaceChildren();
+    const d = drafts.get(sourceId);
+    const count = d?.source?.email?.attachmentCount ?? d?.source?.channel?.attachmentCount ?? 0;
+    if (!owns() || !getRoom() || !room.ownsAccountSession() || !count) return;
+    try {
+      const value = await api.attachments(sourceId);
+      if (!owns() || selected !== sourceId || turn !== attachmentEpoch) return;
+      const rows = value.attachments;
+      if (!rows.length) return;
+      $("#inbox-attachments").hidden = false;
+      $("#inbox-attachment-list").replaceChildren(...rows.map(a => {
+        const item = document.createElement("li");
+        item.textContent = [a.name ?? "Unnamed attachment", a.contentType, a.size === null ? null : `${a.size} bytes`].filter(Boolean).join(" · ");
+        return item;
+      }));
+    } catch (error) {
+      if (owns() && selected === sourceId && turn === attachmentEpoch && error.status !== 404) {
+        $("#inbox-attachments").hidden = false;
+        text("#inbox-attachment-list", "Attachment details unavailable. Refresh to retry.");
+      }
+    }
+  }
+  // The conversation around the open source: entries indented by reply
+  // depth, each opening its source. Re-clicking the button refreshes it.
+  async function loadThread(sourceId) {
+    const turn = ++threadEpoch;
+    $("#inbox-thread").hidden = true; $("#inbox-thread-list").replaceChildren();
+    if (!owns() || !getRoom() || !room.ownsAccountSession()) return;
+    try {
+      const value = await api.threads({ sourceId });
+      if (!owns() || selected !== sourceId || turn !== threadEpoch) return;
+      const thread = value.threads[0];
+      if (!thread || thread.entries.length < 2) {
+        $("#inbox-thread").hidden = false;
+        text("#inbox-thread-list", "No replies in this conversation yet.");
+        return;
+      }
+      $("#inbox-thread").hidden = false;
+      $("#inbox-thread-list").replaceChildren(...thread.entries.map(({ depth, source }) => {
+        const row = document.createElement("div"), open = document.createElement("button");
+        open.type = "button"; open.className = "text-button";
+        open.style.marginLeft = `${Math.min(depth, 6) * 16}px`;
+        open.textContent = `${source.subject || "(No subject)"} · ${source.sender}`;
+        if (source.id === sourceId) { open.disabled = true; open.textContent += " (this message)"; }
+        else open.addEventListener("click", () => open(source.id));
+        row.append(open); return row;
+      }));
+    } catch (error) {
+      if (owns() && selected === sourceId && turn === threadEpoch && error.status !== 404) {
+        $("#inbox-thread").hidden = false;
+        text("#inbox-thread-list", "Conversation unavailable. Refresh to retry.");
       }
     }
   }
@@ -635,6 +760,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   });
   $("#inbox-share-close").addEventListener("click", () => $("#inbox-share-dialog").close());
   $("#inbox-ask").addEventListener("click", ask);
+    $("#inbox-thread-toggle").addEventListener("click", () => { if (selected) loadThread(selected); });
   $("#nav-inbox").addEventListener("click", load);
   $("#nav-rooms").addEventListener("click", () => show("rooms"));
   $("#inbox-refresh").addEventListener("click", async () => {

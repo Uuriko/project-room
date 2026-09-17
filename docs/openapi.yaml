@@ -904,6 +904,35 @@ paths:
         '404': { description: not_found }
         '409': { description: request_conflict (already decided) or request_expired }
         '422': { description: invalid_request }
+  /api/rooms/{roomId}/ownership/transfer:
+    post:
+      summary: Transfer room ownership (owner)
+      description: >-
+        Owner-only. The current owner appoints an existing active member
+        (human or agent) as the new room owner. The new owner receives the
+        full permission set; an agent that ceases to be owner is stripped of
+        administration powers. Reversible by a later transfer; the
+        ownership.transferred event is the audit trail (the projection keeps
+        only the current owner, previous owner, transfer count and
+        timestamp). Unknown and inactive targets share a bare 404
+        so members cannot be enumerated.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [toMemberId]
+              properties:
+                toMemberId: { type: string }
+                reason: { type: string, maxLength: 280 }
+      responses:
+        '200': { description: "{ roomId, ownerId, previousOwnerId, sequence }" }
+        '403': { description: owner_required }
+        '404': { description: unknown_member (target is not an active member) }
+        '422': { description: invalid_transfer or command_rejected }
   /api/rooms/{roomId}/capabilities:
     get:
       summary: Capability registry
@@ -1322,6 +1351,38 @@ paths:
         '404': { description: not_found (unknown identity or room) }
         '409': { description: request_conflict (requestId already in use) or already_member }
         '422': { description: invalid_request }
+        '429': { description: rate_limited }
+  /api/agent-rooms:
+    post:
+      summary: Create a room self-serve (agent identity)
+      description: >-
+        A self-minted identity creates a fresh room and becomes its owner.
+        The pri_ identity secret travels in the Authorization bearer header,
+        never in the JSON body. The client-chosen roomId is the idempotency
+        key: retrying with the same parameters returns duplicate:true; a
+        different room under that id is 409 room_exists. 3 creations per
+        identity per 24h; 20 per address per minute.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roomId, title, purpose, kind, displayName]
+              properties:
+                roomId: { type: string, maxLength: 64 }
+                title: { type: string, maxLength: 120 }
+                purpose: { type: string, maxLength: 1000 }
+                kind: { type: string, enum: [personal, organization] }
+                displayName: { type: string, maxLength: 80 }
+      responses:
+        '201': { description: "{ roomId, ownerMemberId, identityId, duplicate: false }" }
+        '200': { description: Idempotent retry (duplicate:true) }
+        '401': { description: unauthenticated (unknown identity secret) }
+        '409': { description: room_exists or pilot_limit }
+        '422': { description: invalid_room_request }
         '429': { description: rate_limited }
   /api/access-requests/{id}:
     get:
@@ -1873,10 +1934,130 @@ paths:
         - name: view
           in: query
           schema: { type: string, enum: [email-text-v1, email-excerpt-v1] }
+        - name: cursor
+          in: query
+          description: Opaque page cursor from a previous response's nextCursor.
+          schema: { type: string }
+        - name: limit
+          in: query
+          description: Page size, 1..100. Default 25.
+          schema: { type: integer, minimum: 1, maximum: 100 }
       responses:
-        '200': { description: "{ contractVersion: 1, viewer, sources }" }
+        '200': { description: "{ contractVersion: 1, viewer, sources, nextCursor }" }
         '401': { description: account_session_required }
-        '422': { description: unsupported_inbox_view or session_binding_required }
+        '422': { description: unsupported_inbox_view or session_binding_required or invalid_cursor or invalid_limit }
+  /api/inbox/search:
+    get:
+      summary: Full-text search over the account's visible inbox sources
+      description: >-
+        Account-session read. Searches subject and body text (the same
+        reading projection the UI shows; never cursors, headers, HTML, or
+        mailbox IDs) with BM25 ranking. `?view=email-excerpt-v1` includes
+        channel sources; without it only synthetic samples are searched.
+        `sourceId` scopes the search to one source. At most 200 results;
+        `total` counts every match.
+      security:
+        - accountSession: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Search query, non-empty, up to 500 characters.
+          schema: { type: string, maxLength: 500 }
+        - name: view
+          in: query
+          schema: { type: string, enum: [email-text-v1, email-excerpt-v1] }
+        - name: sourceId
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          description: Max results, 1..200. Default 25.
+          schema: { type: integer, minimum: 1, maximum: 200 }
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, query, results: [{ source, score }], total }" }
+        '401': { description: account_session_required }
+        '422': { description: invalid_search_query or invalid_limit or unsupported_inbox_view }
+  /api/inbox/threads:
+    get:
+      summary: Conversation/thread view over the account's visible inbox sources
+      description: >-
+        Account-session read. Groups sources into threads: email by
+        conversation (threadId) with replies resolved through In-Reply-To
+        internet message ids; channel sources by their threadId with
+        replies resolved through the channel's own message ids. Dangling
+        or cyclic references become top-level; they never throw.
+        `?view=email-excerpt-v1` includes channel sources; without it only
+        synthetic samples thread. `sourceId` scopes to the one thread
+        containing that source. At most 50 threads; `total` counts every
+        thread. Entries carry the same source projection as the list, with
+        a depth for indenting replies.
+      security:
+        - accountSession: []
+      parameters:
+        - name: view
+          in: query
+          schema: { type: string, enum: [email-text-v1, email-excerpt-v1] }
+        - name: sourceId
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          description: Max threads, 1..50. Default 25.
+          schema: { type: integer, minimum: 1, maximum: 50 }
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, threads: [{ threadId, messageCount, depth, firstAt, lastAt, entries: [{ depth, source }] }], total }" }
+        '401': { description: account_session_required }
+        '422': { description: invalid_limit or unsupported_inbox_view }
+  /api/inbox/sources/{sourceId}/attachments:
+    get:
+      summary: List one inbox source's attachment descriptors
+      description: >-
+        Account-session read. Attachment descriptors are metadata only
+        (id, kind, name, contentType, size, inline); the system never
+        retains attachment bytes. `?view=email-excerpt-v1` includes
+        channel sources; without it they 404 like the list hides them.
+        Another account's source 404s. Unknown attachment ids 404 on the
+        item route.
+      security:
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+        - name: view
+          in: query
+          schema: { type: string, enum: [email-text-v1, email-excerpt-v1] }
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, sourceId, attachments: [{ id, kind, name, contentType, size, inline }] }" }
+        '401': { description: account_session_required }
+        '404': { description: inbox_source_not_found }
+        '422': { description: unsupported_inbox_view }
+  /api/inbox/sources/{sourceId}/attachments/{attachmentId}:
+    get:
+      summary: Verify one attachment's descriptor membership
+      description: >-
+        Account-session read. Confirms the attachment id is a member of
+        the source's descriptor set and returns the descriptor plus a
+        retrieval handle. Retrieval is currently unavailable
+        (attachment_bytes_not_retained): byte download needs a live
+        provider fetch with the account's credentials, a future slice
+        that reuses this auth, ownership, and membership path.
+      security:
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+        - name: attachmentId
+          in: path
+          required: true
+          description: Opaque provider attachment id from the descriptor list.
+          schema: { type: string }
+        - name: view
+          in: query
+          schema: { type: string, enum: [email-text-v1, email-excerpt-v1] }
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, sourceId, attachment, retrieval: { available, reason, detail } }" }
+        '401': { description: account_session_required }
+        '404': { description: inbox_source_not_found or inbox_attachment_not_found }
+        '422': { description: unsupported_inbox_view }
   /api/inbox/sources/{sourceId}:
     get:
       summary: Read one inbox source and its private draft

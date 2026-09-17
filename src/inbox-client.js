@@ -178,11 +178,53 @@ export class InboxClient {
       throw error;
     }
   }
-  list() {
-    return this.request("?view=email-excerpt-v1", {}, v => Array.isArray(v.sources) && v.sources.every(s => id(s.id) && revision(s.revision) && s.revision > 0
+  // One row of the list/search projection, as returned by the server.
+  validSourceSummary(s) {
+    return id(s.id) && revision(s.revision) && s.revision > 0
       && typeof s.subject === "string" && ["synthetic", "email", "telegram"].includes(s.adapter) && validConnectionRef(s.connection ?? null)
       && (s.adapter === "synthetic") === ((s.connection ?? null) === null) && typeof s.needsYou === "boolean" && (!s.needsYou || s.adapter !== "synthetic")
-      && ["sender", "recipient"].every(k => typeof s[k] === "string")));
+      && ["sender", "recipient"].every(k => typeof s[k] === "string");
+  }
+  list({ cursor = null, limit = null } = {}) {
+    const params = new URLSearchParams({ view: "email-excerpt-v1" });
+    if (cursor !== null && cursor !== undefined) params.set("cursor", cursor);
+    if (limit !== null && limit !== undefined) params.set("limit", String(limit));
+    return this.request(`?${params}`, {}, v => Array.isArray(v.sources) && v.sources.every(s => this.validSourceSummary(s))
+      && (v.nextCursor === null || typeof v.nextCursor === "string"));
+  }
+  // Full-text search over the account's visible sources. Results are
+  // { source, score } pairs, best first; total counts all matches.
+  threads({ sourceId = null, limit = null } = {}) {
+    const params = new URLSearchParams({ view: "email-excerpt-v1" });
+    if (sourceId !== null && sourceId !== undefined) params.set("sourceId", sourceId);
+    if (limit !== null && limit !== undefined) params.set("limit", String(limit));
+    return this.request(`/threads?${params}`, {}, v => Number.isSafeInteger(v.total) && v.total >= 0
+      && Array.isArray(v.threads) && v.threads.every(t => typeof t.threadId === "string"
+        && Number.isSafeInteger(t.messageCount) && t.messageCount > 0 && Number.isSafeInteger(t.depth) && t.depth >= 0
+        && typeof t.firstAt === "string" && typeof t.lastAt === "string"
+        && Array.isArray(t.entries) && t.entries.every(e => Number.isSafeInteger(e.depth) && e.depth >= 0 && this.validSourceSummary(e.source))));
+  }
+  // Attachment descriptors for one source: metadata only, never bytes.
+  // The single-attachment call also verifies descriptor membership and
+  // carries the retrieval handle a future byte-fetch will use.
+  attachments(sourceId) {
+    return this.request(`/sources/${encodeURIComponent(sourceId)}/attachments?view=email-excerpt-v1`, {},
+      v => v.sourceId === sourceId && Array.isArray(v.attachments)
+        && v.attachments.every(a => typeof a.id === "string" && typeof a.kind === "string"
+          && (a.name === null || typeof a.name === "string") && (a.contentType === null || typeof a.contentType === "string")
+          && (a.size === null || Number.isSafeInteger(a.size)) && typeof a.inline === "boolean"));
+  }
+  attachment(sourceId, attachmentId) {
+    return this.request(`/sources/${encodeURIComponent(sourceId)}/attachments/${encodeURIComponent(attachmentId)}?view=email-excerpt-v1`, {},
+      v => v.sourceId === sourceId && typeof v.attachment?.id === "string" && v.attachment.id === attachmentId
+        && v.retrieval?.available === false && typeof v.retrieval?.reason === "string");
+  }
+  search({ query, sourceId = null, limit = null } = {}) {
+    const params = new URLSearchParams({ view: "email-excerpt-v1", q: query });
+    if (sourceId !== null && sourceId !== undefined) params.set("sourceId", sourceId);
+    if (limit !== null && limit !== undefined) params.set("limit", String(limit));
+    return this.request(`/search?${params}`, {}, v => typeof v.query === "string" && Number.isSafeInteger(v.total) && v.total >= 0
+      && Array.isArray(v.results) && v.results.every(r => typeof r.score === "number" && r.score > 0 && this.validSourceSummary(r.source)));
   }
   // Owner-managed connection records: add or update a bot/mailbox profile, or disconnect ("Remove").
   applyConnection(request) {

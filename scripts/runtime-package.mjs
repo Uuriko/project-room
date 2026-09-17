@@ -34,6 +34,12 @@ optional.push("src/work-help.js", "server/work-help.mjs");
 optional.push("src/help-offers.js");
 optional.push("client/help-actions.mjs");
 optional.push("server/inbox.mjs");
+optional.push("server/inbox-search.mjs"); // full-text search index (imported by server/inbox.mjs; pure, no imports of its own)
+optional.push("server/inbox-threads.mjs"); // thread builder (imported by server/inbox.mjs; pure, no imports of its own)
+// NOTE: server/thread-tree.mjs stays OUT of the closure. inbox-threads.mjs
+// already groups, nests, and flattens threads; importing both would duplicate
+// the reply-tree logic. thread-tree.mjs remains available for a future
+// collapse/expand UI slice.
 optional.push("server/inbox-outbox.mjs", "server/inbox-transport.mjs", "server/version.mjs");
 optional.push("scripts/stamp-version.mjs");
 optional.push("server/email-envelope.mjs", "server/graph-email.mjs", "server/email-import.mjs");
@@ -62,6 +68,7 @@ optional.push("server/attention.mjs");
 optional.push("server/moderation.mjs");
 optional.push("server/channel-connection.mjs", "server/channel-import.mjs", "server/channel-adapters/index.mjs", "server/channel-adapters/email.mjs", "server/channel-adapters/telegram.mjs", "server/channel-adapters/gmail.mjs", "server/channel-adapters/whatsapp.mjs");
 optional.push("server/mime-message.mjs", "server/email-routing-inbound.mjs", "server/channel-journal.mjs");
+optional.push("server/agent-rooms.mjs"); // agent room ownership service (imported by server/http.mjs)
 optional.push("server/room-export-html.mjs");
 optional.push("server/access-review.mjs");
 optional.push("server/access-requests.mjs", "server/identity-ratelimit.mjs");

@@ -19,6 +19,7 @@ import { isSessionStatus, workItemSessionContract } from "../src/work-item-sessi
 import { accessReviewReport } from "./access-review.mjs";
 import { roomUsageSummary, parseUsageDays } from "./usage-summary.mjs";
 import { AccessRequests } from "./access-requests.mjs";
+import { AgentRooms } from "./agent-rooms.mjs";
 import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
 import { listPins, setPin } from "./pins.mjs";
 
@@ -93,6 +94,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // access_requests schema is applied in the store open path (server/store.mjs),
   // so every RoomStore — including store-only recovery fixtures — carries it.
   const accessRequests = new AccessRequests(store);
+  // agent_room_ownership schema is applied in the store open path
+  // (server/store.mjs), so every RoomStore carries it; http.mjs only owns
+  // the service instance.
+  const agentRooms = new AgentRooms(store);
   const resolveChannelTransport = channelTransports ?? (({ provider, accountId, connectionId }) => {
     if (!channelSendProviders.includes(provider)) return null;
     const key = JSON.stringify([provider, accountId, connectionId]);
@@ -406,7 +411,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         if (view !== null && (!["email-text-v1", "email-excerpt-v1"].includes(view) || url.searchParams.getAll("view").length !== 1))
           reject(422, "unsupported_inbox_view", "This inbox view is not supported.");
-        if (url.pathname === "/api/inbox" && req.method === "GET") return json(res, 200, store.inbox.list(token, binding, { includeChannels: view !== null }));
+        if (url.pathname === "/api/inbox/threads" && req.method === "GET") return json(res, 200, store.inbox.threads(token, binding,
+          { sourceId: url.searchParams.get("sourceId"), limit: url.searchParams.get("limit"), includeChannels: view !== null }));
+        if (url.pathname === "/api/inbox/search" && req.method === "GET") return json(res, 200, store.inbox.search(token, binding,
+          { query: url.searchParams.get("q"), sourceId: url.searchParams.get("sourceId"), limit: url.searchParams.get("limit"), includeChannels: view !== null }));
+        if (url.pathname === "/api/inbox" && req.method === "GET") return json(res, 200, store.inbox.list(token, binding,
+          { includeChannels: view !== null, cursor: url.searchParams.get("cursor"), limit: url.searchParams.get("limit") }));
         if (url.pathname === connectionRoutes.list && req.method === "GET") return json(res, 200, store.connections.connections(token, binding));
         // The card's live facts: binding state, webhook hash agreement, last delivery and send. Never values or hashes.
         const liveRecord = connectionId => {
@@ -470,6 +480,21 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             reject(422, "invalid_channel_update", "Supply a request ID and recorded updates, or null to import webhook updates.");
           const result = await syncTelegramConnection({ store, token, binding, connectionId, requestId: data.requestId, updates: data.updates, webhooks: channelWebhooks });
           return json(res, result.duplicate ? 200 : 201, { ...store.connections.connectionRecord(token, connectionId, binding), receipt: result.receipt, duplicate: result.duplicate, source: result.source });
+        }
+        const attachmentsList = /^\/api\/inbox\/sources\/([^/]{1,384})\/attachments$/.exec(url.pathname);
+        if (attachmentsList && req.method === "GET") {
+          return json(res, 200, store.inbox.attachments(token, binding,
+            { sourceId: pathId(attachmentsList[1]), includeChannels: view !== null }));
+        }
+        const attachmentItem = /^\/api\/inbox\/sources\/([^/]{1,384})\/attachments\/([^/]{1,384})$/.exec(url.pathname);
+        if (attachmentItem && req.method === "GET") {
+          // Attachment ids are opaque provider values (they may carry "="
+          // padding that pathId rejects); the membership check is the real
+          // validation, so decode without the id-shape gate.
+          let attachmentId;
+          try { attachmentId = decodeURIComponent(attachmentItem[2]); } catch { reject(404, "not_found", "Not found"); }
+          return json(res, 200, store.inbox.attachment(token, binding,
+            { sourceId: pathId(attachmentItem[1]), attachmentId, includeChannels: view !== null }));
         }
         const source = /^\/api\/inbox\/sources\/([^/]{1,384})(?:\/(share-context|room-results|send-context|sends))?$/.exec(url.pathname);
         if (source && req.method === "GET") {
@@ -711,6 +736,21 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         return json(res, 201, accessRequests.request(data.roomId, data));
       }
+      // Agent room ownership, self-serve path: a self-minted identity
+      // creates a room and becomes its owner. The pri_ secret travels in
+      // the bearer header (never a JSON body); per-address rate limit
+      // before the body is read, per-identity budget inside the module.
+      if (url.pathname === "/api/agent-rooms" && req.method === "POST") {
+        rate(`agent-room-create:${remoteAddress}`, 20);
+        const secret = bearer(req);
+        if (!secret) reject(401, "unauthenticated", "Identity secret required");
+        const data = await body(req);
+        if (!exact(data, ["roomId", "title", "purpose", "kind", "displayName"])) {
+          reject(422, "invalid_request", "roomId, title, purpose, kind and displayName are the accepted fields");
+        }
+        const created = agentRooms.create(secret, data);
+        return json(res, created.duplicate ? 200 : 201, created);
+      }
       const accessStatusMatch = /^\/api\/access-requests\/([^/]{1,64})$/.exec(url.pathname);
       if (accessStatusMatch && req.method === "GET") {
         const identityId = url.searchParams.get("identityId");
@@ -722,12 +762,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
       const accessDecideMatch = /^\/api\/rooms\/([^/]{1,384})\/access-requests\/([^/]{1,64})\/decide$/.exec(url.pathname);
-      if (!match && !revokeMatch && !threadMatch && !accessDecideMatch) reject(404, "not_found", "Not found");
-      const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch)[1]);
+      const ownershipTransferMatch = /^\/api\/rooms\/([^/]{1,384})\/ownership\/transfer$/.exec(url.pathname);
+      if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !ownershipTransferMatch) reject(404, "not_found", "Not found");
+      const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? ownershipTransferMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
       const threadMessageId = threadMatch ? pathId(threadMatch[2]) : null;
       const accessRequestId = accessDecideMatch ? pathId(accessDecideMatch[2]) : null;
-      const route = match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : "access-decide";
+      const route = match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide" : "ownership-transfer";
       const selected = roomCredentials(req, url);
       const fence = selected.mode === "account" ? accountBinding(req, route === "stream" ? url : null) : expectedBinding(req);
       const auth = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
@@ -1004,6 +1045,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           reject(422, "invalid_request", "decision, permissions, note are the accepted fields");
         }
         return json(res, 200, accessRequests.decide(selected.token, roomId, accessRequestId, data, fence));
+      }
+      if (route === "ownership-transfer" && req.method === "POST") {
+        // Agent room ownership, appointment path: the current room owner
+        // appoints another member (human or agent) as owner. Owner-only;
+        // the ownership.transferred event is auditable and reversible.
+        // reason is optional; toMemberId is required.
+        const data = await body(req);
+        if (!exact(data, ["toMemberId"]) && !exact(data, ["toMemberId", "reason"])) {
+          reject(422, "invalid_request", "toMemberId and an optional reason are the accepted fields");
+        }
+        return json(res, 200, agentRooms.transfer(selected.token, roomId, data, fence));
       }
       if (route === "agent-connections" && req.method === "POST") {
         const result = store.agentConnections.apply(selected.token, roomId, await body(req), fence);

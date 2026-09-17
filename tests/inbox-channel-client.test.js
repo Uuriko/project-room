@@ -30,13 +30,13 @@ test("the inbox list carries a connection reference per channel source and none 
   const rows = [{ id: "note", revision: 1, adapter: "synthetic", sender: "a", recipient: "b", subject: "Sample", updatedAt: 1, connection: null, needsYou: false },
     { id: "tg", revision: 2, adapter: "telegram", sender: "Avery", recipient: "Fixture Room Bot", subject: "Fixture planning", updatedAt: 2,
       connection: { id: "telegram-fixture", channel: "telegram", provider: "telegram-bot", state: "active" }, needsYou: true }];
-  const ok = setup(async () => reply({ contractVersion: 1, viewer, sources: rows }));
+  const ok = setup(async () => reply({ contractVersion: 1, viewer, sources: rows, nextCursor: null }));
   assert.equal((await ok.list()).sources.length, 2);
   assert.equal((await ok.list()).sources[1].needsYou, true);
   for (const change of [r => r[1].connection = null, r => r[0].connection = r[1].connection, r => r[1].connection.state = "paused",
     r => r[1].connection.secret = "x", r => r[1].adapter = "sms", r => delete r[1].needsYou, r => r[0].needsYou = true, r => r[1].needsYou = "yes"]) {
     const value = structuredClone(rows); change(value);
-    await assert.rejects(setup(async () => reply({ contractVersion: 1, viewer, sources: value })).list(), { code: "invalid_inbox_response" });
+    await assert.rejects(setup(async () => reply({ contractVersion: 1, viewer, sources: value, nextCursor: null })).list(), { code: "invalid_inbox_response" });
   }
 });
 test("the Telegram reading view and send preview are accepted only in their negotiated shapes", async () => {
