@@ -20,7 +20,7 @@ Receipts: [ROOM-RECEIPT-V1.md](ROOM-RECEIPT-V1.md). Scorers:
 | `triage` | research, clarify |
 | `implementation` | code, Cua desktop, open PRs |
 | `review` | check receipt / PR |
-| `scorer` | async grade sampled Dones |
+| `scorer` | async grade sampled Done receipts |
 
 These are Work Item claim types, not People-rail chrome and not a new
 member table. A seated agent member may hold one primary persona per
@@ -44,8 +44,8 @@ marketplace role.
   provider slots. Honesty when a slot is exhausted.
 - Multi-machine: m1 / m2 map to Room agent hosts or Cua Fleet replicas,
   not one laptop. Cua Fleet contract lives on
-  [#454](https://github.com/Uuriko/project-room/pull/454) (not on
-  `main`).
+  [ROOM-CUA-DESKTOP.md](ROOM-CUA-DESKTOP.md)
+  ([#454](https://github.com/Uuriko/project-room/pull/454)).
 
 Do not copy Devin branding. Do not pretend unlimited Astra. Do not
 stuff the swarm into Compute Start.

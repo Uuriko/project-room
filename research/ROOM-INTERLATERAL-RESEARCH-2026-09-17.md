@@ -40,7 +40,7 @@ Platform upgrades (May): **custom events** (unconference first) + **agent-to-age
 | **Source Manifest** | What sources/skills/MCP the agent used | Receipt artifacts + honesty |
 | **Visible authority cards** | may vote / may write / must ask before public / must ask before irreversible | Room member capabilities (already have caps — make **visible**) |
 | **Artifact Maturity Ladder** | Live Note → Discussion Paper → Synthesis → Workshop → Working Paper | Label Done outputs honestly (no fake “shipped paper”) |
-| **Public Artifact Standards** | Attributable, reviewable collaborative work | Done chips + receipts |
+| **Public Artifact Standards** | Attributable, reviewable collaborative work | Done receipts (chip = face; receipt = evidence) |
 | **Legal Agent Harness** | Eval/bench genre for agent behavior | Pair with Cua Bench + Scorers |
 | **Irreversibility** | Drafting ≠ filing/signing/sending | Room action policy (send-on-behalf already) |
 | **Identity ≠ Authority ≠ Capability** | Three layers | People rail / Add agent UX |
@@ -71,7 +71,7 @@ Platform upgrades (May): **custom events** (unconference first) + **agent-to-age
 ### P0 — align with work already in flight
 1. **Rename/extend receipt** toward Interlateral’s Agent Interaction Receipt (principal, authority, sources, reversibility) — folds Warp + Cua + Interlateral
 2. **Authority cards** on agent members (read/chat/write/irreversible gates) — visible in People rail later (Muse); docs/spec now
-3. **Artifact Maturity Ladder** on Work Item outputs / Done chips labels
+3. **Artifact Maturity Ladder** on Work Item outputs / Done receipt labels
 4. **BYOA framing** already Room DNA — lean marketing + Connect copy: “Bring your agent,” not “install our bot”
 
 ### P1 — product shape

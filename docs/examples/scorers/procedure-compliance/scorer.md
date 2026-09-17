@@ -22,7 +22,8 @@ Contract: [ROOM-SCORER.md](../../../ROOM-SCORER.md). Receipt:
 [ROOM-KITS-HARNESS-JEV-ROY.md](../../../ROOM-KITS-HARNESS-JEV-ROY.md).
 
 Cua desktop + Fleet claim / release live on
-[#454](https://github.com/Uuriko/project-room/pull/454) (not on `main`).
+[ROOM-CUA-DESKTOP.md](../../../ROOM-CUA-DESKTOP.md)
+([#454](https://github.com/Uuriko/project-room/pull/454)).
 Grade the loop those docs name; do not invent a Fleet button.
 
 ## Dimension

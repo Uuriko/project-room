@@ -16,9 +16,10 @@ Receipts: [ROOM-RECEIPT-V1.md](ROOM-RECEIPT-V1.md). Handoff:
 
 **Room Done outputs default to Live Note or Discussion Paper honesty.**
 
-A Done chip / `room.receipt.v1` does **not** promote an artifact to
-Workshop Paper or Working Paper. Higher rungs need an explicit
-editorial Act (human review / owner decide), not a session `done`.
+A **Done receipt** (`room.receipt.v1`) does **not** promote an
+artifact to Workshop Paper or Working Paper. The Done chip is face
+only. Higher rungs need an explicit editorial Act (human review /
+owner decide), not a session `done`.
 
 ## Five rungs
 

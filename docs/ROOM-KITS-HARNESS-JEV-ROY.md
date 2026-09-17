@@ -9,8 +9,8 @@ Catalog: [ROOM-KITS-CATALOG.md](ROOM-KITS-CATALOG.md) **Optional later**
 rows for **Skillbox-shaped library** and **Harness bridge**.
 
 First steal map: [#457](https://github.com/Uuriko/project-room/pull/457).
-Cua desktop Connect card: [#454](https://github.com/Uuriko/project-room/pull/454)
-(not on `main`).
+Cua desktop Connect card: [ROOM-CUA-DESKTOP.md](ROOM-CUA-DESKTOP.md)
+([#454](https://github.com/Uuriko/project-room/pull/454)).
 
 ## Skillbox-shaped kits
 
@@ -47,13 +47,16 @@ OpenAI / Anthropic / Responses endpoint. Does **not** edit
 
 | Steal | Room mapping | Don’t |
 | --- | --- | --- |
-| Provider once · pick model · pick harness | Room Connect “bring your agent” panel: endpoint + model + harness | Force one vendor |
+| Provider once · pick model · pick harness | When UI ships: **enrolled-agent config under Connect** (endpoint + model + harness). Not a fourth Join path. | Force one vendor · a new Join CTA |
 | Live model discovery | Honesty: list what the Room Mac / Compute endpoint actually serves | Invent Astra if offline |
 | Inert harnesses when dialect missing | Show why a harness can’t run (visible reason) | Hide broken options |
 | Keys never on argv / never logged | Matches Room import `connection.json` rules | Paste keys in chat |
 | Local-first tray | Optional companion for enrolled agents on a laptop | Drive Potter laptop unrestricted |
 
-This is the Connect *shape* in docs. It is not Connect door HTML.
+This is the Connect *shape* in docs. It is not Connect door HTML. When
+the UI ships, the “bring your agent” panel is **enrolled-agent config
+under Connect** — not a fourth Join path (packet / guest-agent / Add
+agent stay the join paths).
 
 ## Jev
 

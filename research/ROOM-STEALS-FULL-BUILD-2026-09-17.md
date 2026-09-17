@@ -28,26 +28,25 @@ No deploy.
 | 7 | [hraness factory](https://x.com/hraness/status/2100358405911105590) | N× parallel agents; model-limit honesty |
 | 8 | [Interlateral](https://interlateral.com/) / Stanford FutureLaw report | Trust Handoff, Agent Interaction Receipt, Artifact Maturity Ladder |
 
-## Cua files are not on `main`
+## Cua files (merged)
 
 `docs/ROOM-CUA-DESKTOP.md` and
-`research/CUA-FLEET-SPIKE-2026-09-17.md` are **not on `main`**. They live
-on [#454](https://github.com/Uuriko/project-room/pull/454).
+`research/CUA-FLEET-SPIKE-2026-09-17.md` landed in
+[#454](https://github.com/Uuriko/project-room/pull/454).
 
-Scorers need those Cua / Fleet receipts (screenshot path + shell log +
-later `traceRef`) as judge input. Do not invent Quality / Efficiency /
-Compliance scores without a trace. When #454 lands, keep the same
-one-paragraph pointer on the desktop contract.
-
-Until then, Cua desktop is an **Optional later** catalog row that points
-at #454 — not a live `/room/kits` door.
+Scorers need those Cua / Fleet **Done receipts** (screenshot path +
+shell log + later `traceRef`) as judge input. Chip = face; receipt =
+evidence. Do not invent Quality / Efficiency / Compliance scores
+without a trace. Cua desktop remains an **Optional later** catalog row
+— not a live `/room/kits` door.
 
 ## Contracts (this PR)
 
 ### A. `room.receipt.v1`
 
-Artifacts panel separate from Done chip. Cua fleet fields optional.
-`peopleData: false` required on screenshots.
+Artifacts panel = **Done receipt** (evidence). Done chip = People-rail
+face. Scorers judge Done receipts, not chips. Cua fleet fields
+optional. `peopleData: false` required on screenshots.
 
 Contract: [ROOM-RECEIPT-V1.md](../docs/ROOM-RECEIPT-V1.md)
 
@@ -86,8 +85,9 @@ Research: [ROOM-HRANESS-STEAL-2026-09-17.md](ROOM-HRANESS-STEAL-2026-09-17.md)
 ### E. Kits / harness / Jev / Roy
 
 Skillbox-shaped versioned kits; Connect shape
-provider · model · harness; Jev `recommend_kits`; fast default + quality
-ladder honesty.
+provider · model · harness (when UI ships: **enrolled-agent config
+under Connect**, not a fourth Join path); Jev `recommend_kits`; fast
+default + quality ladder honesty.
 
 Contract: [ROOM-KITS-HARNESS-JEV-ROY.md](../docs/ROOM-KITS-HARNESS-JEV-ROY.md)
 
@@ -119,8 +119,8 @@ rows only:
 | Scorer (LLM-judge) | [ROOM-SCORER.md](../docs/ROOM-SCORER.md) |
 | Skillbox-shaped library | [ROOM-KITS-HARNESS-JEV-ROY.md](../docs/ROOM-KITS-HARNESS-JEV-ROY.md) |
 | Harness bridge | [ROOM-KITS-HARNESS-JEV-ROY.md](../docs/ROOM-KITS-HARNESS-JEV-ROY.md) |
-| Connect Cua desktop | [#454](https://github.com/Uuriko/project-room/pull/454) until merge |
-| Interlateral-aligned receipts / authority cards | [ROOM-TRUST-HANDOFF-V0.md](../docs/ROOM-TRUST-HANDOFF-V0.md) · [ROOM-RECEIPT-V1.md](../docs/ROOM-RECEIPT-V1.md) |
+| Connect Cua desktop | [ROOM-CUA-DESKTOP.md](../docs/ROOM-CUA-DESKTOP.md) ([#454](https://github.com/Uuriko/project-room/pull/454)) |
+| Interlateral-aligned receipts / authority cards (visible authority cards = later face, **not People-rail HTML**) | [ROOM-TRUST-HANDOFF-V0.md](../docs/ROOM-TRUST-HANDOFF-V0.md) · [ROOM-RECEIPT-V1.md](../docs/ROOM-RECEIPT-V1.md) |
 
 These rows never replace Join / Connect CTAs and are not a marketplace
 shelf.

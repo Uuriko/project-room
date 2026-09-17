@@ -15,7 +15,8 @@ live `/room/kits` door.
 First steal map (research):
 [#457](https://github.com/Uuriko/project-room/pull/457). Cua / Fleet
 receipts that scorers judge:
-[#454](https://github.com/Uuriko/project-room/pull/454) (not on `main`).
+[ROOM-CUA-DESKTOP.md](ROOM-CUA-DESKTOP.md)
+([#454](https://github.com/Uuriko/project-room/pull/454)).
 
 ## What
 
@@ -25,7 +26,9 @@ Observer may open a PR on Room instructions / skills from failing
 patterns. **Human merge only.**
 
 Needs a full `room.receipt.v1` (tools + artifacts + human comments via
-`traceRef`). Do not invent scores without a trace.
+`traceRef`). **Scorers judge Done receipts, not Done chips.** Chip =
+People-rail face; receipt = evidence. Do not invent scores without a
+trace.
 
 ## File layout (factory-as-code steal)
 
@@ -82,7 +85,8 @@ One dimension per file. Do not collapse these into one mega-judge.
 
 ## Runtime
 
-1. Work Item → Done + `room.receipt.v1`
+1. Work Item → Done + `room.receipt.v1` (the **Done receipt**; the
+   Done chip is face only)
 2. Sample by `samplingRate` (or on-demand re-score for kit testing)
 3. Scorer persona grades offline
 4. Classification + reasoning stored on `receipt.scores`

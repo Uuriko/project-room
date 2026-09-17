@@ -25,8 +25,8 @@ branding claim and not a promise that Room runs Devin.
    route new claims to an available harness / model
 3. **Multi-machine** — m1 / m2 map to Room “agent hosts” or Cua Fleet
    replicas, not one laptop. Cua Fleet spike lives on
-   [#454](https://github.com/Uuriko/project-room/pull/454) (not on
-   `main`).
+   [CUA-FLEET-SPIKE-2026-09-17.md](CUA-FLEET-SPIKE-2026-09-17.md)
+   ([#454](https://github.com/Uuriko/project-room/pull/454)).
 4. **Foreman** — someone / something assigns the swarm; Room `foreman`
    persona
 

@@ -9,9 +9,10 @@ Scorers: [ROOM-SCORER.md](ROOM-SCORER.md). Personas:
 [ROOM-PERSONAS-FACTORY.md](ROOM-PERSONAS-FACTORY.md).
 
 Cua Fleet fields below are optional. The Cua desktop contract and Fleet
-spike are **not on `main`**; they live on
-[#454](https://github.com/Uuriko/project-room/pull/454). Point scorers at
-those receipts when that PR lands. Do not invent scores without a trace.
+spike live on [ROOM-CUA-DESKTOP.md](ROOM-CUA-DESKTOP.md) and
+[CUA-FLEET-SPIKE-2026-09-17.md](../research/CUA-FLEET-SPIKE-2026-09-17.md)
+([#454](https://github.com/Uuriko/project-room/pull/454)). Point scorers
+at those **Done receipts**. Do not invent scores without a trace.
 
 Interlateral Agent Interaction Receipt fields
 (`principalId`, `authorityClaimed`, `sourceManifest[]`,
@@ -27,7 +28,8 @@ Warp Scorers + Cua need a **judgeable artifact pack** separate from the
 Done lifecycle.
 
 - **Done chip** = session finished (People-rail face; not this contract).
-- **Receipt** = evidence (this contract).
+- **Done receipt** = evidence (this contract). Scorers judge receipts,
+  not chips.
 
 This is not the GitHub issue-#11 merge receipt in
 [examples/receipt.md](examples/receipt.md) and
@@ -89,7 +91,7 @@ satisfy this schema.
 | `workItemId` | The Work Item this evidence belongs to. |
 | `persona` | One of `foreman` · `triage` · `implementation` · `review` · `scorer`. |
 | `agentMemberId` | Room member id of the agent who produced the artifacts. No display name, email, or account id. |
-| `completedAt` | ISO-8601. When the artifact pack was closed — not when the Done chip painted. |
+| `completedAt` | ISO-8601. When the **Done receipt** closed — not when the Done chip painted. |
 | `traceRef` | Pointer to the judgeable trace (tools + artifacts + human comments), or `null` if none. Scorers must not invent a score when this is `null` and no artifact can stand in. |
 | `artifacts` | Zero or more evidence items. Empty is honest when the session produced nothing attachable. |
 

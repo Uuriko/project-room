@@ -23,9 +23,9 @@ delegation object: who is acting, for whom, with what grant, on what
 task, citing what, until when.
 
 This is **not** People-rail chrome and not a Connect door. Visible
-authority cards (may write / may vote / must ask before public action /
-must ask before irreversible action) are a later product face for the
-same fields.
+authority cards = later face, **not People-rail HTML** (may write /
+may vote / must ask before public action / must ask before
+irreversible action).
 
 ## Fields
 
