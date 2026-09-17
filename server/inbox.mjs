@@ -282,13 +282,18 @@ export class Inbox {
         if (adapter === "email") {
           const envelope = readEmailEnvelope(info.envelope);
           const occurredAt = envelope.message.receivedAt ?? envelope.message.sentAt;
-          const parent = envelope.replyHeaders.inReplyTo.map(id => replyIndex.get("email:" + id)).find(Boolean);
+          // The reply index is namespaced by connection id, like the thread
+          // id below: an internetMessageId is only unique per mailbox, so a
+          // duplicated or malformed value on one connection must never
+          // cross-parent threads imported through another connection.
+          const connectionId = envelope.connection.id;
+          const parent = envelope.replyHeaders.inReplyTo.map(id => replyIndex.get(`email:${connectionId}:${id}`)).find(Boolean);
           // Provider thread ids are only unique per connection: namespace so
           // the same id on two connections (or two providers) never merges
           // unrelated conversations.
           const threadId = envelope.message.threadId == null ? null
             : `email:${envelope.connection.id}:${envelope.message.threadId}`;
-          return { id: row.id, occurredAt, threadId,
+          return { id: row.id, occurredAt, threadId, connectionId,
             inReplyTo: parent ?? null, internetId: envelope.message.internetMessageId };
         }
         if (adapter !== "synthetic") {
@@ -328,7 +333,7 @@ export class Inbox {
         const replyIndex = new Map();
         const keys = infos.map(info => this.threadKeyOf(info, replyIndex));
         for (const [info, key] of infos.map((info, i) => [info, keys[i]])) {
-          if (key.internetId) replyIndex.set("email:" + key.internetId, key.id);
+          if (key.internetId && key.connectionId) replyIndex.set(`email:${key.connectionId}:${key.internetId}`, key.id);
           if (key.channelId && info.channel) replyIndex.set(info.channel + ":" + key.channelId, key.id);
         }
         // Re-resolve replies now that the index is complete (targets may sort after the reply).
