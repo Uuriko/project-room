@@ -1815,6 +1815,22 @@ $("#invite-link")?.addEventListener("paste", event => {
   $("#invite-link").value = "";
   openInvitation({ valid: true, secret });
 });
+function redeemInviteInput() {
+  const input = $("#invite-link");
+  const err = $("#invite-error");
+  const secret = inviteSecretFromText(input?.value ?? "");
+  if (!secret) {
+    if (err) err.textContent = "That doesn't look like an invite link. Paste the full link you were given.";
+    return;
+  }
+  if (err) err.textContent = "";
+  input.value = "";
+  openInvitation({ valid: true, secret });
+}
+$("#invite-redeem")?.addEventListener("click", redeemInviteInput);
+$("#invite-link")?.addEventListener("keydown", e => {
+  if (e.key === "Enter") { e.preventDefault(); redeemInviteInput(); }
+});
 $("#auth-form").addEventListener("submit", async e => {
   if (signoutLoading) { e.preventDefault(); return; }
   e.preventDefault(); setFormStatus($("#auth-error"), "");

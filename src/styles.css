@@ -935,3 +935,5 @@ summary { overflow-wrap: anywhere; }
 .pinned-item .pinned-meta { grid-column: 1; color: var(--muted); font-size: .7rem; }
 .pinned-item .text-button { grid-column: 2; grid-row: 1 / span 3; align-self: start; min-height: 44px; font-size: .875rem; }
 @media (max-width: 40rem) { .pinned-panel { margin-inline: .75rem; } }
+.invite-row { display: flex; gap: .5rem; }
+.invite-row #invite-link { flex: 1; }

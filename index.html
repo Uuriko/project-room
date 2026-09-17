@@ -51,7 +51,11 @@
           <p id="auth-error" class="status form-status" role="alert"></p>
         </form>
         <label class="invite-paste" for="invite-link">Have an invite?</label>
-        <input id="invite-link" type="text" autocomplete="off" spellcheck="false" maxlength="512" placeholder="Paste the invite link">
+        <div class="invite-row">
+          <input id="invite-link" type="text" autocomplete="off" spellcheck="false" maxlength="512" placeholder="Paste the invite link">
+          <button type="button" id="invite-redeem" class="button secondary">Redeem</button>
+        </div>
+        <p id="invite-error" class="status form-status" role="alert"></p>
         <p id="auth-guest-note" class="form-hint">Guest invites last about eight hours in that browser. Room keys last until they are replaced.</p>
         <details class="access-help"><summary>Need access?</summary>
           <p id="auth-description">Ask the room owner for an invite link or room key.</p>
