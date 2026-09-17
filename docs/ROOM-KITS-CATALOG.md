@@ -45,9 +45,15 @@ not change join today (packet, guest-agent, Add agent).
 An optional kit lives **under Connect**. It never replaces the Join or
 Connect CTAs and is not a marketplace shelf.
 
+See [ROOM-CUA-DESKTOP.md](ROOM-CUA-DESKTOP.md). Scorers need those
+Cua/Fleet receipts as judge input.
+
 | Kit | Status | Contract |
 | --- | --- | --- |
 | **Connect Cua desktop** (alt: Cua Driver MCP) | Optional kit under Connect. Docs only — not a live door, never replaces Join/Connect CTAs, not a marketplace shelf. | [ROOM-CUA-DESKTOP.md](ROOM-CUA-DESKTOP.md) |
+| **Scorer (LLM-judge)** | Optional later. Not a live door. One dimension per scorer; samples Done receipts. Needs traces — never a vanity 1–10 badge. | [ROOM-STEALS-WARP-SKILLBOX-HARNESS-2026-09-17.md](../research/ROOM-STEALS-WARP-SKILLBOX-HARNESS-2026-09-17.md) |
+| **Skillbox-shaped library** | Optional later. Not a live door. Steal versioned skill revisions + scoped keys; do not fork Skillbox into the Worker. | [ROOM-STEALS-WARP-SKILLBOX-HARNESS-2026-09-17.md](../research/ROOM-STEALS-WARP-SKILLBOX-HARNESS-2026-09-17.md) |
+| **Harness bridge** | Optional later. Not a live door. Provider once · pick model · pick harness. Keys never on argv / never in chat. | [ROOM-STEALS-WARP-SKILLBOX-HARNESS-2026-09-17.md](../research/ROOM-STEALS-WARP-SKILLBOX-HARNESS-2026-09-17.md) |
 
 ## Later: App Store
 
