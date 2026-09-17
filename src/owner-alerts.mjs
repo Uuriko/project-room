@@ -433,7 +433,6 @@ export function createOwnerAlertDispatcher(deps = {}) {
       let lastError = null;
       for (let attempt = 1; attempt <= MAX_DISPATCH_ATTEMPTS; attempt += 1) {
         try {
-          // eslint-disable-next-line no-await-in-loop
           await channel.notify(snapshot(alert));
           recordAttempt(alert, { kind: 'dispatch', attempt, ok: true });
           alert.sentAt = clock();
@@ -453,7 +452,6 @@ export function createOwnerAlertDispatcher(deps = {}) {
             error: err instanceof Error ? err.message : String(err),
           });
           if (attempt < MAX_DISPATCH_ATTEMPTS) {
-            // eslint-disable-next-line no-await-in-loop
             await sleep(Math.max(0, backoff(attempt)));
           }
         }
@@ -552,7 +550,6 @@ export function createOwnerAlertDispatcher(deps = {}) {
         if (alert.escalatedAt != null) continue;
         if (now - alert.createdAt < escalationAfterMs) continue;
         try {
-          // eslint-disable-next-line no-await-in-loop
           await channel.notify(snapshot(alert), { escalated: true });
           recordAttempt(alert, { kind: 'escalation', attempt: 'escalation', ok: true });
           alert.escalatedAt = now;
