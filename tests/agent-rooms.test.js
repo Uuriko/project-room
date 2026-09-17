@@ -82,7 +82,7 @@ test("creation budget is enforced per identity", async t => {
 });
 
 test("unknown or malformed identity secrets are 401", async t => {
-  const { rooms, identity } = setup(t);
+  const { rooms } = setup(t);
   assert.throws(() => rooms.create(`pri_${"x".repeat(43)}`, createArgs()),
     err => err.status === 401);
   assert.throws(() => rooms.create("not-a-secret", createArgs()),
