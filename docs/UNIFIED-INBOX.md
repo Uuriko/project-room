@@ -268,6 +268,7 @@ form says so. Email fixtures carry no credentials at all.
 | --- | --- | --- |
 | Email inbound | Recorded Graph fixtures; cards read "Inbound: fixture mailbox · not yet routed" | Cloudflare Email Routing hands mail to the Worker (#144: `server/mime-message.mjs`, `server/email-routing-inbound.mjs`, `docs/EMAIL-ROUTING.md`) and the Worker's `email()` handler is mounted |
 | Email outbound | None; sources say "Sending unavailable", `capabilities.send: false` | An outbound email slice (B23) |
+| Attachment bytes | Never retained; the reader lists descriptors (name, type, size) and downloads stay unavailable | A live provider fetch slice that downloads bytes with the account's credentials, reusing the phase-4 auth, ownership, and membership path |
 | Telegram inbound | Webhook route verifies and journals (`pending_channel_updates`); Reconnect imports | `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET` are set and `setWebhook` is registered |
 | Telegram outbound | `FixtureChannelSender` answers "accepted" locally; labels say "Sample"; `lastSendResult.code = fixture` | The same two bindings; `TelegramTransport` posts `sendMessage` |
 | Connection records | Real journal rows, live today | — |

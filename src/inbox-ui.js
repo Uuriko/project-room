@@ -12,7 +12,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   const storageKey = "project-room:pending-private-share:v1";
   const positionKey = "project-room:inbox-position:v1";
   let storage; try { storage = sessionStorage; } catch {}
-  let resultPreview = null, resultEpoch = 0;
+  let resultPreview = null, resultEpoch = 0, attachmentEpoch = 0, threadEpoch = 0;
   const text = (selector, value) => { $(selector).textContent = value; };
   const ownerKey = () => {
     const s = account.session;
@@ -119,6 +119,8 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     $("#inbox-draft").value = ""; $("#inbox-reader").hidden = true; $("#inbox-conflict").hidden = true;
     $("#inbox-email-details").hidden = true; $("#inbox-email-details").open = false;
     $("#inbox-email-metadata").replaceChildren(); text("#inbox-source-notice", ""); $("#inbox-source-notice").hidden = true; $("#inbox-addressed").hidden = true;
+    attachmentEpoch++; $("#inbox-attachments").hidden = true; $("#inbox-attachment-list").replaceChildren();
+    threadEpoch++; $("#inbox-thread").hidden = true; $("#inbox-thread-list").replaceChildren();
   }
   function sync() {
     const next = ownerKey();
@@ -445,15 +447,16 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     if (!owns()) return;
     if (selected !== sourceId) $("#inbox-email-details").open = false;
     remember(); selected = sourceId; renderList();
+    threadEpoch++; $("#inbox-thread").hidden = true; $("#inbox-thread-list").replaceChildren();
     $("#inbox-panel").classList.add("reading");
-    if (drafts.has(sourceId)) { render(); loadResults(sourceId); return; }
+    if (drafts.has(sourceId)) { render(); loadResults(sourceId); loadAttachments(sourceId); return; }
     $("#inbox-reader").hidden = true; text("#inbox-status", "Loading…");
     const turn = ++epoch;
     try {
       const result = await api.read(sourceId); if (!owns() || turn !== epoch || selected !== sourceId) return;
       drafts.set(sourceId, { source: result.source, base: result.draft, reviewedSource: result.draft?.sourceRevision ?? result.source.revision,
         body: result.draft?.body ?? "", dirty: false, pending: null, busy: false, conflict: null });
-      text("#inbox-status", ""); render(); remember(); loadResults(sourceId);
+      text("#inbox-status", ""); render(); remember(); loadResults(sourceId); loadAttachments(sourceId);
     } catch (error) { if (owns() && turn === epoch) text("#inbox-status", errorText(error)); }
   }
   function render() {
@@ -561,6 +564,65 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     } catch (error) {
       if (owns() && selected === sourceId && turn === resultEpoch && error.status !== 404) {
         $("#inbox-results").hidden = false; text("#inbox-result-list", "Room results unavailable. Refresh to retry.");
+      }
+    }
+  }
+  // Attachment descriptors for the open source, rendered honestly: names,
+  // types and sizes only, with downloads marked unavailable. Files were
+  // never retained, so there is nothing to offer a download for.
+  async function loadAttachments(sourceId) {
+    const turn = ++attachmentEpoch;
+    $("#inbox-attachments").hidden = true; $("#inbox-attachment-list").replaceChildren();
+    const d = drafts.get(sourceId);
+    const count = d?.source?.email?.attachmentCount ?? d?.source?.channel?.attachmentCount ?? 0;
+    if (!owns() || !getRoom() || !room.ownsAccountSession() || !count) return;
+    try {
+      const value = await api.attachments(sourceId);
+      if (!owns() || selected !== sourceId || turn !== attachmentEpoch) return;
+      const rows = value.attachments;
+      if (!rows.length) return;
+      $("#inbox-attachments").hidden = false;
+      $("#inbox-attachment-list").replaceChildren(...rows.map(a => {
+        const item = document.createElement("li");
+        item.textContent = [a.name ?? "Unnamed attachment", a.contentType, a.size === null ? null : `${a.size} bytes`].filter(Boolean).join(" · ");
+        return item;
+      }));
+    } catch (error) {
+      if (owns() && selected === sourceId && turn === attachmentEpoch && error.status !== 404) {
+        $("#inbox-attachments").hidden = false;
+        text("#inbox-attachment-list", "Attachment details unavailable. Refresh to retry.");
+      }
+    }
+  }
+  // The conversation around the open source: entries indented by reply
+  // depth, each opening its source. Re-clicking the button refreshes it.
+  async function loadThread(sourceId) {
+    const turn = ++threadEpoch;
+    $("#inbox-thread").hidden = true; $("#inbox-thread-list").replaceChildren();
+    if (!owns() || !getRoom() || !room.ownsAccountSession()) return;
+    try {
+      const value = await api.threads({ sourceId });
+      if (!owns() || selected !== sourceId || turn !== threadEpoch) return;
+      const thread = value.threads[0];
+      if (!thread || thread.entries.length < 2) {
+        $("#inbox-thread").hidden = false;
+        text("#inbox-thread-list", "No replies in this conversation yet.");
+        return;
+      }
+      $("#inbox-thread").hidden = false;
+      $("#inbox-thread-list").replaceChildren(...thread.entries.map(({ depth, source }) => {
+        const row = document.createElement("div"), open = document.createElement("button");
+        open.type = "button"; open.className = "text-button";
+        open.style.marginLeft = `${Math.min(depth, 6) * 16}px`;
+        open.textContent = `${source.subject || "(No subject)"} · ${source.sender}`;
+        if (source.id === sourceId) { open.disabled = true; open.textContent += " (this message)"; }
+        else open.addEventListener("click", () => open(source.id));
+        row.append(open); return row;
+      }));
+    } catch (error) {
+      if (owns() && selected === sourceId && turn === threadEpoch && error.status !== 404) {
+        $("#inbox-thread").hidden = false;
+        text("#inbox-thread-list", "Conversation unavailable. Refresh to retry.");
       }
     }
   }
@@ -698,6 +760,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   });
   $("#inbox-share-close").addEventListener("click", () => $("#inbox-share-dialog").close());
   $("#inbox-ask").addEventListener("click", ask);
+    $("#inbox-thread-toggle").addEventListener("click", () => { if (selected) loadThread(selected); });
   $("#nav-inbox").addEventListener("click", load);
   $("#nav-rooms").addEventListener("click", () => show("rooms"));
   $("#inbox-refresh").addEventListener("click", async () => {
