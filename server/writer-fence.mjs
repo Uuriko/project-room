@@ -28,6 +28,14 @@ const rebuiltAdditiveTables = ["agent_invite_codes", "wake_queue", "wake_queue_c
 export const unfencedAdditiveTables = Object.freeze([
   "private_inbox_reads",
   "access_requests",
+  // account_login_methods + account_passkey_credentials + account_magic_codes
+  // + account_recovery_codes (multi-method login, slice 1): purely additive,
+  // outside the fence like access_requests — older writers have no code path
+  // to them and method rows are always scoped to an existing account.
+  "account_login_methods",
+  "account_passkey_credentials",
+  "account_magic_codes",
+  "account_recovery_codes",
   // agent_room_ownership (agent room creation provenance) is purely additive
   // at v34 and intentionally NOT fenced: same rationale as
   // private_inbox_reads above — older writers have no code path to it, and
