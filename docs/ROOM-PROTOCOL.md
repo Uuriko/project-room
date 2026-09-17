@@ -14,7 +14,8 @@ human-readable shapes every lane (quill, quill-s2, instinct, grokbot,
 codex, Jillian — see `docs/AGENT-LANES.md`) must use to claim work, report
 state, hand off, and receipt. The rule that underwrites every rule below:
 **stamp at write, never parse at read** — tooling reads the fenced blocks
-and reason suffixes, never the prose around them.
+and reason suffixes, and (for `[lane][claim]` comments only, see §1a) a
+conservative parse of the prose around them.
 
 **Posture: v0, deliberately unstable.** Breaking changes are expected and
 fine while we dogfood. The one rule: every protocol change lands as a PR
@@ -25,7 +26,8 @@ touching this doc (see META-RULE).
 ## 1. The claim block
 
 A claim is a machine-readable fenced block posted as a comment. Every
-claim comment carries exactly one block; prose around it is context only.
+claim comment carries exactly one block; prose around it is context only —
+except for the conservative `[lane][claim]` prose parse in §1a.
 
 ```room-claim
 task-id:    RC-2026-09-16-003
@@ -52,6 +54,18 @@ reason:     write the room protocol spec from the wave brief
   the block, always. If the block is malformed (missing field, unknown
   state word), the claim is **rejected**: a RECLAIM-style comment says so,
   and the task stays unclaimed.
+
+### 1a. Prose `[lane][claim]` (conservative parse)
+
+A `[lane][claim]` comment *without* a fenced block is no longer invisible:
+tooling parses it conservatively. Backtick-quoted path-shaped tokens (plus
+`files:` / `claim:` lines) and a recognizable task-id become a
+lease-bearing claim with the standard `lease=12h`, state `submitted`, and
+the usual task-id reuse guard. Prose that yields no files (or no task-id)
+is recorded as `unleased-prose-claim` — visible on the board as **needs
+fencing**, never silently ignored. A fenced block, when present, always
+wins; fenced-claim behavior is unchanged. (Docs lane may refine this
+wording; the behavior lives in `scripts/room`.)
 
 ## 2. Status-line grammar
 

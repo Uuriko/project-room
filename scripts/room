@@ -148,8 +148,12 @@ post_comment() { # $1 = body -> prints id/url; dry-run prints body to stdout
 
 # ---------------------------------------------------------------------------
 # jq: comment -> event parsing
-# Parses ONLY fenced blocks (room-claim / room-receipt / room-handoff) and
-# the status prefixes; prose is never parsed.
+# Parses fenced blocks (room-claim / room-receipt / room-handoff) and the
+# status prefixes. [lane][claim] prose without a fenced block is parsed
+# conservatively too: backtick-quoted paths (plus files:/claim: lines) and a
+# recognizable task-id become a lease-bearing prose-claim (lease=12h);
+# anything else surfaces as unleased-prose-claim ("needs fencing"), never
+# silently ignored. Fenced claims always win and are byte-for-byte untouched.
 # ---------------------------------------------------------------------------
 
 parse_events() { # stdin: comments JSON array -> stdout: events JSON array
@@ -179,6 +183,42 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
       ([capture("(?<![A-Za-z0-9])[Mm]erge(?:d)?(?: SHA| commit)?[ \\t]*:[ \\t]*(?<s>[0-9a-f]{7,40})(?![A-Za-z0-9])")]
        | .[0] | .s) // null;
 
+    # prose claim parsing: [lane][claim] without a fenced block.
+    # Conservative on purpose: only path-shaped tokens become files, and a
+    # claim earns a lease only when BOTH files and a recognizable task-id are
+    # found. Anything else surfaces as unleased-prose-claim ("needs fencing")
+    # so it is visible in the log, state, metrics, and ROOM-STATE.md — never
+    # silently ignored. A fenced room-claim block always wins when present.
+    def prose_path_ok:
+      test("^[A-Za-z0-9_.][A-Za-z0-9_./-]*$")
+      and (test("/") or test("\\.[A-Za-z0-9]{1,10}$"))
+      and ((test("\\.\\.")) | not);
+    def prose_files:
+      (([capture("`(?<f>[^`\\r\\n]+)`"; "g")] | map(.f))
+       + ([split("\n")[]
+           | capture("^[ \\t]*(?:files?|claim(?:ed|s)?)[ \\t]*[:=][ \\t]*(?<rest>[\\s\\S]*)$")
+           | .rest
+           | [match("[A-Za-z0-9_.][A-Za-z0-9_./-]*"; "g") | .string]]
+          | add // []))
+      | map(select(prose_path_ok)) | unique;
+    def prose_task:
+      (([capture("(?<t>RC-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+)")] | .[0] | .t)
+       // ([capture("(?<t>[A-Z]+[0-9]*-[0-9]+)")] | .[0] | .t)
+       // null);
+    def prose_reason:
+      gsub("[ \\t][ \\t]+"; " ") | gsub("\\n"; " ")
+      | .[0:280] | gsub("^[ \\t]+|[ \\t]+$"; "");
+    def prose_claim($lane):
+      . as $b
+      | ($b | prose_files) as $files
+      | ($b | prose_task) as $task
+      | if ($files | length) > 0 and $task != null then
+          {kind:"prose-claim", task_id:$task, lane:$lane, files:$files,
+           reason:(("prose claim: " + ($b | prose_reason)) | .[0:300])}
+        else
+          {kind:"unleased-prose-claim", lane:$lane, task:$task, files:$files}
+        end;
+
     def parse_comment:
       (.body | gsub("\r"; "")) as $body
       | (.id) as $id | (.created_at) as $at
@@ -193,7 +233,7 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
       | ($body | fence("handoff")) as $fhand
       | (if $pf.p == "[claim]" then
            if $fclaim then {kind:"claim", block:($fclaim|fields)}
-           else {kind:"malformed", want:"room-claim"} end
+           else ($body | prose_claim($lp.lane)) end
          elif $pf.p == "[receipt]" then
            {kind:"receipt",
             task:($pf.tail | first_task),
@@ -285,7 +325,8 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
         else . end;
 
     (reduce .[] as $e (
-      {tasks:{}, log:[], illegal:[], refused:[], noticed:[], lanes:[], prose_receipts:[]};
+      {tasks:{}, log:[], illegal:[], refused:[], noticed:[], lanes:[],
+       prose_receipts:[], unleased_prose_claims:[]};
       ($e.id) as $cid | ($e.at) as $at
       | if $e.kind == "claim" then
           ($e.block["task-id"] // null) as $tid
@@ -435,6 +476,46 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
                 else . end
               end))
           | .log += [{id:$cid, at:$at, kind:"reclaim", ok:true}]
+        elif $e.kind == "prose-claim" then
+          # Lease-bearing prose claim: same task-id reuse guard as fenced
+          # claims (§4 — a task-id never gets a second claimant), standard
+          # 12h lease, state submitted. Marked prose:true so the board can
+          # tell it apart from fenced claims.
+          ($e.task_id // null) as $tid
+          | if ($tid | not) then
+              .log += [{id:$cid, at:$at, kind:"prose-claim", ok:false,
+                        errors:["missing task-id"]}]
+            elif ((.tasks[$tid] // null) != null) then
+              .refused += [{task_id:$tid, by_lane:$e.lane, colliding:"task-id",
+                            holder_lane:(.tasks[$tid].lane // "(released)"),
+                            holder_state:.tasks[$tid].state, at:$at,
+                            comment_id:$cid, via:"prose"}]
+              | .log += [{id:$cid, at:$at, kind:"prose-claim", task_id:$tid,
+                          ok:false,
+                          errors:["duplicate claim refused; task-id already used"]}]
+            else
+              .tasks[$tid] = {
+                task_id:$tid, lane:$e.lane,
+                files:$e.files, lease:"lease=12h", lease_h:12,
+                reason:$e.reason, state:"submitted",
+                claim_id:$cid, claim_at:$at, last_at:$at, heartbeat_at:null,
+                last_block:({lane:$e.lane, files:($e.files | join(", ")),
+                             lease:"lease=12h", state:"submitted",
+                             reason:$e.reason, "task-id":$tid, via:"prose"}),
+                strike_one_at:null, released_at:null,
+                pending_handoff:null, handoff_voided:false,
+                receipts:[], missing_receipt:false, prose:true }
+              | .lanes += [$e.lane]
+              | .log += [{id:$cid, at:$at, kind:"prose-claim", task_id:$tid,
+                          ok:true, via:"prose"}]
+            end
+        elif $e.kind == "unleased-prose-claim" then
+          # Visible, not silent: prose claims that could not be fenced into a
+          # lease-bearing event are recorded for the "needs fencing" surface.
+          .unleased_prose_claims += [{comment_id:$cid, at:$at, lane:$e.lane,
+                                      task:($e.task // null)}]
+          | .log += [{id:$cid, at:$at, kind:"unleased-prose-claim", ok:false,
+                      errors:["needs fencing: no extractable files or task-id"]}]
         elif $e.kind == "ack" then
           ack_check($e; $at)
         else . end
@@ -458,7 +539,8 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
        comments:$meta.comments, watermark:$meta.watermark,
        tasks:.tasks, illegal:.illegal, refused:.refused,
        noticed:.noticed, lanes:.lanes, log:.log,
-       prose_receipts:(.prose_receipts // [])}
+       prose_receipts:(.prose_receipts // []),
+       unleased_prose_claims:(.unleased_prose_claims // [])}
   '
 }
 
@@ -481,10 +563,15 @@ render_md() { # $1=now_epoch $2=registry_json $3=watcher_state ; stdin: state JS
     def iso($e): ($e | strftime("%Y-%m-%dT%H:%M:%SZ"));
     def epoch($s): (($s | fromdate) // 0);
     def is_live($s): (["submitted","working","suspended"] | index($s)) != null;
-    def row($t): "\($t.task_id) | \($t.lane // "(none)") | \($t.state) | \($t.lease_expires_at // "-") | \($t.files | join(", "))";
+    def row($t): "\($t.task_id) | \($t.lane // "(none)")\(if $t.prose then " (prose)" else "" end) | \($t.state) | \($t.lease_expires_at // "-") | \($t.files | join(", "))";
 
     ($now | tonumber) as $now
     | ([.tasks[] | select(is_live(.state))]) as $open_all
+    | ([.tasks[] | select(.prose and is_live(.state))]) as $popen
+    | ([.unleased_prose_claims[]
+        | "\(.comment_id) | \(.lane // "(none)") | \(.task // "-") | \(.at)"]
+       | reverse | .[0:10]) as $frows
+    | ((.unleased_prose_claims | length) - 10) as $frest
     | ($open_all | sort_by(.lease_expires_at // "9999")) as $open
     | ($open | map(select(.state == "working" and .lease_expires_at
                     and ($now < epoch(.lease_expires_at))
@@ -521,8 +608,13 @@ render_md() { # $1=now_epoch $2=registry_json $3=watcher_state ; stdin: state JS
       "task-id | merged | comment-id",
       (if ($rrows | length) == 0 then "(none)" else ($rrows | join("\n")) end),
       "",
+      "## prose-claims-needing-fence",
+      "comment-id | lane | task | at",
+      (if ($frows | length) == 0 then "(none)" else ($frows | join("\n")) end),
+      (if $frest > 0 then "… +\($frest) more" else empty end),
+      "",
       "## signals",
-      "board_comments=\(.comments) threshold=1500 rotation_due=\($rot) watcher=\($watcher) open_claims=\($open_all | length) watermark=\(.watermark)"]
+      "board_comments=\(.comments) threshold=1500 rotation_due=\($rot) watcher=\($watcher) open_claims=\($open_all | length) prose_open=\($popen | length) unfenced_prose=\(.unleased_prose_claims | length) watermark=\(.watermark)"]
     | join("\n") + "\n"
   '
 }
@@ -1127,9 +1219,11 @@ cmd_metrics() {
   fi
   cpd="$(awk -v n="$n" -v d="$days" 'BEGIN{printf "%.2f", n/d}')"
   st="$(printf '%s' "$comments" | parse_events | reduce_state "$(date +%s)" "$n" "$wm")"
-  printf 'claims_opened=%s\n'    "$(printf '%s' "$st" | jq '[.log[] | select(.kind == "claim" and .ok)] | length')"
+  printf 'claims_opened=%s\n'    "$(printf '%s' "$st" | jq '[.log[] | select((.kind == "claim" or .kind == "prose-claim") and .ok)] | length')"
   printf 'claims_completed=%s\n' "$(printf '%s' "$st" | jq '[.tasks[] | select(.state == "completed")] | length')"
   printf 'claims_expired=%s\n'   "$(printf '%s' "$st" | jq '[.tasks[] | select(.released_at != null)] | length')"
+  printf 'prose_claims_opened=%s\n'      "$(printf '%s' "$st" | jq '[.log[] | select(.kind == "prose-claim" and .ok)] | length')"
+  printf 'prose_claims_needing_fence=%s\n' "$(printf '%s' "$st" | jq '.unleased_prose_claims | length')"
   printf 'receipts=%s\n'         "$(printf '%s' "$st" | jq '[.tasks[] | .receipts | length] | add // 0')"
   printf 'missing_receipts=%s\n' "$(printf '%s' "$st" | jq '[.tasks[] | select(.state == "completed" and (.receipts | length) == 0)] | length')"
   printf 'distinct_lanes=%s\n'   "$(printf '%s' "$st" | jq '.lanes | length')"
