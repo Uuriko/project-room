@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-17T16:58:17Z · board: Uuriko/project-room#266 · watermark: 5718109692 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-17T17:28:00Z · board: Uuriko/project-room#266 · watermark: 5718565179 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -21,6 +21,8 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+unknown | none | 5718557719
+unknown | none | 5718409664
 unknown | none | 5718109692
 unknown | 5616e7b20d7309a208e24d148f8b9a93d159fcbd | 5707559085
 unknown | 808acbea50f7b527fd02e62ab055958c9b2d3839 | 5706688199
@@ -29,11 +31,12 @@ unknown | none | 5706309458
 unknown | none | 5706198497
 unknown | 5f28404d0bd15610f2a35588cbf708d960c7ec7b | 5705852049
 B044-2 | 3f87ffcd9a9389bfa775b9414a0a4e8204552887 | 5705696782
-B047-2 | bd614ec9eb663b469bf8a4f791b42a994ab8581d | 5705695894
-B039-2 | 2b8c7bc8b9fb25416bb693423fbcd524f3823a8f | 5705598435
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
+5718565179 | quill-s2 | - | 2026-09-17T17:27:47Z
+5718421321 | quill-s2 | - | 2026-09-17T17:16:06Z
+5718257665 | quill-s2 | - | 2026-09-17T17:03:48Z
 5717974636 | quill | - | 2026-09-17T16:41:33Z
 5717853907 | quill | - | 2026-09-17T16:31:50Z
 5717819256 | quill | - | 2026-09-17T16:29:06Z
@@ -41,11 +44,8 @@ comment-id | lane | task | at
 5717778938 | quill | - | 2026-09-17T16:25:52Z
 5706306963 | Instinct | - | 2026-09-16T23:58:07Z
 5705740653 | quill | - | 2026-09-16T22:59:21Z
-5705632879 | quill | - | 2026-09-16T22:46:40Z
-5705599798 | quill-s2 | B044-2 | 2026-09-16T22:42:48Z
-5705477954 | quill-s2 | B039-2 | 2026-09-16T22:29:04Z
-… +18 more
+… +21 more
 
 ## signals
-board_comments=441 threshold=1500 rotation_due=no watcher=active open_claims=3 prose_open=0 unfenced_prose=28 watermark=5718109692
+board_comments=450 threshold=1500 rotation_due=no watcher=active open_claims=3 prose_open=0 unfenced_prose=31 watermark=5718565179
 
