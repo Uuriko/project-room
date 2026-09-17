@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-17T17:30:35Z · board: Uuriko/project-room#266 · watermark: 5718579789 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-17T17:58:16Z · board: Uuriko/project-room#266 · watermark: 5718872606 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -21,6 +21,8 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+unknown | none | 5718856995
+unknown | none | 5718717842
 unknown | none | 5718557719
 unknown | none | 5718409664
 unknown | none | 5718109692
@@ -29,11 +31,11 @@ unknown | 808acbea50f7b527fd02e62ab055958c9b2d3839 | 5706688199
 unknown | none | 5706342563
 unknown | none | 5706309458
 unknown | none | 5706198497
-unknown | 5f28404d0bd15610f2a35588cbf708d960c7ec7b | 5705852049
-B044-2 | 3f87ffcd9a9389bfa775b9414a0a4e8204552887 | 5705696782
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
+5718859498 | quill-s2 | - | 2026-09-17T17:51:38Z
+5718720375 | quill-s2 | - | 2026-09-17T17:40:07Z
 5718579789 | quill-s2 | - | 2026-09-17T17:28:58Z
 5718565179 | quill-s2 | - | 2026-09-17T17:27:47Z
 5718421321 | quill-s2 | - | 2026-09-17T17:16:06Z
@@ -42,10 +44,8 @@ comment-id | lane | task | at
 5717853907 | quill | - | 2026-09-17T16:31:50Z
 5717819256 | quill | - | 2026-09-17T16:29:06Z
 5717801035 | quill | - | 2026-09-17T16:27:38Z
-5717778938 | quill | - | 2026-09-17T16:25:52Z
-5706306963 | Instinct | - | 2026-09-16T23:58:07Z
-… +22 more
+… +24 more
 
 ## signals
-board_comments=452 threshold=1500 rotation_due=no watcher=active open_claims=3 prose_open=0 unfenced_prose=32 watermark=5718579789
+board_comments=459 threshold=1500 rotation_due=no watcher=active open_claims=3 prose_open=0 unfenced_prose=34 watermark=5718872606
 
