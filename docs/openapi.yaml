@@ -862,6 +862,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
+  /api/rooms/{roomId}/access-requests:
+    get:
+      summary: List access requests (owner)
+      description: >-
+        Owner-only (manage_members grant). Lists pending access requests by
+        default; pass ?status=approved|denied|expired|pending|decided to
+        filter. Approval links the identity via the standard identity-link
+        path; denial records a reason.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: status, in: query, schema: { type: string, enum: [pending, approved, denied, expired, decided] } }
+      responses:
+        '200': { description: The room's access requests }
+        '403': { description: access_denied (manage_members required) }
+  /api/rooms/{roomId}/access-requests/{id}/decide:
+    post:
+      summary: Decide an access request (owner)
+      description: >-
+        Owner-only (manage_members grant). Approve links the identity as a
+        member with the granted permissions (narrowed or equal to what was
+        requested); deny records a reason. The decision is appended to the
+        room's audit trail.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approve, deny] }
+                permissions: { type: array, items: { type: string } }
+                note: { type: string, maxLength: 500 }
+      responses:
+        '200': { description: The decided request (and the new member on approve) }
+        '403': { description: access_denied (manage_members required) }
+        '404': { description: not_found }
+        '409': { description: request_conflict (already decided) or request_expired }
+        '422': { description: invalid_request }
   /api/rooms/{roomId}/capabilities:
     get:
       summary: Capability registry
@@ -1251,6 +1293,50 @@ paths:
         '410': { description: invite_revoked or invite_expired }
         '422': { description: invalid_invite or invalid_invite_name }
         '429': { description: rate_limited }
+  /api/access-requests:
+    post:
+      summary: Request room access (self-serve)
+      description: >-
+        Open: an already self-minted identity asks to join a room. The
+        request sits in a pending queue for the owner to approve or deny;
+        nothing is auto-approved. Idempotent on the client-supplied
+        requestId. Unknown identities and rooms answer with a bare 404.
+        5 requests per identity per hour.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roomId, identityId, displayName, requestedPermissions, requestId]
+              properties:
+                roomId: { type: string }
+                identityId: { type: string }
+                displayName: { type: string, maxLength: 80 }
+                requestedPermissions: { type: array, items: { type: string } }
+                note: { type: string, maxLength: 500 }
+                requestId: { type: string, maxLength: 64 }
+      responses:
+        '201': { description: Pending request created (or the existing one on idempotent retry) }
+        '404': { description: not_found (unknown identity or room) }
+        '409': { description: request_conflict (requestId already in use) or already_member }
+        '422': { description: invalid_request }
+        '429': { description: rate_limited }
+  /api/access-requests/{id}:
+    get:
+      summary: Check an access request's status
+      description: >-
+        Open: the caller supplies the identityId as a query param; only the
+        requesting identity can see its own request (others get 404).
+      security: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: identityId, in: query, required: true, schema: { type: string } }
+      responses:
+        '200': { description: The request with its status (pending, approved, denied, expired) }
+        '404': { description: not_found }
+        '422': { description: invalid_request }
   /api/share-links/preview:
     post:
       summary: Preview a human invitation link

@@ -25,7 +25,7 @@ const rebuiltAdditiveTables = ["agent_invite_codes", "wake_queue", "wake_queue_c
 // This restores the pre-v34 additive pattern (application table, outside the
 // fence): older writers have no code path to the table, and Inbox.verify()
 // replays the read/unread journal against actual rows as the integrity gate.
-export const unfencedAdditiveTables = Object.freeze(["private_inbox_reads"]);
+export const unfencedAdditiveTables = Object.freeze(["private_inbox_reads", "access_requests"]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);
 const tablesFor = version => version <= 27 ? ({ 6: v6Tables, 7: v7Tables, 8: v8Tables, 9: v14Tables, 10: v14Tables, 11: v14Tables, 12: v14Tables, 13: v14Tables, 14: v14Tables, 15: v17Tables, 16: v17Tables, 17: v17Tables, 18: tables, 19: tables, 20: tables, 21: tables, 22: tables, 23: tables, 24: tables, 25: tables, 26: tables, 27: v27Tables })[version]

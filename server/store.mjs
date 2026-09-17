@@ -21,6 +21,7 @@ import { Moderation, moderationSchema, mutedEvent } from "./moderation.mjs";
 import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
+import { accessRequestSchema } from "./access-requests.mjs";
 import { ensureAttachmentSchema, verifyAttachmentSchema } from "./attachment-schema.mjs";
 import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
 import { workItemChanges } from "../src/workflow.js";
@@ -448,6 +449,10 @@ export class RoomStore {
       // same-schema packaged fallbacks that predate it still verify.
       this.db.exec(inboxReadSchema);
       this.db.exec(moderationSchema); // Message reports (issue #6 E4): purely additive, same pattern.
+      // Self-serve agent access requests: purely additive, intentionally outside
+      // the writer fence (see unfencedAdditiveTables). Applied here (not only in
+      // createRoomServer) so store-only fixtures and the recovery audit see it.
+      this.db.exec(accessRequestSchema);
       ensureAttachmentSchema(this.db); // Converge the deployed v28-v33 attachment lineage before installing v34 fences.
       // Idempotent: recreates fences for tables the additive schemas just
       // (re)created, and refuses a file whose existing triggers drifted.

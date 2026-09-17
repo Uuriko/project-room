@@ -52,6 +52,11 @@ signed-in account session (see Account-level writes below).
 `POST /api/agent-invites/redeem` is unauthenticated by design (the one-time
 code in the body is the credential); it is rate limited per address before
 the body is read.
+`POST /api/access-requests` is unauthenticated by design (the identity is
+not a member yet, so there is no credential to check); it is rate limited
+per identity (5/hour) and creates only a pending request — nothing is
+auto-approved. `GET /api/access-requests/{id}` is identity-scoped: only the
+requesting identity can poll its own request.
 
 `POST /api/rooms/:id/import` reads `application/x-ndjson` through the same
 bounded reader as JSON bodies (8 MB instead of 16 KB): an oversized
