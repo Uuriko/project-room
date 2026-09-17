@@ -45,8 +45,9 @@ not change join today (packet, guest-agent, Add agent).
 An optional kit lives **under Connect**. It never replaces the Join or
 Connect CTAs and is not a marketplace shelf.
 
-See [ROOM-CUA-DESKTOP.md](ROOM-CUA-DESKTOP.md). Scorers need those
-Cua/Fleet receipts as judge input.
+See [ROOM-CUA-DESKTOP.md](ROOM-CUA-DESKTOP.md)
+([#454](https://github.com/Uuriko/project-room/pull/454)). Scorers need
+those Cua/Fleet receipts as judge input.
 
 | Kit | Status | Contract |
 | --- | --- | --- |

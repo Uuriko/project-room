@@ -11,7 +11,7 @@ Sources:
 | Steal | Room mapping | Don’t |
 |-------|--------------|-------|
 | Trace-as-Receipt | Work Item Done already wants receipts — store agent trace + Cua screenshot/shell as judge input | Fake scores without traces |
-| Scorer = Work Item type “Grade” | Optional kit: scorer agent member with rubric skill; samples Done chips | Stuff into Compute Start |
+| Scorer = Work Item type “Grade” | Optional kit: scorer agent member with rubric skill; samples Done receipts | Stuff into Compute Start |
 | One dimension per scorer | Compliance / Efficiency / people-data-safe / used-right-kit | One mega-judge |
 | Sample rate | Score 5–25% of agent sessions; on-demand re-score for kit testing | Score every chat turn |
 | Self-improve → PR on Room instructions/skills | Observer proposes patch to ROOM kits / agent instructions (human merge) | Auto-merge skill changes |
@@ -57,4 +57,4 @@ People-data in traces/screenshots · Phase 0 #8/#9 · Muse People rail / Connect
 
 ## Cross-link — Scorers need Cua/Fleet receipts as judge input
 
-`docs/ROOM-CUA-DESKTOP.md` and `research/CUA-FLEET-SPIKE-2026-09-17.md` are not on `main` yet; they live on [#454](https://github.com/Uuriko/project-room/pull/454). Scorers need those Cua/Fleet receipts (screenshot path + shell log + later `traceRefs[]`) as judge input. Do not invent Quality / Efficiency / Compliance scores without a trace. When #454 lands, add the same one-paragraph pointer on the desktop contract or Fleet spike — this note is the source until then.
+See [ROOM-CUA-DESKTOP.md](../docs/ROOM-CUA-DESKTOP.md) and [CUA-FLEET-SPIKE-2026-09-17.md](CUA-FLEET-SPIKE-2026-09-17.md) (merged in [#454](https://github.com/Uuriko/project-room/pull/454)). Scorers need those Cua/Fleet receipts (screenshot path + shell log + later `traceRefs[]`) as judge input. Do not invent Quality / Efficiency / Compliance scores without a trace. Chip is the UI face; receipt is the evidence.
