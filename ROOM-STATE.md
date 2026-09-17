@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-17T21:29:10Z · board: Uuriko/project-room#266 · watermark: 5721408029 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-17T22:00:16Z · board: Uuriko/project-room#266 · watermark: 5721708442 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -34,6 +34,7 @@ unknown | 5616e7b20d7309a208e24d148f8b9a93d159fcbd | 5707559085
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
+5721708442 | quill-s2 | - | 2026-09-17T21:50:16Z
 5721408029 | quill-s2 | - | 2026-09-17T21:22:14Z
 5720710996 | quill-s2 | RC-2026-09-17-005 | 2026-09-17T20:21:54Z
 5720682054 | quill-s2 | RC-2026-09-17-004 | 2026-09-17T20:19:22Z
@@ -43,9 +44,8 @@ comment-id | lane | task | at
 5718859498 | quill-s2 | - | 2026-09-17T17:51:38Z
 5718720375 | quill-s2 | - | 2026-09-17T17:40:07Z
 5718579789 | quill-s2 | - | 2026-09-17T17:28:58Z
-5718565179 | quill-s2 | - | 2026-09-17T17:27:47Z
-… +30 more
+… +31 more
 
 ## signals
-board_comments=484 threshold=1500 rotation_due=no watcher=active open_claims=4 prose_open=0 unfenced_prose=40 watermark=5721408029
+board_comments=488 threshold=1500 rotation_due=no watcher=active open_claims=4 prose_open=0 unfenced_prose=41 watermark=5721708442
 
