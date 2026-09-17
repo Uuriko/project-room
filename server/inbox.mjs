@@ -26,6 +26,29 @@ const emailSelectionText = body => body.content.replace(/\r\n?/g, "\n");
 const text = (v, max, empty = false) => typeof v === "string" && v.isWellFormed() && v.length <= max && (empty || v.trim().length > 0);
 const same = (a, b) => canonical(a) === canonical(b);
 const participantLabel = p => p.displayName || p.handle || p.id;
+// Cursor pagination for the source list. The cursor is an opaque base64url
+// encoding of the (updated_at, id) sort key of the last row on the previous
+// page; both fields are already exposed per source, so it leaks nothing new.
+// The page window is computed over rows, not returned sources: rows filtered
+// by the channel-visibility rule still advance the cursor, so pages never
+// skip or duplicate.
+const pageLimitOf = value => {
+  if (value === undefined || value === null) return 25;
+  const n = typeof value === "string" ? Number(value) : value;
+  if (!Number.isInteger(n) || n < 1 || n > 100) fail(422, "invalid_limit", "limit must be an integer 1..100");
+  return n;
+};
+const decodeCursor = value => {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string") fail(422, "invalid_cursor", "The page cursor is not valid.");
+  let key;
+  try { key = JSON.parse(Buffer.from(value, "base64url").toString("utf8")); }
+  catch { fail(422, "invalid_cursor", "The page cursor is not valid."); }
+  if (!key || typeof key !== "object" || !Number.isInteger(key.updatedAt) || typeof key.id !== "string" || !key.id)
+    fail(422, "invalid_cursor", "The page cursor is not valid.");
+  return key;
+};
+const encodeCursor = key => Buffer.from(JSON.stringify({ updatedAt: key.updatedAt, id: key.id }), "utf8").toString("base64url");
 // One reading summary per source origin: synthetic samples, email, Telegram.
 const summary = d => d.adapter === "email" ? { sender: d.envelope.message.from.address, recipient: d.envelope.connection.identity.address, subject: d.envelope.message.subject }
   : d.adapter === "telegram" ? { sender: participantLabel(d.envelope.message.from), recipient: participantLabel(d.envelope.connection.identity), subject: participantLabel(d.envelope.message.to[0]) }
@@ -185,9 +208,10 @@ export class Inbox {
     return new Map(this.db.prepare("SELECT source_id,read_at FROM private_inbox_reads WHERE account_id=?").all(accountId).map(r => [r.source_id, r.read_at]));
   }
   // Channel sources appear only for a client that negotiated a reading view.
-  list(token, binding, { includeChannels = false, includeEmail = false } = {}) {
+  list(token, binding, { includeChannels = false, includeEmail = false, cursor = null, limit = null } = {}) {
     return this.store.readTransaction(() => {
       const auth = this.auth(token, binding), connections = new Map(), include = includeChannels || includeEmail;
+      const take = pageLimitOf(limit), after = decodeCursor(cursor);
       const connection = profile => {
         if (!connections.has(profile.id)) {
           const saved = this.store.email.connection(auth.account.id, profile.id);
@@ -198,13 +222,22 @@ export class Inbox {
       };
       const sentIds = include ? this.sentProviderIds(auth.account.id) : new Set();
       const readAt = this.readMarkers(auth.account.id);
-      const sources = this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? ORDER BY updated_at DESC,id").all(auth.account.id)
+      const params = [auth.account.id];
+      let sql = "SELECT * FROM private_inbox_sources WHERE account_id=?";
+      if (after) { sql += " AND (updated_at < ? OR (updated_at = ? AND id > ?))"; params.push(after.updatedAt, after.updatedAt, after.id); }
+      sql += " ORDER BY updated_at DESC,id LIMIT ?";
+      params.push(take + 1);
+      const rows = this.db.prepare(sql).all(...params);
+      const hasMore = rows.length > take, page = hasMore ? rows.slice(0, take) : rows;
+      const sources = page
         .map(row => { const d = this.version(auth.account.id, row.id, row.revision);
           if (d.adapter !== "synthetic" && !include) return null;
           return { id: row.id, revision: row.revision, adapter: d.adapter, ...summary(d), updatedAt: row.updated_at,
             readAt: readAt.get(row.id) ?? null,
             connection: d.adapter === "synthetic" ? null : connection(d.envelope.connection), needsYou: inboxNeedsYou(d, sentIds) }; }).filter(Boolean);
-      return { contractVersion: 1, viewer: viewer(auth), sources };
+      const last = page[page.length - 1];
+      return { contractVersion: 1, viewer: viewer(auth), sources,
+        nextCursor: hasMore && last ? encodeCursor({ updatedAt: last.updated_at, id: last.id }) : null };
     });
   }
   read(token, sourceId, binding, { emailView = false, excerptView = false } = {}) {
