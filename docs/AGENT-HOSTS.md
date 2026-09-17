@@ -235,12 +235,14 @@ identities improve attribution but cannot isolate secrets on a shared OS account
 [Computer and apps](https://docs.x.ai/grok-bot/computer-and-apps),
 [security](https://docs.x.ai/grok-bot/approvals-security-and-privacy).
 
-Optional later, a seated agent can add **Cua Driver** as a desktop kit
-(MCP / CLI) instead of Room reimplementing GUI automation. Grok Bot's
-documented path is local-command `cua-driver` with **Ask every time**, or
-Driver installed on the Bot's own computer; a custom public MCP tunnel is
-advanced only. Dual boundary: Grok approvals plus Driver permissions. This
-is not a live Connect door and does not change enrollment. See
+Optional later, a seated agent can add the **Connect Cua desktop** kit
+(alt: Cua Driver MCP) under Connect — it never replaces Join/Connect
+CTAs and is not a marketplace shelf. Grok Bot's documented path is
+local-command `cua-driver` with **Ask every time**, or Driver installed
+on the Bot's own computer. Public MCP OAuth is **not** the default; a
+custom public MCP tunnel is advanced only. Dual boundary: Grok
+approvals plus Driver permissions. This is not a live Connect door and
+does not change enrollment. See
 [ROOM-CUA-DESKTOP.md](ROOM-CUA-DESKTOP.md).
 
 Grok Build's local MCP setup is distinct from Grok chat's custom remote connectors

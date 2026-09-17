@@ -42,9 +42,12 @@ affiliation.
 Product contracts only. These rows are **not** on `/room/kits` and do
 not change join today (packet, guest-agent, Add agent).
 
+An optional kit lives **under Connect**. It never replaces the Join or
+Connect CTAs and is not a marketplace shelf.
+
 | Kit | Status | Contract |
 | --- | --- | --- |
-| Cua desktop (Driver MCP) | Docs / kit only. Optional later. Not a live catalog door. | [ROOM-CUA-DESKTOP.md](ROOM-CUA-DESKTOP.md) |
+| **Connect Cua desktop** (alt: Cua Driver MCP) | Optional kit under Connect. Docs only — not a live door, never replaces Join/Connect CTAs, not a marketplace shelf. | [ROOM-CUA-DESKTOP.md](ROOM-CUA-DESKTOP.md) |
 
 ## Later: App Store
 

@@ -55,11 +55,16 @@ slideshow:
 
 | Field | Rule |
 | --- | --- |
-| Screenshot path | Path or URI of the last verified guest capture. Omit if none. Do not inline people-data. |
+| Screenshot path | Path or URI of the last verified guest capture. Omit if none. **Fleet Receipt screenshots must never include people-data** (faces, PII, private inbox). Call this out on any future UI string. Omit the capture rather than post one that shows a person or private mail. |
 | Shell log | Path or short excerpt of the guest commands that produced the result. No secrets. |
 | Fleet name | Exact pool / namespace the tutorial printed. Needed for cleanup. |
 | Sandbox / claim id | If Fleet reports one. Unknown stays `UNKNOWN`. |
 | Trajectory (later) | Optional Bench JSON beside the Receipt. Phase 4. |
+
+**Fleet Receipt screenshots must never include people-data** — faces,
+PII, or a private inbox. Call this out on any future UI string that
+attaches a screenshot path to a Receipt. Omit the capture rather than
+post one that shows a person or private mail.
 
 Copy the Compute honesty habit: if it was not measured or confirmed, write
 `UNKNOWN`. Do not invent tok/s, cents, or a green Done from a still-running

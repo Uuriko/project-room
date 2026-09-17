@@ -1,6 +1,10 @@
-# Cua desktop kit (optional)
+# Connect Cua desktop
 
-17 September 2026. Product contract. **Not a live Connect door.**
+17 September 2026. Product contract. Kit card title: **Connect Cua desktop**
+(alt OK: Cua Driver MCP).
+
+**Optional kit under Connect.** It never replaces the Join or Connect
+CTAs and is not a marketplace shelf. Not a live Connect door.
 
 Room should **use** [trycua/cua](https://github.com/trycua/cua) (MIT), not
 fork it. Wire Cua as an optional desktop kit a seated agent can claim. Steal
@@ -47,12 +51,14 @@ Two ordinary routes. One advanced route.
 2. **Driver on the agent's own machine.** If the GUI being driven is Grok
    Bot's cloud computer, install Driver *there* and call `cua-driver` on
    that machine. Do not point it at Potter's laptop.
-3. **Custom public MCP tunnel — advanced only.** Grok Bot can reach a
-   public custom MCP server. Cua Driver's MCP is local stdio (or a
-   loopback HTTP listener). Bridging the two needs an authenticated TLS
-   tunnel, a host-generated bearer token, a bounded capability manifest,
-   and a revoke path when the task ends. Cua does not ship a managed
-   public gateway. Do not treat a tunnel as the default kit.
+3. **Custom public MCP tunnel — advanced only.** Public MCP OAuth is
+   **not** the default Grok Bot path and is not this kit. Grok Bot can
+   reach a public custom MCP server; Cua Driver's MCP is local stdio (or
+   a loopback HTTP listener). Bridging the two needs an authenticated
+   TLS tunnel, a host-generated bearer token, a bounded capability
+   manifest, and a revoke path when the task ends. Cua does not ship a
+   managed public gateway. Do not treat a tunnel or remote OAuth as the
+   default kit.
 
 Start with a read-only check (`cua-driver call list_apps '{}'`) before any
 click. Fresh window state, act through an `element_token` from that state,
@@ -69,6 +75,10 @@ on.
 - No Grok Bot **Always allowed** for routine desktop control.
 - No people-data in desktop receipts or kit copy (no emails, account ids,
   display names).
+- **Fleet Receipt screenshots must never include people-data** — faces,
+  PII, or a private inbox. Call this out on any future UI string that
+  attaches a screenshot path to a Receipt. Omit the capture rather than
+  post one that shows a person or private mail.
 - A Room key is not a Cua credential. A Cua credential is not a Compute
   provider token.
 - Do not drive Potter's personal laptop without an explicit opt-in and
@@ -94,7 +104,7 @@ restate them as a second source of truth.
 
 | Phase | Work | Status |
 | --- | --- | --- |
-| **1 Docs / kit** | This contract + catalog row + host cross-link. Optional later kit card: “Connect Cua Driver MCP.” | This PR |
+| **1 Docs / kit** | This contract + catalog row + host cross-link. Optional later kit card: **Connect Cua desktop** (alt: Cua Driver MCP), under Connect only. | This PR |
 | **2 Fleet claim on Work Item** | Optional Room → Fleet claim for a seated Work Item. Credentials in Room secrets. Sandbox URL + last screenshot on the thread. Session join / leave + Done chip + Receipt. | Spike only: [CUA-FLEET-SPIKE-2026-09-17.md](../research/CUA-FLEET-SPIKE-2026-09-17.md) |
 | **3 Lume later** | Local Apple VM for a seated human Mac. Community Macs stay on Compute. | Later |
 | **4 Bench optional** | Export a trajectory next to a Room Receipt. Offline eval. | Optional |
@@ -107,7 +117,9 @@ button.
 Even while using Cua:
 
 1. **Desktop Work Item** — claim a Fleet sandbox for the item; stream a
-   receipt (screenshot path + shell log) into the thread.
+   receipt (screenshot path + shell log) into the thread. **Fleet
+   Receipt screenshots must never include people-data** (faces, PII,
+   private inbox). Call this out on any future UI string.
 2. **Three-surface picker** — Code / API-MCP / GUI in Room tips. Compute
    stays separate.
 3. **Background delivery** — agents act without stealing the user's
@@ -122,8 +134,10 @@ Even while using Cua:
 
 - Fork or rewrite Driver / Fleet / Lume.
 - Stuff Cua into Dasha Compute Start.
-- A live `/room/kits` door or App Store row.
-- Remote MCP OAuth as the default Grok Bot path.
+- A live `/room/kits` door, App Store row, or marketplace shelf.
+- Replacing Join or Connect CTAs with this kit.
+- Public / remote MCP OAuth as the default Grok Bot path (tunnel =
+  advanced only).
 - Instinct Phase 0 [#8](https://github.com/Uuriko/project-room/pull/8) /
   [#9](https://github.com/Uuriko/project-room/pull/9).
 - Quill / inbox / WhatsApp client paths.
