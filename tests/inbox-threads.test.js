@@ -54,3 +54,26 @@ test("malformed inputs are refused", () => {
   throwsCode(() => buildThreads([{ id: "m1", occurredAt: "junk" }]), "invalid_thread_input");
   throwsCode(() => buildThreads([{ id: "m1", occurredAt: "2026-09-16T09:00:00Z", inReplyTo: 7 }]), "invalid_thread_input");
 });
+
+test("reply cycles and self-replies fall back to roots without losing messages", () => {
+  // A pure 2-cycle has no root; the depth-cap guard must render both
+  // messages as roots rather than hiding the thread.
+  const two = buildThreads([
+    msg("a", "2026-09-16T09:00:00Z", { threadId: "t1", inReplyTo: "b" }),
+    msg("b", "2026-09-16T10:00:00Z", { threadId: "t1", inReplyTo: "a" }),
+  ]);
+  assert.equal(two.length, 1);
+  assert.equal(two[0].entries.length, 2);
+  assert.deepEqual(two[0].entries.map(e => e.depth), [0, 0]);
+  // 3-cycle: every message still rendered.
+  const three = buildThreads([
+    msg("a", "2026-09-16T09:00:00Z", { threadId: "t1", inReplyTo: "c" }),
+    msg("b", "2026-09-16T10:00:00Z", { threadId: "t1", inReplyTo: "a" }),
+    msg("c", "2026-09-16T11:00:00Z", { threadId: "t1", inReplyTo: "b" }),
+  ]);
+  assert.equal(three[0].entries.length, 3);
+  // Self-reply is a root, not its own child.
+  const self = buildThreads([msg("a", "2026-09-16T09:00:00Z", { threadId: "t1", inReplyTo: "a" })]);
+  assert.equal(self[0].entries.length, 1);
+  assert.equal(self[0].entries[0].depth, 0);
+});
