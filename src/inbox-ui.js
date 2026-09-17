@@ -6,7 +6,8 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   const $ = selector => document.querySelector(selector);
   const api = new InboxClient(account, { onAccessEnded: onAccountEnded });
   const drafts = new Map(), positions = new Map();
-  let owner = null, active = false, browsing = false, selected = null, epoch = 0, rows = [], sharing = null, sharingBusy = false, retryShare = null;
+  let owner = null, active = false, browsing = false, selected = null, epoch = 0, rows = [], sharing = null, sharingBusy = false, retryShare = null,
+    nextCursor = null, paging = false;
   let navigationEpoch = 0;
   const storageKey = "project-room:pending-private-share:v1";
   const positionKey = "project-room:inbox-position:v1";
@@ -101,6 +102,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     sendUI.reset({ preservePending });
     replyUI.reset({ preservePending });
     api.reset(); owner = null; epoch++; active = false; browsing = false; selected = null; rows = []; sharing = null; sharingBusy = false;
+    nextCursor = null; paging = false;
     drafts.clear(); positions.clear(); retryShare = null; if (!preservePending) persistShare();
     connectionEpoch++; connectionNotes.clear(); connectionRecords.clear(); $("#inbox-connections").hidden = true; $("#inbox-connections").replaceChildren();
     filters = { channel: "all", connection: "all", grouped: true, unreadOnly: false }; $("#inbox-filters").hidden = true; $("#inbox-group-toggle").checked = true;
@@ -193,6 +195,30 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     if (rows.length && !visible.length) text("#inbox-status", "No messages match these filters."); else if (rows.length && $("#inbox-status").textContent === "No messages match these filters.") text("#inbox-status", "");
     const needing = rows.filter(source => source.needsYou).length;
     text("#inbox-attention-count", needing ? `(${needing} need you)` : "");
+    // Paged list: a "Show more" button appears while the server has another
+    // page. It is built here so no static markup changes are needed.
+    if (nextCursor) {
+      const moreBtn = document.createElement("button");
+      moreBtn.type = "button"; moreBtn.className = "inbox-show-more"; moreBtn.textContent = "Show more";
+      moreBtn.addEventListener("click", more);
+      list.append(moreBtn);
+    }
+  }
+  // Append the next page without disturbing selection or filters. Rows are
+  // keyed by id so a repeated cursor can never duplicate a row.
+  async function more() {
+    if (!owns() || !nextCursor || paging) return;
+    paging = true; text("#inbox-status", "Loading more…");
+    const turn = ++epoch;
+    try {
+      const result = await api.list({ cursor: nextCursor }); if (!owns() || turn !== epoch) return;
+      const seen = new Set(rows.map(source => source.id));
+      rows.push(...result.sources.filter(source => !seen.has(source.id)));
+      nextCursor = result.nextCursor ?? null;
+      renderFilters(); renderList();
+      text("#inbox-status", rows.length ? "" : "No messages yet.");
+    } catch (error) { if (owns() && turn === epoch) text("#inbox-status", errorText(error)); }
+    paging = false;
   }
   $("#inbox-filter-channel").addEventListener("change", () => { filters.channel = $("#inbox-filter-channel").value; if (owns()) renderList(); });
   $("#inbox-filter-connection").addEventListener("change", () => { filters.connection = $("#inbox-filter-connection").value; if (owns()) renderList(); });
@@ -369,7 +395,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     loadConnections();
     try {
       const result = await api.list(); if (!owns() || turn !== epoch) return;
-      rows = result.sources; renderFilters(); renderList(); text("#inbox-status", rows.length ? (visibleRows().length ? "" : "No messages match these filters.") : "No messages yet.");
+      rows = result.sources; nextCursor = result.nextCursor ?? null; renderFilters(); renderList(); text("#inbox-status", rows.length ? (visibleRows().length ? "" : "No messages match these filters.") : "No messages yet.");
       $("#inbox-empty").hidden = rows.length > 0;
       if (selected && drafts.has(selected)) { render(); loadResults(selected); return; }
       const pending = pendingShare(), saved = savedPosition();

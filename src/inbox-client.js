@@ -178,11 +178,15 @@ export class InboxClient {
       throw error;
     }
   }
-  list() {
-    return this.request("?view=email-excerpt-v1", {}, v => Array.isArray(v.sources) && v.sources.every(s => id(s.id) && revision(s.revision) && s.revision > 0
+  list({ cursor = null, limit = null } = {}) {
+    const params = new URLSearchParams({ view: "email-excerpt-v1" });
+    if (cursor !== null && cursor !== undefined) params.set("cursor", cursor);
+    if (limit !== null && limit !== undefined) params.set("limit", String(limit));
+    return this.request(`?${params}`, {}, v => Array.isArray(v.sources) && v.sources.every(s => id(s.id) && revision(s.revision) && s.revision > 0
       && typeof s.subject === "string" && ["synthetic", "email", "telegram"].includes(s.adapter) && validConnectionRef(s.connection ?? null)
       && (s.adapter === "synthetic") === ((s.connection ?? null) === null) && typeof s.needsYou === "boolean" && (!s.needsYou || s.adapter !== "synthetic")
-      && ["sender", "recipient"].every(k => typeof s[k] === "string")));
+      && ["sender", "recipient"].every(k => typeof s[k] === "string"))
+      && (v.nextCursor === null || typeof v.nextCursor === "string"));
   }
   // Owner-managed connection records: add or update a bot/mailbox profile, or disconnect ("Remove").
   applyConnection(request) {
