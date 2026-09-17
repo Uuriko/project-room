@@ -6,7 +6,7 @@
 
 **Closest cousin to Project Room we have found.** Treat as peer, not toy.
 
-Room product language is **Second** (never Genie). `seat.kind = personal` is a Second. Spec: [ROOM-SECOND-V0.md](ROOM-SECOND-V0.md).
+Room product language is **Second** (never Genie). `seat.kind = personal` is a Second. Spec: [ROOM-SECOND-V0.md](ROOM-SECOND-V0.md). Deep architecture + new cousins: [ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md](../research/ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md).
 
 ---
 
@@ -97,7 +97,7 @@ Room product language is **Second** (never Genie). `seat.kind = personal` is a S
 2. Extend receipt schema: `delegation.messenger` (from Second), `human.takeover`, `human.release`.  
 3. Attention doc: Quiet Events preference.  
 4. Muse tip: Connect-an-agent copy — “your Second / their agents / one Room” (never Genie; no Nautilo trademark).  
-5. Competitive landscape row: Nautilo (agentsea) as closest open peer.
+5. Competitive landscape: Nautilo as closest open peer, plus deep-pass cousins (qm, Dust, Magentic-UI, Greenroom, AgentsMesh, Patchwork, KaibanJS, Nomos, ai-room).
 
 Video: `/workspace/x-steals-20260917/nautilo/launch.mp4` (watch notes fold in when ready).
 
