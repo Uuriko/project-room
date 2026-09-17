@@ -22,6 +22,7 @@ import { AccessRequests } from "./access-requests.mjs";
 import { AgentRooms } from "./agent-rooms.mjs";
 import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
 import { listPins, setPin } from "./pins.mjs";
+import { GoogleSignIn, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage } from "./google-oauth.mjs";
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -79,10 +80,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   loadAsset = path => readFile(new URL(path, assetRoot)), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
   telegram = telegramConfig(), telegramStatus = new TelegramLiveStatus(), channelTransports = null,
+  googleAuth = null,
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", growth = null }) {
   // Live Telegram bindings are read once (Worker secrets or local env); the
   // config never holds up startup and the card reports "not configured".
   if (typeof telegram?.configured !== "boolean" || !Array.isArray(telegram.bindings)) throw new Error("Telegram configuration must come from telegramConfig()");
+  // Google sign-in is off unless the caller passes googleConfig(env, origin).
+  // The sign-in helper is created lazily so its PKCE/state table lives as long
+  // as this server instance (one per Durable Object in production).
+  let googleSignIn = null;
+  const google = () => {
+    if (!googleAuth) return null;
+    googleSignIn ??= new GoogleSignIn({ clientId: googleAuth.clientId, clientSecret: googleAuth.clientSecret,
+      redirectUri: googleAuth.redirectUri || expectedOrigin() + GOOGLE_CALLBACK_PATH,
+      fetchImpl: googleAuth.fetchImpl ?? fetch, now: () => store.now() });
+    return googleSignIn;
+  };
   if (trustedLocalProxy && !origin?.startsWith("https://")) throw new Error("The deployment proxy requires a fixed HTTPS origin");
   if (!Number.isInteger(streamQueueCap) || streamQueueCap < 1) throw new Error("Stream queue cap must be a positive integer of bytes");
   if (!Number.isInteger(streamInterval) || streamInterval < 1) throw new Error("Stream interval must be a positive integer of milliseconds");
@@ -324,6 +337,56 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === "/api/version" && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode, sourceRevision: SOURCE_REVISION, buildId: BUILD_ID }, req.method === "HEAD");
+      }
+      // Google sign-in (Clerk-free). The start route begins the PKCE flow bound
+      // to the browser's account session slot; the callback verifies state and
+      // the code exchange, upgrades the slot to the Google-provisioned account,
+      // and returns a same-origin HTML page so the SameSite=Strict session
+      // cookie is sent on the next load. Error responses never carry tokens.
+      if (url.pathname === GOOGLE_START_PATH) {
+        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
+        const signIn = google();
+        if (!signIn) return json(res, 503, { status: "unavailable", reason: "google_not_configured" });
+        rate(`google-start:${remoteAddress}`, 10);
+        let slotToken = cookie(req, accountCookieName), expectedRevision;
+        if (!slotToken) {
+          const created = store.createAccountSessionSlot();
+          slotToken = created.token;
+          expectedRevision = created.session.sessionRevision;
+          setCookie(res, accountCookieName, slotToken, Math.max(0, Math.floor((created.session.expiresAt - store.now()) / 1000)));
+        } else {
+          expectedRevision = store.accountSessionSlot(slotToken).sessionRevision;
+        }
+        const started = signIn.begin({ slotToken, expectedRevision });
+        res.statusCode = 302;
+        res.setHeader("Location", started.authorizationUrl);
+        return res.end();
+      }
+      if (url.pathname === GOOGLE_CALLBACK_PATH) {
+        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
+        const signIn = google();
+        if (!signIn) return json(res, 503, { status: "unavailable", reason: "google_not_configured" });
+        rate(`google-callback:${remoteAddress}`, 20);
+        const finishGoogle = href => {
+          const html = googlePostLoginPage(href);
+          res.setHeader("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+          const bytes = Buffer.from(html, "utf8");
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length });
+          return res.end(bytes);
+        };
+        try {
+          const completed = await signIn.complete({ callbackUrl: expectedOrigin() + url.pathname + url.search });
+          const oldRoomToken = cookie(req, roomCookieName);
+          const loggedIn = store.loginAccountSessionWithGoogle(completed.slotToken, completed.claims.sub, completed.expectedRevision, {
+            revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null
+          });
+          setCookie(res, accountCookieName, completed.slotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
+          const firstRoom = store.db.prepare("SELECT room_id FROM member_accounts WHERE account_id=? ORDER BY room_id LIMIT 1")
+            .get(loggedIn.account.id);
+          return finishGoogle(firstRoom ? `/?room=${encodeURIComponent(firstRoom.room_id)}` : "/?google=error");
+        } catch {
+          return finishGoogle("/?google=error");
+        }
       }
       if (url.pathname === "/api/ready" && ["GET", "HEAD"].includes(req.method)) {
         try {

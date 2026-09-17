@@ -3,6 +3,7 @@ import { isIP } from 'node:net';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
+import { googleConfig } from '../server/google-oauth.mjs';
 import { ChannelWebhookInbox } from '../server/channel-import.mjs';
 import { DurableDatabase, durableStorage } from './storage.mjs';
 import { bootstrapRoom } from './bootstrap.mjs';
@@ -32,7 +33,13 @@ export class ProjectRoom {
     if (this.paused) return;
     this.store = new RoomStore(null, { database: new DurableDatabase(ctx.storage), storagePlatform: durableStorage });
     bootstrapRoom(this.store, env);
+    // Google sign-in is optional: unconfigured or misconfigured credentials
+    // disable the /api/auth/google routes (503) instead of breaking the room.
+    let googleAuth = null;
+    try { googleAuth = googleConfig(env, env.ROOM_ORIGIN); }
+    catch (error) { console.warn(`room google auth disabled: ${error.message}`); }
     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: 'cloudflare-staging',
+      googleAuth,
       // Verified provider webhook updates are journaled in the Durable Object's
       // SQLite (pending_channel_updates), so they survive eviction and restart.
       channelWebhooks: new ChannelWebhookInbox(this.store),

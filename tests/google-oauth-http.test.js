@@ -1,0 +1,209 @@
+// HTTP integration tests for Google sign-in (phase 2): the
+// /api/auth/google/start and /api/auth/google/callback routes in
+// server/http.mjs, wired to server/google-oauth.mjs with no Clerk and no
+// provider-onboarding. Google's token and JWKS endpoints are mocked; no
+// network calls, no real credentials.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { generateKeyPairSync, sign } from "node:crypto";
+import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
+import { createRoomServer } from "../server/http.mjs";
+import { GOOGLE_ISSUER, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, GOOGLE_SCOPES } from "../server/google-oauth.mjs";
+import * as T from "../src/events.js";
+
+const clientId = "1234567890-abcdefghijklmnopqrstuvwxyz.apps.googleusercontent.com";
+const clientSecret = "GOCSPX-fixture-secret-never-real";
+const sub = "123456789012345678901";
+const keys = generateKeyPairSync("rsa", { modulusLength: 2048 });
+const jwk = keys.publicKey.export({ format: "jwk" });
+jwk.kid = "google-http-kid";
+jwk.alg = "RS256";
+jwk.use = "sig";
+
+function idToken() {
+  const now = Math.floor(Date.now() / 1000);
+  const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT", kid: jwk.kid })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({ iss: GOOGLE_ISSUER, sub, aud: clientId, iat: now, exp: now + 600 })).toString("base64url");
+  const input = `${header}.${payload}`;
+  return `${input}.${sign("RSA-SHA256", Buffer.from(input), keys.privateKey).toString("base64url")}`;
+}
+
+function googleFetch() {
+  return async url => {
+    if (url === "https://oauth2.googleapis.com/token") {
+      return Response.json({ id_token: idToken(), scope: GOOGLE_SCOPES });
+    }
+    if (url === "https://www.googleapis.com/oauth2/v3/certs") return Response.json({ keys: [jwk] });
+    return new Response("missing", { status: 404 });
+  };
+}
+
+function googleAuth() {
+  return { clientId, clientSecret, fetchImpl: googleFetch() };
+}
+
+async function startServer(t, f, options = {}) {
+  const server = createRoomServer({ store: f.store, ...options });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    f.store.close();
+  });
+  return `http://127.0.0.1:${server.address().port}`;
+}
+
+const accountCookie = res => {
+  const setCookie = res.headers.get("set-cookie") || "";
+  const match = /account_session=([A-Za-z0-9_-]{43})/.exec(setCookie);
+  return match?.[1] ?? null;
+};
+
+async function beginFlow(origin, cookieHeader) {
+  const start = await fetch(origin + GOOGLE_START_PATH, {
+    redirect: "manual", headers: cookieHeader ? { Cookie: cookieHeader } : {}
+  });
+  assert.equal(start.status, 302);
+  const authorize = new URL(start.headers.get("location"));
+  assert.equal(authorize.origin, "https://accounts.google.com");
+  assert.equal(authorize.searchParams.get("client_id"), clientId);
+  assert.equal(authorize.searchParams.get("redirect_uri"), origin + GOOGLE_CALLBACK_PATH);
+  assert.equal(authorize.searchParams.get("scope"), GOOGLE_SCOPES);
+  assert.equal(authorize.searchParams.get("code_challenge_method"), "S256");
+  assert.match(authorize.searchParams.get("state") || "", /^[A-Za-z0-9_-]{43}$/);
+  return { authorize, slotCookie: accountCookie(start) };
+}
+
+test("start redirects to Google with PKCE and mints an account session slot", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f, { googleAuth: googleAuth() });
+  const { slotCookie } = await beginFlow(origin);
+  assert.ok(slotCookie, "start sets the account session cookie");
+  const slot = f.store.accountSessionSlot(slotCookie);
+  assert.equal(slot.account, null, "slot is unauthenticated until the callback");
+});
+
+test("start reuses the existing account session slot", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f, { googleAuth: googleAuth() });
+  const first = await beginFlow(origin);
+  const second = await beginFlow(origin, `account_session=${first.slotCookie}`);
+  assert.equal(second.slotCookie, null, "no new slot cookie when one already exists");
+});
+
+test("start is 503 with honest JSON when Google is not configured", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const res = await fetch(origin + GOOGLE_START_PATH, { redirect: "manual" });
+  assert.equal(res.status, 503);
+  const body = await res.json();
+  assert.equal(body.reason, "google_not_configured");
+  assert.equal(JSON.stringify(body).includes(clientSecret), false);
+});
+
+test("start rejects non-GET methods", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f, { googleAuth: googleAuth() });
+  const res = await fetch(origin + GOOGLE_START_PATH, { method: "POST" });
+  assert.equal(res.status, 405);
+});
+
+test("callback success establishes the session and returns the same-origin page", async t => {
+  const f = createAcceptanceFixture();
+  // The Google account already belongs to commons, so the landing opens it.
+  const pre = f.store.createAccountSessionSlot();
+  f.store.loginAccountSessionWithGoogle(pre.token, sub, 0);
+  f.store.command(f.keys.owner, "commons", { id: "google-member-1", type: T.EVENT_TYPES.MEMBER_ADDED,
+    data: { memberId: "googler", displayName: "Googler", kind: "human", permissions: [] } });
+  f.store.bindHumanAccount("commons", "googler", `google:${sub}`);
+
+  const origin = await startServer(t, f, { googleAuth: googleAuth() });
+  const { authorize, slotCookie } = await beginFlow(origin);
+  const callback = await fetch(
+    `${origin}${GOOGLE_CALLBACK_PATH}?state=${authorize.searchParams.get("state")}&code=code-fixture`,
+    { redirect: "manual", headers: { Cookie: `account_session=${slotCookie}` } });
+  assert.equal(callback.status, 200);
+  const html = await callback.text();
+  assert.match(html, /content="0;url=\/\?room=commons"/);
+  const sessionCookie = accountCookie(callback);
+  assert.equal(sessionCookie, slotCookie, "the callback retains the same session slot");
+  const session = f.store.authenticateAccountSession(sessionCookie);
+  assert.equal(session.account.id, `google:${sub}`);
+  assert.doesNotMatch(session.account.id, /@/);
+  // The account row uses the Google subject, never the email address.
+  const row = f.store.db.prepare("SELECT id, origin FROM accounts WHERE id=?").get(`google:${sub}`);
+  assert.equal(row.origin, "google");
+  // No secret material leaks into the returned page.
+  assert.equal(html.includes(clientSecret), false);
+  assert.equal(html.includes("code-fixture"), false);
+});
+
+test("callback success without rooms still establishes the session", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f, { googleAuth: googleAuth() });
+  const { authorize, slotCookie } = await beginFlow(origin);
+  const callback = await fetch(
+    `${origin}${GOOGLE_CALLBACK_PATH}?state=${authorize.searchParams.get("state")}&code=code-fixture`,
+    { redirect: "manual", headers: { Cookie: `account_session=${slotCookie}` } });
+  assert.equal(callback.status, 200);
+  const html = await callback.text();
+  assert.match(html, /url=\/\?google=error/);
+  const sessionCookie = accountCookie(callback);
+  assert.ok(sessionCookie, "session cookie is set even without a room to open");
+  const session = f.store.authenticateAccountSession(sessionCookie);
+  assert.equal(session.account.id, `google:${sub}`);
+});
+
+test("callback with a state mismatch provisions no account", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f, { googleAuth: googleAuth() });
+  await beginFlow(origin);
+  const bad = await fetch(`${origin}${GOOGLE_CALLBACK_PATH}?state=${"x".repeat(43)}&code=code-fixture`, { redirect: "manual" });
+  assert.equal(bad.status, 200);
+  assert.match(await bad.text(), /url=\/\?google=error/);
+  assert.equal(bad.headers.get("set-cookie") || "", "");
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM accounts WHERE id LIKE 'google:%'").get().n, 0);
+});
+
+test("callback with a provider denial provisions no account", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f, { googleAuth: googleAuth() });
+  const { authorize } = await beginFlow(origin);
+  const denied = await fetch(
+    `${origin}${GOOGLE_CALLBACK_PATH}?state=${authorize.searchParams.get("state")}&error=access_denied`,
+    { redirect: "manual" });
+  assert.equal(denied.status, 200);
+  assert.match(await denied.text(), /url=\/\?google=error/);
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM accounts WHERE id LIKE 'google:%'").get().n, 0);
+});
+
+test("callback is 503 with honest JSON when Google is not configured", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const res = await fetch(`${origin}${GOOGLE_CALLBACK_PATH}?state=${"y".repeat(43)}&code=x`, { redirect: "manual" });
+  assert.equal(res.status, 503);
+  const body = await res.json();
+  assert.equal(body.reason, "google_not_configured");
+});
+
+test("callback rejects non-GET methods", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f, { googleAuth: googleAuth() });
+  const res = await fetch(origin + GOOGLE_CALLBACK_PATH, { method: "POST" });
+  assert.equal(res.status, 405);
+});
+
+test("second login with the same Google subject reuses the account", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f, { googleAuth: googleAuth() });
+  for (let i = 0; i < 2; i++) {
+    const { authorize, slotCookie } = await beginFlow(origin);
+    const callback = await fetch(
+      `${origin}${GOOGLE_CALLBACK_PATH}?state=${authorize.searchParams.get("state")}&code=code-${i}`,
+      { redirect: "manual", headers: { Cookie: `account_session=${slotCookie}` } });
+    assert.equal(callback.status, 200);
+    const session = f.store.authenticateAccountSession(accountCookie(callback));
+    assert.equal(session.account.id, `google:${sub}`);
+  }
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM accounts WHERE id=?").get(`google:${sub}`).n, 1);
+});

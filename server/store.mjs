@@ -923,6 +923,43 @@ export class RoomStore {
       return this.authenticateAccountSession(slotToken);
     });
   }
+  // Google sign-in upgrades an account session slot the same way an access-key
+  // login does, but the account is provisioned from the verified Google subject
+  // (never the email address). The login is recorded as an account credential
+  // so the slot's parent-credential link stays intact; the credential token is
+  // never exposed.
+  loginAccountSessionWithGoogle(slotToken, googleSub, expectedRevision, { revokeRoomToken = null } = {}) {
+    if (typeof googleSub !== "string" || !/^[1-9][0-9]{0,254}$/.test(googleSub)) fail(422, "invalid_google_subject", "A verified Google subject is required");
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) fail(422, "invalid_session_revision", "A current account session revision is required");
+    return this.transaction(() => {
+      const slot = this.accountSessionSlot(slotToken);
+      if (slot.sessionRevision !== expectedRevision) fail(409, "stale_session_revision", "Account session changed; refresh before signing in");
+      const accountId = `google:${googleSub}`;
+      const existing = this.db.prepare("SELECT id, active, auth_epoch FROM accounts WHERE id=?").get(accountId);
+      let accountAuthEpoch;
+      if (!existing) {
+        this.createAccount(accountId, "google");
+        accountAuthEpoch = 0;
+      } else {
+        if (existing.active !== 1) fail(403, "access_denied", "Active account required");
+        accountAuthEpoch = existing.auth_epoch;
+      }
+      const revision = expectedRevision + 1;
+      // The slot table requires a parent credential when an account is set.
+      // Record the Google login as an account credential (the token is never
+      // exposed; the verified Google subject is the credential).
+      const authenticatedUntil = Math.min(slot.expiresAt, this.now() + 8 * 3600000);
+      const parentCredentialHash = hash(this.insertAccountCredential(accountId, authenticatedUntil));
+      this.db.prepare(`UPDATE account_session_slots SET revision=?,account_id=?,account_auth_epoch=?,parent_credential_hash=?,authenticated_until=?
+        WHERE hash=? AND revision=?`).run(revision, accountId, accountAuthEpoch, parentCredentialHash,
+        authenticatedUntil, slot.credentialHash, expectedRevision);
+      if (revokeRoomToken !== null) {
+        if (typeof revokeRoomToken !== "string" || !tokenPattern.test(revokeRoomToken)) fail(422, "invalid_credential", "Invalid prior Room credential");
+        this.revoke(revokeRoomToken);
+      }
+      return this.authenticateAccountSession(slotToken);
+    });
+  }
   logoutAccountSession(slotToken, expectedRevision) {
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) fail(422, "invalid_session_revision", "A current account session revision is required");
     return this.transaction(() => {
