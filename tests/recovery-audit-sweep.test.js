@@ -88,6 +88,13 @@ function sweep() {
   step(T.REPLY_REQUEST_CANCELLED, "owner", () => ({ requestMessageId: "req-1", expectedRequestRevision: state().replyRequests?.["req-1"]?.revision ?? 0, reason: "never mind" }));
 
   step(T.WORK_ACCEPTED, "producer", () => ({ workItemId: W, expectedRevision: item().revision }));
+  // Help only opens on accepted work, and auditWorkHelp short-circuits to
+  // almost nothing until a help event exists - so without this the sweep was
+  // walking straight past that auditor while appearing to cover the room.
+  step(T.WORK_HELP_UPDATED, "producer", () => ({
+    workItemId: W, expectedRevision: item().revision, expectedHelpRevision: item().helpWanted?.revision ?? 0,
+    status: "open", scope: "A second pair of eyes", expiresAt: new Date(Date.now() + 3600_000).toISOString()
+  }));
   step(T.WORK_STARTED, "producer", () => ({ workItemId: W, expectedRevision: item().revision }));
   step(T.SESSION_STOP_REQUESTED, "owner", () => ({ workItemId: W, expectedRevision: item().revision }));
   step(T.SESSION_STOPPED, "producer", () => ({ workItemId: W, expectedRevision: item().revision, status: "done", spendCents: 20, budgetEnforced: true, reason: "finished", outputs: "agenda" }));
@@ -137,7 +144,7 @@ test("the sweep covers enough of the event surface to be worth trusting", () => 
   // refused - which would make the test above pass for the wrong reason.
   const all = Object.values(T);
   const missing = all.filter(type => !result.exercised.has(type));
-  assert.ok(result.exercised.size >= 29,
+  assert.ok(result.exercised.size >= 30,
     `only ${result.exercised.size} of ${all.length} event types were exercised; not covered: ${missing.join(", ")}`);
 });
 
