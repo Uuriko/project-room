@@ -94,16 +94,39 @@ test("threads respect sourceId scope and per-account isolation", t => {
   const f = fixture(t);
   const a = f.importEmail({ messageId: "m-a", internetMessageId: "<a@example.test>", conversationId: "conv-1",
     subject: "Kickoff", body: "Let us start." });
-  f.importEmail({ messageId: "m-b", internetMessageId: "<b@example.test>", conversationId: "conv-1",
+  const b = f.importEmail({ messageId: "m-b", internetMessageId: "<b@example.test>", conversationId: "conv-1",
     subject: "Re: Kickoff", body: "Agreed.", inReplyTo: "<a@example.test>" });
+  // sourceId scopes to the full thread containing the source, not a singleton.
   const scoped = f.threads({ includeChannels: true, sourceId: a });
   assert.equal(scoped.total, 1);
-  assert.equal(scoped.threads[0].messageCount, 1);
-  assert.equal(scoped.threads[0].entries[0].source.id, a);
+  assert.equal(scoped.threads.length, 1);
+  assert.equal(scoped.threads[0].messageCount, 2);
+  assert.deepEqual(scoped.threads[0].entries.map(entry => entry.source.id), [a, b]);
+  assert.deepEqual(scoped.threads[0].entries.map(entry => entry.depth), [0, 1]);
+  // Scoping from the reply lands on the same thread.
+  const fromReply = f.threads({ includeChannels: true, sourceId: b });
+  assert.equal(fromReply.total, 1);
+  assert.equal(fromReply.threads[0].threadId, scoped.threads[0].threadId);
+  // Unknown and cross-account ids 404; malformed ids 422.
+  assert.throws(() => f.threads({ includeChannels: true, sourceId: "nope-missing" }),
+    err => err.status === 404 && err.code === "inbox_source_not_found");
+  assert.throws(() => f.threads({ includeChannels: true, sourceId: "bad id!" }),
+    err => err.status === 422 && err.code === "invalid_inbox_source");
   const guest = f.store.accountForMember("commons", "guest"), key = f.store.issueAccountAccessKey(guest.id);
   const slot = f.store.createAccountSessionSlot(), session = { token: slot.token, ...f.store.loginAccountSession(slot.token, key, 0) };
+  assert.throws(() => f.store.inbox.threads(session.token, session.sessionBinding, { includeChannels: true, sourceId: a }),
+    err => err.status === 404 && err.code === "inbox_source_not_found");
   const isolated = f.store.inbox.threads(session.token, session.sessionBinding, { includeChannels: true });
   assert.equal(isolated.total, 0);
+});
+
+test("a sourceId outside the reading view scopes to nothing instead of leaking", t => {
+  const f = fixture(t);
+  const a = f.importEmail({ messageId: "m-a2", internetMessageId: "<a2@example.test>", conversationId: "conv-2",
+    subject: "Hidden", body: "no reading view" });
+  const scoped = f.threads({ sourceId: a });
+  assert.equal(scoped.total, 0);
+  assert.deepEqual(scoped.threads, []);
 });
 
 test("rejects invalid limits and caps the thread count", t => {
