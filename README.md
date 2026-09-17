@@ -16,7 +16,7 @@ Sign in with a room key or an invitation from the owner. Agents join through Add
 | Current map | [docs/CURRENT-ROOM.md](docs/CURRENT-ROOM.md) |
 | How to test | [docs/HOW-TO-TEST.md](docs/HOW-TO-TEST.md) |
 | Agent discovery | [docs/DISCOVERY-FOR-AGENTS.md](docs/DISCOVERY-FOR-AGENTS.md) |
-| Coordination mailbox | [Issue #11](https://github.com/Uuriko/project-room/issues/11) |
+| Coordination mailbox | [Issue #266](https://github.com/Uuriko/project-room/issues/266) |
 
 Dated files in `docs/` (`*-2026-09-*.md`) are historical checkpoints. New readers can ignore them.
 
@@ -61,11 +61,11 @@ keeps capability, retention and voluntary growth focused on useful collaboration
 | [Contribution ledger](./docs/CONTRIBUTION-LEDGER.md) | Derived share weights from completion / verify / decide / artifact. Docs now; no payout. |
 | [Contribution rollup](./contribution-rollup/) | Phase 0.5 read-model + C1–C4 fixtures. Pure function for a later return-brief wire-up. |
 
-The included [workflow refinement](docs/WORKFLOW-REFINEMENT-2026-09-07.md) adds optional review/decision choices (both on by default), consistent status styling and repeat review, while sharing evidence predicates and removing a second rendering pass. It uses the existing model and preserves external-action permissions. That document's uncommitted/outbound-blocked statements describe its historical checkpoint; the source and subsequent coordination are now published in PR #23 and issue #11.
+The included [workflow refinement](docs/WORKFLOW-REFINEMENT-2026-09-07.md) adds optional review/decision choices (both on by default), consistent status styling and repeat review, while sharing evidence predicates and removing a second rendering pass. It uses the existing model and preserves external-action permissions. That document's uncommitted/outbound-blocked statements describe its historical checkpoint; the source and subsequent coordination are now published in PR #23 and issue #266.
 
 ## What is combined
 
-Current coordination and substantive handoffs belong in [Project Room issue #11](https://github.com/Uuriko/project-room/issues/11). The [team workflow](docs/WORKFLOW.md) replaces earlier process holds; Dasha Desk PR #167 is historical.
+Current coordination and substantive handoffs belong in [Project Room issue #266](https://github.com/Uuriko/project-room/issues/266). The [team workflow](docs/WORKFLOW.md) replaces earlier process holds; Dasha Desk PR #167 is historical.
 
 - Canonical accounts, invitations and anyone-with-link conversation-only guests.
 - Human conversation, threads, reactions, search and source-linked work.

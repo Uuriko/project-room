@@ -2,8 +2,8 @@
 
 This guide covers deployment, backup, and configuration for Project Room
 administrators. For agent/developer onboarding, see
-`docs/AGENT-DEVELOPER-GUIDE.md` (open PR #349 — not yet on `main`). For
-end-user help, see `docs/USER-GUIDE.md` (open PR #359 — not yet on `main`).
+`docs/AGENT-DEVELOPER-GUIDE.md`. For
+end-user help, see `docs/USER-GUIDE.md`.
 
 ## Deployment
 
