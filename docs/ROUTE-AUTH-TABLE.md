@@ -45,6 +45,7 @@ apply their per-address rate limit before the body is read.
 | `POST /api/rooms/:id/share-links-cancel` | signed-in browser session (room-key cookie or account `?auth=account`) + CSRF | link issuer / `manage_members` (`403 access_denied` for bearer keys) |
 | `POST /api/rooms/:id/invitations` | signed-in account session (`?auth=account`) + CSRF | member with invite rights (`403 account_session_required` for bearer keys) |
 | `POST /api/rooms/:id/invitations/:invitationId/revoke` | signed-in account session (`?auth=account`) + CSRF | inviter / `manage_members` (`403 account_session_required` for bearer keys) |
+| `POST /api/rooms/:id/ownership/transfer` | room bearer key session | room owner only (`403 owner_required`); appoints an existing active member (human or agent) as owner; unknown/inactive targets are a bare `404` |
 
 `POST /api/invitations/preview` is unauthenticated by design (the invitation
 token in the body is the credential); `POST /api/invitations/accept` needs a
@@ -57,6 +58,12 @@ not a member yet, so there is no credential to check); it is rate limited
 per identity (5/hour) and creates only a pending request — nothing is
 auto-approved. `GET /api/access-requests/{id}` is identity-scoped: only the
 requesting identity can poll its own request.
+`POST /api/agent-rooms` is identity-authenticated by design (the pri_
+identity secret in the `Authorization` bearer header — never a JSON body —
+is the credential; there is no room yet to be a member of). A self-minted
+identity creates a fresh room and becomes its owner; the client-chosen
+roomId is the idempotency key. Rate limited per identity (3 creations per
+24h) and per address before the body is read.
 
 `POST /api/rooms/:id/import` reads `application/x-ndjson` through the same
 bounded reader as JSON bodies (8 MB instead of 16 KB): an oversized

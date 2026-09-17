@@ -22,6 +22,7 @@ import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.m
 import { Attention, attentionSchema } from "./attention.mjs";
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
 import { accessRequestSchema } from "./access-requests.mjs";
+import { agentRoomSchema } from "./agent-rooms.mjs";
 import { ensureAttachmentSchema, verifyAttachmentSchema } from "./attachment-schema.mjs";
 import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
 import { workItemChanges } from "../src/workflow.js";
@@ -230,6 +231,7 @@ const shapes = {
   [T.ROOM_POLICY_SET]: ROOM_POLICY_FIELDS.join(" "),
   [T.ROOM_SPEND_ALLOWANCE_SET]: "allowanceCents periodDays",
   [T.ROOM_ARCHIVED]: "reason",
+  [T.OWNERSHIP_TRANSFERRED]: "toMemberId reason",
   [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId identityId",
   [T.MEMBER_ACCESS_CHANGED]: "memberId expectedMemberRevision permissions active",
   [T.MEMBER_STATUS_UPDATED]: "memberId message",
@@ -453,6 +455,10 @@ export class RoomStore {
       // the writer fence (see unfencedAdditiveTables). Applied here (not only in
       // createRoomServer) so store-only fixtures and the recovery audit see it.
       this.db.exec(accessRequestSchema);
+      // Agent room creation provenance: purely additive, intentionally outside
+      // the writer fence (see unfencedAdditiveTables). Applied here (not only in
+      // createRoomServer) so store-only fixtures and the recovery audit see it.
+      this.db.exec(agentRoomSchema);
       ensureAttachmentSchema(this.db); // Converge the deployed v28-v33 attachment lineage before installing v34 fences.
       // Idempotent: recreates fences for tables the additive schemas just
       // (re)created, and refuses a file whose existing triggers drifted.

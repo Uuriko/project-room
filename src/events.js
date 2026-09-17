@@ -46,7 +46,8 @@ export const EVENT_TYPES = Object.freeze({
   SESSION_STATUS_CHANGED: SESSION_EVENT_TYPES.STATUS_CHANGED,
   SESSION_STOP_REQUESTED: SESSION_EVENT_TYPES.STOP_REQUESTED,
   SESSION_STOPPED: SESSION_EVENT_TYPES.STOPPED,
-  CAPABILITIES_ADVERTISED: "capabilities.advertised"
+  CAPABILITIES_ADVERTISED: "capabilities.advertised",
+  OWNERSHIP_TRANSFERRED: "ownership.transferred"
 });
 
 // Room policy (issue #6 A4): the owner can make independent review and/or an
@@ -211,6 +212,7 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.ROOM_POLICY_SET]: setRoomPolicy,
     [EVENT_TYPES.ROOM_SPEND_ALLOWANCE_SET]: setSpendAllowance,
     [EVENT_TYPES.ROOM_ARCHIVED]: archiveRoom,
+    [EVENT_TYPES.OWNERSHIP_TRANSFERRED]: transferOwnership,
     [EVENT_TYPES.MEMBER_ADDED]: addMember,
     [EVENT_TYPES.MEMBER_JOINED_VIA_INVITATION]: joinMemberViaInvitation,
     [EVENT_TYPES.MEMBER_ACCESS_CHANGED]: changeMemberAccess,
@@ -299,13 +301,16 @@ function createRoom(state, incoming) {
 
 function updateCharter(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
-  if (actor.kind !== "human" || actor.id !== state.room.ownerId) throw new Error("Only the Room owner may change room instructions");
+  // Room-scoped owner power: an agent owner may set instructions, so the
+  // gate is ownership, not humanity. Account-bound powers (spend
+  // allowance, access review, connection sponsorship) stay human-only.
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may change room instructions");
   state.room.charter = charterFromEvent(incoming, state.room.charter ?? null);
 }
 
 function setRoomPolicy(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
-  if (actor.kind !== "human" || actor.id !== state.room.ownerId) throw new Error("Only the Room owner may set room policy");
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may set room policy");
   for (const field of ROOM_POLICY_FIELDS) {
     if (typeof incoming.data[field] !== "boolean") throw new Error(`Room policy requires ${field} as true or false`);
   }
@@ -321,11 +326,49 @@ function setRoomPolicy(state, incoming) {
 
 function archiveRoom(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
-  if (actor.kind !== "human" || actor.id !== state.room.ownerId) throw new Error("Only the Room owner may archive the room");
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may archive the room");
   if (incoming.data.reason != null && (typeof incoming.data.reason !== "string" || incoming.data.reason.length > 280)) throw new Error("Archive reason must be 280 characters or fewer");
   state.room.archivedAt = incoming.at;
   state.room.archivedById = incoming.actorId;
   if (incoming.data.reason) state.room.archiveReason = incoming.data.reason;
+}
+
+// Ownership is transferable: the current owner appoints an existing active
+// member (human or agent) as the new owner. Only the owner can transfer, so
+// there is no privilege escalation; the transfer is reversible by another
+// transfer. The event log is the audit trail; the projection keeps only
+// scalar current/previous-owner fields, never a history array.
+// Ownership implies full authority, so the new owner receives
+// the whole permission set (a bootstrap owner's set), whatever its kind —
+// otherwise an agent owner would be a figurehead unable to administer
+// membership. An agent that ceases to be the owner is stripped of
+// manage_members/decide on the way out, because non-owner agents can never
+// hold those (validatePermissions). A human ex-owner keeps its snapshot;
+// the new owner can demote it explicitly.
+function transferOwnership(state, incoming) {
+  requireFields(incoming.data, ["toMemberId"]);
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may transfer ownership");
+  // Unknown and inactive targets share one error so member enumeration is
+  // impossible; the module maps it to a bare 404.
+  const target = Object.hasOwn(state.members, incoming.data.toMemberId) && state.members[incoming.data.toMemberId];
+  if (!target || target.active === false) throw new Error("Unknown member");
+  if (target.id === state.room.ownerId) throw new Error("Already the room owner");
+  if (incoming.data.reason != null && (typeof incoming.data.reason !== "string" || incoming.data.reason.length > 280)) {
+    throw new Error("Transfer reason must be 280 characters or fewer");
+  }
+  const previous = state.room.ownerId;
+  const previousOwner = state.members[previous];
+  target.permissions = [...PERMISSIONS];
+  target.revision += 1;
+  if (previousOwner && previousOwner.kind === "agent") {
+    previousOwner.permissions = previousOwner.permissions.filter(p => !["manage_members", "decide"].includes(p));
+    previousOwner.revision += 1;
+  }
+  state.room.ownerId = target.id;
+  state.room.previousOwnerId = previous;
+  state.room.ownershipTransferredAt = incoming.at;
+  state.room.ownershipRevision = (state.room.ownershipRevision ?? 0) + 1;
 }
 
 function addMember(state, incoming) {
@@ -336,7 +379,7 @@ function addMember(state, incoming) {
   if (isBootstrapOwner && incoming.actorId !== memberId) throw new Error("Only the owner may bootstrap membership");
   if (!isBootstrapOwner) requirePermission(state, incoming.actorId, "manage_members");
   if (!["human", "agent"].includes(incoming.data.kind)) throw new Error("Member kind must be human or agent");
-  validatePermissions(incoming.data.permissions, incoming.data.kind);
+  validatePermissions(incoming.data.permissions, incoming.data.kind, isBootstrapOwner);
   if (!isBootstrapOwner && incoming.data.authorityPolicyVersion === MEMBERSHIP_AUTHORITY_POLICY_VERSION) {
     requireScopedMemberAdministration(state, incoming.actorId, memberId, null, incoming.data.permissions);
   } else if (incoming.data.authorityPolicyVersion != null && incoming.data.authorityPolicyVersion !== 1) {
@@ -345,7 +388,7 @@ function addMember(state, incoming) {
   if (incoming.data.accountableHumanId && (!isBootstrapOwner || incoming.data.accountableHumanId !== memberId)) {
     if (requireMember(state, incoming.data.accountableHumanId).kind !== "human") throw new Error("Accountable sponsor must be a human member");
   }
-  if (isBootstrapOwner && (incoming.data.kind !== "human" || !incoming.data.permissions.includes("manage_members"))) throw new Error("Owner must retain membership administration");
+  if (isBootstrapOwner && !incoming.data.permissions.includes("manage_members")) throw new Error("Owner must retain membership administration");
   // Round-2 #101: a member record may be bound to a global agent identity.
   if (incoming.data.identityId != null
     && (typeof incoming.data.identityId !== "string" || incoming.data.identityId.length > 64)) throw new Error("identityId must be a short string");
@@ -393,9 +436,12 @@ function joinMemberViaInvitation(state, incoming) {
   };
 }
 
-function validatePermissions(permissions, kind) {
+function validatePermissions(permissions, kind, isOwner = false) {
   if (!Array.isArray(permissions) || permissions.some(p => !PERMISSIONS.includes(p)) || new Set(permissions).size !== permissions.length) throw new Error("Invalid permissions");
-  if (kind === "agent" && permissions.some(p => ["manage_members", "decide"].includes(p))) throw new Error("Human administration cannot be delegated to an agent");
+  // Human administration cannot be delegated to an agent — except to the
+  // room owner itself: ownership implies full authority, so a bootstrap or
+  // appointed agent owner holds the whole set like a human owner does.
+  if (!isOwner && kind === "agent" && permissions.some(p => ["manage_members", "decide"].includes(p))) throw new Error("Human administration cannot be delegated to an agent");
 }
 
 function changeMemberAccess(state, incoming) {
