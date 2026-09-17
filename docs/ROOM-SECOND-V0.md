@@ -160,6 +160,7 @@ Copy: “Take over — your Second stands down.” / “You’re back — Second
 | `Second.bind` / `seat.bind` | Personal seat attached to owner in a Room |
 | `Second.unbind` / `seat.unbind` | Detach / revoke / archive |
 | `delegation.messenger` | Messenger round-trip (or timeout/deny) |
+| `delegation.spawn` | Second or factory `foreman` mints a named specialist `room` seat (same-rung allowed). Cites parent receipt. Not a second personal agent. Never Genie. Research: [ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md) |
 | `disclosure.deny` | Secretary block |
 | `human.takeover` | Owner grabs surface |
 | `human.release` | Owner returns surface |
@@ -198,6 +199,7 @@ Success = durable work + receipts, not a settings tour.
 - [ ] Every human member can see exactly one `seat.kind=personal` Second  
 - [ ] Group Room can complete a turn with no `@` and ≤1 wake  
 - [ ] Messenger produces `delegation.messenger` with return or timeout  
+- [ ] Specialist spawn produces `delegation.spawn` with `parentReceiptId` + `modelRung` + `meter`; nickname ≠ Second ≠ Genie  
 - [ ] Secret-scope ask produces `disclosure.deny` (not silence without receipt)  
 - [ ] Takeover/release pair appears on a live artifact session  
 - [ ] Guest/non-owner cannot age or read owner tool leases  
@@ -211,3 +213,4 @@ Success = durable work + receipts, not a settings tour.
 - `ROOM-ATTENTION-PRESENCE-V0.md` — quiet / wake  
 - `ROOM-RECEIPT-V1.md` — envelope schema home  
 - [ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md](../research/ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md) — research + JSON shapes
+- [ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md) — same-rung spawn + Jev + `delegation.spawn`

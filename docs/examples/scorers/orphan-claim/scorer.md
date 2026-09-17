@@ -22,6 +22,11 @@ Contract: [ROOM-SCORER.md](../../../ROOM-SCORER.md). Receipt:
 [ROOM-RECEIPT-GRAPH-V0.md](../../../ROOM-RECEIPT-GRAPH-V0.md).
 Architecture spine:
 [ROOM-COHESIVE-ARCHITECTURE.md](../../../ROOM-COHESIVE-ARCHITECTURE.md).
+Closed-set labels may pin `model: jev` when a TypeSafe / Gateway key
+is present ([ROOM-SCORER.md](../../../ROOM-SCORER.md) Jev rung).
+Absent key → `fast-default`. `delegation.spawn` without
+`parentReceiptId` is an orphan claim.
+Research: [ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](../../../../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md).
 
 `selfImprovement: true` — recurring `orphan_claim` may open a PR on
 Room instructions / kit copy that forgot to cite prior receipts.

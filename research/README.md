@@ -28,6 +28,7 @@ Architecture SoR (steal stack collapsed):
 | [ROOM-STEALS-WARP-SKILLBOX-HARNESS-2026-09-17.md](ROOM-STEALS-WARP-SKILLBOX-HARNESS-2026-09-17.md) | Warp Scorers + Skillbox + harness-bridge steals (research only) |
 | [ROOM-STEALS-FULL-BUILD-2026-09-17.md](ROOM-STEALS-FULL-BUILD-2026-09-17.md) | Finish-all-steals master plan (receipt / scorer / personas / kits; docs only) |
 | [ROOM-HRANESS-STEAL-2026-09-17.md](ROOM-HRANESS-STEAL-2026-09-17.md) | hraness factory parallelism + limit honesty (research only) |
+| [ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md) | Codex same-rung spawn + named specialists + TypeSafe Jev scorer/router + `delegation.spawn` + meter honesty (research only; Second never Genie) |
 | [ROOM-INTERLATERAL-RESEARCH-2026-09-17.md](ROOM-INTERLATERAL-RESEARCH-2026-09-17.md) | Interlateral → Room: receipts, handoff, authority cards, maturity ladder (research only) |
 | [ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md](ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md) | Cousin landscape: Oasis, agensis, Agent Room, Alook, HumanLayer, Nautilo → **Second**; qm / Dust / Magentic-UI / Greenroom / AgentsMesh (research only) |
 | [ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md](ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md) | Nautilo packages / Conductor / Floor Manager + new cousins + Second receipt shapes (research only) |
