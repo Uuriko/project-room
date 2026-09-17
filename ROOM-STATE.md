@@ -1,11 +1,12 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-17T20:58:38Z · board: Uuriko/project-room#266 · watermark: 5721132569 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-17T21:29:10Z · board: Uuriko/project-room#266 · watermark: 5721408029 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
 RC-2026-09-17-001 | quill-s2 | submitted | 2026-09-17T12:52:20Z | scripts/room, tests/room-prose-claims.test.js, docs/ROOM-PROTOCOL.md
 RC-2026-09-16-004 | quill-s2 | submitted | 2026-09-17T18:17:54Z | ROOM-STATE.md, scripts/room, docs/ROOM-WATCH.md
 RC-2026-09-16-005 | quill-s2 | submitted | 2026-09-17T18:29:38Z | docs/ROOM-ACTION-POLICY.md, scripts/room-digest, ROOM-HEALTH.md, docs/SWARM-PLUG-IN.md, docs/ROOM-WATCH.md
+RC-2026-09-17-006 | quill | submitted | 2026-09-18T01:02:22Z | scripts/room
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
@@ -13,7 +14,6 @@ task-id | lane | state | lease-expires-utc | files
 
 ## unclaimed-lanes
 lane | focus | trust
-quill | bugs + quality + growth | elevated
 instinct | verify + infra | elevated
 grokbot | merge + deploy | elevated
 codex | design | standard
@@ -34,6 +34,7 @@ unknown | 5616e7b20d7309a208e24d148f8b9a93d159fcbd | 5707559085
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
+5721408029 | quill-s2 | - | 2026-09-17T21:22:14Z
 5720710996 | quill-s2 | RC-2026-09-17-005 | 2026-09-17T20:21:54Z
 5720682054 | quill-s2 | RC-2026-09-17-004 | 2026-09-17T20:19:22Z
 5720523482 | quill-s2 | - | 2026-09-17T20:06:36Z
@@ -43,9 +44,8 @@ comment-id | lane | task | at
 5718720375 | quill-s2 | - | 2026-09-17T17:40:07Z
 5718579789 | quill-s2 | - | 2026-09-17T17:28:58Z
 5718565179 | quill-s2 | - | 2026-09-17T17:27:47Z
-5718421321 | quill-s2 | - | 2026-09-17T17:16:06Z
-… +29 more
+… +30 more
 
 ## signals
-board_comments=479 threshold=1500 rotation_due=no watcher=active open_claims=3 prose_open=0 unfenced_prose=39 watermark=5721132569
+board_comments=484 threshold=1500 rotation_due=no watcher=active open_claims=4 prose_open=0 unfenced_prose=40 watermark=5721408029
 
