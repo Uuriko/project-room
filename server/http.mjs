@@ -411,6 +411,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         if (view !== null && (!["email-text-v1", "email-excerpt-v1"].includes(view) || url.searchParams.getAll("view").length !== 1))
           reject(422, "unsupported_inbox_view", "This inbox view is not supported.");
+        if (url.pathname === "/api/inbox/threads" && req.method === "GET") return json(res, 200, store.inbox.threads(token, binding,
+          { sourceId: url.searchParams.get("sourceId"), limit: url.searchParams.get("limit"), includeChannels: view !== null }));
+        if (url.pathname === "/api/inbox/search" && req.method === "GET") return json(res, 200, store.inbox.search(token, binding,
+          { query: url.searchParams.get("q"), sourceId: url.searchParams.get("sourceId"), limit: url.searchParams.get("limit"), includeChannels: view !== null }));
         if (url.pathname === "/api/inbox" && req.method === "GET") return json(res, 200, store.inbox.list(token, binding,
           { includeChannels: view !== null, cursor: url.searchParams.get("cursor"), limit: url.searchParams.get("limit") }));
         if (url.pathname === connectionRoutes.list && req.method === "GET") return json(res, 200, store.connections.connections(token, binding));
@@ -476,6 +480,21 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             reject(422, "invalid_channel_update", "Supply a request ID and recorded updates, or null to import webhook updates.");
           const result = await syncTelegramConnection({ store, token, binding, connectionId, requestId: data.requestId, updates: data.updates, webhooks: channelWebhooks });
           return json(res, result.duplicate ? 200 : 201, { ...store.connections.connectionRecord(token, connectionId, binding), receipt: result.receipt, duplicate: result.duplicate, source: result.source });
+        }
+        const attachmentsList = /^\/api\/inbox\/sources\/([^/]{1,384})\/attachments$/.exec(url.pathname);
+        if (attachmentsList && req.method === "GET") {
+          return json(res, 200, store.inbox.attachments(token, binding,
+            { sourceId: pathId(attachmentsList[1]), includeChannels: view !== null }));
+        }
+        const attachmentItem = /^\/api\/inbox\/sources\/([^/]{1,384})\/attachments\/([^/]{1,384})$/.exec(url.pathname);
+        if (attachmentItem && req.method === "GET") {
+          // Attachment ids are opaque provider values (they may carry "="
+          // padding that pathId rejects); the membership check is the real
+          // validation, so decode without the id-shape gate.
+          let attachmentId;
+          try { attachmentId = decodeURIComponent(attachmentItem[2]); } catch { reject(404, "not_found", "Not found"); }
+          return json(res, 200, store.inbox.attachment(token, binding,
+            { sourceId: pathId(attachmentItem[1]), attachmentId, includeChannels: view !== null }));
         }
         const source = /^\/api\/inbox\/sources\/([^/]{1,384})(?:\/(share-context|room-results|send-context|sends))?$/.exec(url.pathname);
         if (source && req.method === "GET") {

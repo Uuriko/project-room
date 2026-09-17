@@ -5,6 +5,8 @@ import { storedText } from "./text-results.mjs";
 import { ServiceError } from "./store.mjs";
 import { isSend, internalSend, validateSend, sendPreview, transitionSend } from "./inbox-outbox.mjs";
 import { readEmailEnvelope, EmailContractError } from "./email-envelope.mjs";
+import { indexMessages, search as runInboxSearch } from "./inbox-search.mjs";
+import { buildThreads } from "./inbox-threads.mjs";
 import { readChannelEnvelope } from "./channel-adapters/index.mjs";
 import { channels, connectionState, profileChannel } from "./channel-connection.mjs";
 import { prepareGraphReplyDraft, buildGraphReplyDraft, classifyGraphReplyCreation, classifyGraphReplyUpdateAcknowledgment, normalizeReplyObservation, prepareGraphReplyUpdate, buildGraphReplyUpdate, compareReplyUpdateEnvelope } from "./graph-reply-draft.mjs";
@@ -49,6 +51,29 @@ const decodeCursor = value => {
   return key;
 };
 const encodeCursor = key => Buffer.from(JSON.stringify({ updatedAt: key.updatedAt, id: key.id }), "utf8").toString("base64url");
+// Full-text search bounds. The index is built per request over the same
+// reading projection the UI shows (subject + paragraphs) — never cursors,
+// headers, HTML, mailbox IDs, or secrets. At most 5000 sources enter the
+// index; at most 200 results leave it.
+const searchLimitOf = value => {
+  if (value === undefined || value === null) return 25;
+  const n = typeof value === "string" ? Number(value) : value;
+  if (!Number.isInteger(n) || n < 1 || n > 200) fail(422, "invalid_limit", "limit must be an integer 1..200");
+  return n;
+};
+const threadLimitOf = value => {
+  if (value === undefined || value === null) return 25;
+  const n = typeof value === "string" ? Number(value) : value;
+  if (!Number.isInteger(n) || n < 1 || n > 50) fail(422, "invalid_limit", "limit must be an integer 1..50");
+  return n;
+};
+const searchText = d => {
+  try {
+    if (d.adapter === "synthetic") return [d.subject ?? "", ...(d.paragraphs ?? [])].join("\n");
+    if (d.adapter === "email") { const e = readEmailEnvelope(d.envelope); return [e.message.subject, e.body.format === "text" ? e.body.content : ""].join("\n"); }
+    return readChannelEnvelope(d.envelope).body.content ?? "";
+  } catch { return ""; }
+};
 // One reading summary per source origin: synthetic samples, email, Telegram.
 const summary = d => d.adapter === "email" ? { sender: d.envelope.message.from.address, recipient: d.envelope.connection.identity.address, subject: d.envelope.message.subject }
   : d.adapter === "telegram" ? { sender: participantLabel(d.envelope.message.from), recipient: participantLabel(d.envelope.connection.identity), subject: participantLabel(d.envelope.message.to[0]) }
@@ -208,20 +233,26 @@ export class Inbox {
     return new Map(this.db.prepare("SELECT source_id,read_at FROM private_inbox_reads WHERE account_id=?").all(accountId).map(r => [r.source_id, r.read_at]));
   }
   // Channel sources appear only for a client that negotiated a reading view.
+  // One row of the list/search projection, shared by list() and search().
+  sourceSummary(auth, row, { connections, include, readAt, sentIds }) {
+    const d = this.version(auth.account.id, row.id, row.revision);
+    if (d.adapter !== "synthetic" && !include) return null;
+    const profile = d.adapter === "synthetic" ? null : d.envelope.connection;
+    if (profile && !connections.has(profile.id)) {
+      const saved = this.store.email.connection(auth.account.id, profile.id);
+      connections.set(profile.id, { id: profile.id, channel: profileChannel(profile), provider: profile.provider,
+        state: saved ? connectionState(saved, auth.account.authEpoch) : "disconnected" });
+    }
+    return { id: row.id, revision: row.revision, adapter: d.adapter, ...summary(d), updatedAt: row.updated_at,
+      readAt: readAt.get(row.id) ?? null, connection: profile ? connections.get(profile.id) : null,
+      needsYou: inboxNeedsYou(d, sentIds) };
+  }
   list(token, binding, { includeChannels = false, includeEmail = false, cursor = null, limit = null } = {}) {
     return this.store.readTransaction(() => {
       const auth = this.auth(token, binding), connections = new Map(), include = includeChannels || includeEmail;
       const take = pageLimitOf(limit), after = decodeCursor(cursor);
-      const connection = profile => {
-        if (!connections.has(profile.id)) {
-          const saved = this.store.email.connection(auth.account.id, profile.id);
-          connections.set(profile.id, { id: profile.id, channel: profileChannel(profile), provider: profile.provider,
-            state: saved ? connectionState(saved, auth.account.authEpoch) : "disconnected" });
-        }
-        return connections.get(profile.id);
-      };
-      const sentIds = include ? this.sentProviderIds(auth.account.id) : new Set();
-      const readAt = this.readMarkers(auth.account.id);
+      const ctx = { connections, include, readAt: this.readMarkers(auth.account.id),
+        sentIds: include ? this.sentProviderIds(auth.account.id) : new Set() };
       const params = [auth.account.id];
       let sql = "SELECT * FROM private_inbox_sources WHERE account_id=?";
       if (after) { sql += " AND (updated_at < ? OR (updated_at = ? AND id > ?))"; params.push(after.updatedAt, after.updatedAt, after.id); }
@@ -229,15 +260,142 @@ export class Inbox {
       params.push(take + 1);
       const rows = this.db.prepare(sql).all(...params);
       const hasMore = rows.length > take, page = hasMore ? rows.slice(0, take) : rows;
-      const sources = page
-        .map(row => { const d = this.version(auth.account.id, row.id, row.revision);
-          if (d.adapter !== "synthetic" && !include) return null;
-          return { id: row.id, revision: row.revision, adapter: d.adapter, ...summary(d), updatedAt: row.updated_at,
-            readAt: readAt.get(row.id) ?? null,
-            connection: d.adapter === "synthetic" ? null : connection(d.envelope.connection), needsYou: inboxNeedsYou(d, sentIds) }; }).filter(Boolean);
+      const sources = page.map(row => this.sourceSummary(auth, row, ctx)).filter(Boolean);
       const last = page[page.length - 1];
       return { contractVersion: 1, viewer: viewer(auth), sources,
         nextCursor: hasMore && last ? encodeCursor({ updatedAt: last.updated_at, id: last.id }) : null };
+    });
+  }
+  // Full-text search over an account's visible sources, backed by the pure
+  // index in server/inbox-search.mjs. Mirrors list()'s visibility rule:
+  // channel sources appear only for a client that negotiated a reading view.
+  // Results carry list()'s source shape plus a BM25 score, best first.
+    // Threading keys for one visible source. Email groups by conversation
+    // (threadId) with replies resolved through internetMessageId; channel
+    // sources group by their threadId with replies resolved through the
+    // channel's own message ids. Synthetic samples have no thread metadata
+    // and form singletons keyed by their own id.
+    threadKeyOf(info, replyIndex) {
+      const { row, adapter } = info;
+      const fallback = () => ({ id: row.id, occurredAt: new Date(row.updated_at).toISOString(), threadId: null, inReplyTo: null });
+      try {
+        if (adapter === "email") {
+          const envelope = readEmailEnvelope(info.envelope);
+          const occurredAt = envelope.message.receivedAt ?? envelope.message.sentAt;
+          const parent = envelope.replyHeaders.inReplyTo.map(id => replyIndex.get("email:" + id)).find(Boolean);
+          return { id: row.id, occurredAt, threadId: envelope.message.threadId,
+            inReplyTo: parent ?? null, internetId: envelope.message.internetMessageId };
+        }
+        if (adapter !== "synthetic") {
+          const envelope = readChannelEnvelope(info.envelope), message = envelope.message;
+          const occurredAt = typeof message.sentAt === "string" ? message.sentAt : new Date(row.updated_at).toISOString();
+          const replyTo = typeof message.replyTo === "string" ? replyIndex.get(envelope.channel + ":" + message.replyTo) : null;
+          return { id: row.id, occurredAt, threadId: typeof message.threadId === "string" ? message.threadId : null,
+            inReplyTo: replyTo ?? null, channelId: typeof message.id === "string" ? message.id : null };
+        }
+        return fallback();
+      } catch {
+        return fallback();
+      }
+    }
+    threads(token, binding, { sourceId = null, limit = null, includeChannels = false } = {}) {
+      return this.store.readTransaction(() => {
+        const auth = this.auth(token, binding), take = threadLimitOf(limit);
+        const include = includeChannels === true;
+        const rows = sourceId
+          ? this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? AND id=?").all(auth.account.id, sourceId)
+          : this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? ORDER BY updated_at DESC,id LIMIT 5000").all(auth.account.id);
+        const infos = [];
+        for (const row of rows) {
+          try {
+            const d = this.version(auth.account.id, row.id, row.revision);
+            if (d.adapter !== "synthetic" && !include) continue;
+            infos.push({ row, adapter: d.adapter, envelope: d.envelope, channel: d.envelope?.channel ?? null });
+          } catch { /* malformed version: skip, never break the thread view */ }
+        }
+        const replyIndex = new Map();
+        const keys = infos.map(info => this.threadKeyOf(info, replyIndex));
+        for (const [info, key] of infos.map((info, i) => [info, keys[i]])) {
+          if (key.internetId) replyIndex.set("email:" + key.internetId, key.id);
+          if (key.channelId && info.channel) replyIndex.set(info.channel + ":" + key.channelId, key.id);
+        }
+        // Re-resolve replies now that the index is complete (targets may sort after the reply).
+        const messages = infos.map((info, i) => {
+          const key = this.threadKeyOf(info, replyIndex);
+          return { id: key.id, occurredAt: key.occurredAt, threadId: key.threadId, inReplyTo: key.inReplyTo };
+        });
+        const built = buildThreads(messages);
+        const ctx = { connections: new Map(), include, readAt: this.readMarkers(auth.account.id),
+          sentIds: include ? this.sentProviderIds(auth.account.id) : new Set() };
+        const byId = new Map(rows.map(row => [row.id, row]));
+        const threads = built.slice(0, take).map(thread => ({
+          threadId: thread.threadId, messageCount: thread.messageCount, depth: thread.depth,
+          firstAt: thread.firstAt, lastAt: thread.lastAt,
+          entries: thread.entries
+            .map(({ message, depth }) => ({ depth, source: this.sourceSummary(auth, byId.get(message.id), ctx) }))
+            .filter(entry => entry.source)
+        })).filter(thread => thread.entries.length > 0);
+        return { contractVersion: 1, viewer: viewer(auth), threads, total: built.length };
+      });
+    }
+    // Attachment descriptors for one source. Descriptors are metadata only: the
+    // system never retains attachment bytes, so this is a listing and a
+    // membership check, not a download. Byte retrieval needs a live provider
+    // fetch with the account's credentials; that future slice reuses this
+    // auth + ownership + membership path.
+    attachmentDescriptors(d) {
+      if (d.adapter === "email") {
+        return readEmailEnvelope(d.envelope).attachments.items
+          .map(a => ({ id: a.id, kind: a.kind, name: a.name, contentType: a.contentType, size: a.size, inline: a.inline }));
+      }
+      if (d.adapter !== "synthetic") {
+        return readChannelEnvelope(d.envelope).attachments
+          .map(a => ({ id: a.id, kind: a.kind, name: a.name, contentType: a.contentType, size: a.size, inline: false }));
+      }
+      return [];
+    }
+    attachments(token, binding, { sourceId, includeChannels = false } = {}) {
+      return this.store.readTransaction(() => {
+        const auth = this.auth(token, binding), row = this.source(auth.account.id, sourceId);
+        const d = this.version(auth.account.id, row.id, row.revision);
+        if (d.adapter !== "synthetic" && includeChannels !== true) fail(404, "inbox_source_not_found", "Source not found.");
+        return { contractVersion: 1, viewer: viewer(auth), sourceId: row.id, attachments: this.attachmentDescriptors(d) };
+      });
+    }
+    attachment(token, binding, { sourceId, attachmentId, includeChannels = false } = {}) {
+      return this.store.readTransaction(() => {
+        const auth = this.auth(token, binding), row = this.source(auth.account.id, sourceId);
+        const d = this.version(auth.account.id, row.id, row.revision);
+        if (d.adapter !== "synthetic" && includeChannels !== true) fail(404, "inbox_source_not_found", "Source not found.");
+        const found = this.attachmentDescriptors(d).find(a => a.id === attachmentId);
+        if (!found) fail(404, "inbox_attachment_not_found", "Attachment not found.");
+        return { contractVersion: 1, viewer: viewer(auth), sourceId: row.id, attachment: found,
+          retrieval: { available: false, reason: "attachment_bytes_not_retained",
+            detail: "Descriptors are metadata only. Byte retrieval needs a live provider fetch with the account's credentials." } };
+      });
+    }
+  search(token, binding, { query = null, sourceId = null, limit = null, includeChannels = false } = {}) {
+    return this.store.readTransaction(() => {
+      const auth = this.auth(token, binding);
+      if (typeof query !== "string" || !query.trim() || query.length > 500) fail(422, "invalid_search_query", "Supply a search query up to 500 characters.");
+      const take = searchLimitOf(limit), include = includeChannels;
+      const rows = this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? ORDER BY updated_at DESC,id LIMIT 5000").all(auth.account.id);
+      const byId = new Map(rows.map(row => [row.id, row]));
+      const messages = [];
+      for (const row of rows) {
+        if (sourceId && row.id !== sourceId) continue;
+        const d = this.version(auth.account.id, row.id, row.revision);
+        if (d.adapter !== "synthetic" && !include) continue;
+        const body = searchText(d);
+        if (body.trim()) messages.push({ id: row.id, subject: summary(d).subject ?? "", body });
+      }
+      const hits = runInboxSearch(indexMessages(messages), query, { limit: take });
+      const ctx = { connections: new Map(), include, readAt: this.readMarkers(auth.account.id),
+        sentIds: include ? this.sentProviderIds(auth.account.id) : new Set() };
+      const results = hits.results
+        .map(({ message, score }) => ({ source: this.sourceSummary(auth, byId.get(message.id), ctx), score }))
+        .filter(result => result.source);
+      return { contractVersion: 1, viewer: viewer(auth), query: hits.query.trim(), results, total: hits.total };
     });
   }
   read(token, sourceId, binding, { emailView = false, excerptView = false } = {}) {

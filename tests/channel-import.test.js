@@ -29,7 +29,16 @@ function fixture(t) {
   f.configure = profile => f.apply({ action: "connection.configure", requestId: randomUUID(), connectionId: profile.id, expectedRevision: 0, profile: structuredClone(profile) });
   f.reader = (limit = 100) => new RecordedTelegramBot({ connection: f.telegram.connection, updates: f.telegram.updates, limit });
   f.prepare = (reader, extra = {}) => prepareTelegramFixturePage({ store: f.store, token: f.auth.token, binding: f.auth.sessionBinding, connectionId: f.telegram.connection.id, reader, ...extra });
-  f.list = () => f.store.inbox.list(f.auth.token, f.auth.sessionBinding, { includeChannels: true }).sources;
+  f.list = () => {
+    // The fixture wants every source; page through the bounded list.
+    const rows = []; let cursor = null;
+    for (;;) {
+      const page = f.store.inbox.list(f.auth.token, f.auth.sessionBinding, { includeChannels: true, cursor, limit: 100 });
+      rows.push(...page.sources);
+      if (!page.nextCursor) return rows;
+      cursor = page.nextCursor;
+    }
+  };
   f.sourceId = messageId => telegramSourceId(f.telegram.connection, messageId);
   f.read = (id, options) => f.store.inbox.read(f.auth.token, id, f.auth.sessionBinding, options);
   f.inbox = request => f.store.inbox.apply(f.auth.token, request, f.auth.sessionBinding);
