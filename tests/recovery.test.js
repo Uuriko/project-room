@@ -19,7 +19,7 @@ function fixture(t) {
   return { ...f, directory };
 }
 
-test("online capture preserves all 40 tables, identity boundaries and exact retries through recovery and restart", async t => {
+test("online capture preserves all 41 tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t);
   const { identityId } = f.store.identities.create("Recovery agent");
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
@@ -43,8 +43,11 @@ test("online capture preserves all 40 tables, identity boundaries and exact retr
   f.store.db.prepare(`INSERT INTO access_requests(request_id,room_id,identity_id,display_name,requested_permissions,note,status,created_at)
     VALUES('recovery-access-request','commons',?,?,?,'recovery note','pending',?)`)
     .run(identityId, "Recovery agent", JSON.stringify(["read"]), f.now());
+  // Seed one agent-room ownership record so the capture covers agent_room_ownership.
+  f.store.db.prepare(`INSERT INTO agent_room_ownership(identity_id,room_id,created_at) VALUES(?,?,?)`)
+    .run(identityId, "commons", f.now());
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 40);
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 41);
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);

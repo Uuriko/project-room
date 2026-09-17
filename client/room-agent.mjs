@@ -218,6 +218,37 @@ export async function requestAccess(origin, { roomId, identityId, displayName, r
   }
   return value;
 }
+// Self-serve room creation: a self-minted identity creates a fresh room and
+// becomes its owner. The identity secret travels in the Authorization bearer
+// header, never in the JSON body. The client-chosen roomId is the
+// idempotency key: retrying with the same parameters returns duplicate:true.
+export async function createAgentRoom(origin, identitySecret, { roomId, title, purpose, kind, displayName } = {}, { fetchImpl = globalThis.fetch, signal } = {}) {
+  let service;
+  try { service = assertServiceOrigin(origin); }
+  catch { throw new RoomClientError(0, "invalid_config", "Use a fixed HTTPS origin or an isolated loopback development origin"); }
+  if (typeof identitySecret !== "string" || !identitySecret.startsWith("pri_")) {
+    throw new RoomClientError(0, "invalid_config", "A valid identity secret is required");
+  }
+  let response;
+  try {
+    response = await fetchImpl(`${service}/api/agent-rooms`, {
+      method: "POST", redirect: "error", credentials: "omit",
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
+      headers: { Authorization: `Bearer ${identitySecret}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ roomId, title, purpose, kind, displayName }),
+    });
+  } catch (error) {
+    if (error instanceof RoomClientError) throw error;
+    throw new RoomClientError(0, "service_unavailable", "Could not complete the request. Check the service address and retry.");
+  }
+  let value;
+  try { value = await response.json(); } catch { value = null; }
+  if (!response.ok) throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room request failed");
+  if (typeof value?.roomId !== "string" || typeof value?.ownerMemberId !== "string") {
+    throw new RoomClientError(200, "invalid_response", "Room returned an invalid created room");
+  }
+  return value;
+}
 export class RoomAgentClient {
   #origin;
   #roomId;
@@ -625,6 +656,14 @@ export class RoomAgentClient {
   decideAccessRequest(requestId, { decision, permissions, note } = {}, { signal } = {}) {
     return this.#accessAdmin(`/access-requests/${encodeURIComponent(requestId)}/decide`,
       { decision, ...(permissions === undefined ? {} : { permissions }), ...(note === undefined ? {} : { note }) }, { signal });
+  }
+  // Ownership appointment: the current room owner transfers ownership to an
+  // existing active member (human or agent). Owner-only; the transfer is
+  // reversible and audited in the room's event log.
+  transferOwnership(toMemberId, { reason, signal } = {}) {
+    if (typeof toMemberId !== "string" || !toMemberId) throw new RoomClientError(0, "invalid_config", "Choose the member to appoint as owner");
+    return this.#request("/ownership/transfer",
+      { toMemberId, ...(reason === undefined ? {} : { reason }) }, signal);
   }
   // W4-57 M6: sanitized support-export bundle (owner-only). Whitelisted
   // scalar fields only — safe to hand to support without redaction.
