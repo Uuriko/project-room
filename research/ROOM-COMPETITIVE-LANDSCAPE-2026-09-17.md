@@ -28,6 +28,7 @@ Goal: find startups & products similar to Project Room (people + agents on one l
 | Skillbox | Versioned skills + Jev router |
 | harness-bridge | endpoint · model · harness honesty |
 | hraness | N× parallel factory capacity honesty |
+| Nautilo (agentsea/nautilo, MIT) | Closest open multi-user + multi-agent Room peer; Genie loyalty; Smart Routing; harness-of-harnesses; Secretary; privacy ladder |
 
 ## New cousins (this pass)
 
@@ -67,6 +68,13 @@ Goal: find startups & products similar to Project Room (people + agents on one l
 - Cross-company agents with permissions, human review, audit — enterprise workflow angle.
 - **Steal:** Permission surfaces + audit logs as first-class (we already bias receipts).
 
+### 8. Nautilo (agentsea/nautilo) — open org harness
+- **Shape:** MIT, alpha ([nautilo.ai](https://nautilo.ai) · [agentsea/nautilo](https://github.com/agentsea/nautilo)). Self-hosted org harness: every human gets a radically loyal personal Genie; people + Genies share Rooms; Desktop / Web / Android / iPhone. Smart Routing (right agent joins from context; `@` optional). Harness-of-harnesses (Genie coordinates Codex / Hermes / Claude Code). Secretary / Secret Keeper (know when to shut up). Privacy model ladder 1–10 (sensitive subtasks route to the most-private model).
+- **Pain they name:** 1:1 harnesses bolted onto chat; bots treated as spam on WhatsApp/Signal; no first-class multi-user + multi-agent space.
+- **Steal:** **Closest open multi-user + multi-agent Room peer.** Personal Genie seat (loyalty / disclosure axis); ambient Smart Routing; visible `delegation.messenger` receipts; `human.takeover` on live artifacts; progressive tool leases; quiet Events; preflight skill pack. Specs: [ROOM-NAUTILO-STEAL.md](../docs/ROOM-NAUTILO-STEAL.md) · [ROOM-PERSONAL-GENIE-SEAT-V0.md](../docs/ROOM-PERSONAL-GENIE-SEAT-V0.md).
+- **Don’t:** Personality / face / voice as the core value prop; film editor as P0; reimplement their Bun/Fastify/Drizzle/Logto monorepo; opaque delegation.
+- **Closest cousin** — differentiate: Nautilo leads with loyal Genie + org harness UX; Project Room stays the **accountability ledger** (receipt graph, scorers, design-bound implement, capacity honesty).
+
 ## Priority learnings for Project Room
 | Priority | Learning | Action |
 |----------|----------|--------|
@@ -78,12 +86,35 @@ Goal: find startups & products similar to Project Room (people + agents on one l
 | P1 | Wake vs pull MCP modes (Agent Room) | Document in Connect kits |
 | P2 | Oasis “agents as teammates” copy | Marketing/Connect copy, not product rename |
 | P2 | Factory/Warp metrics on delivered work | Scorer dashboards later |
+| P0 | Personal Genie seat + Smart Routing + visible messenger (Nautilo) | [ROOM-PERSONAL-GENIE-SEAT-V0.md](../docs/ROOM-PERSONAL-GENIE-SEAT-V0.md) · [ROOM-NAUTILO-STEAL.md](../docs/ROOM-NAUTILO-STEAL.md) |
+| P1 | Progressive tools, quiet Events, preflights, privacy ladder (Nautilo) | Capacity-board honesty + attention preference + implement-gate skills — docs only |
+
+## Nautilo delta (Ledger Room)
+
+Nautilo proves the market wants *multiplayer people+agents in a Room with personal loyalty*. Ledger Room’s edge remains the **receipt graph + scorers + design-bound implement + capacity honesty**.
+
+Specs (this PR, docs only):
+
+- [ROOM-NAUTILO-STEAL.md](../docs/ROOM-NAUTILO-STEAL.md)
+- [ROOM-PERSONAL-GENIE-SEAT-V0.md](../docs/ROOM-PERSONAL-GENIE-SEAT-V0.md)
+
+| Upgrade | Room map |
+| --- | --- |
+| Personal seat | `seat.kind = personal` / `room` / `synthesis`; optional loyalty / **disclosure** (Secretary) axis |
+| Messenger receipts | `delegation.messenger` citing prior envelope + returned summary — visible, not opaque |
+| Human takeover | `human.takeover` / `human.release` on live artifacts + CUA |
+| Progressive tools | Turn-scoped tool schema leases on the Capacity board |
+| Quiet events | Attention preference on the Events channel only; approvals stay loud |
+| Preflights | Design-bound implement skill pack (Experience / Systems / Green PR) |
+
+Does not take [#466](https://github.com/Uuriko/project-room/pull/466) receipt-graph source. Fold this delta into `research/ROOM-NOVEL-SYNTHESIS-2026-09-17.md` when that Ledger Room note lands.
 
 ## Differentiation one-liner
-**Project Room** = the project’s shared ledger (Work Items, receipts, people+agents, honesty) — not an IDE (HumanLayer), not an event third-space (Interlateral), not a coding-agent mesh alone (Agent Room), not a canvas chat hub (agensis/Oasis). Steal their membership/authority/artifact patterns; keep Compute separate. Folded synthesis: [Ledger Room](ROOM-NOVEL-SYNTHESIS-2026-09-17.md) — six-axis seats, Work Items with receipt graphs, scorers that fail orphan claims.
+**Project Room** = the project’s shared ledger (Work Items, receipts, people+agents, honesty) — not an IDE (HumanLayer), not an event third-space (Interlateral), not a coding-agent mesh alone (Agent Room), not a canvas chat hub (agensis/Oasis), not a loyal-Genie org harness (Nautilo). Steal their membership/authority/artifact/personal-seat patterns; keep Compute separate. Folded synthesis: [Ledger Room](ROOM-NOVEL-SYNTHESIS-2026-09-17.md) — six-axis seats, Work Items with receipt graphs, scorers that fail orphan claims.
 
 ## Next
 1. Folded into project-room research (this note + [FULL-BUILD](ROOM-STEALS-FULL-BUILD-2026-09-17.md) index)
 2. Attention modes + presence contract landed: [ROOM-ATTENTION-PRESENCE-V0.md](../docs/ROOM-ATTENTION-PRESENCE-V0.md) (pairs Trust Handoff; People-rail chrome later)
 3. Tip Muse for People-rail presence when open
 4. Ledger Room fold: [ROOM-NOVEL-SYNTHESIS-2026-09-17.md](ROOM-NOVEL-SYNTHESIS-2026-09-17.md) · [ROOM-RECEIPT-GRAPH-V0.md](../docs/ROOM-RECEIPT-GRAPH-V0.md) · [orphan-claim](../docs/examples/scorers/orphan-claim/scorer.md)
+5. Nautilo steal specs: [ROOM-NAUTILO-STEAL.md](../docs/ROOM-NAUTILO-STEAL.md) · [ROOM-PERSONAL-GENIE-SEAT-V0.md](../docs/ROOM-PERSONAL-GENIE-SEAT-V0.md) (docs only; no People-rail / Connect HTML)
