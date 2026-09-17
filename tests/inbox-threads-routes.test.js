@@ -139,3 +139,31 @@ test("rejects invalid limits and caps the thread count", t => {
   assert.equal(one.threads.length, 1);
   assert.equal(one.total, 1);
 });
+
+test("the same provider thread id on two connections stays two threads", t => {
+  const f = fixture(t);
+  f.importEmail({ messageId: "m-x1", internetMessageId: "<x1@example.test>", conversationId: "conv-same",
+    subject: "One", body: "first connection" });
+  // A second connection whose provider emits the identical conversation id.
+  const other = emailContractFixture();
+  other.connection.id = "mail-second"; other.connection.accountId = f.email.connection.accountId;
+  other.connection.mailboxId = "fixture-mailbox-2";
+  other.connection.identity = { name: "Morgan Two", address: "morgan2@example.test" };
+  f.store.email.apply(f.session.token, { action: "connection.configure", requestId: randomUUID(),
+    connectionId: other.connection.id, expectedRevision: 0, profile: structuredClone(other.connection) }, f.session.sessionBinding);
+  const m = other.message;
+  m.id = "m-x2"; m.internetMessageId = "<x2@example.test>"; m.conversationId = "conv-same";
+  m.subject = "Two"; m.body.content = "second connection"; m.internetMessageHeaders = [];
+  other.options.attachmentObservation.messageId = "m-x2";
+  other.options.attachmentObservation.messageRevision = m.changeKey;
+  const envelope = normalizeGraphEmail(other.connection, m, other.options);
+  const state = f.store.email.state(f.session.token, other.connection.id, m.parentFolderId, f.session.sessionBinding);
+  f.store.email.apply(f.session.token, { action: "page.apply", requestId: randomUUID(), connectionId: other.connection.id,
+    connectionRevision: other.connection.revision, folderId: m.parentFolderId,
+    expectedRevision: state.folder?.revision ?? 0, expectedCursor: state.expectedCursor, cursor: randomUUID(),
+    reset: state.needsReset, complete: true, observations: [{ kind: "message", expectedSourceRevision: 0, envelope }] }, f.session.sessionBinding);
+  const result = f.threads({ includeChannels: true });
+  assert.equal(result.total, 2);
+  assert.ok(result.threads.every(th => th.messageCount === 1), "no cross-connection thread merge");
+  assert.notEqual(result.threads[0].threadId, result.threads[1].threadId);
+});

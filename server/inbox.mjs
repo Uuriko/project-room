@@ -283,15 +283,22 @@ export class Inbox {
           const envelope = readEmailEnvelope(info.envelope);
           const occurredAt = envelope.message.receivedAt ?? envelope.message.sentAt;
           const parent = envelope.replyHeaders.inReplyTo.map(id => replyIndex.get("email:" + id)).find(Boolean);
-          return { id: row.id, occurredAt, threadId: envelope.message.threadId,
+          // Provider thread ids are only unique per connection: namespace so
+          // the same id on two connections (or two providers) never merges
+          // unrelated conversations.
+          const threadId = envelope.message.threadId == null ? null
+            : `email:${envelope.connection.id}:${envelope.message.threadId}`;
+          return { id: row.id, occurredAt, threadId,
             inReplyTo: parent ?? null, internetId: envelope.message.internetMessageId };
         }
         if (adapter !== "synthetic") {
           const envelope = readChannelEnvelope(info.envelope), message = envelope.message;
           const occurredAt = typeof message.sentAt === "string" ? message.sentAt : new Date(row.updated_at).toISOString();
           const replyTo = typeof message.replyTo === "string" ? replyIndex.get(envelope.channel + ":" + message.replyTo) : null;
-          return { id: row.id, occurredAt, threadId: typeof message.threadId === "string" ? message.threadId : null,
-            inReplyTo: replyTo ?? null, channelId: typeof message.id === "string" ? message.id : null };
+          // Same namespacing as the reply index: a bare provider thread id can
+          // collide across channels (e.g. numeric chat ids).
+          const threadId = typeof message.threadId === "string" ? `${envelope.channel}:${message.threadId}` : null;
+          return { id: row.id, occurredAt, threadId, inReplyTo: replyTo ?? null, channelId: typeof message.id === "string" ? message.id : null };
         }
         return fallback();
       } catch {
