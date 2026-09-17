@@ -1978,6 +1978,37 @@ paths:
         '200': { description: "{ contractVersion: 1, viewer, query, results: [{ source, score }], total }" }
         '401': { description: account_session_required }
         '422': { description: invalid_search_query or invalid_limit or unsupported_inbox_view }
+  /api/inbox/threads:
+    get:
+      summary: Conversation/thread view over the account's visible inbox sources
+      description: >-
+        Account-session read. Groups sources into threads: email by
+        conversation (threadId) with replies resolved through In-Reply-To
+        internet message ids; channel sources by their threadId with
+        replies resolved through the channel's own message ids. Dangling
+        or cyclic references become top-level; they never throw.
+        `?view=email-excerpt-v1` includes channel sources; without it only
+        synthetic samples thread. `sourceId` scopes to the one thread
+        containing that source. At most 50 threads; `total` counts every
+        thread. Entries carry the same source projection as the list, with
+        a depth for indenting replies.
+      security:
+        - accountSession: []
+      parameters:
+        - name: view
+          in: query
+          schema: { type: string, enum: [email-text-v1, email-excerpt-v1] }
+        - name: sourceId
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          description: Max threads, 1..50. Default 25.
+          schema: { type: integer, minimum: 1, maximum: 50 }
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, threads: [{ threadId, messageCount, depth, firstAt, lastAt, entries: [{ depth, source }] }], total }" }
+        '401': { description: account_session_required }
+        '422': { description: invalid_limit or unsupported_inbox_view }
   /api/inbox/sources/{sourceId}:
     get:
       summary: Read one inbox source and its private draft

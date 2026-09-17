@@ -6,6 +6,7 @@ import { ServiceError } from "./store.mjs";
 import { isSend, internalSend, validateSend, sendPreview, transitionSend } from "./inbox-outbox.mjs";
 import { readEmailEnvelope, EmailContractError } from "./email-envelope.mjs";
 import { indexMessages, search as runInboxSearch } from "./inbox-search.mjs";
+import { buildThreads } from "./inbox-threads.mjs";
 import { readChannelEnvelope } from "./channel-adapters/index.mjs";
 import { channels, connectionState, profileChannel } from "./channel-connection.mjs";
 import { prepareGraphReplyDraft, buildGraphReplyDraft, classifyGraphReplyCreation, classifyGraphReplyUpdateAcknowledgment, normalizeReplyObservation, prepareGraphReplyUpdate, buildGraphReplyUpdate, compareReplyUpdateEnvelope } from "./graph-reply-draft.mjs";
@@ -58,6 +59,12 @@ const searchLimitOf = value => {
   if (value === undefined || value === null) return 25;
   const n = typeof value === "string" ? Number(value) : value;
   if (!Number.isInteger(n) || n < 1 || n > 200) fail(422, "invalid_limit", "limit must be an integer 1..200");
+  return n;
+};
+const threadLimitOf = value => {
+  if (value === undefined || value === null) return 25;
+  const n = typeof value === "string" ? Number(value) : value;
+  if (!Number.isInteger(n) || n < 1 || n > 50) fail(422, "invalid_limit", "limit must be an integer 1..50");
   return n;
 };
 const searchText = d => {
@@ -263,6 +270,74 @@ export class Inbox {
   // index in server/inbox-search.mjs. Mirrors list()'s visibility rule:
   // channel sources appear only for a client that negotiated a reading view.
   // Results carry list()'s source shape plus a BM25 score, best first.
+    // Threading keys for one visible source. Email groups by conversation
+    // (threadId) with replies resolved through internetMessageId; channel
+    // sources group by their threadId with replies resolved through the
+    // channel's own message ids. Synthetic samples have no thread metadata
+    // and form singletons keyed by their own id.
+    threadKeyOf(info, replyIndex) {
+      const { row, adapter } = info;
+      const fallback = () => ({ id: row.id, occurredAt: new Date(row.updated_at).toISOString(), threadId: null, inReplyTo: null });
+      try {
+        if (adapter === "email") {
+          const envelope = readEmailEnvelope(info.envelope);
+          const occurredAt = envelope.message.receivedAt ?? envelope.message.sentAt;
+          const parent = envelope.replyHeaders.inReplyTo.map(id => replyIndex.get("email:" + id)).find(Boolean);
+          return { id: row.id, occurredAt, threadId: envelope.message.threadId,
+            inReplyTo: parent ?? null, internetId: envelope.message.internetMessageId };
+        }
+        if (adapter !== "synthetic") {
+          const envelope = readChannelEnvelope(info.envelope), message = envelope.message;
+          const occurredAt = typeof message.sentAt === "string" ? message.sentAt : new Date(row.updated_at).toISOString();
+          const replyTo = typeof message.replyTo === "string" ? replyIndex.get(envelope.channel + ":" + message.replyTo) : null;
+          return { id: row.id, occurredAt, threadId: typeof message.threadId === "string" ? message.threadId : null,
+            inReplyTo: replyTo ?? null, channelId: typeof message.id === "string" ? message.id : null };
+        }
+        return fallback();
+      } catch {
+        return fallback();
+      }
+    }
+    threads(token, binding, { sourceId = null, limit = null, includeChannels = false } = {}) {
+      return this.store.readTransaction(() => {
+        const auth = this.auth(token, binding), take = threadLimitOf(limit);
+        const include = includeChannels === true;
+        const rows = sourceId
+          ? this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? AND id=?").all(auth.account.id, sourceId)
+          : this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? ORDER BY updated_at DESC,id LIMIT 5000").all(auth.account.id);
+        const infos = [];
+        for (const row of rows) {
+          try {
+            const d = this.version(auth.account.id, row.id, row.revision);
+            if (d.adapter !== "synthetic" && !include) continue;
+            infos.push({ row, adapter: d.adapter, envelope: d.envelope, channel: d.envelope?.channel ?? null });
+          } catch { /* malformed version: skip, never break the thread view */ }
+        }
+        const replyIndex = new Map();
+        const keys = infos.map(info => this.threadKeyOf(info, replyIndex));
+        for (const [info, key] of infos.map((info, i) => [info, keys[i]])) {
+          if (key.internetId) replyIndex.set("email:" + key.internetId, key.id);
+          if (key.channelId && info.channel) replyIndex.set(info.channel + ":" + key.channelId, key.id);
+        }
+        // Re-resolve replies now that the index is complete (targets may sort after the reply).
+        const messages = infos.map((info, i) => {
+          const key = this.threadKeyOf(info, replyIndex);
+          return { id: key.id, occurredAt: key.occurredAt, threadId: key.threadId, inReplyTo: key.inReplyTo };
+        });
+        const built = buildThreads(messages);
+        const ctx = { connections: new Map(), include, readAt: this.readMarkers(auth.account.id),
+          sentIds: include ? this.sentProviderIds(auth.account.id) : new Set() };
+        const byId = new Map(rows.map(row => [row.id, row]));
+        const threads = built.slice(0, take).map(thread => ({
+          threadId: thread.threadId, messageCount: thread.messageCount, depth: thread.depth,
+          firstAt: thread.firstAt, lastAt: thread.lastAt,
+          entries: thread.entries
+            .map(({ message, depth }) => ({ depth, source: this.sourceSummary(auth, byId.get(message.id), ctx) }))
+            .filter(entry => entry.source)
+        })).filter(thread => thread.entries.length > 0);
+        return { contractVersion: 1, viewer: viewer(auth), threads, total: built.length };
+      });
+    }
   search(token, binding, { query = null, sourceId = null, limit = null, includeChannels = false } = {}) {
     return this.store.readTransaction(() => {
       const auth = this.auth(token, binding);

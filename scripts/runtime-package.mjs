@@ -35,6 +35,11 @@ optional.push("src/help-offers.js");
 optional.push("client/help-actions.mjs");
 optional.push("server/inbox.mjs");
 optional.push("server/inbox-search.mjs"); // full-text search index (imported by server/inbox.mjs; pure, no imports of its own)
+optional.push("server/inbox-threads.mjs"); // thread builder (imported by server/inbox.mjs; pure, no imports of its own)
+// NOTE: server/thread-tree.mjs stays OUT of the closure. inbox-threads.mjs
+// already groups, nests, and flattens threads; importing both would duplicate
+// the reply-tree logic. thread-tree.mjs remains available for a future
+// collapse/expand UI slice.
 optional.push("server/inbox-outbox.mjs", "server/inbox-transport.mjs", "server/version.mjs");
 optional.push("scripts/stamp-version.mjs");
 optional.push("server/email-envelope.mjs", "server/graph-email.mjs", "server/email-import.mjs");

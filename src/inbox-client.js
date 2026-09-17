@@ -194,6 +194,16 @@ export class InboxClient {
   }
   // Full-text search over the account's visible sources. Results are
   // { source, score } pairs, best first; total counts all matches.
+  threads({ sourceId = null, limit = null } = {}) {
+    const params = new URLSearchParams({ view: "email-excerpt-v1" });
+    if (sourceId !== null && sourceId !== undefined) params.set("sourceId", sourceId);
+    if (limit !== null && limit !== undefined) params.set("limit", String(limit));
+    return this.request(`/threads?${params}`, {}, v => Number.isSafeInteger(v.total) && v.total >= 0
+      && Array.isArray(v.threads) && v.threads.every(t => typeof t.threadId === "string"
+        && Number.isSafeInteger(t.messageCount) && t.messageCount > 0 && Number.isSafeInteger(t.depth) && t.depth >= 0
+        && typeof t.firstAt === "string" && typeof t.lastAt === "string"
+        && Array.isArray(t.entries) && t.entries.every(e => Number.isSafeInteger(e.depth) && e.depth >= 0 && this.validSourceSummary(e.source))));
+  }
   search({ query, sourceId = null, limit = null } = {}) {
     const params = new URLSearchParams({ view: "email-excerpt-v1", q: query });
     if (sourceId !== null && sourceId !== undefined) params.set("sourceId", sourceId);
