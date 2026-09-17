@@ -12,6 +12,8 @@ Pairs with:
   kit + Fleet spike (docs only)
 - [#457](https://github.com/Uuriko/project-room/pull/457) — Warp Scorers
   + Skillbox + harness-bridge research map
+- [ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md](ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md)
+  — cousin landscape (Oasis, agensis, Agent Room, Alook, HumanLayer)
 
 No deploy.
 
@@ -27,6 +29,7 @@ No deploy.
 | 6 | TypeSafe Jev | Typed kit recommend without 30-turn search |
 | 7 | [hraness factory](https://x.com/hraness/status/2100358405911105590) | N× parallel agents; model-limit honesty |
 | 8 | [Interlateral](https://interlateral.com/) / Stanford FutureLaw report | Trust Handoff, Agent Interaction Receipt, Artifact Maturity Ladder |
+| 9 | Cousin landscape (Oasis, agensis, Agent Room, Alook, HumanLayer, Factory.ai, Dust) | Shared-room cousins; steal membership / authority / artifact patterns — see [ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md](ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md) |
 
 ## Cua files (merged)
 
@@ -109,6 +112,16 @@ Contracts:
 - [ROOM-TRUST-HANDOFF-V0.md](../docs/ROOM-TRUST-HANDOFF-V0.md)
 - [ROOM-ARTIFACT-MATURITY.md](../docs/ROOM-ARTIFACT-MATURITY.md)
 
+### G. Competitive / cousin landscape (research only)
+
+Oasis, agensis, Agent Room, Alook, HumanLayer, Factory.ai, Dust.
+Steal membership / authority / attention / artifact patterns. Room
+stays the project ledger — not an IDE, marketplace, or canvas chat
+hub. Closest name collision: Agent Room (coding-agent mesh).
+
+Research:
+[ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md](ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md)
+
 ## Catalog face (not live doors)
 
 [ROOM-KITS-CATALOG.md](../docs/ROOM-KITS-CATALOG.md) **Optional later**
@@ -164,6 +177,7 @@ shelf.
 | `docs/ROOM-KITS-HARNESS-JEV-ROY.md` | Kits / harness / Jev / Roy |
 | `research/ROOM-HRANESS-STEAL-2026-09-17.md` | hraness factory steal |
 | `research/ROOM-INTERLATERAL-RESEARCH-2026-09-17.md` | Interlateral → Room research (attached source) |
+| `research/ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md` | Cousin landscape (Oasis / agensis / Agent Room / Alook / HumanLayer) |
 | `docs/ROOM-TRUST-HANDOFF-V0.md` | Trust Handoff Protocol v0 |
 | `docs/ROOM-ARTIFACT-MATURITY.md` | Five-rung artifact ladder |
 | `docs/examples/scorers/*/scorer.md` | Four default scorer stubs |
