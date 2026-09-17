@@ -2,6 +2,10 @@
 
 17 September 2026. Contract. Not a live API yet.
 
+Architecture spine:
+[ROOM-COHESIVE-ARCHITECTURE.md](ROOM-COHESIVE-ARCHITECTURE.md)
+(Second · Connect · ledger).
+
 Master plan:
 [ROOM-STEALS-FULL-BUILD-2026-09-17.md](../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md).
 

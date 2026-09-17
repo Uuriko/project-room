@@ -7,6 +7,9 @@ Research only. Product contract:
 [ROOM-PERSONAS-FACTORY.md](../docs/ROOM-PERSONAS-FACTORY.md).
 Master plan:
 [ROOM-STEALS-FULL-BUILD-2026-09-17.md](ROOM-STEALS-FULL-BUILD-2026-09-17.md).
+Architecture spine:
+[ROOM-COHESIVE-ARCHITECTURE.md](../docs/ROOM-COHESIVE-ARCHITECTURE.md)
+(Capacity = honest leases + host/provider limits).
 
 ## Claim
 

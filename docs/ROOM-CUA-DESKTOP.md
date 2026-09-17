@@ -3,6 +3,12 @@
 17 September 2026. Product contract. Kit card title: **Connect Cua desktop**
 (alt OK: Cua Driver MCP).
 
+Architecture spine:
+[ROOM-COHESIVE-ARCHITECTURE.md](ROOM-COHESIVE-ARCHITECTURE.md)
+(Second · Connect · ledger). This kit is the **Connect Desktop**
+evidence path ([#454](https://github.com/Uuriko/project-room/pull/454))
+— not a second Connect product. Muse ACK: Connect chrome is Muse.
+
 **Optional kit under Connect.** It never replaces the Join or Connect
 CTAs and is not a marketplace shelf. Not a live Connect door.
 

@@ -20,6 +20,8 @@ Judge only the receipt + trace for this Work Item. Return exactly one label.
 Contract: [ROOM-SCORER.md](../../../ROOM-SCORER.md). Receipt:
 [ROOM-RECEIPT-V1.md](../../../ROOM-RECEIPT-V1.md). Graph:
 [ROOM-RECEIPT-GRAPH-V0.md](../../../ROOM-RECEIPT-GRAPH-V0.md).
+Architecture spine:
+[ROOM-COHESIVE-ARCHITECTURE.md](../../../ROOM-COHESIVE-ARCHITECTURE.md).
 
 `selfImprovement: true` — recurring `orphan_claim` may open a PR on
 Room instructions / kit copy that forgot to cite prior receipts.

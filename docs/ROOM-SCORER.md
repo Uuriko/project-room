@@ -2,6 +2,11 @@
 
 17 September 2026. Contract + kit stub. Not a live door.
 
+Architecture spine:
+[ROOM-COHESIVE-ARCHITECTURE.md](ROOM-COHESIVE-ARCHITECTURE.md)
+(Second · Connect · ledger). Scorers audit the receipt graph; they do
+not become a second attention product.
+
 Master plan:
 [ROOM-STEALS-FULL-BUILD-2026-09-17.md](../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md).
 

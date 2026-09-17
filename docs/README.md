@@ -23,11 +23,22 @@ Project Room: a chat for people, with a way to plug AI agents into the same room
 
 ## Steal contracts (docs only, not live doors)
 
-Muse ACK build-out lane. Pairs [#454](https://github.com/Uuriko/project-room/pull/454)
-[#457](https://github.com/Uuriko/project-room/pull/457). No deploy.
+**Architecture spine:** [ROOM-COHESIVE-ARCHITECTURE.md](ROOM-COHESIVE-ARCHITECTURE.md)
+(Second · Connect · ledger). Dated research copy:
+[ROOM-COHESIVE-ARCHITECTURE-2026-09-17.md](../research/ROOM-COHESIVE-ARCHITECTURE-2026-09-17.md).
+Prefer the docs SoR when deciding what ships.
+
+Muse ACK build-out lane. **Muse ACK on Connect:** Wake · Pull · Desktop ·
+Takeover are one surface; Muse owns Connect chrome / People-rail chips —
+this lane is docs/spec only. Pairs
+[#454](https://github.com/Uuriko/project-room/pull/454)
+[#457](https://github.com/Uuriko/project-room/pull/457)
+[#466](https://github.com/Uuriko/project-room/pull/466)
+[#467](https://github.com/Uuriko/project-room/pull/467). No deploy.
 
 | Doc | What it is |
 | --- | --- |
+| [ROOM-COHESIVE-ARCHITECTURE.md](ROOM-COHESIVE-ARCHITECTURE.md) | **SoR** — collapses steal stack into one product (Second · Connect · ledger) |
 | [ROOM-RECEIPT-V1.md](ROOM-RECEIPT-V1.md) | `room.receipt.v1` Done receipt (evidence; chip = face) |
 | [ROOM-RECEIPT-GRAPH-V0.md](ROOM-RECEIPT-GRAPH-V0.md) | `citedReceiptIds[]` DAG; orphan claims fail the scorer |
 | [ROOM-SCORER.md](ROOM-SCORER.md) | Warp-shaped LLM judge; one dimension per scorer |
@@ -40,8 +51,11 @@ Muse ACK build-out lane. Pairs [#454](https://github.com/Uuriko/project-room/pul
 | [ROOM-KITS-CATALOG.md](ROOM-KITS-CATALOG.md) | Optional later rows only — not live doors |
 
 Master plan: [ROOM-STEALS-FULL-BUILD-2026-09-17.md](../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md).
-Novel synthesis: [ROOM-NOVEL-SYNTHESIS-2026-09-17.md](../research/ROOM-NOVEL-SYNTHESIS-2026-09-17.md).
+Novel synthesis (pre-collapse): [ROOM-NOVEL-SYNTHESIS-2026-09-17.md](../research/ROOM-NOVEL-SYNTHESIS-2026-09-17.md)
+— superseded for “what is Room” decisions by the cohesive architecture SoR.
 Cua desktop contract: [ROOM-CUA-DESKTOP.md](ROOM-CUA-DESKTOP.md) ([#454](https://github.com/Uuriko/project-room/pull/454)).
+Second + Nautilo steal specs land in [#467](https://github.com/Uuriko/project-room/pull/467)
+(`ROOM-SECOND-V0`, `ROOM-NAUTILO-STEAL`) and hang off this spine.
 
 ## The dated archive
 

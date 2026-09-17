@@ -2,6 +2,12 @@
 
 17 September 2026. Contract. Docs only. Not a live API.
 
+Architecture spine:
+[ROOM-COHESIVE-ARCHITECTURE.md](ROOM-COHESIVE-ARCHITECTURE.md)
+(Second · Connect · ledger). This note is the receipt-graph DAG
+(`citedReceiptIds[]`); messenger / deny / takeover kinds hang on that
+spine.
+
 `room.receipt.v1` gains `citedReceiptIds[]`. When Agent B relies on
 Agent A’s output, B’s receipt **cites** A’s receipt id. Trust Handoff
 made structural. Orphan claims fail the scorer.

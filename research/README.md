@@ -6,6 +6,10 @@ proof that a mailbox, payout, or hosted agent is live.
 
 Start with [PROJECT-ROOM-BLUEPRINT.md](PROJECT-ROOM-BLUEPRINT.md). Implementation
 truth is in [`docs/`](../docs/), especially [CURRENT-ROOM.md](../docs/CURRENT-ROOM.md).
+Architecture SoR (steal stack collapsed):
+[ROOM-COHESIVE-ARCHITECTURE.md](../docs/ROOM-COHESIVE-ARCHITECTURE.md)
+(Second · Connect · ledger). Dated brief:
+[ROOM-COHESIVE-ARCHITECTURE-2026-09-17.md](ROOM-COHESIVE-ARCHITECTURE-2026-09-17.md).
 
 | Note | What it is |
 | --- | --- |
@@ -19,13 +23,14 @@ truth is in [`docs/`](../docs/), especially [CURRENT-ROOM.md](../docs/CURRENT-RO
 | [PROJECT-ROOM-OPEN-DECISIONS-2026-09-08.md](PROJECT-ROOM-OPEN-DECISIONS-2026-09-08.md) | Open product decisions |
 | [PROJECT-ROOM-RESEARCH-TO-BUILD-PLAN-2026-09-08.md](PROJECT-ROOM-RESEARCH-TO-BUILD-PLAN-2026-09-08.md) | Research-to-build sequence |
 | [PROJECT-ROOM-RESEARCH-DECISION-2026-09-07.md](PROJECT-ROOM-RESEARCH-DECISION-2026-09-07.md) | 7 September research decision |
+| [ROOM-COHESIVE-ARCHITECTURE-2026-09-17.md](ROOM-COHESIVE-ARCHITECTURE-2026-09-17.md) | Dated brief of the architecture SoR (Second · Connect · ledger). Canonical: [docs/ROOM-COHESIVE-ARCHITECTURE.md](../docs/ROOM-COHESIVE-ARCHITECTURE.md) |
 | [CUA-FLEET-SPIKE-2026-09-17.md](CUA-FLEET-SPIKE-2026-09-17.md) | Fleet pool/claim/release → Work Item session + Receipt (research only) |
 | [ROOM-STEALS-WARP-SKILLBOX-HARNESS-2026-09-17.md](ROOM-STEALS-WARP-SKILLBOX-HARNESS-2026-09-17.md) | Warp Scorers + Skillbox + harness-bridge steals (research only) |
 | [ROOM-STEALS-FULL-BUILD-2026-09-17.md](ROOM-STEALS-FULL-BUILD-2026-09-17.md) | Finish-all-steals master plan (receipt / scorer / personas / kits; docs only) |
 | [ROOM-HRANESS-STEAL-2026-09-17.md](ROOM-HRANESS-STEAL-2026-09-17.md) | hraness factory parallelism + limit honesty (research only) |
 | [ROOM-INTERLATERAL-RESEARCH-2026-09-17.md](ROOM-INTERLATERAL-RESEARCH-2026-09-17.md) | Interlateral → Room: receipts, handoff, authority cards, maturity ladder (research only) |
 | [ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md](ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md) | Cousin landscape: Oasis, agensis, Agent Room, Alook, HumanLayer (research only) |
-| [ROOM-NOVEL-SYNTHESIS-2026-09-17.md](ROOM-NOVEL-SYNTHESIS-2026-09-17.md) | Ledger Room novel synthesis: six-axis seat + receipt graph (research only) |
+| [ROOM-NOVEL-SYNTHESIS-2026-09-17.md](ROOM-NOVEL-SYNTHESIS-2026-09-17.md) | Ledger Room novel synthesis: six-axis seat + receipt graph (research only; superseded for decisions by the cohesive architecture SoR) |
 | [multiplayer-messaging-20260908/](multiplayer-messaging-20260908/) | Collaboration/messaging plan (markdown + DOCX) |
 | [2026-09-07-project-room-v2/](2026-09-07-project-room-v2/) | Earlier sourced report and comparison screenshots |
 | [2026-09-07-project-room/](2026-09-07-project-room/) | First 7 September report source |

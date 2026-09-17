@@ -4,9 +4,15 @@ Docs / research only. Cousin landscape for the steal stack. Does not
 ship a live kit door, Connect panel, People-rail change, or client
 diff.
 
+Architecture spine:
+[ROOM-COHESIVE-ARCHITECTURE.md](../docs/ROOM-COHESIVE-ARCHITECTURE.md)
+(Second · Connect · ledger). Nautilo steal + Second product canon land
+in [#467](https://github.com/Uuriko/project-room/pull/467) and hang off
+that spine.
+
 Master plan:
 [ROOM-STEALS-FULL-BUILD-2026-09-17.md](ROOM-STEALS-FULL-BUILD-2026-09-17.md).
-Novel synthesis (Ledger Room):
+Novel synthesis (Ledger Room; superseded for decisions by the SoR):
 [ROOM-NOVEL-SYNTHESIS-2026-09-17.md](ROOM-NOVEL-SYNTHESIS-2026-09-17.md).
 Receipt graph:
 [ROOM-RECEIPT-GRAPH-V0.md](../docs/ROOM-RECEIPT-GRAPH-V0.md).
