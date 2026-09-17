@@ -481,19 +481,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const result = await syncTelegramConnection({ store, token, binding, connectionId, requestId: data.requestId, updates: data.updates, webhooks: channelWebhooks });
           return json(res, result.duplicate ? 200 : 201, { ...store.connections.connectionRecord(token, connectionId, binding), receipt: result.receipt, duplicate: result.duplicate, source: result.source });
         }
-        const attachments = /^\/api\/inbox\/sources\/([^/]{1,384})\/attachments(?:\/([^/]{1,384}))?$/.exec(url.pathname);
-        if (attachments && req.method === "GET") {
-          const id = pathId(attachments[1]);
-          if (attachments[2]) {
-            // Attachment ids are opaque provider values (they may carry "="
-            // padding that pathId rejects); the membership check below is the
-            // real validation, so decode without the id-shape gate.
-            let attachmentId;
-            try { attachmentId = decodeURIComponent(attachments[2]); } catch { reject(404, "not_found", "Not found"); }
-            return json(res, 200, store.inbox.attachment(token, binding,
-              { sourceId: id, attachmentId, includeChannels: view !== null }));
-          }
-          return json(res, 200, store.inbox.attachments(token, binding, { sourceId: id, includeChannels: view !== null }));
+        const attachmentsList = /^\/api\/inbox\/sources\/([^/]{1,384})\/attachments$/.exec(url.pathname);
+        if (attachmentsList && req.method === "GET") {
+          return json(res, 200, store.inbox.attachments(token, binding,
+            { sourceId: pathId(attachmentsList[1]), includeChannels: view !== null }));
+        }
+        const attachmentItem = /^\/api\/inbox\/sources\/([^/]{1,384})\/attachments\/([^/]{1,384})$/.exec(url.pathname);
+        if (attachmentItem && req.method === "GET") {
+          // Attachment ids are opaque provider values (they may carry "="
+          // padding that pathId rejects); the membership check is the real
+          // validation, so decode without the id-shape gate.
+          let attachmentId;
+          try { attachmentId = decodeURIComponent(attachmentItem[2]); } catch { reject(404, "not_found", "Not found"); }
+          return json(res, 200, store.inbox.attachment(token, binding,
+            { sourceId: pathId(attachmentItem[1]), attachmentId, includeChannels: view !== null }));
         }
         const source = /^\/api\/inbox\/sources\/([^/]{1,384})(?:\/(share-context|room-results|send-context|sends))?$/.exec(url.pathname);
         if (source && req.method === "GET") {
