@@ -302,9 +302,14 @@ export class Inbox {
       return this.store.readTransaction(() => {
         const auth = this.auth(token, binding), take = threadLimitOf(limit);
         const include = includeChannels === true;
-        const rows = sourceId
-          ? this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? AND id=?").all(auth.account.id, sourceId)
-          : this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? ORDER BY updated_at DESC,id LIMIT 5000").all(auth.account.id);
+        // A scoped lookup names an existing source in this account (404 when
+        // unknown, 422 when malformed); the thread returned is the full
+        // conversation containing it, built from the same visible set as the
+        // unscoped view. When the source is not visible in this view (a
+        // channel source without a reading view, or a malformed version),
+        // the scope matches nothing and the result is empty.
+        if (sourceId) this.source(auth.account.id, sourceId);
+        const rows = this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? ORDER BY updated_at DESC,id LIMIT 5000").all(auth.account.id);
         const infos = [];
         for (const row of rows) {
           try {
@@ -325,17 +330,20 @@ export class Inbox {
           return { id: key.id, occurredAt: key.occurredAt, threadId: key.threadId, inReplyTo: key.inReplyTo };
         });
         const built = buildThreads(messages);
+        const scoped = sourceId
+          ? built.filter(thread => thread.entries.some(entry => entry.message.id === sourceId))
+          : built;
         const ctx = { connections: new Map(), include, readAt: this.readMarkers(auth.account.id),
           sentIds: include ? this.sentProviderIds(auth.account.id) : new Set() };
         const byId = new Map(rows.map(row => [row.id, row]));
-        const threads = built.slice(0, take).map(thread => ({
+        const threads = scoped.slice(0, take).map(thread => ({
           threadId: thread.threadId, messageCount: thread.messageCount, depth: thread.depth,
           firstAt: thread.firstAt, lastAt: thread.lastAt,
           entries: thread.entries
             .map(({ message, depth }) => ({ depth, source: this.sourceSummary(auth, byId.get(message.id), ctx) }))
             .filter(entry => entry.source)
         })).filter(thread => thread.entries.length > 0);
-        return { contractVersion: 1, viewer: viewer(auth), threads, total: built.length };
+        return { contractVersion: 1, viewer: viewer(auth), threads, total: scoped.length };
       });
     }
     // Attachment descriptors for one source. Descriptors are metadata only: the
