@@ -2506,7 +2506,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
          AND (? IS NULL OR json_extract(body,'$.at')<=?)
          ORDER BY sequence LIMIT ?`
       ).all(roomId, after, actor, actor, since, since, until, until, limit).map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
-      const next = events.at(-1)?.sequence ?? after;
+      // The cursor advances by what was SCANNED, not by what was returned.
+      // A filter can match nothing in a stretch of the log: taking `next` from
+      // the last returned row left it at the caller's own `after`, while
+      // hasMore was measured against the room's unfiltered sequence - so a
+      // client following the documented next/hasMore contract asked for the
+      // same empty page forever. Fewer rows than the limit means the scan
+      // reached the end of the log, so the cursor belongs at that end.
+      //
+      // This is computed before the DM filter below on purpose: the cursor
+      // must describe what was scanned, not what this viewer was allowed to
+      // see, or two members would page the same log at different speeds.
+      const reachedEnd = events.length < limit;
+      const next = reachedEnd ? sequence : events.at(-1).sequence;
       // RC-2026-09-18-012: targeted-DM privacy. A message.posted event
       // carrying data.toMemberId is a direct message: only its sender and
       // its addressed member may read it. Other events (including
