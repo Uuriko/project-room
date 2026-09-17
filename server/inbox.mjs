@@ -338,6 +338,42 @@ export class Inbox {
         return { contractVersion: 1, viewer: viewer(auth), threads, total: built.length };
       });
     }
+    // Attachment descriptors for one source. Descriptors are metadata only: the
+    // system never retains attachment bytes, so this is a listing and a
+    // membership check, not a download. Byte retrieval needs a live provider
+    // fetch with the account's credentials; that future slice reuses this
+    // auth + ownership + membership path.
+    attachmentDescriptors(d) {
+      if (d.adapter === "email") {
+        return readEmailEnvelope(d.envelope).attachments.items
+          .map(a => ({ id: a.id, kind: a.kind, name: a.name, contentType: a.contentType, size: a.size, inline: a.inline }));
+      }
+      if (d.adapter !== "synthetic") {
+        return readChannelEnvelope(d.envelope).attachments
+          .map(a => ({ id: a.id, kind: a.kind, name: a.name, contentType: a.contentType, size: a.size, inline: false }));
+      }
+      return [];
+    }
+    attachments(token, binding, { sourceId, includeChannels = false } = {}) {
+      return this.store.readTransaction(() => {
+        const auth = this.auth(token, binding), row = this.source(auth.account.id, sourceId);
+        const d = this.version(auth.account.id, row.id, row.revision);
+        if (d.adapter !== "synthetic" && includeChannels !== true) fail(404, "inbox_source_not_found", "Source not found.");
+        return { contractVersion: 1, viewer: viewer(auth), sourceId: row.id, attachments: this.attachmentDescriptors(d) };
+      });
+    }
+    attachment(token, binding, { sourceId, attachmentId, includeChannels = false } = {}) {
+      return this.store.readTransaction(() => {
+        const auth = this.auth(token, binding), row = this.source(auth.account.id, sourceId);
+        const d = this.version(auth.account.id, row.id, row.revision);
+        if (d.adapter !== "synthetic" && includeChannels !== true) fail(404, "inbox_source_not_found", "Source not found.");
+        const found = this.attachmentDescriptors(d).find(a => a.id === attachmentId);
+        if (!found) fail(404, "inbox_attachment_not_found", "Attachment not found.");
+        return { contractVersion: 1, viewer: viewer(auth), sourceId: row.id, attachment: found,
+          retrieval: { available: false, reason: "attachment_bytes_not_retained",
+            detail: "Descriptors are metadata only. Byte retrieval needs a live provider fetch with the account's credentials." } };
+      });
+    }
   search(token, binding, { query = null, sourceId = null, limit = null, includeChannels = false } = {}) {
     return this.store.readTransaction(() => {
       const auth = this.auth(token, binding);

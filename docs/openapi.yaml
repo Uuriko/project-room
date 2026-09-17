@@ -2009,6 +2009,55 @@ paths:
         '200': { description: "{ contractVersion: 1, viewer, threads: [{ threadId, messageCount, depth, firstAt, lastAt, entries: [{ depth, source }] }], total }" }
         '401': { description: account_session_required }
         '422': { description: invalid_limit or unsupported_inbox_view }
+  /api/inbox/sources/{sourceId}/attachments:
+    get:
+      summary: List one inbox source's attachment descriptors
+      description: >-
+        Account-session read. Attachment descriptors are metadata only
+        (id, kind, name, contentType, size, inline); the system never
+        retains attachment bytes. `?view=email-excerpt-v1` includes
+        channel sources; without it they 404 like the list hides them.
+        Another account's source 404s. Unknown attachment ids 404 on the
+        item route.
+      security:
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+        - name: view
+          in: query
+          schema: { type: string, enum: [email-text-v1, email-excerpt-v1] }
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, sourceId, attachments: [{ id, kind, name, contentType, size, inline }] }" }
+        '401': { description: account_session_required }
+        '404': { description: inbox_source_not_found }
+        '422': { description: unsupported_inbox_view }
+  /api/inbox/sources/{sourceId}/attachments/{attachmentId}:
+    get:
+      summary: Verify one attachment's descriptor membership
+      description: >-
+        Account-session read. Confirms the attachment id is a member of
+        the source's descriptor set and returns the descriptor plus a
+        retrieval handle. Retrieval is currently unavailable
+        (attachment_bytes_not_retained): byte download needs a live
+        provider fetch with the account's credentials, a future slice
+        that reuses this auth, ownership, and membership path.
+      security:
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+        - name: attachmentId
+          in: path
+          required: true
+          description: Opaque provider attachment id from the descriptor list.
+          schema: { type: string }
+        - name: view
+          in: query
+          schema: { type: string, enum: [email-text-v1, email-excerpt-v1] }
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, sourceId, attachment, retrieval: { available, reason, detail } }" }
+        '401': { description: account_session_required }
+        '404': { description: inbox_source_not_found or inbox_attachment_not_found }
+        '422': { description: unsupported_inbox_view }
   /api/inbox/sources/{sourceId}:
     get:
       summary: Read one inbox source and its private draft

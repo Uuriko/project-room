@@ -204,6 +204,21 @@ export class InboxClient {
         && typeof t.firstAt === "string" && typeof t.lastAt === "string"
         && Array.isArray(t.entries) && t.entries.every(e => Number.isSafeInteger(e.depth) && e.depth >= 0 && this.validSourceSummary(e.source))));
   }
+  // Attachment descriptors for one source: metadata only, never bytes.
+  // The single-attachment call also verifies descriptor membership and
+  // carries the retrieval handle a future byte-fetch will use.
+  attachments(sourceId) {
+    return this.request(`/sources/${encodeURIComponent(sourceId)}/attachments?view=email-excerpt-v1`, {},
+      v => v.sourceId === sourceId && Array.isArray(v.attachments)
+        && v.attachments.every(a => typeof a.id === "string" && typeof a.kind === "string"
+          && (a.name === null || typeof a.name === "string") && (a.contentType === null || typeof a.contentType === "string")
+          && (a.size === null || Number.isSafeInteger(a.size)) && typeof a.inline === "boolean"));
+  }
+  attachment(sourceId, attachmentId) {
+    return this.request(`/sources/${encodeURIComponent(sourceId)}/attachments/${encodeURIComponent(attachmentId)}?view=email-excerpt-v1`, {},
+      v => v.sourceId === sourceId && typeof v.attachment?.id === "string" && v.attachment.id === attachmentId
+        && v.retrieval?.available === false && typeof v.retrieval?.reason === "string");
+  }
   search({ query, sourceId = null, limit = null } = {}) {
     const params = new URLSearchParams({ view: "email-excerpt-v1", q: query });
     if (sourceId !== null && sourceId !== undefined) params.set("sourceId", sourceId);
