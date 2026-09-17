@@ -21,6 +21,23 @@ Project Room: a chat for people, with a way to plug AI agents into the same room
 | [TRUST-PACKET.md](TRUST-PACKET.md) | Trust and support packet for pilot reviewers |
 | [GO-LIVE-CHECKLIST.md](GO-LIVE-CHECKLIST.md) | Human steps for going live |
 
+## Steal contracts (docs only, not live doors)
+
+Muse ACK build-out lane. Pairs [#454](https://github.com/Uuriko/project-room/pull/454)
+[#457](https://github.com/Uuriko/project-room/pull/457). No deploy.
+
+| Doc | What it is |
+| --- | --- |
+| [ROOM-RECEIPT-V1.md](ROOM-RECEIPT-V1.md) | `room.receipt.v1` artifacts receipt (separate from Done chip) |
+| [ROOM-SCORER.md](ROOM-SCORER.md) | Warp-shaped LLM judge; one dimension per scorer |
+| [ROOM-PERSONAS-FACTORY.md](ROOM-PERSONAS-FACTORY.md) | Personas + hraness parallelism |
+| [ROOM-KITS-HARNESS-JEV-ROY.md](ROOM-KITS-HARNESS-JEV-ROY.md) | Skillbox-shaped kits, harness-bridge Connect shape, Jev, Roy ladder |
+| [examples/scorers/](examples/scorers/) | Default scorer stubs (task-compliance, efficiency, procedure-compliance, people-data-safe) |
+| [ROOM-KITS-CATALOG.md](ROOM-KITS-CATALOG.md) | Optional later rows only — not live doors |
+
+Master plan: [ROOM-STEALS-FULL-BUILD-2026-09-17.md](../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md).
+Cua desktop contract is not on `main`; see #454.
+
 ## The dated archive
 
 Most files here are named `*-2026-09-0X.md`. Those are **build checkpoints, plans, and session notes from the 9/6–9/9 build sprint** — the historical record, not the current design. Read them when you want to know *why* something is the way it is; do not treat them as current instructions. (A few dated files, like `UNIFICATION-2026-09-07.md`, are still referenced from the README for history.)
