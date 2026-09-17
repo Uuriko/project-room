@@ -8,19 +8,36 @@ class RateLimitError extends Error { constructor(code, message) { super(message)
 const fail = (code, message) => { throw new RateLimitError(code, message); };
 const check = (condition, message) => { if (!condition) fail("invalid_ratelimit", message); };
 // Create a rate limiter. now is an injectable clock (ms).
-export function createRateLimiter({ store, now, capacity = 60, refillPerSecond = 1 } = {}) {
+export function createRateLimiter({ store, now, capacity = 60, refillPerSecond = 1, maxKeys = 2000 } = {}) {
   check(store === undefined || store instanceof Map, "store must be a Map if given");
   check(now === undefined || typeof now === "function", "now must be a function if given");
   check(Number.isInteger(capacity) && capacity > 0, "capacity must be positive");
   check(Number.isFinite(refillPerSecond) && refillPerSecond > 0, "refillPerSecond must be positive");
+  check(Number.isInteger(maxKeys) && maxKeys > 0, "maxKeys must be positive");
   const clock = now ?? (() => Date.now());
   const buckets = store ?? new Map();
+  // Bounded, least-recently-used. A bucket is one small object, but the key is
+  // whatever the caller passed, and callers key on request data. Unbounded, a
+  // stream of unfamiliar keys grows this map for the lifetime of the process.
+  // Evicting the least recently touched entry is the same trade server/http.mjs
+  // makes for its own rate families: a flood costs the floodgate its history,
+  // never a refusal for everyone else. Map insertion order is the recency order.
   const bucketFor = identityId => {
     check(typeof identityId === "string" && identityId.length > 0, "identityId must be a non-empty string");
-    if (!buckets.has(identityId)) {
-      buckets.set(identityId, { tokens: capacity, lastRefill: clock() });
+    const existing = buckets.get(identityId);
+    if (existing) {
+      buckets.delete(identityId); // re-inserted below, so it becomes most recent
+      buckets.set(identityId, existing);
+      return existing;
     }
-    return buckets.get(identityId);
+    while (buckets.size >= maxKeys) {
+      const oldest = buckets.keys().next();
+      if (oldest.done) break;
+      buckets.delete(oldest.value);
+    }
+    const fresh = { tokens: capacity, lastRefill: clock() };
+    buckets.set(identityId, fresh);
+    return fresh;
   };
   // Refill based on elapsed time.
   const refill = bucket => {

@@ -1963,6 +1963,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // join. Unauthenticated (the identity is not a member yet); the
       // module rate-limits per identity and never reveals more than 404.
       if (url.pathname === "/api/access-requests" && req.method === "POST") {
+        // The other three open POST routes all bound themselves per address
+        // before reading a body; this one did not, so the only limit it had was
+        // keyed on a field the caller chooses.
+        rate(`access-request:${remoteAddress}`, 20);
         const data = await body(req);
         if (!exact(data, ["roomId", "identityId", "displayName", "requestedPermissions", "note", "requestId"])) {
           reject(422, "invalid_request", "roomId, identityId, displayName, requestedPermissions, note, requestId are the accepted fields");
