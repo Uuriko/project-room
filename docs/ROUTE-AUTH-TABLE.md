@@ -133,6 +133,7 @@ needs `X-Session-Binding`. Bearer keys are never accepted here.
 | `POST /api/inbox/simulation` | signed-in account session + CSRF + binding | loopback clients of a synthetic-transport service only (403 / 409 otherwise); 60/account/min |
 | `POST /api/inbox/connections/:id/sync` | signed-in account session + CSRF + binding | owner of the connection; loopback only; 60/account/min |
 | `POST /api/guest-agent-links` | room bearer key, or room / account browser session + CSRF; room named in the body | room owner + `manage_members` (same operation as `POST /api/rooms/:id/guest-agent-links`); 30/address/min |
+| `POST /api/auth/recovery-codes/generate` | signed-in account session + CSRF | mints (or regenerates — invalidating the previous set) the account's recovery-code set, returned exactly once; codes are never logged or re-displayed; 10/address/min |
 
 `GET /api/inbox*` and `GET /api/account-rooms` are the matching reads: account
 session plus `X-Session-Binding`, 401 `account_session_required` for any
@@ -168,6 +169,7 @@ the served-open set differs from the declared set; `node scripts/open-routes.mjs
 | `POST /api/guest-agent-links/join` | capability (`gt_` link token, 20/address/min) | `read_chat` access for the linked guest member; 410 for unknown tokens |
 | `POST /api/session` | the access key in the body (10/address/min) | 401 on a wrong key; sets `room_session` on success |
 | `POST /api/inbox/webhooks/:connectionId` | per-connection webhook secret header | see Inbox connection routes below |
+| `POST /api/auth/recovery-codes/redeem` | capability (verified email hint + recovery code; 10/address/min + 10/email-hint/15min) | open by design: the same 401 `invalid_recovery_code` for unknown email, no set, or wrong code; a successful redeem burns the code and upgrades the caller's session slot |
 
 ## Account routes (account session, not room credentials)
 
@@ -175,6 +177,7 @@ the served-open set differs from the declared set; `node scripts/open-routes.mjs
 |---|---|---|
 | `GET /api/account-rooms` | account session cookie + `X-Session-Binding` | the account's own current memberships only (a left or revoked membership disappears on the next read); each entry carries `kind` and `archived` |
 | `POST /api/account-rooms` | account session cookie + `X-Session-Binding` + CSRF (`protectWrite`), 10/min per account | canonical account with an active human membership that is a room owner or holds `manage_members` (403 `room_creation_denied` otherwise, including provisional room-key accounts); the caller becomes member `owner` of the new room; client `roomId` is the idempotency key (200 `duplicate: true` on replay, 409 `room_exists` for a different room under that id); 409 `pilot_limit` at 100 memberships |
+| `GET /api/auth/recovery-codes/status` | account session cookie | `{ configured, remaining }` for the account's own recovery-code set; codes are never exposed (no re-display route) |
 
 ## Inbox connection routes (account session, not room credentials)
 

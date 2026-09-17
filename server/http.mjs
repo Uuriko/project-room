@@ -23,6 +23,8 @@ import { AgentRooms } from "./agent-rooms.mjs";
 import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
 import { listPins, setPin } from "./pins.mjs";
 import { GoogleSignIn, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage } from "./google-oauth.mjs";
+import { createRateLimiter } from "./identity-ratelimit.mjs";
+import { normalizeEmail } from "./account-login-methods.mjs";
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -95,6 +97,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       redirectUri: googleAuth.redirectUri || expectedOrigin() + GOOGLE_CALLBACK_PATH,
       fetchImpl: googleAuth.fetchImpl ?? fetch, now: () => store.now() });
     return googleSignIn;
+  };
+  // ---- Recovery codes (slice 6, RC-2026-09-17-015) ----
+  //
+  // Last-resort sign-in for the multi-method login program. A generated set
+  // is shown exactly once (never re-displayed, never logged); redeeming one
+  // code upgrades an anonymous slot into the account session. Generate and
+  // status need an authenticated account session; redeem resolves the account
+  // from a verified email hint — the client never supplies a raw account id.
+  // The redeem budget is 10 attempts per 15 minutes per email hint (per-IP
+  // limits ride on the shared rate() family at the route itself).
+  const recoveryRedeemLimiter = createRateLimiter({ capacity: 10, refillPerSecond: 10 / (15 * 60) });
+  const recoveryRedeemAllowed = emailHint => {
+    const verdict = recoveryRedeemLimiter.check(`recovery-redeem:${rateHash(emailHint)}`);
+    if (!verdict.allowed) reject(429, "rate_limited", verdict.message);
   };
   if (trustedLocalProxy && !origin?.startsWith("https://")) throw new Error("The deployment proxy requires a fixed HTTPS origin");
   if (!Number.isInteger(streamQueueCap) || streamQueueCap < 1) throw new Error("Stream queue cap must be a positive integer of bytes");
@@ -665,6 +681,70 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return json(res, 200, accountView(store.logoutAccountSession(slotToken, data.expectedSessionRevision)));
         }
         reject(405, "method_not_allowed", "Method not allowed");
+      }
+      // ---- Recovery codes (slice 6, RC-2026-09-17-015) ----
+      //
+      // generate: an authenticated account session mints (or regenerates) the
+      // set; the plaintext codes leave in exactly this one response and are
+      // never logged or re-displayed. Regenerating invalidates the set that
+      // was shown before. redeem: the account is resolved from the verified
+      // email hint; a wrong code and an unknown email return the same 401
+      // shape, and a successful redeem burns the code, records the method
+      // use, and upgrades the caller's session slot. status: authenticated
+      // sessions see only the configured/remaining counts, never the codes.
+      if (url.pathname === "/api/auth/recovery-codes/generate" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`recovery-codes-generate:${remoteAddress}`, 10);
+        const auth = store.authenticateAccountSession(cookie(req, accountCookieName));
+        protectWrite(req, auth, false);
+        const { codes, count } = store.accountLogins.generateRecoveryCodes(auth.account.id);
+        return json(res, 200, { codes, count, generatedAt: new Date(store.now()).toISOString(),
+          warning: "Save these now \u2014 they are shown once and each works a single time. Regenerating invalidates the previous set." });
+      }
+      if (url.pathname === "/api/auth/recovery-codes/status" && req.method === "GET") {
+        rate(`recovery-codes-status:${remoteAddress}`, 30);
+        const auth = store.authenticateAccountSession(cookie(req, accountCookieName));
+        const configured = store.accountLogins.listMethods(auth.account.id)
+          .some(method => method.type === "recovery-code-set" && !method.disabled);
+        const remaining = configured ? store.accountLogins.recoveryCodesRemaining(auth.account.id) : null;
+        return json(res, 200, { configured, remaining });
+      }
+      if (url.pathname === "/api/auth/recovery-codes/redeem" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`recovery-redeem:${remoteAddress}`, 10);
+        const data = await body(req);
+        if (!exact(data, ["email", "code", "sessionToken", "sessionRevision"])
+          || typeof data.email !== "string" || typeof data.code !== "string"
+          || typeof data.sessionToken !== "string" || !Number.isSafeInteger(data.sessionRevision)) {
+          reject(422, "invalid_recovery_redeem", "An email, recovery code, session token, and current session revision are required");
+        }
+        const email = normalizeEmail(data.email);
+        if (email === null) reject(422, "invalid_email", "A valid email address is required");
+        // The slot is verified before any code is burned so a CSRF failure
+        // cannot consume a one-time code.
+        const slot = store.accountSessionSlot(data.sessionToken);
+        protectWrite(req, slot, false);
+        recoveryRedeemAllowed(email);
+        const accountId = store.accountLogins.findAccountByVerifiedEmail(email);
+        let redemption;
+        try {
+          if (accountId === null) reject(401, "invalid_recovery_code", "That recovery code is not valid");
+          redemption = store.accountLogins.consumeRecoveryCode(accountId, data.code);
+        } catch (error) {
+          // No set and a wrong code answer identically: there is no oracle.
+          if (error instanceof ServiceError && (error.code === "invalid_recovery_code" || error.code === "login_method_not_found")) {
+            reject(401, "invalid_recovery_code", "That recovery code is not valid");
+          }
+          throw error;
+        }
+        const method = store.accountLogins.listMethods(accountId)
+          .find(candidate => candidate.type === "recovery-code-set" && !candidate.disabled);
+        if (method) store.accountLogins.touchMethod(accountId, method.id);
+        const loggedIn = store.loginAccountSessionWithMethod(data.sessionToken, accountId, data.sessionRevision, {
+          method: { kind: "recovery-code", ref: method ? method.id : "recovery-code-set" }
+        });
+        setCookie(res, accountCookieName, data.sessionToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
+        return json(res, 200, { remaining: redemption.remaining, session: accountView(loggedIn) });
       }
       if (url.pathname === "/api/guest-agent-links" && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, guestAgentLinkContract(), req.method === "HEAD");
