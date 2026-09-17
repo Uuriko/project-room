@@ -107,7 +107,7 @@
             <summary>Add connection</summary>
             <form id="inbox-connection-form" class="inbox-connection-form">
               <label for="inbox-connection-channel">Channel</label>
-              <select id="inbox-connection-channel" name="channel"><option value="telegram">Telegram bot</option><option value="email">Email mailbox (fixture)</option></select>
+              <select id="inbox-connection-channel" name="channel"><option value="telegram">Telegram bot</option><option value="email">Email mailbox (fixture)</option><option value="whatsapp">WhatsApp (pairing required)</option></select>
               <label for="inbox-connection-id">Connection id</label>
               <input id="inbox-connection-id" name="id" type="text" value="telegram-bot" maxlength="128" required autocomplete="off">
               <div data-channel="telegram">
@@ -119,6 +119,11 @@
               <div data-channel="email" hidden>
                 <label for="inbox-connection-address">Mailbox address</label>
                 <input id="inbox-connection-address" name="address" type="email" maxlength="320" placeholder="you@example.test" autocomplete="off">
+              </div>
+              <div data-channel="whatsapp" hidden>
+                <label for="inbox-connection-phone">Phone number</label>
+                <input id="inbox-connection-phone" name="phone" type="tel" inputmode="tel" maxlength="16" placeholder="+15551234567" autocomplete="off">
+                <p class="form-hint">E.164 format. Only the last four digits are kept; the full number is never stored or shown.</p>
               </div>
               <label for="inbox-connection-name">Display name <span class="form-hint">(optional)</span></label>
               <input id="inbox-connection-name" name="name" type="text" maxlength="200" autocomplete="off">

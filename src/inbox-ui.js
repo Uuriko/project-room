@@ -134,7 +134,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     $("#choose-room").hidden = !getRoom();
   }
   const errorText = error => error.code === "obsolete_inbox" ? "" : error.status === 404 ? "Message unavailable." : "Couldn’t load inbox. Try again.";
-  const channelLabel = { email: "Email", telegram: "Telegram" };
+  const channelLabel = { email: "Email", telegram: "Telegram", whatsapp: "WhatsApp" };
   const stateLabel = { active: "connected", disconnected: "disconnected", reconnect_required: "reconnect required" };
   // One group per connection (email, Telegram, ...) plus the sample messages.
   const groupLabel = c => c ? `${channelLabel[c.channel] ?? c.channel} · ${connectionName(c.id) ?? stateLabel[c.state] ?? c.state}` : "Sample messages";
@@ -303,6 +303,10 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   // Email has no live path yet: the mailbox is a recorded fixture until routing lands.
   const emailLines = record => [record.mode === "fixture" ? "Inbound: fixture mailbox · not yet routed" : "Inbound: routed", "Sending: not available",
     "Last update received: " + when(record.webhookSetAt ?? null).replace("none yet", "fixture only")];
+  // WhatsApp has no live path yet: pairing is recorded from a last-four fingerprint,
+  // inbound stays unrouted and sending is unavailable until a live adapter lands.
+  const whatsappLines = record => ["Pairing: required · link the number", "Inbound: not yet routed", "Sending: not available",
+    "Last update received: " + when(record.webhookSetAt ?? null).replace("none yet", "none recorded")];
   function renderConnections(records) {
     const container = $("#inbox-connections");
     container.hidden = !records.length;
@@ -313,7 +317,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       const heading = document.createElement("h2"); heading.className = "form-hint"; heading.textContent = `${channelLabel[c.channel] ?? c.channel} · ${c.identity.displayName || c.identity.handle || c.externalId}`;
       const status = document.createElement("p"); status.className = "inbox-connection-state"; status.textContent = stateLabel[c.state] ?? c.state;
       const facts = document.createElement("ul"); facts.className = "inbox-connection-facts";
-      for (const line of record.live ? liveLines(record.live) : c.channel === "email" ? emailLines(record) : []) { const item = document.createElement("li"); item.textContent = line; facts.append(item); }
+      for (const line of record.live ? liveLines(record.live) : c.channel === "email" ? emailLines(record) : c.channel === "whatsapp" ? whatsappLines(record) : []) { const item = document.createElement("li"); item.textContent = line; facts.append(item); }
       card.append(heading, status, facts);
       const actions = document.createElement("div"), note = document.createElement("span");
       actions.className = "inbox-connection-actions"; note.className = "inbox-connection-note"; note.setAttribute("role", "status"); note.textContent = connectionNotes.get(c.id) ?? "";
@@ -377,6 +381,15 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       return { revision, profile: { accountId, id, revision, channel, provider: "telegram-bot", externalId: botId,
         identity: { kind: "bot", id: botId, handle: "@" + username, displayName }, capabilities: { read: true, send: true, threads: true, edit: true } } };
     }
+    if (channel === "whatsapp") {
+      // Pairing-required channel: validate E.164, but keep only the last-four
+      // fingerprint in the profile. The full number never leaves this form.
+      const phone = value("phone");
+      if (!/^\+[1-9]\d{7,14}$/.test(phone)) throw new Error("Phone: E.164 format, e.g. +15551234567.");
+      const last4 = phone.slice(-4), displayName = value("name") || "WhatsApp …" + last4;
+      return { revision, profile: { accountId, id, revision, channel, provider: "whatsapp-cloud", externalId: "wa-" + last4,
+        identity: { kind: "user", id: "wa:" + last4, handle: "…" + last4, displayName }, capabilities: { read: true, send: false, threads: true, edit: false } } };
+    }
     const address = value("address").toLowerCase(), name = value("name") || address;
     if (!/^[^\s@]{1,64}@[^\s@]{1,255}$/.test(address) || address.length > 320) throw new Error("Address: one mailbox address.");
     return { revision, profile: { accountId, id, revision, provider: "microsoft-graph", mailboxId: address, identity: { name, address }, aliases: [] } };
@@ -384,7 +397,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   $("#inbox-connection-channel").addEventListener("change", () => {
     const channel = $("#inbox-connection-channel").value;
     for (const field of document.querySelectorAll("#inbox-connection-form [data-channel]")) { field.hidden = field.dataset.channel !== channel; for (const input of field.querySelectorAll("input")) input.required = !field.hidden; }
-    $("#inbox-connection-id").value = channel === "telegram" ? "telegram-bot" : "mailbox";
+    $("#inbox-connection-id").value = channel === "telegram" ? "telegram-bot" : channel === "whatsapp" ? "whatsapp" : "mailbox";
   });
   $("#inbox-connection-form").addEventListener("submit", async event => {
     event.preventDefault();
@@ -400,6 +413,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       const result = await api.applyConnection(request); if (!owns()) return;
       const c = result.connection;
       connectionNotes.set(c.id, c.channel === "telegram" ? (result.live?.state === "configured" ? "Added · press Reconnect to register the webhook secret" : "Added · set the Telegram bindings, then Reconnect")
+        : c.channel === "whatsapp" ? "Added · pairing required, not yet routed"
         : "Added · fixture mailbox, not yet routed");
       text("#inbox-connection-form-status", "Added " + (c.identity.displayName || c.identity.handle || c.externalId) + ".");
       form.reset(); $("#inbox-connection-channel").dispatchEvent(new Event("change"));

@@ -40,7 +40,7 @@ function validReplyTarget(a, update = false) {
     && o.to.length + o.cc.length + o.bcc.length > 0 && !o.differences.some(v => ["draft_state", "thread", "from", "sender", "attachments"].includes(v));
   return (!a.canReview || supported) && (!r?.current || a.canReview) && (a.status !== "draft_reviewed" || r !== null);
 }
-const connectionStates = ["active", "disconnected", "reconnect_required"], channels = { email: "Email", telegram: "Telegram" };
+const connectionStates = ["active", "disconnected", "reconnect_required"], channels = { email: "Email", telegram: "Telegram", whatsapp: "WhatsApp" };
 const validConnectionRef = c => c === null || (id(c?.id) && Object.hasOwn(channels, c.channel) && boundedText(c.provider, 64)
   && connectionStates.includes(c.state) && Object.keys(c).length === 4);
 const isoTime = v => v === null || (typeof v === "string" && v.length <= 40 && Number.isFinite(Date.parse(v)));
