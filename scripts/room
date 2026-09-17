@@ -288,7 +288,10 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
     def lease_h_of($l): (($l | capture("^lease=(?<n>[0-9]+)h$") | .n | tonumber) // null);
     def lease_exp($t):
       if ($t.lease_h | not) then null
-      else (epoch($t.claim_at) + $t.lease_h * 3600) end;
+      # Heartbeats renew the lease: expiry extends from the last heartbeat
+      # (or claim time if no heartbeat yet). Per John's 2026-09-17 decision:
+      # "it needs a heartbeat" means heartbeats keep the lease alive.
+      else (epoch($t.heartbeat_at // $t.claim_at) + $t.lease_h * 3600) end;
 
     def validate_claim($b):
       []
