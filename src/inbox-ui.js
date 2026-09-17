@@ -7,7 +7,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   const api = new InboxClient(account, { onAccessEnded: onAccountEnded });
   const drafts = new Map(), positions = new Map();
   let owner = null, active = false, browsing = false, selected = null, epoch = 0, rows = [], sharing = null, sharingBusy = false, retryShare = null,
-    nextCursor = null, paging = false;
+    nextCursor = null, paging = false, searchQuery = null, searching = false;
   let navigationEpoch = 0;
   const storageKey = "project-room:pending-private-share:v1";
   const positionKey = "project-room:inbox-position:v1";
@@ -102,7 +102,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     sendUI.reset({ preservePending });
     replyUI.reset({ preservePending });
     api.reset(); owner = null; epoch++; active = false; browsing = false; selected = null; rows = []; sharing = null; sharingBusy = false;
-    nextCursor = null; paging = false;
+    nextCursor = null; paging = false; searchQuery = null; searching = false;
     drafts.clear(); positions.clear(); retryShare = null; if (!preservePending) persistShare();
     connectionEpoch++; connectionNotes.clear(); connectionRecords.clear(); $("#inbox-connections").hidden = true; $("#inbox-connections").replaceChildren();
     filters = { channel: "all", connection: "all", grouped: true, unreadOnly: false }; $("#inbox-filters").hidden = true; $("#inbox-group-toggle").checked = true;
@@ -230,6 +230,41 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     label.append(box, document.createTextNode(" Unread only"));
     $("#inbox-filters").append(label);
     box.addEventListener("change", () => { filters.unreadOnly = box.checked; if (owns()) renderList(); });
+  }
+  // Full-text search over the account's visible sources, built here so no
+  // static markup changes are needed. Searching replaces the list with the
+  // ranked results; clearing restores the paged list.
+  if (!$("#inbox-search-form")) {
+    const form = document.createElement("form"); form.id = "inbox-search-form"; form.className = "inbox-search";
+    const input = document.createElement("input"); input.id = "inbox-search-input"; input.type = "search";
+    input.placeholder = "Search messages…"; input.setAttribute("aria-label", "Search messages");
+    const go = document.createElement("button"); go.type = "submit"; go.className = "button secondary"; go.textContent = "Search";
+    const clear = document.createElement("button"); clear.type = "button"; clear.id = "inbox-search-clear";
+    clear.className = "button secondary"; clear.textContent = "Clear"; clear.hidden = true;
+    form.append(input, go, clear);
+    $("#inbox-filters").append(form);
+    form.addEventListener("submit", event => { event.preventDefault(); runSearch(input.value); });
+    clear.addEventListener("click", () => { input.value = ""; clearSearch(); });
+  }
+  async function runSearch(query) {
+    if (!owns() || searching) return;
+    const q = query.trim();
+    if (!q) { clearSearch(); return; }
+    searching = true; searchQuery = q; text("#inbox-status", `Searching for “${q}”…`);
+    const turn = ++epoch;
+    try {
+      const result = await api.search({ query: q }); if (!owns() || turn !== epoch) return;
+      rows = result.results.map(r => r.source); nextCursor = null;
+      renderFilters(); renderList();
+      const clear = $("#inbox-search-clear"); if (clear) clear.hidden = false;
+      text("#inbox-status", result.total ? `${result.total} result${result.total === 1 ? "" : "s"} for “${result.query}”.` : `No results for “${result.query}”.`);
+    } catch (error) { if (owns() && turn === epoch) { searchQuery = null; text("#inbox-status", errorText(error)); } }
+    searching = false;
+  }
+  function clearSearch() {
+    if (searchQuery === null) return;
+    searchQuery = null; const clear = $("#inbox-search-clear"); if (clear) clear.hidden = true;
+    load();
   }
   // Read/unread toggle next to "Ask room": read state is a marker, not a new
   // source version, so drafts and their revision pins are unaffected.
@@ -395,7 +430,9 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     loadConnections();
     try {
       const result = await api.list(); if (!owns() || turn !== epoch) return;
-      rows = result.sources; nextCursor = result.nextCursor ?? null; renderFilters(); renderList(); text("#inbox-status", rows.length ? (visibleRows().length ? "" : "No messages match these filters.") : "No messages yet.");
+      rows = result.sources; nextCursor = result.nextCursor ?? null; searchQuery = null;
+      const clear = $("#inbox-search-clear"); if (clear) clear.hidden = true;
+      renderFilters(); renderList(); text("#inbox-status", rows.length ? (visibleRows().length ? "" : "No messages match these filters.") : "No messages yet.");
       $("#inbox-empty").hidden = rows.length > 0;
       if (selected && drafts.has(selected)) { render(); loadResults(selected); return; }
       const pending = pendingShare(), saved = savedPosition();

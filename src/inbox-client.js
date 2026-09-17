@@ -178,15 +178,28 @@ export class InboxClient {
       throw error;
     }
   }
+  // One row of the list/search projection, as returned by the server.
+  validSourceSummary(s) {
+    return id(s.id) && revision(s.revision) && s.revision > 0
+      && typeof s.subject === "string" && ["synthetic", "email", "telegram"].includes(s.adapter) && validConnectionRef(s.connection ?? null)
+      && (s.adapter === "synthetic") === ((s.connection ?? null) === null) && typeof s.needsYou === "boolean" && (!s.needsYou || s.adapter !== "synthetic")
+      && ["sender", "recipient"].every(k => typeof s[k] === "string");
+  }
   list({ cursor = null, limit = null } = {}) {
     const params = new URLSearchParams({ view: "email-excerpt-v1" });
     if (cursor !== null && cursor !== undefined) params.set("cursor", cursor);
     if (limit !== null && limit !== undefined) params.set("limit", String(limit));
-    return this.request(`?${params}`, {}, v => Array.isArray(v.sources) && v.sources.every(s => id(s.id) && revision(s.revision) && s.revision > 0
-      && typeof s.subject === "string" && ["synthetic", "email", "telegram"].includes(s.adapter) && validConnectionRef(s.connection ?? null)
-      && (s.adapter === "synthetic") === ((s.connection ?? null) === null) && typeof s.needsYou === "boolean" && (!s.needsYou || s.adapter !== "synthetic")
-      && ["sender", "recipient"].every(k => typeof s[k] === "string"))
+    return this.request(`?${params}`, {}, v => Array.isArray(v.sources) && v.sources.every(s => this.validSourceSummary(s))
       && (v.nextCursor === null || typeof v.nextCursor === "string"));
+  }
+  // Full-text search over the account's visible sources. Results are
+  // { source, score } pairs, best first; total counts all matches.
+  search({ query, sourceId = null, limit = null } = {}) {
+    const params = new URLSearchParams({ view: "email-excerpt-v1", q: query });
+    if (sourceId !== null && sourceId !== undefined) params.set("sourceId", sourceId);
+    if (limit !== null && limit !== undefined) params.set("limit", String(limit));
+    return this.request(`/search?${params}`, {}, v => typeof v.query === "string" && Number.isSafeInteger(v.total) && v.total >= 0
+      && Array.isArray(v.results) && v.results.every(r => typeof r.score === "number" && r.score > 0 && this.validSourceSummary(r.source)));
   }
   // Owner-managed connection records: add or update a bot/mailbox profile, or disconnect ("Remove").
   applyConnection(request) {

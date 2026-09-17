@@ -34,6 +34,7 @@ optional.push("src/work-help.js", "server/work-help.mjs");
 optional.push("src/help-offers.js");
 optional.push("client/help-actions.mjs");
 optional.push("server/inbox.mjs");
+optional.push("server/inbox-search.mjs"); // full-text search index (imported by server/inbox.mjs; pure, no imports of its own)
 optional.push("server/inbox-outbox.mjs", "server/inbox-transport.mjs", "server/version.mjs");
 optional.push("scripts/stamp-version.mjs");
 optional.push("server/email-envelope.mjs", "server/graph-email.mjs", "server/email-import.mjs");

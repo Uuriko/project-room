@@ -411,6 +411,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         if (view !== null && (!["email-text-v1", "email-excerpt-v1"].includes(view) || url.searchParams.getAll("view").length !== 1))
           reject(422, "unsupported_inbox_view", "This inbox view is not supported.");
+        if (url.pathname === "/api/inbox/search" && req.method === "GET") return json(res, 200, store.inbox.search(token, binding,
+          { query: url.searchParams.get("q"), sourceId: url.searchParams.get("sourceId"), limit: url.searchParams.get("limit"), includeChannels: view !== null }));
         if (url.pathname === "/api/inbox" && req.method === "GET") return json(res, 200, store.inbox.list(token, binding,
           { includeChannels: view !== null, cursor: url.searchParams.get("cursor"), limit: url.searchParams.get("limit") }));
         if (url.pathname === connectionRoutes.list && req.method === "GET") return json(res, 200, store.connections.connections(token, binding));

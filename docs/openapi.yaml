@@ -1934,10 +1934,50 @@ paths:
         - name: view
           in: query
           schema: { type: string, enum: [email-text-v1, email-excerpt-v1] }
+        - name: cursor
+          in: query
+          description: Opaque page cursor from a previous response's nextCursor.
+          schema: { type: string }
+        - name: limit
+          in: query
+          description: Page size, 1..100. Default 25.
+          schema: { type: integer, minimum: 1, maximum: 100 }
       responses:
-        '200': { description: "{ contractVersion: 1, viewer, sources }" }
+        '200': { description: "{ contractVersion: 1, viewer, sources, nextCursor }" }
         '401': { description: account_session_required }
-        '422': { description: unsupported_inbox_view or session_binding_required }
+        '422': { description: unsupported_inbox_view or session_binding_required or invalid_cursor or invalid_limit }
+  /api/inbox/search:
+    get:
+      summary: Full-text search over the account's visible inbox sources
+      description: >-
+        Account-session read. Searches subject and body text (the same
+        reading projection the UI shows; never cursors, headers, HTML, or
+        mailbox IDs) with BM25 ranking. `?view=email-excerpt-v1` includes
+        channel sources; without it only synthetic samples are searched.
+        `sourceId` scopes the search to one source. At most 200 results;
+        `total` counts every match.
+      security:
+        - accountSession: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Search query, non-empty, up to 500 characters.
+          schema: { type: string, maxLength: 500 }
+        - name: view
+          in: query
+          schema: { type: string, enum: [email-text-v1, email-excerpt-v1] }
+        - name: sourceId
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          description: Max results, 1..200. Default 25.
+          schema: { type: integer, minimum: 1, maximum: 200 }
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, query, results: [{ source, score }], total }" }
+        '401': { description: account_session_required }
+        '422': { description: invalid_search_query or invalid_limit or unsupported_inbox_view }
   /api/inbox/sources/{sourceId}:
     get:
       summary: Read one inbox source and its private draft
