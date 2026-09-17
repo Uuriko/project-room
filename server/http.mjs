@@ -486,7 +486,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return json(res, 200, store.inbox.attachments(token, binding,
             { sourceId: pathId(attachmentsList[1]), includeChannels: view !== null }));
         }
-        const attachmentItem = /^\/api\/inbox\/sources\/([^/]{1,384})\/attachments\/([^/]{1,384})$/.exec(url.pathname);
+        const attachmentItem = /^\/api\/inbox\/sources\/([^/]{1,384})\/attachments\/([^/]{1,8192})$/.exec(url.pathname);
         if (attachmentItem && req.method === "GET") {
           // Attachment ids are opaque provider values (they may carry "="
           // padding that pathId rejects); the membership check is the real
