@@ -90,5 +90,4 @@ export function checkPasswordPolicy(password) {
 // Workers runtime forbids random generation during module evaluation; the
 // value is a real scrypt verifier for an unguessable placeholder, so it
 // behaves identically to a minted one.
-export const DUMMY_PASSWORD_VERIFIER =
-  "scrypt$16384$8$1$TQ4ug3qQaXHk4bKZFJ5Dlw$m2yyt62ODf_PX6D77r-zd8oDuFchuzwdfF9TXBDsjuY";
+export const DUMMY_PASSWORD_VERIFIER = "scrypt$16384$8$1$TQ4ug3qQaXHk4bKZFJ5Dlw$m2yyt62ODf_PX6D77r-zd8oDuFchuzwdfF9TXBDsjuY";
