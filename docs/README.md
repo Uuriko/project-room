@@ -46,6 +46,9 @@ this lane is docs/spec only. Pairs
 | [ROOM-KITS-HARNESS-JEV-ROY.md](ROOM-KITS-HARNESS-JEV-ROY.md) | Skillbox-shaped kits, harness-bridge Connect shape, Jev, Roy ladder |
 | [ROOM-TRUST-HANDOFF-V0.md](ROOM-TRUST-HANDOFF-V0.md) | Trust Handoff Protocol v0 (principal, authority, reversibility, expiration) |
 | [ROOM-ATTENTION-PRESENCE-V0.md](ROOM-ATTENTION-PRESENCE-V0.md) | Attention modes (all / mentions / none) + host presence (Alook; not People-rail HTML) |
+| [ROOM-NAUTILO-STEAL.md](ROOM-NAUTILO-STEAL.md) | Nautilo (agentsea) P0–P2 steals: **Second**, Smart Routing, messenger receipts |
+| [ROOM-SECOND-V0.md](ROOM-SECOND-V0.md) | Second product spec v0 — personal loyal seat; never Genie in product copy |
+| [ROOM-PERSONAL-GENIE-SEAT-V0.md](ROOM-PERSONAL-GENIE-SEAT-V0.md) | Redirect — **Second** is canonical |
 | [ROOM-ARTIFACT-MATURITY.md](ROOM-ARTIFACT-MATURITY.md) | Five-rung ladder; Room Done defaults to Live Note / Discussion Paper |
 | [examples/scorers/](examples/scorers/) | Default scorer stubs (task-compliance, efficiency, procedure-compliance, people-data-safe, orphan-claim) |
 | [ROOM-KITS-CATALOG.md](ROOM-KITS-CATALOG.md) | Optional later rows only — not live doors |
