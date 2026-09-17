@@ -34,7 +34,7 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     assert.equal(await page.locator("#auth-error").textContent(), "");
     assert.equal(await page.getByLabel("Room key", { exact: true }).isVisible(), true);
     assert.equal(await page.locator("#auth-description").isVisible(), false);
-    assert.match(await page.locator("#auth-guest-note").textContent(), /eight hours/);
+    assert.equal(await page.locator("#auth-guest-note").count(), 0, "guest-duration note removed in streamlined login");
     await page.locator("#refresh-button").click();
     await page.waitForFunction(() => document.querySelector("#connection-status").dataset.state === "signed-out");
     assert.equal(await page.locator("#auth-error").textContent(), "", "normal signed-out refresh is not an error");
