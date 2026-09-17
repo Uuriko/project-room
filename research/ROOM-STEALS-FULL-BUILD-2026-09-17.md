@@ -28,8 +28,8 @@ Pairs with:
 - [#466](https://github.com/Uuriko/project-room/pull/466) — receipt graph
 - [#467](https://github.com/Uuriko/project-room/pull/467) — Second +
   Nautilo steal (`ROOM-SECOND-V0`, `ROOM-NAUTILO-STEAL`)
-- [ROOM-NAUTILO-STEAL.md](../docs/ROOM-NAUTILO-STEAL.md) — personal
-  Genie seat + org harness (docs only)
+- [ROOM-NAUTILO-STEAL.md](../docs/ROOM-NAUTILO-STEAL.md) — **Second**
+  + org harness (docs only)
 
 No deploy.
 
@@ -46,7 +46,7 @@ No deploy.
 | 7 | [hraness factory](https://x.com/hraness/status/2100358405911105590) | N× parallel agents; model-limit honesty |
 | 8 | [Interlateral](https://interlateral.com/) / Stanford FutureLaw report | Trust Handoff, Agent Interaction Receipt, Artifact Maturity Ladder |
 | 9 | Cousin landscape (Oasis, agensis, Agent Room, Alook, HumanLayer, Factory.ai, Dust) | Shared-room cousins; steal membership / authority / artifact patterns — see [ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md](ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md) |
-| 10 | [Nautilo](https://nautilo.ai) / [agentsea/nautilo](https://github.com/agentsea/nautilo) (MIT) | Closest open multi-user + multi-agent Room peer; personal Genie seat; Smart Routing; harness-of-harnesses; Secretary; privacy ladder — [ROOM-NAUTILO-STEAL.md](../docs/ROOM-NAUTILO-STEAL.md) |
+| 10 | [Nautilo](https://nautilo.ai) / [agentsea/nautilo](https://github.com/agentsea/nautilo) (MIT) | Closest open multi-user + multi-agent Room peer; Nautilo Genie → Room **Second**; Smart Routing; harness-of-harnesses; Secretary; privacy ladder — [ROOM-NAUTILO-STEAL.md](../docs/ROOM-NAUTILO-STEAL.md) · [ROOM-SECOND-V0.md](../docs/ROOM-SECOND-V0.md) |
 
 ## Cua files (merged)
 
@@ -134,10 +134,10 @@ Contracts:
 
 Oasis, agensis, Agent Room, Alook, HumanLayer, Factory.ai, Dust,
 Nautilo (agentsea). Steal membership / authority / attention /
-artifact / personal-seat patterns. Room stays the project ledger —
-not an IDE, marketplace, canvas chat hub, or loyal-Genie org harness.
+artifact / Second patterns. Room stays the project ledger —
+not an IDE, marketplace, canvas chat hub, or Nautilo Genie org harness.
 Closest name collision: Agent Room (coding-agent mesh). Closest open
-peer: Nautilo.
+peer: Nautilo. Room personal seat name: **Second**.
 
 Research:
 [ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md](ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md)
@@ -162,17 +162,18 @@ memory · presence) stays on
 [ROOM-ATTENTION-PRESENCE-V0.md](../docs/ROOM-ATTENTION-PRESENCE-V0.md).
 People-rail chips are later Muse.
 
-### I. Nautilo steal (personal Genie seat + org harness)
+### I. Nautilo steal (Second + org harness)
 
 Closest open multi-user + multi-agent Room peer. Docs only. Does not
-take Instinct Phase 0 #8 / #9 or Muse UI trees.
+take Instinct Phase 0 #8 / #9 or Muse UI trees. Room language is
+**Second** (never Genie).
 
 Contracts:
 
 - [ROOM-NAUTILO-STEAL.md](../docs/ROOM-NAUTILO-STEAL.md)
-- [ROOM-PERSONAL-GENIE-SEAT-V0.md](../docs/ROOM-PERSONAL-GENIE-SEAT-V0.md)
+- [ROOM-SECOND-V0.md](../docs/ROOM-SECOND-V0.md)
 
-Nautilo delta (Ledger Room): personal seat, messenger receipts,
+Nautilo delta (Ledger Room): Second, messenger receipts from Second,
 human takeover, progressive tools, quiet events, preflights — see
 the landscape subsection
 [Nautilo delta](ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md#nautilo-delta-ledger-room).
@@ -238,7 +239,8 @@ shelf.
 | `research/ROOM-NOVEL-SYNTHESIS-2026-09-17.md` | Ledger Room novel synthesis |
 | `docs/ROOM-RECEIPT-GRAPH-V0.md` | `citedReceiptIds[]` DAG; orphan claims fail |
 | `docs/ROOM-NAUTILO-STEAL.md` | Nautilo P0–P2 steals + Ledger Room delta |
-| `docs/ROOM-PERSONAL-GENIE-SEAT-V0.md` | Personal vs room vs synthesis seat + disclosure axis |
+| `docs/ROOM-SECOND-V0.md` | Second = personal seat + disclosure axis |
+| `docs/ROOM-PERSONAL-GENIE-SEAT-V0.md` | Redirect — Second is canonical |
 | `docs/ROOM-TRUST-HANDOFF-V0.md` | Trust Handoff Protocol v0 |
 | `docs/ROOM-ARTIFACT-MATURITY.md` | Five-rung artifact ladder |
 | `docs/examples/scorers/*/scorer.md` | Five default scorer stubs (incl. orphan-claim) |
