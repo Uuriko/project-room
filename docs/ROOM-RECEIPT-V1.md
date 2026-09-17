@@ -22,6 +22,11 @@ Interlateral Agent Interaction Receipt fields
 Maturity labels live on [ROOM-ARTIFACT-MATURITY.md](ROOM-ARTIFACT-MATURITY.md);
 a receipt does not promote past Live Note / Discussion Paper.
 
+Receipt graph (additive): `id` + `citedReceiptIds[]`. When Agent B
+relies on Agent A’s output, B cites A’s receipt id. Orphan claims
+fail the scorer. See [ROOM-RECEIPT-GRAPH-V0.md](ROOM-RECEIPT-GRAPH-V0.md)
+and [examples/scorers/orphan-claim/scorer.md](examples/scorers/orphan-claim/scorer.md).
+
 ## Why
 
 Warp Scorers + Cua need a **judgeable artifact pack** separate from the
@@ -47,6 +52,7 @@ satisfy this schema.
 ```json
 {
   "kind": "room.receipt.v1",
+  "id": "string",
   "workItemId": "string",
   "persona": "foreman|triage|implementation|review|scorer",
   "agentMemberId": "string",
@@ -79,6 +85,7 @@ satisfy this schema.
     "released": true,
     "deleted": true
   },
+  "citedReceiptIds": [],
   "scores": []
 }
 ```
@@ -88,6 +95,7 @@ satisfy this schema.
 | Field | Rule |
 | --- | --- |
 | `kind` | Exactly `room.receipt.v1`. |
+| `id` | Stable Room receipt id. Required for this pack to be **citable**. Missing `id` is honest for an unpersisted draft. See [ROOM-RECEIPT-GRAPH-V0.md](ROOM-RECEIPT-GRAPH-V0.md). |
 | `workItemId` | The Work Item this evidence belongs to. |
 | `persona` | One of `foreman` · `triage` · `implementation` · `review` · `scorer`. |
 | `agentMemberId` | Room member id of the agent who produced the artifacts. No display name, email, or account id. |
@@ -127,6 +135,19 @@ A Done receipt defaults to Live Note / Discussion Paper honesty
 ([ROOM-ARTIFACT-MATURITY.md](ROOM-ARTIFACT-MATURITY.md)). These fields
 do not bump maturity.
 
+### Receipt graph (additive)
+
+Trust Handoff made structural. B cites A when B relied on A’s Done
+pack. Orphan claims fail
+[orphan-claim](examples/scorers/orphan-claim/scorer.md).
+
+| Field | Rule |
+| --- | --- |
+| `citedReceiptIds` | Ids of prior `room.receipt.v1` objects this receipt relied on. Empty is honest first hop. No self-cite. DAG, not a mash. Receipt ids only — not chips, chat mentions, or Compute jobs. |
+
+Full rules: [ROOM-RECEIPT-GRAPH-V0.md](ROOM-RECEIPT-GRAPH-V0.md).
+Scorers never rewrite this field.
+
 ### `cua` (optional)
 
 Present only when a Cua Fleet / Driver session was claimed. All four
@@ -146,8 +167,8 @@ delete.
 ### `scores`
 
 Scorers **append** only. They never rewrite `artifacts`, `cua`,
-`traceRef`, or the Interlateral honesty fields. See
-[ROOM-SCORER.md](ROOM-SCORER.md).
+`traceRef`, `id`, `citedReceiptIds`, or the Interlateral honesty
+fields. See [ROOM-SCORER.md](ROOM-SCORER.md).
 
 Each entry:
 

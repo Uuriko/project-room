@@ -25,6 +25,7 @@ truth is in [`docs/`](../docs/), especially [CURRENT-ROOM.md](../docs/CURRENT-RO
 | [ROOM-HRANESS-STEAL-2026-09-17.md](ROOM-HRANESS-STEAL-2026-09-17.md) | hraness factory parallelism + limit honesty (research only) |
 | [ROOM-INTERLATERAL-RESEARCH-2026-09-17.md](ROOM-INTERLATERAL-RESEARCH-2026-09-17.md) | Interlateral → Room: receipts, handoff, authority cards, maturity ladder (research only) |
 | [ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md](ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md) | Cousin landscape: Oasis, agensis, Agent Room, Alook, HumanLayer (research only) |
+| [ROOM-NOVEL-SYNTHESIS-2026-09-17.md](ROOM-NOVEL-SYNTHESIS-2026-09-17.md) | Ledger Room novel synthesis: six-axis seat + receipt graph (research only) |
 | [multiplayer-messaging-20260908/](multiplayer-messaging-20260908/) | Collaboration/messaging plan (markdown + DOCX) |
 | [2026-09-07-project-room-v2/](2026-09-07-project-room-v2/) | Earlier sourced report and comparison screenshots |
 | [2026-09-07-project-room/](2026-09-07-project-room/) | First 7 September report source |

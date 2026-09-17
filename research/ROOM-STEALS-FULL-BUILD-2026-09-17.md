@@ -14,6 +14,8 @@ Pairs with:
   + Skillbox + harness-bridge research map
 - [ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md](ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md)
   — cousin landscape (Oasis, agensis, Agent Room, Alook, HumanLayer)
+- [ROOM-NOVEL-SYNTHESIS-2026-09-17.md](ROOM-NOVEL-SYNTHESIS-2026-09-17.md)
+  — Ledger Room fold (six-axis seat + receipt graph)
 
 No deploy.
 
@@ -71,6 +73,7 @@ Default examples:
 - [efficiency](../docs/examples/scorers/efficiency/scorer.md)
 - [procedure-compliance](../docs/examples/scorers/procedure-compliance/scorer.md)
 - [people-data-safe](../docs/examples/scorers/people-data-safe/scorer.md)
+- [orphan-claim](../docs/examples/scorers/orphan-claim/scorer.md)
 
 ### C. Personas
 
@@ -121,6 +124,26 @@ hub. Closest name collision: Agent Room (coding-agent mesh).
 
 Research:
 [ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md](ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md)
+
+### H. Ledger Room / receipt graph (novel synthesis)
+
+The Room is the system of record for collaborative agentic work.
+`room.receipt.v1` gains `id` + `citedReceiptIds[]`. When Agent B
+relies on Agent A’s output, B cites A’s receipt id. Orphan claims
+fail the scorer (`pass` / `orphan_claim` / `insufficient_citations`).
+
+Research:
+[ROOM-NOVEL-SYNTHESIS-2026-09-17.md](ROOM-NOVEL-SYNTHESIS-2026-09-17.md)
+
+Contracts:
+
+- [ROOM-RECEIPT-GRAPH-V0.md](../docs/ROOM-RECEIPT-GRAPH-V0.md)
+- [orphan-claim](../docs/examples/scorers/orphan-claim/scorer.md)
+
+Six-axis seat (identity · membership · authority · attention ·
+memory · presence) stays on
+[ROOM-ATTENTION-PRESENCE-V0.md](../docs/ROOM-ATTENTION-PRESENCE-V0.md).
+People-rail chips are later Muse.
 
 ## Catalog face (not live doors)
 
@@ -178,9 +201,11 @@ shelf.
 | `research/ROOM-HRANESS-STEAL-2026-09-17.md` | hraness factory steal |
 | `research/ROOM-INTERLATERAL-RESEARCH-2026-09-17.md` | Interlateral → Room research (attached source) |
 | `research/ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md` | Cousin landscape (Oasis / agensis / Agent Room / Alook / HumanLayer) |
+| `research/ROOM-NOVEL-SYNTHESIS-2026-09-17.md` | Ledger Room novel synthesis |
+| `docs/ROOM-RECEIPT-GRAPH-V0.md` | `citedReceiptIds[]` DAG; orphan claims fail |
 | `docs/ROOM-TRUST-HANDOFF-V0.md` | Trust Handoff Protocol v0 |
 | `docs/ROOM-ARTIFACT-MATURITY.md` | Five-rung artifact ladder |
-| `docs/examples/scorers/*/scorer.md` | Four default scorer stubs |
+| `docs/examples/scorers/*/scorer.md` | Five default scorer stubs (incl. orphan-claim) |
 | `docs/ROOM-KITS-CATALOG.md` | Optional later rows |
 | `research/README.md` | Index |
 | `docs/README.md` | Index |

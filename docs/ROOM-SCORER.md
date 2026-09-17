@@ -5,7 +5,8 @@
 Master plan:
 [ROOM-STEALS-FULL-BUILD-2026-09-17.md](../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md).
 
-Receipts: [ROOM-RECEIPT-V1.md](ROOM-RECEIPT-V1.md). Personas:
+Receipts: [ROOM-RECEIPT-V1.md](ROOM-RECEIPT-V1.md). Graph:
+[ROOM-RECEIPT-GRAPH-V0.md](ROOM-RECEIPT-GRAPH-V0.md). Personas:
 [ROOM-PERSONAS-FACTORY.md](ROOM-PERSONAS-FACTORY.md).
 
 Catalog row: **Scorer (LLM-judge)** on
@@ -80,6 +81,7 @@ one** label from `labels`.
 | [efficiency](examples/scorers/efficiency/scorer.md) | unnecessary tool loops / stuck screenshots |
 | [procedure-compliance](examples/scorers/procedure-compliance/scorer.md) | used right kits / Cua loop |
 | [people-data-safe](examples/scorers/people-data-safe/scorer.md) | receipt artifacts contain no people-data |
+| [orphan-claim](examples/scorers/orphan-claim/scorer.md) | claims cite prior receipts (`pass` / `orphan_claim` / `insufficient_citations`) |
 
 One dimension per file. Do not collapse these into one mega-judge.
 
