@@ -91,3 +91,25 @@ test("synthetic samples expose an empty attachment list", t => {
   assert.throws(() => f.attachment("s-1", "attachment-1="),
     err => err.status === 404 && err.code === "inbox_attachment_not_found");
 });
+
+test("the item route reaches long provider attachment ids over HTTP", async t => {
+  const f = fixture(t);
+  // Provider attachment ids are opaque up to 2048 chars; the route must
+  // accept what the envelope schema stores, not just short ids.
+  const longId = `${"a".repeat(500)}=`;
+  f.email.options.attachmentObservation.items[0].id = longId;
+  const sourceId = f.importEmail("m-long");
+  const { createRoomServer } = await import("../server/http.mjs");
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const path = `/api/inbox/sources/${sourceId}/attachments/${encodeURIComponent(longId)}?view=email-text-v1`;
+  const res = await fetch(`${origin}${path}`, { headers: { Origin: origin,
+    Cookie: `account_session=${f.session.token}`, "x-session-binding": f.session.sessionBinding } });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.attachment.id, longId);
+  assert.equal(body.retrieval.available, false);
+  assert.equal(body.retrieval.reason, "attachment_bytes_not_retained");
+});
