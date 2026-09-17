@@ -732,11 +732,40 @@ function archiveChannel(state, incoming) {
   if (channel.id === DEFAULT_CHANNEL_ID) throw new Error("The main channel can't be archived");
   channel.archivedAt ??= incoming.at;
 }
+// A message named by a completed work item's receipt is that work's result.
+// src/work-packet.js puts it plainly: "the immutable stored message is the
+// artifact". Nothing enforced it, so an edit was accepted and then broke
+// everything downstream at once - server/text-results.mjs storedText requires
+// the posted body to still equal the stored one, so GET work-result answered
+// 422 result_unavailable for that item forever while it went on reporting
+// state: completed with an evidenceVersion hash matching nothing retrievable,
+// and auditTextResults failed, which takes backupRoom down for the whole
+// database.
+//
+// Scoped to receipts, deliberately. auditTextResults only walks work.completed
+// events carrying room_text evidence, and a draft is meant to be revised.
+//
+// This refuses an owner's delete as well as an author's edit, which is the
+// uncomfortable half: removing harmful content that happens to be bound as
+// evidence now needs the receipt invalidated first, and there is no event for
+// that yet. That is worth building. It is still better than the present
+// behaviour, where the delete is accepted and silently destroys the artifact
+// plus the room's backups, because a refusal says so at the moment it happens.
+const evidenceReceipt = (state, messageId) => {
+  for (const work of Object.values(state.workItems ?? {})) {
+    for (const receipt of [...(work.receiptHistory ?? []), work.receipt]) {
+      if (receipt?.nativeText?.messageId === messageId) return work;
+    }
+  }
+  return null;
+};
 
 function findEditableMessage(state, incoming) {
   const message = state.messages.find(m => m.id === incoming.data.messageId);
   if (!message) throw new Error("Message not found");
   if (message.deletedAt) throw new Error("Message was deleted");
+  const evidenceFor = evidenceReceipt(state, message.id);
+  if (evidenceFor) throw new Error(`This message is the recorded result of ${evidenceFor.id} and cannot be changed`);
   const actor = requireMember(state, incoming.actorId);
   if (message.authorId !== actor.id && actor.id !== state.room.ownerId) throw new Error("Only the author or the Room owner can change this message");
   if ((message.revision ?? 0) !== incoming.data.expectedMessageRevision) throw new Error("Message changed; refresh before editing");
