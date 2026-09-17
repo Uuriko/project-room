@@ -13,6 +13,14 @@ spike are **not on `main`**; they live on
 [#454](https://github.com/Uuriko/project-room/pull/454). Point scorers at
 those receipts when that PR lands. Do not invent scores without a trace.
 
+Interlateral Agent Interaction Receipt fields
+(`principalId`, `authorityClaimed`, `sourceManifest[]`,
+`reversibility`, `expiration`) are optional honesty fields. See
+[ROOM-TRUST-HANDOFF-V0.md](ROOM-TRUST-HANDOFF-V0.md) and
+[ROOM-INTERLATERAL-RESEARCH-2026-09-17.md](../research/ROOM-INTERLATERAL-RESEARCH-2026-09-17.md).
+Maturity labels live on [ROOM-ARTIFACT-MATURITY.md](ROOM-ARTIFACT-MATURITY.md);
+a receipt does not promote past Live Note / Discussion Paper.
+
 ## Why
 
 Warp Scorers + Cua need a **judgeable artifact pack** separate from the
@@ -52,6 +60,17 @@ satisfy this schema.
       "peopleData": false
     }
   ],
+  "principalId": "string|null",
+  "authorityClaimed": "string|null",
+  "sourceManifest": [
+    {
+      "url": "string|null",
+      "path": "string|null",
+      "sha256": "string|null"
+    }
+  ],
+  "reversibility": "reversible|irreversible|unknown",
+  "expiration": "ISO-8601|null",
   "cua": {
     "fleetName": "string|null",
     "claimId": "string|null",
@@ -83,6 +102,29 @@ satisfy this schema.
 | `sha256` | Content hash when the bytes are stored. `null` if unknown. Do not invent. |
 | `peopleData` | **Must be `false`.** Screenshots and desktop captures: no faces, PII, or private inbox. Omit the capture rather than post one that shows a person or private mail. |
 
+### Interlateral Agent Interaction Receipt (optional)
+
+Chain-of-custody honesty fields. Which agent supplied what, for whom,
+with what claimed authority, citing what sources, with what
+reversibility, until when. They do not replace `agentMemberId` /
+`workItemId`. They do not authorize a live writer.
+
+| Field | Rule |
+| --- | --- |
+| `principalId` | Room member id of the attested human principal. `null` if none. An agent without a principal cannot claim authority. No display name, email, or account id. |
+| `authorityClaimed` | Grant the actor claims (e.g. `write`, `vote`, `ask-before-public`, `ask-before-irreversible`). A claim is not a grant. Visible authority cards are a later face — [ROOM-TRUST-HANDOFF-V0.md](ROOM-TRUST-HANDOFF-V0.md). |
+| `sourceManifest` | Enumerated sources relied on. Paths / URLs / checksums only. **No people-data.** Empty is honest when nothing was cited. |
+| `reversibility` | `reversible` · `irreversible` · `unknown`. Drafting vs file / sign / transmit / trigger external systems. |
+| `expiration` | ISO-8601. When the claimed authority lapses. `null` is unknown, not forever. |
+
+People-data ban still holds: screenshots, shell excerpts, and
+`sourceManifest` entries must not include faces, PII, or a private
+inbox. `peopleData` on every artifact remains `false`.
+
+A Done receipt defaults to Live Note / Discussion Paper honesty
+([ROOM-ARTIFACT-MATURITY.md](ROOM-ARTIFACT-MATURITY.md)). These fields
+do not bump maturity.
+
 ### `cua` (optional)
 
 Present only when a Cua Fleet / Driver session was claimed. All four
@@ -101,8 +143,9 @@ delete.
 
 ### `scores`
 
-Scorers **append** only. They never rewrite `artifacts`, `cua`, or
-`traceRef`. See [ROOM-SCORER.md](ROOM-SCORER.md).
+Scorers **append** only. They never rewrite `artifacts`, `cua`,
+`traceRef`, or the Interlateral honesty fields. See
+[ROOM-SCORER.md](ROOM-SCORER.md).
 
 Each entry:
 
@@ -126,7 +169,7 @@ aggregate “72% quality” field on the receipt.
 ## Rules
 
 1. Screenshots and desktop captures: `peopleData` must be `false`; no
-   faces, PII, private inbox.
+   faces, PII, private inbox. Same ban on `sourceManifest`.
 2. Scorers append to `scores`; they never rewrite artifacts.
 3. Compute jobs are not Room receipts.
 4. Releasing a Cua claim does not mark the Work Item completed.

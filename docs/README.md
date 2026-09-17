@@ -32,6 +32,8 @@ Muse ACK build-out lane. Pairs [#454](https://github.com/Uuriko/project-room/pul
 | [ROOM-SCORER.md](ROOM-SCORER.md) | Warp-shaped LLM judge; one dimension per scorer |
 | [ROOM-PERSONAS-FACTORY.md](ROOM-PERSONAS-FACTORY.md) | Personas + hraness parallelism |
 | [ROOM-KITS-HARNESS-JEV-ROY.md](ROOM-KITS-HARNESS-JEV-ROY.md) | Skillbox-shaped kits, harness-bridge Connect shape, Jev, Roy ladder |
+| [ROOM-TRUST-HANDOFF-V0.md](ROOM-TRUST-HANDOFF-V0.md) | Trust Handoff Protocol v0 (principal, authority, reversibility, expiration) |
+| [ROOM-ARTIFACT-MATURITY.md](ROOM-ARTIFACT-MATURITY.md) | Five-rung ladder; Room Done defaults to Live Note / Discussion Paper |
 | [examples/scorers/](examples/scorers/) | Default scorer stubs (task-compliance, efficiency, procedure-compliance, people-data-safe) |
 | [ROOM-KITS-CATALOG.md](ROOM-KITS-CATALOG.md) | Optional later rows only — not live doors |
 

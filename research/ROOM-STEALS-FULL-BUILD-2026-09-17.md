@@ -26,6 +26,7 @@ No deploy.
 | 5 | Roy model rank | Ladder astra > glm > dsv; default = fast dsv |
 | 6 | TypeSafe Jev | Typed kit recommend without 30-turn search |
 | 7 | [hraness factory](https://x.com/hraness/status/2100358405911105590) | N× parallel agents; model-limit honesty |
+| 8 | [Interlateral](https://interlateral.com/) / Stanford FutureLaw report | Trust Handoff, Agent Interaction Receipt, Artifact Maturity Ladder |
 
 ## Cua files are not on `main`
 
@@ -90,6 +91,24 @@ ladder honesty.
 
 Contract: [ROOM-KITS-HARNESS-JEV-ROY.md](../docs/ROOM-KITS-HARNESS-JEV-ROY.md)
 
+### F. Interlateral-aligned receipts / authority cards
+
+Trust Handoff Protocol v0 (identity, principal, authority scope, task
+scope, source manifest, confidence, known limitations, human
+approvals, data sensitivity, reversibility, expiration). Artifact
+Maturity Ladder (Live Note → Working Paper). Room Done defaults to
+Live Note / Discussion Paper honesty. Receipt v1 adds
+`principalId`, `authorityClaimed`, `sourceManifest[]`,
+`reversibility`, `expiration`. People-data ban held.
+
+Research:
+[ROOM-INTERLATERAL-RESEARCH-2026-09-17.md](ROOM-INTERLATERAL-RESEARCH-2026-09-17.md)
+
+Contracts:
+
+- [ROOM-TRUST-HANDOFF-V0.md](../docs/ROOM-TRUST-HANDOFF-V0.md)
+- [ROOM-ARTIFACT-MATURITY.md](../docs/ROOM-ARTIFACT-MATURITY.md)
+
 ## Catalog face (not live doors)
 
 [ROOM-KITS-CATALOG.md](../docs/ROOM-KITS-CATALOG.md) **Optional later**
@@ -101,6 +120,7 @@ rows only:
 | Skillbox-shaped library | [ROOM-KITS-HARNESS-JEV-ROY.md](../docs/ROOM-KITS-HARNESS-JEV-ROY.md) |
 | Harness bridge | [ROOM-KITS-HARNESS-JEV-ROY.md](../docs/ROOM-KITS-HARNESS-JEV-ROY.md) |
 | Connect Cua desktop | [#454](https://github.com/Uuriko/project-room/pull/454) until merge |
+| Interlateral-aligned receipts / authority cards | [ROOM-TRUST-HANDOFF-V0.md](../docs/ROOM-TRUST-HANDOFF-V0.md) · [ROOM-RECEIPT-V1.md](../docs/ROOM-RECEIPT-V1.md) |
 
 These rows never replace Join / Connect CTAs and are not a marketplace
 shelf.
@@ -142,6 +162,9 @@ shelf.
 | `docs/ROOM-PERSONAS-FACTORY.md` | Personas + factory parallelism |
 | `docs/ROOM-KITS-HARNESS-JEV-ROY.md` | Kits / harness / Jev / Roy |
 | `research/ROOM-HRANESS-STEAL-2026-09-17.md` | hraness factory steal |
+| `research/ROOM-INTERLATERAL-RESEARCH-2026-09-17.md` | Interlateral teardown (full) |
+| `docs/ROOM-TRUST-HANDOFF-V0.md` | Trust Handoff Protocol v0 |
+| `docs/ROOM-ARTIFACT-MATURITY.md` | Five-rung artifact ladder |
 | `docs/examples/scorers/*/scorer.md` | Four default scorer stubs |
 | `docs/ROOM-KITS-CATALOG.md` | Optional later rows |
 | `research/README.md` | Index |

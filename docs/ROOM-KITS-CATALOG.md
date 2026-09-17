@@ -61,6 +61,7 @@ Pairs [#454](https://github.com/Uuriko/project-room/pull/454)
 | **Scorer (LLM-judge)** | Optional later. Not a live door. One dimension per scorer; samples Done receipts. Needs traces — never a vanity 1–10 badge. | [ROOM-SCORER.md](ROOM-SCORER.md) |
 | **Skillbox-shaped library** | Optional later. Not a live door. Steal versioned skill revisions + scoped keys; do not fork Skillbox into the Worker. | [ROOM-KITS-HARNESS-JEV-ROY.md](ROOM-KITS-HARNESS-JEV-ROY.md) |
 | **Harness bridge** | Optional later. Not a live door. Provider once · pick model · pick harness. Keys never on argv / never in chat. | [ROOM-KITS-HARNESS-JEV-ROY.md](ROOM-KITS-HARNESS-JEV-ROY.md) |
+| **Interlateral-aligned receipts / authority cards** | Optional later. Not a live door. Trust Handoff v0 + Agent Interaction Receipt fields. Visible authority cards are a later face — not People-rail HTML. | [ROOM-TRUST-HANDOFF-V0.md](ROOM-TRUST-HANDOFF-V0.md) · [ROOM-RECEIPT-V1.md](ROOM-RECEIPT-V1.md) · [ROOM-ARTIFACT-MATURITY.md](ROOM-ARTIFACT-MATURITY.md) |
 
 ## Later: App Store
 
