@@ -148,12 +148,8 @@ post_comment() { # $1 = body -> prints id/url; dry-run prints body to stdout
 
 # ---------------------------------------------------------------------------
 # jq: comment -> event parsing
-# Parses fenced blocks (room-claim / room-receipt / room-handoff) and the
-# status prefixes. [lane][claim] prose without a fenced block is parsed
-# conservatively too: backtick-quoted paths (plus files:/claim: lines) and a
-# recognizable task-id become a lease-bearing prose-claim (lease=12h);
-# anything else surfaces as unleased-prose-claim ("needs fencing"), never
-# silently ignored. Fenced claims always win and are byte-for-byte untouched.
+# Parses ONLY fenced blocks (room-claim / room-receipt / room-handoff) and
+# the status prefixes; prose is never parsed.
 # ---------------------------------------------------------------------------
 
 parse_events() { # stdin: comments JSON array -> stdout: events JSON array
@@ -174,51 +170,6 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
 
     def first_rc: ([capture("(?<t>RC-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+)")] | .[0] | .t) // null;
 
-    # prose receipt fields: [lane][receipt] A010-2 ... PR #392 ... Merge SHA: <hex>
-    def first_task: ([capture("(?<t>[A-Z]+[0-9]*-[0-9]+)")] | .[0] | .t) // null;
-    def first_pr:
-      (([capture("(?:PR|pull)[ \\t#:/]*#?(?<n>[0-9]+)")] | .[0] | .n)
-       // ([capture("project-room#(?<n>[0-9]+)")] | .[0] | .n)) // null;
-    def first_sha:
-      ([capture("(?<![A-Za-z0-9])[Mm]erge(?:d)?(?: SHA| commit)?[ \\t]*:[ \\t]*(?<s>[0-9a-f]{7,40})(?![A-Za-z0-9])")]
-       | .[0] | .s) // null;
-
-    # prose claim parsing: [lane][claim] without a fenced block.
-    # Conservative on purpose: only path-shaped tokens become files, and a
-    # claim earns a lease only when BOTH files and a recognizable task-id are
-    # found. Anything else surfaces as unleased-prose-claim ("needs fencing")
-    # so it is visible in the log, state, metrics, and ROOM-STATE.md — never
-    # silently ignored. A fenced room-claim block always wins when present.
-    def prose_path_ok:
-      test("^[A-Za-z0-9_.][A-Za-z0-9_./-]*$")
-      and (test("/") or test("\\.[A-Za-z0-9]{1,10}$"))
-      and ((test("\\.\\.")) | not);
-    def prose_files:
-      (([capture("`(?<f>[^`\\r\\n]+)`"; "g")] | map(.f))
-       + ([split("\n")[]
-           | capture("^[ \\t]*(?:files?|claim(?:ed|s)?)[ \\t]*[:=][ \\t]*(?<rest>[\\s\\S]*)$")
-           | .rest
-           | [match("[A-Za-z0-9_.][A-Za-z0-9_./-]*"; "g") | .string]]
-          | add // []))
-      | map(select(prose_path_ok)) | unique;
-    def prose_task:
-      (([capture("(?<t>RC-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+)")] | .[0] | .t)
-       // ([capture("(?<t>[A-Z]+[0-9]*-[0-9]+)")] | .[0] | .t)
-       // null);
-    def prose_reason:
-      gsub("[ \\t][ \\t]+"; " ") | gsub("\\n"; " ")
-      | .[0:280] | gsub("^[ \\t]+|[ \\t]+$"; "");
-    def prose_claim($lane):
-      . as $b
-      | ($b | prose_files) as $files
-      | ($b | prose_task) as $task
-      | if ($files | length) > 0 and $task != null then
-          {kind:"prose-claim", task_id:$task, lane:$lane, files:$files,
-           reason:(("prose claim: " + ($b | prose_reason)) | .[0:300])}
-        else
-          {kind:"unleased-prose-claim", lane:$lane, task:$task, files:$files}
-        end;
-
     def parse_comment:
       (.body | gsub("\r"; "")) as $body
       | (.id) as $id | (.created_at) as $at
@@ -226,21 +177,14 @@ parse_events() { # stdin: comments JSON array -> stdout: events JSON array
       | (($first | capture("^\\[(?<lane>[A-Za-z0-9_-]+)\\](?<rest>[\\s\\S]*)$"))
          // {lane: null, rest: $first}) as $lp
       | ($lp.rest | gsub("^[ \t]+"; "")) as $rest
-      | (($rest | capture("^(?<p>\\[claim\\]|\\[receipt\\]|STATUS:|DONE:|HANDOFF:|RECLAIM)(?<tail>[\\s\\S]*)$"))
+      | (($rest | capture("^(?<p>\\[claim\\]|STATUS:|DONE:|HANDOFF:|RECLAIM)(?<tail>[\\s\\S]*)$"))
          // {p: null, tail: $rest}) as $pf
       | ($body | fence("claim")) as $fclaim
       | ($body | fence("receipt")) as $frcpt
       | ($body | fence("handoff")) as $fhand
       | (if $pf.p == "[claim]" then
            if $fclaim then {kind:"claim", block:($fclaim|fields)}
-           else ($body | prose_claim($lp.lane)) end
-         elif $pf.p == "[receipt]" then
-           {kind:"receipt",
-            task:($pf.tail | first_task),
-            pr:($body | first_pr),
-            merged:($body | first_sha),
-            ref:($pf.tail | first_rc),
-            receipt:(if $frcpt then ($frcpt|fields) else null end)}
+           else {kind:"malformed", want:"room-claim"} end
          elif $pf.p == "STATUS:" then
            (if ($pf.tail | test("^[ \t]*ACK[ \t]+RC-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+")) then
               {ack:true, ack_task:(($pf.tail | first_rc))}
@@ -325,8 +269,7 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
         else . end;
 
     (reduce .[] as $e (
-      {tasks:{}, log:[], illegal:[], refused:[], noticed:[], lanes:[],
-       prose_receipts:[], unleased_prose_claims:[]};
+      {tasks:{}, log:[], illegal:[], refused:[], noticed:[], lanes:[]};
       ($e.id) as $cid | ($e.at) as $at
       | if $e.kind == "claim" then
           ($e.block["task-id"] // null) as $tid
@@ -426,12 +369,6 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
                             receipt:($e.receipt != null)}]
               end
             end
-        elif $e.kind == "receipt" then
-          .prose_receipts += [{task:($e.task // "unknown"), lane:$e.lane,
-                               pr:($e.pr // null),
-                               merged:(($e.receipt // {})["merged"] // $e.merged // "none"),
-                               at:$at, comment_id:$cid}]
-          | .log += [{id:$cid, at:$at, kind:"receipt", task_id:$e.task, ok:true}]
         elif $e.kind == "handoff" then
           ((($e.hblock // {})["task-id"] // null) // (($e.cblock // {})["task-id"] // null)) as $tid
           | if ($tid | not) then .log += [{id:$cid, at:$at, kind:"handoff", ok:false, errors:["no task-id"]}]
@@ -476,46 +413,6 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
                 else . end
               end))
           | .log += [{id:$cid, at:$at, kind:"reclaim", ok:true}]
-        elif $e.kind == "prose-claim" then
-          # Lease-bearing prose claim: same task-id reuse guard as fenced
-          # claims (§4 — a task-id never gets a second claimant), standard
-          # 12h lease, state submitted. Marked prose:true so the board can
-          # tell it apart from fenced claims.
-          ($e.task_id // null) as $tid
-          | if ($tid | not) then
-              .log += [{id:$cid, at:$at, kind:"prose-claim", ok:false,
-                        errors:["missing task-id"]}]
-            elif ((.tasks[$tid] // null) != null) then
-              .refused += [{task_id:$tid, by_lane:$e.lane, colliding:"task-id",
-                            holder_lane:(.tasks[$tid].lane // "(released)"),
-                            holder_state:.tasks[$tid].state, at:$at,
-                            comment_id:$cid, via:"prose"}]
-              | .log += [{id:$cid, at:$at, kind:"prose-claim", task_id:$tid,
-                          ok:false,
-                          errors:["duplicate claim refused; task-id already used"]}]
-            else
-              .tasks[$tid] = {
-                task_id:$tid, lane:$e.lane,
-                files:$e.files, lease:"lease=12h", lease_h:12,
-                reason:$e.reason, state:"submitted",
-                claim_id:$cid, claim_at:$at, last_at:$at, heartbeat_at:null,
-                last_block:({lane:$e.lane, files:($e.files | join(", ")),
-                             lease:"lease=12h", state:"submitted",
-                             reason:$e.reason, "task-id":$tid, via:"prose"}),
-                strike_one_at:null, released_at:null,
-                pending_handoff:null, handoff_voided:false,
-                receipts:[], missing_receipt:false, prose:true }
-              | .lanes += [$e.lane]
-              | .log += [{id:$cid, at:$at, kind:"prose-claim", task_id:$tid,
-                          ok:true, via:"prose"}]
-            end
-        elif $e.kind == "unleased-prose-claim" then
-          # Visible, not silent: prose claims that could not be fenced into a
-          # lease-bearing event are recorded for the "needs fencing" surface.
-          .unleased_prose_claims += [{comment_id:$cid, at:$at, lane:$e.lane,
-                                      task:($e.task // null)}]
-          | .log += [{id:$cid, at:$at, kind:"unleased-prose-claim", ok:false,
-                      errors:["needs fencing: no extractable files or task-id"]}]
         elif $e.kind == "ack" then
           ack_check($e; $at)
         else . end
@@ -538,9 +435,7 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
     | {board:$board, generated_at:iso($now | tonumber),
        comments:$meta.comments, watermark:$meta.watermark,
        tasks:.tasks, illegal:.illegal, refused:.refused,
-       noticed:.noticed, lanes:.lanes, log:.log,
-       prose_receipts:(.prose_receipts // []),
-       unleased_prose_claims:(.unleased_prose_claims // [])}
+       noticed:.noticed, lanes:.lanes, log:.log}
   '
 }
 
@@ -557,21 +452,16 @@ build_state() { # -> state JSON on stdout (live board)
 # jq: state -> ROOM-STATE.md (machine board)
 # ---------------------------------------------------------------------------
 
-render_md() { # $1=now_epoch $2=registry_json $3=watcher_state ; stdin: state JSON -> markdown
-  local now="$1" reg="$2" watcher="${3:-active}"
-  jq -r --argjson now "$now" --arg board "$(board_addr)" --argjson reg "$reg" --arg watcher "$watcher" '
+render_md() { # $1=now_epoch $2=registry_json ; stdin: state JSON -> markdown
+  local now="$1" reg="$2"
+  jq -r --argjson now "$now" --arg board "$(board_addr)" --argjson reg "$reg" '
     def iso($e): ($e | strftime("%Y-%m-%dT%H:%M:%SZ"));
     def epoch($s): (($s | fromdate) // 0);
     def is_live($s): (["submitted","working","suspended"] | index($s)) != null;
-    def row($t): "\($t.task_id) | \($t.lane // "(none)")\(if $t.prose then " (prose)" else "" end) | \($t.state) | \($t.lease_expires_at // "-") | \($t.files | join(", "))";
+    def row($t): "\($t.task_id) | \($t.lane // "(none)") | \($t.state) | \($t.lease_expires_at // "-") | \($t.files | join(", "))";
 
     ($now | tonumber) as $now
     | ([.tasks[] | select(is_live(.state))]) as $open_all
-    | ([.tasks[] | select(.prose and is_live(.state))]) as $popen
-    | ([.unleased_prose_claims[]
-        | "\(.comment_id) | \(.lane // "(none)") | \(.task // "-") | \(.at)"]
-       | reverse | .[0:10]) as $frows
-    | ((.unleased_prose_claims | length) - 10) as $frest
     | ($open_all | sort_by(.lease_expires_at // "9999")) as $open
     | ($open | map(select(.state == "working" and .lease_expires_at
                     and ($now < epoch(.lease_expires_at))
@@ -579,7 +469,6 @@ render_md() { # $1=now_epoch $2=registry_json $3=watcher_state ; stdin: state JS
     | ([$open_all[] | .lane] | map(select(. != null)) | unique) as $livelanes
     | ($reg | map(select(.lane as $l | ($livelanes | index($l)) | not))) as $unclaimed
     | ([.tasks[] | .task_id as $t | .receipts[] | {task_id:$t, merged:(.merged // "none"), comment_id}]
-       + [.prose_receipts[] | {task_id:.task, merged:(.merged // "none"), comment_id}]
        | sort_by(.comment_id) | reverse | .[0:10]) as $rcpts
     | ($open | .[0:25] | map(row(.))) as $orows
     | (($open | length) - 25) as $orest
@@ -608,13 +497,8 @@ render_md() { # $1=now_epoch $2=registry_json $3=watcher_state ; stdin: state JS
       "task-id | merged | comment-id",
       (if ($rrows | length) == 0 then "(none)" else ($rrows | join("\n")) end),
       "",
-      "## prose-claims-needing-fence",
-      "comment-id | lane | task | at",
-      (if ($frows | length) == 0 then "(none)" else ($frows | join("\n")) end),
-      (if $frest > 0 then "… +\($frest) more" else empty end),
-      "",
       "## signals",
-      "board_comments=\(.comments) threshold=1500 rotation_due=\($rot) watcher=\($watcher) open_claims=\($open_all | length) prose_open=\($popen | length) unfenced_prose=\(.unleased_prose_claims | length) watermark=\(.watermark)"]
+      "board_comments=\(.comments) threshold=1500 rotation_due=\($rot) watcher=paused open_claims=\($open_all | length) watermark=\(.watermark)"]
     | join("\n") + "\n"
   '
 }
@@ -959,7 +843,7 @@ cmd_rebuild() {
   st="$(build_state)"
   reg="$(registry_json)"
   now="$(date +%s)"
-  printf '%s' "$st" | render_md "$now" "$reg" "${ROOM_WATCHER_STATE:-active}" > "$out.tmp" || die "rebuild: render failed"
+  printf '%s' "$st" | render_md "$now" "$reg" > "$out.tmp" || die "rebuild: render failed"
   mv "$out.tmp" "$out"
   bytes="$(wc -c < "$out" | tr -d ' ')"
   printf 'room: wrote %s (%s bytes)\n' "$out" "$bytes"
@@ -968,25 +852,8 @@ cmd_rebuild() {
 }
 
 rebuild_commit_push() { # $1 = rebuilt file
-  local out="$1" rr start_branch staged
+  local out="$1" rr start_branch
   rr="$(repo_root)"
-  # Resolve relative --out against the original cwd, then snapshot outside the
-  # repo: the branch checkout below would clobber $out when it lives inside the
-  # working tree (e.g. --out ROOM-STATE.md run from the repo root), and cp
-  # source==dest aborts under set -e.
-  case "$out" in /*) ;; *) out="$PWD/$out" ;; esac
-  staged="$(mktemp)" || die "rebuild: mktemp failed"
-  cp "$out" "$staged" || die "rebuild: snapshot failed"
-  # The rebuild above dirtied ROOM-STATE.md in the working tree, and the
-  # branch switch below refuses to overwrite local modifications. The fresh
-  # content is already snapshotted in $staged — and ROOM-STATE.md is generated
-  # (do-not-hand-edit), never a precious local edit — so reset the worktree
-  # copy to HEAD before switching branches.
-  if git -C "$rr" ls-files --error-unmatch -- ROOM-STATE.md >/dev/null 2>&1 \
-     && git -C "$rr" status --porcelain -- ROOM-STATE.md | grep -q .; then
-    git -C "$rr" checkout --quiet HEAD -- ROOM-STATE.md \
-      || die "rebuild: cannot reset dirty ROOM-STATE.md"
-  fi
   start_branch="$(git -C "$rr" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   git -C "$rr" fetch origin main --quiet || die "rebuild: fetch origin/main failed"
   if git -C "$rr" show-ref --verify --quiet refs/remotes/origin/room-state; then
@@ -994,8 +861,7 @@ rebuild_commit_push() { # $1 = rebuilt file
   else
     git -C "$rr" checkout --quiet -B room-state origin/main
   fi
-  cp "$staged" "$rr/ROOM-STATE.md"
-  rm -f "$staged"
+  cp "$out" "$rr/ROOM-STATE.md"
   if git -C "$rr" status --porcelain -- ROOM-STATE.md | grep -q .; then
     git -C "$rr" add ROOM-STATE.md
     git -C "$rr" -c user.name="quill" -c user.email="quill@local" commit --quiet \
@@ -1219,11 +1085,9 @@ cmd_metrics() {
   fi
   cpd="$(awk -v n="$n" -v d="$days" 'BEGIN{printf "%.2f", n/d}')"
   st="$(printf '%s' "$comments" | parse_events | reduce_state "$(date +%s)" "$n" "$wm")"
-  printf 'claims_opened=%s\n'    "$(printf '%s' "$st" | jq '[.log[] | select((.kind == "claim" or .kind == "prose-claim") and .ok)] | length')"
+  printf 'claims_opened=%s\n'    "$(printf '%s' "$st" | jq '[.log[] | select(.kind == "claim" and .ok)] | length')"
   printf 'claims_completed=%s\n' "$(printf '%s' "$st" | jq '[.tasks[] | select(.state == "completed")] | length')"
   printf 'claims_expired=%s\n'   "$(printf '%s' "$st" | jq '[.tasks[] | select(.released_at != null)] | length')"
-  printf 'prose_claims_opened=%s\n'      "$(printf '%s' "$st" | jq '[.log[] | select(.kind == "prose-claim" and .ok)] | length')"
-  printf 'prose_claims_needing_fence=%s\n' "$(printf '%s' "$st" | jq '.unleased_prose_claims | length')"
   printf 'receipts=%s\n'         "$(printf '%s' "$st" | jq '[.tasks[] | .receipts | length] | add // 0')"
   printf 'missing_receipts=%s\n' "$(printf '%s' "$st" | jq '[.tasks[] | select(.state == "completed" and (.receipts | length) == 0)] | length')"
   printf 'distinct_lanes=%s\n'   "$(printf '%s' "$st" | jq '.lanes | length')"
