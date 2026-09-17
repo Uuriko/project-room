@@ -41,9 +41,9 @@ this lane is docs/spec only. Pairs
 | [ROOM-COHESIVE-ARCHITECTURE.md](ROOM-COHESIVE-ARCHITECTURE.md) | **SoR** — collapses steal stack into one product (Second · Connect · ledger) |
 | [ROOM-RECEIPT-V1.md](ROOM-RECEIPT-V1.md) | `room.receipt.v1` Done receipt (evidence; chip = face) |
 | [ROOM-RECEIPT-GRAPH-V0.md](ROOM-RECEIPT-GRAPH-V0.md) | `citedReceiptIds[]` DAG; orphan claims fail the scorer |
-| [ROOM-SCORER.md](ROOM-SCORER.md) | Warp-shaped LLM judge; one dimension per scorer |
-| [ROOM-PERSONAS-FACTORY.md](ROOM-PERSONAS-FACTORY.md) | Personas + hraness parallelism |
-| [ROOM-KITS-HARNESS-JEV-ROY.md](ROOM-KITS-HARNESS-JEV-ROY.md) | Skillbox-shaped kits, harness-bridge Connect shape, Jev, Roy ladder |
+| [ROOM-SCORER.md](ROOM-SCORER.md) | Warp-shaped LLM judge; one dimension per scorer; Jev cheap closed-set rung |
+| [ROOM-PERSONAS-FACTORY.md](ROOM-PERSONAS-FACTORY.md) | Personas + hraness parallelism + same-rung spawn + named specialists + meter honesty |
+| [ROOM-KITS-HARNESS-JEV-ROY.md](ROOM-KITS-HARNESS-JEV-ROY.md) | Skillbox-shaped kits, harness-bridge Connect shape, Jev (recommend / scorer / pre-Ask), Roy ladder |
 | [ROOM-TRUST-HANDOFF-V0.md](ROOM-TRUST-HANDOFF-V0.md) | Trust Handoff Protocol v0 (principal, authority, reversibility, expiration) |
 | [ROOM-ATTENTION-PRESENCE-V0.md](ROOM-ATTENTION-PRESENCE-V0.md) | Attention modes (all / mentions / none) + host presence (Alook; not People-rail HTML) |
 | [ROOM-NAUTILO-STEAL.md](ROOM-NAUTILO-STEAL.md) | Nautilo (agentsea) P0–P2 steals: **Second**, Smart Routing, messenger receipts |
@@ -53,6 +53,7 @@ this lane is docs/spec only. Pairs
 | [examples/scorers/](examples/scorers/) | Default scorer stubs (task-compliance, efficiency, procedure-compliance, people-data-safe, orphan-claim) |
 | [ROOM-KITS-CATALOG.md](ROOM-KITS-CATALOG.md) | Optional later rows only — not live doors |
 
+Jev + Codex same-rung spawn (research): [ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md).
 Master plan: [ROOM-STEALS-FULL-BUILD-2026-09-17.md](../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md).
 Novel synthesis (pre-collapse): [ROOM-NOVEL-SYNTHESIS-2026-09-17.md](../research/ROOM-NOVEL-SYNTHESIS-2026-09-17.md)
 — superseded for “what is Room” decisions by the cohesive architecture SoR.

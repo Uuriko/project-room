@@ -66,12 +66,25 @@ agent stay the join paths).
 
 ## Jev
 
-`recommend_kits(query) → [{ id, score }]` using an operator TypeSafe /
-Vercel key. Optional.
+TypeSafe System One evaluation model (`typesafe-ai/jev` on Vercel AI
+Gateway). **No text generation.** Shared `state` + typed questions
+(boolean / choice / score) → answers + probabilities in parallel.
+Not Browser Use “Jev Ultrafast”. Research:
+[ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md).
 
-Room “which kit?” instead of a 30-turn search. Do not require Jev SaaS.
-When the key is absent, the recommend path is inert + reason — same
-honesty as a missing harness dialect.
+Optional operator TypeSafe / Vercel key. Do not require Jev SaaS.
+When the key is absent, every Jev path is inert + reason — same
+honesty as a missing harness dialect. Do not invent keys in chat.
+
+| Use | Mapping |
+| --- | --- |
+| Kit recommend | `recommend_kits(query) → [{ id, score }]` — Room “which kit?” instead of a 30-turn search |
+| Scorer rung | Closed-set dimensions (orphan-claim / people-data-safe) may pin `model: jev` ([ROOM-SCORER.md](ROOM-SCORER.md)) |
+| Pre-Ask / Compute gate | Cheap route Hosted vs Community vs refuse; classify intent (code / bug / explain). Research only — not a Compute Start blob |
+| Capacity eligibility | Parallel booleans per host / provider state (P1) |
+
+Keep the LLM judge for open-ended scorer essays. Do not replace Ask
+chat with Jev. Calibrate probabilities on labeled Room receipts.
 
 ## Roy ladder
 
@@ -84,7 +97,14 @@ is exhausted, fail-loud and offer the fast-default fallback
 ([ROOM-PERSONAS-FACTORY.md](ROOM-PERSONAS-FACTORY.md)).
 
 Judge models on [ROOM-SCORER.md](ROOM-SCORER.md) prefer `fast-default`
-so scoring stays inside the 3–5% token bound.
+for open-ended essays and `jev` for closed-set pins so scoring stays
+inside the 3–5% token bound.
+
+Same-rung factory spawn is allowed: Second / `foreman` may pin
+children to the parent’s Roy rung
+([ROOM-PERSONAS-FACTORY.md](ROOM-PERSONAS-FACTORY.md)). Never rename
+a model to hide which meter (`hosted` / `community` / `web`) a seat
+burns.
 
 ## Stay-outs
 

@@ -36,6 +36,9 @@ branding claim and not a promise that Room runs Devin.
 Fail-loud on the exhausted persona’s lane. Offer the Roy fast-default
 fallback. Never rename models to hide a limit
 ([ROOM-KITS-HARNESS-JEV-ROY.md](../docs/ROOM-KITS-HARNESS-JEV-ROY.md)).
+Same-rung spawn is also allowed: children may share the parent’s Roy
+rung, and each seat labels its meter (`hosted` / `community` / `web`)
+— [ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md).
 
 One Work Item → one primary claim; helpers attach via thread, not silent
 overwrite.

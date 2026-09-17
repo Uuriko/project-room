@@ -58,7 +58,7 @@ Pairs [#454](https://github.com/Uuriko/project-room/pull/454)
 | Kit | Status | Contract |
 | --- | --- | --- |
 | **Connect Cua desktop** (alt: Cua Driver MCP) | Optional kit under Connect. Docs only — not a live door, never replaces Join/Connect CTAs, not a marketplace shelf. | [ROOM-CUA-DESKTOP.md](ROOM-CUA-DESKTOP.md) |
-| **Scorer (LLM-judge)** | Optional later. Not a live door. One dimension per scorer; samples **Done receipts** (chip = face; receipt = evidence). Needs traces — never a vanity 1–10 badge. | [ROOM-SCORER.md](ROOM-SCORER.md) |
+| **Scorer (LLM-judge)** | Optional later. Not a live door. One dimension per scorer; samples **Done receipts** (chip = face; receipt = evidence). Needs traces — never a vanity 1–10 badge. Closed-set dimensions may pin TypeSafe Jev. | [ROOM-SCORER.md](ROOM-SCORER.md) |
 | **Skillbox-shaped library** | Optional later. Not a live door. Steal versioned skill revisions + scoped keys; do not fork Skillbox into the Worker. | [ROOM-KITS-HARNESS-JEV-ROY.md](ROOM-KITS-HARNESS-JEV-ROY.md) |
 | **Harness bridge** | Optional later. Not a live door. Provider once · pick model · pick harness. When UI ships: **enrolled-agent config under Connect**, not a fourth Join path. Keys never on argv / never in chat. | [ROOM-KITS-HARNESS-JEV-ROY.md](ROOM-KITS-HARNESS-JEV-ROY.md) |
 | **Interlateral-aligned receipts / authority cards** | Optional later. Not a live door. Trust Handoff v0 + Agent Interaction Receipt fields. Visible authority cards = later face, **not People-rail HTML**. | [ROOM-TRUST-HANDOFF-V0.md](ROOM-TRUST-HANDOFF-V0.md) · [ROOM-RECEIPT-V1.md](ROOM-RECEIPT-V1.md) · [ROOM-ARTIFACT-MATURITY.md](ROOM-ARTIFACT-MATURITY.md) |
