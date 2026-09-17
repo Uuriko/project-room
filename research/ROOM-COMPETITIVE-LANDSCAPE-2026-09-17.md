@@ -6,6 +6,10 @@ diff.
 
 Master plan:
 [ROOM-STEALS-FULL-BUILD-2026-09-17.md](ROOM-STEALS-FULL-BUILD-2026-09-17.md).
+Novel synthesis (Ledger Room):
+[ROOM-NOVEL-SYNTHESIS-2026-09-17.md](ROOM-NOVEL-SYNTHESIS-2026-09-17.md).
+Receipt graph:
+[ROOM-RECEIPT-GRAPH-V0.md](../docs/ROOM-RECEIPT-GRAPH-V0.md).
 
 Goal: find startups & products similar to Project Room (people + agents on one ledger: Work Items, receipts, Connect-an-agent, BYOA) and extract learnings.
 
@@ -45,7 +49,7 @@ Goal: find startups & products similar to Project Room (people + agents on one l
 
 ### 5. HumanLayer — multiplayer coding agent workspace
 - **Shape:** Tasks group sessions + artifacts + worktrees; RPI workflow (Questions→Research→Design→Structure→Plan→Implement); comment-driven design before code; local+cloud daemons; BYOK; design docs feed agents directly.
-- **Steal:** **Artifacts tied to Work Item** (we have receipt.v1); phased workflow as optional Work Item templates; design comments → agent context (not orphan Notion); “do not outsource the thinking” checkpoints before implement.
+- **Steal:** **Artifacts tied to Work Item** (we have receipt.v1); phased workflow as optional Work Item templates; design comments → agent context (not orphan Notion); “do not outsource the thinking” checkpoints before implement. Receipt graph cites prior agent receipts so design/implement claims are not orphan — [ROOM-RECEIPT-GRAPH-V0.md](../docs/ROOM-RECEIPT-GRAPH-V0.md).
 - **Don’t:** Become a coding IDE — Room stays coordination ledger; Compute separate.
 
 ### 6. Factory.ai Software Factory
@@ -61,7 +65,7 @@ Goal: find startups & products similar to Project Room (people + agents on one l
 | Priority | Learning | Action |
 |----------|----------|--------|
 | P0 | Separate identity / membership / authority / attention (Alook + Interlateral) | Spec authority cards + attention modes on agent members — [ROOM-ATTENTION-PRESENCE-V0.md](../docs/ROOM-ATTENTION-PRESENCE-V0.md) · [ROOM-TRUST-HANDOFF-V0.md](../docs/ROOM-TRUST-HANDOFF-V0.md) |
-| P0 | Artifacts + design comments bound to Work Item (HumanLayer) | receipt.v1 + optional design.md artifact type |
+| P0 | Artifacts + design comments bound to Work Item (HumanLayer) | receipt.v1 + optional design.md artifact type + [receipt graph](../docs/ROOM-RECEIPT-GRAPH-V0.md) (`citedReceiptIds[]`) |
 | P0 | Verified agent passport + consent for cross-owner (Agent Room) | Align Add-agent digest keys + guest consent |
 | P1 | Presence + reconnect catch-up (Alook) | Agent host online indicator — [ROOM-ATTENTION-PRESENCE-V0.md](../docs/ROOM-ATTENTION-PRESENCE-V0.md) |
 | P1 | Thread fork/merge for parallel agent exploration (agensis) | Research note only until Muse board lane |
@@ -70,9 +74,10 @@ Goal: find startups & products similar to Project Room (people + agents on one l
 | P2 | Factory/Warp metrics on delivered work | Scorer dashboards later |
 
 ## Differentiation one-liner
-**Project Room** = the project’s shared ledger (Work Items, receipts, people+agents, honesty) — not an IDE (HumanLayer), not an event third-space (Interlateral), not a coding-agent mesh alone (Agent Room), not a canvas chat hub (agensis/Oasis). Steal their membership/authority/artifact patterns; keep Compute separate.
+**Project Room** = the project’s shared ledger (Work Items, receipts, people+agents, honesty) — not an IDE (HumanLayer), not an event third-space (Interlateral), not a coding-agent mesh alone (Agent Room), not a canvas chat hub (agensis/Oasis). Steal their membership/authority/artifact patterns; keep Compute separate. Folded synthesis: [Ledger Room](ROOM-NOVEL-SYNTHESIS-2026-09-17.md) — six-axis seats, Work Items with receipt graphs, scorers that fail orphan claims.
 
 ## Next
 1. Folded into project-room research (this note + [FULL-BUILD](ROOM-STEALS-FULL-BUILD-2026-09-17.md) index)
 2. Attention modes + presence contract landed: [ROOM-ATTENTION-PRESENCE-V0.md](../docs/ROOM-ATTENTION-PRESENCE-V0.md) (pairs Trust Handoff; People-rail chrome later)
 3. Tip Muse for People-rail presence when open
+4. Ledger Room fold: [ROOM-NOVEL-SYNTHESIS-2026-09-17.md](ROOM-NOVEL-SYNTHESIS-2026-09-17.md) · [ROOM-RECEIPT-GRAPH-V0.md](../docs/ROOM-RECEIPT-GRAPH-V0.md) · [orphan-claim](../docs/examples/scorers/orphan-claim/scorer.md)
