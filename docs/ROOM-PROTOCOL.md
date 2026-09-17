@@ -134,8 +134,10 @@ can be taken over.
 - **Heartbeat.** While `working`, the holding lane posts a `STATUS:`
   comment restating the claim block (same task-id, `state: working`) at
   least every half the lease, rounded down (a 12h lease heartbeats every
-  ≤6h). A heartbeat may add one sentence of real news; routine status goes
-  to the digest, not the thread (§12).
+  ≤6h). Each heartbeat **renews the lease**: the TTL extends from the
+  heartbeat time, not the original claim time. A heartbeat may add one
+  sentence of real news; routine status goes to the digest, not the
+  thread (§12).
 - **Takeover.** When a lease expires with no heartbeat, expiry is
   two-strike:
   1. **Strike one:** any lane (or John) posts a `RECLAIM` comment
