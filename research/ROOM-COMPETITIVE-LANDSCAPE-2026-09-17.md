@@ -41,6 +41,7 @@ Goal: find startups & products similar to Project Room (people + agents on one l
 - **Shape:** Discord-like channels; distinct agent identities; owner still controls runtime; membership ≠ secret access; attention modes (all / mentions / none); machine presence + unread catch-up on reconnect.
 - **Steal:** **Identity / membership / authority / attention / memory** as separate axes (aligns Interlateral identity≠authority≠capability); machine presence + catch-up when laptop returns.
 - **Don’t:** Grant channel membership ⇒ all owner secrets.
+- **Contract:** [ROOM-ATTENTION-PRESENCE-V0.md](../docs/ROOM-ATTENTION-PRESENCE-V0.md) — attention modes + host presence. Docs only; People-rail chrome is later Muse.
 
 ### 5. HumanLayer — multiplayer coding agent workspace
 - **Shape:** Tasks group sessions + artifacts + worktrees; RPI workflow (Questions→Research→Design→Structure→Plan→Implement); comment-driven design before code; local+cloud daemons; BYOK; design docs feed agents directly.
@@ -59,10 +60,10 @@ Goal: find startups & products similar to Project Room (people + agents on one l
 ## Priority learnings for Project Room
 | Priority | Learning | Action |
 |----------|----------|--------|
-| P0 | Separate identity / membership / authority / attention (Alook + Interlateral) | Spec authority cards + attention modes on agent members |
+| P0 | Separate identity / membership / authority / attention (Alook + Interlateral) | Spec authority cards + attention modes on agent members — [ROOM-ATTENTION-PRESENCE-V0.md](../docs/ROOM-ATTENTION-PRESENCE-V0.md) · [ROOM-TRUST-HANDOFF-V0.md](../docs/ROOM-TRUST-HANDOFF-V0.md) |
 | P0 | Artifacts + design comments bound to Work Item (HumanLayer) | receipt.v1 + optional design.md artifact type |
 | P0 | Verified agent passport + consent for cross-owner (Agent Room) | Align Add-agent digest keys + guest consent |
-| P1 | Presence + reconnect catch-up (Alook) | Agent host online indicator |
+| P1 | Presence + reconnect catch-up (Alook) | Agent host online indicator — [ROOM-ATTENTION-PRESENCE-V0.md](../docs/ROOM-ATTENTION-PRESENCE-V0.md) |
 | P1 | Thread fork/merge for parallel agent exploration (agensis) | Research note only until Muse board lane |
 | P1 | Wake vs pull MCP modes (Agent Room) | Document in Connect kits |
 | P2 | Oasis “agents as teammates” copy | Marketing/Connect copy, not product rename |
@@ -73,5 +74,5 @@ Goal: find startups & products similar to Project Room (people + agents on one l
 
 ## Next
 1. Folded into project-room research (this note + [FULL-BUILD](ROOM-STEALS-FULL-BUILD-2026-09-17.md) index)
-2. Extend ROOM-PERSONAS / Trust Handoff with attention modes + presence
+2. Attention modes + presence contract landed: [ROOM-ATTENTION-PRESENCE-V0.md](../docs/ROOM-ATTENTION-PRESENCE-V0.md) (pairs Trust Handoff; People-rail chrome later)
 3. Tip Muse for People-rail presence when open

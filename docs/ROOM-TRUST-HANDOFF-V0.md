@@ -7,7 +7,10 @@ FutureLaw event report, 13 April 2026). Research:
 [ROOM-INTERLATERAL-RESEARCH-2026-09-17.md](../research/ROOM-INTERLATERAL-RESEARCH-2026-09-17.md).
 
 Receipts: [ROOM-RECEIPT-V1.md](ROOM-RECEIPT-V1.md). Maturity:
-[ROOM-ARTIFACT-MATURITY.md](ROOM-ARTIFACT-MATURITY.md). Master plan:
+[ROOM-ARTIFACT-MATURITY.md](ROOM-ARTIFACT-MATURITY.md). Attention +
+presence (Alook; membership ≠ authority ≠ attention):
+[ROOM-ATTENTION-PRESENCE-V0.md](ROOM-ATTENTION-PRESENCE-V0.md). Master
+plan:
 [ROOM-STEALS-FULL-BUILD-2026-09-17.md](../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md).
 
 Catalog row: **Interlateral-aligned receipts / authority cards** on
