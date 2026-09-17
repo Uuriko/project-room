@@ -78,6 +78,9 @@ same fields.
    ([ROOM-SCORER.md](ROOM-SCORER.md)).
 6. Compute jobs are not Trust Handoffs
    ([BRIDGE-COMPUTE.md](BRIDGE-COMPUTE.md)).
+7. Do not copy Interlateral’s default `--dangerously-skip-permissions`.
+   Room keeps Ask every time + Cua dual boundary
+   ([#454](https://github.com/Uuriko/project-room/pull/454)).
 
 ## Stay-outs
 

@@ -151,6 +151,7 @@ shelf.
 - auto-merge self-improve
 - Potter keys
 - Auto-billing Fleet without delete
+- `--dangerously-skip-permissions` as a Room default (Interlateral OSS mesh does this; Room keeps Ask every time + Cua dual boundary)
 
 ## File list (this build-out)
 
@@ -162,7 +163,7 @@ shelf.
 | `docs/ROOM-PERSONAS-FACTORY.md` | Personas + factory parallelism |
 | `docs/ROOM-KITS-HARNESS-JEV-ROY.md` | Kits / harness / Jev / Roy |
 | `research/ROOM-HRANESS-STEAL-2026-09-17.md` | hraness factory steal |
-| `research/ROOM-INTERLATERAL-RESEARCH-2026-09-17.md` | Interlateral teardown (full) |
+| `research/ROOM-INTERLATERAL-RESEARCH-2026-09-17.md` | Interlateral → Room research (attached source) |
 | `docs/ROOM-TRUST-HANDOFF-V0.md` | Trust Handoff Protocol v0 |
 | `docs/ROOM-ARTIFACT-MATURITY.md` | Five-rung artifact ladder |
 | `docs/examples/scorers/*/scorer.md` | Four default scorer stubs |
