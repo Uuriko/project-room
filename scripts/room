@@ -1131,6 +1131,15 @@ cmd_sweep() {
 # receipts-scan (enforcer, cron-only)
 # ---------------------------------------------------------------------------
 
+digest_items_unchanged() { # $1 = digest body -> 0 when the newest board digest lists the same items
+  local new_items old_body old_items
+  new_items="$(printf '%s\n' "$1" | grep '^- ' | sort)"
+  old_body="$(fetch_comments | jq -r '[.[] | select((.body // "") | startswith("[room-watch] missing receipts"))] | last | .body // ""')"
+  [ -n "$old_body" ] || return 1
+  old_items="$(printf '%s\n' "$old_body" | grep '^- ' | sort)"
+  [ "$new_items" = "$old_items" ]
+}
+
 cmd_receipts_scan() {
   local post=0
   while [ $# -gt 0 ]; do case "$1" in
@@ -1166,7 +1175,7 @@ cmd_receipts_scan() {
   if [ -n "$out" ]; then
     printf '%s' "$out" | awk -F'\t' '{printf "%-6s %-14s %-22s %s\n", $1, $2, $3, $4}'
   fi
-  if [ "$post" = 1 ]; then
+  if [ "$post" = 1 ] && [ -n "$out" ]; then
     local digest
     digest="[room-watch] missing receipts (24h SLO)
 
@@ -1177,6 +1186,8 @@ $([ -n "$prows" ] && printf '%s\n' "$prows" | awk -F'\t' '{print "- " $1 " " $2 
 Receipts close the loop (protocol §6): post DONE: + a room-receipt block with the merge SHA within 24h of the merge."
     if [ "$DRY_RUN" = 1 ]; then
       printf 'PLAN: post prose digest comment\n%s\n' "$digest"
+    elif digest_items_unchanged "$digest"; then
+      printf 'room: digest unchanged since last board post, skipping\n'
     else
       post_comment "$digest" >/dev/null
       printf 'room: posted digest comment\n'
