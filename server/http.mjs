@@ -23,6 +23,7 @@ import { AgentRooms } from "./agent-rooms.mjs";
 import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
 import { listPins, setPin } from "./pins.mjs";
 import { GoogleSignIn, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage } from "./google-oauth.mjs";
+import { createMagicLinkMailer, magicLinkUnavailable } from "./magic-links.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { normalizeEmail } from "./account-login-methods.mjs";
 import { createPasskeyAuth, resolvePasskeyParams } from "./account-passkeys.mjs";
@@ -85,6 +86,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   telegram = telegramConfig(), telegramStatus = new TelegramLiveStatus(), channelTransports = null,
   googleAuth = null,
   passkeyService = null, // test injection for the passkey routes; production uses createPasskeyAuth({ store })
+  magicLinkMailer = null,
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", growth = null }) {
   // Live Telegram bindings are read once (Worker secrets or local env); the
   // config never holds up startup and the card reports "not configured".
@@ -93,6 +95,21 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // The sign-in helper is created lazily so its PKCE/state table lives as long
   // as this server instance (one per Durable Object in production).
   let googleSignIn = null;
+  // Magic-link mailer (slice 3). Unconfigured by default: the routes say so
+  // honestly (mail_not_configured) and never pretend a code was sent.
+  const magicMailer = magicLinkMailer ?? createMagicLinkMailer();
+  if (typeof magicMailer.isConfigured !== "function" || typeof magicMailer.sendMagicLink !== "function") {
+    throw new Error("magicLinkMailer must come from createMagicLinkMailer()");
+  }
+  // Per-email buckets (hourly) complement the per-address rate() limits below.
+  const magicRequestEmailLimiter = createRateLimiter({ capacity: 3, refillPerSecond: 3 / 3600 });
+  const magicConsumeEmailLimiter = createRateLimiter({ capacity: 10, refillPerSecond: 10 / 3600 });
+  const magicEmailLimit = (limiter, normalized) => {
+    const checked = limiter.check(rateHash(normalized));
+    if (!checked.allowed) {
+      throw new ServiceError(429, "rate_limited", checked.message, { "Retry-After": String(Math.ceil(checked.retryAfterMs / 1000)) });
+    }
+  };
   const google = () => {
     if (!googleAuth) return null;
     googleSignIn ??= new GoogleSignIn({ clientId: googleAuth.clientId, clientSecret: googleAuth.clientSecret,
@@ -413,6 +430,74 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         } catch {
           return finishGoogle("/?google=error");
         }
+      }
+      // ---- Magic link auth (slice 3, RC-2026-09-17-012) ----
+      //
+      // Passwordless email sign-in. POST /api/auth/magic/request issues a
+      // single-use code and hands it to the mailer seam; POST
+      // /api/auth/magic/consume redeems it, provisions/links the account,
+      // and upgrades the anonymous account-session slot (same shape as the
+      // /api/account-session POST login, with method { kind: "magic" }).
+      //
+      // Codes are never returned in API responses — only through the
+      // mailer. When no mail provider is configured the request route says
+      // so honestly (mail_not_configured) and issues nothing. Both routes
+      // ride the browser's account slot + CSRF like every other cookie
+      // session write; the response shape never reveals whether the email
+      // already has an account.
+      if (url.pathname === "/api/auth/magic/request" || url.pathname === "/api/auth/magic/consume") {
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        checkOrigin(req, true);
+        const slotToken = cookie(req, accountCookieName);
+        if (!slotToken) reject(401, "account_session_required", "Start an account browser session before signing in");
+        const slot = store.accountSessionSlot(slotToken);
+        protectWrite(req, slot, false);
+        if (url.pathname === "/api/auth/magic/request") {
+          const data = await body(req);
+          if (!exact(data, ["email"]) || typeof data.email !== "string") reject(422, "invalid_email_request", "An email address is required");
+          const normalized = normalizeEmail(data.email);
+          if (!normalized) reject(422, "invalid_email", "A valid email address is required");
+          rate(`magic-request:${remoteAddress}`, 5);
+          magicEmailLimit(magicRequestEmailLimiter, normalized);
+          if (!magicMailer.isConfigured()) return json(res, 200, magicLinkUnavailable());
+          const issued = store.accountLogins.issueMagicCode({ email: normalized });
+          await magicMailer.sendMagicLink({ to: normalized, code: issued.code, expiresAt: issued.expiresAt });
+          return json(res, 200, { status: "sent" });
+        }
+        const data = await body(req);
+        if (!exact(data, ["email", "code", "expectedSessionRevision"]) || typeof data.email !== "string" || typeof data.code !== "string") {
+          reject(422, "invalid_magic_login", "Email, code, and current session revision are required");
+        }
+        if (!Number.isSafeInteger(data.expectedSessionRevision) || data.expectedSessionRevision < 0) {
+          reject(422, "invalid_session_revision", "A current account session revision is required");
+        }
+        const normalized = normalizeEmail(data.email);
+        if (!normalized) reject(422, "invalid_email", "A valid email address is required");
+        rate(`magic-consume:${remoteAddress}`, 10);
+        magicEmailLimit(magicConsumeEmailLimiter, normalized);
+        // The model burns the code window on failure (401 invalid_magic_code)
+        // after 5 wrong attempts / 15-minute expiry / single use.
+        store.accountLogins.consumeMagicCode({ email: normalized, code: data.code });
+        // Magic links prove email ownership, so find-or-create by verified
+        // email is safe. A password account on the same address links to the
+        // same account instead of forking a new one.
+        let accountId = store.accountLogins.findAccountByVerifiedEmail(normalized);
+        if (!accountId) {
+          const derived = `email:${createHash("sha256").update(normalized, "utf8").digest("hex")}`;
+          try { store.createAccount(derived, "magic-link"); }
+          catch (error) { if (!(error instanceof ServiceError) || error.status !== 409) throw error; }
+          accountId = derived;
+        }
+        let method = store.accountLogins.listMethods(accountId).find(row => row.type === "magic" && row.email === normalized);
+        if (!method) method = store.accountLogins.linkMagicMethod(accountId, { email: normalized });
+        store.accountLogins.touchMethod(accountId, method.id);
+        const oldRoomToken = cookie(req, roomCookieName);
+        const loggedIn = store.loginAccountSessionWithMethod(slotToken, accountId, data.expectedSessionRevision, {
+          method: { kind: "magic", ref: method.id },
+          revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null
+        });
+        setCookie(res, accountCookieName, slotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
+        return json(res, 201, accountView(loggedIn));
       }
       if (url.pathname === "/api/ready" && ["GET", "HEAD"].includes(req.method)) {
         try {
