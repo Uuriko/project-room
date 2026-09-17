@@ -70,6 +70,7 @@ optional.push("server/channel-connection.mjs", "server/channel-import.mjs", "ser
 optional.push("server/mime-message.mjs", "server/email-routing-inbound.mjs", "server/channel-journal.mjs");
 optional.push("server/agent-rooms.mjs"); // agent room ownership service (imported by server/http.mjs)
 optional.push("server/google-oauth.mjs"); // Google sign-in (imported by server/http.mjs and cloudflare/room.mjs)
+optional.push("server/account-login-methods.mjs"); // Multi-method login model (imported by server/store.mjs)
 optional.push("server/room-export-html.mjs");
 optional.push("server/access-review.mjs");
 optional.push("server/access-requests.mjs", "server/identity-ratelimit.mjs");
