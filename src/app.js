@@ -580,20 +580,9 @@ function configureAuthPanel(roomId = selectedRoomFromLocation()) {
   const accountMode = accountSignIn();
   $("#auth-title").textContent = roomId && accountMode ? "Open this room" : "Welcome.";
   $("#access-key-label").textContent = accountMode ? "Account key" : "Room key";
-  if ($("#auth-lead")) {
-    $("#auth-lead").textContent = accountMode
-      ? roomId ? `Paste the account key that can open #${roomId}. Have a room key? Choose Room key.` : "Paste your account key. Inbox does not need a room."
-      : "Paste your room key. Same browser as last time? You may already be in.";
-  }
   $("#auth-kind-room")?.setAttribute("aria-pressed", accountMode ? "false" : "true");
   $("#auth-kind-account")?.setAttribute("aria-pressed", accountMode ? "true" : "false");
   $("#auth-kind-room")?.classList.toggle("suggested", Boolean(accountMode && roomId));
-  $("#auth-description").textContent = accountMode
-    ? roomId ? "Use an account key with membership in this room." : "Use your account key. No room membership is needed."
-    : "Ask the room owner for an invite link or room key.";
-  $("#auth-hint").textContent = accountMode
-    ? roomId ? "Need membership? Ask the room owner. Keep your key private." : "Keep your key private."
-    : "Keep your key private. Lost guest access? Ask for a new invite.";
   $("#auth-form button[type='submit']").textContent = accountMode ? (roomId ? "Open room" : "Sign in") : "Enter room";
 }
 function setAuthKind(kind) {
@@ -1814,6 +1803,22 @@ $("#invite-link")?.addEventListener("paste", event => {
   event.preventDefault();
   $("#invite-link").value = "";
   openInvitation({ valid: true, secret });
+});
+function redeemInviteInput() {
+  const input = $("#invite-link");
+  const err = $("#invite-error");
+  const secret = inviteSecretFromText(input?.value ?? "");
+  if (!secret) {
+    if (err) err.textContent = "That doesn't look like an invite link. Paste the full link you were given.";
+    return;
+  }
+  if (err) err.textContent = "";
+  input.value = "";
+  openInvitation({ valid: true, secret });
+}
+$("#invite-redeem")?.addEventListener("click", redeemInviteInput);
+$("#invite-link")?.addEventListener("keydown", e => {
+  if (e.key === "Enter") { e.preventDefault(); redeemInviteInput(); }
 });
 $("#auth-form").addEventListener("submit", async e => {
   if (signoutLoading) { e.preventDefault(); return; }
