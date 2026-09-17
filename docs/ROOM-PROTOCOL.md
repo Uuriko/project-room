@@ -41,10 +41,10 @@ reason:     write the room protocol spec from the wave brief
 | Field     | Required | Rules                                                                               |
 |-----------|----------|-------------------------------------------------------------------------------------|
 | `task-id` | yes      | Unique per task, format `RC-YYYY-MM-DD-NNN`. Never reused after a terminal state.    |
-| `lane`    | yes      | One of the registered lanes in `docs/AGENT-LANES.md`. Exactly one lane per claim.    |
+| `lane`    | yes      | One of the registered lanes in `lanes/REGISTRY.md`. Exactly one lane per claim.    |
 | `files`   | yes      | Exact file paths, comma-separated, relative to repo root. `*` is forbidden.         |
 | `lease`   | yes      | `lease=<N>h` (1–72). The TTL the claiming lane asserts it can hold.                  |
-| `state`   | yes      | One of the A2A-lite words in §4, lowercase.                                         |
+| `state`   | yes      | One of the A2A-lite words in §3, lowercase.                                         |
 | `reason`  | yes      | One line: why this claim exists.                                                    |
 
 - **One block per comment.** Two blocks in one comment = the first is the
@@ -77,10 +77,10 @@ what the comment *is* before any reading is required:
   claim block with the new `state` (fields may otherwise stay identical).
   No new task is created; the comment's task-id must already be live.
 - `DONE:` — terminal success. `state: completed` in the block; SHOULD carry
-  a receipt per §7 in the same comment.
+  a receipt per §6 in the same comment.
 - `HANDOFF:` — transfers a live claim to another lane. Must contain the
-  handoff block (§8) plus the restated claim block naming the receiving lane.
-- `RECLAIM` — the two-strike nudge (§5), a duplicate-claim rejection notice,
+  handoff block (§7) plus the restated claim block naming the receiving lane.
+- `RECLAIM` — the two-strike nudge (§4), a duplicate-claim rejection notice,
   or an illegal-transition notice. May be posted by any lane.
 
 A comment without one of these prefixes is prose and changes nothing. Board
@@ -122,7 +122,7 @@ happened.
 `state: submitted` followed by a `STATUS:` moving it to `working` is the
 normal two-step: announce, then pick up. A lane may collapse both into one
 comment (`[claim]` with `state: working`) only when starting immediately;
-heartbeat (§5) always assumes `working` means hands-on.
+heartbeat (§4) always assumes `working` means hands-on.
 
 ## 4. Claim/lease mechanics
 
@@ -137,12 +137,12 @@ can be taken over.
   ≤6h). Each heartbeat **renews the lease**: the TTL extends from the
   heartbeat time, not the original claim time. A heartbeat may add one
   sentence of real news; routine status goes to the digest, not the
-  thread (§12).
+  thread (§11).
 - **Takeover.** When a lease expires with no heartbeat, expiry is
   two-strike:
   1. **Strike one:** any lane (or John) posts a `RECLAIM` comment
      `@`-mentioning the holding lane: lease expired, heartbeat overdue,
-     requesting status within 4h. This is an *interrupt* (§12) — it
+     requesting status within 4h. This is an *interrupt* (§11) — it
      genuinely needs a person/agent to answer.
   2. **Strike two:** if no heartbeat lands within 4h of the nudge, any
      lane posts `RECLAIM` again, declares the claim released, and the
@@ -294,7 +294,7 @@ play-by-play. The room-wide reactions carry the lightweight channel:
 
 Reaction etiquette: react to the invoking comment; don't thread under it.
 Status that wants words but isn't a claim/handoff/receipt belongs in the
-digest (§12), not the board.
+digest (§11), not the board.
 
 ## 11. Mention-as-interrupt routing
 
