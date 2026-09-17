@@ -2,9 +2,6 @@ name: hosted-denial-conformance
 
 on:
   pull_request:
-    paths:
-      - "hosted-denial-conformance/**"
-      - ".github/workflows/hosted-denial-conformance.yml"
   push:
     paths:
       - "hosted-denial-conformance/**"

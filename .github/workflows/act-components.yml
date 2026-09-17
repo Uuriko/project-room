@@ -2,9 +2,6 @@ name: act-components
 
 on:
   pull_request:
-    paths:
-      - "act-components/**"
-      - ".github/workflows/act-components.yml"
   push:
     paths:
       - "act-components/**"
