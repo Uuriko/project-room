@@ -1,0 +1,150 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { rmSync } from "node:fs";
+import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
+import { textVersion } from "../server/text-results.mjs";
+import { auditRecovery } from "../server/recovery.mjs";
+
+// A gate for one bug class, found three times in one day.
+//
+// auditRecovery runs four auditors - text results, charters, reply requests and
+// work help - and each replays the event log into its own narrower model, then
+// asserts that model deep-equals the live projection. Any legitimate event an
+// auditor does not implement makes the two disagree PERMANENTLY: no later event
+// restores agreement. And auditRecovery gates backupRoom and loops every room,
+// so a single such event in a single room stops the entire database being
+// backed up, while nothing whatever is corrupt.
+//
+// Found this way, not by reading:
+//   * auditReplyRequests skipped message.edited / message.deleted, so any edit
+//     in a room holding a reply request broke backups.
+//   * auditCharters never followed ownership.transferred, so the first transfer
+//     broke them.
+//   * auditCharters also required the owner to be human, so every room made by
+//     POST /api/agent-rooms broke them the moment it was created.
+//
+// So the gate is not "test the auditors", it is "drive the room through every
+// event type the product has and require the audit to survive each one". A new
+// event type that no auditor models should fail here, naming itself, on the
+// commit that introduces it.
+//
+// Checked against the bugs that motivated it rather than assumed: reverting the
+// reply-request fix makes this fail naming message.posted, message.edited and
+// message.deleted; reverting the charter fix makes it fail naming
+// ownership.transferred.
+//
+// It does NOT catch the third one, and that is worth stating plainly. Editing a
+// message bound as completion evidence needs a particular order - complete with
+// room_text evidence, then edit that exact message - which a linear sweep of
+// event types never produces. A sweep catches "this event type was never
+// modelled"; it cannot catch "this combination was never considered". That one
+// is pinned by tests/work-evidence-immutable.test.js, and its existence is the
+// reason not to treat this file as covering the class on its own.
+
+const W = "test-handoff";
+const W2 = "write-work";
+
+function sweep() {
+  const fixture = createAcceptanceFixture();
+  const state = () => fixture.store.room("commons").state;
+  const item = (id = W) => state().workItems[id];
+  const exercised = new Set(["room.created", "member.added", "work.proposed"]);
+  const broke = [];
+
+  const step = (type, actor, data) => {
+    let receipt;
+    try { receipt = fixture.store.command(fixture.keys[actor], "commons", { id: randomUUID(), type, data: typeof data === "function" ? data() : data }); }
+    catch { return null; } // Refused commands are not this test's subject.
+    exercised.add(type);
+    try { auditRecovery(fixture.store); }
+    catch (error) { broke.push(`${type}: ${error.message}`); }
+    return receipt;
+  };
+
+  step(T.ROOM_CHARTER_UPDATED, "owner", () => ({ expectedRevision: state().room.charter?.revision ?? 0, purpose: "Coordinate the pilot.", outputs: "An agenda.", boundaries: "No spend.", escalation: "Ask the owner." }));
+  step(T.ROOM_POLICY_SET, "owner", { requireIndependentReview: true, requireOwnerDecision: true });
+  step(T.ROOM_SPEND_ALLOWANCE_SET, "owner", { allowanceCents: 10000, periodDays: 30 });
+  step(T.NOTIFICATION_PREFERENCES_SET, "producer", { preferences: { mentions: "all" } });
+  step(T.MEMBER_STATUS_UPDATED, "producer", { memberId: "producer", message: "Working on the agenda" });
+  step(T.CAPABILITIES_ADVERTISED, "producer", { capabilities: ["text"] });
+  step(T.MEMBER_MUTE_SET, "owner", { memberId: "guest", muted: true });
+
+  step(T.MESSAGE_POSTED, "producer", { messageId: "chat-1", body: "hello room" });
+  step(T.MESSAGE_EDITED, "producer", { messageId: "chat-1", body: "hello room, again", expectedMessageRevision: 0 });
+  step(T.MESSAGE_REACTION_SET, "reviewer", { messageId: "chat-1", reaction: "like", active: true });
+  step(T.MESSAGE_PINNED, "owner", { messageId: "chat-1" });
+  step(T.MESSAGE_UNPINNED, "owner", { messageId: "chat-1" });
+  step(T.MESSAGE_DELETED, "producer", { messageId: "chat-1", expectedMessageRevision: 1, reason: "tidy" });
+
+  // An open reply request is what arms auditReplyRequests' whole-message-list
+  // comparison, so every message event after this point is the regression that
+  // took backups down.
+  step(T.MESSAGE_POSTED, "owner", { messageId: "req-1", body: "Please confirm", toMemberId: "producer", requestKind: "reply" });
+  step(T.MESSAGE_POSTED, "producer", { messageId: "chat-2", body: "an ordinary message while a request is open" });
+  step(T.MESSAGE_EDITED, "producer", { messageId: "chat-2", body: "edited while a request is open", expectedMessageRevision: 0 });
+  step(T.MESSAGE_DELETED, "producer", { messageId: "chat-2", expectedMessageRevision: 1, reason: "tidy" });
+  step(T.REPLY_REQUEST_CANCELLED, "owner", () => ({ requestMessageId: "req-1", expectedRequestRevision: state().replyRequests?.["req-1"]?.revision ?? 0, reason: "never mind" }));
+
+  step(T.WORK_ACCEPTED, "producer", () => ({ workItemId: W, expectedRevision: item().revision }));
+  step(T.WORK_STARTED, "producer", () => ({ workItemId: W, expectedRevision: item().revision }));
+  step(T.SESSION_STOP_REQUESTED, "owner", () => ({ workItemId: W, expectedRevision: item().revision }));
+  step(T.SESSION_STOPPED, "producer", () => ({ workItemId: W, expectedRevision: item().revision, status: "done", spendCents: 20, budgetEnforced: true, reason: "finished", outputs: "agenda" }));
+  step(T.WORK_BLOCKED, "producer", () => ({ workItemId: W, expectedRevision: item().revision, reason: "waiting", nextAction: "unblock" }));
+  step(T.WORK_BLOCKER_RESOLVED, "producer", () => ({ workItemId: W, expectedRevision: item().revision, resolution: "unblocked" }));
+
+  const posted = step(T.MESSAGE_POSTED, "producer", { messageId: "draft-1", workItemId: W, body: "The agenda is owned by Potter." });
+  if (posted) {
+    step(T.WORK_COMPLETED, "producer", () => ({
+      workItemId: W, expectedRevision: item().revision, evidenceKind: "room_text",
+      evidenceMessageId: "draft-1", evidenceMessageEventId: posted.event.id,
+      evidenceVersion: textVersion("The agenda is owned by Potter."), previousCompletionEventId: null,
+      producerId: "producer", summary: "Exact room result", nextAction: "Review"
+    }));
+    step(T.VERIFICATION_RECORDED, "reviewer", () => ({
+      workItemId: W, expectedRevision: item().revision, result: "pass",
+      completionEventId: item().receipt.eventId, evidenceVersion: item().receipt.evidenceVersion, summary: "Looks right"
+    }));
+  }
+  step(T.DECISION_RECORDED, "owner", { sourceMessageId: "req-1", statement: "We ship Friday", note: "agreed" });
+
+  step(T.MESSAGE_POSTED, "owner", { messageId: "src-2", body: "Please do the write work" });
+  step(T.WORK_PROPOSED, "owner", { workItemId: W2, title: "Write work", definitionOfDone: "Files changed.", accountableMemberId: "producer", verifierMemberId: "reviewer", humanDecisionMakerId: "owner", mode: "write", sourceMessageId: "src-2" });
+  step(T.WORK_ACCEPTED, "producer", () => ({ workItemId: W2, expectedRevision: item(W2).revision }));
+  step(T.WORK_SUPERSEDED, "owner", () => ({ workItemId: W2, expectedRevision: item(W2).revision, supersededByWorkItemId: W, reason: "folded in" }));
+
+  // Last, because both end the room's normal life.
+  step(T.OWNERSHIP_TRANSFERRED, "owner", { toMemberId: "producer", reason: "handing the room over" });
+  step(T.ROOM_ARCHIVED, "producer", { reason: "pilot over" });
+
+  const directory = fixture.directory;
+  fixture.store.close();
+  rmSync(directory, { recursive: true, force: true });
+  return { exercised, broke };
+}
+
+const result = sweep();
+
+test("no event type leaves the room unauditable", () => {
+  assert.deepEqual(result.broke, [], "these events broke auditRecovery, which means backupRoom is down for every room");
+});
+
+test("the sweep covers enough of the event surface to be worth trusting", () => {
+  // Not every type is reachable from one fixture: some need an invitation, a
+  // spend allowance, write_external permission or a live session. The floor
+  // stops the sweep quietly rotting into a no-op if a step starts being
+  // refused - which would make the test above pass for the wrong reason.
+  const all = Object.values(T);
+  const missing = all.filter(type => !result.exercised.has(type));
+  assert.ok(result.exercised.size >= 29,
+    `only ${result.exercised.size} of ${all.length} event types were exercised; not covered: ${missing.join(", ")}`);
+});
+
+test("the event surface has not grown without this sweep noticing", () => {
+  // A deliberate tripwire. When someone adds an event type, this fails and they
+  // decide: teach the sweep to exercise it, or record that it cannot be. Either
+  // is fine. Silently adding an event no auditor models is what is not.
+  assert.equal(Object.values(T).length, 41,
+    "EVENT_TYPES changed: add the new type to this sweep, then update this count");
+});
