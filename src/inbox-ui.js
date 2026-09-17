@@ -611,13 +611,13 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       }
       $("#inbox-thread").hidden = false;
       $("#inbox-thread-list").replaceChildren(...thread.entries.map(({ depth, source }) => {
-        const row = document.createElement("div"), open = document.createElement("button");
-        open.type = "button"; open.className = "text-button";
-        open.style.marginLeft = `${Math.min(depth, 6) * 16}px`;
-        open.textContent = `${source.subject || "(No subject)"} · ${source.sender}`;
-        if (source.id === sourceId) { open.disabled = true; open.textContent += " (this message)"; }
-        else open.addEventListener("click", () => open(source.id));
-        row.append(open); return row;
+        const row = document.createElement("div"), entry = document.createElement("button");
+        entry.type = "button"; entry.className = "text-button";
+        entry.style.marginLeft = `${Math.min(depth, 6) * 16}px`;
+        entry.textContent = `${source.subject || "(No subject)"} · ${source.sender}`;
+        if (source.id === sourceId) { entry.disabled = true; entry.textContent += " (this message)"; }
+        else entry.addEventListener("click", () => open(source.id));
+        row.append(entry); return row;
       }));
     } catch (error) {
       if (owns() && selected === sourceId && turn === threadEpoch && error.status !== 404) {
