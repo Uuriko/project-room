@@ -202,6 +202,27 @@ export function auditReplyRequests(state, history, checkpoint = null) {
         workItemId: data.workItemId || null, replyToId: data.replyToId || null, toMemberId: data.toMemberId || null, createdAt: e.at });
       recordReplyPost(projected, e, mode); posts.set(row.sequence, e.id);
     }
+    // Messages are not immutable: message.edited and message.deleted are
+    // ordinary commands. Without these two branches the rebuild keeps the body
+    // as first posted while the live projection carries the edit, and compare()
+    // holds every message body against it once any request exists - so a single
+    // edit to any message in the room, related to a request or not, failed this
+    // audit permanently. auditRecovery gates backupRoom, so that took the whole
+    // database's backup and restore path down over a corrected typo.
+    // Mirror src/events.js editMessage/deleteMessage for the compared fields
+    // only: body is the single field of exactMessage that either one changes.
+    if (e.type === "message.edited") {
+      const message = projected.messages.find(entry => entry.id === data.messageId);
+      // The live engine refuses an edit to a message it cannot find, so a log
+      // containing one is a real inconsistency and still fails here.
+      check(Boolean(message) && typeof data.body === "string");
+      message.body = data.body;
+    }
+    if (e.type === "message.deleted") {
+      const message = projected.messages.find(entry => entry.id === data.messageId);
+      check(Boolean(message));
+      message.body = null; // A tombstone keeps who and when, never the text.
+    }
     if (e.type === REPLY_CANCELLED) cancelReplyRequest(projected, e);
     if (checkpoint && row.sequence === checkpoint.sequence) {
       compare(JSON.parse(checkpoint.projection), projected); checkpointChecked = true;
