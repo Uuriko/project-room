@@ -1,6 +1,10 @@
 import { RoomAgentClient, RoomClientError, assertServiceOrigin } from "../client/room-agent.mjs";
 import { agentConnectionFromEnvironment, connectionDiagnostic, ConnectionError } from "../client/agent-connection.mjs";
 
+// Library-only module: not directly executable. Invoke via:
+//   node scripts/agent-inbox.mjs doctor
+// (agent-inbox.mjs imports doctorMain from this file.)
+//
 // Read-only self-test for the agent plug-in loop (research backlog D4):
 // origin, credential source and access, with one concrete repair step for the
 // first failure. Never prints secrets: only the origin, room id and member id
