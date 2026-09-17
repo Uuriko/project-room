@@ -125,3 +125,19 @@ From the same-day thread under the launch post:
 | Harness-of-harnesses | Personal Genie coordinates coding seats; Room ledger remains SoR |
 | E2E narrow grants | Connect Desktop/CUA: capability leases with expiry (pair with progressive tools) |
 
+
+---
+
+## Launch video notes (88s, /workspace/x-steals-20260917/nautilo/launch.mp4)
+
+On-screen arc: **"ONE PLAYER. ONE AGENT. 1P / LOCAL ONLY"** → **"AI GOES MULTIPLAYER."** / **"Your whole organization. One harness."**
+
+Confirmed in UI (not just marketing copy):
+- Named Genies bound to humans ("Genny = Elias Ward's agent", "Rook = Malik Okoro's agent") with personality blurbs + states (listening / FOCUSED / Active cross-talk)
+- **Send Genie to ask a coworker** → conversation → summary back (exact messenger flow)
+- **SMART ROUTING. No @ necessary.** Toggle: keeps @mentions/replies/focus; only smart first-contact routing disabled
+- Co-creative browser (`browser_snapshot` / `browser_click`); **"Take over whenever you want"**
+- Sheets → Genie builds charts; Genie directs Codex/Claude/Hermes in-chat terminal
+- Mobile handoff + vacation summary; in-app video gen; Android+iPhone
+
+**Room product copy steal (tone-safe):** open with the 1P→multiplayer flip. Ledger Room punchline stays accountability, not cosplay Genies.
