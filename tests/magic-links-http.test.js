@@ -52,7 +52,7 @@ const requestCode = (origin, slot, email) => post(origin, "/api/auth/magic/reque
 });
 
 const consumeCode = (origin, slot, email, code) => post(origin, "/api/auth/magic/consume", {
-  cookie: slot.cookie, csrf: slot.csrf, body: { email, code, expectedSessionRevision: slot.revision }
+  cookie: slot.cookie, csrf: slot.csrf, body: { email, code, sessionToken: slot.cookie, sessionRevision: slot.revision }
 });
 
 test("request -> consume roundtrip upgrades the slot and links the method", async t => {

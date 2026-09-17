@@ -1380,8 +1380,11 @@ paths:
     post:
       summary: Redeem a magic-link code and sign the slot in
       description: >-
-        Passwordless sign-in, step 2. The anonymous slot cookie from `GET
-        /api/account-session` plus `Origin` and `X-CSRF-Token` are required.
+        Passwordless sign-in, step 2. The anonymous slot's `sessionToken` and
+        `sessionRevision` from `GET /api/account-session` travel in the body
+        (plus the slot cookie, `Origin`, and `X-CSRF-Token`); the slot is
+        verified before any code is burned so a CSRF failure cannot consume a
+        one-time code.
         A wrong, expired, already-consumed, or 5x-burnt code answers 401
         invalid_magic_code. On success the account is found-or-created by
         verified email (`email:<sha256hex>`), the magic method is linked, and
@@ -1397,11 +1400,12 @@ paths:
           application/json:
             schema:
               type: object
-              required: [email, code, expectedSessionRevision]
+              required: [email, code, sessionToken, sessionRevision]
               properties:
                 email: { type: string }
                 code: { type: string }
-                expectedSessionRevision: { type: integer }
+                sessionToken: { type: string }
+                sessionRevision: { type: integer }
       responses:
         '201': { description: "{ authenticated: true, account: { id, revision, authEpoch }, csrf, sessionBinding, sessionRevision, expiresAt, authenticatedUntil } — Set-Cookie account_session" }
         '401': { description: account_session_required (no slot cookie) or invalid_magic_code }

@@ -435,9 +435,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       //
       // Passwordless email sign-in. POST /api/auth/magic/request issues a
       // single-use code and hands it to the mailer seam; POST
-      // /api/auth/magic/consume redeems it, provisions/links the account,
-      // and upgrades the anonymous account-session slot (same shape as the
-      // /api/account-session POST login, with method { kind: "magic" }).
+      // /api/auth/magic/consume redeems it with { email, code, sessionToken,
+      // sessionRevision }, provisions/links the account, and upgrades the
+      // named account-session slot (same login call as the /api/account-session
+      // POST, with method { kind: "magic" }). The slot is verified before any
+      // code is burned so a CSRF failure cannot consume a one-time code.
       //
       // Codes are never returned in API responses — only through the
       // mailer. When no mail provider is configured the request route says
@@ -465,16 +467,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return json(res, 200, { status: "sent" });
         }
         const data = await body(req);
-        if (!exact(data, ["email", "code", "expectedSessionRevision"]) || typeof data.email !== "string" || typeof data.code !== "string") {
-          reject(422, "invalid_magic_login", "Email, code, and current session revision are required");
-        }
-        if (!Number.isSafeInteger(data.expectedSessionRevision) || data.expectedSessionRevision < 0) {
-          reject(422, "invalid_session_revision", "A current account session revision is required");
+        if (!exact(data, ["email", "code", "sessionToken", "sessionRevision"])
+          || typeof data.email !== "string" || typeof data.code !== "string"
+          || typeof data.sessionToken !== "string" || !Number.isSafeInteger(data.sessionRevision)) {
+          reject(422, "invalid_magic_login", "Email, code, session token, and current session revision are required");
         }
         const normalized = normalizeEmail(data.email);
         if (!normalized) reject(422, "invalid_email", "A valid email address is required");
         rate(`magic-consume:${remoteAddress}`, 10);
         magicEmailLimit(magicConsumeEmailLimiter, normalized);
+        // The slot is verified before any code is burned so a CSRF failure
+        // cannot consume a one-time code.
+        const consumeSlot = store.accountSessionSlot(data.sessionToken);
+        protectWrite(req, consumeSlot, false);
         // The model burns the code window on failure (401 invalid_magic_code)
         // after 5 wrong attempts / 15-minute expiry / single use.
         store.accountLogins.consumeMagicCode({ email: normalized, code: data.code });
@@ -492,11 +497,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!method) method = store.accountLogins.linkMagicMethod(accountId, { email: normalized });
         store.accountLogins.touchMethod(accountId, method.id);
         const oldRoomToken = cookie(req, roomCookieName);
-        const loggedIn = store.loginAccountSessionWithMethod(slotToken, accountId, data.expectedSessionRevision, {
+        const loggedIn = store.loginAccountSessionWithMethod(data.sessionToken, accountId, data.sessionRevision, {
           method: { kind: "magic", ref: method.id },
           revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null
         });
-        setCookie(res, accountCookieName, slotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
+        setCookie(res, accountCookieName, data.sessionToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
         return json(res, 201, accountView(loggedIn));
       }
       if (url.pathname === "/api/ready" && ["GET", "HEAD"].includes(req.method)) {
