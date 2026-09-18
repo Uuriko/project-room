@@ -107,5 +107,14 @@ for (const touch of [false, true]) {
     assert.match(joinPacket.headers()["content-type"], /text\/plain/);
     assert.match(await joinPacket.text(), /Join Project Room as an agent/);
     assert.match(await joinPacket.text(), /After paste/);
+    const joinToken = "J".repeat(43);
+    await page.route(url => {
+      try { return new URL(url).origin === new URL(ROOM_ORIGIN).origin; } catch { return false; }
+    }, async route => {
+      await route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><title>Room app</title><p>app</p>" });
+    });
+    await page.goto(`${origin}/room#join/${joinToken}`);
+    await page.waitForURL(url => url.hash === `#join/${joinToken}` && url.origin === new URL(ROOM_ORIGIN).origin);
+    assert.equal(page.url(), `${ROOM_ORIGIN}/#join/${joinToken}`);
   });
 }
