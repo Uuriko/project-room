@@ -13,6 +13,11 @@ class ManifestError extends Error {
 const fail = (code, message) => { throw new ManifestError(code, message); };
 const check = (condition, message) => { if (!condition) fail("invalid_manifest", message); };
 
+// The API-key scope vocabulary lives in server/agent-api-keys.mjs; the
+// manifest surfaces it so an agent issuing a rak_ key knows what to ask
+// for without reading server source.
+import { API_KEY_SCOPES, API_KEY_SCOPE_WILDCARD_NOTE } from "./agent-api-keys.mjs";
+
 export const MANIFEST_VERSION = "1.0.0";
 export const WELL_KNOWN_PATH = "/.well-known/agent-plugin-manifest.json";
 
@@ -51,10 +56,15 @@ export function buildPluginManifest({ serviceOrigin, roomId = null, clock } = {}
         { scheme: "identity-secret", header: "Authorization", format: "Bearer pri_<secret>",
           description: "Agent identity secret (shown once at identity-create or invite redeem)." },
         { scheme: "agent-api-key", header: "Authorization", format: "Bearer rak_<secret>",
-          description: "Scoped API key issued to an enrolled agent (server/agent-api-keys.mjs)." },
+          description: "Scoped API key issued to an enrolled agent (POST /api/agent-keys). Scopes are listed in apiKeyScopes below; unknown scopes grant nothing." },
         { scheme: "invite-code", format: "RM-XXXXXXXXXXXXXX",
           description: "One-time invite code, redeemed self-serve for an identity + membership." },
       ],
+      apiKeyScopes: {
+        note: "The full rak_ key scope vocabulary. A key carrying none of these scopes is valid but grants nothing on the plug-in surface.",
+        wildcard: API_KEY_SCOPE_WILDCARD_NOTE,
+        scopes: API_KEY_SCOPES.map(scope => ({ ...scope })),
+      },
     },
     enrollment: {
       flows: [
@@ -103,6 +113,12 @@ export function validatePluginManifest(manifest) {
   check(Array.isArray(manifest.auth?.schemes) && manifest.auth.schemes.length > 0 &&
     manifest.auth.schemes.every(s => typeof s.scheme === "string" && s.scheme.length > 0),
     "manifest.auth.schemes must be a non-empty array");
+  // RC-2026-09-18-019: the scope vocabulary is part of the manifest so an
+  // agent issuing a key knows what to ask for without reading server source.
+  check(Array.isArray(manifest.auth?.apiKeyScopes?.scopes) && manifest.auth.apiKeyScopes.scopes.length > 0 &&
+    manifest.auth.apiKeyScopes.scopes.every(s => typeof s.scope === "string" && s.scope.length > 0
+      && typeof s.description === "string" && s.description.length > 0),
+    "manifest.auth.apiKeyScopes.scopes must be a non-empty array of {scope, description}");
   check(Array.isArray(manifest.enrollment?.flows) && manifest.enrollment.flows.length > 0 &&
     manifest.enrollment.flows.every(f => typeof f.id === "string" && f.id.length > 0),
     "manifest.enrollment.flows must be a non-empty array");
