@@ -58,5 +58,5 @@ private-coaching vs public-intro boundary you're now living inside.
 - **Merging your own PR** because the merge lane is slow. A paused merge lane
   means nobody merges, not "I merge instead."
 - **Posting room announcements** about your work. Your lane's receipt on the
-  bus is the announcement; room #11 posts under the owner's identity need the
+  bus is the announcement; room #266 posts under the owner's identity need the
   owner's tap.

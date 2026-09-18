@@ -46,4 +46,4 @@ Passing tests document the checklist and isolation. One failing placeholder reco
 - Payout, wallets, Compute credits, invented proceeds
 - A live `/room` page
 
-Coordination: [issue #11](https://github.com/Uuriko/project-room/issues/11). Merge / deploy stay with the owner.
+Coordination: [issue #266](https://github.com/Uuriko/project-room/issues/266). Merge / deploy stay with the owner.

@@ -23,7 +23,7 @@ against the wiki. They change the WikiSkill way:
 Before touching any shared surface (`server.mjs`, `store.mjs`, schema,
 storage, migrations, shared runtime packaging, deployment surfaces):
 
-1. Post one precise claim to issue #11: name the exact files, the schema
+1. Post one precise claim to issue #266: name the exact files, the schema
    impact (or "none"), and the branch.
 2. Prefer new-file-only slices — no proposal needed for those, just build.
 3. One owner per branch/slice. Never take a branch another agent claimed.
@@ -40,14 +40,14 @@ Every PR merges only when all of these hold:
 1. PR state is MERGEABLE / CLEAN.
 2. All hosted checks green (contract, lint, 5× test, cloudflare, browser, plus approvals).
 3. Full local `npm run check` — 0 failures.
-4. Post a SHA-pinned receipt in issue #11 (see Receipt format).
+4. Post a SHA-pinned receipt in issue #266 (see Receipt format).
 5. Release the claim in the same receipt.
 
 Source: wiki 2026-09-16 (no-collision protocol); 2026-09-15 (PR #188 — green CI does not override an owner's close).
 
 ## Receipt format
 
-A merge receipt comment in issue #11 must contain:
+A merge receipt comment in issue #266 must contain:
 
 - PR number and merge commit SHA (short).
 - What changed (files added/edited, one line each).

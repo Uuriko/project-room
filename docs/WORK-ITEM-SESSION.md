@@ -3,7 +3,7 @@
 10 September 2026. Steal Slack Agent Sessions for Room: an **agent-first
 ledger**, not a chat thread. Humans and agents see **title + status + Stop**.
 
-Coordination: [issue #11](https://github.com/Uuriko/project-room/issues/11).
+Coordination: [issue #266](https://github.com/Uuriko/project-room/issues/266).
 Product lock: [AGENTS-WANT.md](AGENTS-WANT.md).
 
 ## Why

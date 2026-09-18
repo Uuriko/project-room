@@ -54,7 +54,7 @@ Source: `cloudflare/README.md` "Reproduce"; `.github/workflows/test.yml`
   and the plan confirmation in step 8 is still John's to make: the `limits`
   key is honoured only on the Paid plan's Standard usage model.
 
-Post a receipt in issue #11 with the `[Agent]` tag after each merge
+Post a receipt in issue #266 with the `[Agent]` tag after each merge
 (`docs/AGENT-LANES.md`).
 
 ### 3. Deploy the Worker (Grok Bot)
@@ -101,7 +101,7 @@ new version id and source revision in `docs/CURRENT-ROOM.md` and
 4. Redeploy is not needed for secrets, but the Worker must already carry the
    #140 mount (step 2) for inbound updates to be held.
 
-Never paste either value into chat, GitHub, issue #11 or an agent prompt
+Never paste either value into chat, GitHub, issue #266 or an agent prompt
 (`docs/UNIFIED-INBOX.md` "Secrets handling"; `docs/HOW-TO-TEST.md` "Do not
 paste keys").
 
@@ -259,7 +259,7 @@ Fill these into the two documents; do not assert them elsewhere first.
 Run section 3 below, then `node cloudflare/hosted-check.mjs` (operator
 acceptance journey, credentials in `.operator/`, never in CI) and
 `node cloudflare/hosted-check.mjs --return`. Post the deployed version id,
-source revision, results and rollback target in issue #11
+source revision, results and rollback target in issue #266
 (`cloudflare/README.md` "Deployment gate and next steps";
 `docs/INVITE-ONLY-DEPLOYMENT.md` "Launch proof": report exact deployed
 revision, results, limitations, rollback target and operator).
@@ -270,7 +270,7 @@ Session `https://claude.ai/code/session_01KZMBNK6RHbs3HjAdbjwWUm`, working
 from `origin/main` as it stood on 14 September 2026. `main` moves as PRs
 merge, so no fixed sha is recorded here: at deploy time the deployer records
 `git rev-parse origin/main` and the UTC date (`date -u +%Y-%m-%dT%H:%M:%SZ`)
-in the receipt posted in issue #11, and verifies that `sourceRevision` from
+in the receipt posted in issue #266, and verifies that `sourceRevision` from
 `curl -sS $ORIGIN/api/version` equals that sha. Nothing was deployed by this
 session and no secret was read or written.
 
@@ -383,4 +383,4 @@ Email is inbound only; the Inbox does not send mail (`docs/UNIFIED-INBOX.md`
 ### After verification
 
 Record the deployed version id, `sourceRevision` from `/api/version`, the
-date and who verified, in `docs/CURRENT-ROOM.md` and issue #11.
+date and who verified, in `docs/CURRENT-ROOM.md` and issue #266.

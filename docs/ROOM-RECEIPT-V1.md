@@ -40,7 +40,7 @@ Done lifecycle.
 - **Done receipt** = evidence (this contract). Scorers judge receipts,
   not chips.
 
-This is not the GitHub issue-#11 merge receipt in
+This is not the GitHub merge receipt on the coordination issue (#11, comment-locked; now continued on [#266](https://github.com/Uuriko/project-room/issues/266)) in
 [examples/receipt.md](examples/receipt.md) and
 [ROOM-PROCEDURES.md](ROOM-PROCEDURES.md). Merge receipts stay the
 claims-board Done face. `room.receipt.v1` is the Work Item artifact pack

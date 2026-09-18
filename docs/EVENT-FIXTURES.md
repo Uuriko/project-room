@@ -73,7 +73,7 @@ These cases define acceptance behavior. Claiming they pass requires execution ev
 
 ## Contribution Event stubs
 
-Specified scenarios for the [contribution ledger](./CONTRIBUTION-LEDGER.md). They do not change the work-state table or the historical fixtures above. The rollup is derived from existing completion / verify / decide Events. Executable fixtures and tests live in [`contribution-rollup/`](../contribution-rollup/) (Phase 0.5 on [#11](https://github.com/Uuriko/project-room/issues/11)).
+Specified scenarios for the [contribution ledger](./CONTRIBUTION-LEDGER.md). They do not change the work-state table or the historical fixtures above. The rollup is derived from existing completion / verify / decide Events. Executable fixtures and tests live in [`contribution-rollup/`](../contribution-rollup/) (Phase 0.5 on [#11](https://github.com/Uuriko/project-room/issues/11), continued on [#266](https://github.com/Uuriko/project-room/issues/266)).
 
 Use the existing #134 review fixture as the happy-path source: Codex reports the already-existing result, Instinct verifies that exact revision, Potter holds the owner decision. Derived rows cite those Events and the commit `70053cc6cf9d86f3a43220dcfbb0af05797380c0`. They do not invent a merge, a payout, a producer, or a scoreboard Event.
 

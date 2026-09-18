@@ -1,5 +1,8 @@
 # Project Room: one combined local candidate
 
+
+> Note: issue #11 hit GitHub's 2,500-comment limit and is comment-locked (read-only). Live coordination continues on [#266](https://github.com/Uuriko/project-room/issues/266).
+
 John requested: “unify everything as much as possible.” This is the integration
 ledger, not a new product branch competing with the earlier prototype.
 
