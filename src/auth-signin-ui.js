@@ -43,7 +43,7 @@ export function toAuthenticationResponse(credential) {
 
 const METHOD_LABELS = { password: "Email + password", magic: "Magic link", passkey: "Passkey", recovery: "Recovery code" };
 
-export function createAuthSigninUI({ accountClient, ensureAccountSession, onSignedIn }) {
+export function createAuthSigninUI({ accountClient, ensureAccountSession, onSignedIn, onOAuthStart }) {
   let container = null;
   let activeMethod = null;
   let passwordMode = "signup"; // or "login"
@@ -174,6 +174,10 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     }
     const oauthButton = event.target?.closest?.("[data-oauth]");
     if (oauthButton) {
+      // Stash a live invitation before navigating: the OAuth round-trip
+      // drops the #invite/ fragment, and this is the only moment the
+      // secret may touch sessionStorage.
+      try { await onOAuthStart?.(); } catch {}
       // Direct navigation: the start route 302-redirects to GitHub when
       // configured and serves an honest HTML landing page when it is not.
       window.location.assign("/api/auth/github/start");

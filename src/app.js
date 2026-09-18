@@ -88,6 +88,16 @@ const initialJoinFragment = consumeJoinFragment();
 // without a room context, so the dialog re-opens after OAuth sign-in.
 const initialInvitationFragment = consumeInvitationFragment()
   || takeRestoredInvite({ storage: window.sessionStorage, hash: location.hash, search: location.search });
+// Stash the live invitation secret at the exact moment an OAuth navigation
+// starts. The #invite/ fragment never reaches the server, so without this
+// the Google/GitHub round-trip would drop the invitation. The secret touches
+// sessionStorage only for the round-trip (cleared on dialog close/accept and
+// consumed one-shot at boot); merely previewing an invitation never stores it.
+function stashInviteForOAuth() {
+  if (invitation.secret) stashPendingInvite(window.sessionStorage, invitation.secret);
+}
+{ const googleButton = document.querySelector("#google-signin");
+  if (googleButton) googleButton.addEventListener("click", stashInviteForOAuth); }
 let shareLinksUI = null;
 let portableWorkUI = null;
 let resultCopyUI = null;
@@ -314,6 +324,7 @@ const accountSettingsUI = createAccountSettingsUI({ accountClient });
 const signinUI = createAuthSigninUI({
   accountClient,
   ensureAccountSession,
+  onOAuthStart: stashInviteForOAuth,
   onSignedIn: async () => {
     await accountClient.restore();
     const requestedRoom = selectedRoomFromLocation();
@@ -808,9 +819,6 @@ async function openInvitation(fragment) {
     opener,
     openerSelection
   });
-  // Mirror the live invitation so a Google/GitHub OAuth navigation (which
-  // drops the URL fragment) cannot lose it; cleared on close/accept.
-  if (fragment.valid) stashPendingInvite(window.sessionStorage, fragment.secret);
   setInvitationFeedback(fragment.valid ? "Checking the invitation without joining the Room…" : "This invitation link is unavailable.", !fragment.valid);
   renderInvitation();
   $("#connection-status").setAttribute("aria-live", "off");
