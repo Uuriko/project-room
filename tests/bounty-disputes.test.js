@@ -144,3 +144,77 @@ test("malformed inputs are refused", () => {
   throwsCode(() => disputes.finalize("ghost"), "invalid_dispute");
   throwsCode(() => disputes.get("ghost"), "invalid_dispute");
 });
+
+const runLadder = disputes => {
+  disputes.open({ disputeId: "d", bountyId: "bounty-1", bountyAmount: 1000,
+    raisedBy: "alice", reason: "work missing", bond: 50 });
+  disputes.challenge("d", { by: "bob" });
+  disputes.submitEvidence("d", { by: "alice", summary: "screenshots" });
+  disputes.seatDecider("d", { decider: "tier1" });
+  disputes.decide("d", { outcome: "upheld", reasonCodes: ["receipt-incomplete"] });
+};
+
+test("finalize fires the single onDisputeFinalized callback once", () => {
+  const packets = [];
+  const disputes = createDisputes({ onDisputeFinalized: p => packets.push(p) });
+  runLadder(disputes);
+  const final = disputes.finalize("d");
+  assert.equal(final.state, "resolved");
+  assert.equal(packets.length, 1);
+  const [packet] = packets;
+  assert.equal(packet.disputeId, "d");
+  assert.equal(packet.bountyId, "bounty-1");
+  assert.equal(packet.terminal, "resolved");
+  assert.equal(packet.outcome, "upheld");
+  assert.deepEqual([...packet.reasonCodes], ["receipt-incomplete"]);
+  assert.equal(packet.tier, 0);
+  assert.equal(packet.kind, "economic");
+  assert.ok(Object.isFrozen(packet));
+  // A second finalize is an illegal transition, so the callback cannot double-fire.
+  throwsCode(() => disputes.finalize("d"), "invalid_transition");
+  assert.equal(packets.length, 1);
+});
+
+test("withdraw notifies the escrow with a withdrawn terminal", () => {
+  const packets = [];
+  const disputes = createDisputes({ onDisputeFinalized: p => packets.push(p) });
+  disputes.open({ disputeId: "d", bountyId: "bounty-2", bountyAmount: 1000,
+    raisedBy: "alice", reason: "changed mind", bond: 50 });
+  disputes.challenge("d", { by: "bob" });
+  const final = disputes.withdraw("d", { by: "alice" });
+  assert.equal(final.state, "withdrawn");
+  assert.equal(packets.length, 1);
+  assert.equal(packets[0].terminal, "withdrawn");
+  assert.equal(packets[0].outcome, null);
+  assert.equal(packets[0].forfeitedBond, 50); // bond forfeit settles on this packet
+});
+
+test("appealed ladder fires exactly once with the final tier outcome", () => {
+  const packets = [];
+  const disputes = createDisputes({ onDisputeFinalized: p => packets.push(p) });
+  runLadder(disputes);
+  disputes.appeal("d", { by: "bob", bond: 100 });
+  disputes.escalate("d", { decider: "tier2" });
+  disputes.decide("d", { outcome: "split", reasonCodes: ["criterion-unmet"] });
+  disputes.finalize("d");
+  assert.equal(packets.length, 1);
+  assert.equal(packets[0].outcome, "split");
+  assert.equal(packets[0].tier, 1);
+  assert.equal(packets[0].escalations.length, 1);
+});
+
+test("a throwing escrow handler still leaves the dispute terminal", () => {
+  const disputes = createDisputes({ onDisputeFinalized: () => { throw new Error("escrow down"); } });
+  runLadder(disputes);
+  assert.throws(() => disputes.finalize("d"), /escrow down/);
+  assert.equal(disputes.get("d").state, "resolved"); // machine never gets stuck
+  throwsCode(() => disputes.finalize("d"), "invalid_transition"); // still no double-fire
+});
+
+test("no handler configured is fine; non-function handler is refused", () => {
+  const disputes = createDisputes();
+  runLadder(disputes);
+  assert.equal(disputes.finalize("d").state, "resolved");
+  assert.throws(() => createDisputes({ onDisputeFinalized: "nope" }),
+    error => error instanceof DisputeError && /must be a function/.test(error.message));
+});
