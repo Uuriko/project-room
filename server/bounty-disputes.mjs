@@ -254,4 +254,4 @@ export function createDisputes({ store } = {}) {
     clearUnavailable, get, requiredAppealBond,
     size: () => disputes.size, MAX_DISPUTE_COST_RATIO, STATES, REASON_CODES, OUTCOMES });
 }
-export { DisputeError };
+export { DisputeError, REASON_CODES, OUTCOMES };
