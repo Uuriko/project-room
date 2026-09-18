@@ -1473,7 +1473,18 @@ paths:
         the slot's `sessionToken` + `sessionRevision` — the same slot-upgrade
         primitive the other login methods use. Same-origin POST. Assertion
         failures answer 401, never 500. 10/address/min.
-      security: []
+  /api/auth/password/signup:
+    post:
+      summary: Create an account with email+password (slice 2)
+      description: >-
+        Open: provisions an `email:<sha256>` account (origin
+        `password-signup`), links the password and magic-link methods, then
+        upgrades the caller's anonymous slot via the slot's `sessionToken` +
+        `sessionRevision` and sets the account_session cookie. A duplicate
+        email answers 409 already_registered; an invalid slot leaves the
+        account unprovisioned. Passwords are scrypt-hashed (N=16384, r=8,
+        p=1, 16-byte salt); only the verifier is stored. 10 per address per
+        minute.      security: []
       requestBody:
         required: true
         content:
@@ -1491,8 +1502,70 @@ paths:
         '401': { description: passkey_verification_failed (bad challenge, failed assertion, or unknown credential — same shape) }
         '403': { description: origin_denied }
         '409': { description: stale_session_revision }
-        '422': { description: invalid_passkey_response or passkey_origin_rejected }
+        '422': { description: invalid_passkey_response or passkey_origin_rejected }              required: [email, password, sessionToken, sessionRevision]
+              properties:
+                email: { type: string }
+                password: { type: string }
+                sessionToken: { type: string }
+                sessionRevision: { type: integer }
+      responses:
+        '201': { description: "account view; the slot is now signed in" }
+        '409': { description: already_registered (an account with that email exists) }
+        '422': { description: invalid_signup, invalid_email, or password_too_short/password_too_long }
         '429': { description: rate_limited }
+  /api/auth/password/login:
+    post:
+      summary: Sign a session slot in with email+password (slice 2)
+      description: >-
+        Open: verifies the password against the stored scrypt verifier with a
+        constant-time compare and upgrades the caller's anonymous slot via
+        `sessionToken` + `sessionRevision`. A wrong password, an unknown
+        email, and an account with no password set all answer the same 401
+        invalid_credentials shape, so registration status is never revealed.
+        60 per address per minute plus a 10-attempts-per-minute per-email
+        budget.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, sessionToken, sessionRevision]
+              properties:
+                email: { type: string }
+                password: { type: string }
+                sessionToken: { type: string }
+                sessionRevision: { type: integer }
+      responses:
+        '200': { description: "account view; the slot is now signed in" }
+        '401': { description: invalid_credentials (wrong password, unknown email, or no password set — same shape) }
+        '422': { description: invalid_login or invalid_email }
+        '429': { description: rate_limited }
+  /api/auth/password/change:
+    post:
+      summary: Rotate the account password (slice 2)
+      description: >-
+        Authenticated write (account_session cookie, `Origin`): verifies the
+        current password, policy-checks the new one (10–256 characters), and
+        replaces the stored scrypt verifier. The old password stops working
+        immediately. 20 per address per minute.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword: { type: string }
+                newPassword: { type: string }
+      responses:
+        '200': { description: "{ status: ok }" }
+        '401': { description: unauthenticated or invalid_credentials (wrong current password) }
+        '422': { description: invalid_password_change or password_too_short/password_too_long }        '429': { description: rate_limited }
   /api/agent-invites/redeem:
     post:
       summary: Redeem an agent invite code
