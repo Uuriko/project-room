@@ -4,7 +4,7 @@
 **Product:** getdasha.com/compute **Ask** (not Room)  
 **Status:** Spec ready · implement deferred · docs-only  
 **Plan refs:** T045 (this spec) · implement on `Uuriko/dasha-lobby` after quiet-shell tip is live  
-**Companions:** [ASK-QUIET-SHELL-V3.md](../../docs/ASK-QUIET-SHELL-V3.md) · [T044](T044-quiet-export-transcript.md) · T086 export format ([ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md](../ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md) — Job line only when `lastPaidReceipt` has an id; tok/s stays on this chip) · [T046](T046-no-midstream-toks.md) · [BRIDGE-COMPUTE.md](../../docs/BRIDGE-COMPUTE.md)
+**Companions:** [ASK-QUIET-SHELL-V3.md](../../docs/ASK-QUIET-SHELL-V3.md) · [T044](T044-quiet-export-transcript.md) · T086 export format ([ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md](../ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md) — Job line only when `lastPaidReceipt` has an id; tok/s stays on this chip) · T087 Job whisper ([ASK-RECEIPT-LASTPAID-WHISPER-BRIEF-2026-09-18.md](../ASK-RECEIPT-LASTPAID-WHISPER-BRIEF-2026-09-18.md) — `#ask-receipt` shows Job id only on expand when `lastPaidReceipt` has one; never a capacity dash) · [T046](T046-no-midstream-toks.md) · [BRIDGE-COMPUTE.md](../../docs/BRIDGE-COMPUTE.md)
 
 Ask is Compute’s chat door. Compute ≠ Room. Honesty stays short. No Typeform `Start.` return.
 
@@ -156,6 +156,6 @@ Forbidden on Ask:
 
 ## 8. Stay-outs
 
-T044 export chrome · T086 export format (header / Job lines; not this chip) · T046 mid-stream lint · T034 Artifacts-lite · T042 / T043 Regen / Continue · T060 / T065 Bonsai RAM · `#honesty-panel` network strip (Compute P1 — T072: [ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md](../ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md)) · Room Done chip.
+T044 export chrome · T086 export format (header / Job lines; not this chip) · T087 Job whisper (when `#ask-receipt` shows Job id; chip ≠ capacity dash) · T046 mid-stream lint · T034 Artifacts-lite · T042 / T043 Regen / Continue · T060 / T065 Bonsai RAM · `#honesty-panel` network strip (Compute P1 — T072: [ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md](../ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md)) · Room Done chip.
 
 *End. Parent: quiet-shell “one word” stream + honesty after the fact.*

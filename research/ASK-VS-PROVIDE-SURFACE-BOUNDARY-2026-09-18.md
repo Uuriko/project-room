@@ -12,6 +12,8 @@ Companions (cite only):
 (§3.1 one primary · §3.5 empty state · §7 item 11) ·
 [ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md](ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md)
 (T071 grouping · T072 one expandable `N Macs · models` line) ·
+[ASK-RECEIPT-LASTPAID-WHISPER-BRIEF-2026-09-18.md](ASK-RECEIPT-LASTPAID-WHISPER-BRIEF-2026-09-18.md)
+(T087 — `#ask-receipt` Job whisper; never a capacity dash) ·
 [UX-CLEAN-LESS-NOISE-2026-09-17.md](UX-CLEAN-LESS-NOISE-2026-09-17.md)
 (Ask P0 empty · Provide P1 secondary) ·
 [FOLD-COMPUTE-ROOM.md](../docs/FOLD-COMPUTE-ROOM.md)

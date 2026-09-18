@@ -4,7 +4,7 @@
 **Product:** getdasha.com/compute **Ask** stream UI  
 **Status:** Spec ready · lint/test rule · docs-only  
 **Plan refs:** T046 (this spec) · implement test + paint guard on `Uuriko/dasha-lobby`  
-**Companions:** [ASK-QUIET-SHELL-V3.md](../../docs/ASK-QUIET-SHELL-V3.md) §3.6 · [T045](T045-receipt-collapse.md) · [T044](T044-quiet-export-transcript.md) · [HONEST-EMPTY.md](../../docs/HONEST-EMPTY.md)
+**Companions:** [ASK-QUIET-SHELL-V3.md](../../docs/ASK-QUIET-SHELL-V3.md) §3.6 · [T045](T045-receipt-collapse.md) · T087 Job whisper ([ASK-RECEIPT-LASTPAID-WHISPER-BRIEF-2026-09-18.md](../ASK-RECEIPT-LASTPAID-WHISPER-BRIEF-2026-09-18.md) — Job id never mid-stream) · [T044](T044-quiet-export-transcript.md) · [HONEST-EMPTY.md](../../docs/HONEST-EMPTY.md)
 
 Ask is Compute’s chat door. Compute ≠ Room. Stream chrome is one word. No Typeform `Start.` lecture.
 
@@ -147,6 +147,6 @@ No new Typeform step. No `#step-model`. No wrangler from this repo.
 
 ## 7. Stay-outs
 
-T044 export · T045 folded receipt face · T034 Artifacts-lite · T042 / T043 Regen / Continue · T032 / T033 ⌘K menu · T060 / T065 Bonsai RAM notes · Provide earn receipt · Room traces.
+T044 export · T045 folded receipt face · T087 Job whisper (complete-state `#ask-receipt` only) · T034 Artifacts-lite · T042 / T043 Regen / Continue · T032 / T033 ⌘K menu · T060 / T065 Bonsai RAM notes · Provide earn receipt · Room traces.
 
 *End. Parent: quiet-shell “Streaming status one word.”*
