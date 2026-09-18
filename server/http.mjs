@@ -1132,6 +1132,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // the threads list above. On-demand read, never a push (task 22).
         if (url.pathname === "/api/inbox/digest" && req.method === "GET") return json(res, 200, store.inbox.digest(token, binding,
           { since: url.searchParams.get("since"), limit: url.searchParams.get("limit"), includeChannels: view !== null }));
+        // SLA dashboard (task 26): response-time percentiles, breach counts
+        // by channel and severity, and the end-of-day open-conversation
+        // sweep ("nothing closes unowned") across Telegram and email.
+        // Read-only, same account-session auth as the other inbox reads.
+        if (url.pathname === "/api/inbox/sla/dashboard" && req.method === "GET")
+          return json(res, 200, store.inbox.slaDashboard(token, binding));
         // Agent handoff protocol (task 23): journal a structured context
         // packet when a thread is handed to a named agent, so nothing closes
         // unowned. Account session + CSRF, like the other inbox writes; the

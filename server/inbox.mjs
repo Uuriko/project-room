@@ -9,6 +9,7 @@ import { indexMessages, search as runInboxSearch } from "./inbox-search.mjs";
 import { buildThreads } from "./inbox-threads.mjs";
 import { readChannelEnvelope } from "./channel-adapters/index.mjs";
 import { assessThreadSla, slaTargets } from "./sla-clocks.mjs";
+import { buildSlaDashboard } from "./sla-dashboard.mjs";
 import { buildMorningDigest } from "./morning-digest.mjs";
 import { inboxHandoffStatuses } from "./inbox-handoff.mjs";
 import { InboxStitchStore } from "./inbox-stitch-store.mjs";
@@ -806,6 +807,25 @@ export class Inbox {
         return Object.freeze({ contractVersion: 1, viewer: viewer(auth),
           threads: Object.freeze(threads), total: scoped.length });
       });
+    }
+    // SLA dashboard (task 26): response-time percentiles, breach counts, and
+    // the end-of-day open-conversation sweep ("nothing closes unowned"),
+    // across Telegram and email. On-demand read over the same thread scan
+    // the sweep uses, the same clocks the inbox list shows, and the open
+    // handoff journal for ownership — never a push. Ownership: a thread with
+    // an open handoff (journaled receipt, task 23) is someone's; everything
+    // else awaiting a reply is unowned and lands in the sweep.
+    slaDashboard(token, binding, { now = null } = {}) {
+      const at = now === null || now === undefined ? Date.now() : now;
+      const view = this.slaThreadScan(token, binding, { includeChannels: true });
+      const auth = this.auth(token, binding);
+      const owners = new Map();
+      for (const handoff of this.store.handoffs.list(auth.account.id, { status: "open" }))
+        owners.set(handoff.threadId, handoff.toAgent);
+      const alerts = this.store.slaBreachAlerts.list(auth.account.id, {});
+      return { contractVersion: 1, viewer: view.viewer,
+        dashboard: buildSlaDashboard({ threads: view.threads, now: at,
+          targets: slaTargets, owners, breachAlerts: alerts }) };
     }
     // Morning digest (task 21): the overnight arrivals across channels as a
     // daily brief, built from the thread view and the pure digest builder.
