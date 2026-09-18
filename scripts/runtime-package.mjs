@@ -68,6 +68,7 @@ optional.push("server/attention.mjs");
 optional.push("server/moderation.mjs");
 optional.push("server/channel-connection.mjs", "server/channel-import.mjs", "server/channel-adapters/index.mjs", "server/channel-adapters/email.mjs", "server/channel-adapters/telegram.mjs", "server/channel-adapters/gmail.mjs", "server/channel-adapters/whatsapp.mjs");
 optional.push("server/mime-message.mjs", "server/email-routing-inbound.mjs", "server/channel-journal.mjs");
+optional.push("server/channel-drain.mjs"); // Task 9: scheduled drain of pending_channel_updates (imported by server.mjs)
 optional.push("server/agent-rooms.mjs"); // agent room ownership service (imported by server/http.mjs)
 optional.push("server/google-oauth.mjs"); // Google sign-in (imported by server/http.mjs and cloudflare/room.mjs)
 optional.push("server/github-oauth.mjs"); // GitHub sign-in (imported by server/http.mjs)
