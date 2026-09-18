@@ -24,6 +24,7 @@ import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mj
 import { SpamQuarantineJournal, spamQuarantineSchema, migrateSpamQuarantineColumns } from "./spam-quarantine-journal.mjs";
 import { QuarantineThreadSplits, quarantineThreadSplitSchema } from "./quarantine-thread-splits.mjs";
 import { SlaBreachAlertJournal, slaBreachAlertSchema } from "./sla-breach-journal.mjs";
+import { InboxCollabStore, inboxCollabSchema } from "./inbox-collab-store.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
 import { InboxHandoffJournal, inboxHandoffSchema } from "./inbox-handoff.mjs";
 import { AgentPluginStore, agentPluginSchema } from "./agent-plugin-store.mjs";
 import { accessRequestSchema } from "./access-requests.mjs";
@@ -350,6 +351,7 @@ export class RoomStore {
 this.quarantineSplits = new QuarantineThreadSplits(this); // Thread-split records for the quarantine review UI (owner "split" action).
 this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-app sink for SLA-breach deliver.
     this.handoffs = new InboxHandoffJournal(this); // Task 23: durable agent handoff journal.
+    this.collab = new InboxCollabStore(this); // Lane C inbox collaboration journals (task RC-2026-09-18-011).
     this.agentPlugin = new AgentPluginStore(this); // Lane D: scoped API keys, directory cards, webhook subs (RC-2026-09-18-010).
     const version = this.storagePlatform.version(this.db);
     // Supported schema versions are the contiguous range 0..STORE_SCHEMA_VERSION.
@@ -388,6 +390,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // migrates, so verify it only when present.
         this.channelUpdates.verifySchema({ allowAbsent: true });
         this.handoffs.verifySchema({ allowAbsent: true }); // Task 23: purely additive, like the channel journal.
+        this.collab.verifySchema({ allowAbsent: true }); // Lane C collab tables: purely additive, read-only never migrates.
         this.agentPlugin.verifySchema({ allowAbsent: true }); // Lane D plug-in tables: additive, read-only never migrates.
         this.quarantineSplits.verifySchema({ allowAbsent: true }); // Quarantine thread splits: additive, read-only never migrates.
         verifyRoomLifecycle(this);
@@ -500,6 +503,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // outside the writer fence (see unfencedAdditiveTables).
       this.db.exec(agentPluginSchema);
       this.agentPlugin.load();
+      // Lane C inbox collaboration tables (task RC-2026-09-18-011) follow the
+      // same additive pattern: IF NOT EXISTS is idempotent, no schema version
+      // bump, and the tables are intentionally outside the writer fence (see
+      // unfencedAdditiveTables in server/writer-fence.mjs).
+      this.db.exec(inboxCollabSchema);
       // Per-source read markers are purely additive (no data migration): IF NOT
       // EXISTS is idempotent here. The table is intentionally outside the writer
       // fence (see unfencedAdditiveTables in server/writer-fence.mjs) so

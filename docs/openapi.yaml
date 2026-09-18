@@ -2598,6 +2598,423 @@ paths:
         '404': { description: handoff_not_found }
         '409': { description: invalid_handoff_transition }
         '422': { description: invalid_handoff or invalid_handoff_status }
+  /api/rooms/{roomId}/collab/assignments:
+    post:
+      summary: Assign a thread to a room member
+      description: >-
+        Room-token read/write (CSRF + rate limit). Assigns the thread to an
+        agent or human; assigning an already-assigned thread without force is
+        refused with 409 assign_conflict. Returns the wrapper-level
+        assignmentId used by the release route.
+      security:
+        - roomToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [threadId, assignee]
+              properties:
+                threadId: { type: string }
+                assignee: { type: object, description: "{ kind: agent|human, id } identity" }
+                force: { type: boolean, description: "Human-only takeover without a release first (default false)." }
+      responses:
+        '201': { description: "{ assignmentId, assignment: { threadId, assignee, status, assignedAt, history } }" }
+        '409': { description: assign_conflict }
+        '422': { description: assign_invalid }
+    get:
+      summary: List thread assignments for the room
+      description: Room-token read of every thread assignment in this room.
+      security:
+        - roomToken: []
+      responses:
+        '200': { description: "{ assignments: [{ threadId, assignee, status, assignedAt, releasedAt?, history }] }" }
+  /api/rooms/{roomId}/collab/assignments/{id}/release:
+    post:
+      summary: Release a thread assignment
+      description: >-
+        Room-token write (CSRF + rate limit). The {id} is the assignmentId
+        returned by the assign call. Releasing an already-released
+        assignment is refused with 404 assign_not_assigned; unknown ids
+        are 404 assignment_not_found.
+      security:
+        - roomToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, maxLength: 500 }
+      responses:
+        '200': { description: "{ assignmentId, assignment: { threadId, status: released, releasedAt, releasedBy, history } }" }
+        '404': { description: assignment_not_found or assign_not_assigned }
+  /api/rooms/{roomId}/collab/notes:
+    post:
+      summary: Add an internal note to a thread
+      description: >-
+        Room-token write (CSRF + rate limit). Notes are internal to the room's
+        collaborator plane: they are readable only through this route and
+        never appear in room events, inbox source payloads, or channel-bound
+        data (assertNoInternal in server/inbox-internal-notes.mjs is the
+        tripwire).
+      security:
+        - roomToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [threadId, body]
+              properties:
+                threadId: { type: string }
+                body: { type: string, maxLength: 10000 }
+                tag: { type: string, maxLength: 64 }
+      responses:
+        '201': { description: "{ note: { noteId, threadId, author, body, tag, internal: true, createdAt } }" }
+        '422': { description: note_invalid }
+    get:
+      summary: List internal notes for a thread
+      description: >-
+        Room-token read. Notes are ordered oldest first and are never
+        exposed outside this route.
+      security:
+        - roomToken: []
+      parameters:
+        - name: threadId
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: "{ notes: [{ noteId, threadId, author, body, tag, internal: true, createdAt }] }" }
+        '422': { description: invalid_input (threadId required) }
+  /api/rooms/{roomId}/collab/draft-locks/acquire:
+    post:
+      summary: Acquire a draft lock for a thread (agent only)
+      description: >-
+        Room-token write (CSRF + rate limit), agent identity only. One live
+        lock per thread; a lock held by someone else is refused with 409
+        collision_lock_held. Re-acquiring with the same holder refreshes the
+        expiry (ttlMs 1s..30min, default 5min).
+      security:
+        - roomToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [threadId]
+              properties:
+                threadId: { type: string }
+                ttlMs: { type: integer, minimum: 1000, maximum: 1800000 }
+      responses:
+        '201': { description: "{ lock: { lockId, threadId, holder, acquiredAt, expiresAt, ttlMs }, duplicate: false }" }
+        '200': { description: "{ lock, duplicate: true } (same holder refreshed the expiry)" }
+        '403': { description: agent_required }
+        '409': { description: collision_lock_held }
+        '422': { description: collision_invalid }
+  /api/rooms/{roomId}/collab/draft-locks/release:
+    post:
+      summary: Release a draft lock
+      description: >-
+        Room-token write (CSRF + rate limit). Only the lock holder may
+        release it (403 collision_forbidden otherwise); unknown locks are
+        404.
+      security:
+        - roomToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lockId]
+              properties:
+                lockId: { type: string }
+      responses:
+        '200': { description: "{ released: true, lockId }" }
+        '403': { description: collision_forbidden }
+        '404': { description: collision_lock_not_found }
+  /api/rooms/{roomId}/collab/draft-locks:
+    get:
+      summary: Detect a draft collision on a thread
+      description: >-
+        Room-token read. Reports whether the caller's draft would collide
+        with a live lock held by someone else.
+      security:
+        - roomToken: []
+      parameters:
+        - name: threadId
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: "{ collision: boolean, holders: [...] }" }
+        '422': { description: invalid_input (threadId required) }
+  /api/rooms/{roomId}/collab/approvals:
+    post:
+      summary: Propose a draft for human approval (agent only)
+      description: >-
+        Room-token write (CSRF + rate limit), agent identity only. The
+        proposing agent's draft is inert — proposing never sends anything.
+        Approval verdicts require a human (approval_not_human is enforced in
+        the queue as well as at the decide route).
+      security:
+        - roomToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [threadId, draft, channel]
+              properties:
+                threadId: { type: string }
+                draft: { type: object, description: "{ subject?, body } draft payload" }
+                channel: { type: string, maxLength: 64 }
+      responses:
+        '201': { description: "{ proposal: { proposalId, threadId, byAgent, channel, draft, status: pending, history } }" }
+        '403': { description: agent_required }
+        '422': { description: approval_invalid }
+    get:
+      summary: List draft approval proposals for the room
+      description: Room-token read, optionally filtered with `?status=` to one of pending, approved, changes_requested, rejected.
+      security:
+        - roomToken: []
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [pending, approved, changes_requested, rejected] }
+      responses:
+        '200': { description: "{ proposals: [{ proposalId, threadId, byAgent, channel, status, draft, decidedBy?, decidedAt?, history }] }" }
+        '422': { description: approval_invalid (unknown status) }
+  /api/rooms/{roomId}/collab/approvals/{id}/decide:
+    post:
+      summary: Decide an approval proposal (human only)
+      description: >-
+        Room-token write (CSRF + rate limit), human identity only. decision
+        approve moves the proposal to approved; edit requests the given
+        edits (editedBody required) moving it to changes_requested; reject
+        (note required) moves it to rejected. Agent verdicts are refused
+        with 403 before the queue is reached; terminal proposals are 409.
+      security:
+        - roomToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approve, edit, reject] }
+                note: { type: string, maxLength: 2000, description: Required for reject; recorded for any decision. }
+                editedBody: { type: string, maxLength: 20000, description: Required for edit; the requested changes. }
+      responses:
+        '200': { description: "{ proposal: { proposalId, status, decidedBy, decidedAt, history } }" }
+        '403': { description: human_required or approval_not_human }
+        '404': { description: approval_not_found }
+        '409': { description: approval_transition }
+        '422': { description: invalid_input (decision shapes) or approval_invalid }
+  /api/rooms/{roomId}/collab/approvals/{id}/resubmit:
+    post:
+      summary: Resubmit a changes_requested proposal (agent only)
+      description: >-
+        Room-token write (CSRF + rate limit), agent identity only. Legal
+        only from changes_requested; the new draft replaces the pending
+        one and the proposal returns to pending.
+      security:
+        - roomToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [draft]
+              properties:
+                draft: { type: object, description: "{ subject?, body } replacement draft payload" }
+      responses:
+        '200': { description: "{ proposal: { proposalId, status: pending, draft, history } }" }
+        '403': { description: agent_required }
+        '404': { description: approval_not_found }
+        '409': { description: approval_transition }
+        '422': { description: approval_invalid }
+  /api/rooms/{roomId}/collab/routing/mentions:
+    post:
+      summary: Record an agent mention routing event
+      description: >-
+        Room-token write (CSRF + rate limit). Parses the room's mention
+        registry against the mentioned agent name (threadId defaults to the
+        room) and journals one routing record per matched mention.
+      security:
+        - roomToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mentionedAgentId]
+              properties:
+                mentionedAgentId: { type: string, maxLength: 64 }
+                threadId: { type: string }
+                context: { type: string, maxLength: 2000 }
+      responses:
+        '201': { description: "{ records: [{ routingId, threadId, agent, status, occurredAt }], mentions: [...] }" }
+        '422': { description: routing_invalid }
+  /api/rooms/{roomId}/collab/routing:
+    get:
+      summary: List routing events for the room
+      description: Room-token read of every journaled agent-routing record in this room.
+      security:
+        - roomToken: []
+      responses:
+        '200': { description: "{ records: [{ routingId, threadId, agent, mode, policy, status, escalatedTo, context, from, createdAt, history, outcome?, resolvedBy?, resolvedAt? }], policies: { agentId: policy } }" }
+  /api/rooms/{roomId}/collab/routing/{id}/resolve:
+    post:
+      summary: Resolve a routing record
+      description: >-
+        Room-token write (CSRF + rate limit). Marks a routed mention
+        resolved with an outcome; the resolver defaults to the caller.
+      security:
+        - roomToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [outcome]
+              properties:
+                outcome: { type: string, maxLength: 1000 }
+                resolvedBy: { type: object, description: "{ kind: agent|human, id } resolver (default: caller)" }
+      responses:
+        '200': { description: "{ record: { routingId, status: resolved, outcome, resolvedBy, resolvedAt } }" }
+        '404': { description: routing_not_found }
+        '409': { description: routing_transition }
+        '422': { description: routing_invalid }
+  /api/rooms/{roomId}/collab/routing/policy:
+    post:
+      summary: Set an agent routing policy
+      description: >-
+        Room-token write (CSRF + rate limit). Stores the named agent's
+        routing policy (mode direct|escalate, scopes, escalation target,
+        note); unknown modes are 422 routing_invalid.
+      security:
+        - roomToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agentId, policy]
+              properties:
+                agentId: { type: string, maxLength: 64 }
+                policy: { type: object, description: "{ mode: direct|escalate, scopes?, escalateTo?, note? }" }
+      responses:
+        '200': { description: "{ agentId, policy: { mode, scopes, escalateTo, note } }" }
+        '422': { description: routing_invalid }
+  /api/rooms/{roomId}/collab/handoffs:
+    post:
+      summary: Journal a room handoff to a named agent
+      description: >-
+        Room-token write (CSRF + rate limit). Wraps the durable inbox handoff
+        journal for room callers: the account scope resolves from the
+        caller's account session, then the caller's member_accounts binding,
+        then the room owner's account binding — otherwise 409
+        handoff_no_account_scope. The handoff API itself is account-session
+        only, so the route hands the journal an explicit accountId.
+      security:
+        - roomToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [threadId, to]
+              properties:
+                threadId: { type: string }
+                to: { type: object, description: "{ kind: agent|human, id } recipient" }
+                summary: { type: string, maxLength: 2000 }
+                openQuestions: { type: array, items: { type: string } }
+                pendingActions: { type: array, items: { type: string } }
+                excerpt: { type: string, maxLength: 500 }
+                subject: { type: string, maxLength: 200 }
+      responses:
+        '201': { description: "{ duplicate: false, handoff: { handoffId, accountId, threadId, status: open, ... } }" }
+        '200': { description: "{ duplicate: true, handoff } (an open handoff for the thread already exists)" }
+        '409': { description: handoff_no_account_scope or invalid_handoff_transition }
+        '422': { description: invalid_handoff }
+    get:
+      summary: List room handoffs for the resolved account scope
+      description: >-
+        Room-token read. Same account-scope resolution as the POST; handoffs
+        newest first, optionally filtered with `?status=` to one of open,
+        accepted, completed, released.
+      security:
+        - roomToken: []
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [open, accepted, completed, released] }
+      responses:
+        '200': { description: "{ handoffs: [{ handoffId, threadId, status, fromAgent, toAgent, createdAt, packet, history }] }" }
+        '409': { description: handoff_no_account_scope }
+  /api/rooms/{roomId}/collab/handoffs/{id}/transition:
+    post:
+      summary: Move a room handoff along its lifecycle
+      description: >-
+        Room-token write (CSRF + rate limit). Same account-scope resolution
+        as the other handoff routes. Legal edges: open → accepted →
+        completed, or open/accepted → released.
+      security:
+        - roomToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [accepted, completed, released] }
+                note: { type: string, maxLength: 500 }
+      responses:
+        '200': { description: "{ handoff: { handoffId, status, history } }" }
+        '404': { description: handoff_not_found }
+        '409': { description: handoff_no_account_scope or invalid_handoff_transition }
+        '422': { description: invalid_handoff_status }
   /api/inbox/stitch/status:
     get:
       summary: Cross-channel stitching status for the installation

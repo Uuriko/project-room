@@ -1,0 +1,409 @@
+// Lane C inbox collaboration HTTP routes (task RC-2026-09-18-011), over a
+// real store and a real HTTP server: assignments, internal notes (with the
+// non-leakage invariant), draft locks, approvals (an agent can never clear
+// its own draft), routing, and handoffs — plus restart persistence, room
+// scoping, and the typed error codes.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { RoomStore } from "../server/store.mjs";
+import { createRoomServer } from "../server/http.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
+import { AgentRooms, agentRoomSchema } from "../server/agent-rooms.mjs";
+import { createRateLimiter } from "../server/identity-ratelimit.mjs";
+import { assertNoInternal } from "../server/inbox-internal-notes.mjs";
+
+function setup(t) {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-collab-http-"));
+  const dbFile = join(directory, "room.sqlite");
+  const state = { directory, dbFile, store: null, server: null, origin: null };
+  state.store = new RoomStore(dbFile);
+  state.store.initialize(initialRoom("commons"));
+  // A second room owned by an agent, with no human account bindings at all:
+  // the handoff_no_account_scope path and the room-scoping checks.
+  state.store.db.exec(agentRoomSchema);
+  const agentRooms = new AgentRooms(state.store, {
+    rateLimiter: createRateLimiter({ capacity: 1000, refillPerSecond: 1000 }),
+  });
+  const denIdentity = state.store.identities.create("Den Agent");
+  agentRooms.create(denIdentity.secret, { roomId: "agent-den", title: "Den",
+    purpose: "An agent-owned room.", kind: "personal", displayName: "Den Keeper" });
+  const humanKey = state.store.issueAccessKey("commons", "owner");
+  const agent = state.store.identities.create("Collab Agent");
+  state.store.identities.link(humanKey, "commons", { identityId: agent.identityId,
+    displayName: "Collab Agent", permissions: ["accept_work"] });
+  const agent2 = state.store.identities.create("Second Agent");
+  state.store.identities.link(humanKey, "commons", { identityId: agent2.identityId,
+    displayName: "Second Agent", permissions: ["accept_work"] });
+  Object.assign(state, { humanKey, agent, agent2, denIdentity });
+  state.serve = async () => {
+    const server = createRoomServer({ store: state.store });
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    state.server = server;
+    state.origin = "http://127.0.0.1:" + server.address().port;
+  };
+  state.closeServer = async () => {
+    if (!state.server) return;
+    state.server.closeStreams(); state.server.closeAllConnections();
+    await new Promise(resolve => state.server.close(resolve));
+    state.server = null;
+  };
+  // Close and reopen the store file: the writable open must replay every
+  // collab journal from SQLite.
+  state.reopen = async () => {
+    await state.closeServer();
+    state.store.close();
+    state.store = new RoomStore(dbFile);
+    await state.serve();
+  };
+  t.after(async () => {
+    await state.closeServer();
+    state.store.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+  return state;
+}
+
+const bearer = token => ({ Authorization: "Bearer " + token });
+const jsonHeaders = token => ({ ...bearer(token), "Content-Type": "application/json" });
+const post = (f, path, token, body) => fetch(f.origin + path,
+  { method: "POST", headers: jsonHeaders(token), body: JSON.stringify(body) });
+const get = (f, path, token) => fetch(f.origin + path, { headers: bearer(token) });
+const codeOf = async response => (await response.json()).error.code;
+const agentIdOf = f => f.agent.identityId;
+const agent2IdOf = f => f.agent2.identityId;
+
+test("assignments: assign, list, release, and conflicts", async t => {
+  const f = setup(t); await f.serve();
+  const base = "/api/rooms/commons/collab";
+  // Assign the thread to the agent.
+  const assigned = await post(f, `${base}/assignments`, f.humanKey,
+    { threadId: "thread-a", assignee: { kind: "agent", id: agentIdOf(f) } });
+  assert.equal(assigned.status, 201);
+  const { assignmentId, assignment } = await assigned.json();
+  assert.ok(typeof assignmentId === "string");
+  assert.equal(assignment.threadId, "thread-a");
+  assert.equal(assignment.status, "assigned");
+  assert.equal(assignment.assignee.id, agentIdOf(f));
+  // The list carries the wrapper-level assignmentId.
+  const listed = await (await get(f, `${base}/assignments`, f.humanKey)).json();
+  assert.equal(listed.assignments.length, 1);
+  assert.equal(listed.assignments[0].assignmentId, assignmentId);
+  // Assigning elsewhere without force is a 409; force by a human takes over.
+  const conflict = await post(f, `${base}/assignments`, f.humanKey,
+    { threadId: "thread-a", assignee: { kind: "human", id: "owner" } });
+  assert.equal(conflict.status, 409);
+  assert.equal(await codeOf(conflict), "assign_conflict");
+  const forced = await post(f, `${base}/assignments`, f.humanKey,
+    { threadId: "thread-a", assignee: { kind: "human", id: "owner" }, force: true });
+  assert.equal(forced.status, 201);
+  assert.equal((await forced.json()).assignment.assignee.id, "owner");
+  // Release by id; releasing twice is 404 assign_not_assigned.
+  const released = await post(f, `${base}/assignments/${assignmentId}/release`, f.humanKey, { reason: "done" });
+  assert.equal(released.status, 200);
+  assert.equal((await released.json()).assignment.status, "released");
+  const again = await post(f, `${base}/assignments/${assignmentId}/release`, f.humanKey, {});
+  assert.equal(again.status, 404);
+  assert.equal(await codeOf(again), "assign_not_assigned");
+  const unknown = await post(f, `${base}/assignments/nope/release`, f.humanKey, {});
+  assert.equal(unknown.status, 404);
+  assert.equal(await codeOf(unknown), "assignment_not_found");
+  // Bad shapes are 422, not 500.
+  const bad = await post(f, `${base}/assignments`, f.humanKey, { threadId: "", assignee: { kind: "agent", id: agentIdOf(f) } });
+  assert.equal(bad.status, 422);
+  assert.equal(await codeOf(bad), "assign_invalid");
+});
+
+test("internal notes: add, list, and the non-leakage invariant", async t => {
+  const f = setup(t); await f.serve();
+  const base = "/api/rooms/commons/collab";
+  const marker = "SECRET-NOTE-MARKER-9f31";
+  const created = await post(f, `${base}/notes`, f.humanKey,
+    { threadId: "thread-n", body: `do not leak: ${marker}`, tag: "handoff" });
+  assert.equal(created.status, 201);
+  const { note } = await created.json();
+  assert.ok(typeof note.noteId === "string");
+  assert.equal(note.internal, true);
+  assert.equal(note.body, `do not leak: ${marker}`);
+  const listed = await (await get(f, `${base}/notes?threadId=thread-n`, f.humanKey)).json();
+  assert.equal(listed.notes.length, 1);
+  assert.equal(listed.notes[0].noteId, note.noteId);
+  // threadId is required on the list route.
+  const missing = await get(f, `${base}/notes`, f.humanKey);
+  assert.equal(missing.status, 422);
+  // The note must not appear in ordinary room/channel-facing payloads.
+  const snapshot = await (await get(f, "/api/rooms/commons", f.humanKey)).json();
+  assert.ok(!JSON.stringify(snapshot).includes(marker), "note body leaked into the room snapshot");
+  assert.ok(!JSON.stringify(snapshot).includes("internalNote"), "note field leaked into the room snapshot");
+  const events = await (await get(f, "/api/rooms/commons/events?limit=100", f.humanKey)).json();
+  assert.ok(!JSON.stringify(events).includes(marker), "note body leaked into room events");
+  // The tripwire itself: assertNoInternal accepts clean channel payloads and
+  // rejects anything carrying an internal note.
+  assert.doesNotThrow(() => assertNoInternal({ text: "hello", attachments: [] }));
+  assert.throws(() => assertNoInternal({ note }), err => err.code === "note_contract_violation");
+  // And the positive control: the note IS readable through the collab route.
+  const again = await (await get(f, `${base}/notes?threadId=thread-n`, f.humanKey)).json();
+  assert.ok(JSON.stringify(again).includes(marker));
+});
+
+test("draft locks: agent acquire, collisions, detect, release", async t => {
+  const f = setup(t); await f.serve();
+  const base = "/api/rooms/commons/collab";
+  const agentToken = f.agent.secret, agent2Token = f.agent2.secret;
+  const acquired = await post(f, `${base}/draft-locks/acquire`, agentToken, { threadId: "thread-l" });
+  assert.equal(acquired.status, 201);
+  const { lock, duplicate } = await acquired.json();
+  assert.equal(duplicate, false);
+  assert.ok(typeof lock.lockId === "string");
+  assert.equal(lock.holder.id, agentIdOf(f));
+  // Same holder re-acquiring refreshes (200 duplicate:true); a different
+  // agent collides with 409.
+  const refresh = await post(f, `${base}/draft-locks/acquire`, agentToken, { threadId: "thread-l" });
+  assert.equal(refresh.status, 200);
+  assert.equal((await refresh.json()).duplicate, true);
+  const collision = await post(f, `${base}/draft-locks/acquire`, agent2Token, { threadId: "thread-l" });
+  assert.equal(collision.status, 409);
+  assert.equal(await codeOf(collision), "collision_lock_held");
+  // A human cannot acquire a draft lock at all.
+  const humanAcquire = await post(f, `${base}/draft-locks/acquire`, f.humanKey, { threadId: "thread-l" });
+  assert.equal(humanAcquire.status, 403);
+  assert.equal(await codeOf(humanAcquire), "agent_required");
+  // Detect names the other holder; the holder itself sees no collision.
+  const detected = await (await get(f, `${base}/draft-locks?threadId=thread-l`, agent2Token)).json();
+  assert.equal(detected.collision, true);
+  assert.equal(detected.holders[0].id, agentIdOf(f));
+  const selfDetect = await (await get(f, `${base}/draft-locks?threadId=thread-l`, agentToken)).json();
+  assert.equal(selfDetect.collision, false);
+  // Only the holder may release; afterwards the thread is free.
+  const forbidden = await post(f, `${base}/draft-locks/release`, agent2Token, { lockId: lock.lockId });
+  assert.equal(forbidden.status, 403);
+  assert.equal(await codeOf(forbidden), "collision_forbidden");
+  const released = await post(f, `${base}/draft-locks/release`, agentToken, { lockId: lock.lockId });
+  assert.equal(released.status, 200);
+  assert.deepEqual(await released.json(), { released: true, lockId: lock.lockId });
+  const free = await post(f, `${base}/draft-locks/acquire`, agent2Token, { threadId: "thread-l" });
+  assert.equal(free.status, 201);
+  const unknown = await post(f, `${base}/draft-locks/release`, agentToken, { lockId: "nope" });
+  assert.equal(unknown.status, 404);
+  assert.equal(await codeOf(unknown), "lock_not_found");
+});
+
+test("approvals: propose, human decide, agent self-approval refused", async t => {
+  const f = setup(t); await f.serve();
+  const base = "/api/rooms/commons/collab";
+  const agentToken = f.agent.secret;
+  const draft = { subject: "Re: hello", body: "Here is a draft reply." };
+  // A human cannot propose; only agents propose.
+  const humanPropose = await post(f, `${base}/approvals`, f.humanKey,
+    { threadId: "thread-p", draft, channel: "email" });
+  assert.equal(humanPropose.status, 403);
+  assert.equal(await codeOf(humanPropose), "agent_required");
+  const proposed = await post(f, `${base}/approvals`, agentToken,
+    { threadId: "thread-p", draft, channel: "email" });
+  assert.equal(proposed.status, 201);
+  const { proposal } = await proposed.json();
+  assert.equal(proposal.status, "pending");
+  assert.equal(proposal.byAgent.id, agentIdOf(f));
+  const proposalId = proposal.proposalId;
+  // The proposing agent cannot clear its own draft: 403 before the queue.
+  const selfApprove = await post(f, `${base}/approvals/${proposalId}/decide`, agentToken,
+    { decision: "approve" });
+  assert.equal(selfApprove.status, 403);
+  assert.equal(await codeOf(selfApprove), "human_required");
+  // A human approves.
+  const approved = await post(f, `${base}/approvals/${proposalId}/decide`, f.humanKey,
+    { decision: "approve", note: "looks good" });
+  assert.equal(approved.status, 200);
+  assert.equal((await approved.json()).proposal.status, "approved");
+  // Terminal proposals refuse further verdicts with 409.
+  const late = await post(f, `${base}/approvals/${proposalId}/decide`, f.humanKey, { decision: "reject", note: "x" });
+  assert.equal(late.status, 409);
+  assert.equal(await codeOf(late), "approval_transition");
+  // The edit → resubmit → reject lifecycle on a second proposal.
+  const second = await (await post(f, `${base}/approvals`, agentToken,
+    { threadId: "thread-p2", draft, channel: "email" })).json();
+  const edited = await post(f, `${base}/approvals/${second.proposal.proposalId}/decide`, f.humanKey,
+    { decision: "edit", editedBody: "Soften the opening line.", note: "tone" });
+  assert.equal(edited.status, 200);
+  assert.equal((await edited.json()).proposal.status, "changes_requested");
+  // edit without editedBody is 422.
+  const badEdit = await post(f, `${base}/approvals/${second.proposal.proposalId}/decide`, f.humanKey,
+    { decision: "edit" });
+  assert.equal(badEdit.status, 422);
+  // The agent resubmits; only agents resubmit.
+  const humanResubmit = await post(f, `${base}/approvals/${second.proposal.proposalId}/resubmit`, f.humanKey,
+    { draft: { body: "Softer opening." } });
+  assert.equal(humanResubmit.status, 403);
+  const resubmitted = await post(f, `${base}/approvals/${second.proposal.proposalId}/resubmit`, agentToken,
+    { draft: { body: "Softer opening." } });
+  assert.equal(resubmitted.status, 200);
+  assert.equal((await resubmitted.json()).proposal.status, "pending");
+  const rejected = await post(f, `${base}/approvals/${second.proposal.proposalId}/decide`, f.humanKey,
+    { decision: "reject", note: "not this time" });
+  assert.equal(rejected.status, 200);
+  assert.equal((await rejected.json()).proposal.status, "rejected");
+  // Unknown proposals and bad decisions.
+  const unknown = await post(f, `${base}/approvals/nope/decide`, f.humanKey, { decision: "approve" });
+  assert.equal(unknown.status, 404);
+  assert.equal(await codeOf(unknown), "approval_not_found");
+  const badDecision = await post(f, `${base}/approvals/${proposalId}/decide`, f.humanKey, { decision: "maybe" });
+  assert.equal(badDecision.status, 422);
+  // List with a status filter; unknown statuses are 422.
+  const pending = await (await get(f, `${base}/approvals?status=pending`, f.humanKey)).json();
+  assert.ok(pending.proposals.every(p => p.status === "pending"));
+  const badStatus = await get(f, `${base}/approvals?status=napping`, f.humanKey);
+  assert.equal(badStatus.status, 422);
+  assert.equal(await codeOf(badStatus), "approval_invalid");
+});
+
+test("routing: mentions, list, resolve, policy", async t => {
+  const f = setup(t); await f.serve();
+  const base = "/api/rooms/commons/collab";
+  const routed = await post(f, `${base}/routing/mentions`, f.humanKey,
+    { mentionedAgentId: "claude", threadId: "thread-r", context: "needs eyes" });
+  assert.equal(routed.status, 201);
+  const { records, mentions } = await routed.json();
+  assert.deepEqual(mentions, ["claude"]);
+  assert.equal(records.length, 1);
+  assert.equal(records[0].agent, "claude");
+  assert.equal(records[0].status, "routed");
+  const routingId = records[0].routingId;
+  const listed = await (await get(f, `${base}/routing`, f.humanKey)).json();
+  assert.equal(listed.records.length, 1);
+  assert.equal(listed.records[0].routingId, routingId);
+  // Resolve hoists the outcome onto the record view.
+  const resolved = await post(f, `${base}/routing/${routingId}/resolve`, f.humanKey,
+    { outcome: "claude picked it up" });
+  assert.equal(resolved.status, 200);
+  const { record } = await resolved.json();
+  assert.equal(record.status, "resolved");
+  assert.equal(record.outcome, "claude picked it up");
+  assert.equal(record.resolvedBy.id, "owner");
+  const unknown = await post(f, `${base}/routing/nope/resolve`, f.humanKey, { outcome: "x" });
+  assert.equal(unknown.status, 404);
+  assert.equal(await codeOf(unknown), "routing_not_found");
+  // Policies: direct is the default mode; unknown modes are 422.
+  const policy = await post(f, `${base}/routing/policy`, f.humanKey,
+    { agentId: "claude", policy: { mode: "escalate", escalateTo: { kind: "human", id: "owner" }, note: "route up" } });
+  assert.equal(policy.status, 200);
+  assert.equal((await policy.json()).policy.mode, "escalate");
+  const badPolicy = await post(f, `${base}/routing/policy`, f.humanKey,
+    { agentId: "claude", policy: { mode: "teleport" } });
+  assert.equal(badPolicy.status, 422);
+  assert.equal(await codeOf(badPolicy), "routing_invalid");
+  const badMention = await post(f, `${base}/routing/mentions`, f.humanKey, { mentionedAgentId: "not a name!" });
+  assert.equal(badMention.status, 422);
+});
+
+test("handoffs: room-scoped journal writes with account resolution", async t => {
+  const f = setup(t); await f.serve();
+  const base = "/api/rooms/commons/collab";
+  const created = await post(f, `${base}/handoffs`, f.humanKey,
+    { threadId: "thread-h", to: { kind: "agent", id: "claude" }, summary: "Needs a person." });
+  assert.equal(created.status, 201);
+  const { duplicate, handoff } = await created.json();
+  assert.equal(duplicate, false);
+  assert.equal(handoff.status, "open");
+  assert.equal(handoff.packet.to, "claude");
+  assert.equal(handoff.packet.channel, "room");
+  assert.equal(handoff.packet.summary, "Needs a person.");
+  // A second create for the same thread returns the existing open handoff.
+  const repeat = await post(f, `${base}/handoffs`, f.humanKey,
+    { threadId: "thread-h", to: { kind: "agent", id: "grokbot" } });
+  assert.equal(repeat.status, 200);
+  const again = await repeat.json();
+  assert.equal(again.duplicate, true);
+  assert.equal(again.handoff.handoffId, handoff.handoffId);
+  // List and transition through the room route.
+  const listed = await (await get(f, `${base}/handoffs`, f.humanKey)).json();
+  assert.equal(listed.handoffs.length, 1);
+  const accepted = await post(f, `${base}/handoffs/${handoff.handoffId}/transition`, f.humanKey,
+    { status: "accepted", note: "on it" });
+  assert.equal(accepted.status, 200);
+  assert.equal((await accepted.json()).handoff.status, "accepted");
+  const illegal = await post(f, `${base}/handoffs/${handoff.handoffId}/transition`, f.humanKey,
+    { status: "napping" });
+  assert.equal(illegal.status, 422);
+  // The agent-owned room has no human account bindings anywhere: 409 with
+  // the stable handoff_no_account_scope code.
+  const denBase = "/api/rooms/agent-den/collab";
+  const scoped = await post(f, `${denBase}/handoffs`, f.denIdentity.secret,
+    { threadId: "thread-h2", to: { kind: "agent", id: "claude" } });
+  assert.equal(scoped.status, 409);
+  assert.equal(await codeOf(scoped), "handoff_no_account_scope");
+  const scopedList = await get(f, `${denBase}/handoffs`, f.denIdentity.secret);
+  assert.equal(scopedList.status, 409);
+  assert.equal(await codeOf(scopedList), "handoff_no_account_scope");
+});
+
+test("restart persistence: every journal replays from SQLite", async t => {
+  const f = setup(t); await f.serve();
+  const base = "/api/rooms/commons/collab";
+  const agentToken = f.agent.secret, agent2Token = f.agent2.secret;
+  const { assignmentId } = await (await post(f, `${base}/assignments`, f.humanKey,
+    { threadId: "thread-restart", assignee: { kind: "agent", id: agentIdOf(f) } })).json();
+  const { note } = await (await post(f, `${base}/notes`, f.humanKey,
+    { threadId: "thread-restart", body: "persist me" })).json();
+  const { lock } = await (await post(f, `${base}/draft-locks/acquire`, agentToken,
+    { threadId: "thread-restart", ttlMs: 600000 })).json();
+  const { proposal } = await (await post(f, `${base}/approvals`, agentToken,
+    { threadId: "thread-restart", draft: { body: "draft" }, channel: "email" })).json();
+  const { records } = await (await post(f, `${base}/routing/mentions`, f.humanKey,
+    { mentionedAgentId: "claude", threadId: "thread-restart" })).json();
+  await post(f, `${base}/handoffs`, f.humanKey,
+    { threadId: "thread-restart", to: { kind: "agent", id: "claude" } });
+  await f.reopen();
+  // Assignments, notes, locks, approvals, routing all survived the restart.
+  const assignments = await (await get(f, `${base}/assignments`, f.humanKey)).json();
+  assert.equal(assignments.assignments.length, 1);
+  assert.equal(assignments.assignments[0].assignmentId, assignmentId);
+  assert.equal(assignments.assignments[0].status, "assigned");
+  const notes = await (await get(f, `${base}/notes?threadId=thread-restart`, f.humanKey)).json();
+  assert.equal(notes.notes.length, 1);
+  assert.equal(notes.notes[0].noteId, note.noteId);
+  assert.equal(notes.notes[0].body, "persist me");
+  // The replayed lock still blocks a stranger and still belongs to its holder.
+  const blocked = await post(f, `${base}/draft-locks/acquire`, agent2Token, { threadId: "thread-restart" });
+  assert.equal(blocked.status, 409);
+  assert.equal(await codeOf(blocked), "collision_lock_held");
+  const detect = await (await get(f, `${base}/draft-locks?threadId=thread-restart`, agentToken)).json();
+  assert.equal(detect.collision, false);
+  const approvals = await (await get(f, `${base}/approvals`, f.humanKey)).json();
+  assert.equal(approvals.proposals.length, 1);
+  assert.equal(approvals.proposals[0].proposalId, proposal.proposalId);
+  assert.equal(approvals.proposals[0].status, "pending");
+  const routing = await (await get(f, `${base}/routing`, f.humanKey)).json();
+  assert.equal(routing.records.length, 1);
+  assert.equal(routing.records[0].routingId, records[0].routingId);
+  const handoffs = await (await get(f, `${base}/handoffs`, f.humanKey)).json();
+  assert.equal(handoffs.handoffs.length, 1);
+  assert.equal(handoffs.handoffs[0].threadId, "thread-restart");
+  // And the replayed state keeps working: release the assignment by id.
+  const released = await post(f, `${base}/assignments/${assignmentId}/release`, f.humanKey, {});
+  assert.equal(released.status, 200);
+});
+
+test("room scoping: collab data never crosses rooms", async t => {
+  const f = setup(t); await f.serve();
+  const commons = "/api/rooms/commons/collab";
+  const den = "/api/rooms/agent-den/collab";
+  await post(f, `${commons}/assignments`, f.humanKey,
+    { threadId: "thread-scope", assignee: { kind: "agent", id: agentIdOf(f) } });
+  await post(f, `${den}/assignments`, f.denIdentity.secret,
+    { threadId: "thread-scope", assignee: { kind: "agent", id: f.denIdentity.identityId } });
+  const commonsList = await (await get(f, `${commons}/assignments`, f.humanKey)).json();
+  assert.equal(commonsList.assignments.length, 1);
+  assert.equal(commonsList.assignments[0].assignee.id, agentIdOf(f));
+  const denList = await (await get(f, `${den}/assignments`, f.denIdentity.secret)).json();
+  assert.equal(denList.assignments.length, 1);
+  assert.equal(denList.assignments[0].assignee.id, f.denIdentity.identityId);
+  // Notes are room-scoped too.
+  await post(f, `${commons}/notes`, f.humanKey, { threadId: "thread-scope", body: "commons only" });
+  const denNotes = await (await get(f, `${den}/notes?threadId=thread-scope`, f.denIdentity.secret)).json();
+  assert.equal(denNotes.notes.length, 0);
+  // A commons member cannot reach the den's collab routes at all.
+  const forbidden = await get(f, `${den}/assignments`, f.humanKey);
+  assert.ok([401, 403].includes(forbidden.status), `expected 401/403, got ${forbidden.status}`);
+});
