@@ -128,6 +128,22 @@ test("a hold that does not resolve to this account's sources hides nothing", t =
   assert.ok(!review.items.some(i => i.messageId === "ghost-message-9"), "unresolvable hold is not in this account's backlog");
 });
 
+test("a hold with explicit account/source ids is also enforced", t => {
+  const { f, account, token, binding, first, hold1 } = visibilityFixture(t);
+  f.store.inbox.quarantineRelease(token, binding, { quarantineId: hold1.id });
+  assert.ok(listIds(f, token, binding).includes(first.sourceId), "released message is visible");
+  // Gap #2 (PR #563): the hold records the importing account and the inbox
+  // source id; enforcement must honor the explicit link too.
+  const explicit = f.store.spamQuarantine.quarantine({ messageId: first.providerId, channel: "telegram",
+    connectionId: "ignored-because-sourceId-wins", accountId: account.id, sourceId: first.sourceId,
+    flag: flag(85, "explicit_link") });
+  assert.ok(!listIds(f, token, binding).includes(first.sourceId), "explicit hold hides the source from the list");
+  throwsCode(() => f.store.inbox.read(token, first.sourceId, binding), 404, "inbox_source_not_found");
+  assert.ok(!threadSourceIds(f, token, binding).includes(first.sourceId), "explicit hold hides the source from threads");
+  f.store.inbox.quarantineRelease(token, binding, { quarantineId: explicit.id });
+  assert.ok(listIds(f, token, binding).includes(first.sourceId), "released explicit hold returns the source");
+});
+
 test("the review surface still shows held and dismissed rows", t => {
   const { f, token, binding, hold1, hold2 } = visibilityFixture(t);
   f.store.inbox.quarantineDismiss(token, binding, { quarantineId: hold2.id });
