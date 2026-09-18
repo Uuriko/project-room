@@ -1055,6 +1055,28 @@ export class Inbox {
           // or moved here — the scores are recorded on the receipt.
           Object.assign(receipt, runImportGuards({ prefs: this.notifyPrefs, accountId,
             envelope: request.data.envelope, at: now }));
+          // Durable spam quarantine: when the flag trips, file the message in
+          // the restart-surviving spam_quarantine journal (store.spamQuarantine)
+          // for owner review — never the in-memory createQuarantineQueue, which
+          // loses its queue on restart. The journal's review() speaks the same
+          // release|confirm_spam decision vocabulary as the queue, so the
+          // review flow is unchanged. The import itself is untouched: the
+          // message still lands in the inbox (flag-only, task 33) — the journal
+          // is the review backlog, riding the same store transaction as the
+          // receipt (a duplicate requestId short-circuits above, so retries
+          // never double-journal). Journaling never blocks ingestion,
+          // mirroring the stitch try/catch above.
+          if (receipt.spam?.quarantine) {
+            try {
+              this.store.spamQuarantine.quarantine({
+                messageId: request.data.envelope.message?.id,
+                channel: request.data.envelope.channel,
+                connectionId: request.data.envelope.connection?.id ?? null,
+                flag: { score: receipt.spam.score, signals: receipt.spam.signals, quarantine: true },
+                at: now,
+              });
+            } catch { /* quarantine journaling never blocks ingestion */ }
+          }
         }
       } else if (["source.read", "source.unread"].includes(action)) {
         // Read state is a marker, not a content version: the source revision

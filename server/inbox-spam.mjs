@@ -178,6 +178,13 @@ export function createSenderReputation({ store } = {}) {
 // queue as a pending record and stays there until an owner releases it back
 // to the inbox or confirms it as spam. Every transition is recorded with the
 // reviewer and a timestamp. Pure, caller-owned store; frozen outputs.
+//
+// NOTE: the live import path no longer files quarantined mail here — it
+// journals to the restart-surviving SpamQuarantineJournal
+// (server/spam-quarantine-journal.mjs, store.spamQuarantine), whose review()
+// speaks the same release|confirm_spam vocabulary. This queue remains for
+// tests and callers that want a caller-owned in-memory store; it loses its
+// queue on restart.
 class QuarantineError extends Error { constructor(code, message) { super(message); this.name = "QuarantineError"; this.code = code; } }
 const qfail = (code, message) => { throw new QuarantineError(code, message); };
 const qcheck = (condition, message) => { if (!condition) qfail("invalid_quarantine", message); };
