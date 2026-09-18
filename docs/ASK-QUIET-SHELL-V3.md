@@ -173,6 +173,9 @@ From the research note. Do not sneak them into the polish PR.
 | 12 | Network honesty strip `N Macs · models` | Compute P1 |
 | 13 | Speed / Mid / Quality ladder labels | Compute P1 |
 | 14–16 | Room tiered transparency / collapsible tools / Needle confidence | Room P2 — [ROOM-NEEDLE-CONFIDENCE-TRIGGERS-V0.md](ROOM-NEEDLE-CONFIDENCE-TRIGGERS-V0.md) |
+| T044 | Quiet export transcript JSON/MD (thread chrome; not empty-canvas) | Ask follow-on — [research/ask/T044-quiet-export-transcript.md](../research/ask/T044-quiet-export-transcript.md) |
+| T045 | Honesty receipt folds after complete; hover expand | Ask follow-on — [research/ask/T045-receipt-collapse.md](../research/ask/T045-receipt-collapse.md) |
+| T046 | No mid-stream tok/s essay (lint/test rule) | Ask follow-on — [research/ask/T046-no-midstream-toks.md](../research/ask/T046-no-midstream-toks.md) |
 
 #249 already shipped Stop / Regen / Copy / Edit / Enter+Shift+Enter /
 stream-safe MD / New. v3 **does not restyle those into a new product**.
