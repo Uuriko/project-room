@@ -653,6 +653,10 @@ function renderInvitation() {
   if (preview) {
     $("#invitation-room").textContent = preview.roomTitle || preview.roomId;
     $("#invitation-purpose").textContent = preview.roomPurpose || "Not provided";
+    const counts = preview.memberCounts;
+    $("#invitation-members").textContent = counts
+      ? `${counts.humans} human${counts.humans === 1 ? "" : "s"} · ${counts.agents} agent${counts.agents === 1 ? "" : "s"}`
+      : "Not shown";
     $("#invitation-display-name").textContent = preview.displayName;
     $("#invitation-member-id").textContent = preview.memberId;
     $("#invitation-role").textContent = humanize(preview.role);
@@ -685,7 +689,16 @@ function renderInvitation() {
   const action = $("#invitation-accept");
   action.hidden = !(authenticated && (pending || accepted) && !switchingAccount);
   action.disabled = loading;
-  action.textContent = accepted ? "Open room" : phase === "unknown" ? "Check acceptance again" : "Accept and open room";
+  // Onboarding Slice 4: name the acting account so nobody accepts from the
+  // wrong account. The app calls an account session "Personal account".
+  const actingName = authenticated ? "Personal account" : null;
+  const actingLine = $("#invitation-acting-account");
+  actingLine.hidden = !(actingName && preview && phase !== "terminal");
+  if (actingName && preview && phase !== "terminal") actingLine.textContent = `You’ll join as ${actingName}.`;
+  action.textContent = accepted
+    ? (actingName ? `Open room as ${actingName}` : "Open room")
+    : phase === "unknown" ? "Check acceptance again"
+    : actingName ? `Accept and open as ${actingName}` : "Accept and open room";
   $("#invitation-dismiss").disabled = invitationIsCommitting();
 }
 function closeInvitation({ returnFocus = true } = {}) {

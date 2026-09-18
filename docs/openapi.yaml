@@ -1728,7 +1728,7 @@ paths:
   /api/invitations/preview:
     post:
       summary: Preview a membership invitation
-      description: Open; the invitation token is the credential. Room title and role only. 30 per address per minute.
+      description: Open; the invitation token is the credential. Room title, purpose, human+agent member counts, inviter, expiry. 30 per address per minute.
       security: []
       requestBody:
         required: true

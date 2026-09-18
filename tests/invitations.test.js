@@ -163,8 +163,11 @@ test("issue, preview, acceptance, and exact replay preserve immutable account/me
   assert.throws(() => f.store.issueInvitation(f.owner.token, "commons", { ...issued.details, role: "guest" }), /different scope/);
 
   const preview = f.store.previewInvitation(issued.rawToken);
-  assert.deepEqual(Object.keys(preview).sort(), ["displayName", "expiresAt", "id", "invitedByDisplayName", "memberId", "permissions", "revision", "role", "roomId", "roomPurpose", "roomTitle", "status"]);
+  assert.deepEqual(Object.keys(preview).sort(), ["displayName", "expiresAt", "id", "invitedByDisplayName", "memberCounts", "memberId", "permissions", "revision", "role", "roomId", "roomPurpose", "roomTitle", "status"]);
   assert.equal(preview.status, "pending");
+  // Pre-auth preview answers "is this worth an account?": human+agent
+  // member counts, and no identity or account data.
+  assert.deepEqual(preview.memberCounts, { humans: 1, agents: 0 });
   assert.equal(JSON.stringify(preview).includes("account-target"), false);
   assert.equal(f.store.db.prepare("SELECT token_hash FROM membership_invitations WHERE id=?").get(preview.id).token_hash, digest(issued.rawToken));
   assert.equal(JSON.stringify(f.store.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(preview.id)).includes(issued.rawToken), false);
