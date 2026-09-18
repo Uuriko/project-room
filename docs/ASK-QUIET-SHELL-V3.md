@@ -145,7 +145,9 @@ Also keep (tip already ships): `#ask-thread`, `#ask-think`,
 not return the user there.
 
 Stream contracts stay: live user + assistant on send; AbortController
-stop; partial text kept; markdown + stream-safe incomplete fences.
+stop; partial text kept; markdown + stream-safe incomplete fences
+(GFM subset: [ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md](../research/ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md)
+— T085; cite T041 #269; links stay plain).
 v3 does not reopen the Typeform model step.
 
 ---
@@ -184,6 +186,7 @@ From the research note. Do not sneak them into the polish PR.
 | T084 | New chat / Clear thread quiet confirm (Esc/cancel never wipes) | Ask follow-on — [research/ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md](../research/ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md) (cite #249 A7 New; T082 keeps no letter) |
 | T074 | Ask vs Provide surface boundary (doors / dash / table off canvas) | Ask follow-on — [research/ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md](../research/ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md) |
 | T081 | Artifacts-lite implement gate (claim blocked until live + Quill off HTML) | Ask follow-on — [research/ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md](../research/ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md) (cite #493/#507) |
+| T085 | `#ask-thread` GFM subset (fences / lists / bold / inline; links plain) | Ask follow-on — [research/ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md](../research/ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md) (cite T041 #269) |
 
 #249 already shipped Stop / Regen / Copy / Edit / Enter+Shift+Enter /
 stream-safe MD / New. v3 **does not restyle those into a new product**.

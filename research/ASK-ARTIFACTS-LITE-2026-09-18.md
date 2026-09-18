@@ -10,7 +10,10 @@
 **LIVE** may still be Typeform until Instinct wrangler  
 **Companions:** [ASK-QUIET-SHELL-V3.md](../docs/ASK-QUIET-SHELL-V3.md) ·
 [UX-CLEAN-LESS-NOISE-2026-09-17.md](UX-CLEAN-LESS-NOISE-2026-09-17.md) ·
-[ASK-MODEL-CMDK-SPEC-2026-09-17.md](../docs/ASK-MODEL-CMDK-SPEC-2026-09-17.md)
+[ASK-MODEL-CMDK-SPEC-2026-09-17.md](../docs/ASK-MODEL-CMDK-SPEC-2026-09-17.md) ·
+T085 render subset
+([ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md](ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md);
+cite T041 #269 — collapse is after fences already render)
 
 Fold lock: [FOLD-COMPUTE-ROOM.md](../docs/FOLD-COMPUTE-ROOM.md).
 Room “artifact” (editorial rung on a Done receipt) is a **different

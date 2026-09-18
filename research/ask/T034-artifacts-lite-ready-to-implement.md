@@ -9,6 +9,7 @@
 ([ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md](../ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md)) ·
 quiet-shell §7 item 7 (full panel = P1)  
 **Cousin checklist:** [T033 ⌘K](T033-cmdk-ready-to-implement.md) — same gates; different files/IDs  
+**Render subset:** [T085](../ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md) — fences / lists / bold / inline ship; links stay plain (T041 #269). Collapse is after that render.  
 **Tip (source):** `Uuriko/dasha-lobby` `e6da8311` (includes #248 Bonsai, #255 quiet-shell, #257 SSR Mac, #259 PH retire, #261 Motley humans, #264 Needle-out / bonsai grow)  
 **LIVE (probed 2026-09-18 ~01:32Z, T033):** still Typeform — `#step-model`, “Which model?”, meta `Start. Do. Provide. Pay. Credits.`, no `#ask-model`, no `ternary-bonsai-2-27b`. `/compute/humans` 404 (not #261 308).
 

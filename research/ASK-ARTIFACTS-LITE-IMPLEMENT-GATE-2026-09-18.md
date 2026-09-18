@@ -25,6 +25,9 @@ Companions (cite only):
 (T074) ·
 [UX-CLEAN-LESS-NOISE-2026-09-17.md](UX-CLEAN-LESS-NOISE-2026-09-17.md)
 (rank 7 Artifacts) ·
+T085 `#ask-thread` GFM subset
+([ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md](ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md);
+cite T041 #269; collapse is after render) ·
 [FOLD-COMPUTE-ROOM.md](../docs/FOLD-COMPUTE-ROOM.md).
 Room “artifact” is a **different noun**:
 [ROOM-ARTIFACT-MATURITY.md](../docs/ROOM-ARTIFACT-MATURITY.md).
