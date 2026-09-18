@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createCollector } from "../src/growth-collector.js";
@@ -129,4 +129,19 @@ test("C11 file round-trip and missing-file path", () => {
 
 test("C11 saveToFile throws on an invalid collector", () => {
   assert.throws(() => saveToFile("/tmp/x.json", null), /must be a C2 collector/);
+});
+
+test("C11 saveToFile is atomic: staged temp file is renamed over, never left behind", () => {
+  const dir = mkdtempSync(join(tmpdir(), "growth-c11-atomic-"));
+  try {
+    const file = join(dir, "growth-snapshot.json");
+    saveToFile(file, filled(2));
+    saveToFile(file, filled(5));
+    assert.deepEqual(readdirSync(dir), ["growth-snapshot.json"], "no staging temp files remain after saves");
+    const { restored, collector } = loadFromFile(file);
+    assert.equal(restored, true);
+    assert.equal(collector.stats().total, 5, "the second snapshot fully replaced the first");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

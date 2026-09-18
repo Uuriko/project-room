@@ -93,6 +93,22 @@ test("DiagnosticsLog retains a bounded FIFO window per room", () => {
   for (const record of log.list("commons")) assert.equal("roomId" in record, false, "exported records omit the room id");
 });
 
+test("DiagnosticsLog evicts least-recently-used rooms past maxRooms", () => {
+  const log = new DiagnosticsLog(10, { maxRooms: 3 });
+  const entry = roomId => ({ operationId: `op_${roomId}`, at: "2026-09-10T00:00:00Z", status: 200, code: "ok",
+    category: "ok", route: "/api/health", roomId });
+  log.record(entry("a"));
+  log.record(entry("b"));
+  log.record(entry("c"));
+  log.record(entry("a")); // touch a: b is now least-recently-used
+  log.record(entry("d")); // over maxRooms: evicts b
+  assert.deepEqual(log.list("b"), [], "the LRU room is evicted");
+  assert.equal(log.list("a").length, 2);
+  assert.equal(log.list("c").length, 1);
+  assert.equal(log.list("d").length, 1);
+  assert.throws(() => new DiagnosticsLog(10, { maxRooms: 0 }), /maxRooms/);
+});
+
 test("API errors carry a bounded operation ID and category; the header matches the body", async t => {
   const { request } = await fixture(t);
   const response = await request("/api/definitely-not-here");
