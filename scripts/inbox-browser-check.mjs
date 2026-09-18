@@ -15,6 +15,7 @@ import { normalizeGraphEmail } from "../server/graph-email.mjs";
 import { seedRecordedReply } from "./reply-review-fixture.mjs";
 import { prepareGraphReplyUpdate } from "../server/graph-reply-draft.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 function seedEmail(f) {
   const raw = emailContractFixture(); raw.connection.accountId = f.store.accountForMember("commons", "owner").id;
@@ -53,7 +54,7 @@ async function setup(t, mobile = false, simulate = false) {
   page.on("dialog", dialog => dialog.accept());
   await page.route("**/*", route => { if (new URL(route.request().url()).origin !== origin) { external.push(route.request().url()); return route.abort(); } return route.continue(); });
   await page.goto(origin + "/?room=commons");
-  await page.locator("#access-key").fill(accountKey); await page.locator('#auth-form button[type="submit"]').click();
+  await fillAccessKey(page, accountKey); await page.locator('#auth-form button[type="submit"]').click();
   await page.locator("#main").waitFor({ state: "visible" });
   // Opening the inbox lists the connections and opens the first message, two independent round
   // trips; on a phone the opened reader covers the sidebar. Settle both before any sidebar step:
@@ -410,7 +411,7 @@ test("provider preview cannot repopulate private content after another tab chang
   const other = await p.context().newPage(); await other.goto(f.origin + "/?room=commons");
   await other.locator("#main").waitFor(); if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await other.locator("#signout-button").click(); await other.locator("#auth-panel").waitFor();
   const guest = f.store.accountForMember("commons", "guest");
-  await other.locator("#access-key").fill(f.store.issueAccountAccessKey(guest.id)); await other.locator('#auth-form button[type="submit"]').click();
+  await fillAccessKey(other, f.store.issueAccountAccessKey(guest.id)); await other.locator('#auth-form button[type="submit"]').click();
   await other.locator("#main").waitFor(); await p.locator("#auth-panel").waitFor(); release(); await p.waitForLoadState("networkidle");
   assert.equal(await p.locator("#inbox-reply-dialog").isVisible(), false);
   assert.equal(await p.locator("#inbox-reply-body").textContent(), ""); assert.equal(await p.locator("#inbox-reply-addresses").textContent(), "");
@@ -433,7 +434,7 @@ test("opt-in sample mailbox review is usable from account Inbox without entering
   const sample = await createInboxSandbox({ includeEmailReview: true }), browser = await chromium.launch({ headless: true });
   t.after(async () => { await browser.close(); await sample.close(); rmSync(sample.directory, { recursive: true, force: true }); });
   const page = await browser.newPage(); page.setDefaultTimeout(9000);
-  await page.goto(sample.accountUrl); await page.locator("#access-key").fill(sample.accountKey); await page.locator('#auth-form button[type="submit"]').click();
+  await page.goto(sample.accountUrl); await fillAccessKey(page, sample.accountKey); await page.locator('#auth-form button[type="submit"]').click();
   await page.locator("#inbox-list").getByText("A small collaboration", { exact: true }).click();
   await page.locator("#inbox-reply-open").click(); await page.locator("#inbox-reply-confirm:not([disabled])").waitFor();
   await page.locator("#inbox-reply-confirm").click(); await page.locator("#inbox-reply-status").filter({ hasText: "Reviewed · not sent" }).waitFor();
@@ -719,7 +720,7 @@ test("sample reply: a late preview cannot reopen private text after another tab 
   await other.locator("#main").waitFor(); if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await other.locator("#signout-button").click();
   await other.locator("#auth-panel").waitFor();
   const guest = f.store.accountForMember("commons", "guest"), key = f.store.issueAccountAccessKey(guest.id);
-  await other.locator("#access-key").fill(key); await other.locator('#auth-form button[type="submit"]').click();
+  await fillAccessKey(other, key); await other.locator('#auth-form button[type="submit"]').click();
   await other.locator("#main").waitFor(); await p.locator("#auth-panel").waitFor(); release();
   await p.waitForLoadState("networkidle");
   assert.equal(await p.locator("#inbox-send-dialog").isVisible(), false);
@@ -734,7 +735,7 @@ test("sample launcher: an empty room owner can sign in and finish a sample reply
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   page.setDefaultTimeout(9000); const errors = [];
   page.on("pageerror", error => errors.push(error.message));
-  await page.goto(sample.url); await page.locator("#access-key").fill(sample.accountKey); await page.locator('#auth-form button[type="submit"]').click();
+  await page.goto(sample.url); await fillAccessKey(page, sample.accountKey); await page.locator('#auth-form button[type="submit"]').click();
   await page.locator("#inbox-reader").waitFor();
   assert.equal(await page.locator("#main").isVisible(), false);
   await page.locator("#inbox-draft").fill("Let’s try one small idea.");
@@ -765,7 +766,7 @@ test("sample arrival: two samples and existing localhost cookies coexist in one 
   for (const sample of [first, second]) {
     const page = await context.newPage(); pages.push(page); page.setDefaultTimeout(9000);
     page.on("pageerror", error => errors.push(error.message));
-    await page.goto(sample.url); await page.locator("#access-key").fill(sample.accountKey); await page.locator('#auth-form button[type="submit"]').click();
+    await page.goto(sample.url); await fillAccessKey(page, sample.accountKey); await page.locator('#auth-form button[type="submit"]').click();
     await page.locator("#inbox-reader").waitFor();
   }
   const [a, b] = pages;
@@ -976,7 +977,7 @@ test("real inbox: another tab changing the browser account clears private conten
   await other.locator("#main").waitFor({ state: "visible" }); if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await other.locator("#signout-button").click();
   await other.locator("#auth-panel").waitFor({ state: "visible" });
   const guest = f.store.accountForMember("commons", "guest"), key = f.store.issueAccountAccessKey(guest.id);
-  await other.locator("#access-key").fill(key); await other.locator('#auth-form button[type="submit"]').click(); await other.locator("#main").waitFor({ state: "visible" });
+  await fillAccessKey(other, key); await other.locator('#auth-form button[type="submit"]').click(); await other.locator("#main").waitFor({ state: "visible" });
   await p.locator("#auth-panel").waitFor({ state: "visible" }); release();
   await p.waitForLoadState("networkidle");
   assert.equal(await p.locator("#inbox-draft").inputValue(), "");

@@ -15,6 +15,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { ChannelWebhookInbox } from "../server/channel-import.mjs";
 import { telegramConfig, TelegramLiveStatus } from "../server/channel-adapters/telegram-config.mjs";
 import { telegramSourceId } from "../server/channel-adapters/telegram.mjs";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 const WEBHOOK_SECRET = "fixture-webhook-secret-0123456789"; // Invented; only its hash is stored.
 
@@ -45,7 +46,7 @@ async function setup(t, { mobile = false } = {}) {
   page.on("pageerror", e => errors.push(e.message));
   await page.route("**/*", route => { if (new URL(route.request().url()).origin !== origin) { external.push(route.request().url()); return route.abort(); } return route.continue(); });
   await page.goto(origin + "/?room=commons");
-  await page.locator("#access-key").fill(accountKey); await page.locator('#auth-form button[type="submit"]').click();
+  await fillAccessKey(page, accountKey); await page.locator('#auth-form button[type="submit"]').click();
   await page.locator("#main").waitFor({ state: "visible" });
   await page.locator("#nav-inbox").click(); await page.locator("#inbox-panel").waitFor({ state: "visible" });
   const deliver = updates => fetch(origin + "/api/inbox/webhooks/" + telegram.connection.id, { method: "POST", body: JSON.stringify({ updates }),

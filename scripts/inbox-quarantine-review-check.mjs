@@ -12,6 +12,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { normalizeTelegramUpdate, telegramSourceId } from "../server/channel-adapters/telegram.mjs";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 const flag = (score, key) => ({ score, quarantine: true,
   signals: [{ key, weight: score, detail: `Browser check signal ${key}` }] });
@@ -64,7 +65,7 @@ const card = (page, n) => page.locator(".inbox-quarantine-item").nth(n);
 test("quarantine review: held items render, Confirm accepts, Dismiss two-tap dismisses", { timeout: 60000 }, async t => {
   const { page, origin, key } = await setup(t);
   await page.goto(origin + "/?account=1");
-  await page.locator("#access-key").fill(key);
+  await fillAccessKey(page, key);
   await page.locator('#auth-form button[type="submit"]').click();
   await page.locator("#inbox-panel").waitFor();
   await page.locator("#inbox-quarantine").waitFor();

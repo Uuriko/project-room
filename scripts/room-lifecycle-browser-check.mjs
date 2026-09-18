@@ -10,6 +10,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 async function setup(t, viewport) {
   const f = createAcceptanceFixture();
@@ -31,7 +32,7 @@ async function setup(t, viewport) {
   t.after(() => assert.deepEqual(errors, []));
   const login = async accountId => {
     await page.goto(origin + "/?account=1");
-    await page.locator("#access-key").fill(f.store.issueAccountAccessKey(accountId));
+    await fillAccessKey(page, f.store.issueAccountAccessKey(accountId));
     await page.locator('#auth-form button[type="submit"]').click();
     await page.locator("#inbox-panel").waitFor();
   };

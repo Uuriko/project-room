@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { chromium } from 'playwright';
 import { createRecoveryFixture } from './recovery-fixture.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
+import { fillAccessKey } from "./auth-signin.mjs";
 
 test('actual Node entrypoint pauses without touching populated data, then resumes the same Room in a browser', { timeout: 45000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), 'room-recovery-browser-'));
@@ -40,7 +41,7 @@ test('actual Node entrypoint pauses without touching populated data, then resume
   await page.screenshot({ path: 'test-results/recovery-paused-desktop.png' });
   assert.deepEqual(auditRecovery(fixture.store), before);
   await page.goto('about:blank'); await stop(); await start(false);
-  await page.goto(origin); await page.locator('#access-key').fill(fixture.keys.owner);
+  await page.goto(origin); await fillAccessKey(page, fixture.keys.owner);
   await page.getByRole('button', { name: 'Enter room', exact: true }).click();
   await page.locator('#main').waitFor({ state: 'visible' });
   assert.equal(fixture.store.room('commons').sequence, fixture.cursor);

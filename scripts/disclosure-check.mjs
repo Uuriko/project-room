@@ -11,6 +11,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 test("background updates preserve open disclosures, focus, draft and recipient", { timeout: 90000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-disclosure-"));
@@ -41,7 +42,7 @@ test("background updates preserve open disclosures, focus, draft and recipient",
   const login = async (p, key) => {
     await p.goto(origin);
     await p.locator("#auth-panel").waitFor({ state: "visible" });
-    await p.locator("#access-key").fill(key);
+    await fillAccessKey(p, key);
     await p.getByRole("button", { name: "Enter room", exact: true }).click();
     await p.locator("#main").waitFor({ state: "visible" });
   };

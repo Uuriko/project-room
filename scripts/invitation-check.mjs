@@ -11,6 +11,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 const secret = () => randomBytes(32).toString("base64url");
 const chromiumOptions = process.env.ROOM_TEST_CHROMIUM_PATH
@@ -104,7 +105,7 @@ test("targeted invitation preview retries its retained secret without accepting 
   const page = await browser.newPage({ viewport: { width: 1100, height: 850 }, reducedMotion: "reduce" });
   page.setDefaultTimeout(10000);
   await page.goto(origin);
-  await page.locator("#access-key").fill(targetRoomKey);
+  await fillAccessKey(page, targetRoomKey);
   await page.getByRole("button", { name: "Enter room", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
   await page.locator("#message-input").fill("Preserve this selected draft.");
@@ -144,7 +145,7 @@ test("invitation preview and acceptance preserve privacy, drafts, authority, and
   page.on("pageerror", error => errors.push(error.message));
   await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await page.locator("#access-key").fill(targetRoomKey);
+  await fillAccessKey(page, targetRoomKey);
   await page.getByRole("button", { name: "Enter room", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
   assert.match(await page.locator("#identity-label").textContent(), /^Target human/);
@@ -271,7 +272,7 @@ test("account confirmation keeps the modal open and warns before a draft-sensiti
   const f = await fixture(t);
   const page = await (await f.browser.newContext()).newPage();
   await page.goto(f.origin);
-  await page.locator("#access-key").fill(f.targetRoomKey);
+  await fillAccessKey(page, f.targetRoomKey);
   await page.getByRole("button", { name: "Enter room", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
   await page.locator("#message-input").fill("Retain this draft until I choose to switch");

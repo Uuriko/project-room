@@ -8,6 +8,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { textVersion } from "../server/text-results.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 // F4: a resubmitted native result shows the reviewer the changed bytes against
 // the exact previous version, and states that earlier approval never carries
@@ -55,7 +56,7 @@ test("result diff: resubmitted native results show changed bytes; first versions
   });
   const page = await context.newPage(); page.setDefaultTimeout(12000);
   page.on("pageerror", error => errors.push(error.message));
-  await page.goto(origin); await page.locator("#access-key").fill(f.keys.owner);
+  await page.goto(origin); await fillAccessKey(page, f.keys.owner);
   await page.getByRole("button", { name: "Enter room", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
   // Resubmitted result: the comparison appears with the exact changed rows.

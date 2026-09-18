@@ -190,6 +190,11 @@ test("publish/withdraw roundtrip with public visibility", async t => {
   const publishedDoc = await published.json();
   assert.equal(publishedDoc.agentId, "fixture-agent");
   assert.equal(publishedDoc.publicKey, keyPair.publicKey);
+  // RC-2026-09-18-037: the publish response names the card's lifecycle.
+  assert.deepEqual(publishedDoc.next.map(n => n.action), ["see-it-live", "update-card", "withdraw-card"]);
+  assert.equal(publishedDoc.next[0].path, "/api/agent-directory");
+  assert.equal(publishedDoc.next[2].method, "DELETE");
+  assert.ok(publishedDoc.next[2].path.includes("/api/agent-directory/cards/fixture-agent"));
 
   // The public document needs no auth.
   const doc = await (await get(origin, "/api/agent-directory")).json();

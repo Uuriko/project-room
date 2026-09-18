@@ -7,6 +7,7 @@ import { chromium } from "playwright";
 import { startHelperAgentExercise } from "./helper-agent-exercise.mjs";
 import { textVersion } from "../server/text-results.mjs";
 import { openMcpTestClient } from "./mcp-test-client.mjs";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 for (const mobile of [false, true]) test(`credit question ${mobile ? "mobile" : "desktop"}: preserved drafts, earlier result, exact retry and MCP answer`, { timeout: 60000 }, async t => {
   const f = await startHelperAgentExercise({ humanReviewer: true }); let browser, mcp;
@@ -39,7 +40,7 @@ for (const mobile of [false, true]) test(`credit question ${mobile ? "mobile" : 
     if (new URL(route.request().url()).origin === owner.origin) return route.continue();
     outside.push(route.request().url()); return route.abort();
   });
-  await page.goto(owner.origin); await page.locator("#access-key").fill(reviewer);
+  await page.goto(owner.origin); await fillAccessKey(page, reviewer);
   await page.getByRole("button", { name: "Enter room", exact: true }).click(); await page.locator("#main").waitFor();
   const input = page.locator("#message-input"), card = page.locator('[data-work-record-id="' + workId + '"]');
   await input.fill("Keep ordinary room writing.");

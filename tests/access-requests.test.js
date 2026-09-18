@@ -122,6 +122,11 @@ test("owner lists pending; approve links the identity", async t => {
   assert.equal(decided.status, "approved");
   assert.ok(decided.memberId);
   assert.equal(decided.decidedBy, "owner");
+  // RC-2026-09-18-036: the response names the actual grant, not just the request.
+  assert.deepEqual(decided.grantedPermissions, ["accept_work", "complete_work"]);
+  assert.deepEqual(decided.next.map(n => n.action), ["say-hello", "see-new-member"]);
+  assert.ok(decided.next[0].path.includes("/api/rooms/commons/commands"));
+  assert.ok(decided.next[1].path.includes("/api/rooms/commons/presence"));
 
   // The identity is now a real member.
   const link = store.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?")
@@ -143,6 +148,8 @@ test("owner can narrow permissions on approve; deny records a reason", async t =
     { decision: "approve", permissions: ["accept_work"] });
   assert.equal(decided.status, "approved");
   assert.deepEqual(decided.requestedPermissions, ["accept_work", "complete_work", "verify"]);
+  // RC-2026-09-18-036: the narrowed grant is named in the response.
+  assert.deepEqual(decided.grantedPermissions, ["accept_work"]);
 });
 
 test("deny flow", async t => {

@@ -216,7 +216,21 @@ export class AccessRequests {
       this.db.prepare("UPDATE access_requests SET status='approved', decided_at=?, decided_by=? WHERE request_id=?")
         .run(now, auth.member.id, requestId);
       const updated = rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId));
-      return Object.freeze({ ...updated, memberId: linked.memberId });
+      // RC-2026-09-18-036: name the actual grant — the response used to echo
+      // only requestedPermissions, so when the owner narrowed the grant the
+      // effective permissions were invisible in the 200. The next[] names
+      // the owner's moves now that the member is in the room.
+      return Object.freeze({
+        ...updated,
+        memberId: linked.memberId,
+        grantedPermissions: Object.freeze([...grants]),
+        next: Object.freeze([
+          Object.freeze({ action: "say-hello", method: "POST", path: `/api/rooms/${encodeURIComponent(roomId)}/commands`,
+            description: `Post a welcome message for ${row.display_name}: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "hello", toMemberId: "${linked.memberId}" } } to DM the new member directly.` }),
+          Object.freeze({ action: "see-new-member", method: "GET", path: `/api/rooms/${encodeURIComponent(roomId)}/presence`,
+            description: "Confirm the new member in the room's member list, with their granted permissions." }),
+        ]),
+      });
     });
   }
 

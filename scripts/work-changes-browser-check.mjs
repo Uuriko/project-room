@@ -7,6 +7,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 // F3: a draft based on an older revision gets a "what changed" explanation -
 // a derived, read-time list from the item's own revision events. A draft at
@@ -38,7 +39,7 @@ test("work changes: stale-basis drafts explain what changed, current drafts stay
   });
   const page = await context.newPage(); page.setDefaultTimeout(12000);
   page.on("pageerror", error => errors.push(error.message));
-  await page.goto(origin); await page.locator("#access-key").fill(f.keys.owner);
+  await page.goto(origin); await fillAccessKey(page, f.keys.owner);
   await page.getByRole("button", { name: "Enter room", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
   const card = page.locator('[data-work-record-id="test-handoff"]');

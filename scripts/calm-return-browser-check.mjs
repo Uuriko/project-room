@@ -6,6 +6,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 for (const mobile of [false, true]) {
   const label = mobile ? "mobile" : "desktop";
@@ -50,7 +51,7 @@ for (const mobile of [false, true]) {
     page.on("pageerror", error => errors.push(error.message));
     page.on("request", request => { if (request.method() !== "GET" && request.url().includes("/api/rooms/")) writes.push(new URL(request.url()).pathname); });
     await page.clock.install({ time: now });
-    await page.goto(origin); await page.locator("#access-key").fill(f.keys.owner);
+    await page.goto(origin); await fillAccessKey(page, f.keys.owner);
     await page.getByRole("button", { name: "Enter room", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
     const panel = page.locator("#return-brief-panel"), summary = panel.locator(":scope > summary");

@@ -10,6 +10,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { event, EVENT_TYPES as T } from "../src/events.js";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 const chromiumOptions = process.env.ROOM_TEST_CHROMIUM_PATH
   ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH }
@@ -52,7 +53,7 @@ async function enterRoom(page, accessKey, expectedIdentity) {
     const button = document.querySelector('#auth-form button[type="submit"]');
     return button && !button.disabled;
   });
-  await page.locator("#access-key").fill(accessKey);
+  await fillAccessKey(page, accessKey);
   await page.getByRole("button", { name: "Enter room", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
   await page.waitForFunction(name => document.querySelector("#identity-label")?.textContent.startsWith(name), expectedIdentity);

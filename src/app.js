@@ -668,6 +668,9 @@ function configureAuthPanel(roomId = selectedRoomFromLocation()) {
   $("#auth-kind-account")?.setAttribute("aria-pressed", accountMode ? "true" : "false");
   $("#auth-kind-room")?.classList.toggle("suggested", Boolean(accountMode && roomId));
   $("#auth-form button[type='submit']").textContent = accountMode ? (roomId ? "Open room" : "Sign in") : "Enter room";
+  // If the visitor clearly came for a key or invite flow, skip the collapsed first paint.
+  const cameForKeys = accountMode || (typeof location !== "undefined" && location.hash.startsWith("#invite/"));
+  if (cameForKeys) setSigninExtra(true);
 }
 function setAuthKind(kind) {
   authKind = kind === "account" ? "account" : "room";
@@ -1890,6 +1893,17 @@ $("#invitation-accept").addEventListener("click", async () => {
   }
 });
 $("#room-guide-dismiss")?.addEventListener("click", () => dismissRoomGuide());
+function setSigninExtra(open) {
+  const extra = $("#signin-extra"), toggle = $("#signin-more");
+  if (!extra || !toggle) return;
+  extra.hidden = !open;
+  toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  toggle.textContent = open ? "Fewer sign-in options" : "More sign-in options";
+}
+$("#signin-more")?.addEventListener("click", () => {
+  const extra = $("#signin-extra");
+  setSigninExtra(extra ? extra.hidden : false);
+});
 $("#auth-kind-room")?.addEventListener("click", () => setAuthKind("room"));
 $("#auth-kind-account")?.addEventListener("click", () => setAuthKind("account"));
 $("#access-key-reveal")?.addEventListener("click", () => {
