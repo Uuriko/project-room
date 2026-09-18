@@ -17,6 +17,7 @@ import { workHelpContext, validateHelpData } from "./work-help.js";
 import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
 import { installInbox } from "./inbox-ui.js";
 import { createAccountSettingsUI } from "./account-settings-ui.js";
+import { createAuthSigninUI } from "./auth-signin-ui.js";
 
 const $ = selector => document.querySelector(selector);
 $("#skip-link").addEventListener("click", event => {
@@ -57,6 +58,18 @@ const initialGoogleFailed = googleErrorFromLocation();
 if (initialGoogleFailed) {
   const url = new URL(location.href);
   url.searchParams.delete("google");
+  history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash}`);
+}
+// GitHub OAuth callback errors land here (slice 7); the param is stripped
+// immediately so a refresh does not replay the failure message.
+function githubErrorFromLocation() {
+  const values = new URLSearchParams(location.search).getAll("github");
+  return values.length === 1 && values[0] === "error";
+}
+const initialGitHubFailed = githubErrorFromLocation();
+if (initialGitHubFailed) {
+  const url = new URL(location.href);
+  url.searchParams.delete("github");
   history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash}`);
 }
 function storedAuthKind() {
@@ -289,6 +302,24 @@ let accountCheckFlight = null, roomListVersion = 0, roomListCursor = null;
 // Sign-in & security settings (slice 7): mounted inside the account rooms
 // panel's <details>, opened from the session menu.
 const accountSettingsUI = createAccountSettingsUI({ accountClient });
+// Multi-method sign-in / create-account (slice 7): mounts into the auth
+// panel next to the Google button and the room/account key forms. After a
+// browser sign-in the cookie changed, so restore the in-memory session and
+// route the same way the account-key flow does.
+const signinUI = createAuthSigninUI({
+  accountClient,
+  ensureAccountSession,
+  onSignedIn: async () => {
+    await accountClient.restore();
+    const requestedRoom = selectedRoomFromLocation();
+    if (!requestedRoom) { showAccountWorkspace(); return; }
+    const identity = await client.restore(requestedRoom);
+    if (!identity || !state || session?.member.id !== identity.member.id || session?.roomId !== identity.roomId) return;
+    $("#message-input").focus();
+    if (state) revealLocationHash();
+  }
+});
+signinUI.mount($("#auth-signin-ui"));
 function openAccountSettings() {
   setSessionMenuOpen(false);
   if (!accountClient.session?.authenticated) return;
@@ -3707,6 +3738,8 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
       $("#identity-label").textContent = "Not signed in";
       setFormStatus($("#auth-error"), initialGoogleFailed
         ? "Google sign-in didn't finish — it may have been cancelled, or Google declined the request. Try again, or sign in with an account key instead."
+        : initialGitHubFailed
+        ? "GitHub sign-in didn't finish — it may have been cancelled, or GitHub declined the request. Try again, or sign in another way."
         : "");
       setConnectionStatus("Not connected · account sign-in required");
       configureAuthPanel();
@@ -3728,6 +3761,8 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
   const requestedRoom = selectedRoomFromLocation();
   setFormStatus($("#auth-error"), initialGoogleFailed
     ? "Google sign-in didn't finish — it may have been cancelled, or Google declined the request. Try again, or sign in with an account key instead."
+    : initialGitHubFailed
+    ? "GitHub sign-in didn't finish — it may have been cancelled, or GitHub declined the request. Try again, or sign in another way."
     : signedOut
     ? requestedRoom ? `This account cannot open #${requestedRoom}. Use an account with active membership there.` : ""
     : unreachableRoomMessage(error), true);

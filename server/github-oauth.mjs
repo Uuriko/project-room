@@ -24,6 +24,23 @@ export const GITHUB_SCOPES = "read:user user:email";
 export const GITHUB_PENDING_TTL_MS = 10 * 60 * 1000;
 export const GITHUB_PENDING_MAX = 1000;
 
+// Post-login landing page for browser OAuth navigations (slice 7): the
+// GitHub callback content-negotiates — API clients keep the JSON body,
+// browsers (Accept: text/html) get a page that navigates to the account
+// home or the first room, mirroring the Google flow.
+export function githubPostLoginPage(href) {
+  if (href !== '/?github=error' && href !== '/?account=1' && !/^\/\?room=[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(href)) fail('github_callback_invalid');
+  const safe = href.replace(/&/g, '&amp;');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${safe}"><title>Opening Project Room</title></head><body><p>Opening Room…</p><p><a href="${safe}">Continue</a></p></body></html>`;
+}
+
+// Honest unconfigured landing for browser navigations to the GitHub start
+// route (slice 7): API clients keep the 503 JSON body, browsers
+// (Accept: text/html) get a readable page instead of a raw error.
+export function githubUnavailablePage() {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>GitHub sign-in unavailable</title></head><body><main><h1>GitHub sign-in isn&rsquo;t configured</h1><p>GitHub sign-in is not configured on this Room. An operator needs to add the GitHub OAuth credentials before it can be used.</p><p><a href="/?account=1">Back to sign-in</a></p></main></body></html>`;
+}
+
 export class GitHubOAuthError extends Error {
   constructor(code) { super(code); this.name = "GitHubOAuthError"; this.code = code; }
 }

@@ -32,6 +32,7 @@ const ALLOWLIST = [
   /CODE_ALPHABET\s*=\s*"/, // invite-code alphabet constants, not secrets
   /LEGACY_CODE_ALPHABET\s*=\s*"/, // invite-code alphabet constants, not secrets
   /token:\s*"TELEGRAM_BOT_TOKEN"/, // env var NAME as string, not a token value
+  /password:\s*form\.querySelector/, // src/auth-signin-ui.js: reads the user's typed password back from the DOM to preserve it across signup/login mode toggles — not a hardcoded secret
   /webhookSecret:\s*"TELEGRAM_WEBHOOK_SECRET"/, // env var NAME as string
   /insertCredential\(/, // `token = this.insertCredential(...)` — credential store API
   /base64url\(randomBytes\(/, // runtime-generated random values
