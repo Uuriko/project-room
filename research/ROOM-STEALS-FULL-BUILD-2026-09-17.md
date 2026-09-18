@@ -52,6 +52,7 @@ No deploy.
 | 10 | [Nautilo](https://nautilo.ai) / [agentsea/nautilo](https://github.com/agentsea/nautilo) (MIT) | Closest open multi-user + multi-agent Room peer; Nautilo Genie → Room **Second**; Smart Routing; harness-of-harnesses; Secretary; privacy ladder — [ROOM-NAUTILO-STEAL.md](../docs/ROOM-NAUTILO-STEAL.md) · [ROOM-SECOND-V0.md](../docs/ROOM-SECOND-V0.md) · [ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md](ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md) |
 | 11 | Deep-pass cousins (qm, Dust, Magentic-UI, Greenroom, AgentsMesh, Patchwork, KaibanJS, Nomos, ai-room) | Personal/shared scopes, dual permissions, human takeover, wake≠spawn, Autopilot handback — [ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md](ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md) |
 | 12 | Codex ChatGPT Web + TypeSafe Jev ([@miu21590](https://x.com/miu21590/status/2100630512536564085) · [miuuyy/codex-chatgpt-web](https://github.com/miuuyy/codex-chatgpt-web) · [`typesafe-ai/jev`](https://vercel.com/ai-gateway/models/jev)) | Same-rung factory spawn; named specialist seats; Jev cheap scorer/router; `delegation.spawn`; meter honesty (Hosted / Community / Web). **Second** never Genie — [ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md) |
+| 13 | Jev compaction + Reflex ([@altryne](https://x.com/altryne/status/2100739055923425589) · [tamaratran/fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction) · [@kshetrajna](https://x.com/kshetrajna/status/2100739853101195744) · [kshetrajna12/reflex](https://github.com/kshetrajna12/reflex)) | Score tool_use/tool_result (`noul` keepCall/keepResult); drop/truncate stale tools; user+assistant verbatim. Reflex = on-device System One (Qwen3.5-0.8B WebGPU). **Compute ≠ Room.** Do not fork the Claude plugin — [ROOM-JEV-COMPACTION-REFLEX-STEAL-2026-09-18.md](ROOM-JEV-COMPACTION-REFLEX-STEAL-2026-09-18.md) |
 
 ## Cua files (merged)
 
@@ -203,6 +204,22 @@ Contracts patched: [ROOM-SCORER.md](../docs/ROOM-SCORER.md) ·
 [ROOM-KITS-HARNESS-JEV-ROY.md](../docs/ROOM-KITS-HARNESS-JEV-ROY.md) ·
 [ROOM-SECOND-V0.md](../docs/ROOM-SECOND-V0.md).
 
+### K. Jev compaction + Reflex on-device (research)
+
+Score every tool_use / tool_result (`noul` keepCall / keepResult);
+drop or truncate stale tools; user + assistant text stays verbatim.
+Do not summarize honesty receipts. Room: `ledger.compact` on the
+tool-call ledger before context blowup (Second / Connect long traces).
+Ask: optional quiet prune + export after — not a mid-stream essay.
+Community Provide: Reflex-like on-device, or TypeSafe Jev only if a
+key already exists. Do not fork the Claude Code plugin. Needle stays
+tools-edge, not Ask chat. **Compute ≠ Room.**
+
+Research: [ROOM-JEV-COMPACTION-REFLEX-STEAL-2026-09-18.md](ROOM-JEV-COMPACTION-REFLEX-STEAL-2026-09-18.md)
+
+Sibling of §J / [#477](https://github.com/Uuriko/project-room/pull/477).
+Do not edit Ask Artifacts-lite / T042 / T043 / T060 from this fold.
+
 ## Catalog face (not live doors)
 
 [ROOM-KITS-CATALOG.md](../docs/ROOM-KITS-CATALOG.md) **Optional later**
@@ -264,6 +281,7 @@ shelf.
 | `research/ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md` | Nautilo packages + Conductor / Floor Manager + new cousins + receipt shapes |
 | `research/ROOM-NOVEL-SYNTHESIS-2026-09-17.md` | Ledger Room novel synthesis |
 | `research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md` | Codex same-rung spawn + Jev scorer/router + `delegation.spawn` + meter honesty |
+| `research/ROOM-JEV-COMPACTION-REFLEX-STEAL-2026-09-18.md` | Jev tool-trace compaction + Reflex on-device (keepCall/keepResult; no summary) |
 | `docs/ROOM-RECEIPT-GRAPH-V0.md` | `citedReceiptIds[]` DAG; orphan claims fail |
 | `docs/ROOM-NAUTILO-STEAL.md` | Nautilo P0–P2 steals + Ledger Room delta |
 | `docs/ROOM-SECOND-V0.md` | Second product spec v0 (never Genie in product copy) |
