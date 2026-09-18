@@ -44,6 +44,20 @@ function accountHomeFromLocation() {
   const values = new URLSearchParams(location.search).getAll("account");
   return values.length === 1 && values[0] === "1";
 }
+// One-shot signal from the Google OAuth callback: the flow genuinely failed
+// (denied consent, bad state). Read and stripped before boot runs so the
+// failure surfaces exactly once, as an auth-panel message, never as a
+// silent bounce back to the login form.
+function googleErrorFromLocation() {
+  const values = new URLSearchParams(location.search).getAll("google");
+  return values.length === 1 && values[0] === "error";
+}
+const initialGoogleFailed = googleErrorFromLocation();
+if (initialGoogleFailed) {
+  const url = new URL(location.href);
+  url.searchParams.delete("google");
+  history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash}`);
+}
 function storedAuthKind() {
   try { return sessionStorage.getItem("pr-auth-kind"); } catch { return null; }
 }
@@ -3660,7 +3674,9 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
     if (!account?.authenticated) {
       authKind = "account";
       $("#identity-label").textContent = "Not signed in";
-      setFormStatus($("#auth-error"), "");
+      setFormStatus($("#auth-error"), initialGoogleFailed
+        ? "Google sign-in didn't finish — it may have been cancelled, or Google declined the request. Try again, or sign in with an account key instead."
+        : "");
       setConnectionStatus("Not connected · account sign-in required");
       configureAuthPanel();
       $("#auth-panel").hidden = false;
@@ -3679,7 +3695,9 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
   const signedOut = [401, 403].includes(error.status);
   if (signedOut) recovery.clear();
   const requestedRoom = selectedRoomFromLocation();
-  setFormStatus($("#auth-error"), signedOut
+  setFormStatus($("#auth-error"), initialGoogleFailed
+    ? "Google sign-in didn't finish — it may have been cancelled, or Google declined the request. Try again, or sign in with an account key instead."
+    : signedOut
     ? requestedRoom ? `This account cannot open #${requestedRoom}. Use an account with active membership there.` : ""
     : unreachableRoomMessage(error), true);
   setConnectionStatus(signedOut ? "Not connected · sign in required" : "Room service unavailable · not connected");
