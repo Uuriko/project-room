@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeSlackEvent, readSlackEnvelope, slackSourceId, slackEvents, qualifySlackCursor,
+import { normalizeSlackEvent, readSlackEnvelope, slackSourceId, qualifySlackCursor,
   RecordedSlackEvents, bind, slackLimits } from "../server/channel-adapters/slack.mjs";
 import { ContractError } from "../server/channel-connection.mjs";
 import { readChannelEnvelope, adapterFor } from "../server/channel-adapters/index.mjs";
