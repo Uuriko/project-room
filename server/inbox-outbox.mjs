@@ -2,6 +2,7 @@
 import { createHash } from "node:crypto";
 import { validId } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
+import { toCsv, toJsonExport } from "./csv-export.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const exact = (v, fields) => v && typeof v === "object" && !Array.isArray(v)
@@ -159,3 +160,94 @@ export const publicDirectSend = row => row && {
   threadId: row.thread_id, status: row.status, providerId: row.provider_id,
   errorCode: row.error_code, createdAt: row.created_at, updatedAt: row.updated_at
 };
+
+// ---------------------------------------------------------------------------
+// Audit export of the send journal (task 42). The direct_channel_sends journal
+// is append-only and write-only through the HTTP path; the owner needs a
+// structured way to review exactly what the room sent, when, through which
+// channel. Message bodies are never stored — only the body hash — and the
+// export follows the publicDirectSend contract: the same fields the owner may
+// already see, nothing more. Pure: no network I/O, no new tables.
+
+export const directSendExportColumns = () => ([
+  { key: "id", header: "Send ID" },
+  { key: "channel", header: "Channel" },
+  { key: "to", header: "Recipient" },
+  { key: "subject", header: "Subject" },
+  { key: "threadId", header: "Thread ID" },
+  { key: "status", header: "Status" },
+  { key: "providerId", header: "Provider ID" },
+  { key: "errorCode", header: "Error" },
+  { key: "createdAt", header: "Created (UTC)" },
+  { key: "updatedAt", header: "Updated (UTC)" }
+]);
+
+const isoOrNull = ms => ms === null || ms === undefined ? null : new Date(ms).toISOString();
+// One export row: the public shape with human-readable timestamps.
+export function directSendExportRow(row) {
+  const pub = publicDirectSend(row);
+  if (!pub) fail(422, "invalid_direct_send", "Send attempt not found.");
+  return { ...pub, createdAt: isoOrNull(pub.createdAt), updatedAt: isoOrNull(pub.updatedAt) };
+}
+
+// Keyset cursor over the (created_at, id) sort key: "<created_at_ms>:<id>".
+// The id alone cannot cursor the journal because ids are random while rows
+// sort by created_at — a bare id comparison returns the wrong page whenever
+// lexicographic id order disagrees with time order.
+const encodeDirectSendCursor = row => `${row.created_at}:${row.id}`;
+const decodeDirectSendCursor = cursor => {
+  const text = String(cursor ?? "");
+  const split = text.indexOf(":");
+  const createdAt = split > 0 ? Number(text.slice(0, split)) : NaN;
+  const id = split > 0 ? text.slice(split + 1) : "";
+  if (!Number.isSafeInteger(createdAt) || createdAt < 0 || !validId(id))
+    fail(422, "invalid_direct_send", "Supply a pagination cursor.");
+  return { createdAt, id };
+};
+
+// Account-scoped, newest-first page of the send journal. `before` is the
+// opaque cursor of the last row of the previous page; `status` filters to one
+// journal state. Malformed pagination arguments are refused.
+export function listDirectSends(db, accountId, { limit = 100, before = null, status = null } = {}) {
+  ensureDirectSendTable(db);
+  if (!validId(accountId)) fail(422, "invalid_direct_send", "Supply an account.");
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000)
+    fail(422, "invalid_direct_send", "Supply a page size of 1–1000.");
+  if (status !== null && !["pending", "sent", "failed"].includes(status))
+    fail(422, "invalid_direct_send", "Supply a send status.");
+  const cursor = before === null ? null : decodeDirectSendCursor(before);
+  const clauses = ["account_id = ?"], params = [accountId];
+  if (status !== null) { clauses.push("status = ?"); params.push(status); }
+  if (cursor !== null) {
+    clauses.push("(created_at < ? OR (created_at = ? AND id < ?))");
+    params.push(cursor.createdAt, cursor.createdAt, cursor.id);
+  }
+  const rows = db.prepare(`SELECT * FROM direct_channel_sends WHERE ${clauses.join(" AND ")} ORDER BY created_at DESC, id DESC LIMIT ?`)
+    .all(...params, limit + 1);
+  const page = rows.slice(0, limit);
+  return { sends: page.map(publicDirectSend),
+    nextCursor: rows.length > limit ? encodeDirectSendCursor(page[page.length - 1]) : null };
+}
+
+// Full structured export of the account's send journal as CSV or JSON text,
+// oldest first. HTTP download wiring is a later slice; this is the pure core.
+export function exportDirectSends(db, accountId, { format = "csv", status = null, at = Date.now() } = {}) {
+  ensureDirectSendTable(db);
+  if (!validId(accountId)) fail(422, "invalid_direct_send", "Supply an account.");
+  if (!["csv", "json"].includes(format)) fail(422, "invalid_direct_send", "Export as csv or json.");
+  if (status !== null && !["pending", "sent", "failed"].includes(status))
+    fail(422, "invalid_direct_send", "Supply a send status.");
+  if (!Number.isSafeInteger(at) || at < 0) fail(422, "invalid_direct_send", "Supply an export time.");
+  const clauses = ["account_id = ?"], params = [accountId];
+  if (status !== null) { clauses.push("status = ?"); params.push(status); }
+  const rows = db.prepare(`SELECT * FROM direct_channel_sends WHERE ${clauses.join(" AND ")} ORDER BY created_at ASC, id ASC`)
+    .all(...params).map(directSendExportRow);
+  const columns = directSendExportColumns();
+  const generatedAt = new Date(at).toISOString();
+  const stamp = generatedAt.slice(0, 10);
+  if (format === "json") {
+    return { format, filename: `direct-channel-sends-${stamp}.json`,
+      text: toJsonExport({ name: "direct-channel-sends", generatedAt, columns, rows }) };
+  }
+  return { format, filename: `direct-channel-sends-${stamp}.csv`, text: toCsv({ columns, rows }) };
+}
