@@ -81,6 +81,23 @@ const rateHash = value => createHash("sha256").update(String(value)).digest("hex
 // A lagging stream that still has not drained its final event by now is dropped.
 const STREAM_DRAIN_GRACE_MS = 5000;
 
+// Least-recently-used bookkeeping for small internal caches (channel senders).
+// Returns the cached value for key, marking it most-recently-used; when key is
+// absent, makeValue() builds it, the least-recently-used entry is evicted at
+// capacity, and the new value is stored. Exported for unit tests.
+export function touchLruEntry(map, key, makeValue, capacity) {
+  if (map.has(key)) {
+    const value = map.get(key);
+    map.delete(key);
+    map.set(key, value); // mark most-recently-used
+    return value;
+  }
+  while (map.size >= capacity) map.delete(map.keys().next().value); // evict least-recently-used
+  const value = makeValue();
+  map.set(key, value);
+  return value;
+}
+
 export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = STREAM_INTERVAL_DEFAULT_MS, streamQueueCap = 65536, trustedLocalProxy = false,
   loadAsset = path => readFile(new URL(path, assetRoot)), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
@@ -158,13 +175,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   const resolveChannelTransport = channelTransports ?? (({ provider, accountId, connectionId }) => {
     if (!channelSendProviders.includes(provider)) return null;
     const key = JSON.stringify([provider, accountId, connectionId]);
-    if (!channelSenders.has(key)) {
-      if (channelSenders.size >= 2000) channelSenders.clear(); // Idle scopes only hold in-memory receipts; the send journal stays authoritative.
+    // Idle scopes only hold in-memory receipts; the send journal stays
+    // authoritative, so evicting the least-recently-used sender is safe —
+    // unlike clear(), this never drops a transport with in-flight sends that
+    // was recently used.
+    return touchLruEntry(channelSenders, key, () => {
       const adapter = telegram.configured ? new TelegramTransport({ config: telegram, status: telegramStatus, accountId, connectionId, receipts: sendReceipts })
         : new FixtureChannelSender({ kind: provider, status: telegramStatus, accountId, connectionId });
-      channelSenders.set(key, { mode: telegram.configured ? "live" : "fixture", transport: new SyntheticInboxTransport(store.inbox, adapter) });
-    }
-    return channelSenders.get(key);
+      return { mode: telegram.configured ? "live" : "fixture", transport: new SyntheticInboxTransport(store.inbox, adapter) };
+    }, 2000);
   });
   if (typeof cookieNamespace !== "string" || !/^[A-Za-z0-9_-]{0,64}$/.test(cookieNamespace))
     throw new Error("Cookie namespace must contain at most 64 letters, digits, underscores or hyphens");
