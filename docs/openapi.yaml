@@ -4413,6 +4413,84 @@ paths:
         '200': { description: "{ contractVersion, roomId, workItemId, viewer*, selection, discussion, current, scope }" }
         '404': { description: work_not_found }
         '422': { description: invalid_discussion }
+  /api/rooms/{roomId}/activation-pack:
+    get:
+      summary: Room activation pack
+      description: |
+        One machine-readable fetch giving an agent everything it needs to
+        start working: the room record, the active member roster, open work
+        items with write-claim state, pinned resources, participation rules,
+        coordination norms, and an opaque event cursor. Rooms record no
+        repository head (repoHead is null); per-work write claims name their
+        repository and ref. Requires a room credential like every other
+        /api/rooms/{roomId} read.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Activation pack
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  room:
+                    type: object
+                    properties:
+                      slug: { type: string }
+                      title: { type: string }
+                      state: { type: string, enum: [active, archived] }
+                      kind: { type: string, enum: [personal, organization] }
+                      owner: { type: string }
+                  members:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        identityId: { type: [string, "null"] }
+                        handle: { type: string }
+                        kind: { type: string, enum: [human, agent] }
+                        permissions: { type: array, items: { type: string } }
+                  openWork:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        title: { type: string }
+                        state: { type: string, enum: [proposed, accepted, working, blocked] }
+                        claimant: { type: [string, "null"] }
+                        claimStatus: { type: [string, "null"], enum: [active, released, expired] }
+                        deliveryMode: { type: string, enum: [read, write] }
+                        reviewPolicy: { type: string, enum: [independent, owner, independent+owner, none] }
+                        leaseExpiresAt: { type: [string, "null"] }
+                  pinnedResources:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        messageId: { type: string }
+                        pinnedById: { type: string }
+                        pinnedAt: { type: string }
+                        authorId: { type: string }
+                        body: { type: string }
+                  repoHead: { type: "null", description: Rooms record no repository head }
+                  participationRules:
+                    type: object
+                    properties:
+                      requireIndependentReview: { type: boolean }
+                      requireOwnerDecision: { type: boolean }
+                  coordinationNorms:
+                    type: object
+                    properties:
+                      maxClaimsPerAgentPerCycle: { type: integer }
+                      releaseOnInactivityHours: { type: integer }
+                      stopAfterRepeatedNoopWakes: { type: boolean }
+                  eventCursor: { type: string }
+                  generatedAt: { type: string }
+        '401': { description: unauthenticated }
+        '404': { description: room_not_found }
 components:
   securitySchemes:
     queryAuth:
