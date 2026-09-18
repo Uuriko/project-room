@@ -53,7 +53,14 @@ export function authPanelTitle(roomId, title) {
 export const KEY_KIND_HINT = "Room key: one room. Account key: Google or email across rooms.";
 
 // Human invite URLs are #join/<43-char token>, never #room/{id} and never RM-.
+// `location.origin` alone drops `/room` on www.getdasha.com.
 const JOIN_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+
+export function humanJoinShareBase(locationLike = globalThis.location) {
+  const origin = String(locationLike?.origin ?? "").replace(/\/$/, "");
+  const path = String(locationLike?.pathname ?? "").replace(/\/index\.html$/, "").replace(/\/$/, "");
+  return `${origin}${path}`;
+}
 
 export function publicJoinInviteHref(token, purposePath = "", locationLike = globalThis.location) {
   const secret = String(token ?? "");
@@ -62,6 +69,9 @@ export function publicJoinInviteHref(token, purposePath = "", locationLike = glo
   const hostname = locationLike?.hostname ?? "";
   const origin = String(locationLike?.origin ?? "").replace(/\/$/, "");
   const local = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
-  const base = local && origin ? origin : PUBLIC_ROOM_DOOR;
+  const pathAware = humanJoinShareBase(locationLike);
+  const base = local
+    ? (pathAware || origin)
+    : (pathAware.endsWith("/room") ? pathAware : PUBLIC_ROOM_DOOR);
   return `${base}/#join/${secret}${extra}`;
 }

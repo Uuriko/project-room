@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   roomIdFromHash, selectedRoomFromLocation, publicRoomDeepLink, PUBLIC_ROOM_DOOR,
-  publicJoinInviteHref, roomOpenHandoffHref, authPanelTitle, looksLikeSecretTitle, KEY_KIND_HINT
+  publicJoinInviteHref, humanJoinShareBase, roomOpenHandoffHref, authPanelTitle, looksLikeSecretTitle, KEY_KIND_HINT
 } from "../src/room-deep-link.js";
 
 test("roomIdFromHash reads #room/{roomId} and rejects lookalikes", () => {
@@ -72,4 +72,30 @@ test("human invite URL is the full public #join/ link, never #room/ or RM-", () 
   assert.equal(publicJoinInviteHref("RM-ABC"), "");
   assert.equal(publicJoinInviteHref("short"), "");
   assert.doesNotMatch(publicJoinInviteHref(token), /#room\//);
+});
+
+test("human join share URLs keep the app path so www /room is not dropped", () => {
+  const token = "T".repeat(43);
+  assert.equal(humanJoinShareBase({ origin: "https://www.getdasha.com", pathname: "/room" }), "https://www.getdasha.com/room");
+  assert.equal(humanJoinShareBase({ origin: "https://www.getdasha.com", pathname: "/room/" }), "https://www.getdasha.com/room");
+  assert.equal(
+    publicJoinInviteHref(token, "", { hostname: "www.getdasha.com", origin: "https://www.getdasha.com", pathname: "/room" }),
+    `https://www.getdasha.com/room/#join/${token}`
+  );
+  assert.equal(
+    publicJoinInviteHref(token, "", { hostname: "www.getdasha.com", origin: "https://www.getdasha.com", pathname: "/room/" }),
+    `https://www.getdasha.com/room/#join/${token}`
+  );
+  assert.equal(
+    publicJoinInviteHref(token, "/work/item-1", { hostname: "www.getdasha.com", origin: "https://www.getdasha.com", pathname: "/room/index.html" }),
+    `https://www.getdasha.com/room/#join/${token}/work/item-1`
+  );
+  assert.equal(
+    publicJoinInviteHref(token, "", { hostname: "localhost", origin: "http://localhost:52331", pathname: "/" }),
+    `http://localhost:52331/#join/${token}`
+  );
+  assert.doesNotMatch(
+    publicJoinInviteHref(token, "", { hostname: "www.getdasha.com", origin: "https://www.getdasha.com", pathname: "/" }),
+    /^https:\/\/www\.getdasha\.com\/#join\//
+  );
 });

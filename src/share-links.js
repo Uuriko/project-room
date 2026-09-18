@@ -1,4 +1,5 @@
 import { publicJoinInviteHref } from "./room-deep-link.js";
+// Invite copy uses publicJoinInviteHref (origin + /room path). Never `${location.origin}/#join/`.
 
 const $ = selector => document.querySelector(selector);
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;

@@ -123,8 +123,55 @@ test("invitation UI retries the same uncertain creation and preserves confirmed 
     assert.equal(node("#share-link-url").value, `http://localhost:52331/#join/${requests[0].linkToken}`);
     assert.match(node("#share-link-url").value, /#join\//);
     assert.doesNotMatch(node("#share-link-url").value, /#room\//);
+    assert.doesNotMatch(node("#share-link-url").value, /^https:\/\/www\.getdasha\.com\/#join\//);
     assert.equal(node("#share-link-create").disabled, false);
     assert.equal(focused, "#share-link-copy");
+    ui.resetManagement();
+  } finally {
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+  }
+});
+
+test("invitation UI writes a path-aware www /room join URL", async () => {
+  const nodes = new Map();
+  const node = selector => {
+    if (!nodes.has(selector)) nodes.set(selector, {
+      value: "", textContent: "", hidden: false, disabled: false, open: false, dataset: {}, handlers: {},
+      classList: { toggle() {} },
+      addEventListener(type, handler) { this.handlers[type] = handler; },
+      contains() { return false; }, replaceChildren() {}, showModal() { this.open = true; }, close() { this.open = false; },
+      focus() {},
+    });
+    return nodes.get(selector);
+  };
+  const globals = { document: { querySelector: node }, window: { addEventListener() {} },
+    location: { hostname: "www.getdasha.com", origin: "https://www.getdasha.com", pathname: "/room/" } };
+  const previous = new Map(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const member = { id: "owner", kind: "human", revision: 1, permissions: ["manage_members"] };
+  const session = { member };
+  let created;
+  const client = {
+    session, ownsAccountSession: () => true, generation: 0, path: suffix => suffix,
+    async request(path, options) {
+      if (options?.method === "POST") {
+        created = structuredClone(options.data);
+        return { link: { id: "www-link", status: "active", expiresAt: options.data.expiresAt } };
+      }
+      return { links: [] };
+    },
+  };
+  try {
+    for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+    const ui = installShareLinks({ client, accountClient: {}, getState: () => ({ members: { owner: member } }), getSession: () => session, openRoom() {} });
+    node("#share-link-expiry").value = "24";
+    node("#share-link-limit").value = "2";
+    await node("#invite-people-button").handlers.click();
+    await node("#share-link-form").handlers.submit({ preventDefault() {} });
+    assert.equal(node("#share-link-url").value, `https://www.getdasha.com/room/#join/${created.linkToken}`);
+    assert.doesNotMatch(node("#share-link-url").value, /^https:\/\/www\.getdasha\.com\/#join\//);
     ui.resetManagement();
   } finally {
     for (const [key, descriptor] of previous) {
