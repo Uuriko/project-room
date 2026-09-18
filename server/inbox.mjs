@@ -14,6 +14,7 @@ import { inboxHandoffStatuses } from "./inbox-handoff.mjs";
 import { InboxStitchStore } from "./inbox-stitch-store.mjs";
 import { createNotifyPrefs } from "./notify-prefs.mjs";
 import { runImportGuards, replayImportedNotification, scoreImportedEnvelope } from "./inbox-import-guards.mjs";
+import { shadowDecisionForImport } from "./spam-shadow.mjs";
 import { spamQuarantineStatuses } from "./spam-quarantine-journal.mjs";
 import { channels, connectionState, profileChannel } from "./channel-connection.mjs";
 import { prepareGraphReplyDraft, buildGraphReplyDraft, classifyGraphReplyCreation, classifyGraphReplyUpdateAcknowledgment, normalizeReplyObservation, prepareGraphReplyUpdate, buildGraphReplyUpdate, compareReplyUpdateEnvelope } from "./graph-reply-draft.mjs";
@@ -1316,6 +1317,15 @@ export class Inbox {
           // or moved here — the scores are recorded on the receipt.
           Object.assign(receipt, runImportGuards({ prefs: this.notifyPrefs, accountId,
             envelope: request.data.envelope, at: now }));
+          // Shadow-mode auto-quarantine instrumentation (policy §5, 14-day
+          // shadow): log what WOULD have been held under the v1 hold
+          // threshold, with the §2.3 gates evaluated from the envelope. A pure
+          // function of journaled inputs (flag + envelope + at), so the
+          // journal replay recomputes it identically below. One decision per
+          // scored message, wouldHold true or false — flag-only behavior is
+          // unchanged: nothing is held, hidden, or moved here.
+          Object.assign(receipt, { shadowQuarantine: shadowDecisionForImport({ flag: receipt.spam,
+            envelope: request.data.envelope, at: now }) });
           // Durable spam quarantine: when the flag trips, file the message in
           // the restart-surviving spam_quarantine journal (store.spamQuarantine)
           // for owner review — never the in-memory createQuarantineQueue, which
@@ -1476,6 +1486,13 @@ export class Inbox {
           expected.spam = scoreImportedEnvelope(request.data.envelope);
           expected.notify = replayImportedNotification({ snapshot: receipt.notify.prefs, accountId: row.account_id,
             connectionId: receipt.notify.connectionId, urgent: receipt.notify.urgent, at: receipt.notify.at });
+        }
+        // Shadow-decision replay: recompute from the journaled flag inputs and
+        // the journaled at, exactly as the import path did. Receipts journaled
+        // before shadow instrumentation existed skip the replay.
+        if (request.action === "source.import" && receipt.shadowQuarantine !== undefined) {
+          expected.shadowQuarantine = shadowDecisionForImport({ flag: scoreImportedEnvelope(request.data.envelope),
+            envelope: request.data.envelope, at: receipt.shadowQuarantine.at });
         }
         sources.set(key, { account_id: row.account_id, id: request.sourceId, revision: expected.revision, created_at: prior?.created_at ?? row.at, updated_at: row.at }); versions++;
       } else if (["source.read", "source.unread"].includes(request.action)) {

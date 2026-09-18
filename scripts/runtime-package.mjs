@@ -41,6 +41,7 @@ optional.push("server/inbox-stitch-store.mjs"); // hash-only stitch graph (impor
 optional.push("server/inbox-spam.mjs"); // spam/phishing flagging (imported by server/inbox-import-guards.mjs; pure, no imports of its own)
 optional.push("server/notify-prefs.mjs"); // notification prefs + quiet hours (imported by server/inbox.mjs and server/inbox-import-guards.mjs; pure, no imports of its own)
 optional.push("server/inbox-import-guards.mjs"); // import-time spam/notify wiring (imported by server/inbox.mjs; pure, imports inbox-spam.mjs and notify-prefs.mjs)
+optional.push("server/spam-shadow.mjs"); // shadow-mode auto-quarantine instrumentation (imported by server/inbox.mjs; pure, imports inbox-spam.mjs)
 optional.push("server/spam-quarantine-journal.mjs"); // spam-guard quarantine journal (imported by server/store.mjs; imports ServiceError from store.mjs)
 optional.push("server/quarantine-thread-splits.mjs"); // quarantine review thread-split journal (imported by server/store.mjs and server/inbox.mjs)
 // NOTE: server/thread-tree.mjs stays OUT of the closure. inbox-threads.mjs
