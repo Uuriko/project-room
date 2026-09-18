@@ -74,6 +74,7 @@ optional.push("src/work-loops.js");
 optional.push("src/work-recipes.js");
 optional.push("server/action-classes.mjs");
 optional.push("server/room-lifecycle.mjs");
+optional.push("server/room-norms.mjs"); // RC-2026-09-18-043: coordination norms defaults (pure; consumed by the activation-pack route)
 optional.push("server/attachment-schema.mjs");
 optional.push("server/wake-queue.mjs");
 optional.push("server/attention.mjs");
