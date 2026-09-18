@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRuntimePackage, verifyRuntimePackage } from './runtime-package.mjs';
+import { fillAccessKey } from "./auth-signin.mjs";
 
 const repository = fileURLToPath(new URL('../', import.meta.url));
 // Pins track the current store schema, not fixed commits: a packaged runtime can only
@@ -63,7 +64,7 @@ for (const touch of [false, true]) test(`packaged browser fallback ${touch ? 'to
   page.on('dialog', dialog => dialog.accept()); // Explicit synthetic reload/sign-out choices.
   const origin = `http://127.0.0.1:${port}`;
   const enter = async (who = 'owner') => {
-    await page.locator('#access-key').fill(fixture.keys[who]);
+    await fillAccessKey(page, fixture.keys[who]);
     await page.locator('#auth-form button[type=submit]').click();
     await page.locator('#main').waitFor({ state: 'visible' });
   };

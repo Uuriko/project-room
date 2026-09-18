@@ -7,6 +7,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 // Coordination-loop signals are derived at read time and surface as a pause
 // hint on the work card - never a block, write or dispatch. This journey seeds
@@ -45,7 +46,7 @@ test("loop warning: duplicate drafts and acknowledgement chains pause-hint on th
   });
   const page = await context.newPage(); page.setDefaultTimeout(12000);
   page.on("pageerror", error => errors.push(error.message));
-  await page.goto(origin); await page.locator("#access-key").fill(f.keys.owner);
+  await page.goto(origin); await fillAccessKey(page, f.keys.owner);
   await page.getByRole("button", { name: "Enter room", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
   const duplicates = page.locator('[data-work-record-id="test-handoff"] .loop-warning');

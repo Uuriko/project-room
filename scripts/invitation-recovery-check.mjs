@@ -5,6 +5,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
+import { fillAccessKey } from "./auth-signin.mjs";
 
 async function setup(t, { touch = false, clipboard = false } = {}) {
   const fixture = createAcceptanceFixture();
@@ -43,7 +44,7 @@ async function setup(t, { touch = false, clipboard = false } = {}) {
 async function ownerPage(page, origin, fixture) {
   await page.goto(origin);
   await page.locator('#auth-panel').waitFor({ state: 'visible' });
-  await page.locator('#access-key').fill(fixture.keys.owner);
+  await fillAccessKey(page, fixture.keys.owner);
   await page.getByRole('button', { name: 'Enter room', exact: true }).click();
   await page.locator('#main').waitFor({ state: 'visible' });
   await page.locator('#invite-people-button').click();

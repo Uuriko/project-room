@@ -5,6 +5,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { chromium } from "playwright";
 import { createResultsFixture } from "./results-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 async function setup(t, { mobile = false, guest = false, expectedWrites = 0 } = {}) {
   const f = createResultsFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -26,7 +27,7 @@ async function setup(t, { mobile = false, guest = false, expectedWrites = 0 } = 
     if (new URL(route.request().url()).origin !== origin) { outside.push(route.request().url()); return route.abort(); }
     return route.continue();
   });
-  await p.goto(origin); await p.locator("#access-key").fill(f.keys[guest ? "guest" : "owner"]);
+  await p.goto(origin); await fillAccessKey(p, f.keys[guest ? "guest" : "owner"]);
   await p.locator('#auth-form button[type="submit"]').click(); await p.locator("#main").waitFor({ state: "visible" });
   p.on("request", request => { if (request.method() !== "GET" && new URL(request.url()).pathname.startsWith("/api/rooms/")) writes.push(request.url()); });
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(outside, []); assert.equal(writes.length, expectedWrites); });

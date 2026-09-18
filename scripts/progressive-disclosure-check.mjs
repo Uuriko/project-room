@@ -7,6 +7,7 @@ import { rmSync } from "node:fs";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 // Sections normalized to the shared .section-summary anatomy.
 const SHARED = ["#composer-options", "#people-panel", "#record-panel", "#decision-section"];
@@ -28,7 +29,7 @@ async function setup(t, { mobile = false } = {}) {
   });
   await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await page.locator("#access-key").fill(f.keys.owner); await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await fillAccessKey(page, f.keys.owner); await page.getByRole("button", { name: "Enter room", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(outside, []); });
   return { ...f, page };

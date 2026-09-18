@@ -9,6 +9,7 @@ import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { EVENT_TYPES as T } from '../src/events.js';
+import { fillAccessKey } from "./auth-signin.mjs";
 
 for (const touch of [false, true]) {
   test(`first use ${touch ? 'touch' : 'desktop'}: guest suggestion becomes accountable work`, { timeout: 60000 }, async t => {
@@ -35,7 +36,7 @@ for (const touch of [false, true]) {
     await owner.locator('#auth-panel').waitFor({ state: 'visible' });
     assert.equal(await owner.locator('#identity-label').textContent(), 'Not signed in');
     assert.equal(await owner.locator('#auth-error').textContent(), '', 'a normal signed-out visit is not an error');
-    await owner.locator('#access-key').fill(ownerKey);
+    await fillAccessKey(owner, ownerKey);
     await owner.getByRole('button', { name: 'Enter room', exact: true }).click();
     await owner.locator('#main').waitFor({ state: 'visible' });
     await owner.locator('#invite-people-button').click();

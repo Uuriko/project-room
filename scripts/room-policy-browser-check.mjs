@@ -8,6 +8,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 async function setup(t, viewport = { width: 1440, height: 1000 }) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -22,7 +23,7 @@ async function setup(t, viewport = { width: 1440, height: 1000 }) {
   t.after(() => assert.deepEqual(errors, []));
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await page.locator("#access-key").fill(f.keys.owner);
+  await fillAccessKey(page, f.keys.owner);
   await page.getByRole("button", { name: "Enter room", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
   const send = (type, data) => f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type, data });
@@ -30,7 +31,7 @@ async function setup(t, viewport = { width: 1440, height: 1000 }) {
   const openForm = async () => { await page.locator("#new-work-button").click(); await page.locator("#new-work-form").waitFor({ state: "visible" }); await page.locator("#work-options").evaluate(el => { el.open = true; }); };
   const login = async (key, view = viewport) => {
     const other = await browser.newPage({ viewport: view, reducedMotion: "reduce" }); other.setDefaultTimeout(8000); other.on("pageerror", error => errors.push(error.message));
-    await other.goto(`http://127.0.0.1:${server.address().port}`); await other.locator("#access-key").fill(key);
+    await other.goto(`http://127.0.0.1:${server.address().port}`); await fillAccessKey(other, key);
     await other.getByRole("button", { name: "Enter room", exact: true }).click(); await other.locator("#main").waitFor({ state: "visible" }); return other;
   };
   const openDialog = async p => { await p.locator("#room-about").evaluate(el => { el.open = true; }); await p.locator("#room-instructions-open").click(); await p.locator("#room-instructions-dialog").waitFor({ state: "visible" }); };

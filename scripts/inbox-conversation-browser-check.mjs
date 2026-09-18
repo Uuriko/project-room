@@ -11,6 +11,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { emailContractFixture } from "./email-contract-fixture.mjs";
 import { normalizeGraphEmail } from "../server/graph-email.mjs";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 function seedThread(f) {
   const raw = emailContractFixture(); raw.connection.accountId = f.store.accountForMember("commons", "owner").id;
@@ -61,7 +62,7 @@ async function setup(t, mobile = false) {
   page.on("dialog", dialog => dialog.accept());
   await page.route("**/*", route => { if (new URL(route.request().url()).origin !== origin) { external.push(route.request().url()); return route.abort(); } return route.continue(); });
   await page.goto(origin + "/?room=commons");
-  await page.locator("#access-key").fill(accountKey); await page.locator('#auth-form button[type="submit"]').click();
+  await fillAccessKey(page, accountKey); await page.locator('#auth-form button[type="submit"]').click();
   await page.locator("#main").waitFor({ state: "visible" });
   const inbox = async () => {
     await page.locator("#nav-inbox").click(); await page.locator("#inbox-reader").waitFor({ state: "visible" });

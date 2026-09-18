@@ -8,6 +8,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { SyntheticInboxTransport } from "../server/inbox-transport.mjs";
 import { SyntheticMailFixture } from "./synthetic-mail-fixture.mjs";
 import { randomBytes } from "node:crypto";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 async function setup(t, { mobile = false, member = false } = {}) {
   const f = createAcceptanceFixture();
@@ -34,7 +35,7 @@ async function setup(t, { mobile = false, member = false } = {}) {
   page.on("pageerror", e => errors.push(e.message)); page.on("dialog", d => d.accept());
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(outside, []); });
   const login = async (p = page, accessKey = key) => {
-    await p.goto(origin + "/?account=1"); await p.locator("#access-key").fill(accessKey);
+    await p.goto(origin + "/?account=1"); await fillAccessKey(p, accessKey);
     await p.locator('#auth-form button[type="submit"]').click(); await p.locator("#inbox-panel").waitFor();
   };
   const capture = async name => { mkdirSync("test-results/account-workspace", { recursive: true });
@@ -91,7 +92,7 @@ test("account-only other-tab replacement clears a held private read and navigati
   const other = await f.context.newPage(); const account = f.store.accountForMember("commons", "owner");
   await other.goto(f.origin + "/?account=1"); await other.locator("#inbox-panel").waitFor();
   if (await other.locator("#session-menu-button").isVisible()) await other.locator("#session-menu-button").click(); await other.locator("#signout-button").click(); await other.locator("#auth-panel").waitFor();
-  await other.locator("#access-key").fill(f.store.issueAccountAccessKey(account.id));
+  await fillAccessKey(other, f.store.issueAccountAccessKey(account.id));
   await other.locator('#auth-form button[type="submit"]').click(); await other.locator("#inbox-panel").waitFor();
   await p.locator("#auth-panel").waitFor(); release();
   await p.waitForLoadState("networkidle");
@@ -101,7 +102,7 @@ test("account-only other-tab replacement clears a held private read and navigati
 
 test("legacy member entry does not expose an account Inbox", { timeout: 20000 }, async t => {
   const f = await setup(t), p = f.page;
-  await p.goto(f.origin); await p.locator("#access-key").fill(f.keys.guest); await p.locator('#auth-form button[type="submit"]').click();
+  await p.goto(f.origin); await fillAccessKey(p, f.keys.guest); await p.locator('#auth-form button[type="submit"]').click();
   await p.locator("#main").waitFor(); assert.equal(await p.locator("#workspace-nav").isVisible(), false);
 });
 
@@ -131,7 +132,7 @@ test("a lost account-only sign-out response clears private text and leaves a usa
   await p.getByText("Sign-out unconfirmed. Sign in to check your account.", { exact: true }).waitFor();
   assert.equal(await p.locator("#inbox-source-body").textContent(), "");
   assert.equal(await p.locator("#access-key").isEnabled(), true);
-  await p.locator("#access-key").fill(f.key); await p.locator('#auth-form button[type="submit"]').click(); await p.locator("#inbox-reader").waitFor();
+  await fillAccessKey(p, f.key); await p.locator('#auth-form button[type="submit"]').click(); await p.locator("#inbox-reader").waitFor();
 });
 
 test("account confirmation failure keeps the draft and reports uncertainty without signing out", { timeout: 20000 }, async t => {
