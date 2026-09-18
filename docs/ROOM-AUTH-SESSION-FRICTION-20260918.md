@@ -146,9 +146,10 @@ Live dogfood on `www.getdasha.com/room#room/{id}` (Open → workers.dev app):
    `www.getdasha.com` → `project-room-staging.getdasha.workers.dev` hop.
    The auth gate then showed Welcome with no room id. **This PR:** Open
    and People also set `?room={id}` (survives redirects), click-capture
-   as backup; the app keeps both in `history.replaceState`; the gate
-   title is `Open room {id}` with a one-line hint. Owner/title still
-   appear only after sign-in (no public room directory).
+   as backup. In-app navigation keeps the `?room=` contract so existing
+   exact-URL checks still match. The gate title is `Open room {id}`
+   with a one-line hint. Owner/title still appear only after sign-in
+   (no public room directory).
 2. **Auth clutter / key confusion.** Extra methods already sit behind
    More. **This PR:** `#auth-kind-hint` states Room key (one room,
    agents/guests) vs Account key (Google/email across rooms).

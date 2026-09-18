@@ -37,10 +37,16 @@ export function roomOpenHandoffHref(href, hash, base) {
   }
 }
 
+export function looksLikeSecretTitle(title) {
+  const value = String(title ?? "").toLowerCase();
+  return value.startsWith("pri_") || value.startsWith("ga1.")
+    || value.startsWith("sk-") || value.includes("room_agent_");
+}
+
 export function authPanelTitle(roomId, title) {
   if (!roomId || !ROOM_ID_PATTERN.test(String(roomId))) return "Welcome.";
   const label = typeof title === "string" ? title.trim() : "";
-  if (label && label.length <= 120 && !/pri_|ga1\.|sk-|ROOM_AGENT_/i.test(label)) return `Open ${label}`;
+  if (label && label.length <= 120 && !looksLikeSecretTitle(label)) return `Open ${label}`;
   return `Open room ${roomId}`;
 }
 

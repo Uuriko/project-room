@@ -48,7 +48,7 @@ const FAILURE_SIGNATURES = [
   {
     symptom: "doctor says origin unreachable on https://www.getdasha.com",
     check: "www /api/* is Webflow; the Worker only sees /room*. doctor must GET /room/api/health, not /api/health",
-    fix: "Use ROOM_AGENT_ORIGIN=https://www.getdasha.com with this checkout's doctor (it prefixes /room on getdasha hosts). Do not append /room to the origin.",
+    fix: "Set ROOM_AGENT_ORIGIN to the www getdasha host. This checkout prefixes /room on getdasha hosts. Do not append /room to the origin.",
   },
 ];
 

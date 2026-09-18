@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   roomIdFromHash, selectedRoomFromLocation, publicRoomDeepLink, PUBLIC_ROOM_DOOR,
-  roomOpenHandoffHref, authPanelTitle, KEY_KIND_HINT
+  roomOpenHandoffHref, authPanelTitle, looksLikeSecretTitle, KEY_KIND_HINT
 } from "../src/room-deep-link.js";
 
 test("roomIdFromHash reads #room/{roomId} and rejects lookalikes", () => {
@@ -46,6 +46,10 @@ test("auth gate names the room title when known, otherwise the id", () => {
   assert.equal(authPanelTitle("bad id"), "Welcome.");
   assert.match(KEY_KIND_HINT, /Room key opens one room/);
   assert.match(KEY_KIND_HINT, /Account key/);
+  assert.equal(looksLikeSecretTitle("Commons"), false);
+  assert.equal(looksLikeSecretTitle("pri_secret"), true);
+  assert.equal(looksLikeSecretTitle("PRI_secret"), true);
+  assert.equal(looksLikeSecretTitle("ga1.guest"), true);
 });
 
 test("public deep-link is the getdasha door fragment", () => {

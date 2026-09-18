@@ -11,7 +11,7 @@
   hand off `?room=` plus `#room/` so in-app browsers that drop the hash
   still reach the gate titled `Open room {id}`; Room vs Account key is
   spelled out; the invite field sits below More options; logged-out
-  mobile ⋮ is hidden. Audit: `docs/ROOM-AUTH-SESSION-FRICTION-20260918.md`.
+  mobile ⋮ is hidden. Audit: the 2026-09-18 auth-session friction note in docs.
 - Repo hygiene: README no longer cites a stale schema number or a nonexistent
   root file; the seven dead `test-results/` screenshot links in the 9/7 browser
   checkpoint docs are annotated as local-only; new `docs/README.md` orients

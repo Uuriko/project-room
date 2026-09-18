@@ -2,7 +2,7 @@
 // Cookies are HttpOnly (room_session / account_session). These keys are the
 // only client-owned session leftovers. Never store secrets here.
 
-import { ROOM_ID_PATTERN } from "./room-deep-link.js";
+import { ROOM_ID_PATTERN, looksLikeSecretTitle } from "./room-deep-link.js";
 
 export const LAST_ROOM_KEY = "pr-last-room";
 export const LAST_ROOM_TITLE_KEY = "pr-last-room-title";
@@ -14,7 +14,7 @@ export const SESSION_HINT_COPY = "This browser keeps an HttpOnly session cookie 
 
 function safeRoomTitle(title) {
   const value = typeof title === "string" ? title.trim() : "";
-  if (!value || value.length > 120 || /pri_|ga1\.|sk-|ROOM_AGENT_/i.test(value)) return null;
+  if (!value || value.length > 120 || looksLikeSecretTitle(value)) return null;
   return value;
 }
 

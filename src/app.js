@@ -169,6 +169,7 @@ const client = new RoomClient({
     $(".connection-bar").hidden = false;
     $("#signout-button").hidden = false; $("#signout-button").disabled = signoutLoading;
     $("#account-settings-button").hidden = false;
+    syncSessionMenu();
     $("#identity-label").textContent = displayName(session.member.id);
     $("#identity-label").title = `${memberLabel(session.member.id)} · ${kindLabel(session.member.kind)}`;
     $("#cursor-label").textContent = `Your caught-up marker: ${snapshot.cursor} · room event ${snapshot.sequence}`;
@@ -672,7 +673,9 @@ function setInvitationFeedback(text, error = false) {
   }
 }
 function roomHandoffLocation(roomId) {
-  return `${location.pathname}?room=${encodeURIComponent(roomId)}#room/${encodeURIComponent(roomId)}`;
+  // In-app navigation keeps the historical ?room= contract. Door Open/People
+  // already attach both ?room= and #room/ so hash-dropping browsers survive.
+  return `${location.pathname}?room=${encodeURIComponent(roomId)}`;
 }
 function configureAuthPanel(roomId = selectedRoomFromLocation()) {
   const accountMode = accountSignIn();

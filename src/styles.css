@@ -49,7 +49,6 @@ a { color: var(--blue); }
 .session-menu { display: contents; }
 #session-menu-button { display: none; }
 .session-menu-panel { display: contents; }
-#session-menu.empty { display: none; }
 label { color: var(--muted); font-size: .76rem; font-weight: 650; letter-spacing: .02em; }
 select, input, textarea { width: 100%; border: 1px solid var(--line); border-radius: .45rem; background: #0b0f14; color: var(--text); outline: none; }
 select, input { min-height: 2.6rem; padding: 0 .75rem; }
@@ -290,6 +289,7 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
   .topbar-actions { align-items: center; gap: .5rem; }
   #identity-label { font-size: .8rem; color: var(--muted); max-width: 9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .session-menu { display: block; position: relative; }
+  #session-menu.empty { display: none; }
   #session-menu-button { display: inline-grid; }
   .session-menu-panel { display: none; position: absolute; right: 0; top: calc(100% + .4rem); z-index: 30; min-width: 10rem; padding: .5rem; border: 1px solid var(--line); border-radius: .6rem; background: var(--panel-raised, #131922); box-shadow: 0 10px 30px rgb(0 0 0 / 45%); }
   .session-menu.open .session-menu-panel { display: flex; flex-direction: column; gap: .25rem; }
