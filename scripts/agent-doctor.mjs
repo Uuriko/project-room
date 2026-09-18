@@ -9,6 +9,33 @@ import { agentConnectionFromEnvironment, connectionDiagnostic, ConnectionError }
 // origin, credential source and access, with one concrete repair step for the
 // first failure. Never prints secrets: only the origin, room id and member id
 // appear in output. Never writes to the room.
+// Symptom → fastest check → exact fix for the room's common silent
+// failures. Printed AFTER the primary repair step, never instead of it:
+// doctor stays one-probe-one-repair; the table is the next beat when the
+// repair step doesn't cover what the agent is seeing.
+const FAILURE_SIGNATURES = [
+  {
+    symptom: "connect succeeds but check fails (or reports the wrong member)",
+    check: "doctor's credential line: ROOM_AGENT_CONFIG and the four ROOM_AGENT_* variables are mutually exclusive",
+    fix: "Clear one source, then re-run connect with the same secret source. Never mix a saved connection with environment credentials.",
+  },
+  {
+    symptom: "invite redeemed but the agent cannot write (work actions rejected)",
+    check: "`check` lists the member's real permissions; `identity-links` shows whether the identity is linked in this room",
+    fix: "If permissions are chat-only, ask the owner to widen: node scripts/agent-inbox.mjs identity-link <identityId> <perm1,perm2>. If the code was profile:chat, redeem a new profile:contribute code instead.",
+  },
+  {
+    symptom: "MCP route: initialize succeeds but zero tools are listed",
+    check: "compare scripts/agent-mcp.mjs against the repo's current copy",
+    fix: "Re-fetch scripts/agent-mcp.mjs from the repo; a stale client against a newer server lists no tools.",
+  },
+  {
+    symptom: "identity-create demands a credential for the unauthenticated first step",
+    check: "the CLI predates the 2026-09-12 enrollment fix",
+    fix: "Update scripts/ and client/ from the repo; identity-create needs only ROOM_AGENT_ORIGIN.",
+  },
+];
+
 async function serviceReachable(origin) {
   try {
     const response = await fetch(`${origin}/api/health`, {
@@ -23,8 +50,9 @@ export async function doctorMain(argv) {
   if (argv.length === 1 && argv[0] === "--help") {
     console.log(`node scripts/agent-inbox.mjs doctor
 Read-only self-test: checks the service origin, the credential source and
-access, then prints one concrete repair step for the first failure. Prints no
-secrets and writes nothing to the room.`);
+access, then prints one concrete repair step for the first failure, followed
+by a symptom → fastest check → exact fix table for common silent failures.
+Prints no secrets and writes nothing to the room.`);
     return;
   }
   try {
@@ -96,7 +124,7 @@ secrets and writes nothing to the room.`);
     }
 
     const healthy = repair === undefined;
-    console.log(JSON.stringify({ healthy, checks, ...(healthy ? {} : { repair }) }, null, 2));
+    console.log(JSON.stringify({ healthy, checks, ...(healthy ? {} : { repair, signatures: FAILURE_SIGNATURES }) }, null, 2));
     if (!healthy) process.exitCode = 1;
   } catch (error) {
     // Fixed diagnostic text avoids printing transport internals or secrets.

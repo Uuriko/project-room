@@ -135,3 +135,69 @@ test("doctor flags mixed credential sources without a misleading origin error", 
   assert.equal(check(result, "credential").detail, "ambiguous");
   assert.match(result.json.repair, /not both/);
 });
+
+test("doctor appends the failure-signature table after the repair step", async () => {
+  const result = await doctor();
+  assert.equal(result.status, 1);
+  assert.equal(result.json.healthy, false);
+  // The table never replaces the primary repair step: repair comes first.
+  assert.deepEqual(Object.keys(result.json), ["healthy", "checks", "repair", "signatures"]);
+  assert.equal(result.json.signatures.length, 4);
+  for (const entry of result.json.signatures) {
+    assert.ok(typeof entry.symptom === "string" && entry.symptom.length > 0);
+    assert.ok(typeof entry.check === "string" && entry.check.length > 0);
+    assert.ok(typeof entry.fix === "string" && entry.fix.length > 0);
+  }
+  assert.ok(!JSON.stringify(result.json.signatures).includes("pri_"), "table must not leak secrets");
+});
+
+test("signature table covers the unlinked-identity silent failure", async t => {
+  const { origin } = await serve(t);
+  const { identityId, secret } = await createAgentIdentity(origin, "Silent Bot");
+  const result = await doctor([], {
+    ROOM_AGENT_ORIGIN: origin, ROOM_AGENT_ROOM: "commons", ROOM_AGENT_MEMBER: identityId, ROOM_AGENT_TOKEN: secret,
+  });
+  assert.equal(result.status, 1);
+  const write = result.json.signatures.find(entry => entry.symptom.includes("cannot write"));
+  assert.ok(write, "expected a cannot-write signature");
+  assert.match(write.check, /identity-links/);
+  assert.match(write.fix, /identity-link/);
+});
+
+test("signature table covers the mixed-credential-source silent failure", async t => {
+  const { origin } = await serve(t);
+  const dir = mkdtempSync(join(tmpdir(), "doctor-sig-ambiguous-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const result = await doctor([], { ROOM_AGENT_ORIGIN: origin, ROOM_AGENT_CONFIG: dir, ROOM_AGENT_TOKEN: "x".repeat(43) });
+  assert.equal(result.status, 1);
+  const mixed = result.json.signatures.find(entry => entry.symptom.includes("check fails"));
+  assert.ok(mixed, "expected a mixed-credential signature");
+  assert.match(mixed.check, /ROOM_AGENT_CONFIG/);
+  assert.match(mixed.fix, /same secret source/);
+});
+
+test("signature table covers the stale-MCP-client and outdated-CLI failures", async () => {
+  const result = await doctor([], { ROOM_AGENT_ORIGIN: "http://127.0.0.1:1" });
+  assert.equal(result.status, 1);
+  const mcp = result.json.signatures.find(entry => entry.symptom.includes("zero tools"));
+  assert.ok(mcp, "expected an MCP zero-tools signature");
+  assert.match(mcp.fix, /agent-mcp\.mjs/);
+  const stale = result.json.signatures.find(entry => entry.symptom.includes("identity-create demands a credential"));
+  assert.ok(stale, "expected an outdated-CLI signature");
+  assert.match(stale.fix, /ROOM_AGENT_ORIGIN/);
+});
+
+test("healthy doctor output carries no signature table", async t => {
+  const { origin, ownerCommons } = await serve(t);
+  const { identityId, secret } = await createAgentIdentity(origin, "Healthy Sig Bot");
+  const owner = new RoomAgentClient({ origin, roomId: "commons", token: ownerCommons, memberId: "owner" });
+  await owner.linkIdentity({ identityId, permissions: ["accept_work"] });
+  const base = mkdtempSync(join(tmpdir(), "doctor-sig-healthy-"));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const dir = join(base, "agent");
+  saveAgentConnection(dir, { version: 1, origin, roomId: "commons", memberId: identityId, token: secret });
+  const result = await doctor([], { ROOM_AGENT_CONFIG: dir });
+  assert.equal(result.status, 0, JSON.stringify(result.json ?? result.stderr));
+  assert.equal(result.json.healthy, true);
+  assert.equal(result.json.signatures, undefined);
+});

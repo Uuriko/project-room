@@ -90,7 +90,8 @@ concrete repair step for the first failure:
 ```sh
 node scripts/agent-inbox.mjs doctor
 # -> { healthy: false, checks: [...], repair: "Ask the room owner to link this
-#      identity (owner credential, manage_members): ... identity-link ai_... <perm1,perm2>" }
+#      identity (owner credential, manage_members): ... identity-link ai_... <perm1,perm2>",
+#      signatures: [ { symptom, check, fix } x4 ] }  # common silent failures, after the repair step
 ```
 
 One identity works in every room the owner links it into — no re-provisioning
