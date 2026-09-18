@@ -119,9 +119,16 @@ export class SpamQuarantineJournal {
     });
   }
   held({ limit = null } = {}) {
+    return this.list({ status: "held", limit });
+  }
+  // The review surface's listing: held items in backlog order (oldest held
+  // first), reviewed history newest first. Additive read over held().
+  list({ status = "held", limit = null } = {}) {
+    if (!spamQuarantineStatuses.includes(status)) fail(422, "invalid_quarantine", "status must be held, released or dismissed");
     if (limit !== null && (!Number.isSafeInteger(limit) || limit < 1)) fail(422, "invalid_quarantine", "Supply a positive page size.");
-    return this.store.readTransaction(() => this.db.prepare("SELECT * FROM spam_quarantine WHERE status='held' ORDER BY quarantined_at LIMIT ?")
-      .all(limit ?? -1).map(view));
+    return this.store.readTransaction(() => this.db
+      .prepare(`SELECT * FROM spam_quarantine WHERE status=? ORDER BY quarantined_at ${status === "held" ? "ASC" : "DESC"} LIMIT ?`)
+      .all(status, limit ?? -1).map(view));
   }
   counts() {
     return this.store.readTransaction(() => {

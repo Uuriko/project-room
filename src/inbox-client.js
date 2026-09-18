@@ -227,6 +227,37 @@ export class InboxClient {
       && Array.isArray(v.results) && v.results.every(r => typeof r.score === "number" && r.score > 0 && this.validSourceSummary(r.source)));
   }
   // Owner-managed connection records: add or update a bot/mailbox profile, or disconnect ("Remove").
+  // Held-message quarantine review: one row per held message with the
+  // journal's verdict metadata and the resolved imported source.
+  validQuarantineItem(item) {
+    return item !== null && typeof item === "object" && typeof item.id === "string" && typeof item.messageId === "string"
+      && typeof item.channel === "string" && Array.isArray(item.reason) && item.reason.every(s => s !== null && typeof s === "object"
+        && typeof s.key === "string" && typeof s.weight === "number" && typeof s.detail === "string")
+      && Number.isInteger(item.score) && item.score >= 0 && item.score <= 100 && Number.isSafeInteger(item.quarantinedAt)
+      && ["held", "released", "dismissed"].includes(item.status)
+      && (item.source === null || (item.source !== null && typeof item.source === "object" && typeof item.source.id === "string"));
+  }
+  quarantine({ status = "held", limit = null } = {}) {
+    const params = new URLSearchParams();
+    if (status !== null && status !== undefined) params.set("status", status);
+    if (limit !== null && limit !== undefined) params.set("limit", String(limit));
+    return this.request(`/quarantine?${params}`, {}, v => ["held", "released", "dismissed"].includes(v.status)
+      && v.counts !== null && typeof v.counts === "object" && Number.isSafeInteger(v.counts.held)
+      && Array.isArray(v.items) && v.items.every(item => this.validQuarantineItem(item)));
+  }
+  quarantineRelease(quarantineId, note = null) {
+    return this.request("/quarantine/release", { method: "POST", body: JSON.stringify({ quarantineId, note }) },
+      v => v.decision === "release" && this.validQuarantineItem(v.item) && v.item.status === "released");
+  }
+  quarantineDismiss(quarantineId, note = null) {
+    return this.request("/quarantine/dismiss", { method: "POST", body: JSON.stringify({ quarantineId, note }) },
+      v => v.decision === "dismiss" && this.validQuarantineItem(v.item) && v.item.status === "dismissed");
+  }
+  quarantineSplit(quarantineId, note = null) {
+    return this.request("/quarantine/split", { method: "POST", body: JSON.stringify({ quarantineId, note }) },
+      v => v.split !== null && typeof v.split === "object" && typeof v.split.quarantineId === "string"
+        && typeof v.split.sourceId === "string" && this.validQuarantineItem(v.item) && v.item.status === "held");
+  }
   applyConnection(request) {
     const data = structuredClone(request);
     if (!validConnectionCommand(data)) return Promise.reject(fail("invalid_channel_connection", "Choose a supported connection command."));

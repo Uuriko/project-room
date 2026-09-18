@@ -2707,6 +2707,109 @@ paths:
         '200': { description: "{ contractVersion: 1, viewer, stitchKey, removedLinks, receiptId }" }
         '401': { description: account_session_required }
         '422': { description: invalid_stitch_split }
+  /api/inbox/quarantine:
+    get:
+      summary: Held-message quarantine review listing
+      description: >-
+        Account-session read. The owner's held-message backlog: each item
+        carries the spam score, the exact signals that fired (key, weight,
+        plain-language detail), sender, channel, age, and the resolved
+        imported source, plus status counts. `status=held` (default) lists
+        oldest first; `released` and `dismissed` list newest first.
+        Account-scoped: another account never sees these holds.
+      security:
+        - accountSession: []
+      parameters:
+        - name: status
+          in: query
+          description: Which verdicts to list. Default held.
+          schema: { type: string, enum: [held, released, dismissed] }
+        - name: limit
+          in: query
+          description: Max items, a positive integer.
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, status, counts: { held, released, dismissed }, items: [{ id, messageId, channel, connectionId, reason: [{ key, weight, detail }], score, quarantinedAt, status, reviewedBy, reviewedAt, note, source }] }" }
+        '401': { description: account_session_required }
+        '422': { description: invalid_quarantine }
+  /api/inbox/quarantine/release:
+    post:
+      summary: Owner confirms a held message (accepts it into the inbox)
+      description: >-
+        Account-session write (CSRF + inbox rate limit). Records the
+        owner's verdict "not spam" on the held item and removes it from the
+        review backlog; the audit record stays. Confirming does not move,
+        mute, or hide the imported message — the policy is flag-only.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quarantineId]
+              properties:
+                quarantineId: { type: string }
+                note: { type: string, nullable: true, description: "Optional review note, max 2048 chars" }
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, decision: release, item }" }
+        '401': { description: account_session_required }
+        '422': { description: invalid_quarantine_release }
+        '404': { description: quarantine_not_found }
+  /api/inbox/quarantine/dismiss:
+    post:
+      summary: Owner dismisses a held message as spam
+      description: >-
+        Account-session write (CSRF + inbox rate limit). Drops the held
+        item from the review backlog as spam and keeps the audit record.
+        Dismissing does not move, hide, mute, or delete the imported
+        message — the policy is flag-only.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quarantineId]
+              properties:
+                quarantineId: { type: string }
+                note: { type: string, nullable: true, description: "Optional review note, max 2048 chars" }
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, decision: dismiss, item }" }
+        '401': { description: account_session_required }
+        '422': { description: invalid_quarantine_dismiss }
+        '404': { description: quarantine_not_found }
+  /api/inbox/quarantine/split:
+    post:
+      summary: Owner splits a held message off its thread
+      description: >-
+        Account-session write (CSRF + inbox rate limit). Separates the
+        held message from its native thread: a durable split record is
+        journaled and the thread read path forces the source into its own
+        singleton thread. Split is a thread action, not a verdict — the
+        item stays held and still needs Confirm or Dismiss. One split per
+        quarantine id; a second split 409s.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quarantineId]
+              properties:
+                quarantineId: { type: string }
+                note: { type: string, nullable: true, description: "Optional review note, max 256 chars" }
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, split: { quarantineId, accountId, sourceId, priorThread, reviewer, reason, splitAt }, item }" }
+        '401': { description: account_session_required }
+        '422': { description: invalid_quarantine_split }
+        '404': { description: quarantine_not_found }
+        '409': { description: quarantine_already_split }
   /api/inbox/sources/{sourceId}/attachments:
     get:
       summary: List one inbox source's attachment descriptors

@@ -14,6 +14,7 @@ import { inboxHandoffStatuses } from "./inbox-handoff.mjs";
 import { InboxStitchStore } from "./inbox-stitch-store.mjs";
 import { createNotifyPrefs } from "./notify-prefs.mjs";
 import { runImportGuards, replayImportedNotification, scoreImportedEnvelope } from "./inbox-import-guards.mjs";
+import { spamQuarantineStatuses } from "./spam-quarantine-journal.mjs";
 import { channels, connectionState, profileChannel } from "./channel-connection.mjs";
 import { prepareGraphReplyDraft, buildGraphReplyDraft, classifyGraphReplyCreation, classifyGraphReplyUpdateAcknowledgment, normalizeReplyObservation, prepareGraphReplyUpdate, buildGraphReplyUpdate, compareReplyUpdateEnvelope } from "./graph-reply-draft.mjs";
 import { isReplyAttempt, validateReplyAttempt, transitionReplyAttempt, replyObservationReviewable, isReplyUpdate, transitionReplyUpdate } from "./graph-reply-journal.mjs";
@@ -299,6 +300,115 @@ export class Inbox {
       return { contractVersion: 1, viewer: viewer(auth), ...result };
     });
   }
+  // Held-message quarantine review UI. The review surface is a pure
+  // projection: the journal rows resolve to the imported inbox sources they
+  // were quarantined from, and the three review actions write through the
+  // journals. Confirming accepts the message back into the inbox (the
+  // verdict "not spam"); dismissing drops it from the review backlog as spam
+  // and keeps the audit record; splitting separates the source from its
+  // native thread. Nothing here moves, mutes, or deletes the imported
+  // message — the review verdicts are flags, not visibility changes.
+  quarantineReview(token, binding, { status = "held", limit = null } = {}) {
+    return this.store.readTransaction(() => {
+      const auth = this.auth(token, binding);
+      if (typeof limit === "string") {
+        if (!/^\d+$/.test(limit)) fail(422, "invalid_quarantine", "Supply a positive page size.");
+        limit = Number(limit);
+      }
+      if (!spamQuarantineStatuses.includes(status)) fail(422, "invalid_quarantine", "status must be held, released or dismissed");
+      if (limit !== null && (!Number.isSafeInteger(limit) || limit < 1)) fail(422, "invalid_quarantine", "Supply a positive page size.");
+      // Account scoping: the journal is global, so a hold belongs to this
+      // account's review backlog only when it resolves to an imported source
+      // in this account. Another account's holds (or a hold whose message is
+      // gone) never appear here.
+      const items = this.store.spamQuarantine.list({ status, limit: null })
+        .map(item => this.quarantineItem(auth, item))
+        .filter(item => item.source !== null);
+      const counts = { held: 0, released: 0, dismissed: 0 };
+      for (const s of spamQuarantineStatuses) {
+        if (s === status) { counts[s] = items.length; continue; }
+        counts[s] = this.store.spamQuarantine.list({ status: s, limit: null })
+          .filter(item => this.quarantineMatch(auth, item) !== null).length;
+      }
+      return { contractVersion: 1, viewer: viewer(auth), status, counts,
+        items: limit === null ? items : items.slice(0, limit) };
+    });
+  }
+  // The hold the caller's verdict applies to: unknown ids and other
+  // accounts' holds both read as not-found from this account's backlog.
+  quarantineHold(auth, quarantineId) {
+    const hold = this.store.spamQuarantine.get(quarantineId);
+    if (!hold || this.quarantineMatch(auth, hold) === null)
+      fail(404, "quarantine_not_found", "Quarantine hold not found.");
+    return hold;
+  }
+  quarantineRelease(token, binding, { quarantineId, note = null } = {}) {
+    return this.store.transaction(() => {
+      const auth = this.auth(token, binding);
+      this.quarantineHold(auth, quarantineId);
+      const reviewer = auth.account.id;
+      const item = this.store.spamQuarantine.release(quarantineId, { reviewer, note });
+      return { contractVersion: 1, viewer: viewer(auth), decision: "release",
+        item: this.quarantineItem(auth, item) };
+    });
+  }
+  quarantineDismiss(token, binding, { quarantineId, note = null } = {}) {
+    return this.store.transaction(() => {
+      const auth = this.auth(token, binding);
+      this.quarantineHold(auth, quarantineId);
+      const item = this.store.spamQuarantine.dismiss(quarantineId, { reviewer: auth.account.id, note });
+      return { contractVersion: 1, viewer: viewer(auth), decision: "dismiss",
+        item: this.quarantineItem(auth, item) };
+    });
+  }
+  quarantineSplit(token, binding, { quarantineId, note = null } = {}) {
+    return this.store.transaction(() => {
+      const auth = this.auth(token, binding), accountId = auth.account.id;
+      if (!validId(quarantineId)) fail(422, "invalid_quarantine", "quarantineId must be a string id");
+      const hold = this.quarantineHold(auth, quarantineId);
+      const source = this.quarantineMatch(auth, hold);
+      if (!source) fail(409, "quarantine_source_missing", "The quarantined message is no longer in the inbox.");
+      // The thread the source is separated from, for the audit trail. Read
+      // before the split records, so the source is still in its native thread.
+      const scoped = this.threads(token, binding, { sourceId: source.id, includeChannels: true });
+      const priorThread = scoped.threads.find(th => th.entries.some(e => e.source.id === source.id))?.threadId ?? source.id;
+      const split = this.store.quarantineSplits.split({ accountId, quarantineId: hold.id,
+        sourceId: source.id, priorThread, reviewer: accountId, reason: note });
+      return { contractVersion: 1, viewer: viewer(auth), split,
+        item: this.quarantineItem(auth, hold) };
+    });
+  }
+  // One review-surface row: the journal verdict metadata plus the resolved
+  // imported source. The source match keys on the journal's connectionId
+  // when one is recorded — provider message ids repeat across connections,
+  // so message id + channel alone can collide.
+  quarantineItem(auth, item) {
+    const source = this.quarantineMatch(auth, item);
+    return { ...item, source };
+  }
+  quarantineMatch(auth, item) {
+    if (!item) return null;
+    const accountId = auth.account.id;
+    try {
+      const rows = this.db.prepare("SELECT id,revision,updated_at FROM private_inbox_sources WHERE account_id=?").all(accountId);
+      for (const row of rows) {
+        let d;
+        try { d = this.version(accountId, row.id, row.revision); } catch { continue; }
+        const envelope = d.envelope ?? {}, message = envelope.message ?? {};
+        const channelOf = envelope.channel ?? d.adapter ?? null;
+        if (channelOf !== item.channel) continue;
+        const connectionId = envelope.connection?.id ?? null;
+        if (item.connectionId && connectionId !== item.connectionId) continue;
+        const providerId = message.id ?? null;
+        if (providerId && providerId === item.messageId) {
+          const summarized = this.sourceSummary(auth,
+            row, { connections: new Map(), include: true, readAt: new Map(), sentIds: new Set() });
+          return summarized ? { ...summarized, threadId: null } : { id: row.id, revision: row.revision, updatedAt: row.updated_at, threadId: null };
+        }
+      }
+    } catch { return null; }
+    return null;
+  }
   auth(token, binding, roomId = null) {
     if (typeof binding !== "string" || !/^[a-f0-9]{64}$/.test(binding)) fail(422, "session_binding_required", "Current account session binding required.");
     return this.store.authenticateAccountSession(token, roomId, binding);
@@ -425,8 +535,15 @@ export class Inbox {
           if (key.channelId && info.channel) replyIndex.set(info.channel + ":" + key.channelId, key.id);
         }
         // Re-resolve replies now that the index is complete (targets may sort after the reply).
+        // Quarantine review splits: a split source is forced into its own
+        // singleton thread at read time. The stored provider thread and
+        // reply keys are untouched — only the grouping key changes, so the
+        // rest of the conversation keeps its native thread.
+        const splitIds = this.store.quarantineSplits.splitSourceIds(auth.account.id);
         const messages = infos.map((info, i) => {
           const key = this.threadKeyOf(info, replyIndex);
+          if (splitIds.has(info.row.id)) return { id: key.id, occurredAt: key.occurredAt,
+            threadId: `quarantine-split:${info.row.id}`, inReplyTo: null };
           return { id: key.id, occurredAt: key.occurredAt, threadId: key.threadId, inReplyTo: key.inReplyTo };
         });
         const built = buildThreads(messages);

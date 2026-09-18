@@ -13,7 +13,7 @@ const v11Assets = [...v9Assets, "src/room-charter.js", "src/room-instructions.js
 const v12Assets = [...v11Assets, "src/reply-requests.js"];
 const v13Assets = [...v12Assets, "src/work-help.js"];
 const v14Assets = [...v13Assets, "src/help-offers.js"];
-const inboxAssets = [...v14Assets, "src/inbox-client.js", "src/inbox-ui.js"];
+const inboxAssets = [...v14Assets, "src/inbox-client.js", "src/inbox-ui.js", "src/inbox-quarantine-ui.js"];
 export const publicAssets = [...inboxAssets, "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/invite-context.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js"];
 const assetsFor = (schema, inbox, sendUI = false) => schema === 8 ? v8Assets : schema <= 10 ? v9Assets : schema === 11 ? v11Assets : schema === 12 ? v12Assets : schema === 13 ? v13Assets : inbox && schema >= 15 ? sendUI ? publicAssets : inboxAssets : v14Assets;
 const required = [...v8Assets, "server.mjs", "package.json", "package-lock.json",
@@ -41,6 +41,8 @@ optional.push("server/inbox-stitch-store.mjs"); // hash-only stitch graph (impor
 optional.push("server/inbox-spam.mjs"); // spam/phishing flagging (imported by server/inbox-import-guards.mjs; pure, no imports of its own)
 optional.push("server/notify-prefs.mjs"); // notification prefs + quiet hours (imported by server/inbox.mjs and server/inbox-import-guards.mjs; pure, no imports of its own)
 optional.push("server/inbox-import-guards.mjs"); // import-time spam/notify wiring (imported by server/inbox.mjs; pure, imports inbox-spam.mjs and notify-prefs.mjs)
+optional.push("server/spam-quarantine-journal.mjs"); // spam-guard quarantine journal (imported by server/store.mjs; imports ServiceError from store.mjs)
+optional.push("server/quarantine-thread-splits.mjs"); // quarantine review thread-split journal (imported by server/store.mjs and server/inbox.mjs)
 // NOTE: server/thread-tree.mjs stays OUT of the closure. inbox-threads.mjs
 // already groups, nests, and flattens threads; importing both would duplicate
 // the reply-tree logic. thread-tree.mjs remains available for a future
@@ -53,6 +55,7 @@ optional.push("server/graph-reply-draft.mjs");
 optional.push("server/graph-reply-journal.mjs");
 optional.push("server/graph-reply-update-review.mjs");
 optional.push("src/inbox-client.js", "src/inbox-ui.js");
+optional.push("src/inbox-quarantine-ui.js"); // quarantine review surface (imported by src/inbox-ui.js)
 optional.push("src/inbox-send-ui.js");
 optional.push("src/room-roster.js");
 optional.push("deploy/agent-discovery.mjs", "deploy/room-entry.mjs", "server/guest-agent-links.mjs");

@@ -1086,6 +1086,34 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return json(res, 200, store.inbox.stitchSplit(token, binding,
             { stitchKey: data.stitchKey, sourceId: data.sourceId, channel: data.channel, reason: data.reason, scope: data.scope }));
         }
+        // Held-message quarantine review (owner review surface): the four
+        // routes ride the existing account-session auth, and the three
+        // mutations reuse account session + CSRF + the same inbox rate
+        // limit as every other inbox write.
+        if (url.pathname === "/api/inbox/quarantine" && req.method === "GET")
+          return json(res, 200, store.inbox.quarantineReview(token, binding,
+            { status: url.searchParams.get("status") ?? undefined, limit: url.searchParams.get("limit") }));
+        if (url.pathname === "/api/inbox/quarantine/release" && req.method === "POST") {
+          protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
+          const data = await body(req);
+          if (!data || !(exact(data, ["quarantineId"]) || exact(data, ["quarantineId", "note"])) || typeof data.quarantineId !== "string" || (data.note !== undefined && typeof data.note !== "string"))
+            reject(422, "invalid_quarantine_release", "Choose the held message to confirm.");
+          return json(res, 200, store.inbox.quarantineRelease(token, binding, { quarantineId: data.quarantineId, note: data.note }));
+        }
+        if (url.pathname === "/api/inbox/quarantine/dismiss" && req.method === "POST") {
+          protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
+          const data = await body(req);
+          if (!data || !(exact(data, ["quarantineId"]) || exact(data, ["quarantineId", "note"])) || typeof data.quarantineId !== "string" || (data.note !== undefined && typeof data.note !== "string"))
+            reject(422, "invalid_quarantine_dismiss", "Choose the held message to dismiss.");
+          return json(res, 200, store.inbox.quarantineDismiss(token, binding, { quarantineId: data.quarantineId, note: data.note }));
+        }
+        if (url.pathname === "/api/inbox/quarantine/split" && req.method === "POST") {
+          protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
+          const data = await body(req);
+          if (!data || !(exact(data, ["quarantineId"]) || exact(data, ["quarantineId", "note"])) || typeof data.quarantineId !== "string" || (data.note !== undefined && typeof data.note !== "string"))
+            reject(422, "invalid_quarantine_split", "Choose the held message to split.");
+          return json(res, 200, store.inbox.quarantineSplit(token, binding, { quarantineId: data.quarantineId, note: data.note }));
+        }
         // Morning digest (task 21): the overnight arrivals across channels as
         // an in-app daily brief. Channel sources need the reading view, like
         // the threads list above. On-demand read, never a push (task 22).
