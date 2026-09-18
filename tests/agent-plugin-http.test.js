@@ -77,6 +77,18 @@ test("issue shows the secret once; list never shows it; storage is hash-only", a
   assert.ok(!("keyHash" in key), "hash never leaves the server");
   // RC-2026-09-18-024: the 201 carries the presentation-ready credential.
   assert.equal(key.credential, `rak_${key.secret}`, "credential is the exact Authorization-header value");
+  // RC-2026-09-18-028: issue carries scope-filtered next[] guidance (mirrors the signup next[]).
+  const nextActions = key.next.map(n => n.action);
+  assert.deepEqual(nextActions, ["publish-card", "read-directory", "read-manifest"],
+    "directory:publish key unlocks publish-card plus the unauthenticated reads, not webhooks:manage actions");
+  for (const step of key.next) {
+    assert.ok(typeof step.method === "string" && typeof step.path === "string" && typeof step.description === "string",
+      "every next step names its method, path, and what to do");
+  }
+  // A webhooks:manage key sees subscribe-webhooks instead of publish-card.
+  const wh = await post(origin, "/api/agent-keys", { scopes: ["webhooks:manage"] }, identity.secret);
+  const whActions = (await wh.json()).next.map(n => n.action);
+  assert.deepEqual(whActions, ["subscribe-webhooks", "read-directory", "read-manifest"]);
   // The raw secret alone is not a valid presented credential: auth requires the prefix.
   assert.equal(f.store.agentPlugin.verifyPresentedApiKey(key.secret), null);
   const presented = f.store.agentPlugin.verifyPresentedApiKey(key.credential);
@@ -85,9 +97,9 @@ test("issue shows the secret once; list never shows it; storage is hash-only", a
   const listed = await get(origin, "/api/agent-keys", identity.secret);
   assert.equal(listed.status, 200);
   const listBody = await listed.json();
-  assert.equal(listBody.keys.length, 1);
-  assert.equal(listBody.keys[0].keyId, key.keyId);
-  assert.ok(!("secret" in listBody.keys[0]), "list output has no secret");
+  const listedKey = listBody.keys.find(k => k.keyId === key.keyId);
+  assert.ok(listedKey, "the issued key is listed");
+  assert.ok(!("secret" in listedKey), "list output has no secret");
   assert.ok(!JSON.stringify(listBody).includes(key.secret), "secret appears nowhere in the list response");
 
   const row = f.store.db.prepare("SELECT * FROM agent_api_keys WHERE key_id=?").get(key.keyId);
@@ -128,6 +140,9 @@ test("rotate replaces the secret (old stops working) and revoke ends the key", a
   assert.ok(!("keyHash" in rotatedBody));
   // RC-2026-09-18-024: rotation also carries the presentation-ready credential.
   assert.equal(rotatedBody.credential, `rak_${rotatedBody.secret}`);
+  // RC-2026-09-18-028: rotation carries the same scope-filtered next[] guidance
+  // (rooms:read grants no scoped action, so only the unauthenticated reads show).
+  assert.deepEqual(rotatedBody.next.map(n => n.action), ["read-directory", "read-manifest"]);
   const rotatedPresented = f.store.agentPlugin.verifyPresentedApiKey(rotatedBody.credential);
   assert.equal(rotatedPresented?.keyId, keyId, "the rotated credential authenticates");
   assert.equal(f.store.agentPlugin.verifyPresentedApiKey(rotatedBody.secret), null, "raw secret without prefix is rejected");
