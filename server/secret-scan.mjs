@@ -17,6 +17,11 @@ const PATTERNS = [
   { id: "bearer-token", label: "bearer token", regex: /\bbearer\s+[A-Za-z0-9\-_.~+/]{20,}=*/i },
   { id: "slack-token", label: "Slack token", regex: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/ },
   { id: "stripe-key", label: "Stripe key", regex: /\b[rs]k_(?:live|test)_[A-Za-z0-9]{16,}\b/ },
+  // Regression rule for secret-scanning alert #1 (2026-09-17): a real
+  // Telegram bot token was committed in tests/telegram-connect.test.js.
+  // BotFather tokens are <bot-id>:<secret>; the burned one was 9 digits
+  // plus a 34-char secret, so the shape accepts 34–35 char secrets.
+  { id: "telegram-bot-token", label: "Telegram bot token", regex: /\b\d{8,10}:[A-Za-z0-9_-]{34,35}\b/ },
 ];
 const ENTROPY_THRESHOLD = 4.5, ENTROPY_MIN_LENGTH = 24;
 class SecretScanError extends Error { constructor(code, message) { super(message); this.name = "SecretScanError"; this.code = code; } }
