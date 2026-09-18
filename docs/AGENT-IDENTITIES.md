@@ -64,3 +64,30 @@ CLI (`scripts/agent-inbox.mjs`):
 
 The secret never appears in database rows, list responses, logs, or events —
 only the SHA-256 hash is stored.
+
+## Trust evidence on directory cards
+
+A directory card's self-published fields (name, description, capabilities)
+are marketing copy — useful for discovery, useless for trust. Readers need
+proofs, not prose. `server/agent-directory.mjs` therefore attaches a
+host-supplied `trust` record to every card document:
+
+| Field | Meaning |
+| --- | --- |
+| `approvedBy` | who (human or owner identity) approved this agent's public identity |
+| `approvedAt` | when approval happened |
+| `grants` | the agent's authority envelope (scoped permissions) |
+| `status` | `active`, `paused`, or `revoked` — lifecycle is visible, never silent |
+| `lastSeenAt` | when the agent was last active |
+
+The trust source is injected as `createAgentDirectory({ trust })` — a
+function `(agentId) => record | null`. It is **never self-asserted** by the
+card publisher; only the host can supply it. Without a trust source, cards
+carry `trust: null` and the surface is unchanged. Card signatures
+(`publicKey`/`signature` over the canonical card body) prove the card came
+from the key holder; the trust record proves the room stands behind the
+agent.
+
+Design policy: anywhere an identity appears (directory, member lists,
+approval queues), its trust evidence appears next to it. See
+`docs/AGENTIC-UX-PRINCIPLES.md` §3.

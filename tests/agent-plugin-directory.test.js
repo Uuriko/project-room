@@ -108,3 +108,68 @@ test("buildDocument emits a frozen public directory doc with card URLs", t => {
   assert.throws(() => dir.buildDocument({ serviceOrigin: "http://insecure.example" }), DirectoryError);
   assert.throws(() => dir.buildDocument({}), DirectoryError);
 });
+
+// RC-2026-09-18-044: trust evidence on directory cards. Host-supplied, never
+// self-asserted: who approved the agent, when, its authority envelope, its
+// lifecycle status, and when it was last seen.
+test("cards carry trust:null when no trust source is configured", t => {
+  const dir = fresh();
+  const { doc } = publishSigned(dir, { agentId: "research-agent" });
+  assert.equal(doc.trust, null);
+  assert.deepEqual(dir.get("research-agent").trust, null);
+});
+
+test("trust source attaches frozen trust evidence to card docs", t => {
+  const dir = createAgentDirectory({
+    clock: () => 1_700_000_000_000,
+    trust: agentId => agentId === "jill" ? {
+      approvedBy: "john",
+      approvedAt: 1_699_999_000_000,
+      grants: ["accept_work", "complete_work"],
+      status: "active",
+      lastSeenAt: 1_699_999_900_000,
+    } : null,
+  });
+  const { doc } = publishSigned(dir, { agentId: "jill" });
+  assert.deepEqual(doc.trust, {
+    approvedBy: "john",
+    approvedAt: 1_699_999_000_000,
+    grants: ["accept_work", "complete_work"],
+    status: "active",
+    lastSeenAt: 1_699_999_900_000,
+  });
+  assert.ok(Object.isFrozen(doc.trust) && Object.isFrozen(doc.trust.grants));
+  // Agents unknown to the trust source get trust:null, not an empty record.
+  const { doc: other } = publishSigned(dir, { agentId: "stranger" });
+  assert.equal(other.trust, null);
+  // Trust evidence flows through list() and buildDocument() too.
+  assert.equal(dir.list()[0].trust.status, "active");
+  const built = dir.buildDocument({ serviceOrigin: "https://room.example" });
+  assert.equal(built.agents[0].trust.approvedBy, "john");
+});
+
+test("paused and revoked statuses are visible on the card", t => {
+  const statuses = { "a-one": "paused", "a-two": "revoked" };
+  const dir = createAgentDirectory({
+    clock: () => 1_700_000_000_000,
+    trust: agentId => ({ status: statuses[agentId] ?? "active" }),
+  });
+  publishSigned(dir, { agentId: "a-one" });
+  publishSigned(dir, { agentId: "a-two" });
+  assert.equal(dir.get("a-one").trust.status, "paused");
+  assert.equal(dir.get("a-two").trust.status, "revoked");
+});
+
+test("malformed trust records are rejected; non-function trust option throws", t => {
+  const bad = record => createAgentDirectory({
+    clock: () => 1_700_000_000_000,
+    trust: () => record,
+  });
+  const dir = bad({ status: "sleeping" });
+  assert.throws(() => publishSigned(dir, { agentId: "x" }), DirectoryError);
+  const dir2 = bad({ grants: "accept_work" });
+  assert.throws(() => publishSigned(dir2, { agentId: "x" }), DirectoryError);
+  const dir3 = bad({ approvedAt: -5 });
+  assert.throws(() => publishSigned(dir3, { agentId: "x" }), DirectoryError);
+  assert.throws(() => createAgentDirectory({ trust: 42 }), DirectoryError);
+});
