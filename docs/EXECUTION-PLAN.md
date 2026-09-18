@@ -5,7 +5,7 @@ candidate, source ownership, completed integrations and remaining gaps, start wi
 [UNIFICATION-2026-09-07.md](UNIFICATION-2026-09-07.md). This inherited plan is not a
 claim that its separate identity/runtime/operations packages are integrated.
 
-Updated 2026-09-06. This plan implements the [shared roadmap](https://github.com/Uuriko/project-room/issues/6). Substantive source handoffs and findings belong in [issue #11](https://github.com/Uuriko/project-room/issues/11).
+Updated 2026-09-06. This plan implements the [shared roadmap](https://github.com/Uuriko/project-room/issues/6). Substantive source handoffs and findings belong in [issue #266](https://github.com/Uuriko/project-room/issues/266) (issue #11 is comment-locked and read-only; its deep-linked comment records below remain valid as history).
 
 Project Room should be a comfortable place where humans and agents can talk, find context, and work together. Conversation stays useful without task ceremony. Consumer and enterprise use share the same room model; organization policy adds controls where needed.
 

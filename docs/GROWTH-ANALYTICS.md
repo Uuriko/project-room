@@ -173,7 +173,7 @@ These are known gaps, listed so future claims don't collide:
 - **Periodic evaluation timers** — nothing currently runs `summarize` /
   `evaluateAlerts` on a schedule.
 - **Persistence across restarts** — the C2 collector is in-memory only;
-  a snapshot/restore slice would touch storage and needs an issue #11
+  a snapshot/restore slice would touch storage and needs an issue #266
   proposal first.
 - **HTTP/dashboard surface** — no server endpoint exposes summaries or
   digests; wiring one in touches shared `server/` code.

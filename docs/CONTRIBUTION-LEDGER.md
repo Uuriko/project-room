@@ -6,7 +6,7 @@ A Room already records who proposed work, who produced a result, who verified it
 
 The spark is [Schroeder's group-project credit note](https://x.com/jpschroeder/status/2096703320618361059): track who did the work, then split later value by that record. Steal that idea only. Ignore any video-game, Steam, marketplace, or token-product frame.
 
-Design discussion lives on the [Project Room coordination mailbox](https://github.com/Uuriko/project-room/issues/11). Do not merge #8/#9 as the delivery vehicle. Do not touch the identity D235 ship, Arcade, Multichain, or the getdasha Worker.
+Design discussion lives on the [Project Room coordination mailbox](https://github.com/Uuriko/project-room/issues/266). Do not merge #8/#9 as the delivery vehicle. Do not touch the identity D235 ship, Arcade, Multichain, or the getdasha Worker.
 
 ## Product rule
 
@@ -92,12 +92,12 @@ People should be able to discuss a result without learning ledger terminology. O
 
 | Phase | Ships | Does not ship |
 | --- | --- | --- |
-| **Docs (now)** | This contract, README pointer, fixture stubs. Coordination on [#11](https://github.com/Uuriko/project-room/issues/11). | Schema writes, UI, payout, Phase 0 merge. |
+| **Docs (now)** | This contract, README pointer, fixture stubs. Coordination on [#266](https://github.com/Uuriko/project-room/issues/266). | Schema writes, UI, payout, Phase 0 merge. |
 | **0.5** | Derived rollup from completion / verify / decide / artifact; negative-path fixtures; Quiet Focus / return-brief Contributors **read-model only**, drafted off the Phase 0 tip. The isolated module lives in [`contribution-rollup/`](../contribution-rollup/) and does not merge [PR #8](https://github.com/Uuriko/project-room/pull/8) or [PR #9](https://github.com/Uuriko/project-room/pull/9). | New scoreboard Event as the store. Auto-payout. Merge of #8/#9 as-is. Identity D235, Arcade, Multichain, Worker. |
 | **1** | Live derivation in the product (still a projection, not a second ledger). | Wallet, cents, Compute payout, any transfer. |
 | **1b** | Proceeds split using the active rollup. | Nothing until Potter's explicit go. Room still does not collect wallet secrets. Pay stays on its existing door. |
 
-Phase 0 stays the v0 review / Quiet Focus / return-brief slice. Ledger work drafts off that tip and reports on [#11](https://github.com/Uuriko/project-room/issues/11).
+Phase 0 stays the v0 review / Quiet Focus / return-brief slice. Ledger work drafts off that tip and reports on [#266](https://github.com/Uuriko/project-room/issues/266).
 
 ## Negative paths (fixture work)
 
@@ -124,7 +124,7 @@ Executable fixtures live in [`contribution-rollup/fixtures/`](../contribution-ro
 
 ## Ask
 
-Design replies and fixtures on [#11](https://github.com/Uuriko/project-room/issues/11). Draft off the Phase 0 tip. Do not merge #8/#9 as-is for this.
+Design replies and fixtures on [#266](https://github.com/Uuriko/project-room/issues/266). Draft off the Phase 0 tip. Do not merge #8/#9 as-is for this.
 
 - **Instinct** (Phase 0 / harness owner): fixtures that derive the Contributors rollup from completion / verify / decide (and artifact when that is the result), plus negatives for **double-count**, **forged actor**, and **unknown producer**. The isolated `contribution-rollup` module is that 0.5 cut.
 - **Codex**: Quiet Focus / return-brief Contributors **read-model only**. Import `contributorsForReturnBrief` from `contribution-rollup`. Same source Events. No separate scoreboard UI. Optional `proposedById` on work cards is later, not this slice. Do not merge #8/#9 to wire it.

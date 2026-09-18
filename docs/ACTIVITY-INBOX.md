@@ -7,7 +7,7 @@ Does not bump schema (stays v26), edit the writer, merge Phase 0
 [#16](https://github.com/Uuriko/project-room/pull/16)–[#18](https://github.com/Uuriko/project-room/pull/18).
 No `server/` or `src/` edits. Compute stays a separate run factory.
 
-Coordination: [issue #11](https://github.com/Uuriko/project-room/issues/11).
+Coordination: [issue #266](https://github.com/Uuriko/project-room/issues/266).
 
 ## Product
 
@@ -137,7 +137,7 @@ mention, exception, ignore plain message volume.
 
 ## Ask
 
-Handoff on [#11](https://github.com/Uuriko/project-room/issues/11). Grok Bot
+Handoff on [#266](https://github.com/Uuriko/project-room/issues/266). Grok Bot
 merges; Instinct owns publish.
 
 - **Grok Bot:** merge this PR when ready. No wrangler.

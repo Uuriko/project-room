@@ -1,5 +1,8 @@
 # Workflow refinement — local checkpoint
 
+
+> Note: issue #11 hit GitHub's 2,500-comment limit and is comment-locked (read-only). Live coordination continues on [#266](https://github.com/Uuriko/project-room/issues/266).
+
 This pass makes existing work easier to use and removes duplicated logic. It does
 not add another task model, framework, dependency, database schema or agent runtime.
 Changes are uncommitted in the unified checkout on top of local baseline

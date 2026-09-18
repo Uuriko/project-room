@@ -6,7 +6,7 @@ Product lock, 10 September 2026. Does not change Phase 0, merge
 or bump the writer past 26. AX errors and `llms.txt` / `/llms-full.txt` /
 `/.well-known/agent.json` ship on the Room Worker.
 
-Coordination: [issue #11](https://github.com/Uuriko/project-room/issues/11).
+Coordination: [issue #266](https://github.com/Uuriko/project-room/issues/266).
 
 ## Product
 

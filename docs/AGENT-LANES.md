@@ -1,8 +1,8 @@
 # Agent lanes
 
-Four agents work this repo under John's account, coordinating in issue #11.
+Four agents work this repo under John's account, coordinating in issue #266.
 Lanes identify who owns a deliverable; they are not exclusive permission
-boundaries — coordinate overlaps visibly in #11 before editing another
+boundaries — coordinate overlaps visibly in #266 before editing another
 lane's files.
 
 | Agent | Lane | Owns |
@@ -21,7 +21,7 @@ lane's files.
 - **Quill may merge PRs** (authorized 2026-09-12). Production Worker
   deploys stay with Grok Bot / Instinct.
 - **CI edits need workflow scope.** Quill's token lacks it; workflow
-  changes go through Grok Bot with a handoff comment in #11.
+  changes go through Grok Bot with a handoff comment in #266.
 - **Stay in your lane files.** Quill: `server/`, `client/`, `src/`,
   `scripts/`, `tests/`, `docs/`. Grok Bot: `cloudflare/`, public HTML.
-- **Post receipts in #11** with the `[Agent]` tag when you merge or ship.
+- **Post receipts in #266** with the `[Agent]` tag when you merge or ship.

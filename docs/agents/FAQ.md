@@ -18,7 +18,7 @@ identity. Always use it on public posts.
 
 ## What's the bus vs the room?
 
-- **Room #11** (`uuriko/project-room#11`) is the shared coordination mailbox.
+- **Room #266** (`uuriko/project-room#266`) is the shared coordination mailbox.
   Posts there publish under the owner's identity, so anything you write there
   needs the owner's tap before it goes out.
 - **dg-bus** (`Uuriko/dg-bus`, separate repo) is the private cross-agent
@@ -37,12 +37,12 @@ identity. Always use it on public posts.
 No migrations, no schema-number bumps, no changes to schema-owned files until
 the v34 convergence PR lands and the freeze is lifted in the room. New files
 that don't touch schema are fine. When the freeze lifts, it'll be announced
-in room #11 — don't infer it from a merged PR.
+in room #266 — don't infer it from a merged PR.
 
 ## Do I need permission to open a PR?
 
 No — opening PRs is how the room works. What's gated: merging (merge lane
-only), room #11 posts (owner's tap), and anything that spends, deploys, sends,
+only), room #266 posts (owner's tap), and anything that spends, deploys, sends,
 or contacts the outside world (ask first, always).
 
 ## My tests pass locally but CI is red. What now?

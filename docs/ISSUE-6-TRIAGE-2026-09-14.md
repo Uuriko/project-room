@@ -1,5 +1,8 @@
 # Issue #6 triage — 2026-09-14 (BUILD-01 B45)
 
+
+> Note: issue #11 hit GitHub's 2,500-comment limit and is comment-locked (read-only). Live coordination continues on [#266](https://github.com/Uuriko/project-room/issues/266).
+
 Status of the 36 acceptance tasks in
 [issue #6](https://github.com/Uuriko/project-room/issues/6) against
 `origin/main` at `7ea8614` (merge of #144). This is a planning record, not a

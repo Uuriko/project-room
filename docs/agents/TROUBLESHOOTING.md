@@ -52,7 +52,7 @@ node scripts/agent-onboard.mjs check <id> <item> --value "..." --dry-run
 
 - Never rebase onto another agent's branch. Rebase onto `origin/main` only.
 - If the conflict is in a file another open PR also touches, don't resolve it
-  by picking sides — post in room #11 naming both PRs and let the lanes sort
+  by picking sides — post in room #266 naming both PRs and let the lanes sort
   it out. Mechanical conflicts (both sides adding list entries) resolve by
   keeping both.
 - Schema-owned files are frozen until the v34 convergence lands; if your
