@@ -18,6 +18,7 @@ import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
 import { installInbox } from "./inbox-ui.js";
 import { createAccountSettingsUI } from "./account-settings-ui.js";
 import { createAuthSigninUI } from "./auth-signin-ui.js";
+import { stashPendingInvite, clearPendingInvite, takeRestoredInvite } from "./invite-context.js";
 
 const $ = selector => document.querySelector(selector);
 $("#skip-link").addEventListener("click", event => {
@@ -82,7 +83,23 @@ function accountSignIn() {
   return authKind === "account" || accountHomeFromLocation();
 }
 const initialJoinFragment = consumeJoinFragment();
-const initialInvitationFragment = consumeInvitationFragment();
+// A Google/GitHub OAuth round-trip drops the #invite/ fragment (it never
+// reaches the server). Restore a stashed invitation one-shot when landing
+// without a room context, so the dialog re-opens after OAuth sign-in.
+const initialInvitationFragment = consumeInvitationFragment()
+  || takeRestoredInvite({ storage: window.sessionStorage, hash: location.hash, search: location.search });
+// Stash the live invitation secret at the exact moment an OAuth navigation
+// starts. The #invite/ fragment never reaches the server, so without this
+// the Google/GitHub round-trip would drop the invitation. The secret touches
+// sessionStorage only for the round-trip (cleared on dialog close/accept and
+// consumed one-shot at boot); merely previewing an invitation never stores it.
+function stashInviteForOAuth() {
+  if (invitation.secret) stashPendingInvite(window.sessionStorage, invitation.secret);
+}
+// The Google entry point is a plain anchor: stash a live invitation before
+// the navigation, since the OAuth round-trip drops the #invite/ fragment.
+{ const googleButton = $("#google-signin");
+  if (googleButton) googleButton.addEventListener("click", stashInviteForOAuth); }
 let shareLinksUI = null;
 let portableWorkUI = null;
 let resultCopyUI = null;
@@ -309,6 +326,7 @@ const accountSettingsUI = createAccountSettingsUI({ accountClient });
 const signinUI = createAuthSigninUI({
   accountClient,
   ensureAccountSession,
+  onOAuthStart: stashInviteForOAuth,
   onSignedIn: async () => {
     await accountClient.restore();
     const requestedRoom = selectedRoomFromLocation();
@@ -759,6 +777,7 @@ function closeInvitation({ returnFocus = true } = {}) {
   invitation.version += 1;
   const selection = invitation.openerSelection;
   Object.assign(invitation, { phase: "idle", secret: null, preview: null, redemptionId: null, opener: null, openerSelection: null });
+  clearPendingInvite(window.sessionStorage);
   setInvitationFeedback("");
   $("#invitation-account-form").reset();
   if ($("#invitation-dialog").open) $("#invitation-dialog").close();
@@ -866,6 +885,7 @@ async function moveCurrentRoomToAccount(loggedIn) {
 async function openAcceptedRoom(roomId, message, { acceptanceConfirmed = true } = {}) {
   invitation.phase = "opening";
   invitation.secret = null;
+  clearPendingInvite(window.sessionStorage);
   renderInvitation();
   setInvitationFeedback("");
   $("#invitation-dialog").close();
