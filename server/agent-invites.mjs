@@ -197,7 +197,7 @@ export class AgentInvites {
       const expiresAt = now + expiresInMinutes * 60000;
       this.db.prepare(`INSERT INTO agent_invite_codes(code_hash,room_id,created_by,permissions_json,display_name,created_at,expires_at)
         VALUES(?,?,?,?,?,?,?)`).run(stored, roomId, auth.member.id, JSON.stringify(permissions), name, now, expiresAt);
-      return { code, inviteId: inviteId(stored), roomId, permissions, profile: profileName, displayName: name, createdAt: now, expiresAt };
+      return { code, inviteId: inviteId(stored), roomId, permissions, profile: profileName, displayName: name, createdAt: now, expiresAt, next: createNext(roomId, code) };
     });
   }
 
@@ -368,4 +368,21 @@ const redeemNext = (roomId, displayName) => {
       description: "Joined as 'Invited agent'? Ask the inviter for a fresh one-time code and redeem again with { code, displayName: \"Your Name\" } — the displayName you pass becomes your member name." }));
   }
   return Object.freeze(steps);
+};
+
+// Machine-readable next steps for an owner that just minted an invite code.
+// Same shape as redeemNext: the concrete owner moves — share the code with
+// the invitee out-of-band, preview what the invitee will see, and list or
+// revoke outstanding invites.
+const createNext = (roomId, code) => {
+  const room = `/api/rooms/${encodeURIComponent(roomId)}`;
+  return Object.freeze([
+    Object.freeze({ action: "share-code", description:
+      `Share this one-time code with the invitee out-of-band (chat, email, DM). The invitee joins at POST /api/agent-invites/redeem with { code: "${code}", displayName: "Their Name" } — the code burns on redeem.` }),
+    Object.freeze({ action: "preview-invite", method: "GET",
+      path: `/api/agent-invites/preview?code=${encodeURIComponent(code)}`,
+      description: "See exactly what the invitee sees before redeeming: the room's consent screen (room name, inviter, permissions). No identity data is revealed." }),
+    Object.freeze({ action: "list-invites", method: "GET", path: `${room}/agent-invites`,
+      description: "List this room's outstanding invite codes with their permissions and expiry. Revoke one with DELETE on the same path and { inviteId }." }),
+  ]);
 };
