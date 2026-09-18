@@ -10,6 +10,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { RoomAgentClient, createAgentIdentity } from "../client/room-agent.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
+import { doctorHealthUrl } from "../scripts/agent-doctor.mjs";
 
 const execFileAsync = promisify(execFile);
 // The room server runs on this process's event loop, so the CLI must be
@@ -45,6 +46,14 @@ function check(result, name) {
   assert.ok(found, `expected a ${name} check`);
   return found;
 }
+
+test("doctorHealthUrl prefixes /room on getdasha hosts", () => {
+  assert.equal(doctorHealthUrl("https://www.getdasha.com"), "https://www.getdasha.com/room/api/health");
+  assert.equal(doctorHealthUrl("https://getdasha.com"), "https://getdasha.com/room/api/health");
+  assert.equal(doctorHealthUrl("https://project-room-staging.getdasha.workers.dev"),
+    "https://project-room-staging.getdasha.workers.dev/api/health");
+  assert.equal(doctorHealthUrl("http://127.0.0.1:9"), "http://127.0.0.1:9/api/health");
+});
 
 test("doctor --help explains the self-test", async () => {
   const result = await doctor(["--help"]);
@@ -143,7 +152,7 @@ test("doctor appends the failure-signature table after the repair step", async (
   assert.equal(result.json.healthy, false);
   // The table never replaces the primary repair step: repair comes first.
   assert.deepEqual(Object.keys(result.json), ["healthy", "checks", "repair", "signatures"]);
-  assert.equal(result.json.signatures.length, 5);
+  assert.equal(result.json.signatures.length, 7);
   for (const entry of result.json.signatures) {
     assert.ok(typeof entry.symptom === "string" && entry.symptom.length > 0);
     assert.ok(typeof entry.check === "string" && entry.check.length > 0);
@@ -195,6 +204,12 @@ test("signature table covers the stale-MCP-client and outdated-CLI failures", as
   const stale = result.json.signatures.find(entry => entry.symptom.includes("identity-create demands a credential"));
   assert.ok(stale, "expected an outdated-CLI signature");
   assert.match(stale.fix, /ROOM_AGENT_ORIGIN/);
+  const missingAlias = result.json.signatures.find(entry => entry.symptom.includes("identity-create") && entry.symptom.includes("404"));
+  assert.ok(missingAlias, "expected an identity-create 404 signature");
+  assert.match(missingAlias.fix, /agent-identities/);
+  const wwwHealth = result.json.signatures.find(entry => entry.symptom.includes("www.getdasha.com"));
+  assert.ok(wwwHealth, "expected a www health-prefix signature");
+  assert.match(wwwHealth.fix, /\/room/);
 });
 
 test("healthy doctor output carries no signature table", async t => {

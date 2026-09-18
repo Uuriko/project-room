@@ -230,6 +230,11 @@ test("HTTP: prefix-preserving /room/api/* aliases identity-create, agent-rooms, 
   assert.equal(minted.status, 201, JSON.stringify(minted.body));
   assert.match(minted.body.identityId, /^ai_/);
   assert.match(minted.body.secret, /^pri_/);
+  const aliased = await post("/room/api/identity-create", { data: { displayName: "Edge Alias" } });
+  assert.equal(aliased.status, 201, JSON.stringify(aliased.body));
+  assert.match(aliased.body.identityId, /^ai_/);
+  assert.match(aliased.body.secret, /^pri_/);
+  assert.notEqual(aliased.body.identityId, minted.body.identityId);
   const created = await post("/room/api/agent-rooms", {
     token: minted.body.secret,
     data: createArgs("edge-den")

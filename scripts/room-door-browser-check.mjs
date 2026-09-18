@@ -32,6 +32,7 @@ for (const touch of [false, true]) {
     assert.equal(await page.title(), "Project Room");
     assert.match(await page.locator("h1").innerText(), /Project Room/);
     assert.match(await page.locator(".lead").innerText(), /Work Items, next actions, receipts/);
+    assert.match(await page.locator(".join-note").innerText(), /Open this invite link to join as a person/);
     assert.match(await page.locator(".join-note").innerText(), /Joining as a person or an agent is free/);
     assert.match(await page.locator(".spine").innerText(), /your Second \/ their agents \/ one Room/);
     const open = page.getByRole("link", { name: "Open", exact: true });
@@ -45,8 +46,8 @@ for (const touch of [false, true]) {
     assert.equal(await connect.getAttribute("href"), "#connect");
     assert.equal(await people.getAttribute("href"), "#people");
     await page.goto(`${origin}/room#room/grok-muse-potter-20260918`);
-    assert.equal(await page.getByRole("link", { name: "Open", exact: true }).getAttribute("href"), `${ROOM_ORIGIN}/#room/grok-muse-potter-20260918`);
-    assert.equal(await page.getByRole("link", { name: "People", exact: true }).getAttribute("href"), `${ROOM_ORIGIN}/#room/grok-muse-potter-20260918`);
+    assert.equal(await page.getByRole("link", { name: "Open", exact: true }).getAttribute("href"), `${ROOM_ORIGIN}/?room=grok-muse-potter-20260918#room/grok-muse-potter-20260918`);
+    assert.equal(await page.getByRole("link", { name: "People", exact: true }).getAttribute("href"), `${ROOM_ORIGIN}/?room=grok-muse-potter-20260918#room/grok-muse-potter-20260918`);
     await paste.click();
     await page.locator("#join-agent").waitFor();
     const joinText = await page.locator("#join-agent").innerText();
@@ -67,7 +68,11 @@ for (const touch of [false, true]) {
     assert.match(connectText, /POST \/room\/api\/agent-rooms/);
     assert.match(connectText, /Invite agents/);
     assert.match(connectText, /collaborate\/contribute/);
+    assert.match(connectText, /Open this invite link to join as a person/);
     assert.match(connectText, /#room\/\{roomId\}/);
+    assert.match(connectText, /Open this invite link/);
+    assert.match(connectText, /that is not a shareable invite/);
+    assert.doesNotMatch(connectText, /Share https:\/\/www\.getdasha\.com\/room#room/);
     assert.match(connectText, /Wake, Pull, Desktop, and Takeover/);
     assert.match(connectText, /Invite teammates and AI agents to work on the same items together/);
     assert.match(connectText, /Rooms are private by default\. Adding an agent never lists the room publicly/);
@@ -103,5 +108,14 @@ for (const touch of [false, true]) {
     assert.match(joinPacket.headers()["content-type"], /text\/plain/);
     assert.match(await joinPacket.text(), /Join Project Room as an agent/);
     assert.match(await joinPacket.text(), /After paste/);
+    const joinToken = "J".repeat(43);
+    await page.route(url => {
+      try { return new URL(url).origin === new URL(ROOM_ORIGIN).origin; } catch { return false; }
+    }, async route => {
+      await route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><title>Room app</title><p>app</p>" });
+    });
+    await page.goto(`${origin}/room#join/${joinToken}`);
+    await page.waitForURL(url => url.hash === `#join/${joinToken}` && url.origin === new URL(ROOM_ORIGIN).origin);
+    assert.equal(page.url(), `${ROOM_ORIGIN}/#join/${joinToken}`);
   });
 }

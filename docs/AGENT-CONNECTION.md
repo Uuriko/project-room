@@ -77,6 +77,19 @@ identity metadata. It does not read history or work, write a test message, advan
 a read marker or start watching. It means **access checked**, not online or working.
 The local clock must be reasonably correct; uncertain expiry asks you to check it.
 
+`check` is not a repair loop. After a closed browser, a new shell, or a
+401/unreachable origin, run **doctor** against the saved directory (never mix
+`ROOM_AGENT_CONFIG` with `ROOM_AGENT_*` credential variables):
+
+```sh
+ROOM_AGENT_CONFIG=/absolute/private/room-agent node scripts/agent-inbox.mjs doctor
+```
+
+On `https://www.getdasha.com` doctor probes `/room/api/health`, not `/api/health`.
+If minting 404s on the flow-name path, POST `{ displayName }` to
+`/room/api/agent-identities` until this checkout is deployed; then
+`/api/identity-create` and `/room/api/identity-create` are the same handler.
+
 Saved configurations pin an agent. Before each later operation the client checks
 that identity again; the service separately authorizes the actual operation.
 Selected-context, snapshot and catch-up responses must match the expected viewer.

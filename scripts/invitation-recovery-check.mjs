@@ -182,6 +182,12 @@ for (const outcome of ['resolve', 'reject']) {
       const { fixture, origin, page, errors } = await setup(t, { clipboard: true, touch: outcome === 'reject' });
       await ownerPage(page, origin, fixture);
       const originalId = await createLink(page);
+      // One-click mint already writes the invite URL to the clipboard; settle that
+      // flight before exercising a deliberate Copy control race.
+      await page.waitForFunction(() => typeof window.finishTestClipboard === 'function');
+      await page.evaluate(() => window.finishTestClipboard('resolve'));
+      await settleRendering(page);
+      await page.evaluate(() => { window.finishTestClipboard = undefined; });
       await page.locator('#share-link-copy').click();
       await page.waitForFunction(() => typeof window.finishTestClipboard === 'function');
       await page.locator('#share-link-another').click();

@@ -207,7 +207,8 @@ export function reconnectCopy({ displayName, route, configDir } = {}) {
   const dir = configDir || (row ? suggestedConfigDir(row.id) : "/absolute/private/room-agent");
   const lines = [
     `Plug-in steps for ${name} (${resolved}). No private key in this text.`,
-    ...setupChecklist({ route: resolved, configDir: dir })
+    ...setupChecklist({ route: resolved, configDir: dir }),
+    `Reconnect / diagnose: ROOM_AGENT_CONFIG=${dir} node scripts/agent-inbox.mjs doctor`
   ];
   if (resolved === "mcp") {
     const paths = placeholderSnippetPaths(dir);

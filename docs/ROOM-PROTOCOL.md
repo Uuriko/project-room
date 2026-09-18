@@ -162,6 +162,18 @@ can be taken over.
   Overlap found *before* claiming means negotiating in prose first, then
   claiming non-overlapping file sets.
 
+### 4a. Machine collision check
+
+`server/claim-collisions.mjs` (`findClaimCollisions`) is the machine
+reading of the exclusivity rule: given open claims with file lists, it
+returns every file claimed by two or more open claims, with the holding
+claim ids and lanes. Path variants (`./x`, `x//y`) normalize to the same
+file; closed claims (`done`/`withdrawn`/`closed`/`expired`/`released`/
+`rejected`) release their files and never collide. Before opening a claim,
+a lane SHOULD run its intended file set through the detector against the
+current board — a hit means negotiate first, then claim non-overlapping
+files. The detector is advisory: it flags, it never blocks.
+
 ## 5. Lane-tag rules: address vs reference
 
 Lane tags are deliberate tokens, never prose accidents:

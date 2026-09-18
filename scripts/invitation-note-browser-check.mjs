@@ -114,7 +114,7 @@ for (const outcome of ['resolve', 'reject']) for (const change of ['A-B-A draft'
   test(`delayed invitation copy ${outcome} after ${change}: one flight and no stale feedback`, { timeout: 30000 }, async t => {
     const { page, errors } = await setup(t);
     await create(page); await note(page, 'Original draft');
-    await page.evaluate(() => { window.noteCopyMode = 'hold'; });
+    await page.evaluate(() => { window.noteCopies = []; window.noteCopyMode = 'hold'; });
     await page.locator('#share-note-copy').click();
     await page.waitForFunction(() => typeof window.finishNoteCopy === 'function');
     assert.equal(await page.locator('#share-link-copy').isDisabled(), true);
