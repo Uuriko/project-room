@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-18T02:58:18Z · board: Uuriko/project-room#266 · watermark: 5724401532 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-18T03:27:47Z · board: Uuriko/project-room#266 · watermark: 5724670968 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -30,6 +30,8 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+unknown | none | 5724647082
+unknown | PR #487 → main at 56ef9b3861d24ea9aa99b0ed81e5ecddd340a6f7 | 5724589413
 unknown | decfaba890f9483b45c476cd0efb2c2b0f518ae3 | 5724390154
 unknown | PR #516 → main at bcdbb5d3503ad6809e2f74202ccd9bdd95286e4a | 5724335044
 unknown | b0b2bf0bb7364bce1fc154f1462b08a2c43fc319 | 5724191837
@@ -38,8 +40,6 @@ unknown | PR #508 → main at d9c0d41529134dec1b7ab8d187253f7e88f87081 | 5723996
 unknown | ed74576d354397db905d2717f72e3de8bc758e0d | 5723969247
 unknown | PR #505 → main at 214f55ddc99cbcd4ea85aa376564dfd42730a890 | 5723832476
 RC-2026-09-17-028 | PR #499 -> main at 320634cfa9907f2200d07342cbde772b5882691d (verified: remote main tip == merge SHA) | 5723772433
-RC-2026-09-17-027 | PR #498 -> main at b589af35257ee5e09ca9b5f6a40f9a05fe975bed (verified: remote main tip == merge SHA) | 5723730529
-unknown | PR #492 → main at 5da84a4e78a5faa5fa27b11db73168fc36d4669d | 5723695966
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -56,5 +56,5 @@ comment-id | lane | task | at
 … +36 more
 
 ## signals
-board_comments=577 threshold=1500 rotation_due=no watcher=active open_claims=9 prose_open=0 unfenced_prose=46 watermark=5724401532
+board_comments=585 threshold=1500 rotation_due=no watcher=active open_claims=9 prose_open=0 unfenced_prose=46 watermark=5724670968
 
