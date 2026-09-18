@@ -36,6 +36,7 @@ Architecture SoR (steal stack collapsed):
 | [NOVEL-PLANNING-THINKING-BUILDS-2026-09-17.md](NOVEL-PLANNING-THINKING-BUILDS-2026-09-17.md) | Planning / thinking landscape (TSP, cuddlytoddly, Crossfire, …) ranked P0–P2 for Room / Compute / Ask; Ledger Plan Tree fold (research only) |
 | [ROOM-COMPUTE-NEEDLE-STEAL-2026-09-17.md](ROOM-COMPUTE-NEEDLE-STEAL-2026-09-17.md) | Cactus Needle 3 steal — confidence / triggers / intelligence ladder for Second; not an Ask chat model (research only) |
 | [UX-CLEAN-LESS-NOISE-2026-09-17.md](UX-CLEAN-LESS-NOISE-2026-09-17.md) | Ask + Compute + Room anti-noise ranking; Ask quiet-shell P0 (research only) |
+| [ASK-ARTIFACTS-LITE-2026-09-18.md](ASK-ARTIFACTS-LITE-2026-09-18.md) | Ask Artifacts-lite P0 — collapse long fences → opt-in side/bottom panel; not Room artifacts, not a full IDE (research only) |
 | [multiplayer-messaging-20260908/](multiplayer-messaging-20260908/) | Collaboration/messaging plan (markdown + DOCX) |
 | [2026-09-07-project-room-v2/](2026-09-07-project-room-v2/) | Earlier sourced report and comparison screenshots |
 | [2026-09-07-project-room/](2026-09-07-project-room/) | First 7 September report source |
