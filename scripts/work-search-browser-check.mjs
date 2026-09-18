@@ -7,6 +7,7 @@ import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
+import { fillAccessKey } from "./auth-signin.mjs";
 
 for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'desktop'}: return to outcomes without losing context`, { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 50 });
@@ -33,7 +34,7 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
     hasTouch: touch, isMobile: touch, reducedMotion: 'reduce' });
   page.setDefaultTimeout(8000); const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}`);
-  await page.locator('#access-key').fill(f.keys.owner); await page.locator('#auth-form button[type=submit]').click();
+  await fillAccessKey(page, f.keys.owner); await page.locator('#auth-form button[type=submit]').click();
   await page.locator('#main').waitFor({ state: 'visible' });
   const search = page.locator('#message-search'), hits = page.locator('#search-list');
   const workHit = id => hits.locator(`[data-open-work="${id}"]`);

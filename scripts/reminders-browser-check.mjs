@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 for (const mobile of [false, true]) {
   const label = mobile ? "mobile" : "desktop";
@@ -24,7 +25,7 @@ for (const mobile of [false, true]) {
     page.on("pageerror", error => errors.push(error.message));
     page.on("request", request => { if (request.method() === "POST" && request.url().endsWith("/reminders")) writes.push(request.postDataJSON()); });
     await page.clock.install({ time: at });
-    await page.goto(origin); await page.locator("#access-key").fill(f.keys.owner); await page.getByRole("button", { name: "Enter room", exact: true }).click();
+    await page.goto(origin); await fillAccessKey(page, f.keys.owner); await page.getByRole("button", { name: "Enter room", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
     const card = page.locator('[data-work-record-id="test-handoff"]');
     const open = async () => {

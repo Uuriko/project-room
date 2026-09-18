@@ -11,6 +11,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { hashPassword } from "../src/password-auth.mjs";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 async function setup(t) {
   const f = createAcceptanceFixture();
@@ -42,7 +43,7 @@ const methodRow = (page, label) => page.locator(".settings-method", { hasText: l
 test("account settings: methods render, disable/enable/remove, recovery codes, honest provider states", { timeout: 45000 }, async t => {
   const { page, origin, key, accountId, f } = await setup(t);
   await page.goto(origin + "/?account=1");
-  await page.locator("#access-key").fill(key);
+  await fillAccessKey(page, key);
   await page.locator('#auth-form button[type="submit"]').click();
   await page.locator("#inbox-panel").waitFor();
 

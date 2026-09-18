@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { fillAccessKey } from "../scripts/auth-signin.mjs";
 
 const origin = 'https://project-room-staging.getdasha.workers.dev';
 const privatePath = name => new URL(`./.operator/${name}`, import.meta.url);
@@ -46,7 +47,7 @@ try {
     const owner = await ownerContext.newPage(), guest = await guestContext.newPage();
     for (const page of [owner, guest]) page.setDefaultTimeout(20000);
     await owner.goto(origin);
-    await owner.locator('#access-key').fill((await readFile(privatePath('owner-key.txt'), 'utf8')).trim());
+    await fillAccessKey(owner, (await readFile(privatePath('owner-key.txt'), 'utf8')).trim());
     await owner.getByRole('button', { name: 'Enter room', exact: true }).click();
     await owner.locator('#main').waitFor({ state: 'visible' });
     await owner.locator('#invite-people-button').click();

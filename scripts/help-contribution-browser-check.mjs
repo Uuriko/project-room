@@ -11,6 +11,7 @@ import { createRoomServer } from '../server/http.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
 import { textVersion } from '../server/text-results.mjs';
 import { EVENT_TYPES as T } from '../src/events.js';
+import { fillAccessKey } from "./auth-signin.mjs";
 
 for (const multiple of [false, true]) for (const touch of [false, true]) test(`${multiple ? 'alternative contributions' : 'voluntary help'} ${touch ? 'touch' : 'desktop'}: offer, answer, draft, adopt and independently review`, { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture({ managedProducer: true }), handles = new Set(), traffic = [], errors = [];
@@ -72,7 +73,7 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
   const page = await browser.newPage({ viewport: touch ? { width: 390, height: 844 } : { width: 1280, height: 900 },
     isMobile: touch, hasTouch: touch, reducedMotion: 'reduce' });
   page.setDefaultTimeout(8000); page.on('pageerror', error => errors.push(error.message));
-  await page.goto(origin); await page.locator('#access-key').fill(f.keys.owner);
+  await page.goto(origin); await fillAccessKey(page, f.keys.owner);
   await page.locator('#auth-form button[type=submit]').click(); await page.locator('#main').waitFor({ state: 'visible' });
   mkdirSync('test-results', { recursive: true }); const prefix = `test-results/${multiple ? 'help-alternatives' : 'help-contribution'}-${touch ? 'touch' : 'desktop'}`;
   await page.locator('#contribution-open').click();

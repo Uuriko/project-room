@@ -8,6 +8,7 @@ import { readFileSync, rmSync } from "node:fs";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 async function setup(t, { account = false } = {}) {
   const f = createAcceptanceFixture({ managedProducer: false }), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -28,7 +29,7 @@ async function setup(t, { account = false } = {}) {
   const key = account ? f.store.issueAccountAccessKey(f.store.accountForMember("commons", "owner").id) : f.keys.owner;
   await page.goto(account ? origin + "/?room=commons" : origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await page.locator("#access-key").fill(key); await page.locator('#auth-form button[type="submit"]').click();
+  await fillAccessKey(page, key); await page.locator('#auth-form button[type="submit"]').click();
   await page.locator("#main").waitFor({ state: "visible" });
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(outside, []); });
   return { ...f, page, exports };
