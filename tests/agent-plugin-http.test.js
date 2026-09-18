@@ -408,17 +408,27 @@ test("webhook validation and cross-identity isolation", async t => {
   const b = f.store.identities.create("hook-b");
 
   assert.equal(await errorCode(await post(origin, "/api/agent-webhooks",
-    { url: "http://hooks.example.test/plain", events: ["x"] }, a.secret)), "invalid_subscription", "http URLs are rejected");
+    { url: "http://hooks.example.test/plain", events: ["message.posted"] }, a.secret)), "invalid_subscription", "http URLs are rejected");
   assert.equal(await errorCode(await post(origin, "/api/agent-webhooks",
     { url: "https://hooks.example.test/ok", events: [] }, a.secret)), "invalid_subscription_request", "events must be non-empty");
+  // RC-2026-09-18-031: unknown event names fail fast with the taught vocabulary
+  // instead of a 201 that never fires.
+  const badEvents = await post(origin, "/api/agent-webhooks",
+    { url: "https://hooks.example.test/ok", events: ["message-posted"] }, a.secret);
+  assert.equal(badEvents.status, 422);
   assert.equal(await errorCode(await post(origin, "/api/agent-webhooks",
-    { url: "https://hooks.example.test/ok", events: ["x"], secret: "short" }, a.secret)), "invalid_subscription",
+    { url: "https://hooks.example.test/ok", events: ["message-posted"] }, a.secret)), "invalid_subscription_request");
+  const badEventsMsg = (await badEvents.json()).error.message;
+  assert.ok(badEventsMsg.includes('"message-posted"'), "names the unknown event");
+  assert.ok(badEventsMsg.includes("message.posted"), "teaches the valid spelling");
+  assert.equal(await errorCode(await post(origin, "/api/agent-webhooks",
+    { url: "https://hooks.example.test/ok", events: ["message.posted"], secret: "short" }, a.secret)), "invalid_subscription",
     "short caller secrets are rejected");
   assert.equal(await errorCode(await post(origin, "/api/agent-webhooks",
-    { url: "https://hooks.example.test/ok", events: ["x"], extra: 1 }, a.secret)), "invalid_subscription_request");
+    { url: "https://hooks.example.test/ok", events: ["message.posted"], extra: 1 }, a.secret)), "invalid_subscription_request");
 
   const subId = (await (await post(origin, "/api/agent-webhooks",
-    { url: "https://hooks.example.test/a", events: ["x"] }, a.secret)).json()).subscriptionId;
+    { url: "https://hooks.example.test/a", events: ["message.posted"] }, a.secret)).json()).subscriptionId;
   assert.equal(await errorCode(await del(origin, `/api/agent-webhooks/${subId}`, b.secret)), "unknown_subscription",
     "another identity cannot unsubscribe it, and learns nothing");
   assert.deepEqual((await (await get(origin, "/api/agent-webhooks", b.secret)).json()).subscriptions, [],

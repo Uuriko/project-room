@@ -9,6 +9,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { openMcpTestClient } from "./mcp-test-client.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 async function setup(t, touch = false) {
   const f = createAcceptanceFixture(), id = "help-guide", errors = [], traffic = [];
@@ -35,7 +36,7 @@ async function setup(t, touch = false) {
   t.after(async () => { await agent.close(); await browser.close(); server.closeStreams(); server.closeAllConnections();
     await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   await page.goto(origin);
-  await page.locator("#access-key").fill(f.keys.owner);
+  await fillAccessKey(page, f.keys.owner);
   await page.getByRole("button", { name: "Enter room", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
   const card = page.locator(`[data-work-record-id="${id}"]`), dialog = page.locator("#action-dialog");
@@ -167,7 +168,7 @@ test("human help expiry retires its label without new events and guest cannot pu
   assert.equal(f.store.room("commons").sequence, sequence); assert.equal((await f.list()).length, 0);
   f.page.on("dialog", dialog => dialog.accept());
   await f.page.getByRole("button", { name: "Sign out", exact: true }).click();
-  await f.page.locator("#access-key").fill(f.keys.guest);
+  await fillAccessKey(f.page, f.keys.guest);
   await f.page.getByRole("button", { name: "Enter room", exact: true }).click();
   await f.page.locator("#main").waitFor({ state: "visible" });
   assert.equal(await f.card.locator("[data-action=help]").count(), 0);

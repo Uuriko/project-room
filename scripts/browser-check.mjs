@@ -9,6 +9,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["mobile", { width: 390, height: 844 }]]) {
   test(`authenticated ${label}: conversation, drafts, retries, reactions, search, source work, and revocation`, { timeout: 90000 }, async t => {
@@ -51,7 +52,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
       await p.goto(origin);
       await p.locator("#auth-panel").waitFor({ state: "visible" });
       assert.equal(await p.locator("#message-list").textContent(), "");
-      await p.locator("#access-key").fill(key);
+      await fillAccessKey(p, key);
       await p.getByRole("button", { name: "Enter room", exact: true }).click();
       await p.locator("#main").waitFor({ state: "visible" });
     };
@@ -173,7 +174,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await page.locator("#message-list").textContent(), "");
     assert.equal(await page.locator("#search-list").textContent(), "");
     assert.equal(await input.inputValue(), "");
-    await page.locator("#access-key").fill(rotated);
+    await fillAccessKey(page, rotated);
     await page.getByRole("button", { name: "Enter room", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
     assert.equal(await input.inputValue(), "");
@@ -230,7 +231,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const errors = [];
     page.on("pageerror", error => errors.push(error.message));
     await page.goto(origin);
-    await page.locator("#access-key").fill(human);
+    await fillAccessKey(page, human);
     await page.getByRole("button", { name: "Enter room", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
 
@@ -372,7 +373,7 @@ for (const outcome of ["success", "failure"]) {
     page.on("pageerror", error => errors.push(error.message));
     const enter = async () => {
       await page.locator("#auth-panel").waitFor({ state: "visible" });
-      await page.locator("#access-key").fill(key);
+      await fillAccessKey(page, key);
       await page.getByRole("button", { name: "Enter room", exact: true }).click();
       await page.locator("#main").waitFor({ state: "visible" });
       await page.waitForFunction(() => document.querySelector("#rb-current-boundary").textContent.includes("as of event"));

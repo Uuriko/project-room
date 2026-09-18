@@ -9,6 +9,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 test("invite for a purpose: link opens the invited work item after join", { timeout: 90000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 50 });
@@ -27,7 +28,7 @@ test("invite for a purpose: link opens the invited work item after join", { time
   const inviter = await inviterContext.newPage();
   inviter.setDefaultTimeout(8000); inviter.on("pageerror", error => errors.push(error.message));
   await inviter.goto(origin);
-  await inviter.locator("#access-key").fill(f.keys.owner);
+  await fillAccessKey(inviter, f.keys.owner);
   await inviter.getByRole("button", { name: "Enter room", exact: true }).click();
   await inviter.locator("#main").waitFor({ state: "visible" });
   await inviter.locator("#invite-people-button").click();

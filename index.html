@@ -46,6 +46,8 @@
           <button type="button" id="continue-account" class="button ghost" hidden>Continue to your rooms</button>
           <button type="button" id="clear-session" class="text-button">Clear saved session on this browser</button>
         </div>
+        <button type="button" id="signin-more" class="text-button" aria-expanded="false" aria-controls="signin-extra">More sign-in options</button>
+        <div id="signin-extra" hidden>
         <div class="auth-divider"><span>or use a key</span></div>
         <div id="auth-kind" class="auth-kind" role="group" aria-label="What are you signing in with?">
           <button type="button" id="auth-kind-room" class="button ghost" aria-pressed="true">Room key</button>
@@ -72,6 +74,7 @@
         <details class="access-help"><summary>Help</summary>
           <p>Ask the room owner for an invite link or key. Keep your key private.</p>
         </details>
+        </div>
       </section>
 
       <nav id="workspace-nav" class="workspace-nav" aria-label="Workspace" hidden>

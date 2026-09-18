@@ -341,6 +341,9 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 #session-restore { display: grid; gap: .45rem; margin: 0 0 1rem; }
 #session-restore[hidden] { display: none; }
 #session-restore .button { width: 100%; }
+#signin-more { display: block; margin: 1rem auto 0; min-height: 44px; font-size: .85rem; }
+#signin-extra { margin-top: 1.5rem; }
+#signin-extra[hidden] { display: none; }
 .auth-kind { display: flex; flex-wrap: wrap; gap: .45rem; margin: 0 0 1rem; }
 .auth-kind .button { flex: 1 1 8rem; width: auto; min-width: 0; }
 .auth-kind .button[aria-pressed="true"] { border-color: var(--blue); color: var(--text); background: rgb(255 255 255 / 6%); }

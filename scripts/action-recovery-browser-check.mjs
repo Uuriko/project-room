@@ -7,6 +7,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { verificationSatisfied } from "../src/workflow.js";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 async function setup(t, { action = "complete", mobile = false, live = true } = {}) {
   const f = createAcceptanceFixture(), workId = "action-recovery";
@@ -48,7 +49,7 @@ async function setup(t, { action = "complete", mobile = false, live = true } = {
   await page.goto(origin);
   const login = async (role = "owner") => {
     await page.locator("#auth-panel").waitFor({ state: "visible" });
-    await page.locator("#access-key").fill(f.keys[role]); await page.getByRole("button", { name: "Enter room", exact: true }).click();
+    await fillAccessKey(page, f.keys[role]); await page.getByRole("button", { name: "Enter room", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
   };
   await login(action === "verify" ? "human-reviewer" : "owner");

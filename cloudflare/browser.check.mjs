@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { build } from 'esbuild';
 import { Miniflare, Response } from 'miniflare';
 import { chromium } from 'playwright';
+import { fillAccessKey } from "../scripts/auth-signin.mjs";
 
 test('two real browsers use the shared UI on local Workers, including SSE and restart', { timeout: 90000 }, async () => {
   const socket = createServer();
@@ -42,7 +43,7 @@ test('two real browsers use the shared UI on local Workers, including SSE and re
     const owner = await ownerContext.newPage(); let guest = await guestContext.newPage();
     for (const page of [owner, guest]) page.setDefaultTimeout(12000);
     await owner.goto(origin);
-    await owner.locator('#access-key').fill(ownerKey);
+    await fillAccessKey(owner, ownerKey);
     await owner.getByRole('button', { name: 'Enter room', exact: true }).click();
     await owner.locator('#main').waitFor({ state: 'visible' });
     await owner.locator('#invite-people-button').click();

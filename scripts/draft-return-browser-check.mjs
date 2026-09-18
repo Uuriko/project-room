@@ -6,6 +6,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 async function setup(t, { humanWork = false, mobile = false } = {}) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -38,7 +39,7 @@ async function setup(t, { humanWork = false, mobile = false } = {}) {
   await page.goto(origin);
   const login = async (key = f.keys.owner) => {
     await page.locator("#auth-panel").waitFor({ state: "visible" });
-    await page.locator("#access-key").fill(key); await page.getByRole("button", { name: "Enter room", exact: true }).click();
+    await fillAccessKey(page, key); await page.getByRole("button", { name: "Enter room", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
   };
   await login();

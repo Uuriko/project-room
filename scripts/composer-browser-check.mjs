@@ -9,6 +9,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["narrow", { width: 320, height: 780 }]]) {
   test(`composer ${label}: keyboard recovery, discussion errors, composition, and access cleanup`, { timeout: 60000 }, async t => {
@@ -36,7 +37,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await page.goto(origin);
     const login = async key => {
       await page.locator("#auth-panel").waitFor({ state: "visible" });
-      await page.locator("#access-key").fill(key);
+      await fillAccessKey(page, key);
       await page.getByRole("button", { name: "Enter room", exact: true }).click();
       await page.locator("#main").waitFor({ state: "visible" });
       await page.waitForFunction(() => !document.querySelector("#access-key").disabled);

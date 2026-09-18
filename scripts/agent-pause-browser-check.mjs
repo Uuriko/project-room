@@ -13,6 +13,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 const command = (type, data, id = crypto.randomUUID()) => ({ id, type, data });
 
@@ -42,7 +43,7 @@ test("People panel: owner pauses, resumes and removes an agent with a two-click 
   page.on("dialog", dialog => { dialogs.push(dialog.type()); dialog.dismiss(); });
   await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  await page.locator("#access-key").fill(owner);
+  await fillAccessKey(page, owner);
   await page.getByRole("button", { name: "Enter room", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
   await page.locator("#people-panel > summary").click();

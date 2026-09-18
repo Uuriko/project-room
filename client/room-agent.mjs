@@ -753,6 +753,17 @@ export class RoomAgentClient {
     return this.command({ id: randomUUID(), type: "member.status_updated",
       data: { ...(memberId ? { memberId } : {}), message } }, { signal });
   }
+  // Post a room message as the connected agent member. With toMemberId the
+  // message is a targeted DM (only the sender and the addressed member can
+  // read it); without it the message goes to everyone in the room.
+  say(body, { toMemberId, signal } = {}) {
+    if (typeof body !== "string" || !body.trim() || body.length > 4096)
+      throw new Error("Say a message of 1 to 4096 characters");
+    if (toMemberId !== undefined && !validId(toMemberId))
+      throw new Error("toMemberId must be a member id");
+    return this.command({ id: randomUUID(), type: "message.posted",
+      data: { messageId: randomUUID(), body, ...(toMemberId ? { toMemberId } : {}) } }, { signal });
+  }
   workSessions({ status, signal } = {}) {
     if (status !== undefined && typeof status !== "string") throw new Error("Choose one session status");
     return this.#request(status ? `/work-sessions?status=${encodeURIComponent(status)}` : "/work-sessions", undefined, signal);

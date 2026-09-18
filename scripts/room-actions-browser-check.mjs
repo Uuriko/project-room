@@ -5,6 +5,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 async function setup(t, { mobile = false, role = "owner" } = {}) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 50 });
@@ -25,7 +26,7 @@ async function setup(t, { mobile = false, role = "owner" } = {}) {
     return route.continue();
   });
   page.on("pageerror", error => errors.push(error.message));
-  await page.goto(origin); await page.locator("#access-key").fill(f.keys[role]); await page.getByRole("button", { name: "Enter room", exact: true }).click();
+  await page.goto(origin); await fillAccessKey(page, f.keys[role]); await page.getByRole("button", { name: "Enter room", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
   page.on("request", request => { if (request.method() !== "GET" && new URL(request.url()).pathname.startsWith("/api/rooms/")) writes.push(new URL(request.url()).pathname); });
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(external, []); assert.deepEqual(writes, []); });

@@ -151,6 +151,7 @@ if (action === "reply") {
   node scripts/agent-inbox.mjs presence
   node scripts/agent-inbox.mjs capabilities [QUERY]
   node scripts/agent-inbox.mjs advertise CAPABILITY [CAPABILITY...]
+  node scripts/agent-inbox.mjs say [--to MEMBER_ID] MESSAGE...
   node scripts/agent-inbox.mjs templates [TEMPLATE_ID]
   node scripts/agent-inbox.mjs funnel
   node scripts/agent-inbox.mjs export > room.jsonl
@@ -233,18 +234,28 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
     const redeemArgs = extra.filter(a => a !== "--yes" && a !== "--no"),
       redeemAutoYes = redeemArgs.length !== extra.length && extra.includes("--yes"),
       redeemAutoNo = extra.includes("--no");
-    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "sessions", "claim", "session", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "room-create", "identity-link", "identity-links", "identity-unlink", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "request-access", "access-requests", "access-decide", "funnel", "export", "import-history", "thread", "doctor", "support-export"].includes(action)
+    // say accepts an optional --to MEMBER_ID first; the remaining words are
+    // the message body. With --to the message is a targeted DM.
+    const sayArgs = action === "say"
+      ? (checkpoint === "--to"
+        ? { toMemberId: extra[0], words: extra.slice(1) }
+        : { words: [checkpoint, ...extra] })
+      : null;
+    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "say", "sessions", "claim", "session", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "room-create", "identity-link", "identity-links", "identity-unlink", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "request-access", "access-requests", "access-decide", "funnel", "export", "import-history", "thread", "doctor", "support-export"].includes(action)
       || (["connect", "import"].includes(action) && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
       || (action === "import" && ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"].some(name => process.env[name] !== undefined))
       || (["packet", "work", "discussion", "result", "claim"].includes(action) && !validId(checkpoint))
       || (action === "advertise" && (checkpoint === undefined || checkpoint.startsWith("--") || !extra.every(cap => typeof cap === "string" && cap.trim() && cap.length <= 80) || [checkpoint, ...extra].length > 30))
+      || (action === "say" && (sayArgs.toMemberId !== undefined && !validId(sayArgs.toMemberId)
+        || sayArgs.words.length === 0 || sayArgs.words.some(word => typeof word !== "string" || !word.trim())
+        || sayArgs.words.join(" ").length > 4096))
       || (action === "status" && (checkpoint === undefined || [checkpoint, ...extra].join(" ").length > 140))
       || (action === "sessions" && checkpoint !== undefined && !/^[a-z]+$/.test(checkpoint))
       || (action === "session" && (!validId(checkpoint) || extra.length !== 1 || !/^[a-z]+$/.test(extra[0])))
       || (action === "search" && !validWorkSearchQuery(checkpoint))
       || (["discussion", "result"].includes(action) ? false : action === "work" ? new Set(extra).size !== extra.length || extra.some(flag => !["--include-source", "--include-offers"].includes(flag))
         : action === "search" ? extra.length > 1 || (extra.length === 1 && extra[0] !== "--needs-me")
-        : ["advertise", "session", "identity-link", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "room-create"].includes(action) ? false
+        : ["advertise", "say", "session", "identity-link", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "room-create"].includes(action) ? false
         : action === "claim" ? extra.length > 1 || (extra.length === 1 && !isJSONObject(extra[0]))
         : extra.length || (["check", "orient", "next", "brief"].includes(action) && checkpoint !== undefined))
       || (action === "changes" && (!/^\d+$/.test(checkpoint ?? "") || !Number.isSafeInteger(Number(checkpoint))))
@@ -281,6 +292,8 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
       : action === "capabilities" ? await client.capabilities(checkpoint === undefined ? {} : { search: checkpoint })
       : action === "advertise" ? await client.advertiseCapabilities([checkpoint, ...extra])
       : action === "status" ? await client.setStatus([checkpoint, ...extra].join(" "))
+      : action === "say" ? await client.say(sayArgs.words.join(" "),
+        sayArgs.toMemberId === undefined ? {} : { toMemberId: sayArgs.toMemberId })
       : action === "templates" ? { templates: checkpoint === undefined ? client.workTemplates() : [client.workTemplate(checkpoint)].filter(Boolean) }
       : action === "funnel" ? await client.onboardingFunnel()
       : action === "export" ? { ndjson: await client.exportRoom() }

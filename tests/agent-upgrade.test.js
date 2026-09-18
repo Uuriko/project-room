@@ -45,7 +45,7 @@ for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline
   assert.throws(() => new OldStore(f.filename), /newer than this service/);
   current.createAccount("after-v34-upgrade");
   assert.equal(current.account("after-v34-upgrade").active, true);
-  assert.equal(auditRecovery(current).schemaVersion, 34);
+  assert.equal(auditRecovery(current).schemaVersion, 35);
   if (version >= 21) {
     f.replyRequests.forEach((request, index) => assert.deepEqual(current.inbox.reply(f.owner.token, request, f.owner.session.sessionBinding).receipt, f.replyReceipts[index]));
     const attempt = current.inbox.replyAttempts(f.owner.token, f.emailEnvelope.sourceId, f.owner.session.sessionBinding).attempts[0];

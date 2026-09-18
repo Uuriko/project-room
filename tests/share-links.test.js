@@ -7,12 +7,13 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { AgentRooms } from "../server/agent-rooms.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { AccountClient } from "../src/client.js";
 
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-share-contract-")), filename = join(directory, "room.sqlite");
-  let now = Date.now();
+  const now = Date.now();
   const store = new RoomStore(filename, { now: () => now }); store.initialize(initialRoom());
   const ownerKey = store.issueAccessKey("commons", "owner");
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
@@ -155,7 +156,7 @@ test("link creation retries preserve scope and guests cannot administer invitati
   assert.throws(() => f.store.shareLinks.cancel(guest.slot.token, "commons", f.result.link.id, accepted.session.sessionBinding), { code: "access_denied" });
 });
 
-test("HTTP share-link administration refuses room bearer keys; room-key and account browser sessions still work", async t => {
+test("HTTP share-link administration refuses non-owner bearer keys; owner identity bearer, room-key and account browser sessions still work", async t => {
   const f = fixture(t), server = createRoomServer({ store: f.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
@@ -193,4 +194,193 @@ test("HTTP share-link administration refuses room bearer keys; room-key and acco
   const created = await request("/api/rooms/commons/share-links", { method: "POST", headers: cookie,
     data: { ...create, requestId: randomUUID(), linkToken: randomBytes(32).toString("base64url") } });
   assert.equal(created.status, 201);
+});
+
+// The room owner on its agent identity bearer mints human share links: the
+// issuer is recorded with a null account, and the link works end to end.
+function agentOwnerFixture(t) {
+  const f = fixture(t);
+  const identity = f.store.identities.create("Owning Agent");
+  f.store.identities.link(f.ownerKey, "commons", {
+    identityId: identity.identityId, displayName: "Owning Agent", permissions: ["accept_work"]
+  });
+  new AgentRooms(f.store).transfer(f.ownerKey, "commons", { toMemberId: identity.identityId });
+  assert.equal(f.store.roomAuthority("commons").ownerId, identity.identityId);
+  const revision = f.store.roomAuthority("commons").members[identity.identityId].revision;
+  return { ...f, identity, ownerRevision: revision };
+}
+
+test("room owner on its agent identity Bearer <redacted> a human share link with a null issuer account", t => {
+  const f = agentOwnerFixture(t);
+  const linkToken = randomBytes(32).toString("base64url");
+  const details = { requestId: randomUUID(), linkToken, expiresAt: Date.now() + 3600000, maxJoins: 2, expectedMemberRevision: f.ownerRevision };
+  const created = f.store.shareLinks.create(f.identity.secret, "commons", details, null);
+  assert.equal(created.duplicate, false);
+  assert.equal(created.link.status, "active");
+  const row = f.store.db.prepare("SELECT * FROM share_links WHERE id=?").get(created.link.id);
+  assert.equal(row.issuer_account_id, null);
+  assert.equal(row.issuer_auth_epoch, null);
+  assert.equal(row.issuer_member_id, f.identity.identityId);
+  // Exact retries are idempotent for the accountless issuer.
+  const again = f.store.shareLinks.create(f.identity.secret, "commons", details, null);
+  assert.equal(again.duplicate, true);
+  assert.equal(again.link.id, created.link.id);
+  assert.throws(() => f.store.shareLinks.create(f.identity.secret, "commons", { ...details, maxJoins: 3 }, null),
+    { code: "idempotency_conflict" });
+  // The owner lists and cancels on the same bearer.
+  assert.equal(f.store.shareLinks.list(f.identity.secret, "commons", null).links.length, 2);
+  const cancelled = f.store.shareLinks.cancel(f.identity.secret, "commons", created.link.id, null);
+  assert.equal(cancelled.link.status, "cancelled");
+  assert.equal(f.store.verifyInvitationAudit().consistent, true);
+  assert.doesNotThrow(() => f.store.shareLinks.verify());
+});
+
+test("a human guest joins through an agent-issued link and the invitation audit stays consistent", t => {
+  const f = agentOwnerFixture(t);
+  const linkToken = randomBytes(32).toString("base64url");
+  const created = f.store.shareLinks.create(f.identity.secret, "commons",
+    { requestId: randomUUID(), linkToken, expiresAt: Date.now() + 3600000, maxJoins: 2, expectedMemberRevision: f.ownerRevision }, null);
+  const slot = f.store.createAccountSessionSlot();
+  const joined = f.store.shareLinks.join(slot.token, linkToken, { displayName: "Agent-invited Guest",
+    redemptionId: randomUUID(), expectedSessionRevision: 0, expectedSessionBinding: slot.session.sessionBinding });
+  assert.equal(joined.session.member.displayName, "Agent-invited Guest");
+  assert.equal(joined.session.member.role, "guest");
+  const invitation = f.store.db.prepare("SELECT * FROM membership_invitations WHERE id=(SELECT invitation_id FROM share_link_joins WHERE link_id=?)").get(created.link.id);
+  assert.equal(invitation.issuer_account_id, null);
+  assert.equal(invitation.issuer_account_auth_epoch, null);
+  assert.equal(invitation.issuer_member_id, f.identity.identityId);
+  assert.equal(invitation.status, "accepted");
+  assert.equal(f.store.verifyInvitationAudit().consistent, true);
+  assert.doesNotThrow(() => f.store.shareLinks.verify());
+  assert.equal(f.store.shareLinks.list(f.identity.secret, "commons", null).links.find(link => link.id === created.link.id).joins, 1);
+});
+
+test("HTTP: owner identity Bearer <redacted> administers share links; a non-owner agent Bearer <redacted> 403", async t => {
+  const f = agentOwnerFixture(t);
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const request = (path, { method = "GET", headers = {}, data } = {}) => fetch(origin + path, { method,
+    headers: { Origin: origin, ...(data === undefined ? {} : { "Content-Type": "application/json" }), ...headers },
+    ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
+  const ownerBearer = { Authorization: `Bearer ${f.identity.secret}` };
+  const create = { requestId: randomUUID(), linkToken: randomBytes(32).toString("base64url"),
+    expiresAt: Date.now() + 3600000, maxJoins: 1, expectedMemberRevision: f.ownerRevision };
+  const listed = await request("/api/rooms/commons/share-links", { headers: ownerBearer });
+  assert.equal(listed.status, 200);
+  const made = await request("/api/rooms/commons/share-links", { method: "POST", headers: ownerBearer, data: create });
+  assert.equal(made.status, 201);
+  const linkId = (await made.json()).link.id;
+  // The link is active and guest-joinable.
+  assert.equal((await (await request("/api/rooms/commons/share-links", { headers: ownerBearer })).json()).links
+    .find(link => link.id === linkId).status, "active");
+  const cancelled = await request("/api/rooms/commons/share-links-cancel", { method: "POST", headers: ownerBearer, data: { linkId } });
+  assert.equal(cancelled.status, 200);
+  assert.equal((await cancelled.json()).link.status, "cancelled");
+  // A non-owner agent identity bearer is still refused on all three routes,
+  // even with a broad permission grant: the HTTP gate is owner-only.
+  const other = f.store.identities.create("Other Agent");
+  f.store.identities.link(f.ownerKey, "commons", {
+    identityId: other.identityId, displayName: "Other Agent", permissions: ["accept_work", "steer", "verify"]
+  });
+  const otherBearer = { Authorization: `Bearer ${other.secret}` };
+  for (const args of [
+    ["/api/rooms/commons/share-links", {}],
+    ["/api/rooms/commons/share-links", { method: "POST", data: { ...create, requestId: randomUUID(), linkToken: randomBytes(32).toString("base64url") } }],
+    ["/api/rooms/commons/share-links-cancel", { method: "POST", data: { linkId } }],
+  ]) {
+    const response = await request(args[0], { ...args[1], headers: otherBearer });
+    assert.equal(response.status, 403);
+    assert.equal((await response.json()).error.code, "access_denied");
+  }
+});
+
+test("an agent-issued link goes authority_changed when the issuer loses ownership or is deactivated", t => {
+  const f = agentOwnerFixture(t);
+  const linkToken = randomBytes(32).toString("base64url");
+  const created = f.store.shareLinks.create(f.identity.secret, "commons",
+    { requestId: randomUUID(), linkToken, expiresAt: Date.now() + 3600000, maxJoins: 2, expectedMemberRevision: f.ownerRevision }, null);
+  assert.equal(created.link.status, "active");
+  // Ownership moves back to the human owner: the agent keeps membership but is
+  // no longer the owner, so its link loses authority.
+  new AgentRooms(f.store).transfer(f.identity.secret, "commons", { toMemberId: "owner" });
+  assert.equal(f.store.roomAuthority("commons").ownerId, "owner");
+  assert.equal(f.store.shareLinks.list(f.ownerKey, "commons", null).links.find(link => link.id === created.link.id).status, "authority_changed");
+  assert.throws(() => f.store.shareLinks.preview(linkToken), { code: "link_unavailable" });
+});
+
+test("v34 databases migrate share-link and invitation history to v35 with issuer columns nullable", async t => {
+  const directory = mkdtempSync(join(tmpdir(), "room-share-migrate-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const filename = join(directory, "room.sqlite");
+  // Build a v34 database the long way: create it with the new code, then flip
+  // the schema back to the v34 shape (NOT NULL issuer columns, no agent
+  // partial indexes) and the version pragma, with representative rows.
+  const now = Date.now();
+  const legacy = new RoomStore(filename, { now: () => now });
+  legacy.initialize(initialRoom());
+  const ownerKey = legacy.issueAccessKey("commons", "owner");
+  const linkToken = randomBytes(32).toString("base64url");
+  legacy.shareLinks.create(ownerKey, "commons",
+    { requestId: randomUUID(), linkToken, expiresAt: now + 3600000, maxJoins: 2, expectedMemberRevision: 0 }, null);
+  const slot = legacy.createAccountSessionSlot();
+  legacy.shareLinks.join(slot.token, linkToken, { displayName: "Legacy Guest", redemptionId: randomUUID(),
+    expectedSessionRevision: 0, expectedSessionBinding: slot.session.sessionBinding });
+  const shareCount = legacy.db.prepare("SELECT count(*) n FROM share_links").get().n;
+  const invitationCount = legacy.db.prepare("SELECT count(*) n FROM membership_invitations").get().n;
+  const joinCount = legacy.db.prepare("SELECT count(*) n FROM share_link_joins").get().n;
+  legacy.close();
+  // Downgrade the file to the v34 shape: NOT NULL issuer columns, no agent
+  // partial indexes, v34 writer-fence triggers. Parents rebuild before
+  // children (FK-safe order). The renames carry triggers/indexes away; the
+  // v35 migration recreates them.
+  const { DatabaseSync } = await import("node:sqlite");
+  const { fenceDefinitions } = await import("../server/writer-fence.mjs");
+  const db = new DatabaseSync(filename);
+  db.exec("PRAGMA foreign_keys=OFF");
+  const tables = ["share_links", "membership_invitations", "membership_invitation_events", "membership_invitation_journal", "share_link_joins"];
+  // Capture original DDL before any rename rewrites FK targets.
+  const original = Object.fromEntries(tables.map(table =>
+    [table, db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(table).sql]));
+  for (const table of tables) {
+    const downgraded = original[table]
+      .replace("issuer_account_id TEXT REFERENCES accounts(id)", "issuer_account_id TEXT NOT NULL REFERENCES accounts(id)")
+      .replace("issuer_auth_epoch INTEGER,", "issuer_auth_epoch INTEGER NOT NULL,")
+      .replace("issuer_account_auth_epoch INTEGER,", "issuer_account_auth_epoch INTEGER NOT NULL,");
+    // Only share_links and membership_invitations carry issuer columns.
+    if (table !== "share_link_joins" && table !== "membership_invitation_events" && table !== "membership_invitation_journal"
+      && downgraded === original[table]) throw new Error(`downgrade regex missed ${table}`);
+    db.exec(`ALTER TABLE ${table} RENAME TO ${table}_downgrade`);
+    db.exec(downgraded);
+    db.exec(`INSERT INTO ${table} SELECT * FROM ${table}_downgrade`);
+    db.exec(`DROP TABLE ${table}_downgrade`);
+  }
+  // Swap the v35 writer fence for the v34 one a real v34 database would carry.
+  for (const row of db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v*'").all()) {
+    db.exec(`DROP TRIGGER ${row.name}`);
+  }
+  for (const { sql } of fenceDefinitions(34)) db.exec(sql);
+  db.exec("PRAGMA user_version=34");
+  db.close();
+  // Reopening migrates to v35 and preserves every row and the audit.
+  const store = new RoomStore(filename, { now: () => now });
+  t.after(() => store.close());
+  assert.equal(store.storagePlatform.version(store.db), 35);
+  assert.equal(store.db.prepare("SELECT count(*) n FROM share_links").get().n, shareCount);
+  assert.equal(store.db.prepare("SELECT count(*) n FROM membership_invitations").get().n, invitationCount);
+  assert.equal(store.db.prepare("SELECT count(*) n FROM share_link_joins").get().n, joinCount);
+  assert.equal(store.shareLinks.list(ownerKey, "commons", null).links[0].status, "active");
+  assert.equal(store.shareLinks.list(ownerKey, "commons", null).links[0].joins, 1);
+  assert.equal(store.verifyInvitationAudit().consistent, true);
+  assert.doesNotThrow(() => store.shareLinks.verify());
+  // The nullable columns now accept an agent issuer end to end.
+  const identity = store.identities.create("Migrated Owner");
+  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, displayName: "Migrated Owner", permissions: ["accept_work"] });
+  new AgentRooms(store).transfer(ownerKey, "commons", { toMemberId: identity.identityId });
+  const agentToken = randomBytes(32).toString("base64url");
+  const agentCreated = store.shareLinks.create(identity.secret, "commons",
+    { requestId: randomUUID(), linkToken: agentToken, expiresAt: now + 3600000, maxJoins: 1,
+      expectedMemberRevision: store.roomAuthority("commons").members[identity.identityId].revision }, null);
+  assert.equal(agentCreated.link.status, "active");
 });

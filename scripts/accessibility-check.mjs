@@ -10,6 +10,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 test("stale return brief cannot cross a session; skip, local alerts, focus return, and AA primary controls hold", { timeout: 90000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-accessibility-"));
@@ -60,13 +61,13 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   assert.equal(await page.evaluate(() => document.activeElement.id), "auth-title");
 
   // Authentication errors have one local announcement owner, not a duplicate toast.
-  await page.locator("#access-key").fill("invalid-access-key");
+  await fillAccessKey(page, "invalid-access-key");
   await page.getByRole("button", { name: "Enter room", exact: true }).click();
   await page.locator("#auth-error").waitFor({ state: "visible" });
   assert.match(await page.locator("#auth-error").textContent(), /Check the access key and try again/);
   assert.equal(await page.locator("#status").textContent(), "", "no duplicate global authentication alert");
 
-  await page.locator("#access-key").fill(owner);
+  await fillAccessKey(page, owner);
   await page.getByRole("button", { name: "Enter room", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
 
@@ -160,7 +161,7 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   assert.equal(await page.evaluate(() => document.activeElement.id), "access-key", "access end moves focus to sign-in");
   assert.match(await page.locator("#auth-error").textContent(), /Session ended; private drafts were cleared/);
   assert.equal(await page.locator("#status").textContent(), "", "sign-out has one local announcement owner");
-  await page.locator("#access-key").fill(maya);
+  await fillAccessKey(page, maya);
   await page.getByRole("button", { name: "Enter room", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
   assert.equal(await page.locator('[data-work-record-id="producer-choice"] [data-action="verify"]').textContent(), "Record independent check", "known distinct producer exposes independent verification");

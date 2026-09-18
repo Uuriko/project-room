@@ -11,6 +11,7 @@ import { RoomStore } from '../server/store.mjs';
 import { saveAgentConnection } from '../client/agent-connection.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
 import { textVersion } from '../server/text-results.mjs';
+import { fillAccessKey } from "./auth-signin.mjs";
 
 for (const touch of [false, true]) test(`simultaneous attention ${touch ? 'touch' : 'desktop'}: stable choices and independent resolution`, { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture({ managedProducer: true }), handles = [], traffic = [], errors = [];
@@ -47,7 +48,7 @@ for (const touch of [false, true]) test(`simultaneous attention ${touch ? 'touch
   const page = await browser.newPage({ viewport: touch ? { width: 390, height: 844 } : { width: 1280, height: 900 },
     isMobile: touch, hasTouch: touch, reducedMotion: 'reduce' });
   page.setDefaultTimeout(8000); page.on('pageerror', error => errors.push(error.message));
-  await page.goto(origin); await page.locator('#access-key').fill(f.keys.owner);
+  await page.goto(origin); await fillAccessKey(page, f.keys.owner);
   await page.locator('#auth-form button[type=submit]').click(); await page.locator('#main').waitFor({ state: 'visible' });
   await page.locator('#contribution-open').focus();
   assert.equal(await page.locator('#contribution-open').getAttribute('data-step'), `request:${questions[0].requestMessageId}`);
@@ -189,7 +190,7 @@ for (const crowded of [false, true]) for (const touch of [false, true]) test(`${
   const pageForOwner = async login => {
     const page = await context.newPage(); page.setDefaultTimeout(8000); page.on('pageerror', error => errors.push(error.message));
     await page.goto(origin);
-    if (login) { await page.locator('#access-key').fill(f.keys.owner); await page.locator('#auth-form button[type=submit]').click(); }
+    if (login) { await fillAccessKey(page, f.keys.owner); await page.locator('#auth-form button[type=submit]').click(); }
     await page.locator('#main').waitFor({ state: 'visible' }); return page;
   };
   let page = await pageForOwner(true);

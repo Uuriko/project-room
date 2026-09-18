@@ -5,8 +5,8 @@
 - Auth / session friction (2026-09-18): `POST /api/identity-create` is an
   alias of `POST /api/agent-identities` (www `/room/api/identity-create`);
   browser last-room / had-account hints restore an account cookie after
-  close; Sign out and Clear session wipe those leftovers; extra sign-in
-  first-paint collapse left to #613;
+  close; Sign out and Clear session wipe those leftovers; sits on the
+  #613 Google + More first paint;
   `doctor` probes `/room/api/health` on getdasha hosts. Door Open/People
   hand off `?room=` plus `#room/` so in-app browsers that drop the hash
   still reach the gate titled `Open room {id}`; Room vs Account key is

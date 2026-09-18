@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { parseWorkReturn } from "../src/work-packet.js";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 export async function runManualOwnerExercise({ ownerPath, stage, answerPath, output, mobile = false, externalProducer, loseCompletionResponse = false }) {
   assert.ok(["export", "return"].includes(stage));
@@ -27,7 +28,7 @@ export async function runManualOwnerExercise({ ownerPath, stage, answerPath, out
       external.push(route.request().url()); return route.abort();
     });
     page.on("request", request => { if (request.method() === "POST" && request.url().endsWith("/commands")) commands.push(request.postDataJSON()); });
-    await page.goto(config.origin); await page.locator("#access-key").fill(config.token);
+    await page.goto(config.origin); await fillAccessKey(page, config.token);
     await page.getByRole("button", { name: "Enter room", exact: true }).click(); await page.locator("#main").waitFor();
     const composer = "Keep this unrelated manual-route draft.";
     await page.locator("#message-input").fill(composer);

@@ -8,6 +8,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { openMcpTestClient } from "./mcp-test-client.mjs";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 async function setup(t, touch = false, duration = 3600000) {
   const f = createAcceptanceFixture(), workItemId = "offer-guide", errors = [], traffic = [];
@@ -31,7 +32,7 @@ async function setup(t, touch = false, duration = 3600000) {
     page.setDefaultTimeout(8000); page.on("pageerror", e => errors.push(e.message));
     await page.route("**/*", route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
     page.on("request", req => { if (req.url().endsWith("/commands") && req.method() === "POST") traffic.push({ actor, command: req.postDataJSON() }); });
-    await page.goto(origin); await page.locator("#access-key").fill(f.keys[actor]);
+    await page.goto(origin); await fillAccessKey(page, f.keys[actor]);
     await page.getByRole("button", { name: "Enter room", exact: true }).click(); await page.locator("#main").waitFor({ state: "visible" });
     const card = page.locator('[data-work-record-id="' + workItemId + '"]'), dialog = page.locator("#action-dialog");
     const action = async (name, offerId) => {

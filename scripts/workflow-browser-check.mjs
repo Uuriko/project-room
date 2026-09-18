@@ -7,6 +7,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["mobile", { width: 390, height: 844 }]]) {
   test(`workflow ${label}: lighter checks, exact retries, truthful status and later findings`, { timeout: 90000 }, async t => {
@@ -30,7 +31,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const errors = []; page.on("pageerror", error => errors.push(error.message));
     const login = async (page, key) => {
       await page.goto(origin);
-      await page.locator("#access-key").fill(key);
+      await fillAccessKey(page, key);
       await page.getByRole("button", { name: "Enter room", exact: true }).click();
       await page.locator("#main").waitFor({ state: "visible" });
     };

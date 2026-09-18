@@ -90,6 +90,17 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
     };
   }
   if (reasonCode === "command_rejected") {
+    // RC-2026-09-18-035: an unknown-member rejection is not a stale-revision
+    // problem — telling the agent to "Re-read workContext" sends it down the
+    // wrong path. The fix is a member lookup, not a work re-read.
+    if (/^Unknown member/.test(String(message || ""))) {
+      const presencePath = roomId ? `/api/rooms/${roomId}/presence` : "/api/session";
+      return {
+        status: "action_required", reason: "unknown_member",
+        hint: "That member is not in this room. List the room's members and address the message to a current memberId.",
+        next: [path(presencePath), command("List members, then resend to a current memberId")]
+      };
+    }
     return {
       status: "action_required", reason: "command_rejected",
       hint: "Read current work. Do not silently rebase.",

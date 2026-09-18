@@ -10,9 +10,9 @@ Hands-off (not this PR): shareable login-link / agent-issued invite-link
 (#628), Phase 0 #8/#9. Muse People HTML landed in #626 — this PR sits on
 top of it and does not overwrite Connect CTAs.
 
-Related open work: #613 (Simplify auth first paint) is still open. This PR
-does **not** hide `#access-key` or wrap the key form, so it does not fight
-#613 or the Playwright fills that depend on a visible key field.
+**#613 merged.** First paint is Google + More. This PR sits on that wrap:
+session hint / restore stay outside `#signin-extra`; the key form stays
+behind More. Playwright fills use `fillAccessKey`.
 
 ## What a visitor actually meets
 
@@ -40,14 +40,11 @@ then GitHub plus email/password, magic link, passkey, and recovery — all
 visible. A new human could reach a key in one click, but the panel looked
 like six products.
 
-**#613 (still open).** Wants Google + “More options”, and may wrap the key
-form. That is the cleaner first paint. It is not merged; fighting it here
-would hide `#access-key` and break the browser-check fills.
-
-**#613 owns first-paint collapse** (Google + More, including the key
-form). This PR does **not** wrap `#access-key` or add a second
-“More sign-in options” button, so parent can merge alias + hash + gate
-without fighting #613. Muse Connect / People CTAs from #626 are untouched.
+**#613 (merged).** First paint is Welcome + Google + More. Key form, extra
+methods, and invite redeem live in `#signin-extra`. This PR keeps that wrap
+and adds session hint / restore above More so a returning browser can
+Reopen or Continue without opening More. Muse Connect / People CTAs from
+#626 are untouched.
 
 ### Signin / reload
 
@@ -168,7 +165,7 @@ overflow only when leftovers exist.
 1. Identity-create HTTP alias (canonical + `/room` prefix).
 2. Session restore after reload/close + reconnect CTAs + cookie copy.
 3. Sign out / Clear session wipe hints and the account slot.
-4. First-paint collapse left to **#613** (no second More-options control).
+4. First-paint collapse from **#613** kept; session restore sits above More.
 5. Doctor health prefix + documented saved-connection doctor path.
 6. Door Open/People `?room=` + `#room/` handoff; gate names `Open {title}`
    when this browser has seen the room, otherwise `Open room {id}`.
@@ -176,10 +173,7 @@ overflow only when leftovers exist.
 
 ## Remaining P1s (not this PR)
 
-1. **#613 first-paint wrap of the key form** — still the right human
-   default (Google + More options only). Merge it; do not hide `#access-key`
-   from this branch in a way that races that PR.
-2. **#628 shareable login-link / agent-issued invite-link** — hands-off;
+1. **#628 shareable login-link / agent-issued invite-link** — hands-off;
    other agents own minting share links with a bearer.
 3. **8-hour `authenticatedUntil`** — account sessions do not slide on
    activity. After eight hours a returning human must sign in again even
@@ -201,9 +195,10 @@ overflow only when leftovers exist.
 - **#626** merged as `35526422` (“Connect/People UI for agent-owned
   Rooms”). This branch is based on that tip. People / Connect markup,
   roster CTAs, and Muse packet copy were not rewritten.
-- **#613** remains the first-paint owner. This PR does not wrap the key
-  form or add a competing More-options control.
+- **#613** merged. This branch keeps Google + More and does not add a
+  second More-options control.
 - **#628** untouched.
+- **#639** held — another Muse owns Commons.diy research. No collide.
 
 ## How to verify (no secrets)
 

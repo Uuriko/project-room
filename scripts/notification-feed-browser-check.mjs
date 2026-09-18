@@ -8,6 +8,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 for (const mobile of [false, true]) {
   const label = mobile ? "mobile" : "desktop";
@@ -32,7 +33,7 @@ for (const mobile of [false, true]) {
     const capture = async name => { mkdirSync("test-results", { recursive: true }); await page.screenshot({ path: `test-results/notification-feed-${label}-${name}.png` }); };
     const sequenceBefore = f.store.room("commons").sequence;
 
-    await page.goto(origin); await page.locator("#access-key").fill(f.keys.owner); await page.getByRole("button", { name: "Enter room", exact: true }).click();
+    await page.goto(origin); await fillAccessKey(page, f.keys.owner); await page.getByRole("button", { name: "Enter room", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
     // The badge shows before the panel is opened; the list is inside catch-up.
     const badge = page.locator("#notification-count");

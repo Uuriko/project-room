@@ -6,6 +6,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { fillAccessKey } from "./auth-signin.mjs";
 
 for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["mobile", { width: 390, height: 844 }]]) {
   test(`assisted work ${label}: scope conflict, explicit release, exact retry and quiet catch-up`, { timeout: 90000 }, async t => {
@@ -42,7 +43,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     });
     const page = await context.newPage();
     await page.goto(origin);
-    await page.locator("#access-key").fill(fixture.keys.owner);
+    await fillAccessKey(page, fixture.keys.owner);
     await page.getByRole("button", { name: "Enter room", exact: true }).click();
     await page.locator("#main").waitFor({ state: "visible" });
     const snapshot = () => fixture.store.snapshot(fixture.keys.owner, "commons");

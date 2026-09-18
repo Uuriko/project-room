@@ -85,6 +85,14 @@ test("owner mints a one-time code; the raw code is never stored", async t => {
   assert.notEqual(row.code_hash, sha256(res.json.code));
   assert.equal(row.code_hash, slowHash(res.json.code));
   assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM agent_invite_codes WHERE code_hash=?").get(sha256(res.json.code)).n, 0);
+  // RC-2026-09-18-033: the create response names the owner's next moves.
+  assert.deepEqual(res.json.next.map(n => n.action), ["share-code", "preview-invite", "list-invites"]);
+  assert.ok(res.json.next[0].description.includes(res.json.code),
+    "share-code tells the owner what the invitee sends to redeem");
+  assert.ok(res.json.next[1].path.includes(encodeURIComponent(res.json.code)),
+    "preview-invite points at the pre-redemption consent screen for this code");
+  assert.ok(res.json.next.every(n => typeof n.description === "string"),
+    "every next step explains what to do");
 });
 
 test("codes are drawn uniformly from the whole alphabet with no modulo bias", async t => {
