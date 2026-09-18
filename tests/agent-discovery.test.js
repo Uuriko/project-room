@@ -10,7 +10,7 @@ import {
   agentCard, llmsTxt, llmsFullTxt, kitsTxt, agentCardJson, discoveryDoc, DISCOVERY_PATHS,
   AFTER_PASTE_SECTION, SHORT_PACKET_FILES, SHORT_PACKET_SYNONYMS, AGENT_CARD_SYNONYMS, HEALTH_ALIAS_PATHS,
   KITS_CATALOG_PATH, KITS_CATALOG_SYNONYMS, KITS_CATALOG_FILES,
-  isHealthAliasPath, A2A_PROTOCOL_VERSION, AGENT_CARD_A2A_PATH,
+  isHealthAliasPath, rewriteRoomApiPrefix, edgeDoorApiPath, A2A_PROTOCOL_VERSION, AGENT_CARD_A2A_PATH,
   ROOM_ORIGIN, ROOM_DOOR, ROOM_PUBLIC_WWW, ROOM_PUBLIC_LOBBY, COMPUTE_DOOR, ROOM_DOCS,
   EDGE_DOOR_HOSTS, isEdgeDoorUrl
 } from "../deploy/agent-discovery.mjs";
@@ -45,7 +45,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
     "/room/.well-known/agent-card.json",
     ...SHORT_PACKET_FILES.map(name => `/room/${name}`)
   ]);
-  assert.deepEqual(card.join.map(row => row.id), ["packet", "guest-agent-link", "enrolled-key", "identity-mint", "invite-redeem"]);
+  assert.deepEqual(card.join.map(row => row.id), ["packet", "guest-agent-link", "enrolled-key", "identity-mint", "agent-room-create", "invite-redeem"]);
   assert.equal(card.join.find(row => row.id === "packet").status, "live");
   assert.equal(card.join.find(row => row.id === "guest-agent-link").status, "live");
   assert.equal(card.join.find(row => row.id === "enrolled-key").status, "live");
@@ -68,6 +68,11 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.match(text, new RegExp(ROOM_PUBLIC_LOBBY.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(text, /packet \(live, no account\)/);
   assert.match(text, /guest-agent-link \(live, owner-issued\)/);
+  assert.match(text, /agent-room-create \(live, no account\)/);
+  assert.match(text, /\/room\/api\/agent-identities/);
+  assert.match(text, /\/room\/api\/agent-rooms/);
+  assert.match(text, /\/room\/api\/agent-invites\/redeem/);
+  assert.match(text, /www.getdasha.com \(no \/room path\)/);
   assert.match(text, /room_check_access/);
   assert.match(text, /orient/);
   assert.match(text, new RegExp(ROOM_DOCS.client.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
@@ -82,7 +87,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(FORBIDDEN.test(agentCardJson()), false);
   assert.equal(JSON.parse(agentCardJson()).protocol, "project-room-discovery");
   assert.equal(card.protocolVersion, A2A_PROTOCOL_VERSION);
-  assert.deepEqual(card.skills.map(row => row.id), ["orient", "room_check_access", "packet", "guest-agent-link", "enrolled-key", "identity-mint", "invite-redeem"]);
+  assert.deepEqual(card.skills.map(row => row.id), ["orient", "room_check_access", "packet", "guest-agent-link", "enrolled-key", "identity-mint", "agent-room-create", "invite-redeem"]);
   assert.equal(card.capabilities.streaming, true);
   assert.equal(card.capabilities.pushNotifications, false);
   assert.deepEqual(card.defaultInputModes, ["text/plain"]);
@@ -199,6 +204,7 @@ test("kits catalog is its own packet; leftover kit/apps/tools paths do not 404",
   assert.match(catalog.body, /packet \(live, no account\)/);
   assert.match(catalog.body, /guest-agent-link \(live, owner-issued\)/);
   assert.match(catalog.body, /enrolled-key \(live\)/);
+  assert.match(catalog.body, /agent-room-create \(live, no account\)/);
   assert.match(catalog.body, /\/room\/llms\.txt/);
   assert.match(catalog.body, /\.well-known\/agent\.json/);
   assert.match(catalog.body, /\/health/);
@@ -228,6 +234,30 @@ test("kits catalog is its own packet; leftover kit/apps/tools paths do not 404",
   // Skill leftovers stay the short packet, not the kits catalog.
   assert.equal(discoveryDoc("/room/skill").body, short.body);
   assert.notEqual(discoveryDoc("/room/kit").body, short.body);
+});
+
+test("rewriteRoomApiPrefix strips only /room/api…; packets and /room/health stay", () => {
+  assert.equal(rewriteRoomApiPrefix("/room/api/agent-identities"), "/api/agent-identities");
+  assert.equal(rewriteRoomApiPrefix("/room/api/agent-rooms"), "/api/agent-rooms");
+  assert.equal(rewriteRoomApiPrefix("/room/api/agent-invites/redeem"), "/api/agent-invites/redeem");
+  assert.equal(rewriteRoomApiPrefix("/room/api/rooms/grok-den/agent-invites"), "/api/rooms/grok-den/agent-invites");
+  assert.equal(rewriteRoomApiPrefix("/room/api/health"), "/api/health");
+  assert.equal(rewriteRoomApiPrefix("/room/api/health/"), "/api/health/");
+  assert.equal(rewriteRoomApiPrefix("/room/api"), "/api");
+  assert.equal(rewriteRoomApiPrefix("/api/agent-rooms"), "/api/agent-rooms");
+  assert.equal(rewriteRoomApiPrefix("/room/health"), "/room/health");
+  assert.equal(rewriteRoomApiPrefix("/room/llms.txt"), "/room/llms.txt");
+  assert.equal(rewriteRoomApiPrefix("/room/apitest"), "/room/apitest");
+  assert.equal(rewriteRoomApiPrefix("/rooms/api/agent-rooms"), "/rooms/api/agent-rooms");
+});
+
+test("edgeDoorApiPath prefixes /room on getdasha hosts only", () => {
+  assert.equal(edgeDoorApiPath("https://www.getdasha.com", "/api/agent-rooms"), "/room/api/agent-rooms");
+  assert.equal(edgeDoorApiPath("https://getdasha.com", "/api/agent-identities"), "/room/api/agent-identities");
+  assert.equal(edgeDoorApiPath("https://www.getdasha.com", "/room/api/agent-rooms"), "/room/api/agent-rooms");
+  assert.equal(edgeDoorApiPath("https://project-room-staging.getdasha.workers.dev", "/api/agent-rooms"), "/api/agent-rooms");
+  assert.equal(edgeDoorApiPath("https://www.trydemigod.com", "/api/agent-rooms"), "/api/agent-rooms");
+  assert.equal(edgeDoorApiPath("https://www.getdasha.com", "/llms.txt"), "/llms.txt");
 });
 
 test("/room/health aliases return the same JSON as /api/health; bare /health stays 404", async t => {
@@ -318,7 +348,7 @@ test("advertised door root serves the HTML door; packets stay at /room/llms.txt"
 test("edge door predicate: getdasha /room only, prefix preserved", () => {
   assert.deepEqual([...EDGE_DOOR_HOSTS], ["getdasha.com", "www.getdasha.com"]);
   for (const host of EDGE_DOOR_HOSTS) {
-    for (const path of ["/room", "/room/", "/room/llms.txt", "/room/llms-full.txt", "/room/.well-known/agent.json", "/room/skill.md", "/room/skill", "/room/agent.json", "/room/health", "/room/kits", "/room/apps", "/room/tools"]) {
+    for (const path of ["/room", "/room/", "/room/llms.txt", "/room/llms-full.txt", "/room/.well-known/agent.json", "/room/skill.md", "/room/skill", "/room/agent.json", "/room/health", "/room/kits", "/room/apps", "/room/tools", "/room/api/agent-rooms", "/room/api/agent-identities", "/room/api/agent-invites/redeem"]) {
       assert.equal(isEdgeDoorUrl(`https://${host}${path}`), true, `${host}${path}`);
     }
   }
@@ -339,6 +369,8 @@ test("edge door routes use wildcard patterns so query strings never fall through
   assert.doesNotMatch(wrangler, /"pattern": "(?:www\.)?getdasha\.com\/room"/, "exact /room patterns drop query strings");
   assert.match(wrangler, /"pattern": "getdasha\.com\/room\*"/);
   assert.match(wrangler, /"pattern": "www\.getdasha\.com\/room\*"/);
+  const roomWorker = readFileSync(new URL("../cloudflare/room.mjs", import.meta.url), "utf8");
+  assert.match(roomWorker, /rewriteRoomApiPrefix/, "edge rewrite must strip /room/api so enrollment is not AX not_found");
   // The tradeoff is bounded: /roomful junk reaches the worker, which answers a plain
   // 404 for edge-door hosts (not the origin guard's 403); isEdgeDoorUrl keeps it out of the door rewrite.
   assert.equal(isEdgeDoorUrl("https://www.getdasha.com/roomful"), false);

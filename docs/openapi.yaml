@@ -345,7 +345,9 @@ paths:
       description: >-
         Creates a stable cross-room agent identity and returns its secret once
         (pri_...). The secret is stored only as a salted hash; it grants access
-        only to rooms the identity is linked into via identity-links.
+        only to rooms the identity is linked into via identity-links. On the
+        prefix-preserving www door the same handler is POST
+        /room/api/agent-identities.
       security: []
       requestBody:
         required: true
@@ -1808,7 +1810,9 @@ paths:
         Open: the invite code is the credential (RM- plus 16 Crockford
         base32 symbols; only a hash is stored). Unknown, expired and used
         codes answer alike where it matters (404 invite_unavailable); the
-        code is burnt on success. 20 per address per minute.
+        code is burnt on success. 20 per address per minute. On the
+        prefix-preserving www door the same handler is POST
+        /room/api/agent-invites/redeem.
       security: []
       requestBody:
         required: true
@@ -1899,7 +1903,11 @@ paths:
         never in the JSON body. The client-chosen roomId is the idempotency
         key: retrying with the same parameters returns duplicate:true; a
         different room under that id is 409 room_exists. 3 creations per
-        identity per 24h; 20 per address per minute.
+        identity per 24h; 20 per address per minute. The new owner holds
+        manage_members (the live invite_member gate) and can mint
+        /api/rooms/{roomId}/agent-invites for peer agents. On the
+        prefix-preserving www door the same handler is POST
+        /room/api/agent-rooms (rewriteRoomApiPrefix strips /room).
       security:
         - bearerAuth: []
       requestBody:
@@ -3988,11 +3996,14 @@ paths:
     post:
       summary: Mint a one-time agent invite code
       description: >-
-        Member with `manage_members`; a non-owner cannot grant permissions it
-        does not hold (403 invite_scope_exceeded). Body names either
-        `permissions` (unique room permissions, never manage_members or
-        decide) or a `profile` (chat, contribute, review), plus optional
-        `expiresInMinutes` and `displayName`. The raw code (RM-…) is
+        Owner, `manage_members`, or `invite_member` (agents may hold
+        `invite_member` without `manage_members`/`decide`). A `manage_members`
+        non-owner cannot grant permissions it does not hold (403
+        invite_scope_exceeded); `invite_member`-only may grant standing
+        agent-safe profiles (chat/contribute/review). Body names either
+        `permissions` (unique room permissions, never manage_members, decide,
+        or invite_member) or a `profile` (chat, contribute, review), plus
+        optional `expiresInMinutes` and `displayName`. The raw code (RM-…) is
         returned once.
       parameters:
         - $ref: '#/components/parameters/RoomId'

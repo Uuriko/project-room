@@ -1,4 +1,4 @@
-import { RoomAgentClient, validWorkSearchQuery, createAgentIdentity, redeemAgentInvite, previewAgentInvite, requestAccess } from "../client/room-agent.mjs";
+import { RoomAgentClient, validWorkSearchQuery, createAgentIdentity, createAgentRoom, redeemAgentInvite, previewAgentInvite, requestAccess } from "../client/room-agent.mjs";
 import { packetMarkdown } from "../src/work-packet.js";
 import { validId } from "../src/events.js";
 import { createInterface } from "node:readline";
@@ -29,6 +29,22 @@ function printInviteConsent(code, preview) {
     `Expires in about ${minutesLeft} minute${minutesLeft === 1 ? "" : "s"}. Nothing else is granted.`,
     "The identity acts as itself, never as you — your account and credentials are not shared.",
   ].join("\n"));
+}
+
+// room-create: ROOM_ID TITLE PURPOSE [KIND] [DISPLAY_NAME...]
+// Kind defaults to personal; displayName defaults to the title. Needs
+// ROOM_AGENT_ORIGIN + a pri_ identity secret (ROOM_AGENT_TOKEN) — no room
+// exists yet, so a saved connection is not required.
+function parseRoomCreate(roomId, extra) {
+  if (typeof roomId !== "string" || roomId.startsWith("--") || !validId(roomId) || roomId.length > 64
+    || !Array.isArray(extra) || extra.length < 2) return null;
+  const title = extra[0], purpose = extra[1];
+  if (typeof title !== "string" || !title.trim() || title.length > 120) return null;
+  if (typeof purpose !== "string" || !purpose.trim() || purpose.length > 1000) return null;
+  const kindGiven = extra[2] !== undefined && ["personal", "organization"].includes(extra[2]);
+  const displayName = (kindGiven ? extra.slice(3) : extra.slice(2)).join(" ").trim() || title.trim();
+  if (!displayName || displayName.length > 80) return null;
+  return { roomId, title: title.trim(), purpose: purpose.trim(), kind: kindGiven ? extra[2] : "personal", displayName };
 }
 
 async function promptYesNo(question) {
@@ -139,6 +155,7 @@ if (action === "reply") {
   node scripts/agent-inbox.mjs apply-template team-standup [ACCOUNTABLE_MEMBER_ID]
   node scripts/agent-inbox.mjs heartbeats
   node scripts/agent-inbox.mjs identity-create DISPLAY_NAME
+  node scripts/agent-inbox.mjs room-create ROOM_ID TITLE PURPOSE [KIND] [DISPLAY_NAME]
   node scripts/agent-inbox.mjs identity-link IDENTITY_ID PERM1,PERM2 [MEMBER_ID] [DISPLAY_NAME]
   node scripts/agent-inbox.mjs identity-links
   node scripts/agent-inbox.mjs identity-unlink IDENTITY_ID
@@ -161,6 +178,10 @@ Reply requests: node scripts/agent-inbox.mjs reply --help
 Connect checks access, then saves a new private connection; never overwrites or
 issues a key. Supply ROOM_AGENT_ORIGIN, ROOM_AGENT_ROOM, ROOM_AGENT_MEMBER and
 ROOM_AGENT_TOKEN through the approved process environment/secret manager first.
+Live www door: set ROOM_AGENT_ORIGIN to https://www.getdasha.com (no /room
+path). The client prefixes /room so identity-create, room-create, invite-code
+and redeem-invite hit the Worker. Mint identity → room-create → invite-code
+→ peer redeem-invite. Never put a pri_ secret or RM- code in a prompt or commit.
 After saving, clear those four variables and set ROOM_AGENT_CONFIG to that directory.
 Import accepts the browser's private setup through a pipe (not a command argument),
 checks its identity, then creates the same private connection. Existing credential
@@ -202,7 +223,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
     const redeemArgs = extra.filter(a => a !== "--yes" && a !== "--no"),
       redeemAutoYes = redeemArgs.length !== extra.length && extra.includes("--yes"),
       redeemAutoNo = extra.includes("--no");
-    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "sessions", "claim", "session", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "identity-link", "identity-links", "identity-unlink", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "request-access", "access-requests", "access-decide", "funnel", "export", "import-history", "thread", "doctor", "support-export"].includes(action)
+    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "sessions", "claim", "session", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "room-create", "identity-link", "identity-links", "identity-unlink", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "request-access", "access-requests", "access-decide", "funnel", "export", "import-history", "thread", "doctor", "support-export"].includes(action)
       || (["connect", "import"].includes(action) && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
       || (action === "import" && ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"].some(name => process.env[name] !== undefined))
       || (["packet", "work", "discussion", "result", "claim"].includes(action) && !validId(checkpoint))
@@ -213,11 +234,12 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
       || (action === "search" && !validWorkSearchQuery(checkpoint))
       || (["discussion", "result"].includes(action) ? false : action === "work" ? new Set(extra).size !== extra.length || extra.some(flag => !["--include-source", "--include-offers"].includes(flag))
         : action === "search" ? extra.length > 1 || (extra.length === 1 && extra[0] !== "--needs-me")
-        : ["advertise", "session", "identity-link", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite"].includes(action) ? false
+        : ["advertise", "session", "identity-link", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "room-create"].includes(action) ? false
         : action === "claim" ? extra.length > 1 || (extra.length === 1 && !isJSONObject(extra[0]))
         : extra.length || (["check", "orient", "next", "brief"].includes(action) && checkpoint !== undefined))
       || (action === "changes" && (!/^\d+$/.test(checkpoint ?? "") || !Number.isSafeInteger(Number(checkpoint))))
       || (["identity-create", "identity-unlink"].includes(action) && (checkpoint === undefined || checkpoint.startsWith("--")))
+      || (action === "room-create" && !parseRoomCreate(checkpoint, extra))
       || (action === "identity-link" && (checkpoint === undefined || extra.length < 1 || extra.length > 3))
       || (action === "invite-code" && (checkpoint === undefined || checkpoint.startsWith("--")
         || (checkpoint.startsWith("profile:") && !["chat", "contribute", "review"].includes(checkpoint.slice("profile:".length)))
@@ -230,8 +252,8 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
       || (action === "invite-codes" && (checkpoint !== undefined || extra.length))
       || (action === "doctor" && (checkpoint !== undefined || extra.length))
       || (action === "support-export" && (checkpoint !== undefined || extra.length))) throw new ConnectionError("usage_error");
-    const config = ["identity-create", "redeem-invite", "request-access"].includes(action) ? {} : action === "import" ? await readConnectionInput() : agentConnectionFromEnvironment(),
-      client = ["identity-create", "redeem-invite", "request-access"].includes(action) ? null : new RoomAgentClient(config);
+    const config = ["identity-create", "room-create", "redeem-invite", "request-access"].includes(action) ? {} : action === "import" ? await readConnectionInput() : agentConnectionFromEnvironment(),
+      client = ["identity-create", "room-create", "redeem-invite", "request-access"].includes(action) ? null : new RoomAgentClient(config);
     let result;
     if (["connect", "import", "check"].includes(action)) {
       result = action === "check" ? await checkVerificationLadder(client) : await client.checkConnection();
@@ -260,6 +282,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
       : action === "apply-template" ? await client.applyRoomTemplate(checkpoint, { accountableMemberId: extra[0] })
       : action === "heartbeats" ? await client.providerHeartbeats()
       : action === "identity-create" ? await createAgentIdentity(process.env.ROOM_AGENT_ORIGIN, checkpoint)
+      : action === "room-create" ? await createAgentRoom(process.env.ROOM_AGENT_ORIGIN, process.env.ROOM_AGENT_TOKEN, parseRoomCreate(checkpoint, extra))
       : action === "identity-link" ? await client.linkIdentity({ identityId: checkpoint, permissions: (extra[0] ?? "").split(",").map(p => p.trim()).filter(Boolean), ...(extra[1] === undefined ? {} : { memberId: extra[1] }), ...(extra[2] === undefined ? {} : { displayName: extra.slice(2).join(" ") }) })
       : action === "identity-links" ? await client.identityLinks()
       : action === "identity-unlink" ? await client.unlinkIdentity(checkpoint)

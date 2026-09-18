@@ -115,7 +115,21 @@ function setSpendAllowance(state, incoming) {
   };
 }
 
-export const PERMISSIONS = Object.freeze(["steer", "decide", "manage_members", "manage_claims", "accept_work", "complete_work", "verify", "write_external"]);
+export const PERMISSIONS = Object.freeze(["steer", "decide", "manage_members", "manage_claims", "accept_work", "complete_work", "verify", "write_external", "invite_member"]);
+// Agent-safe standing invite scope (chat/contribute/review). invite_member
+// holders may mint these without holding them; they cannot grant
+// manage_members/decide/invite_member via invite-code.
+export const AGENT_INVITE_SAFE_PERMISSIONS = Object.freeze(["accept_work", "complete_work", "verify"]);
+export const AGENT_ADMIN_PERMISSIONS = Object.freeze(["manage_members", "decide"]);
+
+// Owner, manage_members, or invite_member (agents may hold invite_member
+// without manage_members/decide). Used by invite-code mint/redeem.
+export function canInviteMembers(state, memberId) {
+  const member = state?.members?.[memberId];
+  if (!member || member.active === false) return false;
+  if (memberId === state.room?.ownerId) return true;
+  return member.permissions.includes("manage_members") || member.permissions.includes("invite_member");
+}
 
 // A command may check a work revision without advancing it (for example help).
 // Historical evidence readers must not infer a mutation from a field name alone.
@@ -377,7 +391,16 @@ function addMember(state, incoming) {
   if (state.members[memberId]) throw new Error("Member already exists");
   const isBootstrapOwner = Object.keys(state.members).length === 0 && memberId === state.room.ownerId;
   if (isBootstrapOwner && incoming.actorId !== memberId) throw new Error("Only the owner may bootstrap membership");
-  if (!isBootstrapOwner) requirePermission(state, incoming.actorId, "manage_members");
+  if (!isBootstrapOwner) {
+    const agentSafeInvite = incoming.data.kind === "agent"
+      && Array.isArray(incoming.data.permissions)
+      && !incoming.data.permissions.some(p => AGENT_ADMIN_PERMISSIONS.includes(p));
+    if (agentSafeInvite) {
+      if (!canInviteMembers(state, incoming.actorId)) throw new Error(`${incoming.actorId} lacks invite_member`);
+    } else {
+      requirePermission(state, incoming.actorId, "manage_members");
+    }
+  }
   if (!["human", "agent"].includes(incoming.data.kind)) throw new Error("Member kind must be human or agent");
   validatePermissions(incoming.data.permissions, incoming.data.kind, isBootstrapOwner);
   if (!isBootstrapOwner && incoming.data.authorityPolicyVersion === MEMBERSHIP_AUTHORITY_POLICY_VERSION) {
@@ -441,7 +464,7 @@ function validatePermissions(permissions, kind, isOwner = false) {
   // Human administration cannot be delegated to an agent — except to the
   // room owner itself: ownership implies full authority, so a bootstrap or
   // appointed agent owner holds the whole set like a human owner does.
-  if (!isOwner && kind === "agent" && permissions.some(p => ["manage_members", "decide"].includes(p))) throw new Error("Human administration cannot be delegated to an agent");
+  if (!isOwner && kind === "agent" && permissions.some(p => AGENT_ADMIN_PERMISSIONS.includes(p))) throw new Error("Human administration cannot be delegated to an agent");
 }
 
 function changeMemberAccess(state, incoming) {
@@ -535,6 +558,15 @@ function requireScopedMemberAdministration(state, actorId, targetId, currentTarg
   if (targetId === state.room.ownerId) throw new Error("Only the Room owner may change owner authority");
   const actor = requireMember(state, actorId);
   const affected = new Set([...(currentTarget?.permissions ?? []), ...nextPermissions]);
+  // invite_member-only issuers may grant the standing agent-safe set
+  // (chat/contribute/review) without holding those bits themselves.
+  const inviteOnly = actor.permissions.includes("invite_member") && !actor.permissions.includes("manage_members");
+  if (inviteOnly) {
+    if ([...affected].some(permission => !AGENT_INVITE_SAFE_PERMISSIONS.includes(permission))) {
+      throw new Error("A membership administrator cannot grant or remove authority they do not hold");
+    }
+    return;
+  }
   if ([...affected].some(permission => !actor.permissions.includes(permission))) {
     throw new Error("A membership administrator cannot grant or remove authority they do not hold");
   }

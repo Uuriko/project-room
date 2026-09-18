@@ -14,6 +14,7 @@ import { charterContext, validateCharterContext, validateCharterRead } from "../
 import { workHelpContext } from "../src/work-help.js";
 import { workOffersContext, MAX_HELP_OFFERS, MAX_PENDING_HELP_OFFERS } from "../src/help-offers.js";
 import { AGENT_ERRORS, resolveAgentErrorAx } from "../src/agent-error.mjs";
+import { edgeDoorApiPath } from "../deploy/agent-discovery.mjs";
 
 export { AGENT_ERRORS };
 export class RoomClientError extends Error {
@@ -145,7 +146,7 @@ export async function createAgentIdentity(origin, displayName, { fetchImpl = glo
   catch { throw new RoomClientError(0, "invalid_config", "Use a fixed HTTPS origin or an isolated loopback development origin"); }
   let response;
   try {
-    response = await fetchImpl(`${service}/api/agent-identities`, {
+    response = await fetchImpl(`${service}${edgeDoorApiPath(service, "/api/agent-identities")}`, {
       method: "POST", redirect: "error", credentials: "omit",
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
       headers: { "Content-Type": "application/json" },
@@ -170,7 +171,7 @@ export async function redeemAgentInvite(origin, code, displayName, { fetchImpl =
   catch { throw new RoomClientError(0, "invalid_config", "Use a fixed HTTPS origin or an isolated loopback development origin"); }
   let response;
   try {
-    response = await fetchImpl(`${service}/api/agent-invites/redeem`, {
+    response = await fetchImpl(`${service}${edgeDoorApiPath(service, "/api/agent-invites/redeem")}`, {
       method: "POST", redirect: "error", credentials: "omit",
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
       headers: { "Content-Type": "application/json" },
@@ -198,7 +199,7 @@ export async function previewAgentInvite(origin, code, { fetchImpl = globalThis.
   catch { throw new RoomClientError(0, "invalid_config", "Use a fixed HTTPS origin or an isolated loopback development origin"); }
   let response;
   try {
-    response = await fetchImpl(`${service}/api/agent-invites/preview?code=${encodeURIComponent(code)}`, {
+    response = await fetchImpl(`${service}${edgeDoorApiPath(service, "/api/agent-invites/preview")}?code=${encodeURIComponent(code)}`, {
       method: "GET", redirect: "error", credentials: "omit",
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
     });
@@ -225,7 +226,7 @@ export async function requestAccess(origin, { roomId, identityId, displayName, r
   catch { throw new RoomClientError(0, "invalid_config", "Use a fixed HTTPS origin or an isolated loopback development origin"); }
   let response;
   try {
-    response = await fetchImpl(`${service}/api/access-requests`, {
+    response = await fetchImpl(`${service}${edgeDoorApiPath(service, "/api/access-requests")}`, {
       method: "POST", redirect: "error", credentials: "omit",
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
       headers: { "Content-Type": "application/json" },
@@ -257,7 +258,7 @@ export async function createAgentRoom(origin, identitySecret, { roomId, title, p
   }
   let response;
   try {
-    response = await fetchImpl(`${service}/api/agent-rooms`, {
+    response = await fetchImpl(`${service}${edgeDoorApiPath(service, "/api/agent-rooms")}`, {
       method: "POST", redirect: "error", credentials: "omit",
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
       headers: { Authorization: `Bearer ${identitySecret}`, "Content-Type": "application/json" },
@@ -292,7 +293,7 @@ export class RoomAgentClient {
   // redirect could carry the bearer elsewhere), no ambient credentials, and a
   // 15s deadline that a caller-supplied signal narrows but never removes.
   #fetchRaw(path, { method = "GET", headers = {}, body, signal } = {}) {
-    return this.#fetch(`${this.#origin}${path}`, {
+    return this.#fetch(`${this.#origin}${edgeDoorApiPath(this.#origin, path)}`, {
       method, redirect: "error", credentials: "omit", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
       headers: { Authorization: `Bearer ${this.#token}`, ...headers },
       ...(body === undefined ? {} : { body })
@@ -380,10 +381,15 @@ export class RoomAgentClient {
   async #checkIdentityConnection({ signal } = {}) {
     const snapshot = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}`, undefined, signal);
     const member = snapshot?.state?.members?.[this.#memberId];
+    // Agent owners hold manage_members/decide on rooms they created or were
+    // appointed to (#593). That is ownership, not a delegated human-admin
+    // grant — allow the CLI connect/check ladder when this identity is the
+    // room owner. Non-owner agents still cannot carry those bits.
+    const ownerAgent = member?.kind === "agent" && snapshot?.state?.room?.ownerId === this.#memberId;
     if (!snapshot || Array.isArray(snapshot) || snapshot.roomId !== this.#roomId || snapshot.viewerId !== this.#memberId
       || !member || member.kind !== "agent" || member.active !== true || !Number.isSafeInteger(member.revision)
       || !Array.isArray(member.permissions) || member.permissions.some(permission => !PERMISSIONS.includes(permission))
-      || member.permissions.some(permission => ["manage_members", "decide"].includes(permission))) {
+      || (!ownerAgent && member.permissions.some(permission => ["manage_members", "decide"].includes(permission)))) {
       throw new RoomClientError(200, "identity_mismatch", "Identity is not linked to this room as the configured agent");
     }
     return { contractVersion: 1, type: "agent_connection_check", status: "credential_accepted", origin: this.#origin,
@@ -638,9 +644,10 @@ export class RoomAgentClient {
   unlinkIdentity(identityId, { signal } = {}) {
     return this.#deletePath(`/api/rooms/${encodeURIComponent(this.#roomId)}/identity-links`, { identityId }, signal);
   }
-  // One-time agent invite codes. Issuance is owner-only; the raw code is
-  // shown once at creation and only its hash is stored. Redemption is
-  // unauthenticated (the code is the bearer credential).
+  // One-time agent invite codes. Issuance is owner, manage_members, or
+  // invite_member (agents may hold invite_member without manage_members).
+  // The raw code is shown once at creation and only its hash is stored.
+  // Redemption is unauthenticated (the code is the bearer credential).
   async #inviteAdmin(suffix, body, { signal } = {}) {
     const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal);
     if (value?.roomId !== this.#roomId) {

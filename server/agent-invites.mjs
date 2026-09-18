@@ -18,7 +18,7 @@
 import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { ServiceError } from "./store.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
-import { event, EVENT_TYPES as T, memberCan, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS } from "../src/events.js";
+import { event, EVENT_TYPES as T, memberCan, canInviteMembers, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS, AGENT_INVITE_SAFE_PERMISSIONS } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { agentAccessProfiles } from "./agent-connections.mjs";
 
@@ -59,7 +59,7 @@ const randomSymbols = (length, alphabet) => {
 const codeHash = code => code.length === CODE_PREFIX.length + LEGACY_CODE_LENGTH
   ? hash(code)
   : scryptSync(code, CODE_HASH_SALT, 32, CODE_HASH_PARAMS).toString("hex");
-const NEVER_GRANT = ["manage_members", "decide"];
+const NEVER_GRANT = ["manage_members", "decide", "invite_member"];
 const DEFAULT_TTL_MINUTES = 1440; // 24h
 const MIN_TTL_MINUTES = 5;
 const MAX_TTL_MINUTES = 43200; // 30d
@@ -114,14 +114,16 @@ export class AgentInvites {
   // stored hash), shared with the access review.
   view(row, now = this.store.now()) { return view(row, now); }
 
-  // Owner-only: mint a one-time code. The raw code is returned once; only
-  // its hash is stored. Callers may pass an explicit permissions list or a
-  // standing profile name (chat/contribute/review); the profile maps
-  // server-side to a fixed set, so editing the request cannot widen authority.
+  // Owner, manage_members, or invite_member (agents may hold invite_member
+  // without manage_members/decide): mint a one-time code. The raw code is
+  // returned once; only its hash is stored. Callers may pass an explicit
+  // permissions list or a standing profile name (chat/contribute/review);
+  // the profile maps server-side to a fixed set, so editing the request
+  // cannot widen authority.
   create(token, roomId, { permissions, profile, expiresInMinutes = DEFAULT_TTL_MINUTES, displayName } = {}, expectedSessionBinding = null) {
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
-    if (!memberCan(authority, auth.member.id, "manage_members")) fail(403, "access_denied", "Membership administration grant required");
+    if (!canInviteMembers(authority, auth.member.id)) fail(403, "access_denied", "Invite grant required");
     let profileName = null;
     if (profile !== undefined) {
       if (typeof profile !== "string" || !Object.hasOwn(agentAccessProfiles, profile))
@@ -136,14 +138,20 @@ export class AgentInvites {
       fail(422, "invalid_invite_scope", "permissions must be a non-empty list of unique room permissions");
     }
     if (permissions.some(p => NEVER_GRANT.includes(p))) {
-      fail(422, "invalid_invite_scope", "Agent invite codes cannot grant manage_members or decide");
+      fail(422, "invalid_invite_scope", "Agent invite codes cannot grant manage_members, decide, or invite_member");
     }
-    // Non-owner issuers cannot delegate authority they do not hold. Mirrors
-    // requireScopedMemberAdministration in the member.added event validator.
+    // Non-owner issuers: manage_members may only grant bits they hold;
+    // invite_member-only may grant the standing agent-safe set.
     const issuer = authority.members[auth.member.id];
     if (!issuer || issuer.active === false) fail(403, "access_denied", "Active membership required");
-    if (auth.member.id !== authority.ownerId && permissions.some(p => !issuer.permissions.includes(p))) {
-      fail(403, "invite_scope_exceeded", "A membership administrator cannot grant authority they do not hold");
+    if (auth.member.id !== authority.ownerId) {
+      const admin = issuer.permissions.includes("manage_members");
+      if (admin && permissions.some(p => !issuer.permissions.includes(p))) {
+        fail(403, "invite_scope_exceeded", "A membership administrator cannot grant authority they do not hold");
+      }
+      if (!admin && permissions.some(p => !AGENT_INVITE_SAFE_PERMISSIONS.includes(p))) {
+        fail(403, "invite_scope_exceeded", "invite_member can only grant standing agent-safe permissions");
+      }
     }
     if (!Number.isInteger(expiresInMinutes) || expiresInMinutes < MIN_TTL_MINUTES || expiresInMinutes > MAX_TTL_MINUTES) {
       fail(422, "invalid_invite_ttl", `expiresInMinutes must be ${MIN_TTL_MINUTES}-${MAX_TTL_MINUTES}`);
@@ -184,8 +192,7 @@ export class AgentInvites {
       const room = this.store.room(row.room_id);
       // The inviter's authority is re-checked at redemption, like invitation
       // acceptance: a demoted issuer's outstanding codes stop working.
-      const issuer = room.state.members[row.created_by];
-      if (!issuer || issuer.active === false || !issuer.permissions.includes("manage_members")) {
+      if (!canInviteMembers(room.state, row.created_by)) {
         fail(409, "invite_authority_changed", "Inviter authority changed; ask for a new invite code");
       }
       if (room.sequence >= 10000 || Object.keys(room.state.members).length >= 100) {
@@ -256,8 +263,7 @@ export class AgentInvites {
     const room = this.store.room(row.room_id);
     // The inviter's authority is re-checked like redemption: a demoted
     // issuer's outstanding codes stop working.
-    const issuer = room.state.members[row.created_by];
-    if (!issuer || issuer.active === false || !issuer.permissions.includes("manage_members")) {
+    if (!canInviteMembers(room.state, row.created_by)) {
       fail(409, "invite_authority_changed", "Inviter authority changed; ask for a new invite code");
     }
     const permissions = JSON.parse(row.permissions_json);

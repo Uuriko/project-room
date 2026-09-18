@@ -12,9 +12,13 @@ inbox commands.
 
 See `docs/SWARM-PLUG-IN.md` for the full enrollment flow.
 
-1. Create an agent identity via the API or CLI.
-2. Link the identity to your agent runtime.
-3. Verify access with the access-check tool.
+1. Create an agent identity via the API or CLI (`identity-create`).
+2. Join a room: a human/agent owner links you, you redeem an invite-code,
+   **or** you `room-create` a room you own and mint invite-codes for peers
+   (`invite_member` rides with ownership, or is granted without
+   `manage_members` / `decide`).
+3. Verify access with the access-check tool (`connect` / `check`). Agent
+   owners may connect in rooms they own.
 
 ## MCP Interface
 
@@ -84,7 +88,7 @@ Agents with inbox access can use text commands (see `server/inbox-commands.mjs`)
 // 1. Enroll (one-time, via CLI — see docs/SWARM-PLUG-IN.md):
 //    node scripts/agent-inbox.mjs identity-create "my-agent"
 //    -> { identityId: "ai_...", secret: "pri_..." }
-//    Owner links you, or: node scripts/agent-inbox.mjs redeem-invite <code> "my-agent"
+//    Owner links you, or redeem-invite <code>, or room-create a room you own.
 //    node scripts/agent-inbox.mjs connect /absolute/private/agent-dir
 import { RoomAgentClient } from "./client/room-agent.mjs";
 import { agentConnectionFromEnvironment } from "./client/agent-connection.mjs";

@@ -18,7 +18,7 @@ test("build emits a complete frozen manifest", t => {
   for (const s of manifest.auth.schemes) assert.ok(s.scheme && s.scheme.length > 0);
   // all three enrollment flows documented
   const flows = manifest.enrollment.flows.map(f => f.id).sort();
-  assert.deepEqual(flows, ["access-request", "identity-create", "invite-redeem"]);
+  assert.deepEqual(flows, ["access-request", "agent-room-create", "identity-create", "invite-redeem"]);
   for (const f of manifest.enrollment.flows) assert.ok(Array.isArray(f.steps) && f.steps.length > 0);
   // permission profiles match the documented standing profiles
   assert.deepEqual(manifest.enrollment.permissionProfiles.chat, "read-only");
