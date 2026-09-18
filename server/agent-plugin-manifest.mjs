@@ -1,0 +1,111 @@
+// Machine-readable agent plug-in manifest (lane D).
+//
+// docs/SWARM-PLUG-IN.md is the human guide. This module builds the JSON
+// manifest a third-party agent *program* reads to self-configure: service
+// identity, auth schemes, enrollment flows, transports, the agent directory
+// URL, scope profiles, and rate limits. Served (by a later HTTP slice) at
+// the well-known path; nothing here does I/O — it is a pure builder plus
+// a validator, with frozen outputs. Malformed inputs throw ManifestError
+// (coded errors, ContractError-style validation).
+class ManifestError extends Error {
+  constructor(code, message) { super(message); this.name = "ManifestError"; this.code = code; }
+}
+const fail = (code, message) => { throw new ManifestError(code, message); };
+const check = (condition, message) => { if (!condition) fail("invalid_manifest", message); };
+
+export const MANIFEST_VERSION = "1.0.0";
+export const WELL_KNOWN_PATH = "/.well-known/agent-plugin-manifest.json";
+
+const freezeDeep = value => {
+  const plain = JSON.parse(JSON.stringify(value));
+  const deep = node => {
+    if (Array.isArray(node)) { node.forEach(deep); return Object.freeze(node); }
+    if (node !== null && typeof node === "object") {
+      for (const child of Object.values(node)) deep(child);
+      return Object.freeze(node);
+    }
+    return node;
+  };
+  return deep(plain);
+};
+
+// Build the plug-in manifest for a service origin.
+export function buildPluginManifest({ serviceOrigin, roomId = null, clock } = {}) {
+  check(typeof serviceOrigin === "string" && /^https:\/\/\S+$/.test(serviceOrigin),
+    "serviceOrigin must be an https URL");
+  check(roomId === null || (typeof roomId === "string" && roomId.length > 0),
+    "roomId must be a non-empty string if given");
+  check(clock === undefined || typeof clock === "function", "clock must be a function if given");
+  const now = (clock ?? Date.now)();
+
+  const manifest = {
+    version: MANIFEST_VERSION,
+    generatedAt: now,
+    service: {
+      name: "Project Room",
+      origin: serviceOrigin,
+      roomId,
+    },
+    auth: {
+      schemes: [
+        { scheme: "identity-secret", header: "Authorization", format: "Bearer pri_<secret>",
+          description: "Agent identity secret (shown once at identity-create or invite redeem)." },
+        { scheme: "agent-api-key", header: "Authorization", format: "Bearer rak_<secret>",
+          description: "Scoped API key issued to an enrolled agent (server/agent-api-keys.mjs)." },
+        { scheme: "invite-code", format: "RM-XXXXXXXXXXXXXX",
+          description: "One-time invite code, redeemed self-serve for an identity + membership." },
+      ],
+    },
+    enrollment: {
+      flows: [
+        { id: "identity-create", description: "Agent mints its own identity; owner links it into the room.",
+          steps: ["identity-create", "identity-link (owner)", "connect", "check"] },
+        { id: "invite-redeem", description: "Owner mints a one-time code; agent redeems it self-serve (consent first).",
+          steps: ["invite-code (owner)", "redeem-invite", "connect", "check"] },
+        { id: "access-request", description: "Agent with an identity requests access; owner approves or denies.",
+          steps: ["identity-create", "access-request", "access-approve (owner)", "connect", "check"] },
+      ],
+      permissionProfiles: {
+        chat: "read-only",
+        contribute: "accept and complete assigned work",
+        review: "verify evidence",
+      },
+    },
+    transports: {
+      a2a: { description: "Agent-to-agent messaging (src/a2a-transport.mjs)." },
+      mcp: { description: "Model Context Protocol tools with per-agent scopes (server/mcp-scopes.mjs)." },
+      webhook: { description: "Outbound event delivery to agent endpoints (server/agent-webhook-subscriptions.mjs)." },
+    },
+    directory: {
+      url: `${serviceOrigin}/api/agents/directory`,
+      description: "Public, discoverable agent card directory.",
+    },
+    rateLimits: {
+      identityCreatePerIpPerHour: 20,
+      accessRequestsPerAgentPerDay: 5,
+      note: "Rate limits are enforced by the server; values here are informational.",
+    },
+    docs: {
+      guide: `${serviceOrigin}/docs/SWARM-PLUG-IN.md`,
+    },
+  };
+  return freezeDeep(manifest);
+}
+
+// Validate a manifest document (built above or fetched from a peer).
+export function validatePluginManifest(manifest) {
+  check(manifest !== null && typeof manifest === "object", "manifest must be an object");
+  check(manifest.version === MANIFEST_VERSION, `manifest.version must be ${MANIFEST_VERSION}`);
+  check(typeof manifest.service?.origin === "string" && /^https:\/\/\S+$/.test(manifest.service.origin),
+    "manifest.service.origin must be an https URL");
+  check(Array.isArray(manifest.auth?.schemes) && manifest.auth.schemes.length > 0 &&
+    manifest.auth.schemes.every(s => typeof s.scheme === "string" && s.scheme.length > 0),
+    "manifest.auth.schemes must be a non-empty array");
+  check(Array.isArray(manifest.enrollment?.flows) && manifest.enrollment.flows.length > 0 &&
+    manifest.enrollment.flows.every(f => typeof f.id === "string" && f.id.length > 0),
+    "manifest.enrollment.flows must be a non-empty array");
+  check(typeof manifest.directory?.url === "string" && manifest.directory.url.length > 0,
+    "manifest.directory.url must be a non-empty string");
+  return true;
+}
+export { ManifestError };
