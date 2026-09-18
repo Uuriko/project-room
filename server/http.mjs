@@ -1565,6 +1565,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         console.warn(`service diagnostic ${operationId} ${httpStatus} ${code} ${category} ${serviceRoute(req.url)}`);
       }
       json(res, httpStatus, { ...agentErrorBody({ httpStatus, code, message, roomId, workItemId }), operationId, category });
+      // An oversized request is refused after the 413 leaves: destroying the
+      // socket releases the connection at once instead of letting a slow client
+      // hold it until it finishes sending the body it was told to stop sending.
+      if (httpStatus === 413) res.once("finish", () => { try { req.socket?.destroy(); } catch { /* the client is already gone */ } });
     }
   });
   server.requestTimeout = 15000;
