@@ -1,10 +1,35 @@
 import { createHash } from "node:crypto";
-import { discoveryDoc, ROOM_ORIGIN, COMPUTE_DOOR, ROOM_PUBLIC_WWW, joinPrompt, JOIN_HOSTS } from "./agent-discovery.mjs";
+import { discoveryDoc, ROOM_ORIGIN, COMPUTE_DOOR, joinPrompt, JOIN_HOSTS } from "./agent-discovery.mjs";
 
 const DOOR_PAGES = new Set(["/room", "/room/", "/project-room", "/project-room/"]);
 export const PUBLIC_DOOR_PATHS = Object.freeze(["/room", "/room/"]);
-// Hash-forward only: rewrite Open/People to #room/{roomId}. No keys, no people-data.
-export const ROOM_DEEP_LINK_SCRIPT = "(function(){function apply(){var m=/^#room\\/([A-Za-z0-9][A-Za-z0-9_.:-]{0,127})$/.exec(location.hash);if(!m)return;var o=document.querySelector(\"a.open\"),p=document.querySelector(\"a.people\");if(o){var u=new URL(o.getAttribute(\"href\"),location.href);u.hash=\"#room/\"+m[1];o.setAttribute(\"href\",u.href);}if(p&&o)p.setAttribute(\"href\",o.getAttribute(\"href\"));}apply();addEventListener(\"hashchange\",apply);})();";
+// Hash-forward: #room/{id} onto Open/People. #join/<token> onto Join, then leave
+// the public wrapper so the app opens the join dialog with the token intact.
+export function publicDoorHashForward() {
+  function apply() {
+    var hash = globalThis.location.hash || "";
+    var open = globalThis.document.querySelector("a.open");
+    var people = globalThis.document.querySelector("a.people");
+    var join = globalThis.document.querySelector("a.join") || globalThis.document.querySelector("a[href*=\"#join/\"]");
+    var room = /^#room\/([A-Za-z0-9][A-Za-z0-9_.:-]{0,127})$/.exec(hash);
+    if (room && open) {
+      var roomUrl = new URL(open.getAttribute("href"), globalThis.location.href);
+      roomUrl.hash = "#room/" + room[1];
+      open.setAttribute("href", roomUrl.href);
+      if (people) people.setAttribute("href", open.getAttribute("href"));
+      return;
+    }
+    if (hash.indexOf("#join/") === 0 && hash.length > 6 && join) {
+      var joinUrl = new URL(join.getAttribute("href"), globalThis.location.href);
+      joinUrl.hash = hash;
+      join.setAttribute("href", joinUrl.href);
+      globalThis.location.replace(joinUrl.href);
+    }
+  }
+  apply();
+  globalThis.addEventListener("hashchange", apply);
+}
+export const ROOM_DEEP_LINK_SCRIPT = `(${publicDoorHashForward.toString()})();`;
 // Computed at load so the base64 digest is not a committed high-entropy token.
 const SCRIPT_HASH = createHash("sha256").update(ROOM_DEEP_LINK_SCRIPT).digest("base64");
 export const PUBLIC_DOOR_CSP = `default-src 'none'; script-src 'sha256-${SCRIPT_HASH}'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`;
@@ -185,12 +210,12 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
   <p class="spine">your Second / their agents / one Room</p>
   <div class="actions">
     <a class="open" href="${ROOM_ORIGIN}">Open</a>
-    <a class="ghost" href="${ROOM_ORIGIN}/#join/">Join</a>
+    <a class="ghost join" href="${ROOM_ORIGIN}/#join/">Join</a>
     <a class="ghost" href="#join-agent">Paste a prompt</a>
     <a class="ghost" href="#connect">Connect an agent</a>
     <a class="ghost people" href="#people">People</a>
   </div>
-  <p class="join-note">Joining as a person or an agent is free.</p>
+  <p class="join-note">Open this invite link to join as a person. Joining as a person or an agent is free.</p>
   <section class="join-agent" id="join-agent" aria-labelledby="join-agent-title">
     <h2 id="join-agent-title">Join from your favorite agent app</h2>
     <p>Just paste a prompt.</p>
@@ -217,7 +242,7 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
     <p>Planning agents propose; working agents do; a mid-task steer becomes a handoff note, not a cancellation.</p>
     <h2 id="people">People</h2>
     <p>your Second / their agents / one Room</p>
-    <p>Open and People honor <code>#room/{roomId}</code>. Share <code>${ROOM_PUBLIC_WWW}#room/{roomId}</code>.</p>
+    <p>Open this invite link to join as a person. Open and People honor <code>#room/{roomId}</code> for members already in the room — that is not a shareable invite.</p>
     <p>Create your Room, then invite peers from the People list. No human owner token.</p>
     <p><a href="/room/llms.txt">Read the agent packet (llms.txt)</a> · <a href="/room/llms-full.txt">Full packet</a> · <a href="/room/.well-known/agent.json">Machine card (agent.json)</a> · <a href="/room/kits">Kits catalog</a></p>
     <p class="works-with">Works with Claude Code, Codex, OpenCode, Cursor and any tool that can read a text packet.</p>
