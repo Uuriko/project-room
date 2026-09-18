@@ -89,6 +89,7 @@ optional.push("server/morning-digest.mjs"); // Task 21: morning digest builder (
 optional.push("server/digest-mode.mjs"); // Task 21: sender grouping reused by server/morning-digest.mjs
 optional.push("server/inbox-triage.mjs"); // Task 21: triage decider reused by server/morning-digest.mjs
 optional.push("server/inbox-handoff.mjs"); // Task 23: agent handoff protocol (imported by server/inbox.mjs and server/store.mjs)
+optional.push("server/handoff-case.mjs"); // CASE handoff contract (imported by server/inbox-handoff.mjs; pure, imports ServiceError from store.mjs)
 optional.push("server/inbox-assign.mjs"); // Lane C: pure assignment logic (imported by server/inbox-collab-store.mjs; pure, no imports)
 optional.push("server/inbox-internal-notes.mjs"); // Lane C: pure internal-notes logic (imported by server/inbox-collab-store.mjs; imports inbox-assign.mjs)
 optional.push("server/inbox-collision.mjs"); // Lane C: pure draft-collision logic (imported by server/inbox-collab-store.mjs; imports inbox-assign.mjs)
