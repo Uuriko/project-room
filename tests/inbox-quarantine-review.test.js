@@ -233,6 +233,17 @@ test("POST /api/inbox/quarantine/release records the owner's verdict", async t =
   assert.equal(missing.status, 404);
 });
 
+test("POST /api/inbox/quarantine/release accepts an explicit null note", async t => {
+  const { f, origin, creds, hold1 } = await httpFixture(t);
+  creds.csrf = f.store.accountSessionSlot(creds.cookie.split("=")[1]).csrf;
+  // The client sends note: null by default; the route must accept it.
+  const res = await post(origin, "/api/inbox/quarantine/release", creds, { quarantineId: hold1.id, note: null });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.item.status, "released");
+  assert.equal(body.item.note, null);
+});
+
 test("POST /api/inbox/quarantine/dismiss confirms spam over HTTP", async t => {
   const { f, origin, creds, hold2 } = await httpFixture(t);
   creds.csrf = f.store.accountSessionSlot(creds.cookie.split("=")[1]).csrf;
@@ -263,12 +274,13 @@ test("POST /api/inbox/quarantine/split separates the thread over HTTP", async t 
 function clientHarness() {
   const calls = [];
   const account = { generation: 1, currentSession: () => ({ account: { id: "owner", authEpoch: 2 }, sessionRevision: 4, sessionBinding: "b".repeat(64) }),
-    owns: () => true, request: async (path, { body } = {}) => { calls.push({ path, body: body ? JSON.parse(body) : undefined }); return harnessResponse(path); } };
+    owns: () => true, request: async (path, { data } = {}) => { calls.push({ path, data }); return harnessResponse(path); } };
   return { account, calls };
 }
 const item = id => ({ id, messageId: "m-" + id, channel: "telegram", connectionId: "c1",
   reason: [{ key: "k", weight: 80, detail: "why" }], score: 80, quarantinedAt: 1, status: "held",
-  reviewedBy: null, reviewedAt: null, note: null, updatedAt: 1, source: { id: "src-" + id } });
+  reviewedBy: null, reviewedAt: null, note: null, updatedAt: 1, sender: "Spammer", subject: null, excerpt: "test",
+  source: { id: "src-" + id } });
 function harnessResponse(path) {
   const session = { account: { id: "owner", authEpoch: 2 }, sessionRevision: 4, sessionBinding: "b".repeat(64) };
   const viewer = { accountId: "owner", authEpoch: 2, sessionBinding: "b".repeat(64), sessionRevision: 4 };
@@ -290,7 +302,7 @@ test("quarantine client validates the backlog and the review actions", async () 
   assert.ok(calls[0].path.includes("status=held"));
   const released = await client.quarantineRelease("qz-1", "fine");
   assert.equal(released.decision, "release");
-  assert.deepEqual(calls[1], { path: "/api/inbox/quarantine/release", body: { quarantineId: "qz-1", note: "fine" } });
+  assert.deepEqual(calls[1], { path: "/api/inbox/quarantine/release", data: { quarantineId: "qz-1", note: "fine" } });
 });
 
 test("quarantine client validates release, dismiss and split responses", async () => {
