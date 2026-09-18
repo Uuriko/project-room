@@ -4,7 +4,9 @@
 **Canonical brief:** [ROOM-JEV-COMPACTION-P0-BRIEF-2026-09-18.md](../../ROOM-JEV-COMPACTION-P0-BRIEF-2026-09-18.md) ([#504](https://github.com/Uuriko/project-room/pull/504))  
 **Parent steal:** [ROOM-JEV-COMPACTION-REFLEX-STEAL-2026-09-18.md](../../ROOM-JEV-COMPACTION-REFLEX-STEAL-2026-09-18.md) ([#497](https://github.com/Uuriko/project-room/pull/497))
 
-Pickup for Quill / Muse / later Room writers. Ask lobby prune stays on `Uuriko/dasha-lobby` after Instinct + Quill — not these files.
+Pickup for Quill / Muse / later Room writers:
+[`ROOM-JEV-COMPACTION-WI1-PICKUP-2026-09-18.md`](../../ROOM-JEV-COMPACTION-WI1-PICKUP-2026-09-18.md)
+(WI-1 accepted). Ask lobby prune stays on `Uuriko/dasha-lobby` after Instinct + Quill — not these files.
 
 Samples, not a live System One call. This repo has no TypeSafe key. `asker: jev` on the scored sample is shape only. The no-key default is `asker: inert`.
 

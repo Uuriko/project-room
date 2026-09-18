@@ -32,6 +32,7 @@ Architecture SoR (steal stack collapsed):
 | [ROOM-JEV-COMPACTION-REFLEX-STEAL-2026-09-18.md](ROOM-JEV-COMPACTION-REFLEX-STEAL-2026-09-18.md) | TypeSafe Jev tool-trace compaction (keepCall/keepResult, no summary) + Reflex on-device noul/choice/score (research only; Compute ≠ Room; sibling of #477) |
 | [ROOM-JEV-COMPACTION-P0-BRIEF-2026-09-18.md](ROOM-JEV-COMPACTION-P0-BRIEF-2026-09-18.md) | P0 build brief for #497 — Work Items + fixture receipts for `ledger.compact` keepCall/keepResult (docs only; no Phase 0 #8/#9 writer) |
 | [fixtures/ledger-compact/](fixtures/ledger-compact/) | WI fixture receipts for `ledger.compact` (JSON samples + WI-1 checklist; no writer) |
+| [ROOM-JEV-COMPACTION-WI1-PICKUP-2026-09-18.md](ROOM-JEV-COMPACTION-WI1-PICKUP-2026-09-18.md) | Muse / Quill pickup — #504 WI-1 accepted via #510 fixtures; no writer until Muse / kit ACK |
 | [ROOM-INTERLATERAL-RESEARCH-2026-09-17.md](ROOM-INTERLATERAL-RESEARCH-2026-09-17.md) | Interlateral → Room: receipts, handoff, authority cards, maturity ladder (research only) |
 | [ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md](ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md) | Cousin landscape: Oasis, agensis, Agent Room, Alook, HumanLayer, Nautilo → **Second**; qm / Dust / Magentic-UI / Greenroom / AgentsMesh (research only) |
 | [ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md](ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md) | Nautilo packages / Conductor / Floor Manager + new cousins + Second receipt shapes (research only) |
