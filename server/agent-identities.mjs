@@ -162,11 +162,19 @@ export class AgentIdentities {
     if (!roomId) return null;
     const row = this.db.prepare("SELECT identity_id FROM agent_identities WHERE secret_hash=?").get(hash(secret));
     if (!row) return null;
-    const link = this.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?").get(roomId, row.identity_id);
+    return this.resolveIdentityLink(row.identity_id, roomId);
+  }
+
+  // Resolves a known identityId to its linked room member, or null. Used by
+  // the API-key auth branch (RC-2026-09-18-012): a verified rak_ key yields
+  // an identityId, not a secret, so the link lookup runs by identityId.
+  resolveIdentityLink(identityId, roomId) {
+    if (!roomId || typeof identityId !== "string" || !identityId) return null;
+    const link = this.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?").get(roomId, identityId);
     if (!link) return null;
     const member = this.store.roomAuthority(roomId).members[link.member_id];
     if (!member || member.active === false) return null;
-    return { identityId: row.identity_id, member };
+    return { identityId, member };
   }
 }
 

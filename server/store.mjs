@@ -38,6 +38,7 @@ import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs"
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, isRoomAccessToken } from "./guest-agent-links.mjs";
 import { AgentIdentities, agentIdentitySchema, isIdentitySecret } from "./agent-identities.mjs";
+import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
 import { AccountLoginMethods, accountLoginMethodsSchema } from "./account-login-methods.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
@@ -87,6 +88,17 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 export const PILOT_LIMITS = Object.freeze({ eventsPerRoom: 10000, membersPerRoom: 100, workItemsPerRoom: 500, projectionBytes: 4 * 1024 * 1024 });
 const hash = text => createHash("sha256").update(text).digest("hex");
 const key = () => randomBytes(32).toString("base64url");
+// RC-2026-09-18-012: presented agent API-key credentials ("rak_"+secret).
+// The bearer() regex in server/http.mjs gates the shape; this predicate
+// routes verified keys into the agent-identity auth branch below.
+const isApiKeyToken = token => typeof token === "string" && token.startsWith(API_KEY_PREFIX);
+// Channel-fixture threads conventionally carry a "<channel>:" prefix
+// (sms:, messenger:, email:); anything else reports no channel rather
+// than guessing — threadIds stay opaque everywhere else.
+const channelOfThreadId = threadId => {
+  const match = /^(sms|messenger|email|room):/.exec(typeof threadId === "string" ? threadId : "");
+  return match ? match[1] : null;
+};
 const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(",")}]` : value && typeof value === "object" ? `{${Object.keys(value).sort().map(k => `${JSON.stringify(k)}:${canonical(value[k])}`).join(",")}}` : JSON.stringify(value);
 export const provisionalAccountPrefix = "acct-legacy-";
 const provisionalAccountId = (roomId, memberId) => `${provisionalAccountPrefix}${hash(`${roomId}\0${memberId}`).slice(0, 32)}`;
@@ -1404,6 +1416,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   authenticate(token, roomId, expectedSessionBinding = null, { allowAccountSession = true } = {}) {
     // Round-2 #101: multi-room agent identities. One identity secret works in
     // every room the identity is linked to; rooms keep sovereignty via link/unlink.
+    // RC-2026-09-18-012: scoped API keys ("rak_"+secret) authenticate the
+    // AGENT identity bound at issue, with its stored scopes. account stays
+    // null — a key can never grant human-account access, so account-session
+    // gates (e.g. /api/inbox/*) remain unreachable to keys.
+    if (isApiKeyToken(token)) {
+      const record = this.agentPlugin.verifyPresentedApiKey(token);
+      if (!record) fail(401, "unauthenticated", "Unknown, revoked, or expired API key");
+      const resolved = roomId ? this.identities.resolveIdentityLink(record.identityId, roomId) : null;
+      if (!resolved) fail(401, "unauthenticated", "API key identity has no access to this room");
+      return {
+        account: null, member: resolved.member, roomId, identityId: resolved.identityId,
+        credentialHash: hash(token), credentialScope: "room", kind: "api-key",
+        apiKeyId: record.keyId, apiKeyScopes: Object.freeze([...record.scopes]),
+        expiresAt: null, csrf: null, sessionBinding: null
+      };
+    }
     if (isIdentitySecret(token)) {
       const resolved = this.identities.resolveIdentityAuth(token, roomId);
       if (!resolved) fail(401, "unauthenticated", "Unknown identity or no access to this room");
@@ -1917,7 +1945,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const expectedSessionBinding = opts.expectedSessionBinding ?? (typeof bindingOrOptions === "string" || bindingOrOptions === null ? bindingOrOptions : null);
     const { actor = null, since = null, until = null } = opts;
     return this.readTransaction(() => {
-      this.authenticate(token, roomId, expectedSessionBinding);
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) fail(422, "invalid_cursor", "Invalid event cursor or limit");
       if (actor !== null && (typeof actor !== "string" || !actor)) fail(422, "invalid_cursor", "Invalid actor filter");
       for (const [name, value] of [["since", since], ["until", until]]) {
@@ -1936,7 +1964,77 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
          ORDER BY sequence LIMIT ?`
       ).all(roomId, after, actor, actor, since, since, until, until, limit).map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
       const next = events.at(-1)?.sequence ?? after;
-      return { events, next, hasMore: next < sequence };
+      // RC-2026-09-18-012: targeted-DM privacy. A message.posted event
+      // carrying data.toMemberId is a direct message: only its sender and
+      // its addressed member may read it. Other events (including
+      // non-targeted messages and room-level events that also carry a
+      // toMemberId, like ownership transfers) are unaffected. The cursor
+      // still advances past filtered events so pagination cannot stall.
+      const viewerId = auth.member.id;
+      const visible = events.filter(({ event }) =>
+        event?.type !== T.MESSAGE_POSTED || !event?.data?.toMemberId
+        || event.actorId === viewerId || event.data.toMemberId === viewerId);
+      return { events: visible, next, hasMore: next < sequence };
+    });
+  }
+  // RC-2026-09-18-012: agent-scoped unified inbox. An authenticated agent
+  // member reads its own items only:
+  //   - targeted DMs addressed to it (message.posted with toMemberId = me),
+  //   - collab threads currently assigned to it,
+  //   - open @agent routing mentions naming it.
+  // Additive and room-scoped; the human /api/inbox/* account-session gate
+  // is untouched. The HTTP layer additionally requires agent membership
+  // and, for API-key callers, the inbox:read scope.
+  agentInbox(token, roomId, { limit = 50, expectedSessionBinding = null } = {}) {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) fail(422, "invalid_inbox_limit", "Limit must be an integer 1..200");
+    return this.readTransaction(() => {
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const memberId = auth.member.id;
+      const directMessages = this.db.prepare(
+        `SELECT sequence, body FROM events WHERE room_id=?
+         AND json_extract(body,'$.type')=? AND json_extract(body,'$.data.toMemberId')=?
+         ORDER BY sequence DESC LIMIT ?`)
+        .all(roomId, T.MESSAGE_POSTED, memberId, limit)
+        .map(row => {
+          const parsed = JSON.parse(row.body);
+          return {
+            sequence: row.sequence,
+            messageId: parsed.data.messageId ?? null,
+            from: parsed.actorId,
+            body: parsed.data.body,
+            at: parsed.at,
+            channel: "room",
+          };
+        });
+      const assignments = this.collab.listAssignments(roomId)
+        .filter(record => record.status === "assigned"
+          && record.assignee?.kind === "agent" && record.assignee?.id === memberId)
+        .map(record => ({
+          assignmentId: record.assignmentId,
+          threadId: record.threadId,
+          channel: channelOfThreadId(record.threadId),
+          assignedBy: record.assignedBy,
+          assignedAt: record.assignedAt,
+        }));
+      const mentions = this.collab.listRouting(roomId).records
+        .filter(record => record.agent === memberId && ["routed", "escalated"].includes(record.status))
+        .map(record => ({
+          routingId: record.routingId,
+          threadId: record.threadId,
+          channel: channelOfThreadId(record.threadId),
+          from: record.from,
+          context: record.context,
+          mode: record.mode,
+          status: record.status,
+          createdAt: record.createdAt,
+        }));
+      return Object.freeze({
+        agentId: memberId,
+        roomId,
+        directMessages: Object.freeze(directMessages),
+        assignments: Object.freeze(assignments),
+        mentions: Object.freeze(mentions),
+      });
     });
   }
   // Return-brief wiring (disposition 5557850637): one read transaction keeps the frozen
