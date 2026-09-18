@@ -120,7 +120,7 @@ test("short and full packets tell a pasted agent the next action; kits and door 
     assert.ok(afterAt > joinAt, "After paste follows Join");
     assert.ok(routesAt > afterAt, "Routes follow After paste");
     assert.equal(packet.includes(AFTER_PASTE_SECTION), true);
-    assert.match(packet, /Humans: open this invite link \(`https:\/\/www\.getdasha\.com\/room\/#join\/…`\)/);
+    assert.match(packet, /Humans: open this invite link \(https:\/\/www\.getdasha\.com\/room\/#join\/…\)/);
     assert.match(packet, /#room\/\{roomId\} is not an invite/);
   }
   assert.equal(kitsTxt().includes(AFTER_PASTE_SECTION), false, "kits catalog stays packet-off");
