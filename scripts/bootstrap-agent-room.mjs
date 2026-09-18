@@ -215,7 +215,7 @@ https://www.getdasha.com (no /room path). Secrets print once. Never commit them.
     const args = parseBootstrapArgs(argv);
     if (!args) throw new ConnectionError("usage_error");
     const origin = process.env.ROOM_AGENT_ORIGIN;
-    if (origin === undefined) throw new ConnectionError("usage_error");
+    if (!origin) throw new ConnectionError("usage_error");
     const result = await bootstrapAgentRoom(origin, args);
     console.log(JSON.stringify(result, null, 2));
   } catch (error) {
@@ -239,10 +239,12 @@ Needs ROOM_AGENT_ORIGIN.`);
     const args = parseAccountLinkArgs(argv);
     if (!args) throw new ConnectionError("usage_error");
     const origin = process.env.ROOM_AGENT_ORIGIN;
-    if (origin === undefined) throw new ConnectionError("usage_error");
+    if (!origin) throw new ConnectionError("usage_error");
     const result = await requestAccess(origin, {
       roomId: args.roomId, identityId: args.identityId, displayName: args.displayName,
-      requestedPermissions: args.permissions, ...(args.note === undefined ? {} : { note: args.note }),
+      requestedPermissions: args.permissions,
+      note: args.note ?? "Agent account-link: request autonomy to collaborate. No Second.bind.",
+      requestId: `ar_${randomUUID().replaceAll("-", "").slice(0, 16)}`,
     });
     console.log(JSON.stringify({
       contractVersion: 1,

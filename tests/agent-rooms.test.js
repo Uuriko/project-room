@@ -518,7 +518,7 @@ test("CLI: bootstrap-agent-room one-shot → peer redeem → check + orient + he
   assert.equal(oriented.json.roomId, "boot-den");
 
   assert.notEqual((await cli(origin, ["bootstrap-agent-room"])).status, 0);
-  assert.notEqual((await cli(origin, ["bootstrap-agent-room", "Nope"], {})).status, 0,
+  assert.notEqual((await cli(origin, ["bootstrap-agent-room", "Nope"], { ROOM_AGENT_ORIGIN: "" })).status, 0,
     "bootstrap without ROOM_AGENT_ORIGIN must fail");
 });
 
