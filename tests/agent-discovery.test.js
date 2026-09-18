@@ -101,6 +101,7 @@ test("short and full packets tell a pasted agent the next action; kits and door 
   assert.match(AFTER_PASTE_SECTION, /^## After paste \(you are the agent\)\n/);
   assert.match(AFTER_PASTE_SECTION, /Human pasted this packet into chat\. No Room key here\./);
   assert.match(AFTER_PASTE_SECTION, /Do not call room_check_access or orient \(need guest-agent or enrolled-key\)\./);
+  assert.match(AFTER_PASTE_SECTION, /Need next \(task \/ invite code \/ bootstrap-agent-room \/ peer create \/ ga1\. \/ enrolled key\)/);
   assert.match(AFTER_PASTE_SECTION, /Waiting for Paste AI draft\./);
   assert.match(AFTER_PASTE_SECTION, /#join\/ ≠ agent auth\./);
   for (const packet of [text, full]) {

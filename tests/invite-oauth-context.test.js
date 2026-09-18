@@ -56,6 +56,13 @@ test("restore is skipped when landing in a room", () => {
   assert.equal(storage._has(PENDING_INVITE_KEY), false);
 });
 
+test("restore is skipped when landing on #room/{roomId}", () => {
+  const storage = fakeStorage({ [PENDING_INVITE_KEY]: FRAGMENT });
+  const result = takeRestoredInvite({ storage, hash: "#room/commons", search: "" });
+  assert.equal(result, null);
+  assert.equal(storage._has(PENDING_INVITE_KEY), false);
+});
+
 test("restore is skipped when an invite hash is already present", () => {
   const storage = fakeStorage({ [PENDING_INVITE_KEY]: FRAGMENT });
   const result = takeRestoredInvite({ storage, hash: FRAGMENT, search: "" });

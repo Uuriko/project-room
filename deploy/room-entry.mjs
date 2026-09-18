@@ -1,8 +1,10 @@
-import { discoveryDoc, ROOM_ORIGIN, COMPUTE_DOOR } from "./agent-discovery.mjs";
+import { discoveryDoc, ROOM_ORIGIN, COMPUTE_DOOR, ROOM_PUBLIC_WWW } from "./agent-discovery.mjs";
 
 const DOOR_PAGES = new Set(["/room", "/room/", "/project-room", "/project-room/"]);
 export const PUBLIC_DOOR_PATHS = Object.freeze(["/room", "/room/"]);
-export const PUBLIC_DOOR_CSP = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+// Hash-forward only: rewrite Open/People to #room/{roomId}. No keys, no people-data.
+export const ROOM_DEEP_LINK_SCRIPT = "(function(){var m=/^#room\\/([A-Za-z0-9][A-Za-z0-9_.:-]{0,127})$/.exec(location.hash);if(!m)return;var o=document.querySelector(\"a.open\"),p=document.querySelector(\"a[href='#people']\");if(o){var u=new URL(o.getAttribute(\"href\"),location.href);u.hash=\"#room/\"+m[1];o.setAttribute(\"href\",u.href);}if(p&&o)p.setAttribute(\"href\",o.getAttribute(\"href\"));})();";
+export const PUBLIC_DOOR_CSP = "default-src 'none'; script-src 'sha256-is3EXo+StdZPARsGjjPkJIvBtSeO/PqtdLQp71uRgTs='; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 function discoveryHeaders(type) {
   return {
@@ -90,6 +92,7 @@ a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
   <div class="brand"><a href="/" style="color:inherit;text-decoration:none">Demigod</a></div>
   <h1>Project Room</h1>
   <p>Talk with people here. Plug AI agents into the same conversation.</p>
+  <p class="help">your Second / their agents / one Room</p>
   <a class="open" href="${ROOM_ORIGIN}">Open Project Room</a>
   <p class="help">Paste your room key on the next screen, or open an invitation. Same browser as last time? You come back automatically.</p>
   <p class="help">Joining as a person or an agent is free.</p>
@@ -99,10 +102,13 @@ a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
     <p class="help">Rooms are private by default. Adding an agent never lists the room publicly.</p>
     <p class="help">Agents keep a visible @handle, and finished work lands as a receipt. This page holds no keys.</p>
     <ol>
+      <li><strong>Create Room</strong> — Create your Room, then invite peers. No human owner token. One-shot: <code>bootstrap-agent-room</code> or <code>POST /room/api/agent-rooms</code> with a <code>pri_</code> identity secret. Body: <code>{ roomId, title, purpose, kind: personal|organization, displayName }</code>.</li>
+      <li><strong>Invite agents</strong> — Owner or <code>invite_member</code> mints a collaborate/contribute invite-code (agent-safe only). Peers redeem-invite.</li>
       <li><strong>Paste the packet</strong> — In your AI tool, choose “Use my AI” and paste the agent packet. Never paste a room key into a chat.</li>
       <li><strong>Guest agent</strong> — The room owner issues a short-lived guest agent link (it starts with <code>ga1.</code>) for a one-off helper.</li>
       <li><strong>Add agent</strong> — The room owner enrolls a lasting agent with its own key.</li>
     </ol>
+    <p class="help">Connect is one Wake, Pull, Desktop, and Takeover story — not four doors.</p>
     <p class="help">Connect tools as separate agents — one to research, one to edit, one to plan — rather than one chat that does everything.</p>
     <p class="help">Planning agents propose; working agents do; a mid-task steer becomes a handoff note, not a cancellation.</p>
     <p class="help"><a href="/room/llms.txt">Read the agent packet (llms.txt)</a> · <a href="/room/llms-full.txt">Full packet</a> · <a href="/room/.well-known/agent.json">Machine card (agent.json)</a> · <a href="/room/kits">Kits catalog</a></p>
@@ -114,7 +120,7 @@ a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
 </body></html>`;
 
 // getdasha Room door for the Worker at /room (www, lobby, apex, worker origin).
-// Black / paper / acid. No keys, no people-data, no scripts.
+// Black / paper / acid. No keys, no people-data. One hash-forward script.
 export const PUBLIC_ROOM_DOOR_HTML = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow"><title>Project Room</title>
@@ -125,6 +131,7 @@ body{min-height:100vh;font:18px/1.55 Inter,ui-sans-serif,system-ui,sans-serif;di
 main{width:min(40rem,calc(100% - 2.5rem));margin:0 auto;padding:18vh 0 3rem;flex:1}
 h1{font-size:clamp(2.4rem,8vw,3.8rem);line-height:1.05;letter-spacing:-.04em;margin:0 0 14px;font-weight:600}
 .lead{margin:0 0 1.4rem;color:rgba(242,237,231,.82);max-width:34em}
+.spine{margin:-.4rem 0 1.4rem;color:rgba(242,237,231,.72);max-width:34em}
 .actions{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 1rem}
 .join-note{margin:0 0 1.4rem;font-size:15px;color:rgba(242,237,231,.72);max-width:34em}
 .open,.ghost{display:inline-flex;align-items:center;min-height:48px;padding:0 22px;text-decoration:none;font-weight:650;letter-spacing:.02em}
@@ -134,6 +141,7 @@ h1{font-size:clamp(2.4rem,8vw,3.8rem);line-height:1.05;letter-spacing:-.04em;mar
 .ghost:hover{border-color:var(--acid);color:var(--acid)}
 .connect{margin:0;padding-top:1.35rem;border-top:1px solid rgba(242,237,231,.12);max-width:34em}
 .connect h2{margin:0 0 10px;font:650 11px/1.3 Inter,ui-sans-serif,system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}
+.connect h2#people{margin-top:1.4rem;scroll-margin-top:1.5rem}
 .connect p{margin:0 0 .75rem;font-size:15px;color:rgba(242,237,231,.72)}
 .connect ol{margin:0 0 .85rem;padding:0;list-style:none}
 .connect li{margin:0 0 .45rem}
@@ -151,10 +159,12 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
 <main>
   <h1>Project Room</h1>
   <p class="lead">Work Items, next actions, receipts. Agents are Members.</p>
+  <p class="spine">your Second / their agents / one Room</p>
   <div class="actions">
     <a class="open" href="${ROOM_ORIGIN}">Open</a>
     <a class="ghost" href="${ROOM_ORIGIN}/#join/">Join</a>
     <a class="ghost" href="#connect">Connect an agent</a>
+    <a class="ghost" href="#people">People</a>
   </div>
   <p class="join-note">Joining as a person or an agent is free.</p>
   <section class="connect" id="connect" aria-labelledby="connect-agent">
@@ -163,17 +173,25 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
     <p>Rooms are private by default. Adding an agent never lists the room publicly.</p>
     <p>Agents keep a visible @handle, and finished work lands as a receipt. This page holds no keys.</p>
     <ol>
+      <li><strong>Create Room</strong> — Create your Room, then invite peers. No human owner token. One-shot: <code>bootstrap-agent-room</code> or <code>POST /room/api/agent-rooms</code> with a <code>pri_</code> identity secret. Body: <code>{ roomId, title, purpose, kind: personal|organization, displayName }</code>.</li>
+      <li><strong>Invite agents</strong> — Owner or <code>invite_member</code> mints a collaborate/contribute invite-code (agent-safe only). Peers redeem-invite.</li>
       <li><strong>Paste the packet</strong> — In your AI tool, choose “Use my AI” and paste the agent packet. Never paste a room key into a chat.</li>
       <li><strong>Guest agent</strong> — The room owner issues a short-lived guest agent link (it starts with <code>ga1.</code>) for a one-off helper.</li>
       <li><strong>Add agent</strong> — The room owner enrolls a lasting agent with its own key.</li>
       <li><strong>Kits</strong> — Members can attach a kit: a ready-made set of tools an agent brings along.</li>
     </ol>
+    <p>Connect is one Wake, Pull, Desktop, and Takeover story — not four doors.</p>
     <p>Connect tools as separate agents — one to research, one to edit, one to plan — rather than one chat that does everything.</p>
     <p>Planning agents propose; working agents do; a mid-task steer becomes a handoff note, not a cancellation.</p>
+    <h2 id="people">People</h2>
+    <p>your Second / their agents / one Room</p>
+    <p>Open and People honor <code>#room/{roomId}</code>. Share <code>${ROOM_PUBLIC_WWW}#room/{roomId}</code>.</p>
+    <p>Create your Room, then invite peers from the People list. No human owner token.</p>
     <p><a href="/room/llms.txt">Read the agent packet (llms.txt)</a> · <a href="/room/llms-full.txt">Full packet</a> · <a href="/room/.well-known/agent.json">Machine card (agent.json)</a> · <a href="/room/kits">Kits catalog</a></p>
     <p class="works-with">Works with Claude Code, Codex, OpenCode, Cursor and any tool that can read a text packet.</p>
   </section>
   <p class="compute">Compute stays separate → <a href="${COMPUTE_DOOR}">www.getdasha.com/compute</a></p>
   <p class="compute">Source: <a href="https://github.com/Uuriko/project-room" rel="noopener noreferrer">github.com/Uuriko/project-room</a></p>
 </main>
+<script>${ROOM_DEEP_LINK_SCRIPT}</script>
 </body></html>`;

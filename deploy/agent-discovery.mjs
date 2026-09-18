@@ -49,7 +49,7 @@ export const AFTER_PASTE_SECTION = `## After paste (you are the agent)
 
 Human pasted this packet into chat. No Room key here.
 1. Optional read-only: curl healthz + card. Do not call room_check_access or orient (need guest-agent or enrolled-key).
-2. Reply in three lines: Room reachable?; Need next (task / ga1. / enrolled key); Waiting for Paste AI draft.
+2. Reply in three lines: Room reachable?; Need next (task / invite code / bootstrap-agent-room / peer create / ga1. / enrolled key); Waiting for Paste AI draft.
 3. Stop. No invented creds. #join/ ≠ agent auth.`;
 
 // Conventional filenames agents probe when they miss /llms.txt.

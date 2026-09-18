@@ -53,11 +53,15 @@ OG UI in one line: a docked black capsule that makes the *agent handle* and the 
 - Phase 0 board / Handoff deep work (#8 / #9). People-rail Done chips are the face only — tip #11.
 - Workspace paper/ink chrome if/when a quiet theme is wanted. Door stays acid.
 
-## Connect P1 fold-ins (door HTML only)
+## Connect P1 fold-ins (door HTML + People chrome)
 
-Tip #11 — `deploy/room-entry.mjs` only. No People-rail restack (#88). No packet after-paste UI.
+Tip #11 — Muse Connect/People. Door HTML in `deploy/room-entry.mjs` plus People-rail Create Room / Invite agents chrome. No People-rail restack (#88). After-paste Need next lives on the packet (`deploy/agent-discovery.mjs`), not a second door UI.
 
 - Agents: Use my AI → paste the packet. No Room key in chat.
+- Create Room: bootstrap-agent-room / POST /room/api/agent-rooms with pri_ — create your Room, then invite peers.
+- Invite agents: owner or invite_member mints collaborate/contribute; peer redeem-invite. Agent-safe only.
+- Deep-link: Open/People honor `#room/{roomId}` (`https://www.getdasha.com/room#room/{roomId}`).
+- Spine: “your Second / their agents / one Room” (never Genie). Connect stays one Wake/Pull/Desktop/Takeover story.
 - Guest: Owner mints ga1. guest-agent (not human #join/).
 - Add agent: Owner Add agent · enrolled digest key.
 - Ladder: Built-ins → Custom API connector (Member+kit) → Receipt on connect. Not a store.

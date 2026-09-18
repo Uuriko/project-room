@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { roomEntry, publicRoomDoorHtml, isPublicRoomDoorPath, wantsPublicDoorHtml, PUBLIC_DOOR_PATHS } from "../deploy/room-entry.mjs";
-import { ROOM_ORIGIN, COMPUTE_DOOR } from "../deploy/agent-discovery.mjs";
+import { createHash } from "node:crypto";
+import { roomEntry, publicRoomDoorHtml, isPublicRoomDoorPath, wantsPublicDoorHtml, PUBLIC_DOOR_PATHS, ROOM_DEEP_LINK_SCRIPT, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
+import { ROOM_ORIGIN, COMPUTE_DOOR, ROOM_PUBLIC_WWW } from "../deploy/agent-discovery.mjs";
 
 const FORBIDDEN = /Bearer |ROOM_AGENT_TOKEN|sk-|password|@gmail|John |Potter |Uuriko@|acct-|memberId":"[^c]/i;
 
@@ -21,6 +22,16 @@ test("unlisted entry opens the isolated Room without forwarding input or embeddi
   assert.match(html, /Invite teammates and AI agents to work on the same items together\./);
   assert.match(html, /Rooms are private by default\. Adding an agent never lists the room publicly\./);
   assert.match(html, /Agents keep a visible @handle, and finished work lands as a receipt\./);
+  assert.match(html, /your Second \/ their agents \/ one Room/);
+  assert.match(html, /<strong>Create Room<\/strong>/);
+  assert.match(html, /bootstrap-agent-room/);
+  assert.match(html, /POST \/room\/api\/agent-rooms/);
+  assert.match(html, /kind: personal\|organization/);
+  assert.match(html, /<strong>Invite agents<\/strong>/);
+  assert.match(html, /invite_member/);
+  assert.match(html, /collaborate\/contribute/);
+  assert.match(html, /Wake, Pull, Desktop, and Takeover/);
+  assert.doesNotMatch(html, /Genie/);
   assert.match(html, /<strong>Paste the packet<\/strong>/);
   assert.match(html, /<strong>Guest agent<\/strong>/);
   assert.match(html, /<strong>Add agent<\/strong>/);
@@ -46,6 +57,7 @@ test("unlisted entry opens the isolated Room without forwarding input or embeddi
   assert.ok(!html.includes("untrusted"));
   assert.ok(!html.includes("<script"));
   assert.doesNotMatch(html, /dasha\.fun|iframe|walletconnect|Bearer |ROOM_AGENT_TOKEN/i);
+  assert.doesNotMatch(html, /Genie/);
 });
 
 test("/project-room is the same noindex landing", async () => {
@@ -104,15 +116,30 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(html, /href="#connect"/);
   assert.match(html, /Connect an agent/);
   assert.match(html, /id="connect"/);
+  assert.match(html, /your Second \/ their agents \/ one Room/);
+  assert.match(html, /href="#people"/);
+  assert.match(html, />People</);
+  assert.match(html, /id="people"/);
+  assert.match(html, /Open and People honor <code>#room\/\{roomId\}<\/code>/);
+  assert.match(html, /https:\/\/www\.getdasha\.com\/room#room\/\{roomId\}/);
+  assert.equal(ROOM_PUBLIC_WWW, "https://www.getdasha.com/room");
   assert.match(html, /Invite teammates and AI agents to work on the same items together\./);
   assert.match(html, /Rooms are private by default\. Adding an agent never lists the room publicly\./);
   assert.match(html, /Agents keep a visible @handle, and finished work lands as a receipt\./);
+  assert.match(html, /<strong>Create Room<\/strong>/);
+  assert.match(html, /bootstrap-agent-room/);
+  assert.match(html, /POST \/room\/api\/agent-rooms/);
+  assert.match(html, /kind: personal\|organization/);
+  assert.match(html, /<strong>Invite agents<\/strong>/);
+  assert.match(html, /invite_member/);
+  assert.match(html, /collaborate\/contribute/);
   assert.match(html, /<strong>Paste the packet<\/strong>/);
   assert.match(html, /<strong>Guest agent<\/strong>/);
   assert.match(html, /short-lived guest agent link \(it starts with <code>ga1\.<\/code>\)/);
   assert.match(html, /<strong>Add agent<\/strong>/);
   assert.match(html, /enrolls a lasting agent with its own key\./);
   assert.match(html, /<strong>Kits<\/strong> — Members can attach a kit/);
+  assert.match(html, /Wake, Pull, Desktop, and Takeover/);
   assert.match(html, /Connect tools as separate agents — one to research, one to edit, one to plan/);
   assert.match(html, /Planning agents propose; working agents do; a mid-task steer becomes a handoff note, not a cancellation\./);
   assert.match(html, /<a href="\/room\/llms.txt">Read the agent packet \(llms\.txt\)<\/a>/);
@@ -125,14 +152,18 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.doesNotMatch(html, /muse\.ai/i);
   assert.doesNotMatch(html, /\bAmp\b/);
   assert.doesNotMatch(html, /ChatGPT Sites|chatgpt\.com/i);
-  assert.doesNotMatch(html, /\$|pricing|per month/i);
+  assert.doesNotMatch(html, /pricing|per month|\$\d/i);
   assert.match(html, /Works with Claude Code, Codex, OpenCode, Cursor/);
   assert.match(html, /<a href="https:\/\/github\.com\/Uuriko\/project-room" rel="noopener noreferrer">github\.com\/Uuriko\/project-room<\/a>/, "source line is a real link");
   assert.match(html, new RegExp(COMPUTE_DOOR.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(html, /Compute stays separate/);
   assert.match(html, /--ink:#070608/);
   assert.match(html, /--acid:#dfff00/);
-  assert.ok(!html.includes("<script"));
+  const scriptHash = createHash("sha256").update(ROOM_DEEP_LINK_SCRIPT).digest("base64");
+  assert.match(PUBLIC_DOOR_CSP, new RegExp(`script-src 'sha256-${scriptHash.replace(/[+/=]/g, "\\$&")}'`));
+  assert.equal((html.match(/<script>/g) || []).length, 1);
+  assert.ok(html.includes(`<script>${ROOM_DEEP_LINK_SCRIPT}</script>`));
+  assert.doesNotMatch(html, /Genie/);
   assert.equal(FORBIDDEN.test(html), false);
   assert.doesNotMatch(html, /dasha\.fun|iframe|walletconnect|Bearer |ROOM_AGENT_TOKEN|# Project Room|getone\.one|Amore/i);
 });

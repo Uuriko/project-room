@@ -42,6 +42,7 @@ export function takeRestoredInvite({ storage, hash, search }) {
   } catch { return null; }
   if (typeof pending !== "string" || !INVITE_FRAGMENT_PATTERN.test(pending)) return null;
   if (typeof hash === "string" && hash.startsWith("#invite/")) return null;
+  if (typeof hash === "string" && /^#room\/[A-Za-z0-9]/.test(hash)) return null;
   if (typeof search === "string" && /(^|[?&])room=/.test(search)) return null;
   return { valid: true, secret: pending.slice("#invite/".length) };
 }
