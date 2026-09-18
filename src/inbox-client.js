@@ -269,6 +269,31 @@ export class InboxClient {
       v => v.split !== null && typeof v.split === "object" && typeof v.split.quarantineId === "string"
         && typeof v.split.sourceId === "string" && this.validQuarantineItem(v.item) && v.item.status === "held");
   }
+  // Review-coverage dashboard for the quarantine review UI: per-signal
+  // held/reviewed coverage with the Confirm (released) vs Dismiss
+  // (confirmed spam) precision inputs, the coverage-gap list, and account
+  // totals. Empty queue reads as null coverage, never 0.
+  validQuarantineCoverage(v) {
+    const num = n => typeof n === "number" && Number.isFinite(n);
+    const int0 = n => Number.isSafeInteger(n) && n >= 0;
+    const coverageRatio = r => r === null || (num(r) && r >= 0 && r <= 1);
+    const validSignal = s => s !== null && typeof s === "object" && typeof s.key === "string" && s.key.length > 0
+      && int0(s.held) && int0(s.confirmed) && int0(s.dismissed) && int0(s.reviewed) && int0(s.split) && int0(s.total)
+      && coverageRatio(s.reviewCoverage) && coverageRatio(s.shareOfHolds)
+      && (s.avgScore === null || (num(s.avgScore) && s.avgScore >= 0 && s.avgScore <= 100))
+      && (s.avgWeight === null || num(s.avgWeight));
+    return v !== null && typeof v === "object" && v.contractVersion === 1
+      && v.viewer !== null && typeof v.viewer === "object" && typeof v.viewer.accountId === "string"
+      && Number.isSafeInteger(v.generatedAt) && v.generatedAt >= 0
+      && v.totals !== null && typeof v.totals === "object"
+      && int0(v.totals.held) && int0(v.totals.confirmed) && int0(v.totals.dismissed) && int0(v.totals.split)
+      && int0(v.totals.reviewed) && int0(v.totals.total) && coverageRatio(v.totals.reviewCoverage)
+      && Array.isArray(v.zeroCoverageSignals) && v.zeroCoverageSignals.every(k => typeof k === "string")
+      && Array.isArray(v.perSignal) && v.perSignal.every(validSignal);
+  }
+  quarantineCoverage() {
+    return this.request("/quarantine/coverage", {}, v => this.validQuarantineCoverage(v));
+  }
   applyConnection(request) {
     const data = structuredClone(request);
     if (!validConnectionCommand(data)) return Promise.reject(fail("invalid_channel_connection", "Choose a supported connection command."));

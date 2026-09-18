@@ -109,3 +109,41 @@ test("quarantine review: held items render, Confirm accepts, Dismiss two-tap dis
   await card(page, 0).waitFor();
   assert.equal(await page.locator(".inbox-quarantine-item").count(), 1);
 });
+
+test("quarantine review: coverage dashboard renders totals, per-signal rows, and the gap", { timeout: 60000 }, async t => {
+  const { page, origin, key } = await setup(t);
+  await page.goto(origin + "/?account=1");
+  await page.locator("#access-key").fill(key);
+  await page.locator('#auth-form button[type="submit"]').click();
+  await page.locator("#inbox-panel").waitFor();
+  await page.locator("#inbox-quarantine").waitFor();
+  await page.locator("#inbox-quarantine-coverage").waitFor();
+
+  // Totals line: two held, none reviewed.
+  await page.waitForFunction(() =>
+    (document.querySelector("#inbox-quarantine-coverage-summary")?.textContent ?? "").includes("2 held"));
+  const summary = await page.locator("#inbox-quarantine-coverage-summary").textContent();
+  assert.ok(summary.includes("2 held"), "held count renders");
+  assert.ok(summary.includes("0 reviewed of 2 total"), "reviewed/total renders");
+  assert.ok(summary.includes("0% coverage"), "coverage ratio renders");
+  // The gap list names the signals firing on live holds with no verdict yet.
+  const gap = await page.locator("#inbox-quarantine-coverage-gap").textContent();
+  assert.ok(gap.includes("prize_bait"), "gap names prize_bait");
+  assert.ok(gap.includes("wire_fraud"), "gap names wire_fraud");
+  // One row per signal, least-covered first; the server sorts, the client
+  // renders verbatim.
+  const rows = page.locator("#inbox-quarantine-coverage-table tbody tr");
+  assert.equal(await rows.count(), 2, "two signal rows");
+  const keys = await rows.evaluateAll(els => els.map(el => el.querySelector("th").textContent));
+  assert.deepEqual([...keys].sort(), ["prize_bait", "wire_fraud"]);
+  const firstRow = await rows.first().textContent();
+  assert.ok(firstRow.includes("0%"), "per-signal coverage renders");
+
+  // A Confirm verdict lands in the coverage numbers on the same refresh pass.
+  await card(page, 0).getByRole("button", { name: "Confirm", exact: true }).click();
+  await page.waitForFunction(() =>
+    (document.querySelector("#inbox-quarantine-coverage-summary")?.textContent ?? "").includes("1 held · 1 reviewed of 2 total · 50% coverage"));
+  const gapAfter = await page.locator("#inbox-quarantine-coverage-gap").textContent();
+  assert.ok(!gapAfter.includes("prize_bait"), "reviewed signal leaves the gap");
+  assert.ok(gapAfter.includes("wire_fraud"), "unreviewed signal stays in the gap");
+});
