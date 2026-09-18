@@ -1,0 +1,344 @@
+// Lane D agent plug-in sub-store: persistence + ownership wiring for the
+// four pure plug-in modules.
+//
+// server/agent-api-keys.mjs, server/agent-directory.mjs,
+// server/agent-plugin-manifest.mjs and server/agent-webhook-subscriptions.mjs
+// are pure logic (caller-owned Maps, no I/O). This sub-store bridges them to
+// SQLite: the Maps are hydrated from the tables on open, and every mutation
+// is written through inside the same store transaction. API-key secrets are
+// never persisted — only their SHA-256 hashes (the pure module never returns
+// a stored secret). Webhook signing secrets ARE persisted because the server
+// needs them to sign deliveries, but they are never returned over HTTP
+// (only shown once when the server generates one at subscribe time).
+//
+// Ownership: API keys, directory cards and webhook subscriptions are scoped
+// to the publishing agent identity. Cross-identity access reads as 404
+// (never an oracle); a publish colliding with another identity's card is
+// 409. Nothing here touches the network.
+import { randomBytes } from "node:crypto";
+import { createAgentApiKeys, ApiKeyError, API_KEY_PREFIX } from "./agent-api-keys.mjs";
+import { createAgentDirectory, DirectoryError } from "./agent-directory.mjs";
+import { buildPluginManifest, ManifestError } from "./agent-plugin-manifest.mjs";
+import {
+  createAgentWebhookSubscriptions, WebhookSubscriptionError, signPayload, verifySignature,
+} from "./agent-webhook-subscriptions.mjs";
+
+export { ApiKeyError, DirectoryError, ManifestError, WebhookSubscriptionError, signPayload, verifySignature, API_KEY_PREFIX };
+
+// Purely additive, intentionally outside the writer fence (see
+// unfencedAdditiveTables in server/writer-fence.mjs): older writers have no
+// code path to these tables, and every row is scoped to an agent identity.
+export const agentPluginSchema = `
+  CREATE TABLE IF NOT EXISTS agent_api_keys (
+    key_id TEXT PRIMARY KEY,
+    key_hash TEXT NOT NULL UNIQUE,
+    identity_id TEXT NOT NULL,
+    scopes_json TEXT NOT NULL,
+    label TEXT,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER,
+    revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)),
+    last_used_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS agent_api_key_identity ON agent_api_keys(identity_id);
+  CREATE TABLE IF NOT EXISTS agent_directory_cards (
+    agent_id TEXT PRIMARY KEY,
+    card_json TEXT NOT NULL,
+    visibility TEXT NOT NULL CHECK(visibility IN ('public','room','private')),
+    owner_identity_id TEXT NOT NULL,
+    published_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    withdrawn INTEGER NOT NULL DEFAULT 0 CHECK(withdrawn IN (0,1))
+  );
+  CREATE TABLE IF NOT EXISTS agent_webhook_subs (
+    subscription_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    url TEXT NOT NULL,
+    events_json TEXT NOT NULL,
+    secret TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+    created_at INTEGER NOT NULL,
+    journal_json TEXT NOT NULL DEFAULT '[]'
+  );
+  CREATE INDEX IF NOT EXISTS agent_webhook_sub_agent ON agent_webhook_subs(agent_id);
+`;
+
+export class AgentPluginError extends Error {
+  constructor(status, code, message) {
+    super(message);
+    this.name = "AgentPluginError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+export class AgentPluginStore {
+  constructor(store) {
+    this.store = store;
+    this.db = store.db;
+    this.keys = new Map();
+    this.cards = new Map();
+    this.subs = new Map();
+    const clock = () => store.now();
+    this.apiKeys = createAgentApiKeys({ store: this.keys, clock });
+    this.directory = createAgentDirectory({ store: this.cards, clock });
+    this.webhooks = createAgentWebhookSubscriptions({
+      store: this.subs,
+      clock,
+      // Collision-free across restarts (the module's default counter is not
+      // durable); the caller may still pass an explicit subscriptionId.
+      id: () => {
+        let subscriptionId;
+        do { subscriptionId = `sub_${randomBytes(9).toString("base64url")}`; }
+        while (this.subs.has(subscriptionId));
+        return subscriptionId;
+      },
+    });
+  }
+
+  // Hydrate the pure modules' Maps from SQLite. Called once from the store
+  // open path after the schema is exec'd.
+  load() {
+    this.keys.clear();
+    this.cards.clear();
+    this.subs.clear();
+    for (const row of this.db.prepare("SELECT * FROM agent_api_keys").all()) {
+      this.keys.set(row.key_id, {
+        keyId: row.key_id,
+        keyHash: row.key_hash,
+        identityId: row.identity_id,
+        scopes: Object.freeze(JSON.parse(row.scopes_json)),
+        label: row.label,
+        createdAt: row.created_at,
+        expiresAt: row.expires_at,
+        revoked: row.revoked === 1,
+        lastUsedAt: row.last_used_at,
+      });
+    }
+    for (const row of this.db.prepare("SELECT * FROM agent_directory_cards").all()) {
+      this.cards.set(row.agent_id, {
+        agentId: row.agent_id,
+        card: JSON.parse(row.card_json),
+        visibility: row.visibility,
+        publishedAt: row.published_at,
+        updatedAt: row.updated_at,
+        withdrawn: row.withdrawn === 1,
+      });
+    }
+    for (const row of this.db.prepare("SELECT * FROM agent_webhook_subs").all()) {
+      this.subs.set(row.subscription_id, {
+        subscriptionId: row.subscription_id,
+        agentId: row.agent_id,
+        url: row.url,
+        events: Object.freeze(JSON.parse(row.events_json)),
+        secret: row.secret,
+        enabled: row.enabled === 1,
+        createdAt: row.created_at,
+        deliveries: JSON.parse(row.journal_json),
+      });
+    }
+  }
+
+  // Read-only open path: verify the additive tables, allowing absence like
+  // the other additive journals (read-only never migrates).
+  verifySchema({ allowAbsent = false } = {}) {
+    const tables = ["agent_api_keys", "agent_directory_cards", "agent_webhook_subs"];
+    const missing = tables.filter(name =>
+      !this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
+    if (missing.length && !allowAbsent) throw new Error(`agent-plugin tables missing: ${missing.join(", ")}`);
+  }
+
+  // ---- Scoped API keys (secret shown once at issue/rotate; hash-only storage) ----
+
+  issueApiKey({ identityId, scopes, expiresAt = null, label = null }) {
+    return this.store.transaction(() => {
+      const issued = this.apiKeys.issue({ identityId, scopes, expiresAt, label });
+      const record = this.keys.get(issued.keyId);
+      this.db.prepare(`INSERT INTO agent_api_keys
+        (key_id, key_hash, identity_id, scopes_json, label, created_at, expires_at, revoked, last_used_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL)`)
+        .run(record.keyId, record.keyHash, record.identityId, JSON.stringify([...record.scopes]),
+          record.label, record.createdAt, record.expiresAt);
+      return issued;
+    });
+  }
+
+  listApiKeys(identityId) {
+    return this.store.readTransaction(() => this.apiKeys.keysForIdentity(identityId));
+  }
+
+  keyRecordForOwner(keyId, identityId) {
+    const record = this.keys.get(keyId);
+    // Unknown-or-not-yours reads as 404 either way: no cross-identity oracle.
+    if (!record || record.identityId !== identityId) {
+      throw new AgentPluginError(404, "unknown_key", `Unknown API key "${keyId}"`);
+    }
+    return record;
+  }
+
+  rotateApiKey({ identityId, keyId }) {
+    return this.store.transaction(() => {
+      this.keyRecordForOwner(keyId, identityId);
+      const rotated = this.apiKeys.rotate(keyId);
+      const record = this.keys.get(keyId);
+      this.db.prepare("UPDATE agent_api_keys SET key_hash=?, last_used_at=NULL WHERE key_id=?")
+        .run(record.keyHash, keyId);
+      return rotated;
+    });
+  }
+
+  revokeApiKey({ identityId, keyId }) {
+    return this.store.transaction(() => {
+      this.keyRecordForOwner(keyId, identityId);
+      const revoked = this.apiKeys.revoke(keyId);
+      this.db.prepare("UPDATE agent_api_keys SET revoked=1 WHERE key_id=?").run(keyId);
+      return revoked;
+    });
+  }
+
+  // Authenticate a presented API-key secret (for future scoped use); updates
+  // lastUsedAt on success. Returns the public record or null.
+  verifyApiKeySecret(secret) {
+    return this.store.transaction(() => {
+      const record = this.apiKeys.verify(secret);
+      if (!record) return null;
+      const stored = this.keys.get(record.keyId);
+      this.db.prepare("UPDATE agent_api_keys SET last_used_at=? WHERE key_id=?")
+        .run(stored.lastUsedAt, record.keyId);
+      return record;
+    });
+  }
+
+  // ---- Agent directory (public document; owner-scoped publish/withdraw) ----
+
+  publishCard({ identityId, agentId, card, visibility = "public" }) {
+    return this.store.transaction(() => {
+      const existing = this.db.prepare("SELECT owner_identity_id AS ownerIdentityId FROM agent_directory_cards WHERE agent_id=?").get(agentId);
+      if (existing && existing.ownerIdentityId !== identityId) {
+        throw new AgentPluginError(409, "card_owned_by_another_identity",
+          `Card "${agentId}" is published by another identity`);
+      }
+      const doc = this.directory.publish({ agentId, card, visibility });
+      const entry = this.cards.get(agentId);
+      this.db.prepare(`INSERT INTO agent_directory_cards
+        (agent_id, card_json, visibility, owner_identity_id, published_at, updated_at, withdrawn)
+        VALUES (?, ?, ?, ?, ?, ?, 0)
+        ON CONFLICT(agent_id) DO UPDATE SET card_json=excluded.card_json, visibility=excluded.visibility,
+          updated_at=excluded.updated_at, withdrawn=0`)
+        .run(agentId, JSON.stringify(entry.card), entry.visibility, identityId, entry.publishedAt, entry.updatedAt);
+      return doc;
+    });
+  }
+
+  withdrawCard({ identityId, agentId }) {
+    return this.store.transaction(() => {
+      const row = this.db.prepare("SELECT owner_identity_id AS ownerIdentityId FROM agent_directory_cards WHERE agent_id=?").get(agentId);
+      if (!row || row.ownerIdentityId !== identityId) {
+        throw new AgentPluginError(404, "unknown_card", `No card "${agentId}" for this identity`);
+      }
+      const result = this.directory.withdraw(agentId);
+      this.db.prepare("UPDATE agent_directory_cards SET withdrawn=1, updated_at=? WHERE agent_id=?")
+        .run(this.store.now(), agentId);
+      return result;
+    });
+  }
+
+  // The frozen public directory document (public, non-withdrawn cards only).
+  publicDirectoryDocument({ serviceOrigin, query = "", capability = null }) {
+    return this.store.readTransaction(() => {
+      if (!query && capability === null) return this.directory.buildDocument({ serviceOrigin });
+      const agents = this.directory.list({ query, capability }).map(agent => ({
+        ...agent,
+        cardUrl: `${serviceOrigin}/api/agents/directory/${agent.agentId}`,
+      }));
+      return Object.freeze({
+        version: "1.0.0",
+        origin: serviceOrigin,
+        generatedAt: this.store.now(),
+        agents: Object.freeze(agents),
+      });
+    });
+  }
+
+  // A single public card (the cardUrl target in the directory document).
+  // Non-public or withdrawn cards read as 404.
+  publicCard(agentId) {
+    return this.store.readTransaction(() => {
+      const entry = this.cards.get(agentId);
+      if (!entry || entry.withdrawn || entry.visibility !== "public") {
+        throw new AgentPluginError(404, "unknown_card", `No public card "${agentId}"`);
+      }
+      return this.directory.get(agentId);
+    });
+  }
+
+  // ---- Per-agent webhook subscriptions ----
+
+  subscribeWebhook({ identityId, url, events, secret = null }) {
+    return this.store.transaction(() => {
+      // Caller-supplied secrets are never echoed; a server-generated secret
+      // is shown exactly once so the agent can verify deliveries.
+      const signingSecret = secret ?? randomBytes(32).toString("base64url");
+      const view = this.webhooks.subscribe({ agentId: identityId, url, events, secret: signingSecret });
+      const sub = this.subs.get(view.subscriptionId);
+      this.db.prepare(`INSERT INTO agent_webhook_subs
+        (subscription_id, agent_id, url, events_json, secret, enabled, created_at, journal_json)
+        VALUES (?, ?, ?, ?, ?, 1, ?, '[]')`)
+        .run(sub.subscriptionId, sub.agentId, sub.url, JSON.stringify([...sub.events]), sub.secret, sub.createdAt);
+      return { subscription: view, secretShownOnce: secret === null ? signingSecret : null };
+    });
+  }
+
+  listWebhooks(identityId) {
+    return this.store.readTransaction(() => this.webhooks.forAgent(identityId));
+  }
+
+  unsubscribeWebhook({ identityId, subscriptionId }) {
+    return this.store.transaction(() => {
+      const row = this.db.prepare("SELECT agent_id FROM agent_webhook_subs WHERE subscription_id=?").get(subscriptionId);
+      if (!row || row.agent_id !== identityId) {
+        throw new AgentPluginError(404, "unknown_subscription", `Unknown subscription "${subscriptionId}"`);
+      }
+      const result = this.webhooks.unsubscribe(subscriptionId, { agentId: identityId });
+      this.db.prepare("DELETE FROM agent_webhook_subs WHERE subscription_id=?").run(subscriptionId);
+      return result;
+    });
+  }
+
+  // ---- Delivery journal (server-side dispatch calls these; no HTTP routes yet) ----
+
+  buildWebhookDelivery(subscriptionId, { eventType, data }) {
+    return this.store.transaction(() => {
+      const delivery = this.webhooks.buildDelivery(subscriptionId, { eventType, data });
+      this.persistJournal(subscriptionId);
+      return delivery;
+    });
+  }
+
+  recordWebhookAttempt(deliveryId, { ok, error = null }) {
+    return this.store.transaction(() => {
+      const result = this.webhooks.recordAttempt(deliveryId, { ok, error });
+      for (const sub of this.subs.values()) {
+        if (sub.deliveries.some(d => d.deliveryId === deliveryId)) { this.persistJournal(sub.subscriptionId); break; }
+      }
+      return result;
+    });
+  }
+
+  webhookJournal(subscriptionId) {
+    return this.store.readTransaction(() => this.webhooks.journal(subscriptionId));
+  }
+
+  persistJournal(subscriptionId) {
+    const sub = this.subs.get(subscriptionId);
+    if (!sub) return;
+    this.db.prepare("UPDATE agent_webhook_subs SET journal_json=? WHERE subscription_id=?")
+      .run(JSON.stringify(sub.deliveries), subscriptionId);
+  }
+
+  // ---- Plug-in manifest (derived, unauthenticated) ----
+
+  pluginManifest(serviceOrigin) {
+    return buildPluginManifest({ serviceOrigin, roomId: null });
+  }
+}

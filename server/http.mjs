@@ -21,6 +21,7 @@ import { accessReviewReport } from "./access-review.mjs";
 import { roomUsageSummary, parseUsageDays } from "./usage-summary.mjs";
 import { AccessRequests } from "./access-requests.mjs";
 import { AgentRooms } from "./agent-rooms.mjs";
+import { createAgentPluginRoutes } from "./agent-plugin-routes.mjs";
 import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
 import { listPins, setPin } from "./pins.mjs";
 import { GoogleSignIn, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage } from "./google-oauth.mjs";
@@ -308,6 +309,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // (server/store.mjs), so every RoomStore carries it; http.mjs only owns
   // the service instance.
   const agentRooms = new AgentRooms(store);
+  // Lane D agent plug-in surface (RC-2026-09-18-010): identity-scoped API
+  // keys, public agent directory, derived plug-in manifest, per-agent webhook
+  // subscriptions. Schema is applied in the store open path (server/store.mjs),
+  // so every RoomStore carries it; http.mjs only owns the service instance.
+  const agentPlugin = createAgentPluginRoutes({ store, json, reject, body, rate, bearer, exact, pathId, origin });
   const resolveChannelTransport = channelTransports ?? (({ provider, accountId, connectionId }) => {
     if (!channelSendProviders.includes(provider)) return null;
     const key = JSON.stringify([provider, accountId, connectionId]);
@@ -1633,6 +1639,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         setCookie(res, roomCookieName, token, Math.max(0, Math.floor((session.expiresAt - store.now()) / 1000)));
         return json(res, 201, sessionView(session));
       }
+      // Lane D agent plug-in surface (RC-2026-09-18-010): /api/agent-keys,
+      // /api/agent-directory, /api/agent-manifest (+ the well-known manifest
+      // path), /api/agent-webhooks. Mounted before the /api/ 404 guard so
+      // the well-known path (outside /api/) is reachable; the handler
+      // returns true when it served the request, false to fall through.
+      if (await agentPlugin(req, res, { url, remoteAddress })) return;
       if (!url.pathname.startsWith("/api/")) reject(404, "not_found", "Not found");
       if (url.pathname === "/api/session") {
         const selectedRoom = url.searchParams.get("room");

@@ -21,7 +21,7 @@ function fixture(t) {
   return { ...f, directory };
 }
 
-test("online capture preserves all 54 tables, identity boundaries and exact retries through recovery and restart", async t => {
+test("online capture preserves all 58 tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t);
   const { identityId } = f.store.identities.create("Recovery agent");
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
@@ -56,6 +56,13 @@ test("online capture preserves all 54 tables, identity boundaries and exact retr
   // Seed one agent-room ownership record so the capture covers agent_room_ownership.
   f.store.db.prepare(`INSERT INTO agent_room_ownership(identity_id,room_id,created_at) VALUES(?,?,?)`)
     .run(identityId, "commons", f.now());
+  // Seed one of each Lane D plug-in row so the capture covers agent_api_keys,
+  // agent_directory_cards and agent_webhook_subs.
+  f.store.agentPlugin.issueApiKey({ identityId, scopes: ["rooms:read"], label: "recovery-key" });
+  f.store.agentPlugin.publishCard({ identityId, agentId: "recovery-agent",
+    card: { name: "Recovery Agent", description: "Synthetic recovery fixture agent.", capabilities: ["chat"], version: "1.0.0" },
+    visibility: "public" });
+  f.store.agentPlugin.subscribeWebhook({ identityId, url: "https://hooks.example.test/recovery", events: ["message.posted"] });
   // Seed one direct channel send so the capture covers direct_channel_sends.
   f.store.db.prepare(`INSERT INTO direct_channel_sends(id,account_id,channel,recipient,subject,body_hash,thread_id,status,provider_id,error_code,created_at,updated_at)
     VALUES('recovery-direct-send',?,'telegram','123456','',?,NULL,'sent','4242',NULL,?,?)`)
@@ -106,7 +113,7 @@ test("online capture preserves all 54 tables, identity boundaries and exact retr
     decision: { decision: "deliver", reason: "urgent SLA breach is always delivered" },
     prefsSnapshot: createNotifyPrefs().snapshot(f.emailProfile.accountId) });
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 55); // +1: quarantine_thread_splits
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 58); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010)
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);
