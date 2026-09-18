@@ -202,7 +202,7 @@ test("invitation preview and acceptance preserve privacy, drafts, authority, and
   await page.locator("#invitation-account-key").fill(targetAccountKey);
   page.once("dialog", dialog => dialog.accept());
   await page.getByRole("button", { name: "Sign in to review acceptance", exact: true }).click();
-  await page.getByRole("button", { name: "Accept and open room", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Accept and open as Personal account", exact: true }).waitFor();
   assert.equal(await composer.inputValue(), "Keep this private lobby draft", "same-account transition retains the current Room draft before acceptance");
   assert.equal(await page.locator("#message-to-select").inputValue(), "lobby-owner");
   const cookiesBeforeAccept = new Map((await context.cookies()).map(cookie => [cookie.name, cookie.value]));
@@ -219,7 +219,7 @@ test("invitation preview and acceptance preserve privacy, drafts, authority, and
     await release.promise;
     await route.fulfill({ response });
   });
-  await page.getByRole("button", { name: "Accept and open room", exact: true }).click();
+  await page.getByRole("button", { name: "Accept and open as Personal account", exact: true }).click();
   await committed.promise;
   const afterCommit = counts(store, invitationId);
   assert.equal(afterCommit.invitation.status, "accepted");
@@ -239,8 +239,8 @@ test("invitation preview and acceptance preserve privacy, drafts, authority, and
 
   await page.locator("#invitation-account-key").fill(targetAccountKey);
   await page.getByRole("button", { name: "Sign in to review acceptance", exact: true }).click();
-  await page.getByRole("button", { name: "Accept and open room", exact: true }).waitFor();
-  await page.getByRole("button", { name: "Accept and open room", exact: true }).click();
+  await page.getByRole("button", { name: "Accept and open as Personal account", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Accept and open as Personal account", exact: true }).click();
   await page.waitForURL(`${origin}/?room=studio`);
   await page.locator("#main").waitFor({ state: "visible" });
   assert.match(await page.locator("#identity-label").textContent(), /^Target human/);
@@ -304,7 +304,7 @@ test("account confirmation keeps the modal open and warns before a draft-sensiti
   assert.equal(await page.locator("#invitation-dialog").evaluate(element => element.open), true);
   assert.equal(await page.locator("#invitation-dismiss").isDisabled(), true);
   release.resolve();
-  await page.getByRole("button", { name: "Accept and open room", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Accept and open as Personal account", exact: true }).waitFor();
   await page.waitForFunction(() => document.activeElement?.id === "invitation-accept");
   assert.equal(await page.locator("#message-input").inputValue(), "Retain this draft until I choose to switch");
 });
@@ -315,7 +315,7 @@ test("an invalidated offer removes acceptance controls and returns keyboard focu
   await page.goto(`${f.origin}/#invite/${f.invitationToken}`);
   await page.locator("#invitation-account-key").fill(f.targetAccountKey);
   await page.getByRole("button", { name: "Sign in to review acceptance", exact: true }).click();
-  await page.getByRole("button", { name: "Accept and open room", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Accept and open as Personal account", exact: true }).waitFor();
   f.revoke();
   await page.locator("#invitation-accept").click();
   await page.waitForFunction(() => document.querySelector("#invitation-error").textContent.includes("revoked"));
@@ -333,7 +333,7 @@ test("account mismatch focuses the account field for recovery", { timeout: 90000
   await page.goto(`${f.origin}/#invite/${f.invitationToken}`);
   await page.locator("#invitation-account-key").fill(f.otherAccountKey);
   await page.getByRole("button", { name: "Sign in to review acceptance", exact: true }).click();
-  await page.getByRole("button", { name: "Accept and open room", exact: true }).click();
+  await page.getByRole("button", { name: "Accept and open as Personal account", exact: true }).click();
   await page.waitForFunction(() => document.activeElement?.id === "invitation-account-key" && document.querySelector("#invitation-error").textContent.includes("another account"));
   assert.equal(await page.locator("#invitation-accept").isVisible(), false);
 });
@@ -345,7 +345,7 @@ test("uncertain acceptance retains its retry on cancelled dismissal and accepted
   await page.locator("#invitation-account-key").fill(f.targetAccountKey);
   await page.getByRole("button", { name: "Sign in to review acceptance", exact: true }).click();
   await page.route("**/api/invitations/accept", route => route.abort());
-  await page.getByRole("button", { name: "Accept and open room", exact: true }).click();
+  await page.getByRole("button", { name: "Accept and open as Personal account", exact: true }).click();
   await page.waitForFunction(() => document.querySelector("#invitation-error").textContent.includes("could not confirm"));
   await page.waitForFunction(() => document.activeElement?.id === "invitation-accept");
   page.once("dialog", async dialog => { assert.match(dialog.message(), /clears this tab’s retry information/); await dialog.dismiss(); });
@@ -355,9 +355,9 @@ test("uncertain acceptance retains its retry on cancelled dismissal and accepted
   await page.getByRole("button", { name: "Check acceptance again", exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
   await page.goto(`${f.origin}/#invite/${f.invitationToken}`);
-  await page.getByRole("button", { name: "Open room", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Open room as Personal account", exact: true }).waitFor();
   await page.route("**/api/session?room=studio", route => route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "temporarily_unavailable", message: "Room temporarily unavailable" } }) }));
-  await page.getByRole("button", { name: "Open room", exact: true }).click();
+  await page.getByRole("button", { name: "Open room as Personal account", exact: true }).click();
   await page.waitForFunction(() => document.querySelector("#auth-error").textContent.includes("already accepted, but the Room could not be loaded"));
   assert.equal(await page.locator("#auth-error").textContent().then(text => text.includes("account that accepted")), false);
 });
