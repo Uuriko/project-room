@@ -1987,6 +1987,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // and, for API-key callers, the inbox:read scope.
   agentInbox(token, roomId, { limit = 50, expectedSessionBinding = null } = {}) {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) fail(422, "invalid_inbox_limit", "Limit must be an integer 1..200");
+    // RC-2026-09-18-013: the first per-room collab access lazily replays the
+    // persisted journal inside a WRITE transaction. That replay cannot run
+    // inside the readTransaction below ("Cannot write inside a read-only
+    // transaction" -> 500), so warm it here first. Idempotent once warm.
+    this.collab.listAssignments(roomId);
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const memberId = auth.member.id;
