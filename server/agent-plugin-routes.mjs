@@ -20,6 +20,16 @@
 // served the request, false so http.mjs can fall through to other routes.
 import { validatePluginManifest, WELL_KNOWN_PATH } from "./agent-plugin-manifest.mjs";
 import { AgentPluginError } from "./agent-plugin-store.mjs";
+import { API_KEY_SCOPES } from "./agent-api-keys.mjs";
+
+// Scope vocabulary is the single source of truth in
+// server/agent-api-keys.mjs (API_KEY_SCOPES): requiredScope names below
+// must resolve there, so a scope can never be enforced but undocumented.
+const requiredScope = name => {
+  const entry = API_KEY_SCOPES.find(scope => scope.scope === name);
+  if (!entry) throw new Error(`unknown agent API-key scope: ${name}`);
+  return entry.scope;
+};
 
 const KEY_ACTION_ROUTE = /^\/api\/agent-keys\/(rak_[A-Za-z0-9_-]{1,64})\/(rotate|revoke)$/;
 const SUBSCRIPTION_ROUTE = /^\/api\/agent-webhooks\/([A-Za-z0-9_-]{1,64})$/;
@@ -160,7 +170,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
 
   const publishCard = translate(async (req, res, { remoteAddress }) => {
     rate(`agent-directory-publish:${remoteAddress}`, 20);
-    const auth = agentAuth(req, "directory:publish");
+    const auth = agentAuth(req, requiredScope("directory:publish"));
     const data = await body(req);
     // RC-2026-09-18-014: signed cards. publicKey + signature are required on
     // every publish (unsigned publishes are 422); rotationSignature carries
@@ -200,7 +210,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
 
   const withdrawCard = translate(async (req, res, { remoteAddress, agentId }) => {
     rate(`agent-directory-withdraw:${remoteAddress}`, 20);
-    const auth = agentAuth(req, "directory:publish");
+    const auth = agentAuth(req, requiredScope("directory:publish"));
     return json(res, 200, store.agentPlugin.withdrawCard({ identityId: auth.identityId, agentId }));
   });
 
@@ -238,14 +248,14 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   // ---- Per-agent webhook subscriptions ----
 
   const listWebhooks = translate(async (req, res) => {
-    const auth = agentAuth(req, "webhooks:manage");
+    const auth = agentAuth(req, requiredScope("webhooks:manage"));
     rate(`agent-webhooks-read:${auth.identityId}`, 120);
     return json(res, 200, { subscriptions: store.agentPlugin.listWebhooks(auth.identityId) });
   });
 
   const subscribeWebhook = translate(async (req, res, { remoteAddress }) => {
     rate(`agent-webhook-subscribe:${remoteAddress}`, 20);
-    const auth = agentAuth(req, "webhooks:manage");
+    const auth = agentAuth(req, requiredScope("webhooks:manage"));
     const data = await body(req);
     if (!data || !(exact(data, ["url", "events"]) || exact(data, ["url", "events", "secret"])))
       reject(422, "invalid_subscription_request", "url, events, and optional secret are the accepted fields");
@@ -266,7 +276,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
 
   const unsubscribeWebhook = translate(async (req, res, { remoteAddress, subscriptionId }) => {
     rate(`agent-webhook-unsubscribe:${remoteAddress}`, 20);
-    const auth = agentAuth(req, "webhooks:manage");
+    const auth = agentAuth(req, requiredScope("webhooks:manage"));
     return json(res, 200, store.agentPlugin.unsubscribeWebhook({ identityId: auth.identityId, subscriptionId }));
   });
 

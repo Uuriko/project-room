@@ -194,3 +194,32 @@ test("expired requests are not decidable", async t => {
     /already expired/);
   assert.equal(requests.list(ownerToken, "commons").length, 0);
 });
+
+test("unknown permission names fail fast with a self-teaching 422 (RC-2026-09-18-022)", async t => {
+  const { requests, ownerToken, identity } = setup(t);
+  // The request never pends: ["read","write"] are not room permissions.
+  assert.throws(() => requests.request("commons", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["read", "write"], requestId: "ar_badnames"
+  }), error => {
+    assert.equal(error.code, "invalid_request");
+    assert.ok(error.message.includes("accept_work"), "422 names real permissions");
+    return true;
+  });
+  // Approval with hand-written bad permissions fails too.
+  const pending = requests.request("commons", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"], requestId: "ar_goodnames"
+  });
+  assert.throws(() => requests.decide(ownerToken, "commons", pending.requestId,
+    { decision: "approve", permissions: ["read"] }),
+    error => {
+      assert.equal(error.code, "invalid_request");
+      assert.ok(error.message.includes("accept_work"));
+      return true;
+    });
+  // The mirrored vocabulary stays in sync with the canonical PERMISSIONS.
+  const { ACCESS_REQUEST_PERMISSIONS } = await import("../server/access-requests.mjs");
+  const { PERMISSIONS } = await import("../src/events.js");
+  assert.deepEqual([...ACCESS_REQUEST_PERMISSIONS].sort(), [...PERMISSIONS].sort());
+});

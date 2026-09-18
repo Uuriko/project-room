@@ -65,7 +65,9 @@ export class AgentRooms {
     if (!text(request.title, 120)) fail(422, "invalid_room_request", "Room name must be 1 to 120 characters");
     if (!text(request.purpose, 1000, true)) fail(422, "invalid_room_request", "Room purpose must be 1 to 1000 characters");
     if (!text(request.displayName, 80)) fail(422, "invalid_room_request", "Your name in the room must be 1 to 80 characters");
-    if (!ROOM_KINDS.includes(kind)) fail(422, "invalid_room_request", "Room kind must be personal or organization");
+    // RC-2026-09-18-021: the message is derived from ROOM_KINDS so the taught
+    // vocabulary can never drift from the enforced one.
+    if (!ROOM_KINDS.includes(kind)) fail(422, "invalid_room_request", `Room kind must be one of: ${ROOM_KINDS.join(", ")}`);
     const title = request.title.trim(), purpose = request.purpose.trim(), displayName = request.displayName.trim();
     return this.store.transaction(() => {
       const identity = this.store.identities.resolveGlobalIdentitySecret(secret);

@@ -11,7 +11,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { AgentRooms, agentRoomSchema } from "../server/agent-rooms.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
-import { PERMISSIONS } from "../src/events.js";
+import { PERMISSIONS, ROOM_KINDS } from "../src/events.js";
 import { RoomAgentClient, createAgentIdentity, createAgentRoom, redeemAgentInvite } from "../client/room-agent.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -445,4 +445,15 @@ test("CLI: identity-create → room-create → invite-code → peer redeem-invit
   assert.notEqual((await cli(origin, ["room-create", "nope"])).status, 0);
   assert.notEqual((await cli(origin, ["room-create", "a-room", "Title", "Purpose"], {})).status, 0,
     "room-create without a pri_ secret must fail");
+});
+
+test("room-create kind 422 teaches the allowed kinds (RC-2026-09-18-021)", async t => {
+  const { rooms, identity } = setup(t);
+  assert.throws(() => rooms.create(identity.secret, { ...createArgs("bad-kind-room"), kind: "agent" }),
+    error => {
+      assert.equal(error.code, "invalid_room_request");
+      // The message names every allowed kind, derived from ROOM_KINDS.
+      for (const kind of ROOM_KINDS) assert.ok(error.message.includes(kind), `names ${kind}`);
+      return true;
+    });
 });
