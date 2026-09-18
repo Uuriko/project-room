@@ -173,9 +173,13 @@ test("CLI plug-in loop: a new AI goes from no credential to connected member", a
   const agentEnv = { ROOM_AGENT_CONFIG: join(agentDir, "agent") };
   const checked = await cli(origin, ["check"], agentEnv);
   assert.equal(checked.status, 0, checked.stderr);
-  assert.equal(checked.json.status, "credential_accepted");
+  assert.equal(checked.json.type, "agent_connection_ladder");
+  assert.equal(checked.json.status, "verified");
   assert.equal(checked.json.memberId, identityId);
-  assert.deepEqual(checked.json.permissions, ["accept_work", "complete_work"]);
+  assert.deepEqual(checked.json.rungs.map(rung => rung.name), ["access", "read", "write"]);
+  assert.ok(checked.json.rungs.every(rung => rung.ok));
+  assert.match(checked.json.rungs[0].detail, /accept_work,complete_work/);
+  assert.equal(checked.json.summary, "3/3 — you're live in #commons");
   const said = await cli(origin, ["status", "plugged in"], agentEnv);
   assert.equal(said.status, 0, said.stderr);
   const oriented = await cli(origin, ["orient"], agentEnv);

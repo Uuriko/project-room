@@ -39,6 +39,51 @@ async function promptYesNo(question) {
   } finally { rl.close(); }
 }
 
+// Onboarding Slice 3 (RC-2026-09-17-028): `check` is a verification
+// ladder. Rung 1: access probe (the existing checkConnection). Rung 2: read
+// probe — the presence roster, which proves the read path. Rung 3: write
+// probe, draft-only until the sandbox practice room (Slice 8) lands: it
+// composes the verification message but never sends it, and says so
+// explicitly. check never writes to a real room. The first failing rung
+// stops the ladder and names the doctor repair.
+async function checkVerificationLadder(client) {
+  const rungs = [];
+  let access;
+  try {
+    access = await client.checkConnection();
+    rungs.push({ name: "access", ok: true,
+      detail: `credential accepted as ${access.memberId} in room ${access.roomId}; permissions: ${(access.permissions ?? []).join(",") || "none"}` });
+  } catch (error) {
+    const diagnostic = connectionDiagnostic(error);
+    rungs.push({ name: "access", ok: false, detail: diagnostic.hint ?? diagnostic.message });
+    return ladderResult(rungs, null);
+  }
+  try {
+    const roster = await client.presence();
+    const members = Array.isArray(roster?.members) ? roster.members : [];
+    rungs.push({ name: "read", ok: true,
+      detail: `presence roster readable: ${members.length} member${members.length === 1 ? "" : "s"} online` });
+  } catch (error) {
+    const diagnostic = connectionDiagnostic(error);
+    rungs.push({ name: "read", ok: false, detail: diagnostic.hint ?? diagnostic.message });
+    return ladderResult(rungs, access);
+  }
+  rungs.push({ name: "write", ok: true, wrote: false,
+    detail: "draft-only probe: no sandbox room yet, so the verification message was composed but never sent. Nothing was written to any room." });
+  return ladderResult(rungs, access);
+}
+
+function ladderResult(rungs, access) {
+  const total = rungs.length, passed = rungs.filter(rung => rung.ok).length;
+  const failed = rungs.find(rung => !rung.ok);
+  const summary = failed === undefined
+    ? `${total}/${total} — you're live in #${access.roomId}`
+    : `${passed}/${total} — ${failed.name} failed. Run: node scripts/agent-inbox.mjs doctor`;
+  if (failed !== undefined) process.exitCode = 1;
+  return { contractVersion: 1, type: "agent_connection_ladder", status: failed === undefined ? "verified" : "failed",
+    roomId: access?.roomId ?? null, memberId: access?.memberId ?? null, rungs, summary };
+}
+
 async function redeemInviteWithConsent(origin, code, displayName, { autoYes, autoNo }) {
   const preview = await previewAgentInvite(origin, code);
   printInviteConsent(code, preview);
@@ -189,7 +234,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
       client = ["identity-create", "redeem-invite", "request-access"].includes(action) ? null : new RoomAgentClient(config);
     let result;
     if (["connect", "import", "check"].includes(action)) {
-      result = await client.checkConnection();
+      result = action === "check" ? await checkVerificationLadder(client) : await client.checkConnection();
       if (["connect", "import"].includes(action)) {
         saveAgentConnection(checkpoint, { version: 1, ...config });
         result = { ...result, configurationSaved: true };
