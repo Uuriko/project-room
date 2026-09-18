@@ -40,7 +40,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // at v34 and intentionally NOT fenced: same rationale as
   // private_inbox_reads above — older writers have no code path to it, and
   // the projection's ownerId plus the event log are the integrity gate.
-  "agent_room_ownership"
+  "agent_room_ownership",
+  // direct_channel_sends (direct gmail/telegram send journal) is purely
+  // additive and intentionally NOT fenced: same rationale — older writers
+  // have no code path to it, and the journal's pending→sent|failed
+  // transitions are the integrity gate.
+  "direct_channel_sends"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

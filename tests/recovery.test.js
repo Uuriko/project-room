@@ -19,7 +19,7 @@ function fixture(t) {
   return { ...f, directory };
 }
 
-test("online capture preserves all 41 tables, identity boundaries and exact retries through recovery and restart", async t => {
+test("online capture preserves all 46 tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t);
   const { identityId } = f.store.identities.create("Recovery agent");
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
@@ -46,8 +46,28 @@ test("online capture preserves all 41 tables, identity boundaries and exact retr
   // Seed one agent-room ownership record so the capture covers agent_room_ownership.
   f.store.db.prepare(`INSERT INTO agent_room_ownership(identity_id,room_id,created_at) VALUES(?,?,?)`)
     .run(identityId, "commons", f.now());
+  // Seed one direct channel send so the capture covers direct_channel_sends.
+  f.store.db.prepare(`INSERT INTO direct_channel_sends(id,account_id,channel,recipient,subject,body_hash,thread_id,status,provider_id,error_code,created_at,updated_at)
+    VALUES('recovery-direct-send',?,'telegram','123456','',?,NULL,'sent','4242',NULL,?,?)`)
+    .run(f.emailProfile.accountId, "a".repeat(64), f.now(), f.now());
+  // Seed one row per multi-method login table so the capture covers them
+  // (the login slices created the tables but no fixture rows).
+  f.store.db.prepare(`INSERT OR IGNORE INTO accounts(id,active,revision,auth_epoch,origin,created_at)
+    VALUES('recovery-account',1,0,0,'recovery',?)`).run(f.now());
+  f.store.db.prepare(`INSERT INTO account_login_methods(id,account_id,type,provider,label,email,email_hash,verifier,external_subject,created_at,last_used_at,disabled)
+    VALUES('recovery-login-method','recovery-account','oauth','google','Recovery Google','recovery-login@example.com',?,NULL,'recovery-subject',?,NULL,0)`)
+    .run("b".repeat(64), f.now());
+  f.store.db.prepare(`INSERT INTO account_passkey_credentials(credential_id,account_id,method_id,rp_id,public_key_cose,public_key_jwk,sign_count,aaguid,fmt,transports,created_at,last_used_at,disabled)
+    VALUES('recovery-credential','recovery-account','recovery-login-method','example.com','recovery-cose','recovery-jwk',0,NULL,'none',NULL,?,NULL,0)`)
+    .run(f.now());
+  f.store.db.prepare(`INSERT INTO account_magic_codes(code_hash,account_id,email,email_hash,expires_at,consumed_at,attempts,created_at)
+    VALUES(?,'recovery-account','recovery-magic@example.com',?,?,NULL,0,?)`)
+    .run("c".repeat(64), "d".repeat(64), f.now() + 600000, f.now());
+  f.store.db.prepare(`INSERT INTO account_recovery_codes(code_hash,account_id,used_at,created_at)
+    VALUES(?,'recovery-account',NULL,?)`)
+    .run("e".repeat(64), f.now());
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 41);
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 46);
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);

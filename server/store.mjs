@@ -23,6 +23,7 @@ import { Attention, attentionSchema } from "./attention.mjs";
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
 import { accessRequestSchema } from "./access-requests.mjs";
 import { agentRoomSchema } from "./agent-rooms.mjs";
+import { directSendSchema } from "./inbox-outbox.mjs";
 import { ensureAttachmentSchema, verifyAttachmentSchema } from "./attachment-schema.mjs";
 import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
 import { workItemChanges } from "../src/workflow.js";
@@ -464,6 +465,10 @@ export class RoomStore {
       // have no code path to them, and method rows are always scoped to an
       // existing account.
       this.db.exec(accountLoginMethodsSchema);
+      // Direct channel-send journal: purely additive, intentionally outside
+      // the writer fence (see unfencedAdditiveTables). Applied here (not only in
+      // createRoomServer) so store-only fixtures and the recovery audit see it.
+      this.db.exec(directSendSchema);
       ensureAttachmentSchema(this.db); // Converge the deployed v28-v33 attachment lineage before installing v34 fences.
       // Idempotent: recreates fences for tables the additive schemas just
       // (re)created, and refuses a file whose existing triggers drifted.
