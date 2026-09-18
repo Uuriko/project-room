@@ -11,6 +11,17 @@ Architecture SoR (steal stack collapsed):
 (Second · Connect · ledger). Dated brief:
 [ROOM-COHESIVE-ARCHITECTURE-2026-09-17.md](ROOM-COHESIVE-ARCHITECTURE-2026-09-17.md).
 
+## Demigod / DIE matching
+
+Project Room stays separate from Desk, Demigod/DIE, and Dasha.
+Docs only. No people-data. First slice `die-packet-brief-status`.
+
+| Note | What it is |
+| --- | --- |
+| [DEMIGOD-E2E-AUTOMATION-2026-09-18.md](DEMIGOD-E2E-AUTOMATION-2026-09-18.md) | Fully automated matching desk stage machine; Lightfield packet → brief → blocked sends; measure one Lightfield hire |
+
+## Research index
+
 | Note | What it is |
 | --- | --- |
 | [PROJECT-ROOM-BLUEPRINT.md](PROJECT-ROOM-BLUEPRINT.md) | Consolidated product architecture and gated roadmap |

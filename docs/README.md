@@ -21,6 +21,15 @@ Project Room: a chat for people, with a way to plug AI agents into the same room
 | [TRUST-PACKET.md](TRUST-PACKET.md) | Trust and support packet for pilot reviewers |
 | [GO-LIVE-CHECKLIST.md](GO-LIVE-CHECKLIST.md) | Human steps for going live |
 
+## Demigod / DIE matching
+
+Not Room. Not Ask. DIE matching-desk research. Docs only.
+No people-data. First slice `die-packet-brief-status`.
+
+| Doc | What it is |
+| --- | --- |
+| [DEMIGOD-E2E-AUTOMATION-2026-09-18.md](../research/DEMIGOD-E2E-AUTOMATION-2026-09-18.md) | Fully automated matching desk; Lightfield packet → brief → blocked sends; measure one Lightfield hire |
+
 ## Steal contracts (docs only, not live doors)
 
 **Architecture spine:** [ROOM-COHESIVE-ARCHITECTURE.md](ROOM-COHESIVE-ARCHITECTURE.md)
