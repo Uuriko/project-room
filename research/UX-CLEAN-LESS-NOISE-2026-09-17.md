@@ -46,6 +46,9 @@ runtime.
 
 7. **Artifacts panel** (Claude): long code/markdown opens beside
    thread, not as a scroll bomb inside the bubble.
+   **Lite P0** (collapse + opt-in panel) is
+   [ASK-ARTIFACTS-LITE-2026-09-18.md](ASK-ARTIFACTS-LITE-2026-09-18.md);
+   auto-open / HTML preview stay P1.
 8. **History sidebar icon-only** until hover; auto-title chats; search
    later.
 9. **Follow-up chips** after reply (3 max), not a second door row.

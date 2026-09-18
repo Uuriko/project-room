@@ -18,6 +18,8 @@ and density — not a second first-paint rewrite.
 
 Research:
 [UX-CLEAN-LESS-NOISE-2026-09-17.md](../research/UX-CLEAN-LESS-NOISE-2026-09-17.md).
+Artifacts-lite (long fences, P0 — not the full panel):
+[ASK-ARTIFACTS-LITE-2026-09-18.md](../research/ASK-ARTIFACTS-LITE-2026-09-18.md).
 Quiet cousins: [QUIET-PRODUCT-DESIGN-PLAN-2026-09-08.md](QUIET-PRODUCT-DESIGN-PLAN-2026-09-08.md),
 [QUIET-FAST.md](QUIET-FAST.md),
 [PROJECT-ROOM-DESIGN-GUIDE.md](../research/PROJECT-ROOM-DESIGN-GUIDE.md).
@@ -163,7 +165,7 @@ From the research note. Do not sneak them into the polish PR.
 
 | # | Item | When |
 | --- | --- | --- |
-| 7 | Artifacts panel beside the thread | Ask P1 |
+| 7 | Full Artifacts panel (auto-open, HTML preview) | Ask P1 — lite collapse is P0 research: [ASK-ARTIFACTS-LITE-2026-09-18.md](../research/ASK-ARTIFACTS-LITE-2026-09-18.md) |
 | 8 | History sidebar icon-only | Ask P1 |
 | 9 | Follow-up chips after reply (3 max) | Ask P1 |
 | 10 | Branch from edit (quiet fork, no banner) | Ask P1 |
