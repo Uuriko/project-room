@@ -184,6 +184,9 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // the old key's chain-of-custody statement when the key changes;
     // recovery:true is only honored with the identity (owner) secret — a
     // scoped key can never waive the rotation chain.
+    // RC-2026-09-18-027: every publish-path 422 points at the signing guide
+    // so failures teach instead of dead-ending.
+    const signingDocs = "See docs/SIGNED-AGENT-CARDS.md for the signing guide.";
     const shape = data && [
       ["agentId", "card", "publicKey", "signature"],
       ["agentId", "card", "visibility", "publicKey", "signature"],
@@ -195,23 +198,37 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       ["agentId", "card", "visibility", "publicKey", "signature", "rotationSignature", "recovery"],
     ].some(fields => exact(data, fields));
     if (!shape) reject(422, "invalid_card",
-      "agentId, card, publicKey, signature, and optional visibility, rotationSignature, recovery are the accepted fields");
+      "agentId, card, publicKey, signature, and optional visibility, rotationSignature, recovery are the accepted fields. " + signingDocs);
     if (data.recovery !== undefined && data.recovery !== true) {
-      reject(422, "invalid_card", "recovery must be true when given");
+      reject(422, "invalid_card", "recovery must be true when given. " + signingDocs);
     }
     if (data.recovery === true && auth.keyId !== null) {
-      reject(403, "insufficient_scope", "key recovery requires the identity (owner) secret, not a scoped API key");
+      reject(403, "insufficient_scope", "key recovery requires the identity (owner) secret, not a scoped API key. " + signingDocs);
     }
-    const doc = store.agentPlugin.publishCard({
-      identityId: auth.identityId,
-      agentId: data.agentId,
-      card: data.card,
-      publicKey: data.publicKey,
-      signature: data.signature,
-      rotationSignature: data.rotationSignature ?? null,
-      ownerRecovery: data.recovery === true && auth.keyId === null,
-      visibility: data.visibility ?? "public",
-    });
+    let doc;
+    try {
+      doc = store.agentPlugin.publishCard({
+        identityId: auth.identityId,
+        agentId: data.agentId,
+        card: data.card,
+        publicKey: data.publicKey,
+        signature: data.signature,
+        rotationSignature: data.rotationSignature ?? null,
+        ownerRecovery: data.recovery === true && auth.keyId === null,
+        visibility: data.visibility ?? "public",
+      });
+    } catch (error) {
+      // Signing validation (invalid_signing_input / invalid_card_signature)
+      // keeps its code; the doc pointer makes it self-diagnosing. Other
+      // coded errors pass through unchanged.
+      const signingCode = error && (error.name === "SigningError" || error.name === "DirectoryError")
+        && (error.code === "invalid_signing_input" || error.code === "invalid_card_signature")
+        ? error.code : null;
+      if (signingCode) {
+        reject(422, signingCode, `${error.message}. ${signingDocs}`);
+      }
+      throw error;
+    }
     return json(res, 201, doc);
   });
 
