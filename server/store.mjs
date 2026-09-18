@@ -21,6 +21,7 @@ import { Moderation, moderationSchema, mutedEvent } from "./moderation.mjs";
 import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
+import { SpamQuarantineJournal, spamQuarantineSchema } from "./spam-quarantine-journal.mjs";
 import { InboxHandoffJournal, inboxHandoffSchema } from "./inbox-handoff.mjs";
 import { accessRequestSchema } from "./access-requests.mjs";
 import { agentRoomSchema } from "./agent-rooms.mjs";
@@ -342,6 +343,7 @@ export class RoomStore {
     this.email = new EmailImport(this);
     this.connections = this.email; // Every channel connection (email, Telegram) shares the importer.
     this.channelUpdates = new ChannelUpdateJournal(this); // B20: durable webhook update journal.
+    this.spamQuarantine = new SpamQuarantineJournal(this); // Durable spam-guard quarantine journal (PR #554 queue, now restart-safe).
     this.handoffs = new InboxHandoffJournal(this); // Task 23: durable agent handoff journal.
     const version = this.storagePlatform.version(this.db);
     // Supported schema versions are the contiguous range 0..STORE_SCHEMA_VERSION.
@@ -466,6 +468,10 @@ export class RoomStore {
       this.db.exec(attentionSchema);
       // The channel webhook update journal (B20) follows the same additive pattern.
       this.db.exec(channelJournalSchema);
+      // The spam-guard quarantine journal is purely additive as well:
+      // IF NOT EXISTS is idempotent, no schema version bump, and the table is
+      // intentionally outside the writer fence (see unfencedAdditiveTables).
+      this.db.exec(spamQuarantineSchema);
       // The agent handoff journal (task 23) follows the same additive pattern:
       // IF NOT EXISTS is idempotent, no schema version bump, and the table is
       // intentionally outside the writer fence (see unfencedAdditiveTables).

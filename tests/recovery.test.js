@@ -8,6 +8,7 @@ import { request } from "node:http";
 import { RoomStore } from "../server/store.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { backupRoom } from "../server/backup.mjs";
+import { flagMessage } from "../server/inbox-spam.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { createRecoveryFixture } from "../scripts/recovery-fixture.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
@@ -19,7 +20,7 @@ function fixture(t) {
   return { ...f, directory };
 }
 
-test("online capture preserves all 47 tables, identity boundaries and exact retries through recovery and restart", async t => {
+test("online capture preserves all 53 tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t);
   const { identityId } = f.store.identities.create("Recovery agent");
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
@@ -74,8 +75,25 @@ test("online capture preserves all 47 tables, identity boundaries and exact retr
   f.store.db.prepare(`INSERT INTO account_recovery_codes(code_hash,account_id,used_at,created_at)
     VALUES(?,'recovery-account',NULL,?)`)
     .run("e".repeat(64), f.now());
+  // Seed one row per stitch table so the capture covers them (the stitch
+  // slice created the tables but no fixture rows).
+  const stitchAccount = f.emailProfile.accountId, stitchKey = `v1:${"a".repeat(64)}`;
+  f.store.db.prepare(`INSERT INTO stitch_identities(account_id,stitch_key,id_type,channel,kind,first_seen,last_seen,occurrences)
+    VALUES(?,?,'mailbox','email','mailbox','2026-09-01','2026-09-18',1)`).run(stitchAccount, stitchKey);
+  f.store.db.prepare(`INSERT INTO stitch_links(account_id,stitch_key,channel,source_id,linked_at,link_rule,link_score)
+    VALUES(?,?,'email','recovery-source','2026-09-18','exact_address',1.0)`).run(stitchAccount, stitchKey);
+  f.store.db.prepare(`INSERT INTO stitch_revocations(account_id,stitch_key,channel,source_id,reason,revoked_at)
+    VALUES(?,?,'email','recovery-old-source','wrong_match',?)`).run(stitchAccount, stitchKey, f.now());
+  f.store.db.prepare(`INSERT INTO stitch_suggestions(suggestion_id,account_id,stitch_key_a,stitch_key_b,channel_a,channel_b,score,components_json,status,created_at)
+    VALUES('recovery-suggestion',?,?,?,'email','email',0.9,'{}','pending',?)`)
+    .run(stitchAccount, stitchKey, `v1:${"b".repeat(64)}`, f.now());
+  f.store.db.prepare(`INSERT INTO stitch_receipts(receipt_id,account_id,action,stitch_key,payload_json,created_at)
+    VALUES('recovery-receipt',?,'link',?, '{}',?)`).run(stitchAccount, stitchKey, f.now());
+  // Seed one held quarantine record so the capture covers spam_quarantine.
+  f.store.spamQuarantine.quarantine({ messageId: "recovery-quarantined", channel: "telegram",
+    flag: flagMessage({ body: "Urgent! Log in here to confirm your identity and claim your free airdrop. Act now!", urls: ["https://evil-claim.xyz/verify"] }) });
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 47);
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 53);
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);
