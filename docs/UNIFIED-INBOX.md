@@ -367,8 +367,10 @@ into, and neither touches login/auth.
 - `createQuarantineQueue()` — quarantined mail is **never silently dropped**:
   it enters an owner-review queue as `pending` and stays there until an owner
   `review()`s it `release` (back to the inbox) or `confirm_spam`. Records are
-  final and retained after review, with reviewer and timestamp. Auto-quarantine
-  policy itself is John's call (task 33); the guard ships flag-only by default.
+  final and retained after review, with reviewer and timestamp. The live
+  import path files to `SpamQuarantineJournal` instead (durable); this queue
+  remains as the pure in-memory reference. Auto-quarantine policy itself is
+  John's call (task 33); the guard ships flag-only by default.
 - `SpamQuarantineJournal` (`server/spam-quarantine-journal.mjs`, on
   `store.spamQuarantine`) — the durable backing for the quarantine queue: a
   `spam_quarantine` table (additive, unfenced, `IF NOT EXISTS`) holding
@@ -404,6 +406,17 @@ runs the store-owned notify-prefs manager (account id as user id) and journals
 prefs snapshot included so the journal replay recomputes the decision from the
 recorded inputs. Flag-only (task 33): nothing is held, hidden, or moved —
 scoring never blocks ingestion (an unscannable envelope records score 0).
+
+When the flag trips (`receipt.spam.quarantine`), the import branch also files
+the message in `SpamQuarantineJournal` (`store.spamQuarantine`) as a `held`
+record for owner review — the durable switch away from the in-memory
+`createQuarantineQueue`, which loses its queue on restart. The journal write
+rides the same store transaction as the receipt (duplicate `requestId`s
+short-circuit before it, so retries never double-journal), and a journal
+failure never blocks ingestion. Owner review goes through the journal's
+`review()`, which speaks the queue's `release | confirm_spam` vocabulary
+(`confirm_spam` maps to `dismissed`); reviews are final. The message itself
+still lands in the inbox — the journal is the review backlog, not a hide.
 
 ## Status: email is fixture only; Telegram is live once configured
 
