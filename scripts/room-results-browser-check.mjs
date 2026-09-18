@@ -32,7 +32,7 @@ async function setup(t, { mobile = false, guest = false, expectedWrites = 0 } = 
   p.on("request", request => { if (request.method() !== "GET" && new URL(request.url()).pathname.startsWith("/api/rooms/")) writes.push(request.url()); });
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(outside, []); assert.equal(writes.length, expectedWrites); });
   const row = id => p.locator(`#room-results-list [data-result-work-id="${id}"]`);
-  const open = () => p.locator("#work-view-results").click();
+  const open = async () => { await p.locator("#topbar-settings").click(); await p.locator("#results-panel > summary").click(); };
   const read = () => row("native-result").locator("[data-read-result]").click();
   const ready = () => p.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
   const capture = async name => {
@@ -47,7 +47,7 @@ for (const mobile of [false, true]) test(`results ${mobile ? "touch" : "desktop"
   await p.locator("#message-input").fill("Keep my next thought.");
   const scroll = await p.locator("#message-list").evaluate(node => { node.scrollTop = 0; return node.scrollTop; });
   await f.open();
-  assert.equal(await p.locator("#work-list").isVisible(), false);
+  assert.equal(await p.locator("#settings-dialog").isVisible(), true);
   assert.equal(await p.locator("#room-results-list .result-row").count(), 2);
   assert.match(await f.row("native-result").textContent(), /Completed/);
   assert.match(await f.row("approved-result").textContent(), /Approved.*External evidence/);
@@ -63,10 +63,11 @@ for (const mobile of [false, true]) test(`results ${mobile ? "touch" : "desktop"
   assert.equal(await p.locator("#message-input").inputValue(), "Keep my next thought.");
   assert.equal(await p.locator("#message-list").evaluate(node => node.scrollTop), scroll);
   await f.row("native-result").locator("[data-result-work]").click();
-  assert.equal(await p.locator("#work-list").isVisible(), true);
+  assert.equal(await p.locator("#settings-dialog").isVisible(), false);
   assert.equal(await p.locator('[data-work-record-id="native-result"] .work-details').evaluate(node => node.open), true);
   await p.locator("#room-actions-open").click(); await p.locator('[data-room-action="results"]').click();
-  assert.equal(await p.locator("#work-view-results").getAttribute("aria-pressed"), "true");
+  assert.equal(await p.locator("#settings-dialog").isVisible(), true);
+  assert.equal(await p.locator("#results-panel").evaluate(node => node.open), true);
 });
 
 test("results update after review and reopening; a pinned open reader becomes earlier, not a replacement", { timeout: 30000 }, async t => {
@@ -77,10 +78,10 @@ test("results update after review and reopening; a pinned open reader becomes ea
   assert.equal(await p.locator("#result-body").textContent(), f.body);
   assert.equal(await f.row("native-result").count(), 0);
   await p.locator("#close-result").click();
-  assert.equal(await p.locator("#work-view-results").evaluate(node => node === document.activeElement), true);
+  assert.equal(await p.locator("#results-panel > summary").evaluate(node => node === document.activeElement), true);
   f.reopen("pending-result"); f.reopen("approved-result");
   await p.locator("#room-results-list .empty-note").waitFor();
-  assert.match(await p.locator("#room-results-list").textContent(), /Completed results appear here after work is finished/);
+  assert.match(await p.locator("#room-results-list").textContent(), /No completed results yet/);
 });
 
 test("result read failure preserves the list and allows a deliberate retry", { timeout: 30000 }, async t => {
@@ -102,7 +103,7 @@ test("late result reads cannot restore content after sign-out, and the Results v
   await p.locator("#auth-panel").waitFor(); release();
   assert.equal(await p.locator("#result-body").textContent(), "");
   assert.equal(await p.locator("#room-results-list").textContent(), "");
-  assert.equal(await p.locator("#work-view-work").getAttribute("aria-pressed"), "true");
+  assert.equal(await p.locator("#settings-dialog").isVisible(), false);
   await p.unroute("**/work-result?**", { behavior: "wait" });
   assert.equal(await p.locator("#result-dialog").isVisible(), false);
 });
@@ -118,19 +119,20 @@ test("guest Results remain useful with large text and no creation controls", { t
   await f.capture("large-text");
 });
 
-test("creating new work from Results returns to Work only after explicit confirmed submission", { timeout: 30000 }, async t => {
-  const f = await setup(t, { expectedWrites: 1 }), p = f.p; await f.open();
-  assert.equal(await p.locator("#new-work-button").textContent(), "New work");
+test("creating new work from the composer requires explicit confirmed submission", { timeout: 30000 }, async t => {
+  const f = await setup(t, { expectedWrites: 1 }), p = f.p;
+  assert.equal(await p.locator("#new-work-button").getAttribute("aria-label"), "New work");
   await p.locator("#new-work-button").click(); await p.locator("#cancel-work-button").click();
-  assert.equal(await p.locator("#work-view-results").getAttribute("aria-pressed"), "true");
+  assert.equal(await p.locator("#work-dialog").isVisible(), false);
   await p.locator("#new-work-button").click();
   await p.locator("#work-title-input").fill("Follow up on the result");
   await p.locator("#work-done-input").fill("One clear next action.");
+  await p.locator("#work-options > summary").click();
   await p.locator("#assignee-select").selectOption("producer");
+  await p.locator("#require-verification").check();
   await p.locator("#verifier-select").selectOption("reviewer");
-  await p.locator("#new-work-form button[type=submit]").click();
+  await p.locator("#create-work-button").click();
   await p.locator("#work-dialog").waitFor({ state: "hidden" });
-  assert.equal(await p.locator("#work-view-work").getAttribute("aria-pressed"), "true");
-  assert.equal(await p.locator("#work-list").isVisible(), true);
+  await p.locator('#message-list [data-work-timeline]').first().waitFor();
   assert.ok(Object.values(f.state().workItems).some(item => item.title === "Follow up on the result" && item.state === "proposed"));
 });

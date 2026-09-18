@@ -51,7 +51,9 @@ for (const touch of [false, true]) {
     assert.equal(await guest.locator('#identity-label').textContent(), 'Maya');
     assert.equal(await guest.locator('#new-work-button').isVisible(), false);
     assert.equal(await guest.locator('#composer-work-button').isVisible(), false);
-    assert.match(await guest.locator('#work-list').textContent(), /Suggest work in the conversation/);
+    await guest.locator('#topbar-settings').click();
+    assert.match(await guest.locator('#room-results-list').textContent(), /No completed results yet/);
+    await guest.locator('#settings-close').click();
     if (touch) assert.equal(await guest.locator('#message-input').evaluate(input => input.getBoundingClientRect().bottom <= innerHeight), true, 'new mobile guest can see the composer without scrolling');
     const suggestion = 'Prepare a short agenda for Friday';
     await guest.locator('#message-input').fill(suggestion);
@@ -66,6 +68,7 @@ for (const touch of [false, true]) {
     await message.locator('[data-message-action="work"]').click();
     assert.equal(await owner.locator('#work-title-input').inputValue(), suggestion);
     await owner.locator('#work-done-input').fill('Three agenda items with an owner for each.');
+    await owner.locator('#work-options > summary').click();
     await owner.locator('#assignee-select').selectOption('owner');
     await owner.locator('#reviewer-unavailable').waitFor({ state: 'visible' });
     assert.equal(await owner.locator('#require-verification').isChecked(), true, 'review is never silently disabled');
@@ -79,7 +82,7 @@ for (const touch of [false, true]) {
     await owner.locator('#require-verification').uncheck();
     assert.equal(await owner.locator('#require-decision').isChecked(), true, 'owner approval remains required');
     assert.equal(await owner.locator('#reviewer-unavailable').isVisible(), false);
-    await owner.getByRole('button', { name: 'Create outcome', exact: true }).click();
+    await owner.getByRole('button', { name: 'Create', exact: true }).click();
     const card = owner.locator('[data-work-record-id]').filter({ hasText: suggestion });
     await card.waitFor();
     const item = Object.values(store.snapshot(ownerKey, 'commons').state.workItems)[0];

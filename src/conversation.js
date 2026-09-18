@@ -206,8 +206,8 @@ export function composerPlaceholder({ workKind = null, inThread = false } = {}) 
   if (workKind === "cancelled") return "Reason…";
   if (workKind) return "Your reply…";
   return inThread
-    ? "Reply in this thread… @ to address someone"
-    : "Write to the room… @ to address someone";
+    ? "Reply in thread"
+    : "Message #chat";
 }
 
 export function removeMention(text, member) {

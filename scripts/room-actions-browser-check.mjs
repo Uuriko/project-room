@@ -84,6 +84,7 @@ test("room actions open existing work and catch-up flows; shortcuts do not inter
   await f.open(); await f.action("catch-up").click();
   assert.equal(await p.locator("#return-brief-panel").evaluate(node => node.open), true);
   assert.equal(await p.locator("#return-brief-panel > summary").evaluate(node => node === document.activeElement), true);
+  await p.locator("#catchup-close").click();
   await f.open(); await f.action("new-work").click();
   await p.locator("#work-dialog").waitFor(); await p.locator("#work-title-input").fill("An unsaved idea");
   await p.keyboard.press("Control+k");
@@ -103,7 +104,7 @@ test("room actions open existing work and catch-up flows; shortcuts do not inter
 test("room actions offer only the current member's available flows", { timeout: 30000 }, async t => {
   const f = await setup(t, { role: "guest" }); await f.open();
   for (const id of ["new-work", "invite", "agent"]) assert.equal(await f.action(id).count(), 0);
-  for (const id of ["write", "search", "catch-up", "people", "work", "how-invite", "how-agent", "how-inbox"]) assert.equal(await f.action(id).count(), 1);
+  for (const id of ["write", "search", "catch-up", "people", "results", "how-invite", "how-agent", "how-inbox"]) assert.equal(await f.action(id).count(), 1);
   await f.action("how-inbox").click();
   assert.match(await f.page.locator("#status").textContent(), /Inbox uses Account key/);
   await f.capture("guest");
@@ -136,8 +137,10 @@ test("room actions ignore composition and held Enter without changing drafts", {
 
 test("room actions reach work, invitation, agent and instructions without creating anything", { timeout: 30000 }, async t => {
   const f = await setup(t), p = f.page;
-  await f.open(); await f.action("work").click();
-  assert.equal(await p.locator("#work-view-work").evaluate(node => node === document.activeElement), true);
+  await f.open(); await f.action("results").click();
+  assert.equal(await p.locator("#settings-dialog").isVisible(), true);
+  assert.equal(await p.locator("#results-panel").evaluate(node => node.open), true);
+  await p.locator("#settings-close").click();
   for (const [action, dialog, close] of [
     ["invite", "#share-link-dialog", "#share-link-close"],
     ["agent", "#agent-connect-dialog", "#agent-connect-close"],

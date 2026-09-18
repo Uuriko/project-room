@@ -71,14 +71,16 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await isOpen("#rb-history-section"), false);
     assert.equal(await isOpen("#rb-involving-section"), false);
     await page.locator("#message-input").fill("Keep my draft while I move around the room.");
-    await page.locator('[data-room-section="work"]').click();
-    assert.equal(await page.evaluate(() => document.activeElement.id), "work-title");
-    await page.locator('[data-room-section="catch-up"]').click();
-    assert.equal(await isOpen("#return-brief-panel"), true);
+    await page.locator("#topbar-catchup").click();
+    assert.equal(await isOpen("#catchup-dialog"), true);
     assert.equal(await page.locator("#message-input").inputValue(), "Keep my draft while I move around the room.");
     await page.locator("#return-brief-panel > summary").click();
-    await page.locator('[data-room-section="chat"]').click();
-    assert.equal(await page.evaluate(() => document.activeElement.id), "conversation-title");
+    await page.locator("#catchup-close").click();
+    await page.locator("#topbar-settings").click();
+    assert.equal(await isOpen("#settings-dialog"), true);
+    assert.equal(await page.locator("#message-input").inputValue(), "Keep my draft while I move around the room.");
+    await page.locator("#settings-close").click();
+    assert.equal(await page.locator("#message-input").inputValue(), "Keep my draft while I move around the room.");
     await page.locator("#message-input").fill("");
 
     // The owner explicitly proposes and accepts both outcomes through the UI.
@@ -92,7 +94,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
       await page.locator("#assignee-select").selectOption("owner");
       await page.locator("#require-verification").uncheck();
       await page.locator("#require-decision").uncheck();
-      await page.locator('#new-work-form button[type="submit"]').click();
+      await page.locator('#create-work-button').click();
       await page.locator("#new-work-form").waitFor({ state: "hidden" });
       const matches = Object.values(snapshot().state.workItems).filter(work => work.title === title);
       assert.equal(matches.length, 1);
@@ -180,10 +182,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await isOpen("#return-brief-panel"), false, "workflow actions never expand catch-up automatically");
     await capture(page, "quiet-work");
     await page.locator("#message-input").fill("Keep this private unsent draft while I review changes.");
-    await page.locator("#return-brief-panel > summary").focus();
     await Promise.all([
       page.waitForResponse(response => new URL(response.url()).pathname === "/api/rooms/commons/return-brief"),
-      page.keyboard.press("Enter")
+      page.locator("#topbar-catchup").click()
     ]);
     await page.waitForFunction(() => document.querySelector("#summary-grid").textContent && !document.querySelector("#rb-refresh-button").disabled);
     assert.equal(await isOpen("#return-brief-panel"), true);

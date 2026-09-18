@@ -76,14 +76,15 @@ test("first-result journey: join, offer help, contribute, see the outcome", { ti
     producerId: member.id, summary: "Two-line welcome drafted by our newest member.", nextAction: "Post it on the board." });
 
   // 6. The newcomer sees the outcome of their own contribution.
-  await page.locator("#work-view-results").click();
+  await page.locator("#topbar-settings").click();
+  await page.locator("#results-panel > summary").click();
   const row = page.locator('[data-result-work-id="first-result"]');
   await row.waitFor();
   assert.equal(await row.locator("p").textContent(), "Two-line welcome drafted by our newest member.");
   await page.screenshot({ path: "test-results/first-result-journey.png", fullPage: true });
 
   // The newcomer sees their own name credited as the producer of the outcome.
-  await page.locator("#work-view-work").click();
+  await page.locator("#settings-close").click();
   await page.locator('[data-work-record-id="first-result"] .work-details > summary').click();
   const details = page.locator('[data-work-record-id="first-result"] .work-details');
   assert.match(await details.textContent(), /Newcomer/, "receipt credits the newcomer by name");
