@@ -209,7 +209,7 @@ never a lecture on first paint.
 | Ask first paint / empty `#ask-scroll` | **No.** Quiet-shell ≤15%. T047 / T050 already ban Provide / Community dumps on the canvas. |
 | `#ask-model` pill / Community chip | **No.** Pill = selected model. Chip = engine word. |
 | Stream faces (`#ask-think`, `.ask-said`, `#ask-run-chip`) | **No.** T046. |
-| Folded `#ask-receipt` after complete | **Not this line.** Receipt is per-turn (T045). Network strip is fleet presence. |
+| Folded `#ask-receipt` after complete | **Not this line.** Receipt is per-turn (T045). Job whisper (T087) is expand-only on that chip. Network strip is fleet presence. |
 
 If `#top-state` remains in the Ask header, it is still **one
 expandable line**, measured-only, never-invent. It is not a second

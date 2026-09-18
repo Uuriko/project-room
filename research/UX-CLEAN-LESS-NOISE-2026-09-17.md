@@ -69,7 +69,11 @@ runtime.
     Typeform Provide stays off Ask canvas. Boundary (T074):
     [ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md](ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md).
 12. **Network honesty strip**: one line `N Macs · models` expandable —
-    not a capacity dashboard on Ask.
+    not a capacity dashboard on Ask. `#ask-receipt` Job whisper
+    (T087, cite T045
+    [#496](https://github.com/Uuriko/project-room/pull/496):
+    [ASK-RECEIPT-LASTPAID-WHISPER-BRIEF-2026-09-18.md](ASK-RECEIPT-LASTPAID-WHISPER-BRIEF-2026-09-18.md))
+    is a per-turn chip, never that dash.
 13. **Model ladder labels**: Speed / Mid / Quality (map qwen3-4b /
     8b+12b / bonsai) — hide raw ids until advanced. Placement (T075):
     [ASK-ADVANCED-LADDER-UX-BRIEF-2026-09-18.md](ASK-ADVANCED-LADDER-UX-BRIEF-2026-09-18.md)

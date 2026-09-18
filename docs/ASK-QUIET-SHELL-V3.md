@@ -182,6 +182,7 @@ From the research note. Do not sneak them into the polish PR.
 | T044 | Quiet export transcript JSON/MD (thread chrome; not empty-canvas) | Ask follow-on — [research/ask/T044-quiet-export-transcript.md](../research/ask/T044-quiet-export-transcript.md) |
 | T086 | Export thread format (MD download vs copy; headers / model / receipt lines) | Ask follow-on — [research/ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md](../research/ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md) (cite T044 #496) |
 | T045 | Honesty receipt folds after complete; hover expand | Ask follow-on — [research/ask/T045-receipt-collapse.md](../research/ask/T045-receipt-collapse.md) |
+| T087 | lastPaidReceipt Job whisper (`#ask-receipt` shows Job id; never a capacity dash) | Ask follow-on — [research/ASK-RECEIPT-LASTPAID-WHISPER-BRIEF-2026-09-18.md](../research/ASK-RECEIPT-LASTPAID-WHISPER-BRIEF-2026-09-18.md) (cite T045 #496) |
 | T046 | No mid-stream tok/s essay (lint/test rule) | Ask follow-on — [research/ask/T046-no-midstream-toks.md](../research/ask/T046-no-midstream-toks.md) |
 | T082 | Stop / Regen / Copy / Edit keyboard map (Esc / R / C / E) | Ask follow-on — [research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md](../research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md) (cite #249 A1–A5 + §3.4; picker keys stay T032) |
 | T084 | New chat / Clear thread quiet confirm (Esc/cancel never wipes) | Ask follow-on — [research/ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md](../research/ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md) (cite #249 A7 New; T082 keeps no letter) |
