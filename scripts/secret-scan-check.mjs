@@ -50,6 +50,9 @@ const ALLOWLIST = [
   /can store a secret:/, // documentation template string
   /tokenPattern\.test\(/, // `token: tokenPattern.test(...) ? ...` — validation, not a secret
   /\.replace\(.*\.toUpperCase\(\)/, // `secret.replace(...).toUpperCase()` — transform, not a secret
+  /DUMMY_PASSWORD_VERIFIER/, // slice 2: public placeholder scrypt verifier (hash of a known
+    // placeholder password); used only so unknown-email logins cost one scrypt
+    // derivation. Not a credential — it is deliberately published in source.
 ];
 
 // Directories scanned: source code where a real secret could hide.
