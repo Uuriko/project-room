@@ -157,9 +157,9 @@ const invitationSchema = `
     intended_role TEXT NOT NULL CHECK(intended_role IN ('moderator','member','guest')),
     intended_permissions_json TEXT NOT NULL CHECK(json_valid(intended_permissions_json) AND json_type(intended_permissions_json)='array'),
     role_policy_version INTEGER NOT NULL CHECK(role_policy_version=${INVITATION_ROLE_POLICY_VERSION}),
-    issuer_account_id TEXT NOT NULL REFERENCES accounts(id),
+    issuer_account_id TEXT REFERENCES accounts(id),
     issuer_member_id TEXT NOT NULL,
-    issuer_account_auth_epoch INTEGER NOT NULL,
+    issuer_account_auth_epoch INTEGER CHECK((issuer_account_id IS NULL) = (issuer_account_auth_epoch IS NULL)),
     issuer_member_revision INTEGER NOT NULL,
     issue_request_id TEXT NOT NULL,
     issue_fingerprint TEXT NOT NULL CHECK(length(issue_fingerprint)=64),
@@ -185,6 +185,7 @@ const invitationSchema = `
     )
   );
   CREATE UNIQUE INDEX IF NOT EXISTS membership_invitation_issue_request ON membership_invitations(room_id,issuer_account_id,issue_request_id);
+  CREATE UNIQUE INDEX IF NOT EXISTS membership_invitation_agent_issue_request ON membership_invitations(room_id,issuer_member_id,issue_request_id) WHERE issuer_account_id IS NULL;
   CREATE INDEX IF NOT EXISTS membership_invitation_target ON membership_invitations(room_id,intended_account_id,intended_member_id);
   CREATE TABLE IF NOT EXISTS membership_invitation_events (
     invitation_id TEXT NOT NULL REFERENCES membership_invitations(id),
@@ -478,6 +479,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         throw new Error("Pre-v25 reply resolution history requires operator reconciliation");
       if (version < 27) this.migrateAgentIdentitiesV27();
       if (!this.db.prepare("SELECT 1 FROM pragma_table_info('rooms') WHERE name='archived_at'").get()) migrateRoomLifecycleV28(this);
+      // v35: share-link and invitation issuer columns go nullable so an agent
+      // room owner (no account) can be recorded honestly as the issuer.
+      // SQLite cannot relax NOT NULL in place, so both tables are rebuilt.
+      // Fresh databases are created in the v35 shape already; skip the
+      // rebuild for them.
+      if (version > 0 && version < 35) this.migrateShareLinkAgentIssuerV35();
       // Agent invite codes are purely additive (no data migration, no fence
       // impact), so no schema version bump: IF NOT EXISTS is idempotent here
       // and the v0 block above covers fresh databases.
@@ -640,6 +647,114 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.verifyInvitationRecord(record.id);
       }
       this.storagePlatform.setVersion(this.db, 5);
+    });
+  }
+  migrateShareLinkAgentIssuerV35() {
+    // SQLite cannot relax a NOT NULL constraint in place: rebuild the tables
+    // with nullable issuer columns. Column order is unchanged, so
+    // INSERT..SELECT copies every row verbatim; no existing issuer data is
+    // NULL today. Parents are rebuilt before children (each child once), and
+    // legacy tables drop only after nothing references them: with
+    // PRAGMA foreign_keys=ON, ALTER TABLE RENAME rewrites child FK targets to
+    // the legacy name, so the final drops must come last. The no-delete /
+    // no-update triggers ride the renames and are recreated by re-running the
+    // idempotent schema blocks (CREATE..IF NOT EXISTS); the implicit DELETE
+    // that DROP TABLE performs does not fire triggers.
+    this.transaction(() => {
+      const db = this.db;
+      db.exec("ALTER TABLE share_links RENAME TO share_links_legacy_v34");
+      db.exec(`CREATE TABLE share_links (
+        id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE CHECK(length(token_hash)=64),
+        room_id TEXT NOT NULL REFERENCES rooms(id), issuer_account_id TEXT REFERENCES accounts(id),
+        issuer_member_id TEXT NOT NULL, issuer_auth_epoch INTEGER CHECK((issuer_account_id IS NULL) = (issuer_auth_epoch IS NULL)), issuer_member_revision INTEGER NOT NULL,
+        request_id TEXT NOT NULL, fingerprint TEXT NOT NULL, created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL CHECK(expires_at>created_at), max_joins INTEGER NOT NULL CHECK(max_joins BETWEEN 1 AND 25),
+        revoked_at INTEGER, revoked_by_member_id TEXT,
+        CHECK((revoked_at IS NULL AND revoked_by_member_id IS NULL) OR (revoked_at IS NOT NULL AND revoked_by_member_id IS NOT NULL)),
+        UNIQUE(room_id,issuer_account_id,request_id)
+      )`);
+      db.exec("INSERT INTO share_links SELECT * FROM share_links_legacy_v34");
+      db.exec("ALTER TABLE membership_invitations RENAME TO membership_invitations_legacy_v34");
+      db.exec(`CREATE TABLE membership_invitations (
+        id TEXT PRIMARY KEY,
+        token_hash TEXT NOT NULL UNIQUE CHECK(length(token_hash)=64),
+        room_id TEXT NOT NULL REFERENCES rooms(id),
+        intended_account_id TEXT NOT NULL REFERENCES accounts(id),
+        intended_member_id TEXT NOT NULL,
+        intended_display_name TEXT NOT NULL,
+        intended_role TEXT NOT NULL CHECK(intended_role IN ('moderator','member','guest')),
+        intended_permissions_json TEXT NOT NULL CHECK(json_valid(intended_permissions_json) AND json_type(intended_permissions_json)='array'),
+        role_policy_version INTEGER NOT NULL CHECK(role_policy_version=${INVITATION_ROLE_POLICY_VERSION}),
+        issuer_account_id TEXT REFERENCES accounts(id),
+        issuer_member_id TEXT NOT NULL,
+        issuer_account_auth_epoch INTEGER,
+        issuer_member_revision INTEGER NOT NULL,
+        issue_request_id TEXT NOT NULL,
+        issue_fingerprint TEXT NOT NULL CHECK(length(issue_fingerprint)=64),
+        revision INTEGER NOT NULL DEFAULT 0 CHECK(revision>=0),
+        status TEXT NOT NULL CHECK(status IN ('pending','accepted','revoked')),
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        accepted_at INTEGER,
+        accepted_by_account_id TEXT REFERENCES accounts(id),
+        redemption_id TEXT,
+        joined_event_id TEXT UNIQUE REFERENCES events(id),
+        revoked_at INTEGER,
+        revoked_by_account_id TEXT REFERENCES accounts(id),
+        revoked_by_member_id TEXT,
+        revoke_reason TEXT,
+        CHECK(expires_at>created_at),
+        CHECK(
+          (status='pending' AND revision=0 AND accepted_at IS NULL AND accepted_by_account_id IS NULL AND redemption_id IS NULL AND joined_event_id IS NULL AND revoked_at IS NULL AND revoked_by_account_id IS NULL AND revoked_by_member_id IS NULL AND revoke_reason IS NULL)
+          OR
+          (status='accepted' AND revision=1 AND accepted_at IS NOT NULL AND accepted_by_account_id=intended_account_id AND redemption_id IS NOT NULL AND joined_event_id IS NOT NULL AND revoked_at IS NULL AND revoked_by_account_id IS NULL AND revoked_by_member_id IS NULL AND revoke_reason IS NULL)
+          OR
+          (status='revoked' AND revision=1 AND accepted_at IS NULL AND accepted_by_account_id IS NULL AND redemption_id IS NULL AND joined_event_id IS NULL AND revoked_at IS NOT NULL AND revoked_by_account_id IS NOT NULL AND revoked_by_member_id IS NOT NULL AND revoke_reason IS NOT NULL)
+        )
+      )`);
+      db.exec("INSERT INTO membership_invitations SELECT * FROM membership_invitations_legacy_v34");
+      db.exec("ALTER TABLE membership_invitation_events RENAME TO membership_invitation_events_legacy_v34");
+      db.exec(`CREATE TABLE membership_invitation_events (
+        invitation_id TEXT NOT NULL REFERENCES membership_invitations(id),
+        sequence INTEGER NOT NULL CHECK(sequence>0),
+        type TEXT NOT NULL CHECK(type IN ('issued','accepted','revoked')),
+        actor_account_id TEXT REFERENCES accounts(id),
+        actor_member_id TEXT,
+        actor_auth_epoch INTEGER,
+        actor_session_revision INTEGER,
+        invitation_revision INTEGER NOT NULL,
+        at INTEGER NOT NULL,
+        room_event_id TEXT REFERENCES events(id),
+        reason TEXT,
+        PRIMARY KEY(invitation_id,sequence)
+      )`);
+      db.exec("INSERT INTO membership_invitation_events SELECT * FROM membership_invitation_events_legacy_v34");
+      db.exec("ALTER TABLE membership_invitation_journal RENAME TO membership_invitation_journal_legacy_v34");
+      // Triggers keep their names across the rename; drop them so the schema
+      // block below can recreate them on the new table.
+      db.exec("DROP TRIGGER IF EXISTS membership_invitation_journal_no_update");
+      db.exec("DROP TRIGGER IF EXISTS membership_invitation_journal_no_delete");
+      db.exec(invitationJournalSchema); // Standalone block: exact table + triggers.
+      db.exec("INSERT INTO membership_invitation_journal SELECT * FROM membership_invitation_journal_legacy_v34");
+      db.exec("ALTER TABLE share_link_joins RENAME TO share_link_joins_legacy_v34");
+      db.exec(`CREATE TABLE share_link_joins (
+        link_id TEXT NOT NULL REFERENCES share_links(id), invitation_id TEXT NOT NULL UNIQUE REFERENCES membership_invitations(id),
+        slot_hash TEXT NOT NULL REFERENCES account_session_slots(hash), redemption_id TEXT NOT NULL,
+        session_revision INTEGER NOT NULL, fingerprint TEXT NOT NULL,
+        PRIMARY KEY(link_id,slot_hash,redemption_id)
+      )`);
+      db.exec("INSERT INTO share_link_joins SELECT * FROM share_link_joins_legacy_v34");
+      // Children first, then the parents nothing references anymore.
+      db.exec("DROP TABLE share_link_joins_legacy_v34");
+      db.exec("DROP TABLE membership_invitation_events_legacy_v34");
+      db.exec("DROP TABLE membership_invitation_journal_legacy_v34");
+      db.exec("DROP TABLE share_links_legacy_v34");
+      db.exec("DROP TABLE membership_invitations_legacy_v34");
+      // Recreate every index/trigger the renames carried away (all IF NOT
+      // EXISTS), including the new agent-issuer partial unique indexes.
+      db.exec(shareLinkSchema);
+      db.exec(invitationSchema);
+      this.storagePlatform.setVersion(this.db, 35);
     });
   }
   appendInvitationJournal(record, kind) {
@@ -1226,13 +1341,23 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const room = JSON.parse(row.projection);
       let status = invitationStatus(row, this.now());
       if (status === "pending") {
-        const issuerAccount = this.db.prepare("SELECT active,auth_epoch FROM accounts WHERE id=?").get(row.issuer_account_id);
+        const issuerAccount = row.issuer_account_id === null ? null
+          : this.db.prepare("SELECT active,auth_epoch FROM accounts WHERE id=?").get(row.issuer_account_id);
         const targetAccount = this.db.prepare("SELECT active FROM accounts WHERE id=?").get(row.intended_account_id);
         const issuerBinding = this.db.prepare("SELECT account_id FROM member_accounts WHERE room_id=? AND member_id=?").get(row.room_id, row.issuer_member_id);
         const issuerMember = room.members?.[row.issuer_member_id];
-        if (!issuerAccount || issuerAccount.active !== 1 || issuerAccount.auth_epoch !== row.issuer_account_auth_epoch
-          || targetAccount?.active !== 1 || issuerBinding?.account_id !== row.issuer_account_id || !issuerMember || issuerMember.active === false
-          || issuerMember.revision !== row.issuer_member_revision || !issuerMember.permissions.includes("manage_members")) status = "stale";
+        // Agent-issued invitations carry no account: they were minted under the
+        // owner's identity bearer, so authority rests on the member still
+        // being active, unrevised, and still the room owner. Ordinary
+        // invitations keep the account checks.
+        const issuerOk = row.issuer_account_id === null
+          ? Boolean(issuerMember) && issuerMember.active !== false && issuerMember.revision === row.issuer_member_revision
+            && room.room?.ownerId === row.issuer_member_id
+          : Boolean(issuerAccount) && issuerAccount.active === 1 && issuerAccount.auth_epoch === row.issuer_account_auth_epoch
+            && issuerBinding?.account_id === row.issuer_account_id;
+        const issuerPrivileged = room.room?.ownerId === row.issuer_member_id || issuerMember?.permissions.includes("manage_members");
+        if (!issuerOk || targetAccount?.active !== 1 || !issuerMember || issuerMember.active === false
+          || issuerMember.revision !== row.issuer_member_revision || !issuerPrivileged) status = "stale";
       }
       // Onboarding Slice 4: pre-auth preview answers "is this worth an
       // account?" — human+agent member counts, no identity data.
@@ -1323,12 +1448,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const now = this.now();
       if (now >= row.expires_at) fail(410, "invitation_expired", "Invitation expired");
       const room = this.room(row.room_id);
-      const issuerAccount = this.db.prepare("SELECT active,auth_epoch FROM accounts WHERE id=?").get(row.issuer_account_id);
+      const issuerAccount = row.issuer_account_id === null ? null
+        : this.db.prepare("SELECT active,auth_epoch FROM accounts WHERE id=?").get(row.issuer_account_id);
       const issuerBinding = this.db.prepare("SELECT account_id FROM member_accounts WHERE room_id=? AND member_id=?").get(row.room_id, row.issuer_member_id);
       const issuerMember = room.state.members[row.issuer_member_id];
-      if (!issuerAccount || issuerAccount.active !== 1 || issuerAccount.auth_epoch !== row.issuer_account_auth_epoch
-        || issuerBinding?.account_id !== row.issuer_account_id || !issuerMember || issuerMember.active === false
-        || issuerMember.revision !== row.issuer_member_revision || !issuerMember.permissions.includes("manage_members")) {
+      // Agent-issued invitations carry no account: authority rests on the
+      // member still being active, unrevised, and still the room owner
+      // (see previewInvitation). Ordinary invitations keep the account
+      // checks.
+      const issuerOk = row.issuer_account_id === null
+        ? Boolean(issuerMember) && issuerMember.active !== false && issuerMember.revision === row.issuer_member_revision
+          && room.state.room.ownerId === row.issuer_member_id
+        : Boolean(issuerAccount) && issuerAccount.active === 1 && issuerAccount.auth_epoch === row.issuer_account_auth_epoch
+          && issuerBinding?.account_id === row.issuer_account_id;
+      if (!issuerOk || !issuerMember || issuerMember.active === false
+        || issuerMember.revision !== row.issuer_member_revision
+        || !(room.state.room.ownerId === row.issuer_member_id || issuerMember.permissions.includes("manage_members"))) {
         fail(409, "invitation_authority_changed", "Inviter authority changed; ask a current Room administrator for a new invitation");
       }
       if (Object.hasOwn(room.state.members, row.intended_member_id)

@@ -14,14 +14,15 @@ const unavailable = () => fail(410, "link_unavailable", "This link has expired, 
 export const shareLinkSchema = `
   CREATE TABLE IF NOT EXISTS share_links (
     id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE CHECK(length(token_hash)=64),
-    room_id TEXT NOT NULL REFERENCES rooms(id), issuer_account_id TEXT NOT NULL REFERENCES accounts(id),
-    issuer_member_id TEXT NOT NULL, issuer_auth_epoch INTEGER NOT NULL, issuer_member_revision INTEGER NOT NULL,
+    room_id TEXT NOT NULL REFERENCES rooms(id), issuer_account_id TEXT REFERENCES accounts(id),
+    issuer_member_id TEXT NOT NULL, issuer_auth_epoch INTEGER CHECK((issuer_account_id IS NULL) = (issuer_auth_epoch IS NULL)), issuer_member_revision INTEGER NOT NULL,
     request_id TEXT NOT NULL, fingerprint TEXT NOT NULL, created_at INTEGER NOT NULL,
     expires_at INTEGER NOT NULL CHECK(expires_at>created_at), max_joins INTEGER NOT NULL CHECK(max_joins BETWEEN 1 AND 25),
     revoked_at INTEGER, revoked_by_member_id TEXT,
     CHECK((revoked_at IS NULL AND revoked_by_member_id IS NULL) OR (revoked_at IS NOT NULL AND revoked_by_member_id IS NOT NULL)),
     UNIQUE(room_id,issuer_account_id,request_id)
   );
+  CREATE UNIQUE INDEX IF NOT EXISTS share_links_agent_request ON share_links(room_id,issuer_member_id,request_id) WHERE issuer_account_id IS NULL;
   CREATE INDEX IF NOT EXISTS share_links_room ON share_links(room_id,created_at);
   CREATE TABLE IF NOT EXISTS share_link_joins (
     link_id TEXT NOT NULL REFERENCES share_links(id), invitation_id TEXT NOT NULL UNIQUE REFERENCES membership_invitations(id),
@@ -43,6 +44,10 @@ export class ShareLinks {
   constructor(store) { this.store = store; this.db = store.db; }
   administrator(token, roomId, binding) {
     const auth = this.store.authenticate(token, roomId, binding);
+    // Ownership implies full authority (mirrors validatePermissions in
+    // src/events.js): the room owner administers invitation links on any
+    // credential, including an agent identity bearer that has no account.
+    if (this.store.roomAuthority(roomId).ownerId === auth.member?.id) return auth;
     if (!auth.account || auth.member.kind !== "human" || !auth.member.permissions.includes("manage_members")) {
       fail(403, "access_denied", "Only a human room administrator can manage invitation links");
     }
@@ -50,11 +55,23 @@ export class ShareLinks {
   }
   count(row) { return this.db.prepare("SELECT count(*) n FROM share_link_joins WHERE link_id=?").get(row.id).n; }
   authority(row) {
+    const member = this.store.room(row.room_id).state.members[row.issuer_member_id];
+    const ownerId = this.store.roomAuthority(row.room_id).ownerId;
+    // Agent-issued links carry no account: they were minted under the owner's
+    // identity bearer, so authority rests on continued ownership alone.
+    if (row.issuer_account_id === null) {
+      return ownerId === row.issuer_member_id && member?.active !== false
+        && member?.revision === row.issuer_member_revision;
+    }
+    // Human-issued links stay authoritative while the issuer owns the room or
+    // still holds manage_members; ownership implies full authority even when
+    // the grant itself was never recorded on the member.
+    const privileged = ownerId === row.issuer_member_id || member?.permissions.includes("manage_members");
+    const memberOk = member?.active !== false && member?.revision === row.issuer_member_revision && privileged;
     const account = this.db.prepare("SELECT active,auth_epoch FROM accounts WHERE id=?").get(row.issuer_account_id);
     const binding = this.db.prepare("SELECT account_id FROM member_accounts WHERE room_id=? AND member_id=?").get(row.room_id, row.issuer_member_id);
-    const member = this.store.room(row.room_id).state.members[row.issuer_member_id];
     return account?.active === 1 && account.auth_epoch === row.issuer_auth_epoch && binding?.account_id === row.issuer_account_id
-      && member?.active !== false && member?.revision === row.issuer_member_revision && member?.permissions.includes("manage_members");
+      && memberOk;
   }
   view(row) {
     const joins = this.count(row);
@@ -95,7 +112,12 @@ export class ShareLinks {
     return this.store.transaction(() => {
       const auth = this.administrator(token, roomId, binding), tokenHash = hash(linkToken);
       const fingerprint = hash(JSON.stringify([tokenHash, expiresAt, maxJoins, expectedMemberRevision]));
-      const prior = this.db.prepare("SELECT * FROM share_links WHERE room_id=? AND issuer_account_id=? AND request_id=?").get(roomId, auth.account.id, requestId);
+      // Agent issuers have no account: idempotency keys on the member instead.
+      // (SQLite UNIQUE treats NULLs as distinct, so the partial unique index
+      // share_links_agent_request backs this lookup at the storage layer.)
+      const prior = auth.account
+        ? this.db.prepare("SELECT * FROM share_links WHERE room_id=? AND issuer_account_id=? AND request_id=?").get(roomId, auth.account.id, requestId)
+        : this.db.prepare("SELECT * FROM share_links WHERE room_id=? AND issuer_account_id IS NULL AND issuer_member_id=? AND request_id=?").get(roomId, auth.member.id, requestId);
       if (prior) {
         if (prior.fingerprint !== fingerprint) fail(409, "idempotency_conflict", "This request was already used for different link settings");
         return { link: this.view(prior), duplicate: true };
@@ -112,7 +134,7 @@ export class ShareLinks {
       }
       const id = randomUUID();
       this.db.prepare(`INSERT INTO share_links(id,token_hash,room_id,issuer_account_id,issuer_member_id,issuer_auth_epoch,issuer_member_revision,request_id,fingerprint,created_at,expires_at,max_joins)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, tokenHash, roomId, auth.account.id, auth.member.id, auth.account.authEpoch, auth.member.revision, requestId, fingerprint, now, expiresAt, maxJoins);
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, tokenHash, roomId, auth.account?.id ?? null, auth.member.id, auth.account?.authEpoch ?? null, auth.member.revision, requestId, fingerprint, now, expiresAt, maxJoins);
       return { link: this.view(this.db.prepare("SELECT * FROM share_links WHERE id=?").get(id)), duplicate: false };
     });
   }

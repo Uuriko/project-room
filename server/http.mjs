@@ -2115,9 +2115,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, result.duplicate ? 200 : 201, result);
       }
       // Invitation links are administered from a signed-in browser session
-      // (room-key or account cookie) only, never a bearer key: the store-level
-      // administrator() check accepts any human credential, so refuse here.
-      if ((route === "share-links" || route === "share-links-cancel") && selected.bearer) reject(403, "access_denied", "Invitation links require a signed-in browser session");
+      // (room-key or account cookie), or by the room owner on its agent
+      // identity bearer (agent-issued invite links): the store-level
+      // administrator() check accepts any human credential plus the owner, so
+      // refuse every other bearer here — including the owner's own room key
+      // presented as a bearer, whose documented contract stays browser-only.
+      if ((route === "share-links" || route === "share-links-cancel") && selected.bearer
+        && !(auth.kind === "identity" && store.roomAuthority(roomId).ownerId === auth.member?.id)) {
+        reject(403, "access_denied", "Invitation links require a signed-in browser session");
+      }
       if (route === "share-links" && req.method === "GET") return json(res, 200, store.shareLinks.list(selected.token, roomId, fence));
       if (route === "share-links" && req.method === "POST") {
         const data = await body(req);

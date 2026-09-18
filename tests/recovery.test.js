@@ -267,7 +267,7 @@ test("read-only open accepts a v34 backup written before the additive wake queue
   assert.deepEqual(objects(), [], "read-only verification is not migration");
   // Only the additive tables are optional: a wrong schema marker still fails.
   f.store.db.exec("PRAGMA user_version=27");
-  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v34/);
+  assert.throws(() => new RoomStore(f.filename, { readOnly: true }), /requires schema v35/);
   f.store.db.exec("PRAGMA user_version=34");
   // A writable open recreates the additive tables and then verifies them strictly.
   const upgraded = new RoomStore(f.filename, { now: f.now });

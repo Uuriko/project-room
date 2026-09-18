@@ -56,7 +56,7 @@ test("outside credit survives native result reads, replay, review and exact retr
   const final = f.store.room("commons").state;
   assert.equal(final.workItems[workItemId].decision, null);
   assert.deepEqual(f.store.rebuildProjection("commons").state, final);
-  assert.equal(auditRecovery(f.store).schemaVersion, 34);
+  assert.equal(auditRecovery(f.store).schemaVersion, 35);
 });
 
 const previousCommit = "33c817a911ebb9fb0310592cac77d8e61380541d";

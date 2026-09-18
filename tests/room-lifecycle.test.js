@@ -31,7 +31,7 @@ const access = (actorId, memberId, permissions, active = false) => event({ type:
   data: { memberId, expectedMemberRevision: 0, permissions, active } });
 
 test("reducer: kind is validated at creation, archive is owner-only and closes the log, leaving needs no administration", () => {
-  assert.equal(STORE_SCHEMA_VERSION, 34);
+  assert.equal(STORE_SCHEMA_VERSION, 35);
   assert.deepEqual([...ROOM_KINDS], ["personal", "organization"]);
   assert.ok(COMMAND_TYPES.includes(T.ROOM_ARCHIVED)); assert.equal(classifyCommand(T.ROOM_ARCHIVED), "act");
   const state = seed("r").reduce(applyEvent, emptyRoomState());
@@ -148,7 +148,7 @@ test("store: a seeded history that ends archived stores the column, and one that
     event({ type: T.MESSAGE_POSTED, actorId: owner, roomId: "s", data: { messageId: "late", body: "Too late" } })]), /Room is archived/);
   assert.equal(store.db.prepare("SELECT count(*) AS n FROM rooms").get().n, 1, "the failed seed wrote nothing");
   verifyRoomLifecycle(store);
-  assert.equal(auditRecovery(store).schemaVersion, 34);
+  assert.equal(auditRecovery(store).schemaVersion, 35);
 });
 
 test("migration: genuine v27 data gains rooms.archived_at exactly once, keeps every room, and the migration is idempotent", { timeout: 120000 }, async t => {
@@ -174,7 +174,7 @@ test("migration: genuine v27 data gains rooms.archived_at exactly once, keeps ev
   assert.deepEqual(current.db.prepare("SELECT id,sequence,projection FROM rooms ORDER BY id").all(), rooms, "no room row changed beyond the new column");
   assert.deepEqual(current.db.prepare("SELECT id FROM rooms WHERE archived_at IS NOT NULL").all(), [], "pre-v28 rooms are not archived");
   const audit = auditRecovery(current);
-  assert.equal(audit.schemaVersion, 34);
+  assert.equal(audit.schemaVersion, 35);
   const catalog = () => current.db.prepare("SELECT name,sql FROM sqlite_master ORDER BY name").all();
   const schema = catalog(), data = current.db.prepare("SELECT * FROM rooms ORDER BY id").all();
   migrateRoomLifecycleV28(current);

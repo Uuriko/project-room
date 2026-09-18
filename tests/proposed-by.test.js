@@ -282,7 +282,7 @@ test("v1 upgrades checkpoint a conservative projection and strictly replay the v
     "strict v2 replay must never silently accept a v1-only approval");
   store = new RoomStore(filename);
   try {
-    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 34);
+    assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 35);
     assert.deepEqual(store.db.prepare("SELECT body FROM events WHERE room_id='commons' ORDER BY sequence").all().map(row => row.body), eventBodies,
       "migration leaves the append-only event bodies byte-identical");
     const repaired = store.room("commons");
@@ -348,7 +348,7 @@ test("fresh databases use schema v34 and every unsupported schema fails closed w
   const directory = mkdtempSync(join(tmpdir(), "project-room-schema-version-"));
   const filename = join(directory, "room.sqlite");
   const store = new RoomStore(filename);
-  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 34);
+  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 35);
   assert.ok(store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='projection_checkpoints'").get());
   store.db.exec("PRAGMA journal_mode=DELETE; PRAGMA user_version=35");
   store.close();
