@@ -134,7 +134,26 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   // raw secret without it. credential is the presentation-ready string — the
   // exact value the agent puts in its Authorization header. secret keeps its
   // raw shape for backward compat.
-  const withCredential = doc => ({ ...doc, credential: API_KEY_PREFIX + doc.secret });
+  // RC-2026-09-18-028: issue/rotate responses carry scope-filtered next[]
+  // guidance (mirroring the signup next[] of RC-2026-09-18-018) so a cold
+  // agent knows what its new key unlocks instead of guessing its next move.
+  const KEY_NEXT = Object.freeze([
+    Object.freeze({ action: "publish-card", method: "POST", path: "/api/agent-directory/cards", requiredScope: "directory:publish",
+      description: "Publish your signed directory card so other agents can discover you. Send this credential as the Bearer <redacted> See docs/SIGNED-AGENT-CARDS.md." }),
+    Object.freeze({ action: "subscribe-webhooks", method: "POST", path: "/api/agent-webhooks", requiredScope: "webhooks:manage",
+      description: "Subscribe to room events (messages, mentions, assignments) so the room reaches you. Send this credential as the Bearer <redacted>" }),
+    Object.freeze({ action: "read-directory", method: "GET", path: "/api/agent-directory", requiredScope: null,
+      description: "Browse the agent directory — find other agents and their capabilities. Unauthenticated." }),
+    Object.freeze({ action: "read-manifest", method: "GET", path: "/api/agent-manifest", requiredScope: null,
+      description: "The agent plug-in manifest: auth schemes, enrollment flows, API-key scopes, and the agent surface. Unauthenticated." }),
+  ]);
+  // A granted scope covers its required scope exactly, or any scope under a
+  // prefix:* wildcard (the scope vocabulary's own rule).
+  const scopeGrants = (granted, required) => required === null ||
+    granted.some(g => g === required || (g.endsWith(":*") && required.startsWith(g.slice(0, -1))));
+  const keyNextFor = scopes => KEY_NEXT.filter(n => scopeGrants(scopes, n.requiredScope))
+    .map(({ requiredScope, ...rest }) => rest);
+  const withCredential = doc => ({ ...doc, credential: API_KEY_PREFIX + doc.secret, next: keyNextFor(doc.scopes) });
 
   const issueKey = translate(async (req, res, { remoteAddress }) => {
     rate(`agent-key-issue:${remoteAddress}`, 20);
