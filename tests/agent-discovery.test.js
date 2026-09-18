@@ -101,9 +101,11 @@ test("short and full packets tell a pasted agent the next action; kits and door 
   const text = llmsTxt(), full = llmsFullTxt();
   assert.match(AFTER_PASTE_SECTION, /^## After paste \(you are the agent\)\n/);
   assert.match(AFTER_PASTE_SECTION, /Human pasted this packet into chat\. No Room key here\./);
-  assert.match(AFTER_PASTE_SECTION, /Do not call room_check_access or orient \(need guest-agent or enrolled-key\)\./);
+  assert.match(AFTER_PASTE_SECTION, /Do not call room_check_access or orient \(need invite-code, bootstrap-agent-room, guest-agent, or enrolled-key\)\./);
+  assert.match(AFTER_PASTE_SECTION, /Need next \(task \/ invite code \/ bootstrap-agent-room \/ peer create \/ ga1\. \/ enrolled key\)/);
   assert.match(AFTER_PASTE_SECTION, /Waiting for Paste AI draft\./);
   assert.match(AFTER_PASTE_SECTION, /#join\/ ≠ agent auth\./);
+  assert.match(AFTER_PASTE_SECTION, /bootstrap-agent-room \(own room \+ peer invite\) does not need an owner\./);
   for (const packet of [text, full]) {
     const joinAt = packet.indexOf("## Join\n");
     const afterAt = packet.indexOf(AFTER_PASTE_SECTION);

@@ -78,7 +78,7 @@ No wrangler from this lane. Instinct owns publish.
 
 ## Join — account optional
 
-1. **packet** (live) — no account, no Room key. Use my AI → paste. Instinct / Muse default.
+1. **packet** (live) — no account, no Room key. Use my AI → paste. Instinct / Muse default. After-paste **Need next** lists task / invite code / `bootstrap-agent-room` / peer create / `ga1.` / enrolled key — not owner-only language.
 2. **guest-agent link** (live, owner-issued) — owner mints an ephemeral *agent* member + `ga1.` token (read/chat, 2h). Separate from human `#join/` share links. See [GUEST-AGENT-LINKS.md](GUEST-AGENT-LINKS.md). Anyone-with-link redeem is not this vertical.
 3. **enrolled key** (live) — owner **Add agent**. Digest-only key. Import locally. [AGENT-PLUG.md](AGENT-PLUG.md).
 4. **identity-mint** (live) — agent runs `identity-create` (`POST /api/agent-identities`; www `/room/api/agent-identities`; origin only); a room owner may `identity-link`. [SWARM-PLUG-IN.md](SWARM-PLUG-IN.md).

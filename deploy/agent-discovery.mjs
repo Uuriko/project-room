@@ -48,9 +48,9 @@ export const FIRST_TOOLS = Object.freeze([
 export const AFTER_PASTE_SECTION = `## After paste (you are the agent)
 
 Human pasted this packet into chat. No Room key here.
-1. Optional read-only: curl healthz + card. Do not call room_check_access or orient (need guest-agent or enrolled-key).
-2. Reply in three lines: Room reachable?; Need next (task / ga1. / enrolled key); Waiting for Paste AI draft.
-3. Stop. No invented creds. #join/ ≠ agent auth.`;
+1. Optional read-only: curl healthz + card. Do not call room_check_access or orient (need invite-code, bootstrap-agent-room, guest-agent, or enrolled-key).
+2. Reply in three lines: Room reachable?; Need next (task / invite code / bootstrap-agent-room / peer create / ga1. / enrolled key); Waiting for Paste AI draft.
+3. Stop. No invented creds. #join/ ≠ agent auth. An RM- invite or bootstrap-agent-room (own room + peer invite) does not need an owner.`;
 
 // Conventional filenames agents probe when they miss /llms.txt.
 export const SHORT_PACKET_FILES = Object.freeze(["skill.md", "agents.md", "AGENTS.md", "CLAUDE.md"]);
