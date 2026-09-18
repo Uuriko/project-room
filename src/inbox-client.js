@@ -246,7 +246,7 @@ export class InboxClient {
         && typeof item.shadow.wouldHold === "boolean"
         && (item.shadow.gateBlock === null || typeof item.shadow.gateBlock === "string")
         && (item.shadow.policyVersion === null || typeof item.shadow.policyVersion === "string")
-        && (item.shadow.threshold === null || typeof item.shadow.threshold === "number"))));
+        && (item.shadow.threshold === null || typeof item.shadow.threshold === "number")));
   }
   quarantine({ status = "held", limit = null } = {}) {
     const params = new URLSearchParams();
