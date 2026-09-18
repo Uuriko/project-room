@@ -171,10 +171,14 @@ Additive IDs (implement later, **dasha-lobby only**):
 
 ## 7. Ship path
 
-1. **This note** — docs-only on `Uuriko/project-room`.
-2. **Implement** — later, `Uuriko/dasha-lobby` only, after Instinct
-   proves #246 / #249 / #255 live. Not this PR. No wrangler from the
-   note author.
+1. **This note** — docs-only on `Uuriko/project-room` ([#493](https://github.com/Uuriko/project-room/pull/493)).
+2. **Ready-to-implement** — [ask/T034-artifacts-lite-ready-to-implement.md](ask/T034-artifacts-lite-ready-to-implement.md)
+   ([#507](https://github.com/Uuriko/project-room/pull/507)).
+3. **Implement gate** — [ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md](ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md)
+   (T081). Claim blocked until live quiet-shell + Quill off HTML.
+4. **Implement** — later, `Uuriko/dasha-lobby` only, after Instinct
+   proves #246 / #249 / #255 live **and** the T081 boxes are green.
+   Not this PR. No wrangler from the note author.
 
 ---
 

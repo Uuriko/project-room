@@ -20,6 +20,8 @@ Research:
 [UX-CLEAN-LESS-NOISE-2026-09-17.md](../research/UX-CLEAN-LESS-NOISE-2026-09-17.md).
 Artifacts-lite (long fences, P0 — not the full panel):
 [ASK-ARTIFACTS-LITE-2026-09-18.md](../research/ASK-ARTIFACTS-LITE-2026-09-18.md).
+Implement gate (T081, cite #493/#507):
+[ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md](../research/ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md).
 Quiet cousins: [QUIET-PRODUCT-DESIGN-PLAN-2026-09-08.md](QUIET-PRODUCT-DESIGN-PLAN-2026-09-08.md),
 [QUIET-FAST.md](QUIET-FAST.md),
 [PROJECT-ROOM-DESIGN-GUIDE.md](../research/PROJECT-ROOM-DESIGN-GUIDE.md).
@@ -165,7 +167,7 @@ From the research note. Do not sneak them into the polish PR.
 
 | # | Item | When |
 | --- | --- | --- |
-| 7 | Full Artifacts panel (auto-open, HTML preview) | Ask P1 — lite collapse is P0 research: [ASK-ARTIFACTS-LITE-2026-09-18.md](../research/ASK-ARTIFACTS-LITE-2026-09-18.md) |
+| 7 | Full Artifacts panel (auto-open, HTML preview) | Ask P1 — lite collapse is P0 research: [ASK-ARTIFACTS-LITE-2026-09-18.md](../research/ASK-ARTIFACTS-LITE-2026-09-18.md) · implement gate: [ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md](../research/ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md) (T081; cite #493/#507) |
 | 8 | History sidebar icon-only | Ask P1 |
 | 9 | Follow-up chips after reply (3 max) | Ask P1 |
 | 10 | Branch from edit (quiet fork, no banner) | Ask P1 |
@@ -177,6 +179,7 @@ From the research note. Do not sneak them into the polish PR.
 | T045 | Honesty receipt folds after complete; hover expand | Ask follow-on — [research/ask/T045-receipt-collapse.md](../research/ask/T045-receipt-collapse.md) |
 | T046 | No mid-stream tok/s essay (lint/test rule) | Ask follow-on — [research/ask/T046-no-midstream-toks.md](../research/ask/T046-no-midstream-toks.md) |
 | T074 | Ask vs Provide surface boundary (doors / dash / table off canvas) | Ask follow-on — [research/ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md](../research/ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md) |
+| T081 | Artifacts-lite implement gate (claim blocked until live + Quill off HTML) | Ask follow-on — [research/ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md](../research/ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md) (cite #493/#507) |
 
 #249 already shipped Stop / Regen / Copy / Edit / Enter+Shift+Enter /
 stream-safe MD / New. v3 **does not restyle those into a new product**.
