@@ -1157,6 +1157,13 @@ export class RoomStore {
           || targetAccount?.active !== 1 || issuerBinding?.account_id !== row.issuer_account_id || !issuerMember || issuerMember.active === false
           || issuerMember.revision !== row.issuer_member_revision || !issuerMember.permissions.includes("manage_members")) status = "stale";
       }
+      // Onboarding Slice 4: pre-auth preview answers "is this worth an
+      // account?" — human+agent member counts, no identity data.
+      const roster = Object.values(room.members ?? {});
+      const memberCounts = {
+        humans: roster.filter(member => member?.kind === "human").length,
+        agents: roster.filter(member => member?.kind === "agent").length,
+      };
       return {
         ...invitationView(row, this.now()),
         status,
@@ -1164,7 +1171,8 @@ export class RoomStore {
         permissions: JSON.parse(row.intended_permissions_json),
         invitedByDisplayName: room.members?.[row.issuer_member_id]?.displayName ?? "Room administrator",
         roomTitle: room.room?.title ?? "Project Room",
-        roomPurpose: room.room?.purpose ?? ""
+        roomPurpose: room.room?.purpose ?? "",
+        memberCounts,
       };
     });
   }

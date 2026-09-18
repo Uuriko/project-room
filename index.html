@@ -543,12 +543,14 @@
         <dl id="invitation-details" class="invitation-details" hidden>
           <div><dt>Room</dt><dd id="invitation-room"></dd></div>
           <div><dt>Purpose</dt><dd id="invitation-purpose"></dd></div>
+          <div><dt>Members</dt><dd id="invitation-members"></dd></div>
           <div><dt>Membership</dt><dd><span id="invitation-display-name"></span> <code id="invitation-member-id"></code></dd></div>
           <div><dt>Role</dt><dd id="invitation-role"></dd></div>
           <div><dt>Capabilities</dt><dd id="invitation-permissions"></dd></div>
           <div><dt>Created by</dt><dd id="invitation-issuer"></dd></div>
           <div><dt>Expires</dt><dd><time id="invitation-expires"></time></dd></div>
         </dl>
+        <p id="invitation-acting-account" class="form-hint" hidden></p>
         <form id="invitation-account-form" hidden>
           <label for="invitation-account-key">Account key</label>
           <input id="invitation-account-key" type="password" autocomplete="off" spellcheck="false" required maxlength="128" aria-describedby="invitation-account-hint invitation-error">

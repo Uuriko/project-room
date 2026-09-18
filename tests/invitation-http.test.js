@@ -255,12 +255,17 @@ test("invitation preview, account-bound acceptance, Room access, replay, and wro
   assert.equal(previewResponse.headers.get("set-cookie"), null);
   const preview = await previewResponse.json();
   assert.deepEqual(Object.keys(preview).sort(), [
-    "displayName", "expiresAt", "id", "invitedByDisplayName", "memberId", "permissions", "revision", "role", "roomId", "roomPurpose", "roomTitle", "status"
+    "displayName", "expiresAt", "id", "invitedByDisplayName", "memberCounts", "memberId", "permissions", "revision", "role", "roomId", "roomPurpose", "roomTitle", "status"
   ]);
   assert.equal(preview.id, invitationId);
   assert.equal(preview.status, "pending");
   assert.equal(preview.memberId, "target-member");
   assert.deepEqual(preview.permissions, ["accept_work", "complete_work", "verify"]);
+  // Logged-out preview answers "is this worth an account?": room name,
+  // purpose, inviter, human+agent counts, expiry — with no session.
+  assert.equal(preview.roomTitle, "Project Room Commons");
+  assert.deepEqual(preview.memberCounts, { humans: 1, agents: 0 });
+  assert.ok(typeof preview.expiresAt === "number" || typeof preview.expiresAt === "string");
   const serializedPreview = JSON.stringify(preview);
   for (const secret of [invitationToken, "account-target", "account-owner", accountKeys.target, accountKeys.owner]) {
     assert.equal(serializedPreview.includes(secret), false, `preview must not expose ${secret === invitationToken ? "the invitation token" : "account secrets"}`);
