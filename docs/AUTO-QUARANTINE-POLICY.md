@@ -218,3 +218,12 @@ It joins each `receipt.shadowQuarantine` decision (server/spam-shadow.mjs) to th
 labeling true/false positives, false negatives (dismissed but never would-be-held),
 pending review, expired-unreviewed, and unjournaled records, and prints precision,
 false-positive rate, recall, and per-signal true/false-positive breakdowns.
+
+*Review-coverage dashboard (the live queue, not the shadow):* once holds are
+live, run `scripts/quarantine-review-coverage.mjs --store <room.db>` for the
+per-signal review-coverage dashboard over the journal (pure aggregation in
+`server/quarantine-review-coverage.mjs`, tests in
+`tests/quarantine-review-coverage.test.js`): per signal, held / reviewed /
+Confirm (released, not spam) / Dismiss (confirmed spam) / Split counts and
+the coverage ratio (reviewed over all holds — the same definition as the
+shadow tooling's `reviewCoverage`), read-only over the store.
