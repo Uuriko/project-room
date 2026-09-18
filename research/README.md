@@ -42,6 +42,7 @@ Architecture SoR (steal stack collapsed):
 | [UX-CLEAN-LESS-NOISE-2026-09-17.md](UX-CLEAN-LESS-NOISE-2026-09-17.md) | Ask + Compute + Room anti-noise ranking; Ask quiet-shell P0 (research only) |
 | [ASK-ARTIFACTS-LITE-2026-09-18.md](ASK-ARTIFACTS-LITE-2026-09-18.md) | Ask Artifacts-lite P0 — collapse long fences → opt-in side/bottom panel; not Room artifacts, not a full IDE (research only) |
 | [ASK-BONSAI-MAC24-AND-GEMMA-LADDER-2026-09-18.md](ASK-BONSAI-MAC24-AND-GEMMA-LADDER-2026-09-18.md) | T060+T065: Mac ~24GB soft limit next to Bonsai Community Provide; Bonsai vs gemma3-27b Ask ladder (research only; #258 cited, not edited) |
+| [ASK-BONSAI-PROVIDER-OPENAI-ERROR-PATHS-2026-09-18.md](ASK-BONSAI-PROVIDER-OPENAI-ERROR-PATHS-2026-09-18.md) | T067: Mac provider OpenAI backend error paths for ternary-bonsai-2-27b (bad URL, model not ready, timeout, enable_thinking opt-in, kit obsolete Stop). Docs only; no Mac paste / no Potter keys |
 | [ask/](ask/) | Ask quiet-shell follow-ons (docs only): [T044 export transcript](ask/T044-quiet-export-transcript.md) · [T045 receipt collapse](ask/T045-receipt-collapse.md) · [T046 no mid-stream tok/s](ask/T046-no-midstream-toks.md) |
 | [multiplayer-messaging-20260908/](multiplayer-messaging-20260908/) | Collaboration/messaging plan (markdown + DOCX) |
 | [2026-09-07-project-room-v2/](2026-09-07-project-room-v2/) | Earlier sourced report and comparison screenshots |

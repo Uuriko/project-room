@@ -76,6 +76,8 @@ Ask / Compute / Room anti-noise: [UX-CLEAN-LESS-NOISE-2026-09-17.md](../research
 Ask Artifacts-lite (long fences, P0): [ASK-ARTIFACTS-LITE-2026-09-18.md](../research/ASK-ARTIFACTS-LITE-2026-09-18.md).
 Bonsai 24GB soft limit + vs gemma3-27b ladder (T060+T065, research):
 [ASK-BONSAI-MAC24-AND-GEMMA-LADDER-2026-09-18.md](../research/ASK-BONSAI-MAC24-AND-GEMMA-LADDER-2026-09-18.md).
+Bonsai Mac provider OpenAI error paths (T067, research; thinking off; kit Stop obsolete):
+[ASK-BONSAI-PROVIDER-OPENAI-ERROR-PATHS-2026-09-18.md](../research/ASK-BONSAI-PROVIDER-OPENAI-ERROR-PATHS-2026-09-18.md).
 Ask quiet-shell follow-ons (T044–T046, distinct from Artifacts-lite / regen / Bonsai RAM): [research/ask/](../research/ask/).
 
 ## The dated archive
