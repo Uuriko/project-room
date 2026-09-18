@@ -55,6 +55,10 @@ const PROBES = {
   "POST /api/auth/passkey/authenticate/options": [{}, 200],
   // ...and the finish step rejects an unknown challenge id with the same 401 shape as a failed assertion.
   "POST /api/auth/passkey/authenticate/finish": [{ challengeId: "nope", response: {}, sessionToken: token(), sessionRevision: 0 }, 401],
+  // Password signup (slice 2): a policy-failing password answers 422 before anything is created.
+  "POST /api/auth/password/signup": [{ email: "probe@example.com", password: "short", sessionToken: token(), sessionRevision: 0 }, 422],
+  // Password login (slice 2): unknown email and wrong password share the 401 shape.
+  "POST /api/auth/password/login": [{ email: "probe@example.com", password: "long-enough-password", sessionToken: token(), sessionRevision: 0 }, 401],
 };
 
 async function serve(t) {

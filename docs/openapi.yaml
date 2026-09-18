@@ -1473,6 +1473,7 @@ paths:
         the slot's `sessionToken` + `sessionRevision` — the same slot-upgrade
         primitive the other login methods use. Same-origin POST. Assertion
         failures answer 401, never 500. 10/address/min.
+      security: []
   /api/auth/password/signup:
     post:
       summary: Create an account with email+password (slice 2)
@@ -1484,7 +1485,8 @@ paths:
         email answers 409 already_registered; an invalid slot leaves the
         account unprovisioned. Passwords are scrypt-hashed (N=16384, r=8,
         p=1, 16-byte salt); only the verifier is stored. 10 per address per
-        minute.      security: []
+        minute.
+      security: []
       requestBody:
         required: true
         content:
