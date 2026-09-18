@@ -89,19 +89,9 @@ function mount(routes = {}) {
   return { client, signins, container };
 }
 
-test("mount first paint is More sign-in options; extra methods stay collapsed", () => {
+test("mount renders the method chooser, GitHub button, and no form by default", () => {
   const { container } = mount();
-  assert.ok(container.innerHTML.includes("More sign-in options"));
-  assert.ok(container.innerHTML.includes("data-signin-more"));
-  assert.ok(!container.innerHTML.includes("Continue with GitHub"));
-  assert.ok(!container.innerHTML.includes("Email + password"));
-  assert.ok(!container.innerHTML.includes("data-signin-form"));
-});
-
-test("More sign-in options reveals GitHub and the method chooser", () => {
-  const { container } = mount();
-  container.fire("click", { target: { closest: sel => sel === "[data-signin-more]" ? {} : null } });
-  assert.ok(container.innerHTML.includes("Hide extra sign-in options"));
+  assert.ok(container.innerHTML.includes("or sign in another way"));
   assert.ok(container.innerHTML.includes("Continue with GitHub"));
   assert.ok(container.innerHTML.includes("Email + password"));
   assert.ok(container.innerHTML.includes("Magic link"));
@@ -112,7 +102,6 @@ test("More sign-in options reveals GitHub and the method chooser", () => {
 
 test("choosing a method renders its form; choosing again closes it", () => {
   const { container } = mount();
-  container.fire("click", { target: { closest: sel => sel === "[data-signin-more]" ? {} : null } });
   container.fire("click", clickOnDataset("method", { method: "password" }));
   assert.ok(container.innerHTML.includes('data-signin-form="password"'));
   container.fire("click", clickOnDataset("method", { method: "password" }));
@@ -122,7 +111,6 @@ test("choosing a method renders its form; choosing again closes it", () => {
 test("password signup posts email, password, and sessionRevision, then signs in", async () => {
   const view = { authenticated: true, account: { id: "acct-1" } };
   const { client, signins, container } = mount({ "/api/auth/password/signup": view });
-  container.fire("click", { target: { closest: sel => sel === "[data-signin-more]" ? {} : null } });
   container.fire("click", clickOnDataset("method", { method: "password" }));
   await container.listeners.submit[0](submitForm("password", { email: "new@example.invalid", password: "fixture-password-1" }));
   assert.equal(client.calls[0].path, "/api/auth/password/signup");
@@ -136,7 +124,6 @@ test("password signup posts email, password, and sessionRevision, then signs in"
 test("password mode toggle switches between signup and login routes", async () => {
   const view = { authenticated: true, account: { id: "acct-2" } };
   const { client, container } = mount({ "/api/auth/password/login": view });
-  container.fire("click", { target: { closest: sel => sel === "[data-signin-more]" ? {} : null } });
   container.fire("click", clickOnDataset("method", { method: "password" }));
   container.fire("click", clickOnDataset("password-mode", { passwordMode: "login" }));
   await container.listeners.submit[0](submitForm("password", { email: "back@example.invalid", password: "fixture-password-2" }));
@@ -147,7 +134,6 @@ test("magic request unavailable shows the server's honest message", async () => 
   const { client, container } = mount({
     "/api/auth/magic/request": { status: "unavailable", reason: "mail_not_configured", message: "Email delivery isn\u2019t configured." }
   });
-  container.fire("click", { target: { closest: sel => sel === "[data-signin-more]" ? {} : null } });
   container.fire("click", clickOnDataset("method", { method: "magic" }));
   await container.listeners.submit[0](submitForm("magic-request", { email: "m@example.invalid" }));
   assert.equal(client.calls[0].path, "/api/auth/magic/request");
@@ -161,7 +147,6 @@ test("magic request sent moves to the code phase, then consume signs in", async 
     "/api/auth/magic/request": { status: "sent" },
     "/api/auth/magic/consume": view
   });
-  container.fire("click", { target: { closest: sel => sel === "[data-signin-more]" ? {} : null } });
   container.fire("click", clickOnDataset("method", { method: "magic" }));
   await container.listeners.submit[0](submitForm("magic-request", { email: "m@example.invalid" }));
   assert.ok(container.innerHTML.includes('data-signin-form="magic-code"'));
@@ -176,7 +161,6 @@ test("magic request sent moves to the code phase, then consume signs in", async 
 test("recovery redeem posts email/code/sessionRevision and unwraps the session", async () => {
   const session = { authenticated: true, account: { id: "acct-4" } };
   const { client, signins, container } = mount({ "/api/auth/recovery-codes/redeem": { remaining: 7, session } });
-  container.fire("click", { target: { closest: sel => sel === "[data-signin-more]" ? {} : null } });
   container.fire("click", clickOnDataset("method", { method: "recovery" }));
   await container.listeners.submit[0](submitForm("recovery", { email: "r@example.invalid", code: "abcdef-ghijkl" }));
   assert.equal(client.calls[0].path, "/api/auth/recovery-codes/redeem");
@@ -202,7 +186,6 @@ test("passkey flow drives navigator.credentials.get and the finish route", async
     "/api/auth/passkey/authenticate/options": options,
     "/api/auth/passkey/authenticate/finish": view
   });
-  container.fire("click", { target: { closest: sel => sel === "[data-signin-more]" ? {} : null } });
   const saw = [];
   // Node ships a getter-only navigator; defineProperty is the way in.
   Object.defineProperty(globalThis, "navigator", { value: { credentials: { get: async request => { saw.push(request); return credential; } } }, configurable: true });
@@ -224,7 +207,6 @@ test("sign-in failure does not call onSignedIn", async () => {
   const { signins, container } = mount({
     "/api/auth/password/signup": { throw: { code: "email_in_use", message: "That email is already on an account." } }
   });
-  container.fire("click", { target: { closest: sel => sel === "[data-signin-more]" ? {} : null } });
   container.fire("click", clickOnDataset("method", { method: "password" }));
   await container.listeners.submit[0](submitForm("password", { email: "dup@example.invalid", password: "fixture-password-3" }));
   assert.equal(signins.length, 0);

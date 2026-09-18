@@ -5,16 +5,27 @@
 import { ROOM_ID_PATTERN } from "./room-deep-link.js";
 
 export const LAST_ROOM_KEY = "pr-last-room";
+export const LAST_ROOM_TITLE_KEY = "pr-last-room-title";
 export const HAD_ACCOUNT_KEY = "pr-had-account";
 export const AUTH_KIND_KEY = "pr-auth-kind";
 export const GUIDE_DISMISSED_KEY = "pr-guide-dismissed";
 
 export const SESSION_HINT_COPY = "This browser keeps an HttpOnly session cookie — not localStorage. Closing the tab does not sign you out. Account sessions stay signed in for up to 8 hours. Sign out clears the cookie and any remembered room.";
 
-export function rememberLastRoom(roomId, storage) {
+function safeRoomTitle(title) {
+  const value = typeof title === "string" ? title.trim() : "";
+  if (!value || value.length > 120 || /pri_|ga1\.|sk-|ROOM_AGENT_/i.test(value)) return null;
+  return value;
+}
+
+export function rememberLastRoom(roomId, storage, title) {
   if (!ROOM_ID_PATTERN.test(String(roomId ?? ""))) return false;
+  const store = storage ?? globalThis.localStorage;
   try {
-    (storage ?? globalThis.localStorage).setItem(LAST_ROOM_KEY, roomId);
+    store.setItem(LAST_ROOM_KEY, roomId);
+    const label = safeRoomTitle(title);
+    if (label) store.setItem(LAST_ROOM_TITLE_KEY, label);
+    else store.removeItem(LAST_ROOM_TITLE_KEY);
     return true;
   } catch {
     return false;
@@ -47,14 +58,24 @@ export function readLastRoom(storage) {
   }
 }
 
+export function readLastRoomTitle(roomId, storage) {
+  if (roomId && readLastRoom(storage) !== roomId) return null;
+  try {
+    return safeRoomTitle((storage ?? globalThis.localStorage).getItem(LAST_ROOM_TITLE_KEY));
+  } catch {
+    return null;
+  }
+}
+
 export function clearBrowserSessionHints({ localStorage: local, sessionStorage: session } = {}) {
   const localStore = local ?? globalThis.localStorage;
   const sessionStore = session ?? globalThis.sessionStorage;
   const cleared = [];
   try {
     localStore?.removeItem?.(LAST_ROOM_KEY);
+    localStore?.removeItem?.(LAST_ROOM_TITLE_KEY);
     localStore?.removeItem?.(HAD_ACCOUNT_KEY);
-    cleared.push(LAST_ROOM_KEY, HAD_ACCOUNT_KEY);
+    cleared.push(LAST_ROOM_KEY, LAST_ROOM_TITLE_KEY, HAD_ACCOUNT_KEY);
   } catch { /* private-mode / blocked storage */ }
   try {
     sessionStore?.removeItem?.(AUTH_KIND_KEY);

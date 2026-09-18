@@ -43,7 +43,7 @@ export function toAuthenticationResponse(credential) {
 
 const METHOD_LABELS = { password: "Email + password", magic: "Magic link", passkey: "Passkey", recovery: "Recovery code" };
 
-export function createAuthSigninUI({ accountClient, ensureAccountSession, onSignedIn, onOAuthStart, startExpanded = false }) {
+export function createAuthSigninUI({ accountClient, ensureAccountSession, onSignedIn, onOAuthStart }) {
   let container = null;
   let activeMethod = null;
   let passwordMode = "signup"; // or "login"
@@ -51,7 +51,6 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   let magicPhase = "request"; // or "code"
   let magicEmail = "";
   let busy = false;
-  let expanded = Boolean(startExpanded);
 
   const statusNode = () => container?.querySelector("[data-signin-status]") ?? null;
   function setStatus(text, error = false) {
@@ -65,7 +64,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   const api = (session, path, data) => accountClient.request(path, { method: "POST", session, data });
   const failureText = error => error?.message || "Couldn\u2019t sign in. Try again.";
 
-  function extraHtml() {
+  function shellHtml() {
     return `<div class="auth-divider"><span>or sign in another way</span></div>
       <div class="auth-oauth-row">
         <button type="button" class="button secondary" data-oauth="github">Continue with GitHub</button>
@@ -74,11 +73,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
         ${Object.entries(METHOD_LABELS).map(([method, label]) =>
           `<button type="button" class="button ghost" data-method="${method}" aria-pressed="${method === activeMethod}">${label}</button>`).join("")}
       </div>
-      <div data-signin-panel>${panelHtml()}</div>`;
-  }
-  function shellHtml() {
-    return `<button type="button" class="text-button" data-signin-more aria-expanded="${expanded}">${expanded ? "Hide extra sign-in options" : "More sign-in options"}</button>
-      <div data-signin-extra ${expanded ? "" : "hidden"}>${expanded ? extraHtml() : ""}</div>
+      <div data-signin-panel>${panelHtml()}</div>
       <p class="status form-status" role="alert" data-signin-status></p>`;
   }
   function panelHtml() {
@@ -158,12 +153,6 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   }
 
   const onClick = async event => {
-    if (event.target?.closest?.("[data-signin-more]")) {
-      expanded = !expanded;
-      if (!expanded) activeMethod = null;
-      render();
-      return;
-    }
     const methodButton = event.target?.closest?.("[data-method]");
     if (methodButton) {
       activeMethod = activeMethod === methodButton.dataset.method ? null : methodButton.dataset.method;
@@ -263,11 +252,6 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       render();
       container.addEventListener("click", onClick);
       container.addEventListener("submit", onSubmit);
-    },
-    setExpanded(value) {
-      expanded = Boolean(value);
-      if (!expanded) activeMethod = null;
-      render();
     }
   };
 }

@@ -21,7 +21,7 @@ import { createAuthSigninUI } from "./auth-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite } from "./invite-context.js";
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanelTitle, KEY_KIND_HINT } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
-import { rememberLastRoom, rememberAccountHint, readLastRoom, readAccountHint, clearBrowserSessionHints, SESSION_HINT_COPY } from "./browser-session.js";
+import { rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, clearBrowserSessionHints, SESSION_HINT_COPY } from "./browser-session.js";
 
 const $ = selector => document.querySelector(selector);
 $("#skip-link").addEventListener("click", event => {
@@ -181,7 +181,7 @@ const client = new RoomClient({
     agentInvitesUI?.sync();
     updatePeopleHint();
     if (firstSnapshot) {
-      rememberLastRoom(roomId);
+      rememberLastRoom(roomId, undefined, state.room?.title);
       showRoomGuide();
     }
     instructionsUI?.sync();
@@ -350,7 +350,6 @@ const signinUI = createAuthSigninUI({
   }
 });
 signinUI.mount($("#auth-signin-ui"));
-if (accountSignIn() || initialInvitationFragment) signinUI.setExpanded(true);
 if ($("#session-hint")) $("#session-hint").textContent = SESSION_HINT_COPY;
 function openAccountSettings() {
   setSessionMenuOpen(false);
@@ -677,12 +676,13 @@ function roomHandoffLocation(roomId) {
 }
 function configureAuthPanel(roomId = selectedRoomFromLocation()) {
   const accountMode = accountSignIn();
-  $("#auth-title").textContent = authPanelTitle(roomId);
+  const roomTitle = readLastRoomTitle(roomId);
+  $("#auth-title").textContent = authPanelTitle(roomId, roomTitle);
   const roomHint = $("#auth-room-hint");
   if (roomHint) {
     roomHint.hidden = !roomId;
     roomHint.textContent = roomId
-      ? `Continue into #${roomId}. The room name and owner appear after you sign in.`
+      ? (roomTitle ? `${roomTitle} · #${roomId}` : `Continue into #${roomId}.`)
       : "";
   }
   if ($("#auth-kind-hint")) $("#auth-kind-hint").textContent = KEY_KIND_HINT;
@@ -691,7 +691,6 @@ function configureAuthPanel(roomId = selectedRoomFromLocation()) {
   $("#auth-kind-account")?.setAttribute("aria-pressed", accountMode ? "true" : "false");
   $("#auth-kind-room")?.classList.toggle("suggested", Boolean(accountMode && roomId));
   $("#auth-form button[type='submit']").textContent = accountMode ? (roomId ? "Open room" : "Sign in") : "Enter room";
-  signinUI.setExpanded(accountMode || Boolean(invitation.secret) || Boolean(initialInvitationFragment));
   syncSessionRestore();
   syncSessionMenu();
 }
@@ -703,7 +702,8 @@ function syncSessionRestore() {
   const reopen = $("#reopen-last-room");
   if (reopen) {
     reopen.hidden = !lastRoom;
-    reopen.textContent = lastRoom ? `Reopen #${lastRoom}` : "Reopen last room";
+    const title = readLastRoomTitle(lastRoom);
+    reopen.textContent = lastRoom ? `Reopen ${title || `#${lastRoom}`}` : "Reopen last room";
   }
   const cont = $("#continue-account");
   if (cont) cont.hidden = !account;
@@ -768,7 +768,6 @@ function setAuthKind(kind) {
   else url.searchParams.delete("account");
   history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash}`);
   configureAuthPanel();
-  signinUI.setExpanded(authKind === "account" || Boolean(invitation.secret));
   $("#access-key").focus({ preventScroll: true });
 }
 function updatePeopleHint() {

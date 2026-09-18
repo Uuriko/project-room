@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  LAST_ROOM_KEY, HAD_ACCOUNT_KEY, AUTH_KIND_KEY, GUIDE_DISMISSED_KEY, SESSION_HINT_COPY,
-  rememberLastRoom, rememberAccountHint, readLastRoom, readAccountHint, clearBrowserSessionHints
+  LAST_ROOM_KEY, LAST_ROOM_TITLE_KEY, HAD_ACCOUNT_KEY, AUTH_KIND_KEY, GUIDE_DISMISSED_KEY, SESSION_HINT_COPY,
+  rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, clearBrowserSessionHints
 } from "../src/browser-session.js";
 
 function memoryStore(start = {}) {
@@ -25,6 +25,15 @@ test("rememberLastRoom accepts a room id and rejects lookalikes", () => {
   assert.equal(storage.getItem(LAST_ROOM_KEY), "grok-muse-potter-20260918");
 });
 
+test("rememberLastRoom stores a safe title for the same room only", () => {
+  const storage = memoryStore();
+  rememberLastRoom("commons", storage, "Commons");
+  assert.equal(readLastRoomTitle("commons", storage), "Commons");
+  assert.equal(readLastRoomTitle("other", storage), null);
+  rememberLastRoom("commons", storage, "pri_not_a_title");
+  assert.equal(readLastRoomTitle("commons", storage), null);
+});
+
 test("readLastRoom returns a valid id or null", () => {
   assert.equal(readLastRoom(memoryStore({ [LAST_ROOM_KEY]: "commons" })), "commons");
   assert.equal(readLastRoom(memoryStore({ [LAST_ROOM_KEY]: "bad id" })), null);
@@ -40,11 +49,12 @@ test("account hint is a boolean leftover, never a secret", () => {
 });
 
 test("clearBrowserSessionHints removes last-room, account hint, auth-kind, and guide leftovers", () => {
-  const local = memoryStore({ [LAST_ROOM_KEY]: "commons", [HAD_ACCOUNT_KEY]: "1" });
+  const local = memoryStore({ [LAST_ROOM_KEY]: "commons", [LAST_ROOM_TITLE_KEY]: "Commons", [HAD_ACCOUNT_KEY]: "1" });
   const session = memoryStore({ [AUTH_KIND_KEY]: "account", [GUIDE_DISMISSED_KEY]: "1" });
   const cleared = clearBrowserSessionHints({ localStorage: local, sessionStorage: session });
-  assert.deepEqual(cleared, [LAST_ROOM_KEY, HAD_ACCOUNT_KEY, AUTH_KIND_KEY, GUIDE_DISMISSED_KEY]);
+  assert.deepEqual(cleared, [LAST_ROOM_KEY, LAST_ROOM_TITLE_KEY, HAD_ACCOUNT_KEY, AUTH_KIND_KEY, GUIDE_DISMISSED_KEY]);
   assert.equal(local.getItem(LAST_ROOM_KEY), null);
+  assert.equal(local.getItem(LAST_ROOM_TITLE_KEY), null);
   assert.equal(local.getItem(HAD_ACCOUNT_KEY), null);
   assert.equal(session.getItem(AUTH_KIND_KEY), null);
   assert.equal(session.getItem(GUIDE_DISMISSED_KEY), null);

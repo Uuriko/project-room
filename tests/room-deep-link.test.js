@@ -38,9 +38,10 @@ test("roomOpenHandoffHref keeps ?room= and #room/ so Open survives a dropped has
   assert.equal(roomOpenHandoffHref("https://example.com", "", "https://www.getdasha.com/room"), null);
 });
 
-test("auth gate names the room id whenever a deep-link is present", () => {
+test("auth gate names the room title when known, otherwise the id", () => {
   assert.equal(authPanelTitle("grok-muse-potter-20260918"), "Open room grok-muse-potter-20260918");
-  assert.equal(authPanelTitle("commons"), "Open room commons");
+  assert.equal(authPanelTitle("commons", "Commons"), "Open Commons");
+  assert.equal(authPanelTitle("commons", "pri_secret"), "Open room commons");
   assert.equal(authPanelTitle(null), "Welcome.");
   assert.equal(authPanelTitle("bad id"), "Welcome.");
   assert.match(KEY_KIND_HINT, /Room key opens one room/);

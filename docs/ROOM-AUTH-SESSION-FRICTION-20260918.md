@@ -44,11 +44,10 @@ like six products.
 form. That is the cleaner first paint. It is not merged; fighting it here
 would hide `#access-key` and break the browser-check fills.
 
-**This PR.** Collapse GitHub + the four extra methods behind
-`More sign-in options` (`src/auth-signin-ui.js`). Keep Google and the key
-form on first paint so the key path stays **one click** (paste + Enter).
-Account mode, invite redeem, and `?account=1` still expand extras. Muse
-Connect / People CTAs from #626 are untouched.
+**#613 owns first-paint collapse** (Google + More, including the key
+form). This PR does **not** wrap `#access-key` or add a second
+“More sign-in options” button, so parent can merge alias + hash + gate
+without fighting #613. Muse Connect / People CTAs from #626 are untouched.
 
 ### Signin / reload
 
@@ -168,9 +167,10 @@ overflow only when leftovers exist.
 1. Identity-create HTTP alias (canonical + `/room` prefix).
 2. Session restore after reload/close + reconnect CTAs + cookie copy.
 3. Sign out / Clear session wipe hints and the account slot.
-4. First paint: extra methods collapsed; key path still one click.
+4. First-paint collapse left to **#613** (no second More-options control).
 5. Doctor health prefix + documented saved-connection doctor path.
-6. Door Open/People `?room=` + `#room/` handoff; gate names `Open room {id}`.
+6. Door Open/People `?room=` + `#room/` handoff; gate names `Open {title}`
+   when this browser has seen the room, otherwise `Open room {id}`.
 7. Room vs Account key hint; quieter invite field; empty mobile ⋮ hidden.
 
 ## Remaining P1s (not this PR)
@@ -191,17 +191,17 @@ overflow only when leftovers exist.
 6. **Anonymous account-slot create** — `GET /api/account-session` still
    mints a slot when extra sign-in methods run. Cold first paint no longer
    calls it; a follow-up could make the GET read-only and POST the slot.
-7. **Room owner/title on the gate** — needs a public-safe preview route
-   (not this PR; invite-only). The id is now visible; the name is not.
+7. **Room owner on the unauthenticated gate** — invite-only; no public
+   preview. The id is always shown; the title is shown when this browser
+   has already opened that room.
 
 ## Coordination
 
 - **#626** merged as `35526422` (“Connect/People UI for agent-owned
   Rooms”). This branch is based on that tip. People / Connect markup,
   roster CTAs, and Muse packet copy were not rewritten.
-- **#613** remains the first-paint owner. We only collapse the extra
-  methods that #613 also wants collapsed, and we keep the key form
-  reachable.
+- **#613** remains the first-paint owner. This PR does not wrap the key
+  form or add a competing More-options control.
 - **#628** untouched.
 
 ## How to verify (no secrets)

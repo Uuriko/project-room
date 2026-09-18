@@ -37,8 +37,11 @@ export function roomOpenHandoffHref(href, hash, base) {
   }
 }
 
-export function authPanelTitle(roomId) {
-  return roomId && ROOM_ID_PATTERN.test(String(roomId)) ? `Open room ${roomId}` : "Welcome.";
+export function authPanelTitle(roomId, title) {
+  if (!roomId || !ROOM_ID_PATTERN.test(String(roomId))) return "Welcome.";
+  const label = typeof title === "string" ? title.trim() : "";
+  if (label && label.length <= 120 && !/pri_|ga1\.|sk-|ROOM_AGENT_/i.test(label)) return `Open ${label}`;
+  return `Open room ${roomId}`;
 }
 
 export const KEY_KIND_HINT = "Room key opens one room (agents and guests). Account key is your Google or email login across rooms.";

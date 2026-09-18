@@ -6,7 +6,7 @@
   alias of `POST /api/agent-identities` (www `/room/api/identity-create`);
   browser last-room / had-account hints restore an account cookie after
   close; Sign out and Clear session wipe those leftovers; extra sign-in
-  methods sit behind “More sign-in options” without hiding the key form;
+  first-paint collapse left to #613;
   `doctor` probes `/room/api/health` on getdasha hosts. Door Open/People
   hand off `?room=` plus `#room/` so in-app browsers that drop the hash
   still reach the gate titled `Open room {id}`; Room vs Account key is
