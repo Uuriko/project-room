@@ -150,8 +150,29 @@ export class AgentPluginStore {
 
   // ---- Scoped API keys (secret shown once at issue/rotate; hash-only storage) ----
 
+  // Every mutation below runs the pure-module Map change and its SQLite
+  // write-through inside one store transaction. SQLite rolls back on throw,
+  // but the caller-owned Maps would not — so snapshot all three Maps first
+  // and restore their entries if anything throws. The Map objects themselves
+  // are never replaced (the pure modules close over them), only their
+  // entries are restored.
+  mutate(fn) {
+    const snapshot = map => new Map([...map].map(([k, v]) => [k, structuredClone(v)]));
+    const before = { keys: snapshot(this.keys), cards: snapshot(this.cards), subs: snapshot(this.subs) };
+    try {
+      return this.store.transaction(fn);
+    } catch (err) {
+      for (const name of ["keys", "cards", "subs"]) {
+        const target = this[name], saved = before[name];
+        target.clear();
+        for (const [k, v] of saved) target.set(k, v);
+      }
+      throw err;
+    }
+  }
+
   issueApiKey({ identityId, scopes, expiresAt = null, label = null }) {
-    return this.store.transaction(() => {
+    return this.mutate(() => {
       const issued = this.apiKeys.issue({ identityId, scopes, expiresAt, label });
       const record = this.keys.get(issued.keyId);
       this.db.prepare(`INSERT INTO agent_api_keys
@@ -177,7 +198,7 @@ export class AgentPluginStore {
   }
 
   rotateApiKey({ identityId, keyId }) {
-    return this.store.transaction(() => {
+    return this.mutate(() => {
       this.keyRecordForOwner(keyId, identityId);
       const rotated = this.apiKeys.rotate(keyId);
       const record = this.keys.get(keyId);
@@ -188,7 +209,7 @@ export class AgentPluginStore {
   }
 
   revokeApiKey({ identityId, keyId }) {
-    return this.store.transaction(() => {
+    return this.mutate(() => {
       this.keyRecordForOwner(keyId, identityId);
       const revoked = this.apiKeys.revoke(keyId);
       this.db.prepare("UPDATE agent_api_keys SET revoked=1 WHERE key_id=?").run(keyId);
@@ -199,7 +220,7 @@ export class AgentPluginStore {
   // Authenticate a presented API-key secret (for future scoped use); updates
   // lastUsedAt on success. Returns the public record or null.
   verifyApiKeySecret(secret) {
-    return this.store.transaction(() => {
+    return this.mutate(() => {
       const record = this.apiKeys.verify(secret);
       if (!record) return null;
       const stored = this.keys.get(record.keyId);
@@ -212,7 +233,7 @@ export class AgentPluginStore {
   // ---- Agent directory (public document; owner-scoped publish/withdraw) ----
 
   publishCard({ identityId, agentId, card, visibility = "public" }) {
-    return this.store.transaction(() => {
+    return this.mutate(() => {
       const existing = this.db.prepare("SELECT owner_identity_id AS ownerIdentityId FROM agent_directory_cards WHERE agent_id=?").get(agentId);
       if (existing && existing.ownerIdentityId !== identityId) {
         throw new AgentPluginError(409, "card_owned_by_another_identity",
@@ -231,14 +252,17 @@ export class AgentPluginStore {
   }
 
   withdrawCard({ identityId, agentId }) {
-    return this.store.transaction(() => {
+    return this.mutate(() => {
       const row = this.db.prepare("SELECT owner_identity_id AS ownerIdentityId FROM agent_directory_cards WHERE agent_id=?").get(agentId);
       if (!row || row.ownerIdentityId !== identityId) {
         throw new AgentPluginError(404, "unknown_card", `No card "${agentId}" for this identity`);
       }
       const result = this.directory.withdraw(agentId);
+      // Persist the entry's own updatedAt from the pure withdraw above —
+      // calling the clock again here could differ by milliseconds.
+      const entry = this.cards.get(agentId);
       this.db.prepare("UPDATE agent_directory_cards SET withdrawn=1, updated_at=? WHERE agent_id=?")
-        .run(this.store.now(), agentId);
+        .run(entry.updatedAt, agentId);
       return result;
     });
   }
@@ -275,7 +299,7 @@ export class AgentPluginStore {
   // ---- Per-agent webhook subscriptions ----
 
   subscribeWebhook({ identityId, url, events, secret = null }) {
-    return this.store.transaction(() => {
+    return this.mutate(() => {
       // Caller-supplied secrets are never echoed; a server-generated secret
       // is shown exactly once so the agent can verify deliveries.
       const signingSecret = secret ?? randomBytes(32).toString("base64url");
@@ -294,7 +318,7 @@ export class AgentPluginStore {
   }
 
   unsubscribeWebhook({ identityId, subscriptionId }) {
-    return this.store.transaction(() => {
+    return this.mutate(() => {
       const row = this.db.prepare("SELECT agent_id FROM agent_webhook_subs WHERE subscription_id=?").get(subscriptionId);
       if (!row || row.agent_id !== identityId) {
         throw new AgentPluginError(404, "unknown_subscription", `Unknown subscription "${subscriptionId}"`);
@@ -308,7 +332,7 @@ export class AgentPluginStore {
   // ---- Delivery journal (server-side dispatch calls these; no HTTP routes yet) ----
 
   buildWebhookDelivery(subscriptionId, { eventType, data }) {
-    return this.store.transaction(() => {
+    return this.mutate(() => {
       const delivery = this.webhooks.buildDelivery(subscriptionId, { eventType, data });
       this.persistJournal(subscriptionId);
       return delivery;
@@ -316,7 +340,7 @@ export class AgentPluginStore {
   }
 
   recordWebhookAttempt(deliveryId, { ok, error = null }) {
-    return this.store.transaction(() => {
+    return this.mutate(() => {
       const result = this.webhooks.recordAttempt(deliveryId, { ok, error });
       for (const sub of this.subs.values()) {
         if (sub.deliveries.some(d => d.deliveryId === deliveryId)) { this.persistJournal(sub.subscriptionId); break; }

@@ -311,3 +311,32 @@ test("mutating plug-in routes are rate-limited per address", async t => {
   }
   assert.equal(lastStatus, 429, "the 21st issue inside a minute is rate-limited");
 });
+
+test("a failed SQLite write-through rolls back the in-memory Map mutation", async t => {
+  const f = createAcceptanceFixture();
+  t.after(() => f.store.close());
+  const plugins = f.store.agentPlugin;
+  const identity = f.store.identities.create("rollback-agent");
+  const before = plugins.keys.size;
+  // Sabotage the write-through: the pure module issues the key (Map grows),
+  // then the INSERT throws; the Map entry must be restored.
+  const realPrepare = plugins.db.prepare.bind(plugins.db);
+  plugins.db.prepare = sql => {
+    if (typeof sql === "string" && sql.includes("INSERT INTO agent_api_keys")) {
+      throw new Error("synthetic write failure");
+    }
+    return realPrepare(sql);
+  };
+  try {
+    assert.throws(() => plugins.issueApiKey({ identityId: identity.identityId, scopes: ["rooms:read"] }),
+      /synthetic write failure/);
+  } finally {
+    plugins.db.prepare = realPrepare;
+  }
+  assert.equal(plugins.keys.size, before, "the issued key was rolled back from the in-memory Map");
+  assert.equal(plugins.db.prepare("SELECT COUNT(*) AS n FROM agent_api_keys").get().n, before,
+    "no key row leaked into SQLite either");
+  // The store still works after the rollback.
+  const issued = plugins.issueApiKey({ identityId: identity.identityId, scopes: ["rooms:read"] });
+  assert.match(issued.keyId, /^rak_[A-Za-z0-9_-]+$/);
+});
