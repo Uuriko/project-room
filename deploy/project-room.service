@@ -11,7 +11,10 @@ EnvironmentFile=/etc/project-room/pilot.env
 ExecStart=/usr/bin/node /opt/project-room/current/server.mjs
 Restart=on-failure
 RestartSec=5
-TimeoutStopSec=20
+# Graceful close drains SSE streams, writes the growth snapshot, closes the
+# server and the store; give it a full minute before SIGKILL so a slow drain
+# never tears the snapshot mid-write (see audit 2026-09-17).
+TimeoutStopSec=60
 UMask=0077
 StateDirectory=project-room
 StateDirectoryMode=0700
