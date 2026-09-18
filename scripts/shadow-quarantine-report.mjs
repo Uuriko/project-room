@@ -108,7 +108,8 @@ try {
 }
 db.close();
 
-const report = shadowPrecisionReport({ decisions, reviews, now, reviewWindowMs: windowDays * 24 * 3600 * 1000 });
+const report = shadowPrecisionReport({ decisions, reviews, now,
+  reviewWindowMs: (windowDays / 14) * shadowReviewWindowMs });
 
 if (format === "json") {
   console.log(JSON.stringify(report, null, 2));
