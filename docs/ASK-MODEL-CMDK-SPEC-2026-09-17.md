@@ -6,7 +6,7 @@
 **Baseline tip:** `Uuriko/dasha-lobby` `b5fd6e1c` (#257 SSR Mac pending until network known) atop #255 quiet-shell + #246/#249  
 **LIVE:** still clobbered (Typeform) until Instinct wrangler — **still ship on tip**  
 **Companions:** box `UX-CLEAN-LESS-NOISE-2026-09-17.md` · `docs/ASK-QUIET-SHELL-V3.md` · box `GEMMA27-DEMOTE-AFTER-BONSAI.md` (dasha-lobby #258 draft)  
-**Plan refs:** T032 (this spec) · T033 (implement PR after tip live) · T071 (Speed/Mid/Quality ladder — [ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md](../research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md))
+**Plan refs:** T032 (this spec) · T033 (implement PR after tip live) · T071 (Speed/Mid/Quality ladder — [ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md](../research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md)) · T075 (picker placement — [ASK-ADVANCED-LADDER-UX-BRIEF-2026-09-18.md](../research/ASK-ADVANCED-LADDER-UX-BRIEF-2026-09-18.md))
 
 Mirror on box: `/workspace/phase0-publish/ASK-MODEL-CMDK-SPEC-2026-09-17.md`
 

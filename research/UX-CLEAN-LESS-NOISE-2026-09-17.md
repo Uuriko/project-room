@@ -63,7 +63,10 @@ runtime.
 12. **Network honesty strip**: one line `N Macs · models` expandable —
     not a capacity dashboard on Ask.
 13. **Model ladder labels**: Speed / Mid / Quality (map qwen3-4b /
-    8b+12b / bonsai) — hide raw ids until advanced.
+    8b+12b / bonsai) — hide raw ids until advanced. Placement (T075):
+    [ASK-ADVANCED-LADDER-UX-BRIEF-2026-09-18.md](ASK-ADVANCED-LADDER-UX-BRIEF-2026-09-18.md)
+    — picker in composer `#ask-model` → later `#ask-cmdk`; never a
+    model essay on the empty canvas.
 
 ### Project Room (P2 — separate product)
 
