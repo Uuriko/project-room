@@ -20,7 +20,7 @@
 // served the request, false so http.mjs can fall through to other routes.
 import { validatePluginManifest, WELL_KNOWN_PATH } from "./agent-plugin-manifest.mjs";
 import { AgentPluginError } from "./agent-plugin-store.mjs";
-import { API_KEY_SCOPES } from "./agent-api-keys.mjs";
+import { API_KEY_SCOPES, API_KEY_PREFIX } from "./agent-api-keys.mjs";
 
 // Scope vocabulary is the single source of truth in
 // server/agent-api-keys.mjs (API_KEY_SCOPES): requiredScope names below
@@ -129,6 +129,13 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
 
   // ---- Scoped API keys ----
 
+  // RC-2026-09-18-024: auth (verifyPresentedApiKey) requires the presented
+  // credential to START with the rak_ prefix, but issue/rotate hand back the
+  // raw secret without it. credential is the presentation-ready string — the
+  // exact value the agent puts in its Authorization header. secret keeps its
+  // raw shape for backward compat.
+  const withCredential = doc => ({ ...doc, credential: API_KEY_PREFIX + doc.secret });
+
   const issueKey = translate(async (req, res, { remoteAddress }) => {
     rate(`agent-key-issue:${remoteAddress}`, 20);
     const auth = ownerAuth(req);
@@ -148,7 +155,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       expiresAt: data.expiresAt ?? null,
       label: data.label ?? null,
     });
-    return json(res, 201, issued);
+    return json(res, 201, withCredential(issued));
   });
 
   const listKeys = translate(async (req, res) => {
@@ -161,7 +168,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     rate(`agent-key-${action}:${remoteAddress}`, 20);
     const auth = ownerAuth(req);
     const result = action === "rotate"
-      ? store.agentPlugin.rotateApiKey({ identityId: auth.identityId, keyId })
+      ? withCredential(store.agentPlugin.rotateApiKey({ identityId: auth.identityId, keyId }))
       : store.agentPlugin.revokeApiKey({ identityId: auth.identityId, keyId });
     return json(res, 200, result);
   });
