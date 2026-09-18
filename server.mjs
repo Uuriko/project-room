@@ -4,6 +4,7 @@ import { RoomStore } from "./server/store.mjs";
 import { createRoomServer } from "./server/http.mjs";
 import { telegramConfig } from "./server/channel-adapters/telegram-config.mjs";
 import { defaultServerArgs } from "./server/boot-options.mjs";
+import { ChannelDrainer, createChannelDrainScheduler, channelDrainLimits } from "./server/channel-drain.mjs";
 import { deploymentConfig } from "./server/deployment.mjs";
 import { createServer } from "node:http";
 import { maintenanceEnabled, maintenanceReply } from "./server/maintenance.mjs";
@@ -39,6 +40,10 @@ try {
 // a getter evaluated per request (the scheduler itself starts after listen).
 let growthScheduler = null;
 let growthIntervalMs = 0;
+// Task 9 — channel drain scheduler state. Declared before the server is
+// created so the listen callback can report its status (same as growth).
+let channelDrainScheduler = null;
+let channelDrainIntervalMs = 0;
 // Track C C14 — read-only growth HTTP surface (GET /growth/summary,
 // /growth/digest, /growth/health). Pure reads over the collector and the
 // scheduler-status getter: no emission, no mutation, no timers. Null in
@@ -49,6 +54,7 @@ const growthHttp = paused ? null : createGrowthHttp({
     ? { running: growthScheduler.isRunning(), tickCount: growthScheduler.getTickCount(), intervalMs: growthIntervalMs }
     : { running: false, tickCount: 0, intervalMs: growthIntervalMs }
 });
+const serverArgs = paused ? null : defaultServerArgs({ store, origin, streamInterval, trustedLocalProxy: production, telegram: telegramConfig(process.env), growth: growthHttp });
 const server = paused ? createServer((req, res) => {
   try {
     const url = new URL(req.url, origin);
@@ -58,7 +64,7 @@ const server = paused ? createServer((req, res) => {
     const reply = maintenanceReply(url.pathname);
     res.writeHead(reply.status, reply.headers); res.end(req.method === "HEAD" ? undefined : reply.body);
   } catch { res.writeHead(400, { "Cache-Control": "no-store" }); res.end(); }
-}) : createRoomServer(defaultServerArgs({ store, origin, streamInterval, trustedLocalProxy: production, telegram: telegramConfig(process.env), growth: growthHttp }));
+}) : createRoomServer(serverArgs);
 // Track C C11 — growth collector persistence. The snapshot lives in its own
 // JSON file next to the store file; it never touches the store schema. Any
 // failure here only costs analytics history, never boot or shutdown.
@@ -87,6 +93,9 @@ server.listen(port, host, () => {
   if (!paused) console.log(growthScheduler && growthScheduler.isRunning()
     ? `[growth] scheduler started (tick every ${growthIntervalMs}ms)`
     : "[growth] scheduler disabled");
+  if (!paused) console.log(channelDrainScheduler && channelDrainScheduler.isRunning()
+    ? `[channel-drain] scheduler started (tick every ${channelDrainIntervalMs}ms)`
+    : "[channel-drain] scheduler disabled");
 });
 // Track C C13 — growth scheduler. Drives the C12 watcher on a fixed
 // cadence and logs triggered alert hits (no delivery anywhere). Any
@@ -104,6 +113,24 @@ if (!paused) {
     console.warn(`[growth] scheduler disabled: ${error?.message ?? error}`);
   }
 }
+// Task 9 — scheduled auto-drain of pending_channel_updates. The drainer scans
+// the journal on a fixed cadence and poison-screens pending slices (both are
+// session-free); the inbox import itself stays owner-session bound until the
+// B20 system import authority exists, so slices are honestly deferred, never
+// imported. Any failure here only costs drain latency, never boot or shutdown.
+if (!paused && serverArgs.channelWebhooks) {
+  try {
+    const drainer = new ChannelDrainer({ store, webhooks: serverArgs.channelWebhooks });
+    const envInterval = process.env.CHANNEL_DRAIN_INTERVAL_MS;
+    const intervalMs = envInterval === undefined || envInterval === "" ? channelDrainLimits.intervalMs : Number(envInterval);
+    channelDrainIntervalMs = intervalMs;
+    channelDrainScheduler = createChannelDrainScheduler({ drainer, intervalMs });
+    channelDrainScheduler.start();
+  } catch (error) {
+    channelDrainScheduler = null;
+    console.warn(`[channel-drain] scheduler disabled: ${error?.message ?? error}`);
+  }
+}
 let closing = false;
 function close() {
   if (closing) return;
@@ -111,6 +138,8 @@ function close() {
   if (!paused) {
     try { growthScheduler?.stop(); }
     catch (error) { console.warn(`[growth] scheduler stop failed: ${error?.message ?? error}`); }
+    try { channelDrainScheduler?.stop(); }
+    catch (error) { console.warn(`[channel-drain] scheduler stop failed: ${error?.message ?? error}`); }
     try { saveToFile(growthSnapshotPath, growthCollector); }
     catch (error) { console.warn(`[growth] snapshot write failed: ${error?.message ?? error}`); }
   }
