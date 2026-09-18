@@ -85,6 +85,36 @@ test("agent client: presence, capabilities, and session claims end to end", asyn
     expectedRevision: 0, action: "delete_everything" }), /set_status or request_stop/);
 });
 
+test("agent client: say posts room messages and targeted DMs", async t => {
+  const { client } = await fixture(t);
+  const me = client("agent");
+  const peer = client("agent-two");
+
+  // A plain message posts and the receipt carries the journal event.
+  const receipt = await me.say("Hello room, this is agent");
+  assert.ok(Number.isSafeInteger(receipt.sequence));
+  assert.equal(receipt.event.type, "message.posted");
+  assert.equal(receipt.event.actorId, "agent");
+  assert.equal(receipt.event.data.body, "Hello room, this is agent");
+  assert.ok(typeof receipt.event.data.messageId === "string");
+
+  // Another member can read it back through the thread view.
+  const thread = await peer.messageThread(receipt.event.data.messageId);
+  assert.ok(JSON.stringify(thread).includes("Hello room, this is agent"));
+
+  // A targeted DM posts with toMemberId and stays private to the pair.
+  const dm = await me.say("Psst, agent-two", { toMemberId: "agent-two" });
+  assert.equal(dm.event.data.toMemberId, "agent-two");
+  const peerThread = await peer.messageThread(dm.event.data.messageId);
+  assert.ok(JSON.stringify(peerThread).includes("Psst, agent-two"));
+
+  // Local validation refuses bad bodies without a network call.
+  assert.throws(() => me.say(""), /1 to 4096/);
+  assert.throws(() => me.say("   "), /1 to 4096/);
+  assert.throws(() => me.say("x".repeat(4097)), /1 to 4096/);
+  assert.throws(() => me.say("hi", { toMemberId: "not an id!" }), /member id/);
+});
+
 test("agent inbox CLI exposes the autonomy primitives", async t => {
   const { origin, keys } = await fixture(t);
   const env = { ROOM_AGENT_ORIGIN: origin, ROOM_AGENT_ROOM: "commons",
@@ -108,4 +138,19 @@ test("agent inbox CLI exposes the autonomy primitives", async t => {
   assert.ok(JSON.parse(busy.stdout).sessions.some(item => item.workItemId === "auto-task" && item.worker_member_id === "agent"));
   const moved = await run(["session", "auto-task", "active"]);
   assert.equal(moved.status, 0, moved.stderr);
+  const said = await run(["say", "hello", "room", "from", "the", "cli"]);
+  assert.equal(said.status, 0, said.stderr);
+  const posted = JSON.parse(said.stdout);
+  assert.equal(posted.event.type, "message.posted");
+  assert.equal(posted.event.data.body, "hello room from the cli");
+  const threaded = await run(["thread", posted.event.data.messageId]);
+  assert.equal(threaded.status, 0, threaded.stderr);
+  assert.ok(threaded.stdout.includes("hello room from the cli"));
+  const dm = await run(["say", "--to", "agent-two", "private", "hello"]);
+  assert.equal(dm.status, 0, dm.stderr);
+  assert.equal(JSON.parse(dm.stdout).event.data.toMemberId, "agent-two");
+  for (const args of [["say"], ["say", "--to"], ["say", "--to", "agent-two"]]) {
+    const result = await run(args);
+    assert.notEqual(result.status, 0, `expected usage error for [${args.join(" ")}]`);
+  }
 });
