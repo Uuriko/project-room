@@ -78,6 +78,8 @@ optional.push("server/channel-drain.mjs"); // Task 9: scheduled drain of pending
 optional.push("server/sla-clocks.mjs"); // Task 24: per-channel SLA clocks (imported by server/inbox.mjs)
 optional.push("server/sla-urgent-notify.mjs"); // Tasks 24/34/35: SLA-breach urgent-notification producer (feed into decideNotification)
 optional.push("server/sla-sweep.mjs"); // Task 26: SLA sweep/scheduler feeding live threads into the breach producer
+optional.push("server/sla-sweep-hooks.mjs"); // Task 26: real readThreads/deliver hook wiring for the SLA sweep
+optional.push("server/sla-breach-journal.mjs"); // Task 26: durable in-app sink for SLA-breach deliver (imported by server/store.mjs)
 optional.push("server/morning-digest.mjs"); // Task 21: morning digest builder (imported by server/inbox.mjs)
 optional.push("server/digest-mode.mjs"); // Task 21: sender grouping reused by server/morning-digest.mjs
 optional.push("server/inbox-triage.mjs"); // Task 21: triage decider reused by server/morning-digest.mjs
