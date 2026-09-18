@@ -4,12 +4,17 @@
 // is needed (toggle present and collapsed), then fills the key field.
 export async function fillAccessKey(page, value) {
   const more = page.locator('#signin-more');
-  try {
-    if (await more.isVisible({ timeout: 500 }) && await more.getAttribute('aria-expanded') === 'false') {
-      await more.click();
-    }
-  } catch {
-    // No toggle on this build (or it vanished mid-check): fill as before.
+  const key = page.locator('#access-key');
+  // If the key field is already visible there is nothing to expand.
+  if (!(await key.isVisible())) {
+    // Otherwise wait for the first-paint panel, open "More sign-in options",
+    // and wait for the key field to appear — exactly as a human visitor does.
+    // (An immediate isVisible check above avoids racing a panel that has not
+    // rendered yet: checking the toggle too early used to skip the expansion
+    // and then time out filling the hidden field.)
+    await more.waitFor({ state: 'visible' });
+    await more.click();
+    await key.waitFor({ state: 'visible' });
   }
-  await page.locator('#access-key').fill(value);
+  await key.fill(value);
 }
