@@ -21,7 +21,7 @@ import { Moderation, moderationSchema, mutedEvent } from "./moderation.mjs";
 import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
-import { SpamQuarantineJournal, spamQuarantineSchema } from "./spam-quarantine-journal.mjs";
+import { SpamQuarantineJournal, spamQuarantineSchema, migrateSpamQuarantineColumns } from "./spam-quarantine-journal.mjs";
 import { QuarantineThreadSplits, quarantineThreadSplitSchema } from "./quarantine-thread-splits.mjs";
 import { SlaBreachAlertJournal, slaBreachAlertSchema } from "./sla-breach-journal.mjs";
 import { InboxHandoffJournal, inboxHandoffSchema } from "./inbox-handoff.mjs";
@@ -477,6 +477,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // IF NOT EXISTS is idempotent, no schema version bump, and the table is
       // intentionally outside the writer fence (see unfencedAdditiveTables).
       this.db.exec(spamQuarantineSchema);
+      // Gap #2 (PR #562): explicit account_id/source_id columns converge on
+      // existing databases via ALTER TABLE; old rows backfill NULL and keep
+      // reading as { accountId: null, sourceId: null }.
+      migrateSpamQuarantineColumns(this.db);
 // Quarantine thread-split records are purely additive as well:
       // IF NOT EXISTS is idempotent, no schema version bump, and the table is
       // intentionally outside the writer fence (see unfencedAdditiveTables).
