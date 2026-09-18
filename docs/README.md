@@ -54,6 +54,7 @@ this lane is docs/spec only. Pairs
 | [ROOM-DEBATE-MODE-V0.md](ROOM-DEBATE-MODE-V0.md) | Proposer vs challenger (+ optional judge) → action-plan receipt |
 | [ROOM-NEEDLE-CONFIDENCE-TRIGGERS-V0.md](ROOM-NEEDLE-CONFIDENCE-TRIGGERS-V0.md) | Needle-shaped tool honesty — `confidence` + `suppressed_calls`, trigger regex, ladder as leases; not an Ask chat model |
 | [ASK-QUIET-SHELL-V3.md](ASK-QUIET-SHELL-V3.md) | Ask quiet-shell P0 — chrome ≤15%, model in composer, hover actions; tip #246/#249 must deploy first |
+| [ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md](../research/ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md) | T086 — Ask Export thread format (cite T044 #496); markdown download vs copy; headers / model / receipt lines that ship |
 | [ASK-MODEL-CMDK-SPEC-2026-09-17.md](ASK-MODEL-CMDK-SPEC-2026-09-17.md) | Ask ⌘K / slash model menu — Speed / Mid / Quality whisper pill (T032; implement T033) |
 | [ASK-REGEN-ALT-MODEL-SPEC-2026-09-18.md](ASK-REGEN-ALT-MODEL-SPEC-2026-09-18.md) | T042 — hover Regen with… another Community / Hosted ladder model; keep A4 truncate |
 | [ASK-CONTINUE-AFTER-STOP-SPEC-2026-09-18.md](ASK-CONTINUE-AFTER-STOP-SPEC-2026-09-18.md) | T043 — hover Continue after Stop; append, do not duplicate the partial |
@@ -96,6 +97,8 @@ Ask ladder Advanced grouping + network honesty line (T071+T072, research; Advanc
 Ask vs Provide surface boundary (T074, research; Ask never hosts Provide / Host / Marketplace / capacity dash / providers table; cite #268/#270/#255 tip canaries; T073 lobby canary spinning):
 [ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md](../research/ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md).
 Ask quiet-shell follow-ons (T044–T046, distinct from Artifacts-lite / regen / Bonsai RAM): [research/ask/](../research/ask/).
+Ask Export thread format (T086, research; cite T044 #496; markdown download vs copy; headers / model / receipt lines that ship):
+[ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md](../research/ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md).
 Ask Advanced ladder UX brief (T075, research; Speed/Mid/Quality picker placement; never dump a model essay on the empty canvas; cross-link #518):
 [ASK-ADVANCED-LADDER-UX-BRIEF-2026-09-18.md](../research/ASK-ADVANCED-LADDER-UX-BRIEF-2026-09-18.md).
 Ask Stop / Regen / Copy / Edit keyboard shortcuts (T082, research; cite Ask v2 #249 + quiet-shell §3.4; picker keys stay T032; no empty-canvas cheatsheet):

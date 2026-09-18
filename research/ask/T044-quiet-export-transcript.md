@@ -4,7 +4,7 @@
 **Product:** getdasha.com/compute **Ask** (not Room)  
 **Status:** Spec ready · implement deferred · docs-only  
 **Plan refs:** T044 (this spec) · implement on `Uuriko/dasha-lobby` after quiet-shell tip is live  
-**Companions:** [ASK-QUIET-SHELL-V3.md](../../docs/ASK-QUIET-SHELL-V3.md) · [T045](T045-receipt-collapse.md) · [T046](T046-no-midstream-toks.md) · [ASK-MODEL-CMDK-SPEC-2026-09-17.md](../../docs/ASK-MODEL-CMDK-SPEC-2026-09-17.md) · T084 New confirm ([ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md](../ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md))
+**Companions:** [ASK-QUIET-SHELL-V3.md](../../docs/ASK-QUIET-SHELL-V3.md) · [T045](T045-receipt-collapse.md) · [T046](T046-no-midstream-toks.md) · [ASK-MODEL-CMDK-SPEC-2026-09-17.md](../../docs/ASK-MODEL-CMDK-SPEC-2026-09-17.md) · T084 New confirm ([ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md](../ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md)) · T086 thread format ([ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md](../ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md) — MD download vs copy; headers / model / receipt lines)
 
 Ask is Compute’s chat door. Compute ≠ Room. No Typeform `Start.` / `Do.` return.
 
@@ -108,7 +108,7 @@ Readable thread:
 - Fence assistant markdown as-is. Do not re-render HTML.
 - Filename: `ask-transcript-YYYYMMDD.md`.
 
-One-word confirmation on the control: **Copied** is for per-turn Copy. Export may flash **Saved** (or the browser download UI). No toast stack. No honesty lecture.
+One-word confirmation on the control: **Copied** is for per-turn Copy. Export may flash **Saved** (or the browser download UI). No toast stack. No honesty lecture. Format bank (which header / model / receipt lines ship): [T086](../ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md).
 
 ---
 
