@@ -1983,7 +1983,7 @@ paths:
                 label: { type: string }
                 expiresAt: { type: integer, description: "positive integer ms epoch" }
       responses:
-        '201': { description: "{ keyId, secret (shown once), scopes, label, expiresAt, createdAt }" }
+        '201': { description: "{ keyId, secret (shown once), credential ('rak_'+secret — the exact Authorization-header value to present), scopes, label, expiresAt, createdAt, next: scope-filtered next steps (publish-card / subscribe-webhooks / read-directory / read-manifest with method+path) }" }
         '401': { description: unauthenticated (unknown identity secret; scoped keys cannot issue) }
         '422': { description: invalid_api_key_request }
         '429': { description: rate_limited }
@@ -2010,7 +2010,7 @@ paths:
         - { name: keyId, in: path, required: true, schema: { type: string } }
         - { name: action, in: path, required: true, schema: { type: string, enum: [rotate, revoke] } }
       responses:
-        '200': { description: "rotate: the rotated record with the new secret (shown once); revoke: { keyId, revoked: true }" }
+        '200': { description: "rotate: the rotated record with the new secret (shown once), presentation-ready credential ('rak_'+secret), and scope-filtered next[]; revoke: { keyId, revoked: true }" }
         '401': { description: unauthenticated }
         '404': { description: unknown_key }
         '429': { description: rate_limited }
