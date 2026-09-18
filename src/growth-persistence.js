@@ -13,6 +13,7 @@
 import { mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
+import process from "node:process";
 import { createCollector } from "./growth-collector.js";
 import { validateEvent } from "./growth-events.js";
 
