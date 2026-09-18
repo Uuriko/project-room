@@ -54,6 +54,9 @@ this lane is docs/spec only. Pairs
 | [ROOM-DEBATE-MODE-V0.md](ROOM-DEBATE-MODE-V0.md) | Proposer vs challenger (+ optional judge) → action-plan receipt |
 | [ROOM-NEEDLE-CONFIDENCE-TRIGGERS-V0.md](ROOM-NEEDLE-CONFIDENCE-TRIGGERS-V0.md) | Needle-shaped tool honesty — `confidence` + `suppressed_calls`, trigger regex, ladder as leases; not an Ask chat model |
 | [ASK-QUIET-SHELL-V3.md](ASK-QUIET-SHELL-V3.md) | Ask quiet-shell P0 — chrome ≤15%, model in composer, hover actions; tip #246/#249 must deploy first |
+| [ASK-MODEL-CMDK-SPEC-2026-09-17.md](ASK-MODEL-CMDK-SPEC-2026-09-17.md) | Ask ⌘K / slash model menu — Speed / Mid / Quality whisper pill (T032; implement T033) |
+| [ASK-REGEN-ALT-MODEL-SPEC-2026-09-18.md](ASK-REGEN-ALT-MODEL-SPEC-2026-09-18.md) | T042 — hover Regen with… another Community / Hosted ladder model; keep A4 truncate |
+| [ASK-CONTINUE-AFTER-STOP-SPEC-2026-09-18.md](ASK-CONTINUE-AFTER-STOP-SPEC-2026-09-18.md) | T043 — hover Continue after Stop; append, do not duplicate the partial |
 | [ASK-ARTIFACTS-LITE-2026-09-18.md](../research/ASK-ARTIFACTS-LITE-2026-09-18.md) | Ask Artifacts-lite P0 — collapse long fences → opt-in side/bottom panel (research; implement later on dasha-lobby) |
 | [examples/scorers/](examples/scorers/) | Default scorer stubs (task-compliance, efficiency, procedure-compliance, people-data-safe, orphan-claim) |
 | [ROOM-KITS-CATALOG.md](ROOM-KITS-CATALOG.md) | Optional later rows only — not live doors |
