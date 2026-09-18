@@ -26,8 +26,12 @@ Docs only. No people-data. First slice `die-packet-brief-status`.
 | [DIE-CLAY-APOLLO-GAP-2026-09-18.md](DIE-CLAY-APOLLO-GAP-2026-09-18.md) | Clay/Apollo **company-only** gap map; honesty **28/100** Clay company tables; Apollo people NEVER; firmographics bridge exists locally (docs only; no people-data) |
 | [DIE-DEMIGOD-OPTIMIZE-PLAN-2026-09-18.md](DIE-DEMIGOD-OPTIMIZE-PLAN-2026-09-18.md) | DIE+Demigod optimize plan: Wave 1 ATS/techStack/auto-ticket; Wave 2 opt-in/dual-yes; Wave 3 Lightfield measure; no people-data |
 | [DUAL-YES-CONSENT-2026-09-18.md](DUAL-YES-CONSENT-2026-09-18.md) | Dual-yes consent ledger (local SoR); Lightfield SYNTHETIC `intro_unlocked`; opaque handleRef only; no people CRM |
-| [OPT-IN-FORM-SHIP-PLAN-2026-09-18.md](OPT-IN-FORM-SHIP-PLAN-2026-09-18.md) | trydemigod first-party opt-in form ship plan; FIRST_PARTY write path; **not deployed** (docs only) |
+| [OPT-IN-FORM-SHIP-PLAN-2026-09-18.md](OPT-IN-FORM-SHIP-PLAN-2026-09-18.md) | trydemigod first-party opt-in form; Worker/static path stub; FIRST_PARTY **empty** (`live: false`); **not deployed** |
 | [DIE-DEMIGOD-WAVE2-PROGRESS-2026-09-18.md](DIE-DEMIGOD-WAVE2-PROGRESS-2026-09-18.md) | Wave 2 START: dual-yes + Gmail draft.create dry-run (0 live API) + opt-in plan; honesty ~47/100; W1 openRoles 16 / techStack 15 / catalog 40 |
+| [DIE-DEMIGOD-WAVE3-PROGRESS-2026-09-18.md](DIE-DEMIGOD-WAVE3-PROGRESS-2026-09-18.md) | Wave 3 land: MATCH_STATES proposals (`dieSoRMutation: false`); Stripe draft→`finalize_local`; `send_invoice` blocked; honesty ~55/100; Lightfield measure pending; cron never-run |
+| [MATCH-STATE-PROPOSALS-2026-09-18.md](MATCH-STATE-PROPOSALS-2026-09-18.md) | W3.3 local MATCH_STATES proposals only; `status=proposed`; never live DIE SoR |
+| [STRIPE-INVOICE-KILL-SWITCH-2026-09-18.md](STRIPE-INVOICE-KILL-SWITCH-2026-09-18.md) | W3.2 local invoice draft→`finalize_local`; `send_invoice` stays blocked; no live Stripe |
+| [WATCHLIST-OBSERVE-NEVER-RUN-2026-09-18.md](WATCHLIST-OBSERVE-NEVER-RUN-2026-09-18.md) | Observe CLI ≠ cron; routine `demigod-watchlist-observe` never-run until first scheduled 9:25 PT fire |
 
 ## Research index
 
