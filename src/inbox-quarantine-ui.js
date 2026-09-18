@@ -71,8 +71,94 @@ export function installQuarantineReview({ api, ownerKey }) {
     const status = document.createElement("p"); status.id = "inbox-quarantine-status-line"; status.className = "form-hint"; status.setAttribute("role", "status");
     const list = document.createElement("div"); list.id = "inbox-quarantine-list";
     el.append(header, status, list);
+    // Review-coverage dashboard (GET /api/inbox/quarantine/coverage): the
+    // per-signal coverage panel rides inside the review section, above the
+    // held list, so it refreshes and resets with the review surface.
+    el.prepend(coverageSection());
     $("#inbox-connections").before(el);
     return el;
+  }
+  const pct = r => r === null ? "—" : `${Math.round(r * 100)}%`;
+  // Review-coverage dashboard panel: account totals plus one row per signal
+  // that fired on a held row, least-covered first (the server sorts). The
+  // coverage-gap list calls out signals firing on live holds with no owner
+  // verdict yet. Read-only; no PII beyond the signal keys the review list
+  // already shows.
+  function coverageSection() {
+    let el = $("#inbox-quarantine-coverage");
+    if (el) return el;
+    el = document.createElement("section");
+    el.id = "inbox-quarantine-coverage"; el.className = "inbox-quarantine-coverage"; el.setAttribute("aria-label", "Review coverage");
+    const header = document.createElement("header"); header.className = "inbox-quarantine-header";
+    const heading = document.createElement("h2"); heading.className = "form-hint"; heading.textContent = "Review coverage";
+    const reload = document.createElement("button"); reload.type = "button"; reload.className = "button ghost";
+    reload.textContent = "↻"; reload.setAttribute("aria-label", "Refresh review coverage");
+    reload.addEventListener("click", () => { if (owns() && !reload.disabled) refreshCoverage(); });
+    header.append(heading, reload);
+    const summary = document.createElement("p"); summary.id = "inbox-quarantine-coverage-summary"; summary.className = "form-hint";
+    const gap = document.createElement("p"); gap.id = "inbox-quarantine-coverage-gap"; gap.className = "inbox-quarantine-warning"; gap.hidden = true;
+    const table = document.createElement("table"); table.id = "inbox-quarantine-coverage-table"; table.className = "inbox-quarantine-coverage-table";
+    el.append(header, summary, gap, table);
+    return el;
+  }
+  function coverageRow(signal) {
+    const row = document.createElement("tr");
+    const cell = value => { const td = document.createElement("td"); td.textContent = value; return td; };
+    const key = document.createElement("th"); key.scope = "row"; key.textContent = signal.key;
+    row.append(key,
+      cell(String(signal.held)), cell(String(signal.reviewed)), cell(pct(signal.reviewCoverage)),
+      cell(String(signal.confirmed)), cell(String(signal.dismissed)), cell(String(signal.split)),
+      cell(signal.avgScore === null ? "—" : String(signal.avgScore)));
+    return row;
+  }
+  function renderCoverage(report) {
+    coverageSection();
+    const t = report.totals;
+    const summary = $("#inbox-quarantine-coverage-summary");
+    if (t.total === 0) {
+      summary.textContent = "No quarantined messages yet — nothing to measure coverage over.";
+    } else {
+      summary.textContent = `${t.held} held · ${t.reviewed} reviewed of ${t.total} total · ${pct(t.reviewCoverage)} coverage — `
+        + `${t.confirmed} confirmed, ${t.dismissed} dismissed, ${t.split} split.`;
+    }
+    const gap = $("#inbox-quarantine-coverage-gap");
+    if (report.zeroCoverageSignals.length) {
+      gap.hidden = false;
+      gap.textContent = `Coverage gap: no owner verdict yet on live holds carrying ${report.zeroCoverageSignals.join(", ")}.`;
+    } else {
+      gap.hidden = true; gap.textContent = "";
+    }
+    const table = $("#inbox-quarantine-coverage-table");
+    table.replaceChildren();
+    if (report.perSignal.length) {
+      const head = document.createElement("tr");
+      for (const label of ["Signal", "Held", "Reviewed", "Coverage", "Confirmed", "Dismissed", "Split", "Avg score"]) {
+        const th = document.createElement("th"); th.scope = "col"; th.textContent = label; head.append(th);
+      }
+      const thead = document.createElement("thead"); thead.append(head);
+      const tbody = document.createElement("tbody");
+      tbody.append(...report.perSignal.map(coverageRow));
+      table.append(thead, tbody);
+      table.hidden = false;
+    } else {
+      table.hidden = true;
+    }
+  }
+  async function refreshCoverage(turn = epoch) {
+    const el = coverageSection();
+    if (!owns()) return;
+    const reload = el.querySelector("header button");
+    reload.disabled = true;
+    try {
+      const report = await api.quarantineCoverage();
+      if (!owns() || turn !== epoch) return;
+      renderCoverage(report);
+    } catch (error) {
+      if (owns() && turn === epoch)
+        text("#inbox-quarantine-status-line", "Couldn’t load review coverage. Try again.");
+    } finally {
+      if (owns() && turn === epoch) reload.disabled = false;
+    }
   }
   function scoreBadge(score) {
     const badge = document.createElement("span");
@@ -178,6 +264,10 @@ export function installQuarantineReview({ api, ownerKey }) {
     const status = $("#inbox-quarantine-status").value;
     const reload = el.querySelector("header button");
     if (!silent) { reload.disabled = true; text("#inbox-quarantine-status-line", "Loading…"); }
+    // The coverage panel refreshes with the review list, so a Confirm /
+    // Dismiss / Split lands in the numbers on the same pass. It reads its
+    // own endpoint; a failure there must not break the review list.
+    refreshCoverage(turn);
     try {
       const result = await api.quarantine({ status });
       if (!owns() || turn !== epoch) return;

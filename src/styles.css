@@ -752,6 +752,13 @@ summary { overflow-wrap: anywhere; }
 .inbox-quarantine-actions { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
 .inbox-quarantine-note { width: 100%; box-sizing: border-box; font: inherit; font-size: .85rem; padding: .4rem .5rem; border: 1px solid var(--line); border-radius: .4rem; }
 .inbox-quarantine-warning { font-size: .8rem; color: var(--warn, #a35b00); }
+.inbox-quarantine-coverage { margin-bottom: .75rem; border: 1px solid var(--line); border-radius: .5rem; padding: .6rem .7rem; display: grid; gap: .4rem; }
+.inbox-quarantine-coverage p { margin: 0; }
+#inbox-quarantine-coverage-summary:empty { display: none; }
+.inbox-quarantine-coverage-table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+.inbox-quarantine-coverage-table th, .inbox-quarantine-coverage-table td { text-align: left; padding: .25rem .4rem; border-top: 1px solid var(--line); }
+.inbox-quarantine-coverage-table thead th { color: var(--muted); font-weight: 600; border-top: 0; }
+.inbox-quarantine-coverage-table[hidden] { display: none; }
 #inbox-attention-count:empty { display: none; }
 #inbox-attention-count { font-size: .8rem; color: var(--muted); }
 .inbox-add-connection { margin: .75rem .75rem 0; font-size: .85rem; }

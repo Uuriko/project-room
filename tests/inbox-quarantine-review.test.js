@@ -323,6 +323,11 @@ function harnessResponse(path) {
   if (path === "/api/inbox/quarantine/split") return { contractVersion: 1, viewer,
     split: { quarantineId: "qz-1", accountId: "owner", sourceId: "src-qz-1", channel: "telegram", priorThread: null, reviewer: "owner", reason: null, splitAt: 1 },
     item: item("qz-1") };
+  if (path === "/api/inbox/quarantine/coverage") return { contractVersion: 1, viewer, generatedAt: 1,
+    totals: { held: 2, confirmed: 0, dismissed: 0, split: 0, reviewed: 0, total: 2, reviewCoverage: 0 },
+    zeroCoverageSignals: ["k"],
+    perSignal: [{ key: "k", held: 2, confirmed: 0, dismissed: 0, reviewed: 0, split: 0, total: 2,
+      reviewCoverage: 0, shareOfHolds: 1, avgScore: 80, avgWeight: 80 }] };
   throw new Error("unexpected path " + path);
 }
 
@@ -351,6 +356,26 @@ test("quarantine client validates release, dismiss and split responses", async (
     viewer: { accountId: "owner", authEpoch: 2, sessionBinding: "b".repeat(64), sessionRevision: 4 },
     status: "held", counts: { held: 1, released: 0, dismissed: 0 }, items: [{ id: "qz-x" }] });
   await assert.rejects(new InboxClient(bad.account).quarantine({}),
+    error => error.code === "invalid_inbox_response");
+});
+
+test("quarantine client validates the coverage dashboard response", async () => {
+  const { account, calls } = clientHarness();
+  const client = new InboxClient(account);
+  const report = await client.quarantineCoverage();
+  assert.equal(report.totals.total, 2);
+  assert.equal(report.totals.reviewCoverage, 0);
+  assert.deepEqual(report.zeroCoverageSignals, ["k"]);
+  assert.equal(report.perSignal[0].key, "k");
+  assert.equal(calls[0].path, "/api/inbox/quarantine/coverage");
+  // An out-of-range coverage ratio is rejected, not rendered.
+  const bad = clientHarness();
+  bad.account.request = async () => ({ contractVersion: 1,
+    viewer: { accountId: "owner", authEpoch: 2, sessionBinding: "b".repeat(64), sessionRevision: 4 },
+    generatedAt: 1,
+    totals: { held: 2, confirmed: 0, dismissed: 0, split: 0, reviewed: 0, total: 2, reviewCoverage: 2 },
+    zeroCoverageSignals: [], perSignal: [] });
+  await assert.rejects(new InboxClient(bad.account).quarantineCoverage(),
     error => error.code === "invalid_inbox_response");
 });
 
