@@ -76,6 +76,7 @@ optional.push("server/account-passkeys.mjs"); // Passkey auth wiring (slice 5; i
 optional.push("src/passkey-login.mjs"); // WebAuthn logic (imported by server/account-passkeys.mjs)
 optional.push("server/magic-links.mjs"); // Magic-link mail sender seam (imported by server/http.mjs)
 optional.push("src/password-auth.mjs"); // Email+password crypto (imported by server/http.mjs, slice 2)
+optional.push("src/account-settings-ui.js"); // Sign-in & security settings UI (imported by src/app.js, slice 7)
 optional.push("server/room-export-html.mjs");
 optional.push("server/access-review.mjs");
 optional.push("server/access-requests.mjs", "server/identity-ratelimit.mjs");
