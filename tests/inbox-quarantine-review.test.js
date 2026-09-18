@@ -161,9 +161,17 @@ test("split separates the held message off its thread and the row stays held", t
   assert.equal(result.split.reason, "own thread");
   assert.equal(result.item.status, "held", "split is a thread action, not a verdict");
   throwsCode(() => f.store.inbox.quarantineSplit(token, binding, { quarantineId: hold1.id }), 409, "quarantine_already_split");
+  // Visibility enforcement (policy §1: held is held out of the main inbox):
+  // the split source is still held, so it must not appear in the thread
+  // view — the split grouping only becomes visible once the owner releases
+  // it, as its own singleton thread.
+  const whileHeld = f.store.inbox.threads(token, binding, { includeChannels: true });
+  assert.equal(whileHeld.threads.find(th => th.entries.some(e => e.source.id === first.sourceId)),
+    undefined, "held source is hidden from threads even after a split");
+  f.store.inbox.quarantineRelease(token, binding, { quarantineId: hold1.id });
   const threads = f.store.inbox.threads(token, binding, { includeChannels: true });
   const splitThread = threads.threads.find(th => th.entries.some(e => e.source.id === first.sourceId));
-  assert.ok(splitThread, "split source still appears in threads");
+  assert.ok(splitThread, "released split source appears in threads again");
   assert.equal(splitThread.entries.length, 1, "split source is a singleton thread");
 });
 
