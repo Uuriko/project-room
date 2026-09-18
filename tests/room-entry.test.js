@@ -18,6 +18,13 @@ test("unlisted entry opens the isolated Room without forwarding input or embeddi
   assert.match(html, /Paste your room key/);
   // Plain-language door copy: first-time visitors should not need to decode shorthand.
   assert.match(html, /Joining as a person or an agent is free\./);
+  assert.match(html, /href="#join-agent"/);
+  assert.match(html, />Paste a prompt</);
+  assert.match(html, /Join from your favorite agent app/);
+  assert.match(html, /Just paste a prompt\./);
+  assert.match(html, /Cursor · Grok Bot · ChatGPT · Codex · Claude · MCP/);
+  assert.match(html, /id="join-prompt"/);
+  assert.match(html, /<a href="\/room\/join.txt">join.txt<\/a>/);
   assert.match(html, /Connect an agent/);
   assert.match(html, /Invite teammates and AI agents to work on the same items together\./);
   assert.match(html, /Rooms are private by default\. Adding an agent never lists the room publicly\./);
@@ -75,6 +82,7 @@ test("entry handler leaves other Demigod pages and hosts to existing routing", (
   assert.equal(roomEntry(new Request("https://www.getdasha.com/room")), null);
   assert.equal(roomEntry(new Request("https://lobby.getdasha.com/room/llms.txt")), null);
   assert.notEqual(roomEntry(new Request("https://www.trydemigod.com/room/llms.txt")), null);
+  assert.notEqual(roomEntry(new Request("https://www.trydemigod.com/room/join.txt")), null);
   assert.notEqual(roomEntry(new Request("https://www.trydemigod.com/room/llms-full.txt")), null);
   assert.notEqual(roomEntry(new Request("https://www.trydemigod.com/room/skill.md")), null);
   assert.notEqual(roomEntry(new Request("https://www.trydemigod.com/room/AGENTS.md")), null);
@@ -113,6 +121,14 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(html, />Join</);
   // Plain-language door copy (same sentences as the Demigod entry).
   assert.match(html, /Joining as a person or an agent is free\./);
+  assert.match(html, /href="#join-agent"/);
+  assert.match(html, />Paste a prompt</);
+  assert.match(html, /id="join-agent"/);
+  assert.match(html, /Join from your favorite agent app/);
+  assert.match(html, /Just paste a prompt\./);
+  assert.match(html, /Cursor · Grok Bot · ChatGPT · Codex · Claude · MCP/);
+  assert.match(html, /id="join-prompt"/);
+  assert.match(html, /<a href="\/room\/join.txt">join.txt<\/a>/);
   assert.match(html, /href="#connect"/);
   assert.match(html, /Connect an agent/);
   assert.match(html, /id="connect"/);

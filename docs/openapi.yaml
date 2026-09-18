@@ -2231,6 +2231,26 @@ paths:
         '403': { description: insufficient_scope }
         '404': { description: unknown_subscription }
         '429': { description: rate_limited }
+  /api/agent-webhooks/{subscriptionId}/deliveries:
+    get:
+      summary: Read a webhook subscription's delivery journal
+      description: >-
+        Credential: the `pri_` identity secret or a `rak_` API key with the
+        `webhooks:manage` scope. Only the subscribing identity can read its
+        own journal; cross-identity reads are 404 `unknown_subscription`.
+        Entries carry deliveryId, eventType, state (pending/delivered/failed),
+        attempts, error, createdAt — never secrets or signatures. 120 per
+        address per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: subscriptionId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: "{ subscriptionId, deliveries: [{ deliveryId, eventType, state, attempts, error, createdAt }] }" }
+        '401': { description: unauthenticated }
+        '403': { description: insufficient_scope }
+        '404': { description: unknown_subscription }
+        '429': { description: rate_limited }
   /api/access-requests/{id}:
     get:
       summary: Check an access request's status

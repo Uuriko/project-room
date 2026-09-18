@@ -385,6 +385,10 @@ test("subscribe/list/unsubscribe roundtrip; server secret shown once", async t =
   assert.equal(sub.agentId, identity.identityId);
   assert.deepEqual(sub.events, ["message.posted", "work.completed"]);
   assert.ok(typeof sub.secret === "string" && sub.secret.length >= 16, "server-generated signing secret shown once");
+  // RC-2026-09-18-039: the 201 names the secret's job and the debugging path.
+  assert.deepEqual(sub.next.map(n => n.action), ["store-secret", "verify-deliveries", "check-journal"]);
+  assert.ok(sub.next[0].description.includes("exactly once"));
+  assert.ok(sub.next[2].path.includes(`/api/agent-webhooks/${sub.subscriptionId}/deliveries`));
   assert.equal(sub.deliveries, 0);
 
   // A caller-supplied secret is never echoed back.
@@ -392,6 +396,9 @@ test("subscribe/list/unsubscribe roundtrip; server secret shown once", async t =
   const supplied = await (await post(origin, "/api/agent-webhooks",
     { url: "https://hooks.example.test/other", events: ["*"], secret: ownSecret }, identity.secret)).json();
   assert.ok(!("secret" in supplied), "caller-supplied secret is not echoed");
+  // RC-2026-09-18-039: with a caller-supplied secret there is nothing to store,
+  // so next[] skips store-secret.
+  assert.deepEqual(supplied.next.map(n => n.action), ["verify-deliveries", "check-journal"]);
 
   const listed = await (await get(origin, "/api/agent-webhooks", identity.secret)).json();
   assert.equal(listed.subscriptions.length, 2);
@@ -404,6 +411,42 @@ test("subscribe/list/unsubscribe roundtrip; server secret shown once", async t =
   assert.deepEqual(await unsubscribed.json(), { subscriptionId: sub.subscriptionId, unsubscribed: true });
   assert.deepEqual((await (await get(origin, "/api/agent-webhooks", identity.secret)).json()).subscriptions.map(s => s.subscriptionId),
     [supplied.subscriptionId]);
+});
+
+test("delivery journal is readable by the owning identity; cross-identity reads 404", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const identity = f.store.identities.create("hook-journal");
+  const other = f.store.identities.create("hook-journal-other");
+
+  const subscribed = await post(origin, "/api/agent-webhooks",
+    { url: "https://hooks.example.test/agent", events: ["message.posted"] }, identity.secret);
+  assert.equal(subscribed.status, 201);
+  const { subscriptionId } = await subscribed.json();
+
+  // No auth, wrong identity, unknown id.
+  assert.equal((await get(origin, `/api/agent-webhooks/${subscriptionId}/deliveries`)).status, 401);
+  assert.equal(await errorCode(await get(origin, `/api/agent-webhooks/${subscriptionId}/deliveries`, other.secret)), "unknown_subscription");
+  assert.equal(await errorCode(await get(origin, "/api/agent-webhooks/sub_missing/deliveries", identity.secret)), "unknown_subscription");
+
+  // Empty journal reads clean.
+  const empty = await (await get(origin, `/api/agent-webhooks/${subscriptionId}/deliveries`, identity.secret)).json();
+  assert.equal(empty.subscriptionId, subscriptionId);
+  assert.deepEqual(empty.deliveries, []);
+
+  // Server-side dispatch writes journal entries the owner can read.
+  const delivery = f.store.agentPlugin.buildWebhookDelivery(subscriptionId, { eventType: "message.posted", data: { messageId: "m1" } });
+  f.store.agentPlugin.recordWebhookAttempt(delivery.deliveryId, { ok: false, error: "connection refused" });
+  const journal = await (await get(origin, `/api/agent-webhooks/${subscriptionId}/deliveries`, identity.secret)).json();
+  assert.equal(journal.deliveries.length, 1);
+  const entry = journal.deliveries[0];
+  assert.equal(entry.deliveryId, delivery.deliveryId);
+  assert.equal(entry.eventType, "message.posted");
+  assert.equal(entry.state, "failed");
+  assert.equal(entry.attempts, 1);
+  assert.equal(entry.error, "connection refused");
+  assert.ok(!("secret" in entry) && !("signature" in entry) && !("url" in entry),
+    "journal entries never carry secrets, signatures, or the endpoint URL");
 });
 
 test("webhook validation and cross-identity isolation", async t => {

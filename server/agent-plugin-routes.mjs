@@ -39,6 +39,7 @@ const requiredScope = name => {
 
 const KEY_ACTION_ROUTE = /^\/api\/agent-keys\/(rak_[A-Za-z0-9_-]{1,64})\/(rotate|revoke)$/;
 const SUBSCRIPTION_ROUTE = /^\/api\/agent-webhooks\/([A-Za-z0-9_-]{1,64})$/;
+const SUBSCRIPTION_DELIVERIES_ROUTE = /^\/api\/agent-webhooks\/([A-Za-z0-9_-]{1,64})\/deliveries$/;
 const CARD_ROUTE = /^\/api\/agent-directory\/cards\/([A-Za-z0-9_-]{1,120})$/;
 const PUBLIC_CARD_ROUTE = /^\/api\/agents\/directory\/([a-z][a-z0-9-]{0,119})$/;
 
@@ -339,14 +340,43 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       secret: data.secret ?? null,
     });
     // A server-generated signing secret is shown exactly once here; a
-    // caller-supplied one is never echoed back.
-    return json(res, 201, secretShownOnce ? { ...subscription, secret: secretShownOnce } : subscription);
+    // caller-supplied one is never echoed back. RC-2026-09-18-039: the
+    // response names the secret's job — store it now, verify HMAC on
+    // inbound deliveries, and check the journal for failures.
+    const subscribeNext = (subscriptionId, hasSecret) => {
+      const steps = [
+        Object.freeze({ action: "verify-deliveries", description:
+          "Verify inbound deliveries with HMAC-SHA256 over the payload using this subscription's signing secret." }),
+        Object.freeze({ action: "check-journal", method: "GET",
+          path: `/api/agent-webhooks/${encodeURIComponent(subscriptionId)}/deliveries`,
+          description: "Read the per-subscription delivery journal: delivery states (pending/delivered/failed), attempts, and errors." }),
+      ];
+      if (hasSecret) {
+        steps.unshift(Object.freeze({ action: "store-secret",
+          description: "Store this signing secret NOW — it is shown exactly once and never returned again. Losing it means recreating the subscription." }));
+      }
+      return Object.freeze(steps);
+    };
+    const responseBody = secretShownOnce
+      ? { ...subscription, secret: secretShownOnce, next: subscribeNext(subscription.subscriptionId, true) }
+      : { ...subscription, next: subscribeNext(subscription.subscriptionId, false) };
+    return json(res, 201, responseBody);
   });
 
   const unsubscribeWebhook = translate(async (req, res, { remoteAddress, subscriptionId }) => {
     rate(`agent-webhook-unsubscribe:${remoteAddress}`, 20);
     const auth = agentAuth(req, requiredScope("webhooks:manage"));
     return json(res, 200, store.agentPlugin.unsubscribeWebhook({ identityId: auth.identityId, subscriptionId }));
+  });
+
+  // RC-2026-09-18-038: the per-subscription delivery journal over HTTP so an
+  // agent can debug its own failing endpoint. Journal entries are
+  // secret-safe; cross-identity reads 404 like unsubscribe.
+  const webhookDeliveries = translate(async (req, res, { remoteAddress, subscriptionId }) => {
+    rate(`agent-webhook-deliveries:${remoteAddress}`, 120);
+    const auth = agentAuth(req, requiredScope("webhooks:manage"));
+    return json(res, 200, { subscriptionId,
+      deliveries: store.agentPlugin.webhookJournalFor({ identityId: auth.identityId, subscriptionId }) });
   });
 
   return async function handleAgentPluginRoutes(req, res, { url, remoteAddress }) {
@@ -367,6 +397,8 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     if (pathname === "/api/agent-webhooks" && method === "POST") { await subscribeWebhook(req, res, { remoteAddress }); return true; }
     const subMatch = method === "DELETE" ? SUBSCRIPTION_ROUTE.exec(pathname) : null;
     if (subMatch) { await unsubscribeWebhook(req, res, { remoteAddress, subscriptionId: subMatch[1] }); return true; }
+    const deliveriesMatch = method === "GET" ? SUBSCRIPTION_DELIVERIES_ROUTE.exec(pathname) : null;
+    if (deliveriesMatch) { await webhookDeliveries(req, res, { remoteAddress, subscriptionId: deliveriesMatch[1] }); return true; }
     return false;
   };
 }

@@ -484,6 +484,18 @@ export class AgentPluginStore {
     return this.store.readTransaction(() => this.webhooks.journal(subscriptionId));
   }
 
+  // RC-2026-09-18-038: identity-scoped journal read. Cross-identity reads
+  // 404 like unsubscribe — an agent never learns another's deliveries.
+  webhookJournalFor({ identityId, subscriptionId }) {
+    return this.store.readTransaction(() => {
+      const row = this.db.prepare("SELECT agent_id FROM agent_webhook_subs WHERE subscription_id=?").get(subscriptionId);
+      if (!row || row.agent_id !== identityId) {
+        throw new AgentPluginError(404, "unknown_subscription", `Unknown subscription "${subscriptionId}"`);
+      }
+      return this.webhooks.journal(subscriptionId);
+    });
+  }
+
   persistJournal(subscriptionId) {
     const sub = this.subs.get(subscriptionId);
     if (!sub) return;
