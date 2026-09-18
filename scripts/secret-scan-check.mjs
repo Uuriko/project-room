@@ -42,6 +42,7 @@ const ALLOWLIST = [
   /randomBytes\(/, // runtime-generated: `randomBytes(32).toString("base64url")`
   /\btokens\.get\(/, // `token = tokens.get(tokenId)` — Map lookup, not a secret
   /BASE32_ALPHABET\s*=/, // TOTP alphabet constant
+  /GSM7_BASIC\s*=\s*"/, // GSM-7 SMS alphabet constant (server/sms-outbound.mjs) — character set for segmentation accounting, not a secret
   /github\.com\/Uuriko\/[A-Za-z0-9_.-]+\/(pull|issues)\/\d+/, // repo PR/issue URLs (evidence links)
   /\/blob\/main\/docs\//, // docs URLs in discovery configs
   /^\s*secret:\s*<redacted>\s*$/, // literally redacted values

@@ -85,7 +85,6 @@ export function normalizeSmsWebhook(connection, payload) {
   requireContract(object(payload) && typeof payload.MessageSid === "string", "invalid_sms_update");
   const from = phone(payload.From), to = phone(payload.To), messageSid = sid(payload.MessageSid);
   const messageId = to + ":" + messageSid;
-  const info = concatenationInfo(payload);
   return createSmsEnvelope({ connection,
     message: { id: messageId, revision: messageSid, threadId: to + "|" + from, kind: "message", sentAt: null, editedAt: null,
       from: { kind: "user", id: from, handle: from, displayName: from },
