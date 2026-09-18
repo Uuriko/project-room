@@ -1,6 +1,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatShareInvitation, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, requestFailureMessage, reuseVisibleRoom } from "../src/share-links.js";
+import { formatShareInvitation, humanJoinShareBase, humanJoinShareUrl, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, requestFailureMessage, reuseVisibleRoom } from "../src/share-links.js";
+
+test("human join share URLs keep the app path so www /room is not dropped", () => {
+  const token = "T".repeat(43);
+  assert.equal(humanJoinShareBase({ origin: "https://www.getdasha.com", pathname: "/room" }), "https://www.getdasha.com/room");
+  assert.equal(humanJoinShareBase({ origin: "https://www.getdasha.com", pathname: "/room/" }), "https://www.getdasha.com/room");
+  assert.equal(humanJoinShareUrl(token, "", { origin: "https://www.getdasha.com", pathname: "/room" }),
+    `https://www.getdasha.com/room/#join/${token}`);
+  assert.equal(humanJoinShareUrl(token, "", { origin: "https://www.getdasha.com", pathname: "/room/" }),
+    `https://www.getdasha.com/room/#join/${token}`);
+  assert.equal(humanJoinShareUrl(token, "/work/item-1", { origin: "https://www.getdasha.com", pathname: "/room/index.html" }),
+    `https://www.getdasha.com/room/#join/${token}/work/item-1`);
+  assert.equal(humanJoinShareUrl(token, "", { origin: "http://localhost:52331", pathname: "/" }),
+    `http://localhost:52331/#join/${token}`);
+  assert.equal(humanJoinShareUrl(token, "", { origin: "http://localhost:52331" }),
+    `http://localhost:52331/#join/${token}`);
+});
 
 test("invitation note formatting is bounded plain text with an exact URL-only fallback", () => {
   const url = "https://room.example/#join/synthetic";

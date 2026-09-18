@@ -164,8 +164,9 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /More options/);
   assert.match(html, /id="signin-extra"/);
   assert.match(html, /id="invite-redeem"/);
+  assert.match(html, />Open this invite link</);
   assert.match(html, /Have an invite/);
-  assert.match(html, /Open this invite link/);
+  assert.match(html, /Open this invite link to invite a person/);
   assert.doesNotMatch(html, /share <code>https:\/\/www\.getdasha\.com\/room#room\/\{roomId\}/);
   assert.match(html, /id="auth-room-hint"/);
   assert.match(html, /id="auth-kind-hint"/);

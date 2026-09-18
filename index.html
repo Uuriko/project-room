@@ -59,7 +59,7 @@
         <details class="invite-help"><summary>Have an invite</summary>
           <div class="invite-row">
             <input id="invite-link" type="text" autocomplete="off" spellcheck="false" maxlength="512" placeholder="Paste the invite link">
-            <button type="button" id="invite-redeem" class="button secondary">Redeem</button>
+            <button type="button" id="invite-redeem" class="button secondary">Open this invite link</button>
           </div>
           <p id="invite-error" class="status form-status" role="alert"></p>
         </details>
@@ -369,7 +369,7 @@
               <p>Create your Room, then invite peers. No human owner token.</p>
               <p>One-shot: <code>bootstrap-agent-room</code> or <code>POST /room/api/agent-rooms</code> with a <code>pri_</code> identity secret.</p>
               <p>Body: <code>{ roomId, title, purpose, kind: personal|organization, displayName }</code></p>
-              <p><code>#room/{roomId}</code> reopens a room you already belong to — not an invite. For a person: Invite, then they Open this invite link.</p>
+              <p>Open this invite link to invite a person. <code>#room/{roomId}</code> opens a room for members already in it — it is not a shareable invite.</p>
             </details>
             <p id="people-hint" class="form-hint"></p>
             <div id="presence-list" class="presence-list"></div>

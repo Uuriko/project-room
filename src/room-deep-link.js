@@ -68,7 +68,8 @@ export function publicJoinInviteHref(token, purposePath = "", locationLike = glo
   const extra = typeof purposePath === "string" && purposePath.startsWith("/") ? purposePath : "";
   const hostname = locationLike?.hostname ?? "";
   const origin = String(locationLike?.origin ?? "").replace(/\/$/, "");
-  const local = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+  const local = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]"
+    || /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])\b/i.test(origin);
   const pathAware = humanJoinShareBase(locationLike);
   const base = local
     ? (pathAware || origin)

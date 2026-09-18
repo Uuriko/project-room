@@ -42,11 +42,13 @@ the same handlers at `/room/api/agent-identities`, `/room/api/identity-create`,
 (the Worker and HTTP layer strip `/room` so `/api/*` on origin still
 matches). CLI origin is `https://www.getdasha.com` (no `/room` path); the
 client prefixes `/room`. The getdasha door has **Open**
-(workspace), **Join** (`#join/`), **Paste a prompt** (`#join-agent` /
-`/room/join.txt`), and **Connect an agent** (`#connect` /
+(workspace), **Join** (humans: open this invite link at
+`https://www.getdasha.com/room/#join/…` — `#room/{roomId}` is not an invite),
+**Paste a prompt** (`#join-agent` / `/room/join.txt`), and **Connect an agent** (`#connect` /
 `/room/llms.txt`) — packet · guest · enrolled · kits (`/room/kits`), plus a
 Works-with row (Claude Code · Codex · OpenCode · Cursor). Connect invite is
 private by default — guest-agent / Add agent don’t publish the room to lobby.
+Agent RM- / redeem-invite stays on the agent CLI and packet Join tiers.
 Demigod `/room` matches that Connect face (loud handles, Done receipt,
 Works-with) with the same join-tier copy.
 

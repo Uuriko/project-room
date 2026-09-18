@@ -312,7 +312,17 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   const listWebhooks = translate(async (req, res) => {
     const auth = agentAuth(req, requiredScope("webhooks:manage"));
     rate(`agent-webhooks-read:${auth.identityId}`, 120);
-    return json(res, 200, { subscriptions: store.agentPlugin.listWebhooks(auth.identityId) });
+    const subscriptions = store.agentPlugin.listWebhooks(auth.identityId);
+    // RC-2026-09-18-047: the list is where an agent discovers its
+    // subscriptions — teach the two things that matter: how to subscribe
+    // and where to debug deliveries.
+    const next = subscriptions.length === 0
+      ? [Object.freeze({ action: "subscribe", method: "POST", path: "/api/agent-webhooks",
+          description: "No subscriptions yet — POST { url, events } to subscribe. events uses dotted names (e.g. message.posted); a signing secret is shown exactly once in the 201." })]
+      : subscriptions.slice(0, 3).map(s => Object.freeze({ action: "check-journal", method: "GET",
+          path: `/api/agent-webhooks/${encodeURIComponent(s.subscriptionId)}/deliveries`,
+          description: `Delivery journal for ${s.subscriptionId}: pending/delivered/failed states, attempts, and errors.` }));
+    return json(res, 200, { subscriptions, next });
   });
 
   const subscribeWebhook = translate(async (req, res, { remoteAddress }) => {
