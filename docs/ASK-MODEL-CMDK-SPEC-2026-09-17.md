@@ -6,7 +6,7 @@
 **Baseline tip:** `Uuriko/dasha-lobby` `b5fd6e1c` (#257 SSR Mac pending until network known) atop #255 quiet-shell + #246/#249  
 **LIVE:** still clobbered (Typeform) until Instinct wrangler — **still ship on tip**  
 **Companions:** box `UX-CLEAN-LESS-NOISE-2026-09-17.md` · `docs/ASK-QUIET-SHELL-V3.md` · box `GEMMA27-DEMOTE-AFTER-BONSAI.md` (dasha-lobby #258 draft)  
-**Plan refs:** T032 (this spec) · T033 (implement PR after tip live) · T071 (Speed/Mid/Quality ladder — [ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md](../research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md)) · T075 (picker placement — [ASK-ADVANCED-LADDER-UX-BRIEF-2026-09-18.md](../research/ASK-ADVANCED-LADDER-UX-BRIEF-2026-09-18.md))
+**Plan refs:** T032 (this spec) · T033 (implement PR after tip live) · T071 (Speed/Mid/Quality ladder — [ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md](../research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md)) · T075 (picker placement — [ASK-ADVANCED-LADDER-UX-BRIEF-2026-09-18.md](../research/ASK-ADVANCED-LADDER-UX-BRIEF-2026-09-18.md)) · T082 (Stop / Regen / Copy / Edit keys — [ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md](../research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md); this map stays picker-only)
 
 Mirror on box: `/workspace/phase0-publish/ASK-MODEL-CMDK-SPEC-2026-09-17.md`
 
@@ -110,7 +110,8 @@ Copy bank: `Speed` · `Mid` · `Quality` · `Advanced` · `Hosted` · `Community
 | **↑ / ↓** | Menu open | Move highlight |
 | **Enter** | Menu open + highlight | Select model; sync `#ask-model` + `$('model')`; close; return focus `#prompt` |
 | **Esc** | Menu open | Close; restore focus to previous (`#prompt` or `#ask-model`) — **never** clear thread |
-| **Esc** | Menu closed | Existing Ask Esc behavior (tf-back only; never clear thread) |
+| **Esc** | Menu closed + idle | Existing Ask Esc behavior (tf-back only; never clear thread) |
+| **Esc** | Menu closed + `askBusy` | T082 Stop alias — [ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md](../research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md). Same `stopAskRun()`. Not a picker key. |
 | Type-ahead | Menu open | Filter rows by face label + raw id |
 | **Tab** | Menu open | Stay-in-list cycle (prefer) or close — pick one in implement |
 
