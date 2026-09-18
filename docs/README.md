@@ -82,6 +82,8 @@ Bonsai Mac provider OpenAI error paths (T067, research; thinking off; kit Stop o
 [ASK-BONSAI-PROVIDER-OPENAI-ERROR-PATHS-2026-09-18.md](../research/ASK-BONSAI-PROVIDER-OPENAI-ERROR-PATHS-2026-09-18.md).
 Pause-on-battery Provide + Prefer AC copy (T068+T069, research; no lecture):
 [ASK-PROVIDE-BATTERY-PREFER-AC-2026-09-18.md](../research/ASK-PROVIDE-BATTERY-PREFER-AC-2026-09-18.md).
+Provide soft-battery UX copy brief (T083, research; cite #515 T068/T069; quiet `On battery · paused`; no lecture; no blocking Ask):
+[ASK-PROVIDE-SOFT-BATTERY-UX-COPY-2026-09-18.md](../research/ASK-PROVIDE-SOFT-BATTERY-UX-COPY-2026-09-18.md).
 PrismML Bonsai id map (T064, research; public ↔ PQ2_0 / PTQ1_0 / MLX):
 [ASK-PRISMML-BONSAI-ID-MAP-2026-09-18.md](../research/ASK-PRISMML-BONSAI-ID-MAP-2026-09-18.md).
 Ask ladder Advanced grouping + network honesty line (T071+T072, research; Advanced empty; cite #270/#269 canaries):

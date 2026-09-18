@@ -12,7 +12,9 @@ Companions (cite only):
 [ASK-BONSAI-PROVIDER-OPENAI-ERROR-PATHS-2026-09-18.md](ASK-BONSAI-PROVIDER-OPENAI-ERROR-PATHS-2026-09-18.md)
 (T067) ·
 [ASK-PRISMML-BONSAI-ID-MAP-2026-09-18.md](ASK-PRISMML-BONSAI-ID-MAP-2026-09-18.md)
-(T064). Fold lock:
+(T064) ·
+[ASK-PROVIDE-SOFT-BATTERY-UX-COPY-2026-09-18.md](ASK-PROVIDE-SOFT-BATTERY-UX-COPY-2026-09-18.md)
+(T083 runtime copy; no blocking Ask). Fold lock:
 [FOLD-COMPUTE-ROOM.md](../docs/FOLD-COMPUTE-ROOM.md).
 
 Product personal agent (Room) is **Second**. Never Genie. Ask is
@@ -39,6 +41,7 @@ longer.
 | T042 / T043 Ask regen + Continue | **Not** this path. |
 | T044–T046 export / receipt / tok/s | **Not** this path. |
 | T032 / T033 ⌘K model menu | Cite only. Do not restyle `#ask-model`. |
+| T083 runtime copy | **Sibling.** Quiet `On battery · paused`. No lecture. No blocking Ask. |
 | dasha-lobby [#258](https://github.com/Uuriko/dasha-lobby/pull/258) | **Cite, do not edit / undraft.** |
 
 Paths this fold owns:
@@ -122,7 +125,9 @@ new sentence, not a tooltip essay.
 
 Do not add a third accent, a permanent chip, a “battery lecture”
 block, or a Hosted-vs-Community sermon. T046 already bans mid-stream
-kit lectures; this is the same diet on Provide.
+kit lectures; this is the same diet on Provide. Runtime paused
+line (`On battery · paused`) and the no-block-Ask rule are **T083**,
+not a second Prefer AC sentence.
 
 ---
 
@@ -154,4 +159,5 @@ cmdk implement · listing Needle as chat · calling Second a Genie ·
 
 *End. Companion RAM: `research/ASK-BONSAI-MAC24-AND-GEMMA-LADDER-2026-09-18.md`.
 Companion T067: `research/ASK-BONSAI-PROVIDER-OPENAI-ERROR-PATHS-2026-09-18.md`.
-Companion T064 id map: `research/ASK-PRISMML-BONSAI-ID-MAP-2026-09-18.md`.*
+Companion T064 id map: `research/ASK-PRISMML-BONSAI-ID-MAP-2026-09-18.md`.
+Companion T083 runtime copy: `research/ASK-PROVIDE-SOFT-BATTERY-UX-COPY-2026-09-18.md`.*
