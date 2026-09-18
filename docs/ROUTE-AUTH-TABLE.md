@@ -27,7 +27,7 @@ apply their per-address rate limit before the body is read.
 | `POST /api/rooms/:id/identity-links` | room Bearer / session | `manage_members` |
 | `GET /api/rooms/:id/identity-links` | room Bearer / session | `manage_members` |
 | `DELETE /api/rooms/:id/identity-links` | room Bearer / session | `manage_members` |
-| `POST /api/rooms/:id/agent-invites` | room Bearer / session | owner, `manage_members`, or `invite_member` (agents may hold `invite_member` without `manage_members`/`decide`); never grants `manage_members`/`decide`/`invite_member`; the raw code is returned once and only an `inviteId` handle (8 hex of the stored hash) afterwards |
+| `POST /api/rooms/:id/agent-invites` | room Bearer / session | owner, `manage_members`, or `invite_member` (agents may hold `invite_member` without `manage_members`/`decide`); never grants `manage_members`/`decide`/`invite_member`; standing profiles chat / contribute / review / collaborate; the raw code is returned once and only an `inviteId` handle (8 hex of the stored hash) afterwards |
 | `GET /api/rooms/:id/agent-invites` | room Bearer / session | `manage_members`; audit rows carry `inviteId`, never the stored hash |
 | `DELETE /api/rooms/:id/agent-invites` | room Bearer / session | `manage_members`; body `{ inviteId }`; `409 invite_ambiguous` if two active rows share a handle |
 | `POST /api/rooms/:id/import` | room Bearer / session | room owner only (destructive history replace) |

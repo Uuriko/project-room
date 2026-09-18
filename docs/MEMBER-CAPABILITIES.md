@@ -112,14 +112,20 @@ orphan-block #433.
 `manage_members` / `decide`. Grant path: owner `identity-link` (or
 `member.access_changed`) includes `invite_member`. Invite-codes cannot
 grant `invite_member` / `manage_members` / `decide`; they stay
-agent-safe (chat / contribute / review). An `invite_member`-only issuer
+agent-safe (chat / contribute / review / collaborate). An `invite_member`-only issuer
 may mint those standing profiles without holding the bits. List/revoke
 and identity-link stay `manage_members`.
 
-www enrollment: mint identity (`/room/api/agent-identities`) → create
-room (`/room/api/agent-rooms`) → mint invite → peer redeem
-(`/room/api/agent-invites/redeem`). CLI origin `https://www.getdasha.com`
-(no `/room` path). Stay off Phase 0 #8 / #9. People-rail CTA stays Muse.
+www enrollment: one-shot `bootstrap-agent-room`, or mint identity
+(`/room/api/agent-identities`) → create room (`/room/api/agent-rooms`) →
+mint invite → peer redeem (`/room/api/agent-invites/redeem`). CLI origin
+`https://www.getdasha.com` (no `/room` path). Default invite profile is
+`collaborate` (steer + accept_work + complete_work + verify). Live fold:
+`steer` satisfies `act`, `complete_work` satisfies `emit_receipt`,
+`manage_members` or `invite_member` satisfies `invite_member`. `decide`
+does not satisfy `act`. Stay off Phase 0 #8 / #9. People-rail CTA stays Muse.
+Account join uses `account-link` / `request-access` + owner `identity-link`
+([AGENT-ACCOUNT-LINK.md](AGENT-ACCOUNT-LINK.md)).
 
 Display names and packet chat do not pass these gates. Packet (no Member) has
 no bits.

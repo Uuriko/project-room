@@ -14,7 +14,7 @@ const owner = Object.freeze({ id: "owner", kind: "human", role: "owner" });
 const human = Object.freeze({ id: "maya", kind: "human", permissions: [] });
 const agent = Object.freeze({ id: "guest-agent-1", kind: "agent", permissions: [] });
 
-test("default grants: humans and agents get read only; existing permissions do not widen bits", () => {
+test("default grants: humans and agents get read only; decide does not widen act", () => {
   assert.deepEqual(memberCapabilities(human).bits, [...DEFAULT_GRANTS]);
   assert.deepEqual(memberCapabilities(agent).bits, ["read"]);
   assert.equal(memberCapabilities(human).owner, false);
@@ -22,11 +22,10 @@ test("default grants: humans and agents get read only; existing permissions do n
   assert.equal(canEmitReceipt(agent), false);
   assert.equal(canInviteMember(human), false);
 
-  const steward = { id: "mod", kind: "human", permissions: ["manage_members", "decide", "complete_work"] };
-  assert.deepEqual(memberCapabilities(steward).bits, ["read"]);
-  assert.equal(canInviteMember(steward), false);
-  assert.equal(canAct(steward), false);
-  assert.equal(canEmitReceipt(steward), false);
+  // decide stays attenuated: it does not satisfy act.
+  const decider = { id: "mod", kind: "human", permissions: ["decide"] };
+  assert.deepEqual(memberCapabilities(decider).bits, ["read"]);
+  assert.equal(canAct(decider), false);
 });
 
 test("owner all-bits: role, isOwner, or Room ownerId match holds every bit", () => {
@@ -49,6 +48,9 @@ test("deny act without bit: Approve/Reject stay closed; additive act or overlay 
   assert.equal(canAct(human), false);
   assert.equal(canAct(agent), false);
   assert.equal(hasCapability({ id: "reviewer", capabilities: ["decide"] }, "act"), false);
+  // Live fold: steer satisfies act; decide does not.
+  assert.equal(canAct({ id: "peer", kind: "agent", permissions: ["steer"] }), true);
+  assert.equal(canAct({ id: "decider", permissions: ["decide"] }), false);
 
   const granted = { id: "maya", kind: "human", act: true };
   assert.equal(canAct(granted), true);
@@ -62,7 +64,9 @@ test("deny act without bit: Approve/Reject stay closed; additive act or overlay 
 test("invite_member gate: mint/invite stay closed without the bit; owner and grant pass", () => {
   assert.equal(canInviteMember(human), false);
   assert.equal(canInviteMember(agent), false);
-  assert.equal(canInviteMember({ id: "mod", permissions: ["manage_members"] }), false);
+  // Live fold: manage_members satisfies invite_member; decide does not.
+  assert.equal(canInviteMember({ id: "mod", permissions: ["manage_members"] }), true);
+  assert.equal(canInviteMember({ id: "decider", permissions: ["decide"] }), false);
 
   const granted = { id: "maya", kind: "human", invite_member: true };
   assert.equal(canInviteMember(granted), true);
@@ -73,12 +77,13 @@ test("invite_member gate: mint/invite stay closed without the bit; owner and gra
   assert.equal(canInviteMember(owner), true);
   // Live fold: the v26 invite_member permission is the agent grant path.
   assert.equal(canInviteMember({ id: "steward", kind: "agent", permissions: ["invite_member"] }), true);
-  assert.equal(canInviteMember({ id: "mod", permissions: ["manage_members"] }), false);
 });
 
 test("emit_receipt gate: Receipt write stays closed without the bit; grant is a subset", () => {
   assert.equal(canEmitReceipt(human), false);
-  assert.equal(canEmitReceipt({ id: "worker", permissions: ["complete_work"] }), false);
+  // Live fold: complete_work satisfies emit_receipt.
+  assert.equal(canEmitReceipt({ id: "worker", permissions: ["complete_work"] }), true);
+  assert.equal(canEmitReceipt({ id: "reader", permissions: [] }), false);
 
   const granted = { id: "producer", kind: "agent", emit_receipt: true };
   assert.equal(canEmitReceipt(granted), true);
@@ -86,4 +91,16 @@ test("emit_receipt gate: Receipt write stays closed without the bit; grant is a 
   assert.equal(canAct(granted), false);
   assert.equal(canInviteMember(granted), false);
   assert.equal(canEmitReceipt(owner), true);
+});
+
+test("collaborate autonomy set: steer + complete_work folds to act + emit_receipt; no invite_member", () => {
+  const peer = {
+    id: "peer-agent",
+    kind: "agent",
+    permissions: ["steer", "accept_work", "complete_work", "verify"],
+  };
+  assert.deepEqual(memberCapabilities(peer).bits, ["read", "act", "emit_receipt"]);
+  assert.equal(canAct(peer), true);
+  assert.equal(canEmitReceipt(peer), true);
+  assert.equal(canInviteMember(peer), false);
 });

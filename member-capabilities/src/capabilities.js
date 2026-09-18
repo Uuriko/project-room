@@ -36,9 +36,13 @@ function grantedBit(member, context, bit) {
   if (nested && nested[bit] === true) return true;
   const contextBits = additiveObject(context.capabilityBits);
   if (contextBits && contextBits[bit] === true) return true;
-  // Live fold: the v26 invite_member permission is the grant path for agents
-  // (without manage_members/decide). Other PERMISSIONS still do not widen bits.
-  if (bit === "invite_member" && Array.isArray(member.permissions) && member.permissions.includes("invite_member")) {
+  // Live fold (MEMBER-CAPABILITIES later-fold, 2026-09-18):
+  //   steer → act (not decide — decide stays attenuated)
+  //   complete_work → emit_receipt
+  //   invite_member or manage_members → invite_member
+  const folds = { act: ["steer"], emit_receipt: ["complete_work"], invite_member: ["invite_member", "manage_members"] };
+  if (Object.hasOwn(folds, bit) && Array.isArray(member.permissions)
+    && folds[bit].some(permission => member.permissions.includes(permission))) {
     return true;
   }
   return overlayLists(member, context).includes(bit);
