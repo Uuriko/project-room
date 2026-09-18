@@ -8,7 +8,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { roomEntry, publicRoomDoorHtml } from "../deploy/room-entry.mjs";
 import {
   agentCard, llmsTxt, llmsFullTxt, kitsTxt, agentCardJson, discoveryDoc, DISCOVERY_PATHS,
-  AFTER_PASTE_SECTION, SHORT_PACKET_FILES, SHORT_PACKET_SYNONYMS, AGENT_CARD_SYNONYMS, HEALTH_ALIAS_PATHS,
+  AFTER_PASTE_SECTION, joinPrompt, JOIN_HOSTS, JOIN_PROMPT_PATH, SHORT_PACKET_FILES, SHORT_PACKET_SYNONYMS, AGENT_CARD_SYNONYMS, HEALTH_ALIAS_PATHS,
   KITS_CATALOG_PATH, KITS_CATALOG_SYNONYMS, KITS_CATALOG_FILES,
   isHealthAliasPath, rewriteRoomApiPrefix, edgeDoorApiPath, A2A_PROTOCOL_VERSION, AGENT_CARD_A2A_PATH,
   ROOM_ORIGIN, ROOM_DOOR, ROOM_PUBLIC_WWW, ROOM_PUBLIC_LOBBY, COMPUTE_DOOR, ROOM_DOCS,
@@ -38,10 +38,10 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(card.product.compute, COMPUTE_DOOR);
   assert.equal(card.endpoints.healthz, `${ROOM_ORIGIN}/api/health`);
   assert.deepEqual(card.key_routes.map(row => row.path), [
-    "/api/health", "/llms.txt", "/llms-full.txt", "/kits.txt", "/.well-known/agent.json",
+    "/api/health", "/llms.txt", "/join.txt", "/llms-full.txt", "/kits.txt", "/.well-known/agent.json",
     "/.well-known/agent-card.json",
     ...SHORT_PACKET_FILES.map(name => `/${name}`),
-    "/room/llms.txt", "/room/llms-full.txt", "/room/kits.txt", "/room/.well-known/agent.json",
+    "/room/llms.txt", "/room/join.txt", "/room/llms-full.txt", "/room/kits.txt", "/room/.well-known/agent.json",
     "/room/.well-known/agent-card.json",
     ...SHORT_PACKET_FILES.map(name => `/room/${name}`)
   ]);
@@ -67,6 +67,8 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.match(text, new RegExp(ROOM_PUBLIC_WWW.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(text, new RegExp(ROOM_PUBLIC_LOBBY.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(text, /packet \(live, no account\)/);
+  assert.match(text, /paste-prompt \(live, no account\)/);
+  assert.match(text, /GET \/join\.txt/);
   assert.match(text, /guest-agent-link \(live, owner-issued\)/);
   assert.match(text, /agent-room-create \(live, no account\)/);
   assert.match(text, /bootstrap-agent-room/);
@@ -121,6 +123,24 @@ test("short and full packets tell a pasted agent the next action; kits and door 
   assert.match(packetSkill.description, /After paste/);
   assert.match(packetSkill.description, /three-line reply/);
   assert.doesNotMatch(agentCardJson(), FORBIDDEN);
+});
+
+test("join prompt is one paste, secret-free, and served at /join.txt", () => {
+  const prompt = joinPrompt();
+  assert.equal(JOIN_PROMPT_PATH, "/join.txt");
+  assert.deepEqual([...JOIN_HOSTS], ["Cursor", "Grok Bot", "ChatGPT", "Codex", "Claude", "MCP"]);
+  assert.match(prompt, /^Join Project Room as an agent\.\n/);
+  assert.match(prompt, /\/room\/llms\.txt/);
+  assert.match(prompt, /After paste/);
+  assert.match(prompt, /No Room key in this chat/);
+  assert.match(prompt, /Waiting for Paste AI draft/);
+  assert.match(prompt, /human share link is not agent auth/);
+  assert.doesNotMatch(prompt, FORBIDDEN);
+  assert.doesNotMatch(prompt, /chatgpt\.com|ChatGPT Sites/i);
+  assert.equal(discoveryDoc("/join.txt").body, prompt);
+  assert.equal(discoveryDoc("/room/join.txt").body, prompt);
+  assert.equal(discoveryDoc("/project-room/join.txt").body, prompt);
+  assert.match(discoveryDoc("/join.txt").type, /text\/plain/);
 });
 
 test("Room Worker serves llms.txt, llms-full.txt, agent.json and /room aliases", async t => {
@@ -299,12 +319,12 @@ test("door serves the same discovery bytes and points at origin", async () => {
   assert.match(html, /href="\/room\/llms.txt"/);
   assert.match(html, /href="\/room\/\.well-known\/agent\.json"/);
   for (const doorPath of [
-    "/room/llms.txt", "/room/llms-full.txt", "/room/.well-known/agent.json",
+    "/room/llms.txt", "/room/join.txt", "/room/llms-full.txt", "/room/.well-known/agent.json",
     "/room/skill.md", "/room/agents.md", "/room/AGENTS.md", "/room/CLAUDE.md",
     "/room/skill", "/room/skill/", "/room/agents", "/room/llms",
     "/room/agent.json", "/room/readme.md", "/room/gemini.md", "/room/cursor.md",
     "/room/kits.txt", "/room/kits", "/room/kit", "/room/apps", "/room/tools",
-    "/project-room/llms.txt", "/project-room/llms-full.txt", "/project-room/kits.txt",
+    "/project-room/llms.txt", "/project-room/join.txt", "/project-room/llms-full.txt", "/project-room/kits.txt",
     "/project-room/.well-known/agent.json"
   ]) {
     const expected = discoveryDoc(doorPath);
@@ -351,7 +371,7 @@ test("advertised door root serves the HTML door; packets stay at /room/llms.txt"
 test("edge door predicate: getdasha /room only, prefix preserved", () => {
   assert.deepEqual([...EDGE_DOOR_HOSTS], ["getdasha.com", "www.getdasha.com"]);
   for (const host of EDGE_DOOR_HOSTS) {
-    for (const path of ["/room", "/room/", "/room/llms.txt", "/room/llms-full.txt", "/room/.well-known/agent.json", "/room/skill.md", "/room/skill", "/room/agent.json", "/room/health", "/room/kits", "/room/apps", "/room/tools", "/room/api/agent-rooms", "/room/api/agent-identities", "/room/api/agent-invites/redeem"]) {
+    for (const path of ["/room", "/room/", "/room/llms.txt", "/room/join.txt", "/room/llms-full.txt", "/room/.well-known/agent.json", "/room/skill.md", "/room/skill", "/room/agent.json", "/room/health", "/room/kits", "/room/apps", "/room/tools", "/room/api/agent-rooms", "/room/api/agent-identities", "/room/api/agent-invites/redeem"]) {
       assert.equal(isEdgeDoorUrl(`https://${host}${path}`), true, `${host}${path}`);
     }
   }
