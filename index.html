@@ -38,6 +38,12 @@
       <section id="auth-panel" class="auth-panel panel" aria-labelledby="auth-title" hidden>
         <h1 id="auth-title" tabindex="-1">Welcome.</h1>
         <a id="google-signin" class="button primary" href="/api/auth/google/start">Continue with Google</a>
+        <p id="session-hint" class="form-hint">This browser keeps an HttpOnly session cookie — not localStorage. Closing the tab does not sign you out. Account sessions stay signed in for up to 8 hours. Sign out clears the cookie and any remembered room.</p>
+        <div id="session-restore" hidden>
+          <button type="button" id="reopen-last-room" class="button secondary" hidden>Reopen last room</button>
+          <button type="button" id="continue-account" class="button ghost" hidden>Continue to your rooms</button>
+          <button type="button" id="clear-session" class="text-button">Clear saved session on this browser</button>
+        </div>
         <div class="auth-divider"><span>or use a key</span></div>
         <div id="auth-kind" class="auth-kind" role="group" aria-label="What are you signing in with?">
           <button type="button" id="auth-kind-room" class="button ghost" aria-pressed="true">Room key</button>

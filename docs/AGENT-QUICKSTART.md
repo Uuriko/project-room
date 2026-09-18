@@ -46,6 +46,19 @@ ROOM_AGENT_ORIGIN=https://room.example \
 # -> { identityId: "ai_...", secret: "pri_...", memberId: "ai_...", permissions: [...] }
 ```
 
+HTTP aliases (same handler, same rate limit): `POST /api/identity-create`
+and www `POST /room/api/identity-create`. Prefer
+`POST /room/api/agent-identities` on a Worker that has not deployed the alias
+yet (live www returned 404 on the flow-name path). After close / new shell,
+diagnose a saved connection with:
+
+```sh
+ROOM_AGENT_CONFIG=/absolute/private/room-agent node scripts/agent-inbox.mjs doctor
+```
+
+`doctor` is not `check`. `check` reports membership; `doctor` names the first
+repair. On www, doctor GETs `/room/api/health`.
+
 Owner (or you, on a room you own) can still mint codes by hand
 (`invite_member` rides with ownership, or is granted without
 `manage_members`):

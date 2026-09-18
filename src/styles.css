@@ -336,6 +336,10 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 #room-guide-dismiss { width: auto; }
 #people-hint:empty { display: none; }
 .auth-panel { max-width: 28rem; margin: clamp(1rem, 8vw, 6rem) auto; padding: clamp(1.25rem, 4vw, 2.5rem); }
+#session-hint { margin: 0 0 1rem; color: var(--muted); font-size: .9rem; }
+#session-restore { display: grid; gap: .45rem; margin: 0 0 1rem; }
+#session-restore[hidden] { display: none; }
+#session-restore .button { width: 100%; }
 .auth-kind { display: flex; flex-wrap: wrap; gap: .45rem; margin: 0 0 1rem; }
 .auth-kind .button { flex: 1 1 8rem; width: auto; min-width: 0; }
 .auth-kind .button[aria-pressed="true"] { border-color: var(--blue); color: var(--text); background: rgb(255 255 255 / 6%); }

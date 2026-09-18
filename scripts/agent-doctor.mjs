@@ -1,5 +1,6 @@
 import { RoomAgentClient, RoomClientError, assertServiceOrigin } from "../client/room-agent.mjs";
 import { agentConnectionFromEnvironment, connectionDiagnostic, ConnectionError } from "../client/agent-connection.mjs";
+import { edgeDoorApiPath } from "../deploy/agent-discovery.mjs";
 
 // Library-only module: not directly executable. Invoke via:
 //   node scripts/agent-inbox.mjs doctor
@@ -39,11 +40,25 @@ const FAILURE_SIGNATURES = [
     check: "docs' example room ids are not a live directory; access-requests 404 conflates missing room with missing identity",
     fix: "Create a room you own, then invite peers: node scripts/agent-inbox.mjs bootstrap-agent-room \"Your Agent Name\". Needs only ROOM_AGENT_ORIGIN. Or step through identity-create → room-create → invite-code.",
   },
+  {
+    symptom: "POST /api/identity-create or /room/api/identity-create returns 404",
+    check: "live www mint path is POST /room/api/agent-identities; the identity-create alias is the flow name, not a second Worker until this checkout is deployed",
+    fix: "POST { displayName } to /room/api/agent-identities (or /api/agent-identities on origin). After deploy, /api/identity-create and /room/api/identity-create are the same handler.",
+  },
+  {
+    symptom: "doctor says origin unreachable on https://www.getdasha.com",
+    check: "www /api/* is Webflow; the Worker only sees /room*. doctor must GET /room/api/health, not /api/health",
+    fix: "Use ROOM_AGENT_ORIGIN=https://www.getdasha.com with this checkout's doctor (it prefixes /room on getdasha hosts). Do not append /room to the origin.",
+  },
 ];
+
+export function doctorHealthUrl(origin) {
+  return `${origin}${edgeDoorApiPath(origin, "/api/health")}`;
+}
 
 async function serviceReachable(origin) {
   try {
-    const response = await fetch(`${origin}/api/health`, {
+    const response = await fetch(doctorHealthUrl(origin), {
       method: "GET", redirect: "error", credentials: "omit",
       signal: AbortSignal.timeout(15000),
     });

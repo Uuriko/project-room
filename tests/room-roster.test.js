@@ -81,6 +81,8 @@ test("reconnect copy is secret-free and names the host snippets", () => {
   assert.equal(/token/i.test(copy), false);
   assert.match(claudeMcpAddCommand(placeholderSnippetPaths()), /claude mcp add --transport stdio/);
   assert.match(reconnectCopy({ displayName: "Muse" }), /Use my AI/);
+  assert.match(copy, /agent-inbox\.mjs doctor/);
+  assert.match(reconnectCopy({ displayName: "Muse" }), /doctor/);
 });
 
 test("CLI prints Muse packet route and refuses to write host config", () => {
@@ -218,6 +220,11 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /reactionPills/);
   assert.doesNotMatch(app, /details class="reactions"/);
   assert.doesNotMatch(app, /reaction-menu/);
+  assert.match(html, /id="session-hint"/);
+  assert.match(html, /id="session-restore"/);
+  assert.match(html, /id="reopen-last-room"/);
+  assert.match(html, /id="continue-account"/);
+  assert.match(html, /id="clear-session"/);
   assert.match(html, /id="people-panel"/);
   assert.match(html, /id="connect-agent-button"/);
   assert.match(html, /id="message-input"/);

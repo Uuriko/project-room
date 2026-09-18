@@ -21,6 +21,7 @@ import { createAuthSigninUI } from "./auth-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite } from "./invite-context.js";
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
+import { rememberLastRoom, rememberAccountHint, readLastRoom, readAccountHint, clearBrowserSessionHints, SESSION_HINT_COPY } from "./browser-session.js";
 
 const $ = selector => document.querySelector(selector);
 $("#skip-link").addEventListener("click", event => {
@@ -179,7 +180,10 @@ const client = new RoomClient({
     agentConnectionsUI?.sync();
     agentInvitesUI?.sync();
     updatePeopleHint();
-    if (firstSnapshot) showRoomGuide();
+    if (firstSnapshot) {
+      rememberLastRoom(roomId);
+      showRoomGuide();
+    }
     instructionsUI?.sync();
     resultCopyUI?.sync();
     portableWorkUI?.sync();
@@ -226,7 +230,10 @@ const client = new RoomClient({
     agentConnectionsUI?.reset();
     agentInvitesUI?.reset();
     instructionsUI?.reset();
-    if (!keepAccount) clearPrivateWorkspace({ preservePending: leavingPage });
+    if (!keepAccount) {
+      clearPrivateWorkspace({ preservePending: leavingPage });
+      if (pendingSignout || endedContext === "account-switch") clearBrowserSessionHints();
+    }
     else inboxUI?.detachRoom();
     workDraftId = null; replyToId = null; workFormEpoch++; setWorkRetry(false);
     syncRoomLifecycle();
@@ -342,6 +349,8 @@ const signinUI = createAuthSigninUI({
   }
 });
 signinUI.mount($("#auth-signin-ui"));
+if (accountSignIn() || initialInvitationFragment) signinUI.setExpanded(true);
+if ($("#session-hint")) $("#session-hint").textContent = SESSION_HINT_COPY;
 function openAccountSettings() {
   setSessionMenuOpen(false);
   if (!accountClient.session?.authenticated) return;
@@ -366,6 +375,7 @@ function endAccountAccess() {
 }
 function showAccountWorkspace() {
   if (!accountClient.session?.authenticated) return;
+  rememberAccountHint();
   $("#auth-panel").hidden = true; $("#signout-button").hidden = false; $("#signout-button").disabled = signoutLoading;
   $("#account-settings-button").hidden = false;
   if (!state) {
@@ -668,6 +678,64 @@ function configureAuthPanel(roomId = selectedRoomFromLocation()) {
   $("#auth-kind-account")?.setAttribute("aria-pressed", accountMode ? "true" : "false");
   $("#auth-kind-room")?.classList.toggle("suggested", Boolean(accountMode && roomId));
   $("#auth-form button[type='submit']").textContent = accountMode ? (roomId ? "Open room" : "Sign in") : "Enter room";
+  signinUI.setExpanded(accountMode || Boolean(invitation.secret) || Boolean(initialInvitationFragment));
+  syncSessionRestore();
+}
+function syncSessionRestore() {
+  const lastRoom = readLastRoom();
+  const account = Boolean(accountClient.session?.authenticated);
+  const panel = $("#session-restore");
+  if (panel) panel.hidden = !lastRoom && !account;
+  const reopen = $("#reopen-last-room");
+  if (reopen) {
+    reopen.hidden = !lastRoom;
+    reopen.textContent = lastRoom ? `Reopen #${lastRoom}` : "Reopen last room";
+  }
+  const cont = $("#continue-account");
+  if (cont) cont.hidden = !account;
+}
+async function reopenRememberedRoom() {
+  const lastRoom = readLastRoom();
+  if (!lastRoom || signoutLoading || busy) return;
+  setFormStatus($("#auth-error"), "");
+  try {
+    const account = await ensureAccountSession().catch(() => null);
+    if (account?.authenticated) {
+      history.replaceState(history.state, "", `${location.pathname}?room=${encodeURIComponent(lastRoom)}`);
+      configureAuthPanel(lastRoom);
+      await client.restore(lastRoom);
+      return;
+    }
+    await client.restore();
+  } catch (error) {
+    setFormStatus($("#auth-error"), [401, 403].includes(error.status)
+      ? `This browser could not reopen #${lastRoom}. Sign in again.`
+      : unreachableRoomMessage(error), true);
+    syncSessionRestore();
+  }
+}
+async function continueAccountSession() {
+  if (signoutLoading || busy) return;
+  try {
+    const account = await ensureAccountSession();
+    if (account?.authenticated) showAccountWorkspace();
+    else setFormStatus($("#auth-error"), "Sign in to continue to your rooms.", true);
+  } catch (error) {
+    setFormStatus($("#auth-error"), [401, 403].includes(error.status)
+      ? "Sign in to continue to your rooms."
+      : unreachableRoomMessage(error), true);
+  }
+  syncSessionRestore();
+}
+async function clearSavedBrowserSession() {
+  if (signoutLoading || busy) return;
+  clearBrowserSessionHints();
+  if (accountClient.session) {
+    try { await accountClient.logout(); } catch { /* slot may already be anonymous */ }
+    endAccountAccess();
+  }
+  syncSessionRestore();
+  setFormStatus($("#auth-error"), "Saved session on this browser was cleared.", true);
 }
 function setAuthKind(kind) {
   authKind = kind === "account" ? "account" : "room";
@@ -677,6 +745,7 @@ function setAuthKind(kind) {
   else url.searchParams.delete("account");
   history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash}`);
   configureAuthPanel();
+  signinUI.setExpanded(authKind === "account" || Boolean(invitation.secret));
   $("#access-key").focus({ preventScroll: true });
 }
 function updatePeopleHint() {
@@ -1892,6 +1961,9 @@ $("#invitation-accept").addEventListener("click", async () => {
 $("#room-guide-dismiss")?.addEventListener("click", () => dismissRoomGuide());
 $("#auth-kind-room")?.addEventListener("click", () => setAuthKind("room"));
 $("#auth-kind-account")?.addEventListener("click", () => setAuthKind("account"));
+$("#reopen-last-room")?.addEventListener("click", () => { void reopenRememberedRoom(); });
+$("#continue-account")?.addEventListener("click", () => { void continueAccountSession(); });
+$("#clear-session")?.addEventListener("click", () => { void clearSavedBrowserSession(); });
 $("#access-key-reveal")?.addEventListener("click", () => {
   const field = $("#access-key"), show = field.type === "password";
   field.type = show ? "text" : "password";
@@ -3785,7 +3857,34 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
     else await client.restore(requestedRoom);
     return;
   }
-  await client.restore();
+  try {
+    await client.restore();
+    return;
+  } catch (error) {
+    if (![401, 403].includes(error.status)) throw error;
+  }
+  if (readLastRoom() || readAccountHint()) {
+    let account = null;
+    try { account = await ensureAccountSession(); } catch { account = null; }
+    if (account?.authenticated) {
+      const lastRoom = readLastRoom();
+      if (lastRoom) {
+        try {
+          history.replaceState(history.state, "", `${location.pathname}?room=${encodeURIComponent(lastRoom)}`);
+          configureAuthPanel(lastRoom);
+          await client.restore(lastRoom);
+          return;
+        } catch (error) {
+          if (![401, 403].includes(error.status)) throw error;
+        }
+      }
+      showAccountWorkspace();
+      syncSessionRestore();
+      return;
+    }
+  }
+  syncSessionRestore();
+  throw Object.assign(new Error("sign in required"), { status: 401 });
 })().catch(error => {
   if (accountClient.session?.authenticated && [401, 403].includes(error.status)) {
     showAccountWorkspace(); confirmAccount(); return;
