@@ -30,7 +30,7 @@ import { normalizeEmail } from "./account-login-methods.mjs";
 import { createPasskeyAuth, resolvePasskeyParams } from "./account-passkeys.mjs";
 import { hashPassword, verifyPassword, checkPasswordPolicy, DUMMY_PASSWORD_VERIFIER } from "../src/password-auth.mjs";
 import { buildGitHubAuthUrl, codeChallengeFor, createPendingStore, exchangeCodeForToken, fetchGitHubUser,
-  GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH } from "./github-oauth.mjs";
+  GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH, githubPostLoginPage, githubUnavailablePage } from "./github-oauth.mjs";
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -39,7 +39,7 @@ const bindingPattern = /^[a-f0-9]{64}$/;
 const assets = new Map([
   ["/", ["index.html", "text/html"]], ["/index.html", ["index.html", "text/html"]],
   ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js", "agent-connections.js", "return-brief.js", "work-selectors.js", "work-status.js", "work-packet.js", "portable-work.js", "reminders.js", "reminder-time.js", "room-charter.js", "room-instructions.js", "reply-requests.js", "work-help.js", "help-offers.js", "work-item-session.js", "work-loops.js", "work-recipes.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
-  ...["inbox-client.js", "inbox-ui.js", "inbox-send-ui.js", "room-roster.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
+  ...["inbox-client.js", "inbox-ui.js", "inbox-send-ui.js", "room-roster.js", "account-settings-ui.js", "auth-signin-ui.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
   ["/src/styles.css", ["src/styles.css", "text/css"]]
 ]);
 const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -194,6 +194,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // a magic-link method when the provider attested a verified email).
   // linkOAuthMethod rejects cross-account subject reuse with a 409, which
   // surfaces to the caller as-is.
+  // Link intent (slice 7): the settings UI starts the flow with link=true
+  // so the subject attaches to the currently authenticated account. A
+  // subject already owned by a different account 409s instead of silently
+  // switching the browser into that account.
   const linkGitHubSubject = ({ subject, email }) => {
     const logins = store.accountLogins;
     const owner = logins.findAccountByOAuth("github", subject);
@@ -219,6 +223,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
     }
     return { accountId, methodRef: method.id };
+  };
+  // Link intent (slice 7): attach the GitHub subject to the account that
+  // owns the pending session slot. The slot must still be authenticated;
+  // a subject owned elsewhere 409s via linkOAuthMethod.
+  const linkGitHubSubjectToAccount = ({ subject, email, slotToken }) => {
+    let session;
+    try {
+      session = store.authenticateAccountSession(slotToken);
+    } catch (error) {
+      if (error.status !== 401) throw error;
+      throw new ServiceError(401, "invalid_session", "That sign-in attempt is no longer valid; start again");
+    }
+    if (!session.account) throw new ServiceError(401, "account_session_required", "Sign in before connecting GitHub");
+    const normalized = email ? normalizeEmail(email) : null;
+    const method = store.accountLogins.linkOAuthMethod(session.account.id, { provider: "github", subject, email: normalized });
+    return { accountId: session.account.id, methodRef: method.id };
   };
   const githubOAuthErrorMessage = code => ({
     github_state_invalid: "This GitHub sign-in attempt is not valid; start again",
@@ -526,6 +546,36 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return finishGoogle("/?google=error");
         }
       }
+      // Sign-in slot resolution (slice 7): browser clients cannot read the
+      // HttpOnly account-slot cookie, so the sign-in JSON routes accept the
+      // slot token from the request cookie when the body omits sessionToken.
+      // The cookie path is CSRF-protected via protectWrite (the browser
+      // carries the token in the X-CSRF-Token header); the explicit body
+      // token stays a bearer secret for API clients. `csrf: "always"` keeps
+      // the pre-existing always-CSRF routes (magic consume, recovery redeem)
+      // unchanged for body-token callers.
+      const signInSlotToken = (req, data, fields, { code, message, csrf = "cookie" }) => {
+        const withToken = Object.hasOwn(data, "sessionToken");
+        if (!exact(data, withToken ? [...fields, "sessionToken"] : fields)
+          || (withToken && typeof data.sessionToken !== "string")) {
+          reject(422, code, message);
+        }
+        const slotToken = withToken ? data.sessionToken : cookie(req, accountCookieName);
+        if (typeof slotToken !== "string" || slotToken.length === 0) {
+          reject(401, "account_session_required", "Start an account browser session before signing in");
+        }
+        // Cookie-fallback (browser) slots are resolved here for the CSRF
+        // check; explicit API tokens keep the route's original validation
+        // order and are verified by finish*Slot below.
+        if (!withToken) {
+          const slot = store.accountSessionSlot(slotToken);
+          protectWrite(req, slot, false);
+        } else if (csrf === "always") {
+          const slot = store.accountSessionSlot(slotToken);
+          protectWrite(req, slot, false);
+        }
+        return slotToken;
+      };
       // ---- Magic link auth (slice 3, RC-2026-09-17-012) ----
       //
       // Passwordless email sign-in. POST /api/auth/magic/request issues a
@@ -562,9 +612,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return json(res, 200, { status: "sent" });
         }
         const data = await body(req);
-        if (!exact(data, ["email", "code", "sessionToken", "sessionRevision"])
-          || typeof data.email !== "string" || typeof data.code !== "string"
-          || typeof data.sessionToken !== "string" || !Number.isSafeInteger(data.sessionRevision)) {
+        const consumeToken = signInSlotToken(req, data, ["email", "code", "sessionRevision"],
+          { code: "invalid_magic_login", message: "Email, code, session token, and current session revision are required", csrf: "always" });
+        if (typeof data.email !== "string" || typeof data.code !== "string" || !Number.isSafeInteger(data.sessionRevision)) {
           reject(422, "invalid_magic_login", "Email, code, session token, and current session revision are required");
         }
         const normalized = normalizeEmail(data.email);
@@ -573,8 +623,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         magicEmailLimit(magicConsumeEmailLimiter, normalized);
         // The slot is verified before any code is burned so a CSRF failure
         // cannot consume a one-time code.
-        const consumeSlot = store.accountSessionSlot(data.sessionToken);
-        protectWrite(req, consumeSlot, false);
         // The model burns the code window on failure (401 invalid_magic_code)
         // after 5 wrong attempts / 15-minute expiry / single use.
         store.accountLogins.consumeMagicCode({ email: normalized, code: data.code });
@@ -592,11 +640,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!method) method = store.accountLogins.linkMagicMethod(accountId, { email: normalized });
         store.accountLogins.touchMethod(accountId, method.id);
         const oldRoomToken = cookie(req, roomCookieName);
-        const loggedIn = store.loginAccountSessionWithMethod(data.sessionToken, accountId, data.sessionRevision, {
+        const loggedIn = store.loginAccountSessionWithMethod(consumeToken, accountId, data.sessionRevision, {
           method: { kind: "magic", ref: method.id },
           revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null
         });
-        setCookie(res, accountCookieName, data.sessionToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
+        setCookie(res, accountCookieName, consumeToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
         return json(res, 201, accountView(loggedIn));
       }
       // ---- Password auth (slice 2, RC-2026-09-17-011) ----
@@ -619,8 +667,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         checkOrigin(req, true);
         rate(`password-signup:${remoteAddress}`, 10);
         const data = await body(req);
-        if (!exact(data, ["email", "password", "sessionToken", "sessionRevision"])
-          || typeof data.email !== "string" || typeof data.password !== "string") {
+        const signupToken = signInSlotToken(req, data, ["email", "password", "sessionRevision"],
+          { code: "invalid_signup", message: "An email, password, and current session are required" });
+        if (typeof data.email !== "string" || typeof data.password !== "string") {
           reject(422, "invalid_signup", "An email, password, and current session are required");
         }
         const normalized = normalizeEmail(data.email);
@@ -635,7 +684,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const method = store.accountLogins.linkPasswordMethod(accountId, { email: normalized, verifier: hashPassword(data.password) });
         store.accountLogins.linkMagicMethod(accountId, { email: normalized });
         store.accountLogins.touchMethod(accountId, method.id);
-        const loggedIn = finishPasswordSlot(data.sessionToken, accountId, data.sessionRevision, method.id);
+        const loggedIn = finishPasswordSlot(signupToken, accountId, data.sessionRevision, method.id);
         return json(res, 201, accountView(loggedIn));
       }
       if (url.pathname === "/api/auth/password/login") {
@@ -643,8 +692,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         checkOrigin(req, true);
         rate(`password-login-ip:${remoteAddress}`, 60);
         const data = await body(req);
-        if (!exact(data, ["email", "password", "sessionToken", "sessionRevision"])
-          || typeof data.email !== "string" || typeof data.password !== "string") {
+        const loginToken = signInSlotToken(req, data, ["email", "password", "sessionRevision"],
+          { code: "invalid_login", message: "An email, password, and current session are required" });
+        if (typeof data.email !== "string" || typeof data.password !== "string") {
           reject(422, "invalid_login", "An email, password, and current session are required");
         }
         const normalized = normalizeEmail(data.email);
@@ -659,7 +709,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         const passwordMethod = store.accountLogins.listMethods(accountId).find(m => m.type === "password");
         store.accountLogins.touchMethod(accountId, passwordMethod.id);
-        const loggedIn = finishPasswordSlot(data.sessionToken, accountId, data.sessionRevision, passwordMethod.id);
+        const loggedIn = finishPasswordSlot(loginToken, accountId, data.sessionRevision, passwordMethod.id);
         return json(res, 200, accountView(loggedIn));
       }
       if (url.pathname === "/api/auth/password/change") {
@@ -701,12 +751,29 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === GITHUB_START_PATH) {
         if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
         const oauth = github();
-        if (!oauth) return json(res, 503, { status: "unavailable", reason: "github_not_configured",
-          error: { code: "github_not_configured", message: "GitHub sign-in is not configured" } });
+        if (!oauth) {
+          // Slice 7: browsers navigating directly to the start route get a
+          // readable landing page; API clients keep the 503 JSON body.
+          if ((req.headers.accept || "").includes("text/html")) {
+            res.setHeader("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+            const bytes = Buffer.from(githubUnavailablePage(), "utf8");
+            res.writeHead(503, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length });
+            return res.end(bytes);
+          }
+          return json(res, 503, { status: "unavailable", reason: "github_not_configured",
+            error: { code: "github_not_configured", message: "GitHub sign-in is not configured" } });
+        }
         rate(`github-start:${remoteAddress}`, 10);
-        const slotToken = url.searchParams.get("sessionToken");
-        const expectedRevision = store.accountSessionSlot(slotToken).sessionRevision;
-        const { state, codeVerifier } = oauth.pending.create({ sessionToken: slotToken, sessionRevision: expectedRevision });
+        // Browser clients cannot read the HttpOnly slot cookie into the
+        // sessionToken query param, so the slot falls back to the request
+        // cookie (CSRF-protected); API clients keep the bearer query param.
+        const paramToken = url.searchParams.get("sessionToken");
+        const startToken = (typeof paramToken === "string" && paramToken.length > 0) ? paramToken : cookie(req, accountCookieName);
+        if (!startToken) reject(401, "account_session_required", "Start an account browser session before signing in");
+        const startSlot = store.accountSessionSlot(startToken);
+        if (!paramToken) protectWrite(req, startSlot, false);
+        const expectedRevision = startSlot.sessionRevision;
+        const { state, codeVerifier } = oauth.pending.create({ sessionToken: startToken, sessionRevision: expectedRevision });
         const authorizationUrl = buildGitHubAuthUrl({ clientId: oauth.clientId, redirectUri: oauth.redirectUri,
           state, codeChallenge: codeChallengeFor(codeVerifier) });
         res.statusCode = 302;
@@ -719,6 +786,21 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!oauth) return json(res, 503, { status: "unavailable", reason: "github_not_configured",
           error: { code: "github_not_configured", message: "GitHub sign-in is not configured" } });
         rate(`github-callback:${remoteAddress}`, 20);
+        // Browser OAuth navigations send Accept: text/html; they get a
+        // landing page (slice 7) while API clients keep the JSON body.
+        const githubWantsHtml = (req.headers.accept || "").includes("text/html");
+        const githubHtml = href => {
+          const html = githubPostLoginPage(href);
+          res.setHeader("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+          const bytes = Buffer.from(html, "utf8");
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length });
+          return res.end(bytes);
+        };
+        const githubLanding = accountId => {
+          const firstRoom = store.db.prepare("SELECT room_id FROM member_accounts WHERE account_id=? ORDER BY room_id LIMIT 1")
+            .get(accountId);
+          return firstRoom ? `/?room=${encodeURIComponent(firstRoom.room_id)}` : "/?account=1";
+        };
         try {
           if (url.searchParams.getAll("state").length > 1 || url.searchParams.getAll("code").length > 1) {
             throw new GitHubOAuthError("github_callback_invalid");
@@ -736,12 +818,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             fetchFn: oauth.fetchImpl });
           const ghUser = await fetchGitHubUser(accessToken, oauth.fetchImpl);
           const subject = String(ghUser.id);
-          const linked = linkGitHubSubject({ subject, email: ghUser.email });
+          const linked = pending.link
+            ? linkGitHubSubjectToAccount({ subject, email: ghUser.email, slotToken: pending.sessionToken })
+            : linkGitHubSubject({ subject, email: ghUser.email });
           store.accountLogins.touchMethodByOAuth("github", subject);
           const loggedIn = store.loginAccountSessionWithMethod(pending.sessionToken, linked.accountId,
             pending.sessionRevision, { method: { kind: "oauth", ref: linked.methodRef } });
           setCookie(res, accountCookieName, pending.sessionToken,
             Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
+          if (githubWantsHtml) return githubHtml(githubLanding(linked.accountId));
           return json(res, 200, {
             status: "ok",
             provider: "github",
@@ -752,6 +837,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           });
         } catch (error) {
           if (error instanceof GitHubOAuthError) {
+            if (githubWantsHtml) return githubHtml("/?github=error");
             const status = { github_state_invalid: 401, github_state_expired: 401, github_consent_denied: 401,
               github_token_rejected: 401, github_callback_invalid: 422, github_provider_unavailable: 503 }[error.code] ?? 502;
             throw new ServiceError(status, error.code, githubOAuthErrorMessage(error.code));
@@ -819,15 +905,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const params = resolvePasskeyParams(expectedOrigin());
         if (!params) return passkeyUnavailable();
         const data = await body(req);
-        if (!exact(data, ["challengeId", "response", "sessionToken", "sessionRevision"])
-          || typeof data.challengeId !== "string" || data.response === null || typeof data.response !== "object"
-          || typeof data.sessionToken !== "string" || typeof data.sessionRevision !== "number") {
+        const passkeyToken = signInSlotToken(req, data, ["challengeId", "response", "sessionRevision"],
+          { code: "invalid_passkey_response", message: "A challenge id, credential response, and session are required" });
+        if (typeof data.challengeId !== "string" || data.response === null || typeof data.response !== "object"
+          || !Number.isSafeInteger(data.sessionRevision)) {
           reject(422, "invalid_passkey_response", "A challenge id, credential response, and session are required");
         }
         const verified = passkeys().finishAuthentication({ challengeId: data.challengeId, response: data.response,
           expectedOrigin: params.origin, rpId: params.rpId });
         const oldRoomToken = cookie(req, roomCookieName);
-        const loggedIn = store.loginAccountSessionWithMethod(data.sessionToken, verified.accountId, data.sessionRevision, {
+        const loggedIn = store.loginAccountSessionWithMethod(passkeyToken, verified.accountId, data.sessionRevision, {
           method: { kind: "passkey", ref: verified.methodRef },
           revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null
         });
@@ -1164,17 +1251,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         checkOrigin(req, true);
         rate(`recovery-redeem:${remoteAddress}`, 10);
         const data = await body(req);
-        if (!exact(data, ["email", "code", "sessionToken", "sessionRevision"])
-          || typeof data.email !== "string" || typeof data.code !== "string"
-          || typeof data.sessionToken !== "string" || !Number.isSafeInteger(data.sessionRevision)) {
+        const redeemToken = signInSlotToken(req, data, ["email", "code", "sessionRevision"],
+          { code: "invalid_recovery_redeem", message: "An email, recovery code, session token, and current session revision are required", csrf: "always" });
+        if (typeof data.email !== "string" || typeof data.code !== "string" || !Number.isSafeInteger(data.sessionRevision)) {
           reject(422, "invalid_recovery_redeem", "An email, recovery code, session token, and current session revision are required");
         }
         const email = normalizeEmail(data.email);
         if (email === null) reject(422, "invalid_email", "A valid email address is required");
         // The slot is verified before any code is burned so a CSRF failure
         // cannot consume a one-time code.
-        const slot = store.accountSessionSlot(data.sessionToken);
-        protectWrite(req, slot, false);
         recoveryRedeemAllowed(email);
         const accountId = store.accountLogins.findAccountByVerifiedEmail(email);
         let redemption;
@@ -1191,11 +1276,125 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const method = store.accountLogins.listMethods(accountId)
           .find(candidate => candidate.type === "recovery-code-set" && !candidate.disabled);
         if (method) store.accountLogins.touchMethod(accountId, method.id);
-        const loggedIn = store.loginAccountSessionWithMethod(data.sessionToken, accountId, data.sessionRevision, {
+        const loggedIn = store.loginAccountSessionWithMethod(redeemToken, accountId, data.sessionRevision, {
           method: { kind: "recovery-code", ref: method ? method.id : "recovery-code-set" }
         });
-        setCookie(res, accountCookieName, data.sessionToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
+        setCookie(res, accountCookieName, redeemToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
         return json(res, 200, { remaining: redemption.remaining, session: accountView(loggedIn) });
+      }
+      // ---- Login method settings (slice 7, RC-2026-09-17-016) ----
+      // Authenticated management of an account's linked sign-in methods.
+      // GET /api/auth/methods lists the safe method descriptors (verifiers
+      // are never exposed) plus honest provider/mail configuration status;
+      // the disable/enable/remove routes mutate one method at a time and
+      // the model refuses to disable or remove the last active method.
+      // POST /api/auth/password/set attaches a first password to an
+      // account that signed up another way (it 409s when one exists; the
+      // slice-2 change route rotates it). GET /api/auth/github/link/start
+      // begins the slice-4 GitHub OAuth dance with a link intent so the
+      // callback attaches the GitHub subject to the currently authenticated
+      // account instead of the sign-in find-or-provision order.
+      const requireAccountSession = () => {
+        const slotToken = cookie(req, accountCookieName);
+        if (!slotToken) reject(401, "account_session_required", "Sign in to manage sign-in methods");
+        let session;
+        try {
+          session = store.authenticateAccountSession(slotToken);
+        } catch (error) {
+          if (error.status !== 401) throw error;
+          reject(401, "invalid_session", "That session is no longer valid; sign in again");
+        }
+        if (!session.account) reject(401, "account_session_required", "Sign in to manage sign-in methods");
+        return { ...session, slotToken };
+      };
+      const providerConfigured = probe => {
+        try { return probe() !== null; } catch { return false; }
+      };
+      if (url.pathname === "/api/auth/methods") {
+        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
+        const session = requireAccountSession();
+        return json(res, 200, {
+          methods: store.accountLogins.listMethods(session.account.id),
+          providers: {
+            github: { configured: providerConfigured(() => github()) },
+            google: { configured: providerConfigured(() => google()) },
+            passkey: { configured: resolvePasskeyParams(expectedOrigin()) !== null },
+            mail: { configured: magicMailer.isConfigured() }
+          }
+        });
+      }
+      const methodIdFrom = data => {
+        if (!exact(data, ["id"]) || typeof data.id !== "string" || data.id.length === 0) {
+          reject(422, "invalid_method", "A login method id is required");
+        }
+        return data.id;
+      };
+      if (url.pathname === "/api/auth/methods/disable") {
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        checkOrigin(req, true);
+        rate(`auth-methods:${remoteAddress}`, 30);
+        const session = requireAccountSession();
+        protectWrite(req, session, false);
+        const method = store.accountLogins.setMethodDisabled(session.account.id, methodIdFrom(await body(req)), true);
+        return json(res, 200, { method });
+      }
+      if (url.pathname === "/api/auth/methods/enable") {
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        checkOrigin(req, true);
+        rate(`auth-methods:${remoteAddress}`, 30);
+        const session = requireAccountSession();
+        protectWrite(req, session, false);
+        const method = store.accountLogins.setMethodDisabled(session.account.id, methodIdFrom(await body(req)), false);
+        return json(res, 200, { method });
+      }
+      if (url.pathname === "/api/auth/methods/remove") {
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        checkOrigin(req, true);
+        rate(`auth-methods:${remoteAddress}`, 30);
+        const session = requireAccountSession();
+        protectWrite(req, session, false);
+        const removed = store.accountLogins.removeMethod(session.account.id, methodIdFrom(await body(req)));
+        return json(res, 200, removed);
+      }
+      if (url.pathname === "/api/auth/password/set") {
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        checkOrigin(req, true);
+        rate(`password-set:${remoteAddress}`, 20);
+        const session = requireAccountSession();
+        protectWrite(req, session, false);
+        const data = await body(req);
+        if (!exact(data, ["password"]) || typeof data.password !== "string") {
+          reject(422, "invalid_password_set", "A new password is required");
+        }
+        const methods = store.accountLogins.listMethods(session.account.id);
+        if (methods.some(method => method.type === "password")) {
+          reject(409, "password_already_set", "This account already has a password; change it instead");
+        }
+        const policy = checkPasswordPolicy(data.password);
+        if (policy) reject(422, policy.code, policy.message);
+        const email = methods.find(method => method.email)?.email ?? null;
+        if (!email) reject(422, "no_verified_email", "Link an email-based sign-in method before setting a password");
+        const method = store.accountLogins.linkPasswordMethod(session.account.id, { email, verifier: hashPassword(data.password) });
+        store.accountLogins.touchMethod(session.account.id, method.id);
+        return json(res, 201, { status: "ok", method: { id: method.id, type: "password" } });
+      }
+      if (url.pathname === "/api/auth/github/link/start") {
+        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
+        // Auth first: anonymous callers get 401 without learning whether
+        // GitHub is configured (slice 7 hardening).
+        const session = requireAccountSession();
+        const oauth = github();
+        if (!oauth) return json(res, 503, { status: "unavailable", reason: "github_not_configured",
+          error: { code: "github_not_configured", message: "GitHub sign-in is not configured" } });
+        rate(`github-link-start:${remoteAddress}`, 10);
+        const slotToken = session.slotToken;
+        const expectedRevision = store.accountSessionSlot(slotToken).sessionRevision;
+        const { state, codeVerifier } = oauth.pending.create({ sessionToken: slotToken, sessionRevision: expectedRevision, link: true });
+        const authorizationUrl = buildGitHubAuthUrl({ clientId: oauth.clientId, redirectUri: oauth.redirectUri,
+          state, codeChallenge: codeChallengeFor(codeVerifier) });
+        res.statusCode = 302;
+        res.setHeader("Location", authorizationUrl);
+        return res.end();
       }
       if (url.pathname === "/api/guest-agent-links" && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, guestAgentLinkContract(), req.method === "HEAD");

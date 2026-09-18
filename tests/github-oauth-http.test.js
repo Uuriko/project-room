@@ -124,6 +124,20 @@ test("start is 503 with honest JSON when GitHub is not configured", async t => {
   noSecrets(body);
 });
 
+test("start serves an honest HTML landing to browsers when GitHub is not configured", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const slot = f.store.createAccountSessionSlot();
+  const res = await fetch(`${origin}${GITHUB_START_PATH}?sessionToken=${slot.token}`,
+    { redirect: "manual", headers: { Accept: "text/html" } });
+  assert.equal(res.status, 503);
+  assert.ok(res.headers.get("content-type").includes("text/html"));
+  const html = await res.text();
+  assert.ok(html.includes("GitHub sign-in isn&rsquo;t configured") || html.includes("GitHub sign-in isn\u2019t configured"));
+  assert.ok(html.includes("Back to sign-in"));
+  noSecrets({ html });
+});
+
 test("start rejects non-GET methods", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f, { githubAuth: githubAuth() });
