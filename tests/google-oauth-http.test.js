@@ -53,6 +53,15 @@ async function startServer(t, f, options = {}) {
   return `http://127.0.0.1:${server.address().port}`;
 }
 
+
+function authCookie(f, accountId, withMethod = null) {
+  const slot = f.store.createAccountSessionSlot();
+  const revision = slot.session.sessionRevision;
+  if (withMethod) f.store.loginAccountSessionWithMethod(slot.token, accountId, revision, { method: withMethod });
+  else f.store.loginAccountSession(slot.token, f.store.issueAccountAccessKey(accountId), revision);
+  return { cookie: `account_session=${slot.token}`, csrf: f.store.accountSessionSlot(slot.token).csrf };
+};
+
 const accountCookie = res => {
   const setCookie = res.headers.get("set-cookie") || "";
   const match = /account_session=([A-Za-z0-9_-]{43})/.exec(setCookie);
@@ -209,4 +218,62 @@ test("second login with the same Google subject reuses the account", async t => 
     assert.equal(session.account.id, `google:${sub}`);
   }
   assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM accounts WHERE id=?").get(`google:${sub}`).n, 1);
+});
+
+
+test("GET /api/auth/google/link/start 401s anonymously, 503s when Google is not configured", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  // Auth is checked before provider configuration: anonymous callers get
+  // 401 without learning whether Google is configured.
+  const anon = await fetch(origin + "/api/auth/google/link/start", { redirect: "manual" });
+  assert.equal(anon.status, 401);
+
+  const accountId = "google-link-start-503";
+  f.store.createAccount(accountId, "link-start-fixture");
+  const magic = f.store.accountLogins.linkMagicMethod(accountId, { email: "googlelink503@example.invalid" });
+  const creds = authCookie(f, accountId, { kind: "magic", ref: magic.id });
+  const res = await fetch(origin + "/api/auth/google/link/start", {
+    redirect: "manual", headers: { Cookie: creds.cookie } });
+  assert.equal(res.status, 503);
+  assert.equal((await res.json()).reason, "google_not_configured");
+});
+
+test("Google callback links through the shared account-login model", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f, { googleAuth: googleAuth() });
+  const { authorize, slotCookie } = await beginFlow(origin);
+  const callback = await fetch(
+    `${origin}${GOOGLE_CALLBACK_PATH}?state=${authorize.searchParams.get("state")}&code=code-shared`,
+    { redirect: "manual", headers: { Cookie: `account_session=${slotCookie}` } });
+  assert.equal(callback.status, 200);
+  const session = f.store.authenticateAccountSession(accountCookie(callback));
+  // The account is linked through the shared model: the OAuth subject
+  // resolves to the signed-in account via findAccountByOAuth.
+  assert.equal(f.store.accountLogins.findAccountByOAuth("google", sub), session.account.id);
+  const methods = f.store.accountLogins.listMethods(session.account.id);
+  assert.ok(methods.some(m => m.type === "oauth" && m.provider === "google" && !m.disabled),
+    "expected a linked Google OAuth method");
+});
+
+test("Google link intent attaches the subject to the signed-in account", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f, { googleAuth: googleAuth() });
+  const accountId = "google-link-target";
+  f.store.createAccount(accountId, "link-fixture");
+  const magic = f.store.accountLogins.linkMagicMethod(accountId, { email: "googlelink@example.invalid" });
+  const creds = authCookie(f, accountId, { kind: "magic", ref: magic.id });
+  // Start the link flow (authenticated).
+  const start = await fetch(origin + "/api/auth/google/link/start", {
+    redirect: "manual", headers: { Cookie: creds.cookie } });
+  assert.equal(start.status, 302);
+  const authorize = new URL(start.headers.get("location"));
+  const callback = await fetch(
+    `${origin}${GOOGLE_CALLBACK_PATH}?state=${authorize.searchParams.get("state")}&code=code-link`,
+    { redirect: "manual", headers: { Cookie: creds.cookie } });
+  assert.equal(callback.status, 200);
+  assert.equal(f.store.accountLogins.findAccountByOAuth("google", sub), accountId);
+  const methods = f.store.accountLogins.listMethods(accountId);
+  assert.ok(methods.some(m => m.type === "oauth" && m.provider === "google" && !m.disabled),
+    "expected Google linked to the signed-in account");
 });
