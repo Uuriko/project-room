@@ -24,6 +24,23 @@ export const GITHUB_SCOPES = "read:user user:email";
 export const GITHUB_PENDING_TTL_MS = 10 * 60 * 1000;
 export const GITHUB_PENDING_MAX = 1000;
 
+// Post-login landing page for browser OAuth navigations (slice 7): the
+// GitHub callback content-negotiates — API clients keep the JSON body,
+// browsers (Accept: text/html) get a page that navigates to the account
+// home or the first room, mirroring the Google flow.
+export function githubPostLoginPage(href) {
+  if (href !== '/?github=error' && href !== '/?account=1' && !/^\/\?room=[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(href)) fail('github_callback_invalid');
+  const safe = href.replace(/&/g, '&amp;');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${safe}"><title>Opening Project Room</title></head><body><p>Opening Room…</p><p><a href="${safe}">Continue</a></p></body></html>`;
+}
+
+// Honest unconfigured landing for browser navigations to the GitHub start
+// route (slice 7): API clients keep the 503 JSON body, browsers
+// (Accept: text/html) get a readable page instead of a raw error.
+export function githubUnavailablePage() {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>GitHub sign-in unavailable</title></head><body><main><h1>GitHub sign-in isn&rsquo;t configured</h1><p>GitHub sign-in is not configured on this Room. An operator needs to add the GitHub OAuth credentials before it can be used.</p><p><a href="/?account=1">Back to sign-in</a></p></main></body></html>`;
+}
+
 export class GitHubOAuthError extends Error {
   constructor(code) { super(code); this.name = "GitHubOAuthError"; this.code = code; }
 }
@@ -91,7 +108,7 @@ export function createPendingStore({ now = Date.now, ttlMs = GITHUB_PENDING_TTL_
   };
   return {
     size: () => pending.size,
-    create({ sessionToken, sessionRevision }) {
+    create({ sessionToken, sessionRevision, link = false }) {
       if (!/^[A-Za-z0-9_-]{43}$/.test(sessionToken || "")
         || !Number.isSafeInteger(sessionRevision) || sessionRevision < 0) fail("github_session_required");
       sweep();
@@ -102,7 +119,9 @@ export function createPendingStore({ now = Date.now, ttlMs = GITHUB_PENDING_TTL_
       }
       const state = base64urlToken(random(32));
       const codeVerifier = createCodeVerifier(random);
-      pending.set(digest(state), { codeVerifier, sessionToken, sessionRevision, createdAt: now() });
+      // Slice 7: the settings "connect GitHub" flow carries a link intent so
+      // the callback attaches the subject to the authenticated account.
+      pending.set(digest(state), { codeVerifier, sessionToken, sessionRevision, link: link === true, createdAt: now() });
       return { state, codeVerifier };
     },
     consume(state) {
@@ -120,7 +139,8 @@ export function createPendingStore({ now = Date.now, ttlMs = GITHUB_PENDING_TTL_
       if (!entry) fail("github_state_invalid");
       pending.delete(foundKey); // single-use: any replay of the state fails
       if (entry.createdAt + ttlMs <= now()) fail("github_state_expired");
-      return { codeVerifier: entry.codeVerifier, sessionToken: entry.sessionToken, sessionRevision: entry.sessionRevision };
+      return { codeVerifier: entry.codeVerifier, sessionToken: entry.sessionToken, sessionRevision: entry.sessionRevision,
+        link: entry.link === true };
     }
   };
 }
