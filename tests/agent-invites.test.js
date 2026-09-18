@@ -596,7 +596,7 @@ test("invite vocabulary is discoverable and 422s teach it (RC-2026-09-18-020)", 
   const { store, origin, ownerKey } = await serve(t);
   // The module-level vocabulary names every profile and permission.
   const vocab = store.invites.vocabulary();
-  assert.deepEqual(Object.keys(vocab.profiles).sort(), ["chat", "contribute", "review"]);
+  assert.deepEqual(Object.keys(vocab.profiles).sort(), ["chat", "collaborate", "contribute", "review"]);
   for (const [name, entry] of Object.entries(vocab.profiles)) {
     assert.ok(Array.isArray(entry.permissions), `${name} lists permissions`);
     assert.ok(entry.description && entry.description.length > 0, `${name} is described`);
