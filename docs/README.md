@@ -58,6 +58,7 @@ this lane is docs/spec only. Pairs
 | [ASK-REGEN-ALT-MODEL-SPEC-2026-09-18.md](ASK-REGEN-ALT-MODEL-SPEC-2026-09-18.md) | T042 — hover Regen with… another Community / Hosted ladder model; keep A4 truncate |
 | [ASK-CONTINUE-AFTER-STOP-SPEC-2026-09-18.md](ASK-CONTINUE-AFTER-STOP-SPEC-2026-09-18.md) | T043 — hover Continue after Stop; append, do not duplicate the partial |
 | [ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md](../research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md) | T082 — Stop / Regen / Copy / Edit keyboard map (Esc / R / C / E); cite Ask v2 #249 + quiet-shell §3.4; picker keys stay T032 |
+| [ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md](../research/ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md) | T084 — New chat / Clear thread confirm (cite Ask v2 #249 A7); quiet confirm if thread has turns; never wipe without Esc/cancel |
 | [ASK-ARTIFACTS-LITE-2026-09-18.md](../research/ASK-ARTIFACTS-LITE-2026-09-18.md) | Ask Artifacts-lite P0 — collapse long fences → opt-in side/bottom panel (research; implement later on dasha-lobby) |
 | [examples/scorers/](examples/scorers/) | Default scorer stubs (task-compliance, efficiency, procedure-compliance, people-data-safe, orphan-claim) |
 | [ROOM-KITS-CATALOG.md](ROOM-KITS-CATALOG.md) | Optional later rows only — not live doors |
@@ -96,6 +97,8 @@ Ask Advanced ladder UX brief (T075, research; Speed/Mid/Quality picker placement
 [ASK-ADVANCED-LADDER-UX-BRIEF-2026-09-18.md](../research/ASK-ADVANCED-LADDER-UX-BRIEF-2026-09-18.md).
 Ask Stop / Regen / Copy / Edit keyboard shortcuts (T082, research; cite Ask v2 #249 + quiet-shell §3.4; picker keys stay T032; no empty-canvas cheatsheet):
 [ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md](../research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md).
+Ask New chat / Clear thread confirm (T084, research; cite Ask v2 #249 A7 New; quiet confirm if thread has turns; never wipe without Esc/cancel):
+[ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md](../research/ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md).
 
 ## The dated archive
 
