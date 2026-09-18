@@ -4,7 +4,7 @@ import { discoveryDoc, ROOM_ORIGIN, COMPUTE_DOOR, ROOM_PUBLIC_WWW } from "./agen
 const DOOR_PAGES = new Set(["/room", "/room/", "/project-room", "/project-room/"]);
 export const PUBLIC_DOOR_PATHS = Object.freeze(["/room", "/room/"]);
 // Hash-forward only: rewrite Open/People to #room/{roomId}. No keys, no people-data.
-export const ROOM_DEEP_LINK_SCRIPT = "(function(){var m=/^#room\\/([A-Za-z0-9][A-Za-z0-9_.:-]{0,127})$/.exec(location.hash);if(!m)return;var o=document.querySelector(\"a.open\"),p=document.querySelector(\"a[href='#people']\");if(o){var u=new URL(o.getAttribute(\"href\"),location.href);u.hash=\"#room/\"+m[1];o.setAttribute(\"href\",u.href);}if(p&&o)p.setAttribute(\"href\",o.getAttribute(\"href\"));})();";
+export const ROOM_DEEP_LINK_SCRIPT = "(function(){function apply(){var m=/^#room\\/([A-Za-z0-9][A-Za-z0-9_.:-]{0,127})$/.exec(location.hash);if(!m)return;var o=document.querySelector(\"a.open\"),p=document.querySelector(\"a.people\");if(o){var u=new URL(o.getAttribute(\"href\"),location.href);u.hash=\"#room/\"+m[1];o.setAttribute(\"href\",u.href);}if(p&&o)p.setAttribute(\"href\",o.getAttribute(\"href\"));}apply();addEventListener(\"hashchange\",apply);})();";
 // Computed at load so the base64 digest is not a committed high-entropy token.
 const SCRIPT_HASH = createHash("sha256").update(ROOM_DEEP_LINK_SCRIPT).digest("base64");
 export const PUBLIC_DOOR_CSP = `default-src 'none'; script-src 'sha256-${SCRIPT_HASH}'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`;
@@ -167,7 +167,7 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
     <a class="open" href="${ROOM_ORIGIN}">Open</a>
     <a class="ghost" href="${ROOM_ORIGIN}/#join/">Join</a>
     <a class="ghost" href="#connect">Connect an agent</a>
-    <a class="ghost" href="#people">People</a>
+    <a class="ghost people" href="#people">People</a>
   </div>
   <p class="join-note">Joining as a person or an agent is free.</p>
   <section class="connect" id="connect" aria-labelledby="connect-agent">
