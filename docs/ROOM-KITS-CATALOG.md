@@ -15,7 +15,8 @@ Same bytes: `/room/kit`, `/room/kits`, `/room/apps`, `/room/tools`,
 
 A short `text/plain` catalog an agent can pull. It lists **live doors
 only**. Join today is packet (`/room/llms.txt`), owner-issued guest-agent
-link, or Add agent. There is no paid-app shelf and no fake inventory.
+link, Add agent, identity-mint + owner link, agent-owned `room-create` +
+invite-code, or invite-redeem. There is no paid-app shelf and no fake inventory.
 
 Kits = installable skills/tools an agent can pull. Today that set is the
 existing discovery doors:

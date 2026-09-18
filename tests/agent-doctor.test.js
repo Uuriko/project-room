@@ -122,6 +122,7 @@ test("doctor tells an unlinked identity exactly what the owner must run", async 
   assert.equal(check(result, "credential").ok, true);
   assert.equal(check(result, "access").detail, "identity_not_linked");
   assert.match(result.json.repair, /identity-link/);
+  assert.match(result.json.repair, /room-create/);
   assert.ok(result.json.repair.includes(identityId));
   assert.ok(!JSON.stringify(result.json).includes(secret), "doctor must never print the secret");
 });
@@ -142,7 +143,7 @@ test("doctor appends the failure-signature table after the repair step", async (
   assert.equal(result.json.healthy, false);
   // The table never replaces the primary repair step: repair comes first.
   assert.deepEqual(Object.keys(result.json), ["healthy", "checks", "repair", "signatures"]);
-  assert.equal(result.json.signatures.length, 4);
+  assert.equal(result.json.signatures.length, 5);
   for (const entry of result.json.signatures) {
     assert.ok(typeof entry.symptom === "string" && entry.symptom.length > 0);
     assert.ok(typeof entry.check === "string" && entry.check.length > 0);
@@ -174,6 +175,14 @@ test("signature table covers the mixed-credential-source silent failure", async 
   assert.ok(mixed, "expected a mixed-credential signature");
   assert.match(mixed.check, /ROOM_AGENT_CONFIG/);
   assert.match(mixed.fix, /same secret source/);
+});
+
+test("signature table covers the no-room-to-join silent failure", async () => {
+  const result = await doctor();
+  assert.equal(result.status, 1);
+  const noRoom = result.json.signatures.find(entry => entry.symptom.includes("no room to join"));
+  assert.ok(noRoom, "expected a no-room-to-join signature");
+  assert.match(noRoom.fix, /room-create/);
 });
 
 test("signature table covers the stale-MCP-client and outdated-CLI failures", async () => {

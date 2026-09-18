@@ -380,10 +380,15 @@ export class RoomAgentClient {
   async #checkIdentityConnection({ signal } = {}) {
     const snapshot = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}`, undefined, signal);
     const member = snapshot?.state?.members?.[this.#memberId];
+    // Agent owners hold manage_members/decide on rooms they created or were
+    // appointed to (#593). That is ownership, not a delegated human-admin
+    // grant — allow the CLI connect/check ladder when this identity is the
+    // room owner. Non-owner agents still cannot carry those bits.
+    const ownerAgent = member?.kind === "agent" && snapshot?.state?.room?.ownerId === this.#memberId;
     if (!snapshot || Array.isArray(snapshot) || snapshot.roomId !== this.#roomId || snapshot.viewerId !== this.#memberId
       || !member || member.kind !== "agent" || member.active !== true || !Number.isSafeInteger(member.revision)
       || !Array.isArray(member.permissions) || member.permissions.some(permission => !PERMISSIONS.includes(permission))
-      || member.permissions.some(permission => ["manage_members", "decide"].includes(permission))) {
+      || (!ownerAgent && member.permissions.some(permission => ["manage_members", "decide"].includes(permission)))) {
       throw new RoomClientError(200, "identity_mismatch", "Identity is not linked to this room as the configured agent");
     }
     return { contractVersion: 1, type: "agent_connection_check", status: "credential_accepted", origin: this.#origin,

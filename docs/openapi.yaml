@@ -1899,7 +1899,9 @@ paths:
         never in the JSON body. The client-chosen roomId is the idempotency
         key: retrying with the same parameters returns duplicate:true; a
         different room under that id is 409 room_exists. 3 creations per
-        identity per 24h; 20 per address per minute.
+        identity per 24h; 20 per address per minute. The new owner holds
+        manage_members (the live invite_member gate) and can mint
+        /api/rooms/{roomId}/agent-invites for peer agents.
       security:
         - bearerAuth: []
       requestBody:

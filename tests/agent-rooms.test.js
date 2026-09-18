@@ -4,12 +4,28 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { AgentRooms, agentRoomSchema } from "../server/agent-rooms.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { PERMISSIONS } from "../src/events.js";
+import { RoomAgentClient } from "../client/room-agent.mjs";
+
+const execFileAsync = promisify(execFile);
+async function cli(origin, args, env = {}) {
+  const scrubbed = { ...process.env };
+  for (const name of Object.keys(scrubbed)) if (name.startsWith("ROOM_AGENT_")) delete scrubbed[name];
+  const base = env.ROOM_AGENT_CONFIG === undefined ? { ROOM_AGENT_ORIGIN: origin } : {};
+  try {
+    const { stdout, stderr } = await execFileAsync(process.execPath, ["scripts/agent-inbox.mjs", ...args], {
+      env: { ...scrubbed, ...base, ...env }, encoding: "utf8", timeout: 30000, maxBuffer: 1024 * 1024,
+    });
+    return { status: 0, json: JSON.parse(stdout), stderr: String(stderr) };
+  } catch (error) { return { status: error.code ?? 1, stderr: String(error.stderr ?? error.message) }; }
+}
 
 function setup(t, { createCapacity = 1000 } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-agent-rooms-"));
@@ -196,7 +212,7 @@ async function httpFixture(t) {
     headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: JSON.stringify(data ?? {})
   }).then(async res => ({ status: res.status, body: await res.json().catch(() => null) }));
-  return { store, post };
+  return { store, post, origin };
 }
 
 test("HTTP: self-serve creation over the bearer identity secret", async t => {
@@ -241,4 +257,115 @@ test("HTTP: owner transfers ownership; non-owner is refused", async t => {
   });
   assert.equal(noReason.status, 200);
   assert.equal(noReason.body.ownerId, "owner");
+});
+
+test("HTTP: agent owner mints an invite; a peer redeems — no human owner token", async t => {
+  const { store, post } = await httpFixture(t);
+  const owner = store.identities.create("Grok Bot");
+  const created = await post("/api/agent-rooms", {
+    token: owner.secret, data: createArgs("grok-den")
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  assert.equal(created.body.ownerMemberId, owner.identityId);
+  // Invite mint uses the agent owner's pri_ secret, never a human owner key.
+  const minted = await post("/api/rooms/grok-den/agent-invites", {
+    token: owner.secret,
+    data: { profile: "contribute", expiresInMinutes: 60, displayName: "Muse" }
+  });
+  assert.equal(minted.status, 201, JSON.stringify(minted.body));
+  assert.match(minted.body.code, /^RM-/);
+  assert.equal(minted.body.roomId, "grok-den");
+  assert.ok(!minted.body.permissions.includes("manage_members"));
+  assert.ok(!minted.body.permissions.includes("decide"));
+  const redeemed = await post("/api/agent-invites/redeem", {
+    data: { code: minted.body.code, displayName: "Muse" }
+  });
+  assert.equal(redeemed.status, 201, JSON.stringify(redeemed.body));
+  assert.equal(redeemed.body.roomId, "grok-den");
+  assert.match(redeemed.body.identityId, /^ai_/);
+  assert.match(redeemed.body.secret, /^pri_/);
+  assert.deepEqual(redeemed.body.permissions, minted.body.permissions);
+  const peer = store.authenticate(redeemed.body.secret, "grok-den");
+  assert.equal(peer.member.id, redeemed.body.identityId);
+  assert.equal(peer.member.kind, "agent");
+  assert.equal(store.roomAuthority("grok-den").ownerId, owner.identityId);
+});
+
+test("agent owner can connect/check in its own room; a non-owner agent still cannot hold admin bits", async t => {
+  const { store, post, origin } = await httpFixture(t);
+  const owner = store.identities.create("Den Keeper");
+  const created = await post("/api/agent-rooms", { token: owner.secret, data: createArgs("owner-den") });
+  assert.equal(created.status, 201);
+  const ownerClient = new RoomAgentClient({
+    origin, roomId: "owner-den", token: owner.secret, memberId: owner.identityId
+  });
+  const check = await ownerClient.checkConnection();
+  assert.equal(check.status, "credential_accepted");
+  assert.equal(check.memberId, owner.identityId);
+  assert.ok(check.permissions.includes("manage_members"));
+  assert.ok(check.permissions.includes("decide"));
+  const snapshot = await ownerClient.snapshot();
+  assert.equal(snapshot.viewerId, owner.identityId);
+  assert.equal(snapshot.state.room.ownerId, owner.identityId);
+});
+
+test("CLI: identity-create → room-create → invite-code → peer redeem-invite → connect (no human owner token)", async t => {
+  const { origin } = await httpFixture(t);
+  const mintedIdentity = await cli(origin, ["identity-create", "Grok Bot"]);
+  assert.equal(mintedIdentity.status, 0, mintedIdentity.stderr);
+  assert.match(mintedIdentity.json.identityId, /^ai_/);
+  assert.match(mintedIdentity.json.secret, /^pri_/);
+  const { identityId, secret } = mintedIdentity.json;
+
+  const created = await cli(origin, ["room-create", "grok-muse-dogfood", "Grok+Muse", "Agent-owned dogfood room", "personal", "Grok Bot"], {
+    ROOM_AGENT_TOKEN: secret,
+  });
+  assert.equal(created.status, 0, created.stderr);
+  assert.equal(created.json.roomId, "grok-muse-dogfood");
+  assert.equal(created.json.ownerMemberId, identityId);
+  assert.equal(created.json.duplicate, false);
+
+  const ownerEnv = {
+    ROOM_AGENT_ROOM: "grok-muse-dogfood", ROOM_AGENT_MEMBER: identityId, ROOM_AGENT_TOKEN: secret,
+  };
+  const minted = await cli(origin, ["invite-code", "profile:contribute", "60", "Muse"], ownerEnv);
+  assert.equal(minted.status, 0, minted.stderr);
+  assert.match(minted.json.code, /^RM-/);
+  assert.equal(minted.json.roomId, "grok-muse-dogfood");
+
+  const redeemed = await cli(origin, ["redeem-invite", minted.json.code, "Muse", "--yes"]);
+  assert.equal(redeemed.status, 0, redeemed.stderr);
+  assert.match(redeemed.json.secret, /^pri_/);
+  assert.equal(redeemed.json.roomId, "grok-muse-dogfood");
+  assert.notEqual(redeemed.json.identityId, identityId);
+
+  const peerDir = mkdtempSync(join(tmpdir(), "agent-owner-invite-peer-"));
+  const ownerDir = mkdtempSync(join(tmpdir(), "agent-owner-invite-owner-"));
+  t.after(() => {
+    rmSync(peerDir, { recursive: true, force: true });
+    rmSync(ownerDir, { recursive: true, force: true });
+  });
+  const peerConnected = await cli(origin, ["connect", join(peerDir, "muse")], {
+    ROOM_AGENT_ROOM: "grok-muse-dogfood",
+    ROOM_AGENT_MEMBER: redeemed.json.identityId,
+    ROOM_AGENT_TOKEN: redeemed.json.secret,
+  });
+  assert.equal(peerConnected.status, 0, peerConnected.stderr);
+  const peerChecked = await cli(origin, ["check"], { ROOM_AGENT_CONFIG: join(peerDir, "muse") });
+  assert.equal(peerChecked.status, 0, peerChecked.stderr);
+  assert.equal(peerChecked.json.status, "verified");
+  assert.equal(peerChecked.json.memberId, redeemed.json.identityId);
+
+  const ownerConnected = await cli(origin, ["connect", join(ownerDir, "grok")], ownerEnv);
+  assert.equal(ownerConnected.status, 0, ownerConnected.stderr);
+  const ownerChecked = await cli(origin, ["check"], { ROOM_AGENT_CONFIG: join(ownerDir, "grok") });
+  assert.equal(ownerChecked.status, 0, ownerChecked.stderr);
+  assert.equal(ownerChecked.json.status, "verified");
+  assert.equal(ownerChecked.json.memberId, identityId);
+  assert.match(ownerChecked.json.rungs[0].detail, /manage_members/);
+
+  assert.notEqual((await cli(origin, ["room-create"])).status, 0);
+  assert.notEqual((await cli(origin, ["room-create", "nope"])).status, 0);
+  assert.notEqual((await cli(origin, ["room-create", "a-room", "Title", "Purpose"], {})).status, 0,
+    "room-create without a pri_ secret must fail");
 });

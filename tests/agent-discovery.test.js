@@ -45,7 +45,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
     "/room/.well-known/agent-card.json",
     ...SHORT_PACKET_FILES.map(name => `/room/${name}`)
   ]);
-  assert.deepEqual(card.join.map(row => row.id), ["packet", "guest-agent-link", "enrolled-key", "identity-mint", "invite-redeem"]);
+  assert.deepEqual(card.join.map(row => row.id), ["packet", "guest-agent-link", "enrolled-key", "identity-mint", "agent-room-create", "invite-redeem"]);
   assert.equal(card.join.find(row => row.id === "packet").status, "live");
   assert.equal(card.join.find(row => row.id === "guest-agent-link").status, "live");
   assert.equal(card.join.find(row => row.id === "enrolled-key").status, "live");
@@ -68,6 +68,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.match(text, new RegExp(ROOM_PUBLIC_LOBBY.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(text, /packet \(live, no account\)/);
   assert.match(text, /guest-agent-link \(live, owner-issued\)/);
+  assert.match(text, /agent-room-create \(live, no account\)/);
   assert.match(text, /room_check_access/);
   assert.match(text, /orient/);
   assert.match(text, new RegExp(ROOM_DOCS.client.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
@@ -82,7 +83,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(FORBIDDEN.test(agentCardJson()), false);
   assert.equal(JSON.parse(agentCardJson()).protocol, "project-room-discovery");
   assert.equal(card.protocolVersion, A2A_PROTOCOL_VERSION);
-  assert.deepEqual(card.skills.map(row => row.id), ["orient", "room_check_access", "packet", "guest-agent-link", "enrolled-key", "identity-mint", "invite-redeem"]);
+  assert.deepEqual(card.skills.map(row => row.id), ["orient", "room_check_access", "packet", "guest-agent-link", "enrolled-key", "identity-mint", "agent-room-create", "invite-redeem"]);
   assert.equal(card.capabilities.streaming, true);
   assert.equal(card.capabilities.pushNotifications, false);
   assert.deepEqual(card.defaultInputModes, ["text/plain"]);
@@ -199,6 +200,7 @@ test("kits catalog is its own packet; leftover kit/apps/tools paths do not 404",
   assert.match(catalog.body, /packet \(live, no account\)/);
   assert.match(catalog.body, /guest-agent-link \(live, owner-issued\)/);
   assert.match(catalog.body, /enrolled-key \(live\)/);
+  assert.match(catalog.body, /agent-room-create \(live, no account\)/);
   assert.match(catalog.body, /\/room\/llms\.txt/);
   assert.match(catalog.body, /\.well-known\/agent\.json/);
   assert.match(catalog.body, /\/health/);

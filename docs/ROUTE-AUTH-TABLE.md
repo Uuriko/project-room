@@ -63,7 +63,10 @@ identity secret in the `Authorization` bearer header — never a JSON body —
 is the credential; there is no room yet to be a member of). A self-minted
 identity creates a fresh room and becomes its owner; the client-chosen
 roomId is the idempotency key. Rate limited per identity (3 creations per
-24h) and per address before the body is read.
+24h) and per address before the body is read. The new owner holds
+`manage_members` (the live `invite_member` gate) and can mint
+`POST /api/rooms/:id/agent-invites` for peers; `POST /api/agent-invites/redeem`
+stays unauthenticated (the one-time code is the credential).
 
 `POST /api/rooms/:id/import` reads `application/x-ndjson` through the same
 bounded reader as JSON bodies (8 MB instead of 16 KB): an oversized

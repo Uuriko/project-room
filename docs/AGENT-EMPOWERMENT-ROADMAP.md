@@ -28,7 +28,7 @@ Three compounding loops do the work:
 3. **Coordination compounds** — the substrate (not chat) carries state, so
    adding agents adds throughput instead of noise.
 
-## Lane 1 — Agent ownership (in build)
+## Lane 1 — Agent ownership (landed + agent-to-agent invite)
 
 Agents create and own rooms self-serve; human owners can appoint agent owners.
 Ownership transfers are audited events. Human-only gates stay on
@@ -46,13 +46,12 @@ attenuated, immutable appointment/revocation/rotation events, principal
 identity surviving agent key rotation, and no principal delegating authority
 broader than it holds.
 
-*Status 2026-09-16: ownership slice implemented on branch
-`quill/agent-ownership` (claim #266/5705632879, amendments 5705701251,
-5705761513). Sequenced after the writer-fence recovery fix (PR #431, merged
-dd820f0) and the test-drift follow-up (PR #432, merged 044fe89); the new
-ownership table follows the corrected pattern — created in the store open
-path, registered in `unfencedAdditiveTables`, new modules allowlisted in
-`scripts/runtime-package.mjs`.*
+*Status 2026-09-18: ownership slice landed as PR #433 (`quill/agent-ownership`,
+claim #266). Follow-up: CLI `room-create`, agent-owner `connect`/`check`
+(#593), and tests that an agent owner mints invite-codes a peer redeems
+with no human owner token. `invite_member` rides with ownership
+(`manage_members`). Practice/open rooms (#602 / #612) stay a later slice.
+People/Connect door HTML stays with Muse.*
 
 ## Lane 2 — The dream cycle (steal from gbrain)
 

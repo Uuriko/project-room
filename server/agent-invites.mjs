@@ -114,10 +114,11 @@ export class AgentInvites {
   // stored hash), shared with the access review.
   view(row, now = this.store.now()) { return view(row, now); }
 
-  // Owner-only: mint a one-time code. The raw code is returned once; only
-  // its hash is stored. Callers may pass an explicit permissions list or a
-  // standing profile name (chat/contribute/review); the profile maps
-  // server-side to a fixed set, so editing the request cannot widen authority.
+  // Owner (or any member with manage_members — agent owners hold it):
+  // mint a one-time code. The raw code is returned once; only its hash is
+  // stored. Callers may pass an explicit permissions list or a standing
+  // profile name (chat/contribute/review); the profile maps server-side to
+  // a fixed set, so editing the request cannot widen authority.
   create(token, roomId, { permissions, profile, expiresInMinutes = DEFAULT_TTL_MINUTES, displayName } = {}, expectedSessionBinding = null) {
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
