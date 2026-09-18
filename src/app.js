@@ -683,10 +683,8 @@ function configureAuthPanel(roomId = selectedRoomFromLocation()) {
   $("#auth-title").textContent = authPanelTitle(roomId, roomTitle);
   const roomHint = $("#auth-room-hint");
   if (roomHint) {
-    roomHint.hidden = !roomId;
-    roomHint.textContent = roomId
-      ? (roomTitle ? `${roomTitle} · #${roomId}` : `Continue into #${roomId}.`)
-      : "";
+    roomHint.hidden = true;
+    roomHint.textContent = "";
   }
   if ($("#auth-kind-hint")) $("#auth-kind-hint").textContent = KEY_KIND_HINT;
   $("#access-key-label").textContent = accountMode ? "Account key" : "Room key";
@@ -694,9 +692,8 @@ function configureAuthPanel(roomId = selectedRoomFromLocation()) {
   $("#auth-kind-account")?.setAttribute("aria-pressed", accountMode ? "true" : "false");
   $("#auth-kind-room")?.classList.toggle("suggested", Boolean(accountMode && roomId));
   $("#auth-form button[type='submit']").textContent = accountMode ? (roomId ? "Open room" : "Sign in") : "Enter room";
-  // If the visitor clearly came for a key or invite flow, skip the collapsed first paint.
-  const cameForKeys = accountMode || (typeof location !== "undefined" && location.hash.startsWith("#invite/"));
-  if (cameForKeys) setSigninExtra(true);
+  // OAuth invite stash lands on #invite/<43-char>. Keep first paint collapsed otherwise.
+  if (typeof location !== "undefined" && location.hash.startsWith("#invite/")) setSigninExtra(true);
   syncSessionRestore();
   syncSessionMenu();
 }
@@ -778,7 +775,7 @@ function setAuthKind(kind) {
 }
 function updatePeopleHint() {
   const hint = $("#people-hint");
-  if (hint) hint.textContent = "your Second / their agents / one Room. Agent handles stay loud. Done lands as a receipt. Create your Room (bootstrap-agent-room / POST /room/api/agent-rooms), then invite peers.";
+  if (hint) hint.textContent = "your Second / their agents / one Room. Agent handles stay loud. Done lands as a receipt. Create your Room (bootstrap-agent-room / POST /room/api/agent-rooms), then invite peers. Invite a person: they Open this invite link. Agents use an invite-code (RM-).";
 }
 function dismissRoomGuide() {
   if ($("#room-guide")) $("#room-guide").hidden = true;
@@ -1992,7 +1989,7 @@ function setSigninExtra(open) {
   if (!extra || !toggle) return;
   extra.hidden = !open;
   toggle.setAttribute("aria-expanded", open ? "true" : "false");
-  toggle.textContent = open ? "Fewer sign-in options" : "More sign-in options";
+  toggle.textContent = open ? "Fewer options" : "More options";
 }
 $("#signin-more")?.addEventListener("click", () => {
   const extra = $("#signin-extra");
@@ -2027,7 +2024,7 @@ function redeemInviteInput() {
   const err = $("#invite-error");
   const secret = inviteSecretFromText(input?.value ?? "");
   if (!secret) {
-    if (err) err.textContent = "That doesn't look like an invite link. Paste the full link you were given.";
+    if (err) err.textContent = "That doesn't look like an invite link. Paste the full invite link.";
     return;
   }
   if (err) err.textContent = "";

@@ -1,3 +1,5 @@
+import { publicJoinInviteHref } from "./room-deep-link.js";
+
 const $ = selector => document.querySelector(selector);
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 export function consumeJoinFragment() {
@@ -230,7 +232,8 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       currentLink = { id: result.link.id, expiresAt: result.link.expiresAt, memberRevision: request.expectedMemberRevision };
       if (!checkResult()) return;
       const purposeItem = listPurposes().find(p => p.id === $("#share-link-purpose").value) ?? null;
-      $("#share-link-url").value = `${location.origin}/#join/${request.linkToken}${purposeItem ? `/work/${encodeURIComponent(purposeItem.id)}` : ""}`;
+      const inviteUrl = publicJoinInviteHref(request.linkToken, purposeItem ? `/work/${encodeURIComponent(purposeItem.id)}` : "");
+      $("#share-link-url").value = inviteUrl;
       $("#share-purpose-note").hidden = !purposeItem;
       if (purposeItem) $("#share-purpose-note").textContent = `Opens "${purposeItem.title}" after they join. Nothing else in the room is shared.`;
       $("#share-link-url").dataset.linkId = result.link.id;
@@ -239,7 +242,13 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       expiryTimer = setTimeout(checkResult, Math.max(0, currentLink.expiresAt - Date.now()));
       expiryTimer.unref?.();
       updateCopyControls();
-      status("Link ready.");
+      let copied = false;
+      const clipboard = globalThis.navigator?.clipboard;
+      if (inviteUrl && clipboard?.writeText) {
+        try { await clipboard.writeText(inviteUrl); copied = true; } catch { /* fall back to Copy */ }
+      }
+      if (!managementCurrent(version, generation)) { sync(); return; }
+      status(copied ? "Copied. They open this invite link." : "Link ready.");
       $("#share-link-copy").focus();
       list(version, generation).catch(() => {});
     } catch (error) { if (managementCurrent(version, generation)) { managementError(error); status(invitationManagementFailureMessage(error, "create")); } else sync(); }
@@ -369,7 +378,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     if (!getState()) {
       $("#auth-panel").hidden = false;
       setConnectionStatus("Not connected · open an invitation link to join");
-      $("#access-key").focus();
+      ($("#google-signin") ?? $("#auth-title") ?? $("#access-key")).focus?.();
     }
   });
   window.addEventListener("hashchange", () => { const fragment = consumeJoinFragment(); if (fragment) open(fragment); });

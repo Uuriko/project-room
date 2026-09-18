@@ -23,7 +23,7 @@ On the welcome screen:
   key** to switch.
 - **Account key** — tap **Account key** (or open `?account=1`). Inbox
   works from account home without joining a room.
-- **Invitation** — paste the invite link in **Have an invite link?**, or open
+- **Invitation** — paste the invite link in **Have an invite**, or open
   the link the owner sent. Guests get chat access for about eight hours
   in that browser.
 

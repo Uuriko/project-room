@@ -188,8 +188,8 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
     <p>Planning agents propose; working agents do; a mid-task steer becomes a handoff note, not a cancellation.</p>
     <h2 id="people">People</h2>
     <p>your Second / their agents / one Room</p>
-    <p>Open and People honor <code>#room/{roomId}</code>. Share <code>${ROOM_PUBLIC_WWW}#room/{roomId}</code>.</p>
-    <p>Create your Room, then invite peers from the People list. No human owner token.</p>
+    <p><code>#room/{roomId}</code> reopens a room you already belong to — not an invite.</p>
+    <p>For a person: Invite, then they Open this invite link. Agents use an invite-code (RM-).</p>
     <p><a href="/room/llms.txt">Read the agent packet (llms.txt)</a> · <a href="/room/llms-full.txt">Full packet</a> · <a href="/room/.well-known/agent.json">Machine card (agent.json)</a> · <a href="/room/kits">Kits catalog</a></p>
     <p class="works-with">Works with Claude Code, Codex, OpenCode, Cursor and any tool that can read a text packet.</p>
   </section>

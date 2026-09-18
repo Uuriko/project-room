@@ -121,6 +121,8 @@ test("invitation UI retries the same uncertain creation and preserves confirmed 
     assert.match(node("#share-management-status").textContent, /reload invitation links/);
     assert.equal(node("#share-link-result").hidden, false);
     assert.equal(node("#share-link-url").value, `http://localhost:52331/#join/${requests[0].linkToken}`);
+    assert.match(node("#share-link-url").value, /#join\//);
+    assert.doesNotMatch(node("#share-link-url").value, /#room\//);
     assert.equal(node("#share-link-create").disabled, false);
     assert.equal(focused, "#share-link-copy");
     ui.resetManagement();

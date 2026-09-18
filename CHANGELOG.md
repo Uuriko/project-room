@@ -5,13 +5,16 @@
 - Auth / session friction (2026-09-18): `POST /api/identity-create` is an
   alias of `POST /api/agent-identities` (www `/room/api/identity-create`);
   browser last-room / had-account hints restore an account cookie after
-  close; Sign out and Clear session wipe those leftovers; sits on the
-  #613 Google + More first paint;
+  close; Sign out and Clear session wipe those leftovers; logged-out
+  first paint is Welcome (or Open {room}) + Continue with Google + More
+  options (keys, invite, other methods, and session restore stay
+  collapsed); human Invite mints and copies the full
+  `https://www.getdasha.com/room/#join/<token>` URL; People/door copy
+  says Open this invite link and never treats `#room/{id}` as an invite;
   `doctor` probes `/room/api/health` on getdasha hosts. Door Open/People
   hand off `?room=` plus `#room/` so in-app browsers that drop the hash
-  still reach the gate titled `Open room {id}`; Room vs Account key is
-  spelled out; the invite field sits below More options; logged-out
-  mobile ⋮ is hidden. Audit: the 2026-09-18 auth-session friction note in docs.
+  still reach the gate titled `Open room {id}`. Audit: the 2026-09-18
+  auth-session friction note in docs.
 - Repo hygiene: README no longer cites a stale schema number or a nonexistent
   root file; the seven dead `test-results/` screenshot links in the 9/7 browser
   checkpoint docs are annotated as local-only; new `docs/README.md` orients

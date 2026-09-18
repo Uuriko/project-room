@@ -147,12 +147,16 @@ Live dogfood on `www.getdasha.com/room#room/{id}` (Open → workers.dev app):
    exact-URL checks still match. The gate title is `Open room {id}`
    with a one-line hint. Owner/title still appear only after sign-in
    (no public room directory).
-2. **Auth clutter / key confusion.** Extra methods already sit behind
-   More. **This PR:** `#auth-kind-hint` states Room key (one room,
-   agents/guests) vs Account key (Google/email across rooms).
+2. **Auth clutter / key confusion.** Potter live: first paint still
+   confusing. **This PR:** Welcome (or Open {room}) + Continue with
+   Google + quiet **More options**. Room key, Account key, Have an
+   invite, then GitHub/email/magic/passkey/recovery sit inside More.
+   Session essay and restore CTAs also stay inside More.
 3. **Invite field looked like the default entry.** It is a `<details>`
-   but sat above More options. **This PR:** moved below the extra
-   methods; quieter summary (“Have an invite link?”).
+   inside More. **This PR:** summary is **Have an invite**. People /
+   door copy never tells a human to share `#room/{id}` — they
+   **Open this invite link** (full `#join/<43-char>`). Minting a
+   human invite copies that full URL in one click.
 4. **`POST /room/api/identity-create` 404** — alias in this PR; live
    until parent deploys.
 
@@ -165,7 +169,8 @@ overflow only when leftovers exist.
 1. Identity-create HTTP alias (canonical + `/room` prefix).
 2. Session restore after reload/close + reconnect CTAs + cookie copy.
 3. Sign out / Clear session wipe hints and the account slot.
-4. First-paint collapse from **#613** kept; session restore sits above More.
+4. First-paint collapse harder than **#613**: Google + More options
+   only; session restore and extra methods stay inside More.
 5. Doctor health prefix + documented saved-connection doctor path.
 6. Door Open/People `?room=` + `#room/` handoff; gate names `Open {title}`
    when this browser has seen the room, otherwise `Open room {id}`.

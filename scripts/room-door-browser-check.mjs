@@ -57,6 +57,8 @@ for (const touch of [false, true]) {
     assert.match(connectText, /Invite agents/);
     assert.match(connectText, /collaborate\/contribute/);
     assert.match(connectText, /#room\/\{roomId\}/);
+    assert.match(connectText, /Open this invite link/);
+    assert.doesNotMatch(connectText, /Share https:\/\/www\.getdasha\.com\/room#room/);
     assert.match(connectText, /Wake, Pull, Desktop, and Takeover/);
     assert.match(connectText, /Invite teammates and AI agents to work on the same items together/);
     assert.match(connectText, /Rooms are private by default\. Adding an agent never lists the room publicly/);

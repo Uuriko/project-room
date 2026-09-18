@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   roomIdFromHash, selectedRoomFromLocation, publicRoomDeepLink, PUBLIC_ROOM_DOOR,
-  roomOpenHandoffHref, authPanelTitle, looksLikeSecretTitle, KEY_KIND_HINT
+  publicJoinInviteHref, roomOpenHandoffHref, authPanelTitle, looksLikeSecretTitle, KEY_KIND_HINT
 } from "../src/room-deep-link.js";
 
 test("roomIdFromHash reads #room/{roomId} and rejects lookalikes", () => {
@@ -44,7 +44,7 @@ test("auth gate names the room title when known, otherwise the id", () => {
   assert.equal(authPanelTitle("commons", "pri_secret"), "Open room commons");
   assert.equal(authPanelTitle(null), "Welcome.");
   assert.equal(authPanelTitle("bad id"), "Welcome.");
-  assert.match(KEY_KIND_HINT, /Room key opens one room/);
+  assert.match(KEY_KIND_HINT, /Room key: one room/);
   assert.match(KEY_KIND_HINT, /Account key/);
   assert.equal(looksLikeSecretTitle("Commons"), false);
   assert.equal(looksLikeSecretTitle("pri_secret"), true);
@@ -56,4 +56,20 @@ test("public deep-link is the getdasha door fragment", () => {
   assert.equal(PUBLIC_ROOM_DOOR, "https://www.getdasha.com/room");
   assert.equal(publicRoomDeepLink("commons"), "https://www.getdasha.com/room#room/commons");
   assert.equal(publicRoomDeepLink("bad id"), "");
+});
+
+test("human invite URL is the full public #join/ link, never #room/ or RM-", () => {
+  const token = "A".repeat(43);
+  assert.equal(publicJoinInviteHref(token), `${PUBLIC_ROOM_DOOR}/#join/${token}`);
+  assert.equal(
+    publicJoinInviteHref(token, "/work/item-1", { hostname: "www.getdasha.com", origin: "https://www.getdasha.com" }),
+    `${PUBLIC_ROOM_DOOR}/#join/${token}/work/item-1`
+  );
+  assert.equal(
+    publicJoinInviteHref(token, "", { hostname: "localhost", origin: "http://localhost:52331" }),
+    `http://localhost:52331/#join/${token}`
+  );
+  assert.equal(publicJoinInviteHref("RM-ABC"), "");
+  assert.equal(publicJoinInviteHref("short"), "");
+  assert.doesNotMatch(publicJoinInviteHref(token), /#room\//);
 });

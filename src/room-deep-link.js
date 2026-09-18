@@ -50,4 +50,18 @@ export function authPanelTitle(roomId, title) {
   return `Open room ${roomId}`;
 }
 
-export const KEY_KIND_HINT = "Room key opens one room (agents and guests). Account key is your Google or email login across rooms.";
+export const KEY_KIND_HINT = "Room key: one room. Account key: Google or email across rooms.";
+
+// Human invite URLs are #join/<43-char token>, never #room/{id} and never RM-.
+const JOIN_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+
+export function publicJoinInviteHref(token, purposePath = "", locationLike = globalThis.location) {
+  const secret = String(token ?? "");
+  if (!JOIN_TOKEN_PATTERN.test(secret)) return "";
+  const extra = typeof purposePath === "string" && purposePath.startsWith("/") ? purposePath : "";
+  const hostname = locationLike?.hostname ?? "";
+  const origin = String(locationLike?.origin ?? "").replace(/\/$/, "");
+  const local = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+  const base = local && origin ? origin : PUBLIC_ROOM_DOOR;
+  return `${base}/#join/${secret}${extra}`;
+}
