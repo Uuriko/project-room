@@ -26,7 +26,8 @@ function fakeClock(start = 1_000_000) {
   };
 }
 
-const VALID_TOKEN = '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw';
+// Obviously fake fixture token: the shape Telegram uses, never a real token.
+const VALID_TOKEN = '123456789:FAKE_FAKE_FAKE_FAKE_FAKE_FAKE_FAKE_';
 
 function expectTgError(fn, code) {
   assert.throws(fn, (err) => {
