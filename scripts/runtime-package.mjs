@@ -44,6 +44,7 @@ optional.push("server/inbox-import-guards.mjs"); // import-time spam/notify wiri
 optional.push("server/spam-shadow.mjs"); // shadow-mode auto-quarantine instrumentation (imported by server/inbox.mjs; pure, imports inbox-spam.mjs)
 optional.push("server/spam-quarantine-journal.mjs"); // spam-guard quarantine journal (imported by server/store.mjs; imports ServiceError from store.mjs)
 optional.push("server/quarantine-thread-splits.mjs"); // quarantine review thread-split journal (imported by server/store.mjs and server/inbox.mjs)
+optional.push("server/quarantine-review-coverage.mjs"); // per-signal review-coverage dashboard (imported by server/inbox.mjs; pure, no imports of its own)
 // NOTE: server/thread-tree.mjs stays OUT of the closure. inbox-threads.mjs
 // already groups, nests, and flattens threads; importing both would duplicate
 // the reply-tree logic. thread-tree.mjs remains available for a future

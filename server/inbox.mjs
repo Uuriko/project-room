@@ -16,6 +16,7 @@ import { createNotifyPrefs } from "./notify-prefs.mjs";
 import { runImportGuards, replayImportedNotification, scoreImportedEnvelope } from "./inbox-import-guards.mjs";
 import { shadowDecisionForImport } from "./spam-shadow.mjs";
 import { spamQuarantineStatuses } from "./spam-quarantine-journal.mjs";
+import { reviewCoverageBySignal } from "./quarantine-review-coverage.mjs";
 import { channels, connectionState, profileChannel } from "./channel-connection.mjs";
 import { prepareGraphReplyDraft, buildGraphReplyDraft, classifyGraphReplyCreation, classifyGraphReplyUpdateAcknowledgment, normalizeReplyObservation, prepareGraphReplyUpdate, buildGraphReplyUpdate, compareReplyUpdateEnvelope } from "./graph-reply-draft.mjs";
 import { isReplyAttempt, validateReplyAttempt, transitionReplyAttempt, replyObservationReviewable, isReplyUpdate, transitionReplyUpdate } from "./graph-reply-journal.mjs";
@@ -336,6 +337,24 @@ export class Inbox {
       }
       return { contractVersion: 1, viewer: viewer(auth), status, counts,
         items: limit === null ? items : items.slice(0, limit) };
+    });
+  }
+  // Review-coverage dashboard for the quarantine review surface (the inline
+  // dashboard in the review UI): the same pure computation as the #568
+  // read-only tooling (server/quarantine-review-coverage.mjs, --format json
+  // output is the drill-down), projected over this account's review backlog.
+  // Account scoping is the same quarantineMatch() the review surface uses:
+  // another account's holds (or a hold whose message is gone) never shape
+  // this account's numbers, exactly like the review listing itself.
+  quarantineCoverage(token, binding) {
+    return this.store.readTransaction(() => {
+      const auth = this.auth(token, binding);
+      const rows = [];
+      for (const status of spamQuarantineStatuses)
+        for (const item of this.store.spamQuarantine.list({ status, limit: null }))
+          if (this.quarantineMatch(auth, item) !== null) rows.push(item);
+      const splits = new Set(this.store.quarantineSplits.list(auth.account.id).map(split => split.quarantineId));
+      return { contractVersion: 1, viewer: viewer(auth), ...reviewCoverageBySignal({ rows, splits }) };
     });
   }
   // The hold the caller's verdict applies to: unknown ids and other
