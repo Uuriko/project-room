@@ -1093,6 +1093,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (url.pathname === "/api/inbox/quarantine" && req.method === "GET")
           return json(res, 200, store.inbox.quarantineReview(token, binding,
             { status: url.searchParams.get("status") ?? undefined, limit: url.searchParams.get("limit") }));
+        // Review-coverage dashboard for the quarantine review UI: per-signal
+        // held/reviewed coverage (reviewed/total), the Confirm (released) vs
+        // Dismiss (confirmed spam) precision inputs, and the coverage gap
+        // list. Read-only, same account-session auth as the review listing.
+        if (url.pathname === "/api/inbox/quarantine/coverage" && req.method === "GET")
+          return json(res, 200, store.inbox.quarantineCoverage(token, binding));
         if (url.pathname === "/api/inbox/quarantine/release" && req.method === "POST") {
           protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
           const data = await body(req);

@@ -2732,6 +2732,23 @@ paths:
         '200': { description: "{ contractVersion: 1, viewer, status, counts: { held, released, dismissed }, items: [{ id, messageId, channel, connectionId, accountId, sourceId, reason: [{ key, weight, detail }], score, quarantinedAt, status, reviewedBy, reviewedAt, note, sender, subject, excerpt, source }] }  — accountId/sourceId are null on holds written before the gap-#2 columns existed" }
         '401': { description: account_session_required }
         '422': { description: invalid_quarantine }
+  /api/inbox/quarantine/coverage:
+    get:
+      summary: Per-signal review-coverage dashboard for the quarantine queue
+      description: >-
+        Account-session read. The #568 reviewCoverage metric exposed for the
+        inline review dashboard: per spam signal that fired on a held journal
+        row — held, reviewed, Confirm (released, verdict: not spam) /
+        Dismiss (confirmed spam) / Split (thread action, orthogonal to the
+        verdict) breakdown, the per-signal coverage ratio reviewed/total, the
+        share of holds, avg score/weight tuning context, and the zero-coverage
+        signal gap list — plus queue-level totals. Account-scoped like the
+        review listing: another account's holds never shape these numbers.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, generatedAt, totals: { held, confirmed, dismissed, split, reviewed, total, reviewCoverage }, zeroCoverageSignals: [signalKey], perSignal: [{ key, held, confirmed, dismissed, reviewed, split, total, reviewCoverage, shareOfHolds, avgScore, avgWeight }] } — sorted least-covered first; reviewCoverage is null when a denominator is zero" }
+        '401': { description: account_session_required }
   /api/inbox/quarantine/release:
     post:
       summary: Owner confirms a held message (accepts it into the inbox)
