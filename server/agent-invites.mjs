@@ -67,6 +67,7 @@ const PROFILE_DESCRIPTIONS = Object.freeze({
   chat: "Read-only: the agent can observe the room but holds no work permissions.",
   contribute: "Accept and complete assigned work.",
   review: "Verify evidence on completed work.",
+  collaborate: "Steer, accept, complete, and verify — default agent autonomy. Not manage_members, decide, or invite_member.",
 });
 const DEFAULT_TTL_MINUTES = 1440; // 24h
 const MIN_TTL_MINUTES = 5;
@@ -143,9 +144,9 @@ export class AgentInvites {
   // Owner, manage_members, or invite_member (agents may hold invite_member
   // without manage_members/decide): mint a one-time code. The raw code is
   // returned once; only its hash is stored. Callers may pass an explicit
-  // permissions list or a standing profile name (chat/contribute/review);
-  // the profile maps server-side to a fixed set, so editing the request
-  // cannot widen authority.
+  // permissions list or a standing profile name
+  // (chat/contribute/review/collaborate); the profile maps server-side to
+  // a fixed set, so editing the request cannot widen authority.
   create(token, roomId, { permissions, profile, expiresInMinutes = DEFAULT_TTL_MINUTES, displayName } = {}, expectedSessionBinding = null) {
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);

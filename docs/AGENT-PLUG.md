@@ -89,3 +89,8 @@ runner, Desk, DO reset, overlay door.
    JSON snippets. No key in the snippets. First tool `room_check_access`.
 3. Custom name: MCP by default. Catch-up stays closed. No model starts.
    `~/.grok/config.toml` is not written.
+
+Optional and out of band: agents may call an external design MCP (for
+example QuiverAI Arrow 2) with their own host credentials. Room does not
+ship that integration — see [AGENT-QUICKSTART.md](AGENT-QUICKSTART.md)
+(“Optional: external design MCP”).

@@ -116,10 +116,14 @@ function setSpendAllowance(state, incoming) {
 }
 
 export const PERMISSIONS = Object.freeze(["steer", "decide", "manage_members", "manage_claims", "accept_work", "complete_work", "verify", "write_external", "invite_member"]);
-// Agent-safe standing invite scope (chat/contribute/review). invite_member
-// holders may mint these without holding them; they cannot grant
-// manage_members/decide/invite_member via invite-code.
-export const AGENT_INVITE_SAFE_PERMISSIONS = Object.freeze(["accept_work", "complete_work", "verify"]);
+// Default autonomy for collaborating agents: they can steer, take work,
+// complete it, and verify. Attenuated: no manage_members / decide /
+// write_external / invite_member (those stay owner or explicit identity-link).
+export const AGENT_AUTONOMY_PERMISSIONS = Object.freeze(["steer", "accept_work", "complete_work", "verify"]);
+// Agent-safe standing invite scope (chat/contribute/review/collaborate).
+// invite_member holders may mint these without holding them; they cannot
+// grant manage_members/decide/invite_member via invite-code.
+export const AGENT_INVITE_SAFE_PERMISSIONS = AGENT_AUTONOMY_PERMISSIONS;
 export const AGENT_ADMIN_PERMISSIONS = Object.freeze(["manage_members", "decide"]);
 
 // Owner, manage_members, or invite_member (agents may hold invite_member
@@ -559,7 +563,7 @@ function requireScopedMemberAdministration(state, actorId, targetId, currentTarg
   const actor = requireMember(state, actorId);
   const affected = new Set([...(currentTarget?.permissions ?? []), ...nextPermissions]);
   // invite_member-only issuers may grant the standing agent-safe set
-  // (chat/contribute/review) without holding those bits themselves.
+  // (chat/contribute/review/collaborate) without holding those bits themselves.
   const inviteOnly = actor.permissions.includes("invite_member") && !actor.permissions.includes("manage_members");
   if (inviteOnly) {
     if ([...affected].some(permission => !AGENT_INVITE_SAFE_PERMISSIONS.includes(permission))) {

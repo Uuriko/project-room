@@ -285,6 +285,9 @@ test("an agent with invite_member (no manage_members/decide) mints; a peer redee
   assert.equal(minted.status, 201, JSON.stringify(minted.json));
   assert.match(minted.json.code, /^RM-/);
   assert.deepEqual(minted.json.permissions, ["accept_work", "complete_work"]);
+  const collab = await mint(origin, inviter.json.secret, { profile: "collaborate", expiresInMinutes: 60, displayName: "Collab Bot" });
+  assert.equal(collab.status, 201, JSON.stringify(collab.json));
+  assert.deepEqual(collab.json.permissions, ["steer", "accept_work", "complete_work", "verify"]);
   const wide = await mint(origin, inviter.json.secret, { permissions: ["write_external"] });
   assert.equal(wide.status, 403);
   assert.equal(wide.json.error.code, "invite_scope_exceeded");
@@ -370,7 +373,12 @@ test("CLI rejects bad invite arglists at the boundary", async t => {
 
 test("profile names map server-side to the sponsorship's standing permission sets", async t => {
   const { origin, ownerKey } = await serve(t);
-  const expectations = { chat: [], contribute: ["accept_work", "complete_work"], review: ["verify"] };
+  const expectations = {
+    chat: [],
+    contribute: ["accept_work", "complete_work"],
+    review: ["verify"],
+    collaborate: ["steer", "accept_work", "complete_work", "verify"],
+  };
   for (const [profile, permissions] of Object.entries(expectations)) {
     const res = await post(origin, "/api/rooms/commons/agent-invites", { profile }, ownerKey);
     assert.equal(res.status, 201, `${profile}: ${JSON.stringify(res.json)}`);
@@ -588,7 +596,7 @@ test("invite vocabulary is discoverable and 422s teach it (RC-2026-09-18-020)", 
   const { store, origin, ownerKey } = await serve(t);
   // The module-level vocabulary names every profile and permission.
   const vocab = store.invites.vocabulary();
-  assert.deepEqual(Object.keys(vocab.profiles).sort(), ["chat", "contribute", "review"]);
+  assert.deepEqual(Object.keys(vocab.profiles).sort(), ["chat", "collaborate", "contribute", "review"]);
   for (const [name, entry] of Object.entries(vocab.profiles)) {
     assert.ok(Array.isArray(entry.permissions), `${name} lists permissions`);
     assert.ok(entry.description && entry.description.length > 0, `${name} is described`);

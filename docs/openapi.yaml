@@ -1857,7 +1857,7 @@ paths:
                   roomId: { type: string }
                   roomTitle: { type: string }
                   permissions: { type: array, items: { type: string } }
-                  profile: { type: string, description: chat, contribute, review or custom }
+                  profile: { type: string, description: chat, contribute, review, collaborate or custom }
                   expiresAt: { type: integer }
         '404': { description: invite_unavailable }
         '409': { description: invite_already_used or invite_authority_changed }
@@ -4000,9 +4000,9 @@ paths:
         `invite_member` without `manage_members`/`decide`). A `manage_members`
         non-owner cannot grant permissions it does not hold (403
         invite_scope_exceeded); `invite_member`-only may grant standing
-        agent-safe profiles (chat/contribute/review). Body names either
+        agent-safe profiles (chat/contribute/review/collaborate). Body names either
         `permissions` (unique room permissions, never manage_members, decide,
-        or invite_member) or a `profile` (chat, contribute, review), plus
+        or invite_member) or a `profile` (chat, contribute, review, collaborate), plus
         optional `expiresInMinutes` and `displayName`. The raw code (RM-…) is
         returned once.
       parameters:
@@ -4015,7 +4015,7 @@ paths:
               type: object
               properties:
                 permissions: { type: array, items: { type: string } }
-                profile: { type: string, enum: [chat, contribute, review] }
+                profile: { type: string, enum: [chat, contribute, review, collaborate] }
                 expiresInMinutes: { type: integer }
                 displayName: { type: string }
       responses:

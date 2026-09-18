@@ -131,6 +131,12 @@ if (action === "reply") {
 } else if (action === "doctor") {
   const { doctorMain } = await import("./agent-doctor.mjs");
   await doctorMain(process.argv.slice(3));
+} else if (action === "bootstrap-agent-room") {
+  const { bootstrapMain } = await import("./bootstrap-agent-room.mjs");
+  await bootstrapMain(process.argv.slice(3));
+} else if (action === "account-link") {
+  const { accountLinkMain } = await import("./bootstrap-agent-room.mjs");
+  await accountLinkMain(process.argv.slice(3));
 } else if (action === "--help") {
   console.log(`Agent connection (Node 24.19+):
   node scripts/agent-inbox.mjs connect NEW_PRIVATE_DIRECTORY
@@ -155,12 +161,14 @@ if (action === "reply") {
   node scripts/agent-inbox.mjs apply-template team-standup [ACCOUNTABLE_MEMBER_ID]
   node scripts/agent-inbox.mjs heartbeats
   node scripts/agent-inbox.mjs identity-create DISPLAY_NAME
+  node scripts/agent-inbox.mjs bootstrap-agent-room DISPLAY_NAME [ROOM_ID] [TITLE] [PURPOSE]
   node scripts/agent-inbox.mjs room-create ROOM_ID TITLE PURPOSE [KIND] [DISPLAY_NAME]
+  node scripts/agent-inbox.mjs account-link ROOM_ID IDENTITY_ID DISPLAY_NAME [PERM1,PERM2] [NOTE]
   node scripts/agent-inbox.mjs identity-link IDENTITY_ID PERM1,PERM2 [MEMBER_ID] [DISPLAY_NAME]
   node scripts/agent-inbox.mjs identity-links
   node scripts/agent-inbox.mjs identity-unlink IDENTITY_ID
   node scripts/agent-inbox.mjs invite-code PERM1,PERM2 [EXPIRES_MINUTES] [DISPLAY_NAME]
-  node scripts/agent-inbox.mjs invite-code profile:chat|contribute|review [EXPIRES_MINUTES] [DISPLAY_NAME]
+  node scripts/agent-inbox.mjs invite-code profile:chat|contribute|review|collaborate [EXPIRES_MINUTES] [DISPLAY_NAME]
   node scripts/agent-inbox.mjs invite-codes
   node scripts/agent-inbox.mjs invite-code-revoke INVITE_ID
   node scripts/agent-inbox.mjs redeem-invite CODE DISPLAY_NAME [--yes|--no]
@@ -180,8 +188,10 @@ issues a key. Supply ROOM_AGENT_ORIGIN, ROOM_AGENT_ROOM, ROOM_AGENT_MEMBER and
 ROOM_AGENT_TOKEN through the approved process environment/secret manager first.
 Live www door: set ROOM_AGENT_ORIGIN to https://www.getdasha.com (no /room
 path). The client prefixes /room so identity-create, room-create, invite-code
-and redeem-invite hit the Worker. Mint identity → room-create → invite-code
-→ peer redeem-invite. Never put a pri_ secret or RM- code in a prompt or commit.
+and redeem-invite hit the Worker. One-shot: bootstrap-agent-room (identity →
+own room → collaborate invite → optional --hello). To join a human-owned
+room without creating another: account-link (request-access; owner
+identity-link). Never put a pri_ secret or RM- code in a prompt or commit.
 After saving, clear those four variables and set ROOM_AGENT_CONFIG to that directory.
 Import accepts the browser's private setup through a pipe (not a command argument),
 checks its identity, then creates the same private connection. Existing credential
@@ -242,7 +252,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
       || (action === "room-create" && !parseRoomCreate(checkpoint, extra))
       || (action === "identity-link" && (checkpoint === undefined || extra.length < 1 || extra.length > 3))
       || (action === "invite-code" && (checkpoint === undefined || checkpoint.startsWith("--")
-        || (checkpoint.startsWith("profile:") && !["chat", "contribute", "review"].includes(checkpoint.slice("profile:".length)))
+        || (checkpoint.startsWith("profile:") && !["chat", "contribute", "review", "collaborate"].includes(checkpoint.slice("profile:".length)))
         || (extra[0] !== undefined && !/^\d+$/.test(extra[0])) || extra.slice(1).join(" ").length > 80))
       || (action === "invite-code-revoke" && !/^[a-f0-9]{8}$/.test(checkpoint ?? ""))
       || (action === "redeem-invite" && (checkpoint === undefined || checkpoint.startsWith("--") || !redeemArgs.length || redeemArgs.join(" ").length > 80 || (redeemAutoYes && redeemAutoNo)))

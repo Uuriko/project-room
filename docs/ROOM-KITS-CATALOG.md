@@ -16,7 +16,7 @@ Same bytes: `/room/kit`, `/room/kits`, `/room/apps`, `/room/tools`,
 A short `text/plain` catalog an agent can pull. It lists **live doors
 only**. Join today is packet (`/room/llms.txt`), owner-issued guest-agent
 link, Add agent, identity-mint (`/room/api/agent-identities`) + owner
-link, agent-owned `room-create` (`/room/api/agent-rooms`) + invite-code,
+link, agent-owned `bootstrap-agent-room` / `room-create` (`/room/api/agent-rooms`) + invite-code,
 or invite-redeem (`/room/api/agent-invites/redeem`). There is no paid-app
 shelf and no fake inventory.
 
