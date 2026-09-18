@@ -11,6 +11,7 @@ import { readChannelEnvelope } from "./channel-adapters/index.mjs";
 import { assessThreadSla, slaTargets } from "./sla-clocks.mjs";
 import { buildMorningDigest } from "./morning-digest.mjs";
 import { inboxHandoffStatuses } from "./inbox-handoff.mjs";
+import { InboxStitchStore } from "./inbox-stitch-store.mjs";
 import { channels, connectionState, profileChannel } from "./channel-connection.mjs";
 import { prepareGraphReplyDraft, buildGraphReplyDraft, classifyGraphReplyCreation, classifyGraphReplyUpdateAcknowledgment, normalizeReplyObservation, prepareGraphReplyUpdate, buildGraphReplyUpdate, compareReplyUpdateEnvelope } from "./graph-reply-draft.mjs";
 import { isReplyAttempt, validateReplyAttempt, transitionReplyAttempt, replyObservationReviewable, isReplyUpdate, transitionReplyUpdate } from "./graph-reply-journal.mjs";
@@ -213,7 +214,69 @@ const replyPreview = (observation, version) => {
 };
 
 export class Inbox {
-  constructor(store) { this.store = store; this.db = store.db; }
+  constructor(store, { stitch = null } = {}) {
+    this.store = store; this.db = store.db;
+    // Cross-channel thread stitching (task #19): stitch is the frozen
+    // { salt, epoch, enabled, bindings } triple from stitchConfigFromEnv, or
+    // null to leave the stitcher inert (the default). Inert means
+    // indexEnvelope no-ops and the read path returns empty stitched views.
+    this.stitcher = new InboxStitchStore(this.db, stitch ?? { enabled: false });
+  }
+  // Cross-channel thread stitching (task #19): in-session participant brief
+  // for the review queue. Resolved from the stored envelope at read time —
+  // never persisted as a review artifact, so raw handles/addresses never land
+  // in the stitch tables.
+  stitchParticipantBrief(accountId, sourceId) {
+    try {
+      const row = this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? AND id=?").get(accountId, sourceId);
+      if (!row) return null;
+      const data = this.version(accountId, sourceId, row.revision);
+      const envelope = data?.envelope ?? null;
+      const from = envelope?.message?.from ?? {};
+      return { sourceId, channel: envelope?.channel ?? null,
+        handle: from.address ?? from.handle ?? from.id ?? "",
+        displayName: from.name ?? from.displayName ?? "" };
+    } catch { return null; }
+  }
+  // Cross-channel thread stitching (task #19): owner-only stitch actions.
+  // Each runs inside one transaction and reuses the account session, CSRF,
+  // and inbox rate limiting from the HTTP layer — no auth behavior changes.
+  stitchStatus(token, binding) {
+    return this.store.readTransaction(() => {
+      const auth = this.auth(token, binding);
+      return { contractVersion: 1, viewer: viewer(auth),
+        stitching: { enabled: this.stitcher.enabled, epoch: this.stitcher.epoch } };
+    });
+  }
+  stitchSuggestions(token, binding, { limit = 25 } = {}) {
+    return this.store.readTransaction(() => {
+      const auth = this.auth(token, binding);
+      const brief = sourceId => this.stitchParticipantBrief(auth.account.id, sourceId);
+      return { contractVersion: 1, viewer: viewer(auth),
+        suggestions: this.stitcher.suggestions(auth.account.id, { limit, resolveParticipant: brief }) };
+    });
+  }
+  stitchConfirm(token, binding, { suggestionId } = {}) {
+    return this.store.transaction(() => {
+      const auth = this.auth(token, binding);
+      const result = this.stitcher.confirm(auth.account.id, { suggestionId, confirmedBy: auth.account.id });
+      return { contractVersion: 1, viewer: viewer(auth), ...result };
+    });
+  }
+  stitchDismiss(token, binding, { suggestionId } = {}) {
+    return this.store.transaction(() => {
+      const auth = this.auth(token, binding);
+      const result = this.stitcher.dismiss(auth.account.id, { suggestionId });
+      return { contractVersion: 1, viewer: viewer(auth), ...result };
+    });
+  }
+  stitchSplit(token, binding, { stitchKey, sourceId, channel, reason, scope } = {}) {
+    return this.store.transaction(() => {
+      const auth = this.auth(token, binding);
+      const result = this.stitcher.split(auth.account.id, { stitchKey, sourceId, channel, reason, scope });
+      return { contractVersion: 1, viewer: viewer(auth), ...result };
+    });
+  }
   auth(token, binding, roomId = null) {
     if (typeof binding !== "string" || !/^[a-f0-9]{64}$/.test(binding)) fail(422, "session_binding_required", "Current account session binding required.");
     return this.store.authenticateAccountSession(token, roomId, binding);
@@ -362,7 +425,20 @@ export class Inbox {
             .map(({ message, depth }) => ({ depth, source: this.sourceSummary(auth, byId.get(message.id), ctx) }))
             .filter(entry => entry.source)
         })).filter(thread => thread.entries.length > 0);
-        return { contractVersion: 1, viewer: viewer(auth), threads, total: scoped.length };
+        // Cross-channel thread stitching (task #19): stitched timelines are a
+        // read-path enrichment over the same native threads. The native
+        // `threads` contract is unchanged; `stitchedThreads` is additive, and
+        // empty while the stitcher is inert (no salt / flag off).
+        const channelById = new Map(infos.map(info => [info.row.id, info.channel ?? null]));
+        const stitchedThreads = this.stitcher.stitchedTimelines(auth.account.id,
+          scoped.slice(0, take).map(thread => ({ threadId: thread.threadId,
+            entries: thread.entries.map(({ message }) => ({ sourceId: message.id, occurredAt: message.occurredAt })) })),
+          { channelOf: sourceId => channelById.get(sourceId) ?? null })
+          .map(st => ({ ...st, entries: st.entries
+            .map(entry => ({ ...entry, source: this.sourceSummary(auth, byId.get(entry.sourceId), ctx) }))
+            .filter(entry => entry.source) }))
+          .filter(st => st.entries.length > 0);
+        return { contractVersion: 1, viewer: viewer(auth), threads, stitchedThreads, total: scoped.length };
       });
     }
     // Per-channel SLA assessment for one built thread. Direction comes from
@@ -941,6 +1017,15 @@ export class Inbox {
         this.db.prepare(`INSERT INTO private_inbox_sources VALUES(?,?,?,?,?) ON CONFLICT(account_id,id)
           DO UPDATE SET revision=excluded.revision,updated_at=excluded.updated_at`).run(accountId, sourceId, receipt.revision, now, now);
         this.db.prepare("INSERT INTO private_inbox_versions VALUES(?,?,?,?)").run(accountId, sourceId, receipt.revision, JSON.stringify(request.data));
+        // Cross-channel thread stitching (task #19): hash-only identity
+        // indexing for the imported envelope. The try/catch keeps the
+        // comment below honest — a stitch failure never rolls back the
+        // import (stitching never blocks ingestion).
+        if (request.action === "source.import") {
+          try {
+            this.stitcher.indexEnvelope(accountId, request.data.envelope, { sourceId });
+          } catch { /* stitching is read-path enrichment; ingestion proceeds */ }
+        }
       } else if (["source.read", "source.unread"].includes(action)) {
         // Read state is a marker, not a content version: the source revision
         // never moves, only the marker's read_at does. expectedRevision is the

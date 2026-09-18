@@ -1056,6 +1056,36 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           reject(422, "unsupported_inbox_view", "This inbox view is not supported.");
         if (url.pathname === "/api/inbox/threads" && req.method === "GET") return json(res, 200, store.inbox.threads(token, binding,
           { sourceId: url.searchParams.get("sourceId"), limit: url.searchParams.get("limit"), includeChannels: view !== null }));
+        // Cross-channel thread stitching (task #19): owner review + status
+        // surface. Read-only GETs ride the existing account-session auth;
+        // the three mutations reuse account session + CSRF + the same
+        // inbox rate limit as every other inbox write.
+        if (url.pathname === "/api/inbox/stitch/status" && req.method === "GET")
+          return json(res, 200, store.inbox.stitchStatus(token, binding));
+        if (url.pathname === "/api/inbox/stitch/suggestions" && req.method === "GET")
+          return json(res, 200, store.inbox.stitchSuggestions(token, binding, { limit: url.searchParams.get("limit") }));
+        if (url.pathname === "/api/inbox/stitch/confirm" && req.method === "POST") {
+          protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
+          const data = await body(req);
+          if (!data || !exact(data, ["suggestionId"]) || typeof data.suggestionId !== "string")
+            reject(422, "invalid_stitch_confirm", "Choose the suggestion to confirm.");
+          return json(res, 200, store.inbox.stitchConfirm(token, binding, { suggestionId: data.suggestionId }));
+        }
+        if (url.pathname === "/api/inbox/stitch/dismiss" && req.method === "POST") {
+          protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
+          const data = await body(req);
+          if (!data || !exact(data, ["suggestionId"]) || typeof data.suggestionId !== "string")
+            reject(422, "invalid_stitch_dismiss", "Choose the suggestion to dismiss.");
+          return json(res, 200, store.inbox.stitchDismiss(token, binding, { suggestionId: data.suggestionId }));
+        }
+        if (url.pathname === "/api/inbox/stitch/split" && req.method === "POST") {
+          protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
+          const data = await body(req);
+          if (!data || !exact(data, ["stitchKey", "sourceId", "channel", "reason", "scope"]))
+            reject(422, "invalid_stitch_split", "Choose the stitched identity to split.");
+          return json(res, 200, store.inbox.stitchSplit(token, binding,
+            { stitchKey: data.stitchKey, sourceId: data.sourceId, channel: data.channel, reason: data.reason, scope: data.scope }));
+        }
         // Morning digest (task 21): the overnight arrivals across channels as
         // an in-app daily brief. Channel sources need the reading view, like
         // the threads list above. On-demand read, never a push (task 22).

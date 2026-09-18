@@ -36,6 +36,8 @@ optional.push("client/help-actions.mjs");
 optional.push("server/inbox.mjs");
 optional.push("server/inbox-search.mjs"); // full-text search index (imported by server/inbox.mjs; pure, no imports of its own)
 optional.push("server/inbox-threads.mjs"); // thread builder (imported by server/inbox.mjs; pure, no imports of its own)
+optional.push("server/inbox-stitch.mjs"); // stitch key derivation + scoring (imported by server/inbox.mjs and server.mjs; pure)
+optional.push("server/inbox-stitch-store.mjs"); // hash-only stitch graph (imported by server/inbox.mjs; pure persistence, no imports beyond inbox-stitch.mjs)
 // NOTE: server/thread-tree.mjs stays OUT of the closure. inbox-threads.mjs
 // already groups, nests, and flattens threads; importing both would duplicate
 // the reply-tree logic. thread-tree.mjs remains available for a future

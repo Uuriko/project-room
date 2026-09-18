@@ -50,7 +50,16 @@ export const unfencedAdditiveTables = Object.freeze([
   // intentionally NOT fenced: same rationale — older writers have no code
   // path to it, and the journal's open→accepted→completed|released
   // transitions plus the one-open-handoff-per-thread rule are the gate.
-  "inbox_handoffs"
+  "inbox_handoffs",
+  // Cross-channel thread stitching (task #19): stitch_identities,
+  // stitch_links, stitch_revocations, stitch_suggestions, stitch_receipts.
+  // Hash-only, purely additive, intentionally NOT fenced — older writers
+  // have no code path to them, and the stitch store verifies its own schema.
+  "stitch_identities",
+  "stitch_links",
+  "stitch_revocations",
+  "stitch_suggestions",
+  "stitch_receipts"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);
