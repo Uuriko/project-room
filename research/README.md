@@ -32,6 +32,7 @@ Docs only. No people-data. First slice `die-packet-brief-status`.
 | [MATCH-STATE-PROPOSALS-2026-09-18.md](MATCH-STATE-PROPOSALS-2026-09-18.md) | W3.3 local MATCH_STATES proposals only; `status=proposed`; never live DIE SoR |
 | [STRIPE-INVOICE-KILL-SWITCH-2026-09-18.md](STRIPE-INVOICE-KILL-SWITCH-2026-09-18.md) | W3.2 local invoice draft→`finalize_local`; `send_invoice` stays blocked; no live Stripe |
 | [WATCHLIST-OBSERVE-NEVER-RUN-2026-09-18.md](WATCHLIST-OBSERVE-NEVER-RUN-2026-09-18.md) | Observe CLI ≠ cron; routine `demigod-watchlist-observe` never-run until first scheduled 9:25 PT fire |
+| [DIE-DEMIGOD-NEXT-AUTOMATION-2026-09-18.md](DIE-DEMIGOD-NEXT-AUTOMATION-2026-09-18.md) | Next automation list after Wave 3: live opt-in, prove cron, Lightfield measure, hosted desk; honesty ~55/100; FIRST_PARTY empty; cron never-run |
 
 ## Research index
 
