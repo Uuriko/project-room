@@ -1,7 +1,7 @@
 import { workTemplate, WORK_TEMPLATES } from "../src/work-templates.js";
 import { roomTemplate, ROOM_TEMPLATES } from "../src/room-templates.js";
 import { projectBoard } from "../src/board.js";
-import { validId, PERMISSIONS, WORK_STATES } from "../src/events.js";
+import { validId, PERMISSIONS, WORK_STATES, AGENT_AUTONOMY_PERMISSIONS } from "../src/events.js";
 import { nextWorkStep, workActions, reusableWorkDefinition, workCollaboration } from "../src/workflow.js";
 import { isDeepStrictEqual } from "node:util";
 import { searchWork, completedResults, currentResult } from "../src/work-selectors.js";
@@ -661,9 +661,30 @@ export class RoomAgentClient {
     return value;
   }
   async createAgentInvite({ permissions, profile, expiresInMinutes, displayName } = {}, { signal } = {}) {
-    const value = await this.#inviteAdmin("/agent-invites", { permissions, profile,
+    const attempt = body => this.#inviteAdmin("/agent-invites", body, { signal });
+    const options = {
       ...(expiresInMinutes === undefined ? {} : { expiresInMinutes }),
-      ...(displayName === undefined ? {} : { displayName }) }, { signal });
+      ...(displayName === undefined ? {} : { displayName }),
+    };
+    let value;
+    if (profile === "collaborate") {
+      try {
+        value = await attempt({ profile, ...options });
+      } catch (error) {
+        // Deployments older than the collaborate profile reject it with 422
+        // invalid_invite_scope. Fall back to the explicit permission set the
+        // profile maps to (AGENT_AUTONOMY_PERMISSIONS); the server still
+        // validates the minter's grant, so this widens nothing.
+        if (error?.code !== "invalid_invite_scope") throw error;
+        value = await attempt({ permissions: [...AGENT_AUTONOMY_PERMISSIONS], ...options });
+      }
+    } else {
+      value = await attempt({
+        ...(profile === undefined ? {} : { profile }),
+        ...(permissions === undefined ? {} : { permissions }),
+        ...options,
+      });
+    }
     if (typeof value?.code !== "string" || typeof value?.inviteId !== "string") {
       throw new RoomClientError(200, "invalid_response", "Room returned an invalid invite code");
     }

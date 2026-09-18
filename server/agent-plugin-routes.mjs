@@ -39,6 +39,7 @@ const requiredScope = name => {
 
 const KEY_ACTION_ROUTE = /^\/api\/agent-keys\/(rak_[A-Za-z0-9_-]{1,64})\/(rotate|revoke)$/;
 const SUBSCRIPTION_ROUTE = /^\/api\/agent-webhooks\/([A-Za-z0-9_-]{1,64})$/;
+const SUBSCRIPTION_DELIVERIES_ROUTE = /^\/api\/agent-webhooks\/([A-Za-z0-9_-]{1,64})\/deliveries$/;
 const CARD_ROUTE = /^\/api\/agent-directory\/cards\/([A-Za-z0-9_-]{1,120})$/;
 const PUBLIC_CARD_ROUTE = /^\/api\/agents\/directory\/([a-z][a-z0-9-]{0,119})$/;
 
@@ -349,6 +350,16 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     return json(res, 200, store.agentPlugin.unsubscribeWebhook({ identityId: auth.identityId, subscriptionId }));
   });
 
+  // RC-2026-09-18-038: the per-subscription delivery journal over HTTP so an
+  // agent can debug its own failing endpoint. Journal entries are
+  // secret-safe; cross-identity reads 404 like unsubscribe.
+  const webhookDeliveries = translate(async (req, res, { remoteAddress, subscriptionId }) => {
+    rate(`agent-webhook-deliveries:${remoteAddress}`, 120);
+    const auth = agentAuth(req, requiredScope("webhooks:manage"));
+    return json(res, 200, { subscriptionId,
+      deliveries: store.agentPlugin.webhookJournalFor({ identityId: auth.identityId, subscriptionId }) });
+  });
+
   return async function handleAgentPluginRoutes(req, res, { url, remoteAddress }) {
     const pathname = url.pathname, method = req.method;
     if (pathname === "/api/agent-keys" && method === "POST") { await issueKey(req, res, { remoteAddress }); return true; }
@@ -367,6 +378,8 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     if (pathname === "/api/agent-webhooks" && method === "POST") { await subscribeWebhook(req, res, { remoteAddress }); return true; }
     const subMatch = method === "DELETE" ? SUBSCRIPTION_ROUTE.exec(pathname) : null;
     if (subMatch) { await unsubscribeWebhook(req, res, { remoteAddress, subscriptionId: subMatch[1] }); return true; }
+    const deliveriesMatch = method === "GET" ? SUBSCRIPTION_DELIVERIES_ROUTE.exec(pathname) : null;
+    if (deliveriesMatch) { await webhookDeliveries(req, res, { remoteAddress, subscriptionId: deliveriesMatch[1] }); return true; }
     return false;
   };
 }
