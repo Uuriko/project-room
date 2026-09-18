@@ -45,7 +45,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // additive and intentionally NOT fenced: same rationale — older writers
   // have no code path to it, and the journal's pending→sent|failed
   // transitions are the integrity gate.
-  "direct_channel_sends"
+  "direct_channel_sends",
+  // inbox_handoffs (agent handoff protocol, task 23) is purely additive and
+  // intentionally NOT fenced: same rationale — older writers have no code
+  // path to it, and the journal's open→accepted→completed|released
+  // transitions plus the one-open-handoff-per-thread rule are the gate.
+  "inbox_handoffs"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

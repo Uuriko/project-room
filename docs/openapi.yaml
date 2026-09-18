@@ -2508,6 +2508,96 @@ paths:
         '200': { description: "{ contractVersion: 1, viewer, digest: { date, since, generatedAt, totalArrivals, channels: [{ channel, count, newThreads, senderGroups: [{ senderId, senderLabel, count, threads: [{ threadId, sourceIds, senderId, senderLabel, subject, excerpt, newCount, occurredAt, triage: { action, reasons }, sla, actions }] }] }], needsHuman, quarantined, breached, atRisk } }" }
         '401': { description: account_session_required }
         '422': { description: invalid_digest_since or invalid_limit or unsupported_inbox_view }
+  /api/inbox/handoffs:
+    get:
+      summary: List journaled agent handoffs
+      description: >-
+        Account-session read. The "nothing closes unowned" sweep: every
+        handoff journaled for this account, newest first, optionally filtered
+        with `?status=` to one of open, accepted, completed, released.
+        Handoff packets carry the context packet (summary, open questions,
+        pending actions, channel constraints) and no PII beyond what the
+        thread view already shows.
+      security:
+        - accountSession: []
+      parameters:
+        - name: status
+          in: query
+          description: Filter to one lifecycle status.
+          schema: { type: string, enum: [open, accepted, completed, released] }
+      responses:
+        '200': { description: "{ contractVersion: 1, statuses: [...], handoffs: [{ handoffId, accountId, threadId, channel, status, fromAgent, toAgent, createdAt, updatedAt, packet, history }] }" }
+        '401': { description: account_session_required }
+        '422': { description: invalid_handoff_status }
+    post:
+      summary: Hand a thread to a named agent
+      description: >-
+        Account-session write (CSRF + rate limit, like the other inbox
+        writes). Builds the handoff context packet from the recent thread
+        view — `?view=email-excerpt-v1` includes channel sources, without it
+        only synthetic threads can be handed off — and journals it as an open
+        handoff. One open handoff per thread: a repeat create for the same
+        thread returns the existing receipt with `duplicate: true` (HTTP 200
+        instead of 201). The packet is a compact structured context: source
+        ids, channel, SLA clock, triage reasons, an authored summary, open
+        questions, pending actions, and channel constraints; it never pulls
+        message bodies beyond what the thread view already shows.
+      security:
+        - accountSession: []
+      parameters:
+        - name: view
+          in: query
+          schema: { type: string, enum: [email-text-v1, email-excerpt-v1] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [threadId, to]
+              properties:
+                threadId: { type: string, description: "Thread id from the thread list or digest." }
+                to: { type: string, description: "Named receiving agent id." }
+                from: { type: string, description: "Handing party id. Default: owner." }
+                summary: { type: string, maxLength: 2000, description: "Compact prior summary authored by the handing party." }
+                openQuestions: { type: array, maxItems: 5, items: { type: string, maxLength: 500 } }
+                pendingActions: { type: array, maxItems: 10, items: { type: string, maxLength: 300 } }
+                excerpt: { type: string, maxLength: 500, description: "Latest-message excerpt the thread view already shows." }
+                triage: { type: object, description: "{ action, reasons }. Default: needs_human." }
+      responses:
+        '201': { description: "{ contractVersion: 1, duplicate: false, handoff: { handoffId, status: open, packet, history } }" }
+        '200': { description: "Repeat create for a thread that already has an open handoff: the existing receipt with duplicate: true." }
+        '401': { description: account_session_required }
+        '404': { description: handoff_thread_not_found — the thread is not in the recent thread view }
+        '422': { description: invalid_handoff or invalid_handoff_packet or unsupported_inbox_view }
+  /api/inbox/handoffs/transition:
+    post:
+      summary: Move a handoff along its lifecycle
+      description: >-
+        Account-session write (CSRF + rate limit). Legal edges: open →
+        accepted → completed, or open/accepted → released. Terminal handoffs
+        (completed, released) are immutable; illegal edges are refused with
+        409, never silently rewritten. Every transition appends to the
+        handoff's history.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [handoffId, status]
+              properties:
+                handoffId: { type: string }
+                status: { type: string, enum: [accepted, completed, released] }
+                note: { type: string, maxLength: 500 }
+      responses:
+        '200': { description: "{ contractVersion: 1, handoff: { handoffId, status, history } }" }
+        '401': { description: account_session_required }
+        '404': { description: handoff_not_found }
+        '409': { description: invalid_handoff_transition }
+        '422': { description: invalid_handoff or invalid_handoff_status }
   /api/inbox/sources/{sourceId}/attachments:
     get:
       summary: List one inbox source's attachment descriptors

@@ -21,6 +21,7 @@ import { Moderation, moderationSchema, mutedEvent } from "./moderation.mjs";
 import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
+import { InboxHandoffJournal, inboxHandoffSchema } from "./inbox-handoff.mjs";
 import { accessRequestSchema } from "./access-requests.mjs";
 import { agentRoomSchema } from "./agent-rooms.mjs";
 import { directSendSchema } from "./inbox-outbox.mjs";
@@ -331,6 +332,7 @@ export class RoomStore {
     this.email = new EmailImport(this);
     this.connections = this.email; // Every channel connection (email, Telegram) shares the importer.
     this.channelUpdates = new ChannelUpdateJournal(this); // B20: durable webhook update journal.
+    this.handoffs = new InboxHandoffJournal(this); // Task 23: durable agent handoff journal.
     const version = this.storagePlatform.version(this.db);
     // Supported schema versions are the contiguous range 0..STORE_SCHEMA_VERSION.
     // A hand-maintained list dropped v26 when the version bumped to 27,
@@ -363,6 +365,7 @@ export class RoomStore {
         // backup taken before it is still a valid v27 file; read-only never
         // migrates, so verify it only when present.
         this.channelUpdates.verifySchema({ allowAbsent: true });
+        this.handoffs.verifySchema({ allowAbsent: true }); // Task 23: purely additive, like the channel journal.
         verifyRoomLifecycle(this);
         this.moderation.verifySchema({ allowAbsent: true }); // E4 message reports: additive at v27 as well.
         return;
@@ -449,6 +452,10 @@ export class RoomStore {
       this.db.exec(attentionSchema);
       // The channel webhook update journal (B20) follows the same additive pattern.
       this.db.exec(channelJournalSchema);
+      // The agent handoff journal (task 23) follows the same additive pattern:
+      // IF NOT EXISTS is idempotent, no schema version bump, and the table is
+      // intentionally outside the writer fence (see unfencedAdditiveTables).
+      this.db.exec(inboxHandoffSchema);
       // Per-source read markers are purely additive (no data migration): IF NOT
       // EXISTS is idempotent here. The table is intentionally outside the writer
       // fence (see unfencedAdditiveTables in server/writer-fence.mjs) so
