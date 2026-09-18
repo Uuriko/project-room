@@ -17,7 +17,7 @@ test("the generic connection record validates every field and rejects extra or u
     assert.throws(() => channelConnection(value), EmailContractError);
   }
   assert.throws(() => channelProfile(record), EmailContractError, "the profile has no state");
-  assert.deepEqual(channels, ["email", "telegram", "whatsapp"]);
+  assert.deepEqual(channels, ["email", "telegram", "whatsapp", "sms", "messenger"]);
 });
 test("email connections stay Graph-shaped while mapping onto the generic record", () => {
   const raw = emailContractFixture().connection, clean = emailConnection(raw);
@@ -34,8 +34,8 @@ test("email connections stay Graph-shaped while mapping onto the generic record"
   }
   assert.equal(adapterForProfile(raw).provider, "microsoft-graph");
   assert.equal(adapterForProfile(telegramContractFixture().connection).provider, "telegram-bot");
-  assert.deepEqual([...channelAdapters.keys()], ["microsoft-graph", "telegram-bot", "gmail-api", "whatsapp-cloud"]);
+  assert.deepEqual([...channelAdapters.keys()], ["microsoft-graph", "telegram-bot", "gmail-api", "whatsapp-cloud", "sms-gateway", "messenger-api"]);
   for (const adapter of channelAdapters.values()) for (const key of ["channel", "provider", "readEnvelope", "sourceId", "scope", "bind"]) assert.ok(key in adapter, key);
-  assert.throws(() => readChannelEnvelope({ channel: "sms" }), { code: "unsupported_channel" });
+  assert.throws(() => readChannelEnvelope({ channel: "pager" }), { code: "unsupported_channel" });
   assert.throws(() => readChannelEnvelope(null), { code: "unsupported_channel" });
 });
