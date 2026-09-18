@@ -19,7 +19,7 @@ function fixture(t) {
   return { ...f, directory };
 }
 
-test("online capture preserves all 41 tables, identity boundaries and exact retries through recovery and restart", async t => {
+test("online capture preserves all 42 tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t);
   const { identityId } = f.store.identities.create("Recovery agent");
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
@@ -46,8 +46,12 @@ test("online capture preserves all 41 tables, identity boundaries and exact retr
   // Seed one agent-room ownership record so the capture covers agent_room_ownership.
   f.store.db.prepare(`INSERT INTO agent_room_ownership(identity_id,room_id,created_at) VALUES(?,?,?)`)
     .run(identityId, "commons", f.now());
+  // Seed one direct channel send so the capture covers direct_channel_sends.
+  f.store.db.prepare(`INSERT INTO direct_channel_sends(id,account_id,channel,recipient,subject,body_hash,thread_id,status,provider_id,error_code,created_at,updated_at)
+    VALUES('recovery-direct-send',?,'telegram','123456','',?,NULL,'sent','4242',NULL,?,?)`)
+    .run(f.emailProfile.accountId, "a".repeat(64), f.now(), f.now());
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 41);
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 42);
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);

@@ -400,3 +400,73 @@ export function installInboxReplyReview({ api, ownerKey }) {
     hasPending: () => Boolean(pending || busy)
   };
 }
+
+// Direct channel composer. POSTs {channel, to, subject, body, threadId?} to
+// /api/inbox/channel-sends through the caller's authenticated api.request
+// pipeline and reports pending → sent | failed honestly. The caller supplies
+// the form element ids; nothing is installed globally.
+// ids: { form, channel, to, subject, body, threadId?, send, status }
+export function installInboxDirectSend({ api, ownerKey, ids }) {
+  const $ = id => document.getElementById(id);
+  const el = {};
+  for (const key of ["form", "channel", "to", "subject", "body", "send", "status"]) {
+    el[key] = $(ids[key]);
+    if (!el[key]) throw new Error("Direct send composer is missing element: " + ids[key]);
+  }
+  const threadEl = ids.threadId ? $(ids.threadId) : null;
+  let state = "idle", busy = false, generation = 0;
+  const honest = code => ({
+    gmail_not_connected: "Gmail isn’t connected for sending. Nothing was sent.",
+    telegram_not_connected: "Telegram isn’t configured here. Nothing was sent.",
+    telegram_send_rejected: "Telegram refused the message. Nothing was sent.",
+    telegram_unavailable: "Telegram is unreachable right now. Nothing was confirmed sent.",
+    gmail_unavailable: "Gmail is unreachable right now. Nothing was confirmed sent.",
+    invalid_direct_send: "Check the recipient and message, then try again.",
+    rate_limited: "Too many sends — wait a minute and try again."
+  }[code] || "Send failed. Nothing was confirmed sent.");
+  function render(note = "") {
+    const own = Boolean(ownerKey());
+    el.send.disabled = busy || !own;
+    el.status.textContent = !own ? "Sign in to send."
+      : state === "pending" ? "Sending…"
+      : state === "sent" ? "Sent."
+      : state === "failed" ? note || "Send failed."
+      : note;
+    el.status.dataset.sendState = state;
+  }
+  function validSend(v) {
+    return v && v.contractVersion === 1 && v.send && typeof v.send.id === "string"
+      && ["sent", "failed"].includes(v.send.status) && ["gmail", "telegram"].includes(v.send.channel);
+  }
+  async function send(event) {
+    event?.preventDefault?.();
+    const gen = generation, owner = ownerKey();
+    if (!owner || busy) return;
+    const data = { channel: el.channel.value, to: el.to.value.trim(), subject: el.subject.value, body: el.body.value };
+    const threadId = threadEl?.value.trim();
+    if (threadId) data.threadId = threadId;
+    busy = true; state = "pending"; render();
+    try {
+      const value = await api.request("/channel-sends", { method: "POST", data }, validSend);
+      if (gen !== generation || owner !== ownerKey()) return;
+      state = value.send.status;
+      render(state === "sent"
+        ? `Sent via ${value.send.channel === "gmail" ? "Gmail" : "Telegram"}.`
+        : honest(value.send.errorCode));
+      if (state === "sent") el.form.reset();
+    } catch (error) {
+      if (gen !== generation || owner !== ownerKey()) return;
+      state = "failed";
+      render(honest(error?.code));
+    } finally {
+      if (gen === generation && owner === ownerKey()) { busy = false; render(); }
+    }
+  }
+  el.form.addEventListener("submit", send);
+  render();
+  return {
+    reset() { generation++; busy = false; state = "idle"; render(); },
+    hasPending: () => busy,
+    get state() { return state; }
+  };
+}

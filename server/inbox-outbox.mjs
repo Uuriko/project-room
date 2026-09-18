@@ -90,3 +90,72 @@ export function transitionSend(sends, request, { preview, authEpoch, at }) {
   }
   return { ...prior, revision: prior.revision + 1, status, providerId, updatedAt: at };
 }
+
+// ---------------------------------------------------------------------------
+// Direct channel-send outbox journal. Unlike the reply reserve/dispatch flow
+// above (tied to an inbox source), a direct send is composed freely, so it gets
+// its own additive table: pending → sent | failed. Message bodies are never
+// stored or logged — only a SHA-256 hash for correlation. No network I/O here.
+
+export const directSendChannels = Object.freeze(["gmail", "telegram"]);
+// Exported so the store creates the table alongside the other additive
+// schemas; the journal also ensures it lazily for raw-db callers.
+export const directSendSchema = `CREATE TABLE IF NOT EXISTS direct_channel_sends (
+  id TEXT PRIMARY KEY, account_id TEXT NOT NULL, channel TEXT NOT NULL,
+  recipient TEXT NOT NULL, subject TEXT NOT NULL DEFAULT '',
+  body_hash TEXT NOT NULL, thread_id TEXT,
+  status TEXT NOT NULL, provider_id TEXT, error_code TEXT,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`;
+const DIRECT_SEND_INDEX = `CREATE INDEX IF NOT EXISTS direct_channel_sends_account ON direct_channel_sends(account_id, created_at)`;
+const ensureDirectSendTable = db => { db.exec(directSendSchema); db.exec(DIRECT_SEND_INDEX); };
+const emailTo = v => typeof v === "string" && v.length >= 3 && v.length <= 320 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+const chatTo = v => typeof v === "string" && /^-?\d{1,20}$/.test(v);
+const directSendFields = data => data && typeof data === "object" && !Array.isArray(data)
+  && (exact(data, ["channel", "to", "subject", "body"]) || exact(data, ["channel", "to", "subject", "body", "threadId"]));
+
+export function validateDirectSend(data) {
+  if (!directSendFields(data)) fail(422, "invalid_direct_send", "Send channel, recipient, subject and body.");
+  if (!directSendChannels.includes(data.channel)) fail(422, "invalid_direct_send", "Send over gmail or telegram.");
+  const toOk = data.channel === "gmail" ? emailTo(data.to) : chatTo(data.to);
+  if (!toOk) fail(422, "invalid_direct_send", data.channel === "gmail" ? "A valid email recipient is required." : "A Telegram chat id is required.");
+  if (typeof data.subject !== "string" || data.subject.length > 300) fail(422, "invalid_direct_send", "Subject must be at most 300 characters.");
+  if (typeof data.body !== "string" || !data.body.trim() || data.body.length > 20000 || !data.body.isWellFormed())
+    fail(422, "invalid_direct_send", "Message body must be 1–20000 characters.");
+  if (data.channel === "telegram" && data.body.length > 4096) fail(422, "invalid_direct_send", "Telegram messages must be at most 4096 characters.");
+  if (data.threadId !== undefined && !validId(data.threadId)) fail(422, "invalid_direct_send", "Thread reference is invalid.");
+}
+
+export function recordDirectSend(db, { id, accountId, channel, to, subject, bodyHash, threadId, at }) {
+  ensureDirectSendTable(db);
+  if (!validId(id) || !validId(accountId) || !directSendChannels.includes(channel) || typeof to !== "string" || !to
+    || typeof bodyHash !== "string" || !/^[a-f0-9]{64}$/.test(bodyHash) || !Number.isSafeInteger(at))
+    fail(422, "invalid_direct_send", "Send channel, recipient and body are required.");
+  db.prepare(`INSERT INTO direct_channel_sends
+    (id, account_id, channel, recipient, subject, body_hash, thread_id, status, provider_id, error_code, created_at, updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, accountId, channel, to, subject, bodyHash, threadId ?? null, "pending", null, null, at, at);
+  return getDirectSend(db, id);
+}
+
+export function completeDirectSend(db, id, { status, providerId = null, errorCode = null, at }) {
+  ensureDirectSendTable(db);
+  if (!["sent", "failed"].includes(status) || !Number.isSafeInteger(at)) fail(422, "invalid_direct_send", "A send outcome is required.");
+  const row = getDirectSend(db, id);
+  if (!row) fail(404, "direct_send_not_found", "Send attempt not found.");
+  if (row.status !== "pending") fail(409, "direct_send_settled", "This send attempt already settled.");
+  db.prepare(`UPDATE direct_channel_sends SET status=?, provider_id=?, error_code=?, updated_at=? WHERE id=?`)
+    .run(status, providerId, errorCode, at, id);
+  return getDirectSend(db, id);
+}
+
+export function getDirectSend(db, id) {
+  ensureDirectSendTable(db);
+  const row = db.prepare(`SELECT * FROM direct_channel_sends WHERE id=?`).get(id);
+  return row ?? null;
+}
+
+// The public shape: everything the owner may see, never the body.
+export const publicDirectSend = row => row && {
+  id: row.id, channel: row.channel, to: row.recipient, subject: row.subject,
+  threadId: row.thread_id, status: row.status, providerId: row.provider_id,
+  errorCode: row.error_code, createdAt: row.created_at, updatedAt: row.updated_at
+};
