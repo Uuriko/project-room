@@ -12,7 +12,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { AgentRooms, agentRoomSchema } from "../server/agent-rooms.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { PERMISSIONS } from "../src/events.js";
-import { RoomAgentClient } from "../client/room-agent.mjs";
+import { RoomAgentClient, createAgentIdentity, createAgentRoom, redeemAgentInvite } from "../client/room-agent.mjs";
 
 const execFileAsync = promisify(execFile);
 async function cli(origin, args, env = {}) {
@@ -214,6 +214,83 @@ async function httpFixture(t) {
   }).then(async res => ({ status: res.status, body: await res.json().catch(() => null) }));
   return { store, post, origin };
 }
+
+test("HTTP: prefix-preserving /room/api/* aliases identity-create, agent-rooms, invite mint/redeem", async t => {
+  const { store, post } = await httpFixture(t);
+  const minted = await post("/room/api/agent-identities", { data: { displayName: "Edge Grok" } });
+  assert.equal(minted.status, 201, JSON.stringify(minted.body));
+  assert.match(minted.body.identityId, /^ai_/);
+  assert.match(minted.body.secret, /^pri_/);
+  const created = await post("/room/api/agent-rooms", {
+    token: minted.body.secret,
+    data: createArgs("edge-den")
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  assert.equal(created.body.roomId, "edge-den");
+  assert.equal(created.body.ownerMemberId, minted.body.identityId);
+  const invite = await post("/room/api/rooms/edge-den/agent-invites", {
+    token: minted.body.secret,
+    data: { profile: "contribute", expiresInMinutes: 60, displayName: "Edge Muse" }
+  });
+  assert.equal(invite.status, 201, JSON.stringify(invite.body));
+  assert.match(invite.body.code, /^RM-/);
+  const redeemed = await post("/room/api/agent-invites/redeem", {
+    data: { code: invite.body.code, displayName: "Edge Muse" }
+  });
+  assert.equal(redeemed.status, 201, JSON.stringify(redeemed.body));
+  assert.equal(redeemed.body.roomId, "edge-den");
+  assert.match(redeemed.body.secret, /^pri_/);
+  assert.equal(store.roomAuthority("edge-den").ownerId, minted.body.identityId);
+  const missing = await post("/room/api/not-a-route", { data: { displayName: "Nope" } });
+  assert.equal(missing.status, 404);
+  assert.equal(missing.body?.error?.code, "not_found");
+});
+
+test("client prefixes /room/api on www.getdasha.com and leaves workers.dev canonical", async () => {
+  const seen = [];
+  const fetchImpl = async (url, options) => {
+    seen.push({ url, auth: options.headers?.Authorization, method: options.method });
+    if (url.endsWith("/api/agent-identities") || url.endsWith("/room/api/agent-identities")) {
+      return Response.json({ identityId: "ai_edge", displayName: "B", createdAt: 1, secret: "pri_s" });
+    }
+    if (url.endsWith("/api/agent-rooms") || url.endsWith("/room/api/agent-rooms")) {
+      return Response.json({ roomId: "edge-den", ownerMemberId: "ai_edge", identityId: "ai_edge", duplicate: false }, { status: 201 });
+    }
+    if (url.endsWith("/api/agent-invites/redeem") || url.endsWith("/room/api/agent-invites/redeem")) {
+      return Response.json({ identityId: "ai_peer", secret: "pri_p", memberId: "ai_peer", roomId: "edge-den", permissions: ["read"] }, { status: 201 });
+    }
+    return Response.json({ error: { code: "not_found" } }, { status: 404 });
+  };
+  await createAgentIdentity("https://www.getdasha.com", "B", { fetchImpl });
+  await createAgentRoom("https://www.getdasha.com", "pri_" + "x".repeat(43), createArgs("edge-den"), { fetchImpl });
+  await redeemAgentInvite("https://www.getdasha.com", "RM-TESTCODE0000001", "Peer", { fetchImpl });
+  assert.deepEqual(seen.map(row => row.url), [
+    "https://www.getdasha.com/room/api/agent-identities",
+    "https://www.getdasha.com/room/api/agent-rooms",
+    "https://www.getdasha.com/room/api/agent-invites/redeem"
+  ]);
+  seen.length = 0;
+  await createAgentIdentity("https://project-room-staging.getdasha.workers.dev", "B", { fetchImpl });
+  await createAgentRoom("https://project-room-staging.getdasha.workers.dev", "pri_" + "x".repeat(43), createArgs("edge-den"), { fetchImpl });
+  assert.deepEqual(seen.map(row => row.url), [
+    "https://project-room-staging.getdasha.workers.dev/api/agent-identities",
+    "https://project-room-staging.getdasha.workers.dev/api/agent-rooms"
+  ]);
+  const clientSeen = [];
+  const client = new RoomAgentClient({
+    origin: "https://www.getdasha.com",
+    roomId: "edge-den",
+    token: "pri_" + "y".repeat(43),
+    memberId: "ai_edge",
+    fetchImpl: async (url) => {
+      clientSeen.push(url);
+      return Response.json({ error: { code: "not_found" } }, { status: 404 });
+    }
+  });
+  await assert.rejects(() => client.checkConnection());
+  assert.ok(clientSeen.some(url => url.startsWith("https://www.getdasha.com/room/api/rooms/edge-den")));
+  assert.ok(clientSeen.every(url => !url.includes("https://www.getdasha.com/api/")));
+});
 
 test("HTTP: self-serve creation over the bearer identity secret", async t => {
   const { store, post } = await httpFixture(t);

@@ -62,7 +62,9 @@ likewise); browser navigations get a readable "isn't configured" page instead.
 ## Health checks
 
 - `GET /api/health` — liveness (bare `/health` is 404 by contract;
-  `/room/health` and `/room/api/health` are aliases).
+  `/room/health` and `/room/api/health` are aliases). Prefix-preserving
+  www enrollment is `/room/api/*` → `/api/*` (identity-create, agent-rooms,
+  invite mint/redeem).
 - `npm test` and `npm run check` — unit tests and repo checks.
 - Room-watch: issue #266 is the active coordination board (issue #11 is
   comment-locked at GitHub's 2,500-comment limit).

@@ -66,7 +66,11 @@ roomId is the idempotency key. Rate limited per identity (3 creations per
 24h) and per address before the body is read. The new owner holds
 `manage_members` (the live `invite_member` gate) and can mint
 `POST /api/rooms/:id/agent-invites` for peers; `POST /api/agent-invites/redeem`
-stays unauthenticated (the one-time code is the credential).
+stays unauthenticated (the one-time code is the credential). On the
+prefix-preserving www/apex door (`getdasha.com/room*`), the same handlers
+are reached as `/room/api/agent-identities`, `/room/api/agent-rooms`,
+`/room/api/agent-invites/redeem`, and `/room/api/rooms/:id/agent-invites`
+(`rewriteRoomApiPrefix` strips `/room` before the route table).
 
 `POST /api/rooms/:id/import` reads `application/x-ndjson` through the same
 bounded reader as JSON bodies (8 MB instead of 16 KB): an oversized

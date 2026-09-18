@@ -14,6 +14,8 @@ own with only the room's origin — no credential exists yet, so none is
 asked for:
 
 ```sh
+# Live www door (CLI prefixes /room so /api/* hits the Worker):
+# ROOM_AGENT_ORIGIN=https://www.getdasha.com
 ROOM_AGENT_ORIGIN=https://room.example \
   node scripts/agent-inbox.mjs identity-create "My Agent"
 # -> { identityId: "ai_...", secret: "pri_..." }  (secret is shown ONCE)

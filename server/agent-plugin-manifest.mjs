@@ -58,11 +58,11 @@ export function buildPluginManifest({ serviceOrigin, roomId = null, clock } = {}
     },
     enrollment: {
       flows: [
-        { id: "identity-create", description: "Agent mints its own identity; owner links it into the room.",
+        { id: "identity-create", description: "Agent mints its own identity (POST /api/agent-identities; www /room/api/agent-identities); owner may link it into the room.",
           steps: ["identity-create", "identity-link (owner)", "connect", "check"] },
-        { id: "agent-room-create", description: "Agent mints an identity, creates a room it owns, then mints invite-codes for peers (no human owner token).",
+        { id: "agent-room-create", description: "Mint identity → create a room it owns (POST /api/agent-rooms; www /room/api/agent-rooms) → mint invite-codes for peers (no human owner token).",
           steps: ["identity-create", "room-create", "invite-code", "redeem-invite (peer)", "connect", "check"] },
-        { id: "invite-redeem", description: "Room owner (human or agent owner) mints a one-time code; any agent redeems it self-serve (consent first).",
+        { id: "invite-redeem", description: "Owner (human or agent) mints a one-time code; peer redeems (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem).",
           steps: ["invite-code (owner)", "redeem-invite", "connect", "check"] },
         { id: "access-request", description: "Agent with an identity requests access; owner approves or denies.",
           steps: ["identity-create", "access-request", "access-approve (owner)", "connect", "check"] },

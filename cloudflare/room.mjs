@@ -10,7 +10,7 @@ import { ChannelDrainer } from '../server/channel-drain.mjs';
 import { DurableDatabase, durableStorage } from './storage.mjs';
 import { bootstrapRoom } from './bootstrap.mjs';
 import { maintenanceEnabled, maintenanceResponse } from '../server/maintenance.mjs';
-import { isEdgeDoorUrl, EDGE_DOOR_HOSTS } from '../deploy/agent-discovery.mjs';
+import { isEdgeDoorUrl, EDGE_DOOR_HOSTS, rewriteRoomApiPrefix } from '../deploy/agent-discovery.mjs';
 // E1 — email inbound (Worker email() handler). These must come after the
 // imports above: server/channel-adapters/index.mjs has a module-init order
 // constraint and is only safely evaluated after store.mjs/http.mjs.
@@ -110,10 +110,13 @@ export default {
   async fetch(request, env) {
     // getdasha edge doors: rewrite onto the Room origin BEFORE the origin
     // check so the worker Host reaches the guard, not the browser Host - the
-    // guard 403s anything that is not ROOM_ORIGIN. Prefix preserved.
+    // guard 403s anything that is not ROOM_ORIGIN. Packets keep /room;
+    // /room/api/* becomes /api/* so identity-create, agent-rooms, and
+    // invite redeem hit the same handlers as origin (www /api/* is Webflow).
     if (isEdgeDoorUrl(request.url)) {
       const inbound = new URL(request.url);
-      request = new Request(new URL(inbound.pathname + inbound.search, roomOrigin(env).origin), request);
+      const path = rewriteRoomApiPrefix(inbound.pathname) + inbound.search;
+      request = new Request(new URL(path, roomOrigin(env).origin), request);
     } else if (EDGE_DOOR_HOSTS.includes(new URL(request.url).hostname)) {
       // The /room* route also catches /rooms, /roommates and similar lookalikes
       // (an exact pattern would drop /room?ref= query strings). Those are simply

@@ -305,6 +305,9 @@ test("createAgentIdentity sends no credential and validates the origin", async (
   };
   const value = await createAgentIdentity("https://room.example", "B", { fetchImpl });
   assert.equal(seen.url, "https://room.example/api/agent-identities");
+  const edge = await createAgentIdentity("https://www.getdasha.com", "B", { fetchImpl });
+  assert.equal(seen.url, "https://www.getdasha.com/room/api/agent-identities");
+  assert.equal(edge.secret, "pri_s");
   assert.equal(seen.auth, undefined);
   assert.equal(value.secret, "pri_s");
   await assert.rejects(

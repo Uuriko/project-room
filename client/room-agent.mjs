@@ -14,6 +14,7 @@ import { charterContext, validateCharterContext, validateCharterRead } from "../
 import { workHelpContext } from "../src/work-help.js";
 import { workOffersContext, MAX_HELP_OFFERS, MAX_PENDING_HELP_OFFERS } from "../src/help-offers.js";
 import { AGENT_ERRORS, resolveAgentErrorAx } from "../src/agent-error.mjs";
+import { edgeDoorApiPath } from "../deploy/agent-discovery.mjs";
 
 export { AGENT_ERRORS };
 export class RoomClientError extends Error {
@@ -145,7 +146,7 @@ export async function createAgentIdentity(origin, displayName, { fetchImpl = glo
   catch { throw new RoomClientError(0, "invalid_config", "Use a fixed HTTPS origin or an isolated loopback development origin"); }
   let response;
   try {
-    response = await fetchImpl(`${service}/api/agent-identities`, {
+    response = await fetchImpl(`${service}${edgeDoorApiPath(service, "/api/agent-identities")}`, {
       method: "POST", redirect: "error", credentials: "omit",
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
       headers: { "Content-Type": "application/json" },
@@ -170,7 +171,7 @@ export async function redeemAgentInvite(origin, code, displayName, { fetchImpl =
   catch { throw new RoomClientError(0, "invalid_config", "Use a fixed HTTPS origin or an isolated loopback development origin"); }
   let response;
   try {
-    response = await fetchImpl(`${service}/api/agent-invites/redeem`, {
+    response = await fetchImpl(`${service}${edgeDoorApiPath(service, "/api/agent-invites/redeem")}`, {
       method: "POST", redirect: "error", credentials: "omit",
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
       headers: { "Content-Type": "application/json" },
@@ -198,7 +199,7 @@ export async function previewAgentInvite(origin, code, { fetchImpl = globalThis.
   catch { throw new RoomClientError(0, "invalid_config", "Use a fixed HTTPS origin or an isolated loopback development origin"); }
   let response;
   try {
-    response = await fetchImpl(`${service}/api/agent-invites/preview?code=${encodeURIComponent(code)}`, {
+    response = await fetchImpl(`${service}${edgeDoorApiPath(service, "/api/agent-invites/preview")}?code=${encodeURIComponent(code)}`, {
       method: "GET", redirect: "error", credentials: "omit",
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
     });
@@ -225,7 +226,7 @@ export async function requestAccess(origin, { roomId, identityId, displayName, r
   catch { throw new RoomClientError(0, "invalid_config", "Use a fixed HTTPS origin or an isolated loopback development origin"); }
   let response;
   try {
-    response = await fetchImpl(`${service}/api/access-requests`, {
+    response = await fetchImpl(`${service}${edgeDoorApiPath(service, "/api/access-requests")}`, {
       method: "POST", redirect: "error", credentials: "omit",
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
       headers: { "Content-Type": "application/json" },
@@ -257,7 +258,7 @@ export async function createAgentRoom(origin, identitySecret, { roomId, title, p
   }
   let response;
   try {
-    response = await fetchImpl(`${service}/api/agent-rooms`, {
+    response = await fetchImpl(`${service}${edgeDoorApiPath(service, "/api/agent-rooms")}`, {
       method: "POST", redirect: "error", credentials: "omit",
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
       headers: { Authorization: `Bearer ${identitySecret}`, "Content-Type": "application/json" },
@@ -292,7 +293,7 @@ export class RoomAgentClient {
   // redirect could carry the bearer elsewhere), no ambient credentials, and a
   // 15s deadline that a caller-supplied signal narrows but never removes.
   #fetchRaw(path, { method = "GET", headers = {}, body, signal } = {}) {
-    return this.#fetch(`${this.#origin}${path}`, {
+    return this.#fetch(`${this.#origin}${edgeDoorApiPath(this.#origin, path)}`, {
       method, redirect: "error", credentials: "omit", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
       headers: { Authorization: `Bearer ${this.#token}`, ...headers },
       ...(body === undefined ? {} : { body })

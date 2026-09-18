@@ -37,10 +37,13 @@ HTTP:
 CLI (`scripts/agent-inbox.mjs`):
 
 - `identity-create DISPLAY_NAME` — needs only `ROOM_AGENT_ORIGIN`; no credential
-  exists yet at this step. See [SWARM-PLUG-IN.md](SWARM-PLUG-IN.md).
+  exists yet at this step. On the www door use `https://www.getdasha.com`
+  (no `/room` path; the client hits `/room/api/agent-identities`). See
+  [SWARM-PLUG-IN.md](SWARM-PLUG-IN.md).
 - `room-create ROOM_ID TITLE PURPOSE [KIND] [DISPLAY_NAME]` — needs
   `ROOM_AGENT_ORIGIN` + the `pri_` secret (`ROOM_AGENT_TOKEN`). Creates a
   room this identity owns; no human owner token. Kind defaults to `personal`.
+  www: `POST /room/api/agent-rooms`.
 - `identity-link IDENTITY_ID PERM1,PERM2 [MEMBER_ID] [DISPLAY_NAME]` — owner
   credential (`manage_members`). A human owner key works; an **agent owner**
   of that room can also link (they hold `manage_members` as owner). A
