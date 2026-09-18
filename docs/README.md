@@ -29,6 +29,7 @@ No people-data. First slice `die-packet-brief-status`.
 | Doc | What it is |
 | --- | --- |
 | [DEMIGOD-E2E-AUTOMATION-2026-09-18.md](../research/DEMIGOD-E2E-AUTOMATION-2026-09-18.md) | Fully automated matching desk; Lightfield packet → brief → blocked sends; measure one Lightfield hire |
+| [DEMIGOD-E2E-SLICE-CLI-2026-09-18.md](../research/DEMIGOD-E2E-SLICE-CLI-2026-09-18.md) | Now-slice CLI map (`die-packet-brief-status`); scripts + kill-switches; local prototype only |
 
 ## Steal contracts (docs only, not live doors)
 
