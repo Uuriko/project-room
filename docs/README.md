@@ -35,8 +35,12 @@ No people-data. First slice `die-packet-brief-status`.
 | [DEMIGOD-E2E-OPTIMIZE-2026-09-18.md](../research/DEMIGOD-E2E-OPTIMIZE-2026-09-18.md) | Optimize steals (HumanLayer, Factory blocklist, Horton queue, company waterfall, Stripe draft→send); stage allow/ask/block; Lightfield hire funnel; ~34/100 draft factory honesty |
 | [DIE-DEMIGOD-OPTIMIZE-PLAN-2026-09-18.md](../research/DIE-DEMIGOD-OPTIMIZE-PLAN-2026-09-18.md) | DIE+Demigod optimize plan: Wave 1 ATS/techStack/auto-ticket; Wave 2 opt-in/dual-yes; Wave 3 Lightfield measure; no people-data |
 | [DUAL-YES-CONSENT-2026-09-18.md](../research/DUAL-YES-CONSENT-2026-09-18.md) | Dual-yes consent ledger (local SoR); Lightfield SYNTHETIC `intro_unlocked`; opaque handleRef only; no people CRM |
-| [OPT-IN-FORM-SHIP-PLAN-2026-09-18.md](../research/OPT-IN-FORM-SHIP-PLAN-2026-09-18.md) | trydemigod first-party opt-in form ship plan; FIRST_PARTY write path; **not deployed** (docs only) |
+| [OPT-IN-FORM-SHIP-PLAN-2026-09-18.md](../research/OPT-IN-FORM-SHIP-PLAN-2026-09-18.md) | trydemigod first-party opt-in form; Worker/static path stub; FIRST_PARTY **empty** (`live: false`); **not deployed** |
 | [DIE-DEMIGOD-WAVE2-PROGRESS-2026-09-18.md](../research/DIE-DEMIGOD-WAVE2-PROGRESS-2026-09-18.md) | Wave 2 START: dual-yes + Gmail draft.create dry-run (0 live API) + opt-in plan; honesty ~47/100; W1 openRoles 16 / techStack 15 / catalog 40 |
+| [DIE-DEMIGOD-WAVE3-PROGRESS-2026-09-18.md](../research/DIE-DEMIGOD-WAVE3-PROGRESS-2026-09-18.md) | Wave 3 land: MATCH_STATES proposals (`dieSoRMutation: false`); Stripe draft→`finalize_local`; `send_invoice` blocked; honesty ~55/100; Lightfield measure pending; cron never-run |
+| [MATCH-STATE-PROPOSALS-2026-09-18.md](../research/MATCH-STATE-PROPOSALS-2026-09-18.md) | W3.3 local MATCH_STATES proposals only; `status=proposed`; never live DIE SoR |
+| [STRIPE-INVOICE-KILL-SWITCH-2026-09-18.md](../research/STRIPE-INVOICE-KILL-SWITCH-2026-09-18.md) | W3.2 local invoice draft→`finalize_local`; `send_invoice` stays blocked; no live Stripe |
+| [WATCHLIST-OBSERVE-NEVER-RUN-2026-09-18.md](../research/WATCHLIST-OBSERVE-NEVER-RUN-2026-09-18.md) | Observe CLI ≠ cron; routine `demigod-watchlist-observe` never-run until first scheduled 9:25 PT fire |
 
 ## Steal contracts (docs only, not live doors)
 

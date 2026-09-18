@@ -1,6 +1,11 @@
-# Opt-in form ship plan (trydemigod) — docs only this turn
+# Opt-in form ship plan (trydemigod) — docs + local stub; still not deployed
 
-**Goal:** Replace SYNTHETIC `fixtures/opt-in-pool.json` with live `FIRST_PARTY` rows from a first-party form. No people scrape. Do **not** deploy trydemigod in this Wave 2 START task.
+**Goal:** Replace SYNTHETIC `fixtures/opt-in-pool.json` with live `FIRST_PARTY` rows from a first-party form. No people scrape. Do **not** deploy trydemigod in this fold.
+
+Wave 2 START ([#551](https://github.com/Uuriko/project-room/pull/551)) wrote the ship plan. Wave 3 adds a **local Worker/static path stub** and an empty `FIRST_PARTY` pool. The form is still **not** hosted.
+
+Project Room stays separate from Desk, Demigod/DIE, and Dasha.
+Compute ≠ Room. DIE matching ≠ Ask.
 
 ## Form fields (from `schemas/opt-in-talent.schema.json`)
 
@@ -17,18 +22,28 @@
 
 Server adds: `optInId` (UUID), `status=active`, `dataMarker=FIRST_PARTY`. Never accept client-supplied `FIRST_PARTY` / `SYNTHETIC` spoof without auth.
 
-## Worker route sketch
+## Worker + static path (next ship — docs / local stub only)
 
-```
-POST /api/opt-in
-  - Validate body against opt-in-talent.schema.json (minus server fields)
-  - Require consent checkbox + consentVersion match
-  - Write FIRST_PARTY row to DIE/demigod-ops opt-in store (or KV/D1)
-  - Return { optInId, status: "active" } — no echo of handle value in logs
-GET  /api/opt-in/healthz  — form surface up
-```
+**Host (planned):** `trydemigod.com` (or Access-gated admin). **Not published from this slice.**
 
-Access: Cloudflare Access or equivalent on write admin; public form POST rate-limited. **No** LinkedIn OAuth scrape. **No** Apollo/People enrichment on submit.
+| Surface | Method / path | Behavior |
+| --- | --- | --- |
+| Static form | `GET /opt-in` | Worker assets / Pages; fields match the local form stub |
+| Health | `GET /api/opt-in/healthz` | `{ ok: true, service: "demigod-opt-in", live: true\|false }` |
+| Submit | `POST /api/opt-in` | Validate body → persist `FIRST_PARTY` → `{ optInId, status: "active" }` (no handle echo in logs) |
+
+Access: Cloudflare Access or equivalent on write-admin / export; public form POST rate-limited. **No** LinkedIn OAuth scrape. **No** Apollo/People enrichment on submit. **No** wrangler publish from this fold.
+
+### Local stub (Wave 3 — this is what exists)
+
+| Artifact | Honesty |
+| --- | --- |
+| `fixtures/opt-in/form.stub.html` | Disabled controls; planned `action=/api/opt-in`; **not** hosted |
+| `fixtures/opt-in/FIRST_PARTY.empty.json` | `items: []` · `live: false` until Worker intake |
+| `fixtures/opt-in/worker-route.stub.mjs` | `--check` / `--dry-run-validate`; **refuses persist** |
+| `schemas/opt-in-talent.schema.json` | Ready; unchanged |
+
+Keep `fixtures/opt-in-pool.json` as `SYNTHETIC`. Do not invent live talent. Promote to `FIRST_PARTY` only after a real consent POST.
 
 ## FIRST_PARTY write path
 
@@ -46,8 +61,8 @@ Access: Cloudflare Access or equivalent on write admin; public form POST rate-li
 
 ## Success metric
 
-**First live FIRST_PARTY row** lands in the pool and replaces SYNTHETIC-only honesty. Until then: queue remains synthetic; draft factory honesty stays mid-40s.
+**First live FIRST_PARTY row** lands in the pool and replaces SYNTHETIC-only honesty. Until then: queue remains synthetic; `FIRST_PARTY` stays empty; draft factory honesty stays mid-50s (Wave 3 snapshot **~55/100**).
 
 ## Out of scope this turn
 
-Deploy, wrangler publish, Access enable, live form HTML on trydemigod, Stripe, email send.
+Deploy, wrangler publish, Access enable, live form HTML on trydemigod, Stripe, email send, inventing talent rows.
