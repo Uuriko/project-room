@@ -167,6 +167,7 @@ the served-open set differs from the declared set; `node scripts/open-routes.mjs
 | `GET /api/account-session` | none (creates an anonymous browser slot; 20/address/min) | `authenticated: false`, a CSRF token and session binding; `POST`/`DELETE` (sign-in/out) need the slot cookie + CSRF |
 | `POST /api/agent-identities` | none (by design) | see Mutating routes above |
 | `POST /api/agent-invites/redeem` | capability (invite code, 20/address/min) | 404 `invite_unavailable` for unknown codes; burns the code on success |
+| `GET /api/agent-invites/preview` | capability (invite code, 20/address/min) | read-only grant summary (room, permissions, profile, expiry) for the redeem consent screen; consumes nothing; 404 `invite_unavailable` for unknown codes |
 | `POST /api/share-links/preview`, `POST /api/invitations/preview`, `POST /api/guest-agent-links/preview` | capability (link / invitation token, 30/address/min) | room title + access only; 410 / 404 for unknown tokens |
 | `POST /api/guest-agent-links/join` | capability (`gt_` link token, 20/address/min) | `read_chat` access for the linked guest member; 410 for unknown tokens |
 | `POST /api/session` | the access key in the body (10/address/min) | 401 on a wrong key; sets `room_session` on success |

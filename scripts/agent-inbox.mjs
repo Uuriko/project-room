@@ -1,6 +1,7 @@
-import { RoomAgentClient, validWorkSearchQuery, createAgentIdentity, redeemAgentInvite, requestAccess } from "../client/room-agent.mjs";
+import { RoomAgentClient, validWorkSearchQuery, createAgentIdentity, redeemAgentInvite, previewAgentInvite, requestAccess } from "../client/room-agent.mjs";
 import { packetMarkdown } from "../src/work-packet.js";
 import { validId } from "../src/events.js";
+import { createInterface } from "node:readline";
 import { agentConnectionFromEnvironment, readConnectionInput, saveAgentConnection, connectionDiagnostic, ConnectionError } from "../client/agent-connection.mjs";
 
 const readStdin = () => new Promise((resolve, reject) => {  let text = ""; process.stdin.setEncoding("utf8");
@@ -13,6 +14,51 @@ const isJSONObject = text => {
   try { const value = JSON.parse(text); return !!value && typeof value === "object" && !Array.isArray(value); }
   catch { return false; }
 };
+
+// Pre-redemption consent screen for redeem-invite: show the invite's room,
+// granted permissions and expiry BEFORE anything is created, and get an
+// explicit yes. The grant summary prints to stderr so stdout stays machine
+// readable; --yes skips only the prompt, --no reviews then aborts —
+// neither skips the summary.
+function printInviteConsent(code, preview) {
+  const minutesLeft = Math.max(0, Math.round((preview.expiresAt - Date.now()) / 60000));
+  const grants = preview.permissions.length ? preview.permissions.join(", ") : "(chat only — no work permissions)";
+  console.error([
+    `Invite ${code} → room "${preview.roomTitle}" (${preview.roomId})`,
+    `This code grants: ${grants}  (profile: ${preview.profile})`,
+    `Expires in about ${minutesLeft} minute${minutesLeft === 1 ? "" : "s"}. Nothing else is granted.`,
+    "The identity acts as itself, never as you — your account and credentials are not shared.",
+  ].join("\n"));
+}
+
+async function promptYesNo(question) {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = await new Promise(resolve => rl.question(question, resolve));
+    return /^(y|yes)$/i.test(answer.trim());
+  } finally { rl.close(); }
+}
+
+async function redeemInviteWithConsent(origin, code, displayName, { autoYes, autoNo }) {
+  const preview = await previewAgentInvite(origin, code);
+  printInviteConsent(code, preview);
+  let proceed = autoYes;
+  if (autoNo) proceed = false;
+  else if (!autoYes) {
+    if (!process.stdin.isTTY) {
+      console.error("Not attached to a terminal: review the grant above, then re-run with --yes to accept it (or --no to decline).");
+      process.exitCode = 1;
+      return;
+    }
+    proceed = await promptYesNo("Redeem this invite and create the identity? [y/N] ");
+  }
+  if (!proceed) {
+    console.error("Declined: the invite was not redeemed and no identity was created.");
+    process.exitCode = 1;
+    return;
+  }
+  return redeemAgentInvite(origin, code, displayName);
+}
 
 const [action = "orient", checkpoint, ...extra] = process.argv.slice(2);
 if (action === "reply") {
@@ -55,7 +101,7 @@ if (action === "reply") {
   node scripts/agent-inbox.mjs invite-code profile:chat|contribute|review [EXPIRES_MINUTES] [DISPLAY_NAME]
   node scripts/agent-inbox.mjs invite-codes
   node scripts/agent-inbox.mjs invite-code-revoke INVITE_ID
-  node scripts/agent-inbox.mjs redeem-invite CODE DISPLAY_NAME
+  node scripts/agent-inbox.mjs redeem-invite CODE DISPLAY_NAME [--yes|--no]
   node scripts/agent-inbox.mjs request-access ROOM_ID IDENTITY_ID DISPLAY_NAME PERM1,PERM2 [NOTE]
   node scripts/agent-inbox.mjs access-requests [STATUS]
   node scripts/agent-inbox.mjs access-decide REQUEST_ID approve|deny [PERM1,PERM2] [NOTE]
@@ -104,6 +150,13 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
         || (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > 50))
         || (cursor !== undefined && (since !== undefined || cursor.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(cursor)))) throw new ConnectionError("usage_error");
     }
+    // redeem-invite accepts a trailing --yes to skip the interactive consent
+    // prompt, or --no to review the grant and abort (a scripted decline /
+    // dry run). The flags are never part of the display name and are
+    // mutually exclusive. The grant summary prints either way.
+    const redeemArgs = extra.filter(a => a !== "--yes" && a !== "--no"),
+      redeemAutoYes = redeemArgs.length !== extra.length && extra.includes("--yes"),
+      redeemAutoNo = extra.includes("--no");
     if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "sessions", "claim", "session", "status", "notify", "templates", "apply-template", "heartbeats", "identity-create", "identity-link", "identity-links", "identity-unlink", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "request-access", "access-requests", "access-decide", "funnel", "export", "import-history", "thread", "doctor", "support-export"].includes(action)
       || (["connect", "import"].includes(action) && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
       || (action === "import" && ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"].some(name => process.env[name] !== undefined))
@@ -125,7 +178,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
         || (checkpoint.startsWith("profile:") && !["chat", "contribute", "review"].includes(checkpoint.slice("profile:".length)))
         || (extra[0] !== undefined && !/^\d+$/.test(extra[0])) || extra.slice(1).join(" ").length > 80))
       || (action === "invite-code-revoke" && !/^[a-f0-9]{8}$/.test(checkpoint ?? ""))
-      || (action === "redeem-invite" && (checkpoint === undefined || checkpoint.startsWith("--") || !extra.length || extra.join(" ").length > 80))
+      || (action === "redeem-invite" && (checkpoint === undefined || checkpoint.startsWith("--") || !redeemArgs.length || redeemArgs.join(" ").length > 80 || (redeemAutoYes && redeemAutoNo)))
       || (action === "request-access" && (checkpoint === undefined || extra.length < 3 || extra.length > 4))
       || (action === "access-requests" && (checkpoint !== undefined && !/^[a-z]+$/.test(checkpoint) || extra.length))
       || (action === "access-decide" && (checkpoint === undefined || !["approve", "deny"].includes(extra[0])))
@@ -172,7 +225,7 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
           ...(extra[1] === undefined ? {} : { displayName: extra.slice(1).join(" ") }) })
       : action === "invite-codes" ? await client.agentInvites()
       : action === "invite-code-revoke" ? await client.revokeAgentInvite(checkpoint)
-      : action === "redeem-invite" ? await redeemAgentInvite(process.env.ROOM_AGENT_ORIGIN, checkpoint, extra.join(" "))
+      : action === "redeem-invite" ? await redeemInviteWithConsent(process.env.ROOM_AGENT_ORIGIN, checkpoint, redeemArgs.join(" "), { autoYes: redeemAutoYes, autoNo: redeemAutoNo })
       : action === "request-access" ? await requestAccess(process.env.ROOM_AGENT_ORIGIN, {
           roomId: checkpoint, identityId: extra[0], displayName: extra[1],
           requestedPermissions: extra[2].split(",").map(p => p.trim()).filter(Boolean),
@@ -197,7 +250,9 @@ permissions. See docs/AGENT-CONNECTION.md for scope, recovery and current limits
         })()
       : await client.changes(Number(checkpoint));
     if (action === "export") process.stdout.write(result.ndjson);
-    else console.log(action === "packet" ? result : JSON.stringify(result, null, 2));
+    // redeem-invite returns undefined on consent abort (exit code already
+    // set, explanation on stderr): nothing machine-readable to print.
+    else if (result !== undefined) console.log(action === "packet" ? result : JSON.stringify(result, null, 2));
   } catch (error) {
     // Fixed diagnostic text avoids printing transport internals or environment secrets.
     console.error(JSON.stringify(connectionDiagnostic(error)));

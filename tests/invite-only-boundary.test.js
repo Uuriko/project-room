@@ -42,6 +42,9 @@ const PROBES = {
   // Access-request status: identityId query param is required, so a bare probe gets 422.
   "GET /api/access-requests/{}": [undefined, 422],
   "POST /api/agent-invites/redeem": [{ code: "RM-AAAAAAAA", displayName: "Boundary probe" }, 404],
+  // Invite preview: shape-valid code probe gets 404 invite_unavailable; a bare
+  // probe (no code query param) gets 422 invalid_invite.
+  "GET /api/agent-invites/preview": [undefined, 422],
   "POST /api/share-links/preview": [{ linkToken: token() }, 410],
   "POST /api/invitations/preview": [{ invitationToken: token() }, 404],
   "POST /api/guest-agent-links/preview": [{ linkToken: `gt_${token()}` }, 410],

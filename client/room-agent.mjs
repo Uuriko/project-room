@@ -188,6 +188,32 @@ export async function redeemAgentInvite(origin, code, displayName, { fetchImpl =
   }
   return value;
 }
+// Read-only agent invite preview for the pre-redemption consent screen.
+// Unauthenticated: the code is the bearer credential. Consumes nothing and
+// returns no identity data — just the room, granted permissions, profile
+// and expiry the consent screen shows before redeem commits.
+export async function previewAgentInvite(origin, code, { fetchImpl = globalThis.fetch, signal } = {}) {
+  let service;
+  try { service = assertServiceOrigin(origin); }
+  catch { throw new RoomClientError(0, "invalid_config", "Use a fixed HTTPS origin or an isolated loopback development origin"); }
+  let response;
+  try {
+    response = await fetchImpl(`${service}/api/agent-invites/preview?code=${encodeURIComponent(code)}`, {
+      method: "GET", redirect: "error", credentials: "omit",
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
+    });
+  } catch (error) {
+    if (error instanceof RoomClientError) throw error;
+    throw new RoomClientError(0, "service_unavailable", "Could not complete the request. Check the service address and retry.");
+  }
+  let value;
+  try { value = await response.json(); } catch { value = null; }
+  if (!response.ok) throw new RoomClientError(response.status, value?.error?.code ?? "request_failed", value?.error?.message ?? "Room request failed");
+  if (typeof value?.roomId !== "string" || !Array.isArray(value?.permissions) || typeof value?.profile !== "string") {
+    throw new RoomClientError(200, "invalid_response", "Room returned an invalid invite preview");
+  }
+  return value;
+}
 // Self-serve access request (unauthenticated): an identity without room
 // membership asks to join. The roomId, identityId, displayName and
 // requestedPermissions are required; note is optional. Returns the pending
