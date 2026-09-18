@@ -1061,6 +1061,21 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // the threads list above. On-demand read, never a push (task 22).
         if (url.pathname === "/api/inbox/digest" && req.method === "GET") return json(res, 200, store.inbox.digest(token, binding,
           { since: url.searchParams.get("since"), limit: url.searchParams.get("limit"), includeChannels: view !== null }));
+        // Agent handoff protocol (task 23): journal a structured context
+        // packet when a thread is handed to a named agent, so nothing closes
+        // unowned. Account session + CSRF, like the other inbox writes; the
+        // packet carries no PII beyond what the thread view already shows.
+        if (url.pathname === "/api/inbox/handoffs" && req.method === "POST") {
+          protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
+          const result = store.inbox.handoff(token, binding, await body(req), { includeChannels: view !== null });
+          return json(res, result.duplicate ? 200 : 201, result);
+        }
+        if (url.pathname === "/api/inbox/handoffs" && req.method === "GET") return json(res, 200, store.inbox.handoffs(token, binding,
+          { status: url.searchParams.get("status") }));
+        if (url.pathname === "/api/inbox/handoffs/transition" && req.method === "POST") {
+          protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
+          return json(res, 200, store.inbox.handoffTransition(token, binding, await body(req)));
+        }
         if (url.pathname === "/api/inbox/search" && req.method === "GET") return json(res, 200, store.inbox.search(token, binding,
           { query: url.searchParams.get("q"), sourceId: url.searchParams.get("sourceId"), limit: url.searchParams.get("limit"), includeChannels: view !== null }));
         if (url.pathname === "/api/inbox" && req.method === "GET") return json(res, 200, store.inbox.list(token, binding,

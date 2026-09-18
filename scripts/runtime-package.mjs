@@ -73,6 +73,7 @@ optional.push("server/sla-clocks.mjs"); // Task 24: per-channel SLA clocks (impo
 optional.push("server/morning-digest.mjs"); // Task 21: morning digest builder (imported by server/inbox.mjs)
 optional.push("server/digest-mode.mjs"); // Task 21: sender grouping reused by server/morning-digest.mjs
 optional.push("server/inbox-triage.mjs"); // Task 21: triage decider reused by server/morning-digest.mjs
+optional.push("server/inbox-handoff.mjs"); // Task 23: agent handoff protocol (imported by server/inbox.mjs and server/store.mjs)
 optional.push("server/agent-rooms.mjs"); // agent room ownership service (imported by server/http.mjs)
 optional.push("server/google-oauth.mjs"); // Google sign-in (imported by server/http.mjs and cloudflare/room.mjs)
 optional.push("server/github-oauth.mjs"); // GitHub sign-in (imported by server/http.mjs)
