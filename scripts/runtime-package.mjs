@@ -50,6 +50,7 @@ optional.push("server/quarantine-review-coverage.mjs"); // per-signal review-cov
 // the reply-tree logic. thread-tree.mjs remains available for a future
 // collapse/expand UI slice.
 optional.push("server/inbox-outbox.mjs", "server/inbox-transport.mjs", "server/version.mjs");
+optional.push("server/csv-export.mjs"); // structured CSV/JSON export (imported by server/inbox-outbox.mjs for the send-journal audit export; pure, no imports of its own)
 optional.push("scripts/stamp-version.mjs");
 optional.push("server/email-envelope.mjs", "server/graph-email.mjs", "server/email-import.mjs");
 optional.push("server/graph-fixture-sync.mjs");
