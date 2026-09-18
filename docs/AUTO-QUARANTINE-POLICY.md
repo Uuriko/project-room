@@ -205,3 +205,16 @@ a message that still looks like it came from his bot.
 
 *Appendix (filled after shadow period): would-be holds, release rate, per-signal true/false
 positive breakdown, recommended weight adjustments.*
+
+The appendix report is produced mechanically by `scripts/shadow-quarantine-report.mjs`
+(pure join/labeling in `server/spam-shadow-report.mjs`, tests in
+`tests/spam-shadow-report.test.js`), run read-only against the store:
+
+    node scripts/shadow-quarantine-report.mjs --store <room.db> \
+      --since 2026-09-18T00:00:00Z --review-window-days 14
+
+It joins each `receipt.shadowQuarantine` decision (server/spam-shadow.mjs) to the
+`spam_quarantine` review outcome (dismissed = confirmed spam, released = ham),
+labeling true/false positives, false negatives (dismissed but never would-be-held),
+pending review, expired-unreviewed, and unjournaled records, and prints precision,
+false-positive rate, recall, and per-signal true/false-positive breakdowns.
