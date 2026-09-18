@@ -17,6 +17,8 @@ Docs / fixtures / contracts only. **No Phase 0
 [#9](https://github.com/Uuriko/project-room/pull/9) source.** No runtime
 writer. No Muse UI. **Compute ≠ Room.** Fixture receipts:
 [`research/fixtures/ledger-compact/`](fixtures/ledger-compact/).
+Muse / Quill pickup (WI-1 accepted):
+[`ROOM-JEV-COMPACTION-WI1-PICKUP-2026-09-18.md`](ROOM-JEV-COMPACTION-WI1-PICKUP-2026-09-18.md).
 
 ---
 
