@@ -36,7 +36,10 @@ runtime.
 3. **Quiet model chip**: model name inside composer (Claude
    Sonnet-in-bar), not a loud picker row. ⌘K / click opens list.
 4. **Hover actions only**: Copy / Regen / Edit appear on hover (or
-   focus), not permanent icon rails under every message.
+   focus), not permanent icon rails under every message. Keyboard
+   map (T082):
+   [ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md](ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md)
+   — Esc Stop · R Regen · C Copy · E Edit. Picker keys stay T032.
 5. **Empty state = 1 line + ≤4 starters**: no Provide/Marketplace/Host
    marketing on Ask canvas; those stay quiet nav links.
 6. **Streaming status one word**: “Thinking…” / stop — no tok/s /
