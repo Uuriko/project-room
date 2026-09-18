@@ -383,7 +383,7 @@ test("CLI mints a code from a profile name and rejects unknown profiles", async 
 });
 
 test("preview returns the grant without consuming the code", async t => {
-  const { store, origin, ownerKey } = await serve(t);
+  const { origin, ownerKey } = await serve(t);
   const minted = await mint(origin, ownerKey, { profile: "contribute", expiresInMinutes: 60, displayName: "Plug Bot" });
   assert.equal(minted.status, 201, JSON.stringify(minted.json));
   const preview = await get(origin, `/api/agent-invites/preview?code=${encodeURIComponent(minted.json.code)}`);
