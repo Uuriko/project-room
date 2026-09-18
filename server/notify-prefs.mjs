@@ -131,6 +131,34 @@ export function createNotifyPrefs({ store } = {}) {
     const prefs = prefsFor(userId);
     return prefs.connections.get(connectionId) ?? null;
   };
+  // Export the prefs a notify decision ran on as a plain JSON-safe record, and
+  // restore one onto a fresh manager. The inbox import path journals the
+  // snapshot with each imported message so the journal replay recomputes the
+  // recorded decision from the recorded inputs — the decision stays
+  // replay-deterministic even after the owner edits their prefs.
+  const snapshot = userId => {
+    const prefs = prefsFor(userId);
+    const windowOf = window => window === null ? null : Object.freeze({ ...window });
+    return Object.freeze({ global: prefs.global,
+      rooms: Object.freeze({ ...Object.fromEntries(prefs.rooms) }),
+      threads: Object.freeze({ ...Object.fromEntries(prefs.threads) }),
+      quietHours: windowOf(prefs.quietHours),
+      connections: Object.freeze(Object.fromEntries([...prefs.connections].map(([id, connection]) =>
+        [id, Object.freeze({ connectionId: id, channel: connection.channel, batching: connection.batching,
+          quietHours: windowOf(connection.quietHours) })]))) });
+  };
+  const restore = (userId, value) => {
+    check(value !== null && typeof value === "object" && !Array.isArray(value), "prefs snapshot must be an object");
+    users.delete(userId);
+    if (value.global !== undefined && value.global !== null) setGlobal(userId, { level: value.global });
+    for (const [roomId, level] of Object.entries(value.rooms ?? {})) setRoom(userId, { roomId, level });
+    for (const [threadId, level] of Object.entries(value.threads ?? {})) setThread(userId, { threadId, level });
+    if (value.quietHours !== undefined && value.quietHours !== null) setQuietHours(userId, value.quietHours);
+    for (const [connectionId, connection] of Object.entries(value.connections ?? {}))
+      setConnection(userId, { connectionId, channel: connection.channel, batching: connection.batching,
+        quietHours: connection.quietHours ?? null });
+    return snapshot(userId);
+  };
   // Resolve the effective level for a thread in a room.
   const resolve = (userId, { roomId, threadId }) => {
     const prefs = prefsFor(userId);
@@ -165,7 +193,7 @@ export function createNotifyPrefs({ store } = {}) {
   };
   return Object.freeze({ setGlobal, setRoom, setThread, resolve, LEVELS: Object.freeze([...LEVELS]),
     setQuietHours, clearQuietHours, quietHoursFor,
-    setConnection, removeConnection, connectionFor, decideNotification,
+    setConnection, removeConnection, connectionFor, snapshot, restore, decideNotification,
     BATCHINGS: Object.freeze([...BATCHINGS]) });
 }
 export { NotifyError };
