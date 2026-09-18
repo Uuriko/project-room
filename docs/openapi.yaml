@@ -1495,6 +1495,24 @@ paths:
         '401': { description: unauthenticated }
         '503': { description: github_not_configured }
         '429': { description: rate_limited }
+  /api/auth/google/link/start:
+    get:
+      summary: Start Google OAuth to connect it to the signed-in account (RC-2026-09-17-017)
+      description: >-
+        Authenticated (account_session cookie): binds the caller's account
+        session slot into a single-use PKCE state with a link intent and 302s
+        to Google. The callback then attaches the Google subject to the
+        currently authenticated account (409 when the Google account is
+        already linked to a different account) instead of the sign-in
+        find-or-provision order. 503 google_not_configured when Google
+        sign-in is not set up. 10 per address per minute.
+      security:
+        - accountSession: []
+      responses:
+        '302': { description: "Redirect to the Google authorization URL" }
+        '401': { description: unauthenticated }
+        '503': { description: google_not_configured }
+        '429': { description: rate_limited }
   /api/auth/magic/request:
     post:
       summary: Issue a magic-link sign-in code

@@ -240,6 +240,51 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     const method = store.accountLogins.linkOAuthMethod(session.account.id, { provider: "github", subject, email: normalized });
     return { accountId: session.account.id, methodRef: method.id };
   };
+  // Google shared-account linking (RC-2026-09-17-017): mirrors the GitHub
+  // find-or-provision order through the shared account-login model instead of
+  // provisioning `google:<sub>` directly.
+  const linkGoogleSubject = ({ subject, email }) => {
+    const logins = store.accountLogins;
+    const owner = logins.findAccountByOAuth("google", subject);
+    if (owner) {
+      const existing = logins.listMethods(owner).find(m => m.type === "oauth" && m.provider === "google" && !m.disabled);
+      return { accountId: owner, methodRef: existing ? existing.id : `google:${subject}` };
+    }
+    const normalized = email ? normalizeEmail(email) : null;
+    const emailOwner = normalized ? logins.findAccountByVerifiedEmail(normalized) : null;
+    if (emailOwner) {
+      const method = logins.linkOAuthMethod(emailOwner, { provider: "google", subject, email: normalized });
+      return { accountId: emailOwner, methodRef: method.id };
+    }
+    const accountId = `google:${subject}`;
+    if (!store.db.prepare("SELECT 1 FROM accounts WHERE id=?").get(accountId)) {
+      store.createAccount(accountId, "google-oauth");
+    }
+    const method = logins.linkOAuthMethod(accountId, { provider: "google", subject, email: normalized });
+    if (normalized) {
+      try { logins.linkMagicMethod(accountId, { email: normalized }); }
+      catch (error) {
+        if (!(error instanceof ServiceError) || error.code !== "login_method_exists") throw error;
+      }
+    }
+    return { accountId, methodRef: method.id };
+  };
+  // Link intent: attach the Google subject to the account that owns the
+  // pending session slot. The slot must still be authenticated; a subject
+  // owned elsewhere 409s via linkOAuthMethod.
+  const linkGoogleSubjectToAccount = ({ subject, email, slotToken }) => {
+    let session;
+    try {
+      session = store.authenticateAccountSession(slotToken);
+    } catch (error) {
+      if (error.status !== 401) throw error;
+      throw new ServiceError(401, "invalid_session", "That sign-in attempt is no longer valid; start again");
+    }
+    if (!session.account) throw new ServiceError(401, "account_session_required", "Sign in before connecting Google");
+    const normalized = email ? normalizeEmail(email) : null;
+    const method = store.accountLogins.linkOAuthMethod(session.account.id, { provider: "google", subject, email: normalized });
+    return { accountId: session.account.id, methodRef: method.id };
+  };
   const githubOAuthErrorMessage = code => ({
     github_state_invalid: "This GitHub sign-in attempt is not valid; start again",
     github_state_expired: "This GitHub sign-in attempt expired; start again",
@@ -530,13 +575,23 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         };
         try {
           const completed = await signIn.complete({ callbackUrl: expectedOrigin() + url.pathname + url.search });
+          // Shared-model linking (RC-2026-09-17-017): the callback links the
+          // Google subject through the account-login model. A link intent
+          // attaches to the signed-in account; otherwise find-or-provision
+          // runs (existing OAuth link → verified-email match → new account).
+          const subject = String(completed.claims.sub);
+          const email = typeof completed.claims.email === "string" ? completed.claims.email : null;
+          const linked = completed.link
+            ? linkGoogleSubjectToAccount({ subject, email, slotToken: completed.slotToken })
+            : linkGoogleSubject({ subject, email });
+          store.accountLogins.touchMethodByOAuth("google", subject);
           const oldRoomToken = cookie(req, roomCookieName);
-          const loggedIn = store.loginAccountSessionWithGoogle(completed.slotToken, completed.claims.sub, completed.expectedRevision, {
-            revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null
-          });
+          const loggedIn = store.loginAccountSessionWithMethod(completed.slotToken, linked.accountId,
+            completed.expectedRevision, { method: { kind: "oauth", ref: linked.methodRef },
+              revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null });
           setCookie(res, accountCookieName, completed.slotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
           const firstRoom = store.db.prepare("SELECT room_id FROM member_accounts WHERE account_id=? ORDER BY room_id LIMIT 1")
-            .get(loggedIn.account.id);
+            .get(linked.accountId);
           // A fresh account has no rooms yet: land on the account home, where
           // the room list, invite redemption, and "New room" creation live.
           // The error path is reserved for genuine failures (denied consent,
@@ -1394,6 +1449,21 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           state, codeChallenge: codeChallengeFor(codeVerifier) });
         res.statusCode = 302;
         res.setHeader("Location", authorizationUrl);
+        return res.end();
+      }
+      if (url.pathname === "/api/auth/google/link/start") {
+        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
+        // Auth first: anonymous callers get 401 without learning whether
+        // Google is configured.
+        const session = requireAccountSession();
+        const signIn = google();
+        if (!signIn) return json(res, 503, { status: "unavailable", reason: "google_not_configured" });
+        rate(`google-link-start:${remoteAddress}`, 10);
+        const slotToken = session.slotToken;
+        const expectedRevision = store.accountSessionSlot(slotToken).sessionRevision;
+        const started = signIn.begin({ slotToken, expectedRevision, link: true });
+        res.statusCode = 302;
+        res.setHeader("Location", started.authorizationUrl);
         return res.end();
       }
       if (url.pathname === "/api/guest-agent-links" && ["GET", "HEAD"].includes(req.method)) {

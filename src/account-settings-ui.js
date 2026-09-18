@@ -130,7 +130,7 @@ function oauthSectionHtml(providers) {
     ? `<a class="button" href="/api/auth/github/link/start">Connect GitHub</a><p class="form-hint">Links this GitHub account to your Project Room account.</p>`
     : `<p class="form-hint">GitHub sign-in isn\u2019t configured on this Room.</p>`;
   const google = providers?.google?.configured
-    ? `<a class="button" href="/api/auth/google/start">Sign in with Google</a><p class="form-hint">This signs you into the account linked to that Google identity.</p>`
+    ? `<a class="button" href="/api/auth/google/link/start">Connect Google</a><p class="form-hint">Links this Google account to your Project Room account.</p>`
     : `<p class="form-hint">Google sign-in isn\u2019t configured on this Room.</p>`;
   return `<h3>Connected accounts</h3>${github}${google}`;
 }
