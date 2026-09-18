@@ -81,6 +81,7 @@ test("the journal creates, dedupes one open handoff per thread, and lists", t =>
   assert.equal(first.receipt.packet.to, "claude");
   assert.equal(first.receipt.history.length, 1);
   assert.equal(first.receipt.history[0].status, "open");
+  assert.ok(inboxHandoffStatuses.includes(first.receipt.history[0].status));
   const again = j.create("email:abc", fields({ threadId: "thread:1" }), { to: "grokbot" });
   assert.equal(again.duplicate, true, "a second create for the same thread returns the existing receipt");
   assert.equal(again.receipt.handoffId, first.receipt.handoffId);
