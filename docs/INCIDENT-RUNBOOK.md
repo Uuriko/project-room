@@ -2,10 +2,14 @@
 
 How we declare, run, communicate, and learn from incidents. Companion docs:
 - `src/health-status.mjs` (F008) — the `/api/health` payload and `/status` page
-- `src/uptime-monitor.mjs` (F021) — the uptime monitor and alert events
 - `docs/SAFE-DIAGNOSTICS.md` — approved diagnostic commands
 - `docs/V8-RECOVERY-RUNBOOK.md` — disaster recovery (restore-from-backup procedures)
 - `docs/SECRETS-ROTATION.md` (F005) — credential-leak response
+
+There is no external uptime monitor or paging integration: the monitoring we
+actually have is `GET /api/health` (per-check rows with `status`, `detail`,
+`latencyMs`) and the `/status` page. Anything below that assumes an external
+monitor is stale — fix the doc, not the assumption.
 
 Read this doc before you declare your first incident. During a live incident, use it
 as a checklist, not a textbook.
@@ -19,7 +23,7 @@ always downgrade, and upgrading late costs time.
 
 | Severity | Definition | Paging threshold |
 |----------|------------|------------------|
-| **SEV1** | Service down or broadly unusable: `/api/health` returns `unhealthy` (HTTP 503), uptime monitor fires a `down` alert, or the room cannot serve any user action (messages, work items, identity). Data at risk (corruption, loss, or suspected breach). | Page the incident commander immediately, day or night. Target acknowledge: **5 min**. |
+| **SEV1** | Service down or broadly unusable: `/api/health` returns `unhealthy` (HTTP 503), or the room cannot serve any user action (messages, work items, identity). Data at risk (corruption, loss, or suspected breach). | Page the incident commander immediately, day or night. Target acknowledge: **5 min**. |
 | **SEV2** | Core feature degraded for many users: `degraded` health status (a required dependency failing, or an optional dependency taking down a major feature), partial data loss, or a single lane of the app (inbox, agents, bridge) down while the rest works. | Page the on-call engineer. Target acknowledge: **15 min**. |
 | **SEV3** | Limited impact: intermittent errors, one endpoint slow, a minor feature broken, or a non-required dependency failing that only narrows functionality. No data loss. | Handle during working hours; no paging. Acknowledge same day. |
 | **SEV4** | No user impact: flaky monitor, noisy alert, cosmetic issue, or a problem found and fixed before it affected anyone. | Fix when convenient; log it in the incident log. |
@@ -62,9 +66,8 @@ always cheaper than declaring late.
    every action with timestamps. This becomes the postmortem's timeline.
 4. **Snapshot first evidence:** run `GET /api/health` and save the payload.
    Record `status`, `version`, `uptimeMs`, `checkedAt`, and the per-check rows
-   (`name`, `required`, `status`, `detail`, `latencyMs`). Grab the uptime
-   monitor's `getSnapshot()` — which endpoints are `down` vs `up`, and
-   `consecutiveFailures` counts.
+   (`name`, `required`, `status`, `detail`, `latencyMs`). Those rows are the
+   whole monitoring surface — there is no separate uptime monitor.
 5. **Set the first update time** (see §5) and start the clock.
 
 An incident is declared against **impact**, not against a person or a change.
@@ -75,15 +78,8 @@ Never attach a name to blame — attach it to a role and a task.
 Work this list top-down. Stop at the first step that explains the symptom, then
 go fix it. Do not run commands that mutate state until you've named a theory.
 
-1. **Uptime monitor verdict.** Call `getStatus()` / `getSnapshot()` on the
-   uptime monitor (F021, `src/uptime-monitor.mjs`). Which endpoints are `down`?
-   How many `consecutiveFailures`? A single failure is noise; the monitor only
-   fires `down` after 3 consecutive failures (configurable
-   `failureThreshold`) — if the alert fired, it already waited, so treat it as
-   real. If the alert is `recovered` but users still report trouble, the check
-   may be too coarse (one URL up, the real path down) — widen the monitored
-   endpoints before closing.
-2. **Health payload.** `GET /api/health` (F008, `src/health-status.mjs`).
+1. **Health verdict.** `GET /api/health` (F008, `src/health-status.mjs`) — the
+   whole monitoring surface.
    - HTTP 200 with `status: "healthy"` → the service is up; the problem is
      elsewhere (client, proxy, DNS). Check the `/status` page next.
    - HTTP 200 with `status: "degraded"` → a **non-required** check is failing.
@@ -91,24 +87,28 @@ go fix it. Do not run commands that mutate state until you've named a theory.
      tells you why, `latencyMs` tells you whether it's failing or timing out.
    - HTTP 503 with `status: "unhealthy"` → a **required** check is failing.
      This is the readiness signal: treat as SEV1 until proven otherwise.
+   - A single failing optional check is noise only if the next poll recovers;
+     read `detail` and `latencyMs` before dismissing it.
+   - If the payload is `unhealthy` but users are fine, the checks may be too
+     coarse — widen them before closing.
    - Endpoint unreachable but the process is alive → suspect the HTTP layer
      (server/http wiring, port binding), not the app logic.
    - Endpoint unreachable and the process is down → check the process
      supervisor / host first; do not re-run provisioning blindly.
-3. **Compare versions and uptime.** `version` and `uptimeMs` in the health
+2. **Compare versions and uptime.** `version` and `uptimeMs` in the health
    payload: did the process just restart (low `uptimeMs` — crash loop?), or did
    a deploy land just before the incident started? A fresh restart + SEV1
    almost always means the last change or the last crash.
-4. **Per-check details.** For every `fail` row: note `required` (does it gate
+3. **Per-check details.** For every `fail` row: note `required` (does it gate
    unhealthy?), `detail` (probe's own words), and `latencyMs` (a timeout
    versus an instant failure points at different causes). Probes are cheap and
    non-invasive by contract — a failing probe means the dependency, not the
    probe, is sick.
-5. **Logs.** With a theory in hand, look at the app logs around the alert time
+4. **Logs.** With a theory in hand, look at the app logs around the alert time
    (see `docs/SAFE-DIAGNOSTICS.md` for the approved read-only commands). Never
    `tail -f` a SEV1 into confusion — sample a bounded window and paste the
    relevant lines into the incident log.
-6. **Stop and reassess.** If the first 30 minutes produce no theory, the IC
+5. **Stop and reassess.** If the first 30 minutes produce no theory, the IC
    pauses debugging, restates the known facts out loud, and either brings in a
    fresh responder or escalates (§6). Rotating a tired mind beats staring
    longer.
@@ -121,8 +121,8 @@ go fix it. Do not run commands that mutate state until you've named a theory.
 | `GET /api/health` → 200, `status: "degraded"` | Optional dependency down | Read failing check's `detail`; scope the blast radius |
 | `GET /api/health` → 200, `status: "healthy"` | Service itself up | Look outward: proxy, DNS, client; check `/status` page |
 | `GET /status` disagrees with `/api/health` | Rendering/route wiring issue | Compare `renderStatusPage` inputs vs health payload |
-| Uptime monitor `down` alert fired | 3+ consecutive endpoint failures | Trust it; start at step 2 |
-| Uptime monitor flapping (`down` → `recovered` → `down`) | Intermittent fault or too-aggressive timeout | Check `latencyMs` in health rows; consider raising `timeoutMs` |
+| `GET /api/health` → 503 | Required check failing | Treat as SEV1 until proven otherwise; start at step 1 |
+| `GET /api/health` flapping (`unhealthy` → `healthy` → `unhealthy`) | Intermittent fault or too-aggressive probe timeout | Check `latencyMs` in health rows; consider widening the check |
 
 ## 5. Communication cadence
 
@@ -157,7 +157,7 @@ stop watching.
 
 ## 6. Escalation paths
 
-Escalate when any of these is true: the 30-minute theory-less stall (§4.6), the
+Escalate when any of these is true: the 30-minute theory-less stall (§4.5), the
 IC needs a fresh pair of eyes, the blast radius grew, or the fix needs
 someone not in the room (host access, DNS, a vendor).
 
@@ -219,7 +219,7 @@ Blameless culture, non-negotiable:
 which health check row failed, which monitor alert fired, which log line.>
 
 ## What went well
-- <e.g. "uptime monitor fired within 3 minutes", "update cadence held">
+- <e.g. "health check flagged the failing dependency within a minute", "update cadence held">
 
 ## What went badly
 - <e.g. "no runbook for X", "health check said healthy while users were down">
@@ -242,11 +242,9 @@ gets re-raised.
 
 Don't declare for these — work them through the normal lanes:
 
-- A single failed health probe that recovers on the next check (the
-  `failureThreshold` exists precisely to absorb these).
-- An uptime monitor `down` alert that is already `recovered` before a human
-  looks, with no user reports — log it as SEV4 and widen the monitored
-  endpoints if it repeats.
+- A single failed health probe that recovers on the next check (a lone
+  failure with no user impact is noise — log it as SEV4 and widen the check
+  if it repeats).
 - A deploy that succeeded and is behaving normally.
 - A feature request, a question, or a complaint about how something works.
 - A failing test on a branch that hasn't merged.
