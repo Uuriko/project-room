@@ -369,6 +369,14 @@ into, and neither touches login/auth.
   `review()`s it `release` (back to the inbox) or `confirm_spam`. Records are
   final and retained after review, with reviewer and timestamp. Auto-quarantine
   policy itself is John's call (task 33); the guard ships flag-only by default.
+- `SpamQuarantineJournal` (`server/spam-quarantine-journal.mjs`, on
+  `store.spamQuarantine`) — the durable backing for the quarantine queue: a
+  `spam_quarantine` table (additive, unfenced, `IF NOT EXISTS`) holding
+  `held → released | dismissed` records with the flag's signal list as the
+  reason, the reviewer, and timestamps. Held rows survive process restarts
+  and Durable Object evictions; reviews are final. `review()` speaks the
+  in-memory queue's `release | confirm_spam` decision vocabulary
+  (`confirm_spam` maps to `dismissed`).
 
 **Quiet hours** (`server/notify-prefs.mjs`):
 - `setQuietHours(userId, { start, end, tz })` — a half-open local window

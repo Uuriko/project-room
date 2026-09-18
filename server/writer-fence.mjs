@@ -51,6 +51,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // path to it, and the journal's open→accepted→completed|released
   // transitions plus the one-open-handoff-per-thread rule are the gate.
   "inbox_handoffs",
+  // spam_quarantine (spam-guard quarantine journal) is purely additive and
+  // intentionally NOT fenced: same rationale — older writers have no code
+  // path to it, and the journal's held→released|dismissed transitions plus
+  // the reviews-are-final rule are the gate.
+  "spam_quarantine",
   // Cross-channel thread stitching (task #19): stitch_identities,
   // stitch_links, stitch_revocations, stitch_suggestions, stitch_receipts.
   // Hash-only, purely additive, intentionally NOT fenced — older writers
