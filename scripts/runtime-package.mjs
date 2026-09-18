@@ -93,7 +93,14 @@ optional.push("server/spend-allowance.mjs");
 optional.push("src/growth-emit.js", "src/growth-events.js", "src/growth-collector.js", "src/growth-mentions.js", "src/growth-fanout.js", "src/growth-persistence.js", "src/growth-summary.js", "src/growth-compare.js", "src/growth-alerts.js", "src/growth-watch.js", "src/growth-scheduler.js", "src/growth-http.js", "src/growth-digest.js");
 const allowed = new Set([...required, ...optional]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
-const check = condition => { if (!condition) throw new Error("Runtime package does not match its exact allowlisted contract"); };
+// The contract stays exact: any mismatch fails. Each failure now names the
+// offending path/value so a PR author can fix it in one cycle instead of
+// re-running CI to discover what drifted (e.g. a new server module imported
+// by an allowlisted file that was never registered in `optional` above).
+const check = (condition, detail) => {
+  if (!condition) throw new Error("Runtime package does not match its exact allowlisted contract"
+    + (detail ? `: ${detail}` : ""));
+};
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const hashPattern = /^[0-9a-f]{40}$/;
 const manifestName = "runtime-manifest.json";
@@ -102,13 +109,15 @@ function runtimeMetadata(files) {
   const schema = /export const STORE_SCHEMA_VERSION = (\d+);/.exec(files.get("server/writer-fence.mjs").toString());
   const pkg = JSON.parse(files.get("package.json"));
   const config = JSON.parse(files.get("cloudflare/wrangler.jsonc"));
-  check(["8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34"].includes(schema?.[1]) && typeof pkg.engines?.node === "string");
+  check(["8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34"].includes(schema?.[1]) && typeof pkg.engines?.node === "string",
+    `unsupported store schema ${schema?.[1] ?? "unparseable"} or missing package.json engines.node`);
   return { schemaVersion: Number(schema[1]), node: pkg.engines.node, cloudflare: { compatibilityDate: config.compatibility_date,
     compatibilityFlags: config.compatibility_flags, durableObjects: config.durable_objects, migrations: config.migrations } };
 }
 
 export function createRuntimePackage({ repository, commit, destination }) {
-  check(typeof commit === "string" && hashPattern.test(commit));
+  check(typeof commit === "string" && hashPattern.test(commit),
+    `commit must be a full 40-char hash, got: ${String(commit).slice(0, 64)}`);
   const git = (...args) => execFileSync("git", args, { cwd: repository, maxBuffer: 16 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
   let resolved;
   try {
@@ -117,16 +126,19 @@ export function createRuntimePackage({ repository, commit, destination }) {
     throw new Error(`Baseline commit ${commit} is not in this checkout's history.`
       + ` The upgrade gates need the full history: run 'git fetch --unshallow' (or clone without --depth).`);
   }
-  check(resolved === commit);
+  check(resolved === commit, `resolved commit ${resolved} does not match requested ${commit}`);
   const tree = git("rev-parse", `${commit}^{tree}`).toString().trim();
   const entries = git("ls-tree", "-r", "-z", commit, "--", ...allowed).toString().split("\0").filter(Boolean).map(line => {
-    const match = /^(100644|100755) blob ([0-9a-f]{40})\t(.+)$/.exec(line); check(match && allowed.has(match[3]));
+    const match = /^(100644|100755) blob ([0-9a-f]{40})\t(.+)$/.exec(line);
+    check(match && allowed.has(match[3]), `git tree entry is not in the allowlisted runtime package: ${match?.[3] ?? line}`);
     return { path: match[3], object: match[2] };
   }).sort((a, b) => a.path < b.path ? -1 : 1);
-  check(required.every(path => entries.some(entry => entry.path === path)));
+  const missingRequired = required.filter(path => !entries.some(entry => entry.path === path));
+  check(missingRequired.length === 0, `required runtime files missing from the package: ${missingRequired.join(", ")}`);
   const files = new Map(entries.map(entry => [entry.path, git("cat-file", "blob", entry.object)]));
   const runtime = runtimeMetadata(files);
-  check(isAbsolute(destination) && destination === resolve(destination));
+  check(isAbsolute(destination) && destination === resolve(destination),
+    `destination must be an absolute normalized path, got: ${destination}`);
   const parent = realpathSync(dirname(destination)), output = join(parent, basename(destination));
   mkdirSync(output, { mode: 0o700 }); // Existing paths are never reused or overwritten.
   for (const [path, bytes] of files) {
@@ -149,24 +161,50 @@ export function verifyRuntimePackage(directory, { expectedCommit } = {}) {
     for (const entry of readdirSync(join(root, prefix), { withFileTypes: true })) {
       const path = prefix ? `${prefix}/${entry.name}` : entry.name;
       if (entry.isDirectory()) {
-        check([...allowed].some(file => file.startsWith(path + "/"))); walk(path);
-      } else { check(entry.isFile() && (path === manifestName || allowed.has(path))); actual.push(path); }
+        check([...allowed].some(file => file.startsWith(path + "/")),
+          `packaged directory ${path}/ is not a prefix of any allowlisted runtime file`);
+        walk(path);
+      } else {
+        check(entry.isFile() && (path === manifestName || allowed.has(path)),
+          `packaged file ${path} is not in the allowlisted runtime package`);
+        actual.push(path);
+      }
     }
   };
   walk();
-  check(actual.includes(manifestName));
+  check(actual.includes(manifestName), "packaged runtime is missing its runtime-manifest.json");
   const raw = readFileSync(join(root, manifestName)), manifest = JSON.parse(raw);
-  check(manifest.format === 1 && hashPattern.test(manifest.sourceCommit) && hashPattern.test(manifest.sourceTree)
-    && (!expectedCommit || manifest.sourceCommit === expectedCommit) && Array.isArray(manifest.files)
-    && same(manifest.publicAssets, assetsFor(manifest.runtime?.schemaVersion, manifest.files.some(f => f.path === "src/inbox-ui.js"), manifest.files.some(f => f.path === "src/inbox-send-ui.js"))));
+  check(manifest.format === 1, `runtime manifest format ${manifest.format} is not 1`);
+  check(hashPattern.test(manifest.sourceCommit),
+    `runtime manifest sourceCommit is not a commit hash: ${String(manifest.sourceCommit).slice(0, 64)}`);
+  check(hashPattern.test(manifest.sourceTree),
+    `runtime manifest sourceTree is not a tree hash: ${String(manifest.sourceTree).slice(0, 64)}`);
+  check(!expectedCommit || manifest.sourceCommit === expectedCommit,
+    `runtime manifest sourceCommit ${manifest.sourceCommit} does not match expected ${expectedCommit}`);
+  check(Array.isArray(manifest.files), "runtime manifest files is not an array");
+  const expectedAssets = assetsFor(manifest.runtime?.schemaVersion,
+    manifest.files.some(f => f.path === "src/inbox-ui.js"), manifest.files.some(f => f.path === "src/inbox-send-ui.js"));
+  const missingAssets = expectedAssets.filter(a => !manifest.publicAssets.includes(a));
+  const extraAssets = manifest.publicAssets.filter(a => !expectedAssets.includes(a));
+  check(missingAssets.length === 0 && extraAssets.length === 0,
+    `runtime manifest publicAssets mismatch: missing [${missingAssets.join(", ")}], extra [${extraAssets.join(", ")}]`);
   const listed = manifest.files.map(entry => entry.path);
-  check(new Set(listed).size === listed.length && same([...listed].sort(), listed) && required.every(path => listed.includes(path))
-    && same(actual.sort(), [...listed, manifestName].sort()));
+  check(new Set(listed).size === listed.length, "runtime manifest lists a file more than once");
+  check(same([...listed].sort(), listed), "runtime manifest file list is not sorted");
+  const missingListed = required.filter(path => !listed.includes(path));
+  check(missingListed.length === 0, `runtime manifest omits required files: ${missingListed.join(", ")}`);
+  const actualSorted = actual.sort(), expectedSorted = [...listed, manifestName].sort();
+  check(same(actualSorted, expectedSorted),
+    `packaged files differ from the manifest: missing [${expectedSorted.filter(p => !actualSorted.includes(p)).join(", ")}], extra [${actualSorted.filter(p => !expectedSorted.includes(p)).join(", ")}]`);
   const files = new Map();
   for (const entry of manifest.files) {
-    check(allowed.has(entry.path) && Number.isSafeInteger(entry.bytes) && entry.bytes >= 0 && /^[0-9a-f]{64}$/.test(entry.sha256));
+    check(allowed.has(entry.path), `manifest entry ${entry.path} is not in the allowlisted runtime package`);
+    check(Number.isSafeInteger(entry.bytes) && entry.bytes >= 0 && /^[0-9a-f]{64}$/.test(entry.sha256),
+      `manifest entry ${entry.path} has invalid bytes/sha256`);
     const bytes = readFileSync(join(root, entry.path));
-    check(bytes.length === entry.bytes && sha256(bytes) === entry.sha256); files.set(entry.path, bytes);
+    check(bytes.length === entry.bytes && sha256(bytes) === entry.sha256,
+      `packaged file ${entry.path} does not match its manifest bytes/sha256`);
+    files.set(entry.path, bytes);
   }
   // Check this codebase's literal imports, including dynamic literal imports.
   // This is not a complete JavaScript dependency parser; cold runtime tests and
@@ -176,10 +214,14 @@ export function verifyRuntimePackage(directory, { expectedCommit } = {}) {
     for (const match of bytes.toString().matchAll(/(?<!["'.])(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)["']([^"']+)["']/g)) {
       const specifier = match[1];
       if (specifier.startsWith("node:") || specifier.startsWith("cloudflare:")) continue;
-      check(specifier.startsWith(".") && files.has(posix.normalize(posix.join(posix.dirname(path), specifier))));
+      const resolved = posix.normalize(posix.join(posix.dirname(path), specifier));
+      check(specifier.startsWith(".") && files.has(resolved),
+        `${path} imports ${JSON.stringify(specifier)} (resolves to ${resolved}), which is not in the allowlisted runtime package — register it in scripts/runtime-package.mjs`);
     }
   }
-  check(same(manifest.runtime, runtimeMetadata(files)));
+  const actualRuntime = runtimeMetadata(files);
+  check(same(manifest.runtime, actualRuntime),
+    `runtime manifest metadata differs from recomputed: manifest ${JSON.stringify(manifest.runtime)} vs computed ${JSON.stringify(actualRuntime)}`);
   return { verified: true, sourceCommit: manifest.sourceCommit, sourceTree: manifest.sourceTree,
     schemaVersion: manifest.runtime.schemaVersion, files: listed.length, assets: manifest.publicAssets.length, manifestSha256: sha256(raw) };
 }
