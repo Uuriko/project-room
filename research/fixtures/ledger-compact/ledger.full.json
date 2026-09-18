@@ -1,0 +1,26 @@
+{
+  "kind": "ledger.full",
+  "version": 1,
+  "parentReceiptId": "rcp_session_wi1_done",
+  "workItemId": "wi_ledger_compact_p0",
+  "seatId": "seat_second_1",
+  "firstEnvelopeId": "env_mission_first",
+  "delegationSpawnId": "rcp_spawn_review",
+  "toolReceipts": [
+    {
+      "toolUseId": "toolu_read_1",
+      "tool": "Read",
+      "receiptId": "rcp_tool_read_1"
+    },
+    {
+      "toolUseId": "toolu_bash_1",
+      "tool": "Bash",
+      "receiptId": "rcp_tool_bash_1"
+    },
+    {
+      "toolUseId": "toolu_screenshot_1",
+      "tool": "Screenshot",
+      "receiptId": "rcp_tool_screenshot_1"
+    }
+  ]
+}

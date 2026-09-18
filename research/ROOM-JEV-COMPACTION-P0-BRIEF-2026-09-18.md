@@ -15,7 +15,8 @@
 Docs / fixtures / contracts only. **No Phase 0
 [#8](https://github.com/Uuriko/project-room/pull/8) /
 [#9](https://github.com/Uuriko/project-room/pull/9) source.** No runtime
-writer. No Muse UI. **Compute ≠ Room.**
+writer. No Muse UI. **Compute ≠ Room.** Fixture receipts:
+[`research/fixtures/ledger-compact/`](fixtures/ledger-compact/).
 
 ---
 
@@ -147,7 +148,7 @@ shape.
 
 | | |
 | --- | --- |
-| **Deliver** | This brief (canonical P0) + later optional `docs/examples/receipts/ledger-compact.v1.json` when a fixture PR opens |
+| **Deliver** | This brief (canonical P0) + [research/fixtures/ledger-compact/](fixtures/ledger-compact/) (`ledger-compact.v1.json` + orphan fail) |
 | **Receipt** | A valid `ledger.compact` JSON with `parentReceiptId`, `decisions[]`, `stats`, `asker` |
 | **Fail receipt** | Compact **without** `parentReceiptId` → orphan-claim scorer `orphan_claim` (same rule as spawn without parent) |
 | **Must** | `kind` is `ledger.compact`; `version` is `1`; wrapping Done cites parent |
@@ -160,7 +161,7 @@ derived `action`.
 
 | | |
 | --- | --- |
-| **Deliver** | Fixture `decisions[]` covering all three verbs: `keep`, `truncate`, `drop` |
+| **Deliver** | Fixture `decisions[]` covering all three verbs: `keep`, `truncate`, `drop` — [ledger-compact.v1.json](fixtures/ledger-compact/ledger-compact.v1.json) |
 | **Receipt** | Three rows, e.g. Read `keepCall=0.81 keepResult=0.72 → keep`; Bash `0.80 / 0.12 → truncate`; screenshot `0.11 / 0.09 → drop` |
 | **Must** | Action matches the table in §3; truncate keeps `truncateHeadChars` honesty in `stats.charsAfter` |
 | **Must not** | A “summary” string that rewrites the tool result; drop without a decision row |
@@ -171,7 +172,7 @@ derived `action`.
 
 | | |
 | --- | --- |
-| **Deliver** | Fixture A: `keepThreshold=0.5`, `preserveRecentMessages=6`, `truncateHeadChars=300`, first Mission id **absent** from `decisions[]`. Fixture B: `asker=inert`, `inertReason="no typesafe key"`, `decisions=[]`, `stats.callsAfter === callsBefore` |
+| **Deliver** | Fixture A: `keepThreshold=0.5`, `preserveRecentMessages=6`, `truncateHeadChars=300`, first Mission id **absent** from `decisions[]` ([ledger-compact.v1.json](fixtures/ledger-compact/ledger-compact.v1.json)). Fixture B: `asker=inert`, `inertReason="no typesafe key"`, `decisions=[]`, `stats.callsAfter === callsBefore` ([ledger-compact.inert.json](fixtures/ledger-compact/ledger-compact.inert.json)) |
 | **Receipt** | Both fixtures; inert keeps the full ledger |
 | **Must** | No invented `TYPESAFE_API_KEY`; unfit / throw also inert (reason required) |
 | **Must not** | Claude-plugin lossy-summary fallback; mid-stream compact of the live turn |
@@ -182,7 +183,7 @@ derived `action`.
 
 | | |
 | --- | --- |
-| **Deliver** | Two-load fixture: `view.compact.json` (after drop/truncate) **and** `ledger.full.json` (pre-compact tool receipts still listed by id) |
+| **Deliver** | Two-load fixture: [view.compact.json](fixtures/ledger-compact/view.compact.json) (after drop/truncate) **and** [ledger.full.json](fixtures/ledger-compact/ledger.full.json) (pre-compact tool receipts still listed by id) |
 | **Receipt** | Compact receipt `stats.callsAfter < callsBefore` **and** every dropped `toolUseId` still resolvable on the parent graph |
 | **Must** | Later `room.receipt.v1` may still `citedReceiptIds` a dropped tool’s original receipt |
 | **Must not** | Delete original tool receipts from the graph; compact away `delegation.spawn` / `parentReceiptId` |
@@ -207,9 +208,9 @@ derived `action`.
 
 ### Must
 
-- [ ] WI-1…WI-4 each have a named fixture receipt (or this brief’s
-      examples, until a fixture PR lands)
-- [ ] Orphan compact (no `parentReceiptId`) is documented as fail
+- [x] WI-1…WI-4 each have a named fixture receipt
+      ([`research/fixtures/ledger-compact/`](fixtures/ledger-compact/))
+- [x] Orphan compact (no `parentReceiptId`) is documented as fail
 - [ ] Action table matches keepCall / keepResult vs `0.5`
 - [ ] Inert+reason is the no-key path
 - [ ] View ≠ erase is explicit

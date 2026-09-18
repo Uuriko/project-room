@@ -1,0 +1,43 @@
+{
+  "kind": "ledger.compact",
+  "version": 1,
+  "parentReceiptId": "rcp_session_wi1_done",
+  "seatId": "seat_second_1",
+  "workItemId": "wi_ledger_compact_p0",
+  "asker": "jev",
+  "keepThreshold": 0.5,
+  "preserveRecentMessages": 6,
+  "truncateHeadChars": 300,
+  "fitStage": "inputs-200",
+  "decisions": [
+    {
+      "toolUseId": "toolu_read_1",
+      "tool": "Read",
+      "keepCall": 0.81,
+      "keepResult": 0.72,
+      "action": "keep"
+    },
+    {
+      "toolUseId": "toolu_bash_1",
+      "tool": "Bash",
+      "keepCall": 0.80,
+      "keepResult": 0.12,
+      "action": "truncate"
+    },
+    {
+      "toolUseId": "toolu_screenshot_1",
+      "tool": "Screenshot",
+      "keepCall": 0.11,
+      "keepResult": 0.09,
+      "action": "drop"
+    }
+  ],
+  "stats": {
+    "callsBefore": 3,
+    "callsAfter": 2,
+    "charsBefore": 18420,
+    "charsAfter": 1896
+  },
+  "inertReason": null,
+  "completedAt": "2026-09-18T00:00:00.000Z"
+}

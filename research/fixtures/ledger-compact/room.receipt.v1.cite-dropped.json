@@ -1,0 +1,21 @@
+{
+  "kind": "room.receipt.v1",
+  "id": "rcp_later_cites_dropped",
+  "workItemId": "wi_ledger_compact_p0",
+  "persona": "review",
+  "agentMemberId": "member_seat_review_1",
+  "completedAt": "2026-09-18T00:05:00.000Z",
+  "traceRef": "trace_wi_ledger_compact_p0",
+  "artifacts": [],
+  "principalId": null,
+  "authorityClaimed": null,
+  "sourceManifest": [],
+  "reversibility": "reversible",
+  "expiration": null,
+  "citedReceiptIds": [
+    "rcp_session_wi1_done",
+    "rcp_compact_wi1",
+    "rcp_tool_screenshot_1"
+  ],
+  "scores": []
+}
