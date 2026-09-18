@@ -81,6 +81,7 @@ optional.push("server/access-requests.mjs", "server/identity-ratelimit.mjs");
 optional.push("server/usage-summary.mjs");
 optional.push("server/channel-adapters/telegram-config.mjs", "server/channel-adapters/telegram-transport.mjs", "scripts/telegram-set-webhook.mjs");
 optional.push("server/boot-options.mjs"); // imported by server.mjs: default boot args incl. ChannelWebhookInbox
+optional.push("server/instance-lock.mjs"); // imported by server.mjs: single-instance boot lock for the on-disk database
 optional.push("server/pins.mjs");
 optional.push("server/notifications.mjs");
 optional.push("server/spend-allowance.mjs");
