@@ -21,6 +21,12 @@
 import { validatePluginManifest, WELL_KNOWN_PATH } from "./agent-plugin-manifest.mjs";
 import { AgentPluginError } from "./agent-plugin-store.mjs";
 import { API_KEY_SCOPES, API_KEY_PREFIX } from "./agent-api-keys.mjs";
+import { EVENT_TYPES } from "../src/events.js";
+
+// RC-2026-09-18-031: the room event vocabulary webhooks may subscribe to.
+// Derived from EVENT_TYPES so the taught list can never drift from what the
+// dispatcher actually emits; "*" subscribes to every event type.
+const WEBHOOK_EVENTS = Object.freeze([...Object.values(EVENT_TYPES).sort(), "*"]);
 
 // Scope vocabulary is the single source of truth in
 // server/agent-api-keys.mjs (API_KEY_SCOPES): requiredScope names below
@@ -304,6 +310,14 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       reject(422, "invalid_subscription_request", "url, events, and optional secret are the accepted fields");
     if (!Array.isArray(data.events) || data.events.length === 0 || !data.events.every(e => typeof e === "string"))
       reject(422, "invalid_subscription_request", "events must be a non-empty string array");
+    // RC-2026-09-18-031: fail fast on unknown event names instead of a 201
+    // that never fires — an agent subscribing "message-posted" (dashes)
+    // instead of "message.posted" (dots) would otherwise debug silence.
+    const unknown = data.events.filter(e => !WEBHOOK_EVENTS.includes(e));
+    if (unknown.length > 0) {
+      reject(422, "invalid_subscription_request",
+        `unknown webhook event(s): ${unknown.map(e => `"${e}"`).join(", ")}. Valid event types: ${WEBHOOK_EVENTS.join(", ")}`);
+    }
     if (data.secret !== undefined && data.secret !== null && typeof data.secret !== "string")
       reject(422, "invalid_subscription_request", "secret must be a string when given");
     const { subscription, secretShownOnce } = store.agentPlugin.subscribeWebhook({
