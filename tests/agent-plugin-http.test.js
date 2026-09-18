@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { validatePluginManifest, WELL_KNOWN_PATH } from "../server/agent-plugin-manifest.mjs";
+import { generateKeyPair, signCard, signKeyRotation, verifyCardSignature } from "../server/agent-card-signing.mjs";
 
 async function startServer(t, f, options = {}) {
   const server = createRoomServer({ store: f.store, ...options });
@@ -46,6 +47,17 @@ const fixtureCard = (overrides = {}) => ({
   skills: ["fixtures"],
   version: "1.0.0",
   ...overrides,
+});
+
+// RC-2026-09-18-014: directory publishes must be signed. Returns the request
+// body for POST /api/agent-directory/cards (optionally with visibility,
+// rotationSignature, recovery).
+const signedPublishBody = (agentId, card, keyPair, extras = {}) => ({
+  agentId,
+  card,
+  publicKey: keyPair.publicKey,
+  signature: signCard({ agentId, card, privateKey: keyPair.privateKey }),
+  ...extras,
 });
 
 test("issue shows the secret once; list never shows it; storage is hash-only", async t => {
@@ -143,11 +155,14 @@ test("publish/withdraw roundtrip with public visibility", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("dir-agent");
+  const keyPair = generateKeyPair();
 
   const published = await post(origin, "/api/agent-directory/cards",
-    { agentId: "fixture-agent", card: fixtureCard(), visibility: "public" }, identity.secret);
+    signedPublishBody("fixture-agent", fixtureCard(), keyPair, { visibility: "public" }), identity.secret);
   assert.equal(published.status, 201);
-  assert.equal((await published.json()).agentId, "fixture-agent");
+  const publishedDoc = await published.json();
+  assert.equal(publishedDoc.agentId, "fixture-agent");
+  assert.equal(publishedDoc.publicKey, keyPair.publicKey);
 
   // The public document needs no auth.
   const doc = await (await get(origin, "/api/agent-directory")).json();
@@ -156,6 +171,14 @@ test("publish/withdraw roundtrip with public visibility", async t => {
   const listed = doc.agents.find(a => a.agentId === "fixture-agent");
   assert.ok(listed, "published card appears in the public document");
   assert.ok(listed.cardUrl.endsWith("/api/agents/directory/fixture-agent"));
+  // The listed card carries its key envelope, verifiable offline.
+  assert.ok(verifyCardSignature({
+    agentId: listed.agentId,
+    card: { name: listed.name, description: listed.description, url: listed.url,
+      capabilities: [...listed.capabilities], skills: [...listed.skills], version: listed.version },
+    publicKey: listed.publicKey,
+    signature: listed.signature,
+  }), "listed card verifies offline against its publicKey");
 
   const card = await get(origin, "/api/agents/directory/fixture-agent");
   assert.equal(card.status, 200);
@@ -170,34 +193,117 @@ test("publish/withdraw roundtrip with public visibility", async t => {
   assert.equal((await get(origin, "/api/agents/directory/fixture-agent")).status, 404);
 });
 
+test("unsigned and mis-signed publishes are rejected with 422", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const identity = f.store.identities.create("dir-sig");
+  const keyPair = generateKeyPair();
+  const other = generateKeyPair();
+
+  // No signature at all.
+  assert.equal((await post(origin, "/api/agent-directory/cards",
+    { agentId: "unsigned-agent", card: fixtureCard() }, identity.secret)).status, 422);
+  assert.equal(await errorCode(await post(origin, "/api/agent-directory/cards",
+    { agentId: "unsigned-agent", card: fixtureCard() }, identity.secret)), "invalid_card");
+  // publicKey without signature.
+  assert.equal(await errorCode(await post(origin, "/api/agent-directory/cards",
+    { agentId: "unsigned-agent", card: fixtureCard(), publicKey: keyPair.publicKey }, identity.secret)), "invalid_card");
+  // Signature from the wrong key.
+  const forged = signedPublishBody("forged-agent", fixtureCard(), other);
+  forged.publicKey = keyPair.publicKey;
+  assert.equal(await errorCode(await post(origin, "/api/agent-directory/cards", forged, identity.secret)),
+    "invalid_card_signature");
+  // Signature over a tampered card body.
+  const tampered = signedPublishBody("tampered-agent", fixtureCard(), keyPair);
+  tampered.card = fixtureCard({ description: "Tampered after signing." });
+  assert.equal(await errorCode(await post(origin, "/api/agent-directory/cards", tampered, identity.secret)),
+    "invalid_card_signature");
+});
+
+test("key rotation over HTTP requires the old key's rotation signature", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const identity = f.store.identities.create("dir-rotate");
+  const oldKp = generateKeyPair();
+  const newKp = generateKeyPair();
+
+  const first = await post(origin, "/api/agent-directory/cards",
+    signedPublishBody("rotate-agent", fixtureCard(), oldKp), identity.secret);
+  assert.equal(first.status, 201);
+
+  // Key swap without the chain-of-custody statement is rejected.
+  assert.equal(await errorCode(await post(origin, "/api/agent-directory/cards",
+    signedPublishBody("rotate-agent", fixtureCard(), newKp), identity.secret)), "invalid_card_signature");
+
+  // With the old key's rotation signature it succeeds.
+  const rotationSignature = signKeyRotation({
+    agentId: "rotate-agent", card: fixtureCard(), newPublicKey: newKp.publicKey, oldPrivateKey: oldKp.privateKey,
+  });
+  const rotated = await post(origin, "/api/agent-directory/cards",
+    signedPublishBody("rotate-agent", fixtureCard(), newKp, { rotationSignature }), identity.secret);
+  assert.equal(rotated.status, 201);
+  assert.equal((await rotated.json()).publicKey, newKp.publicKey);
+
+  // The old key is now dead for this agent.
+  assert.equal(await errorCode(await post(origin, "/api/agent-directory/cards",
+    signedPublishBody("rotate-agent", fixtureCard(), oldKp), identity.secret)), "invalid_card_signature");
+});
+
+test("owner-signed recovery rotates a lost key; scoped keys cannot", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const identity = f.store.identities.create("dir-recover");
+  const oldKp = generateKeyPair();
+  const newKp = generateKeyPair();
+
+  assert.equal((await post(origin, "/api/agent-directory/cards",
+    signedPublishBody("recover-agent", fixtureCard(), oldKp), identity.secret)).status, 201);
+
+  // A scoped API key with directory:publish cannot waive the rotation chain.
+  const scoped = await (await post(origin, "/api/agent-keys",
+    { scopes: ["directory:publish"] }, identity.secret)).json();
+  assert.equal(await errorCode(await post(origin, "/api/agent-directory/cards",
+    signedPublishBody("recover-agent", fixtureCard(), newKp, { recovery: true }), `rak_${scoped.secret}`)),
+    "insufficient_scope");
+
+  // The identity (owner) secret can recover the lost key.
+  const recovered = await post(origin, "/api/agent-directory/cards",
+    signedPublishBody("recover-agent", fixtureCard(), newKp, { recovery: true }), identity.secret);
+  assert.equal(recovered.status, 201);
+  assert.equal((await recovered.json()).publicKey, newKp.publicKey);
+});
+
 test("private cards stay out of the public document; ownership is enforced", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const owner = f.store.identities.create("dir-owner");
   const stranger = f.store.identities.create("dir-stranger");
+  const ownerKeys = generateKeyPair();
+  const strangerKeys = generateKeyPair();
 
   const published = await post(origin, "/api/agent-directory/cards",
-    { agentId: "quiet-agent", card: fixtureCard({ name: "Quiet Agent" }), visibility: "private" }, owner.secret);
+    signedPublishBody("quiet-agent", fixtureCard({ name: "Quiet Agent" }), ownerKeys, { visibility: "private" }), owner.secret);
   assert.equal(published.status, 201);
 
   const doc = await (await get(origin, "/api/agent-directory")).json();
   assert.equal(doc.agents.find(a => a.agentId === "quiet-agent"), undefined, "private card is not listed publicly");
   assert.equal((await get(origin, "/api/agents/directory/quiet-agent")).status, 404, "private card has no public card URL");
 
-  // Another identity cannot steal the agentId or withdraw the card.
+  // Another identity cannot steal the agentId or withdraw the card (signed
+  // so it reaches the ownership check rather than the signature gate).
   assert.equal(await errorCode(await post(origin, "/api/agent-directory/cards",
-    { agentId: "quiet-agent", card: fixtureCard({ name: "Impostor" }) }, stranger.secret)), "card_owned_by_another_identity");
+    signedPublishBody("quiet-agent", fixtureCard({ name: "Impostor" }), strangerKeys), stranger.secret)), "card_owned_by_another_identity");
   assert.equal(await errorCode(await del(origin, "/api/agent-directory/cards/quiet-agent", stranger.secret)), "unknown_card");
 
   // Card validation errors surface as 422.
   assert.equal(await errorCode(await post(origin, "/api/agent-directory/cards",
-    { agentId: "bad-agent", card: { name: "x" } }, owner.secret)), "invalid_directory");
+    signedPublishBody("bad-agent", { name: "x" }, ownerKeys), owner.secret)), "invalid_directory");
   assert.equal(await errorCode(await post(origin, "/api/agent-directory/cards",
-    { agentId: "BAD ID", card: fixtureCard() }, owner.secret)), "invalid_directory");
+    signedPublishBody("BAD ID", fixtureCard(), ownerKeys), owner.secret)), "invalid_directory");
 
-  // Owner republish updates the card.
+  // Owner republish updates the card (same key).
   const republished = await post(origin, "/api/agent-directory/cards",
-    { agentId: "quiet-agent", card: fixtureCard({ name: "Quiet Agent", version: "1.1.0" }), visibility: "public" }, owner.secret);
+    signedPublishBody("quiet-agent", fixtureCard({ name: "Quiet Agent", version: "1.1.0" }), ownerKeys, { visibility: "public" }), owner.secret);
   assert.equal(republished.status, 201);
   assert.equal((await (await get(origin, "/api/agents/directory/quiet-agent")).json()).version, "1.1.0");
 });
@@ -207,9 +313,9 @@ test("directory search filters query and capability", async t => {
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("dir-search");
   await post(origin, "/api/agent-directory/cards",
-    { agentId: "searchable-one", card: fixtureCard({ name: "Weather Bot", capabilities: ["weather"] }) }, identity.secret);
+    signedPublishBody("searchable-one", fixtureCard({ name: "Weather Bot", capabilities: ["weather"] }), generateKeyPair()), identity.secret);
   await post(origin, "/api/agent-directory/cards",
-    { agentId: "searchable-two", card: fixtureCard({ name: "Chat Bot", capabilities: ["chat"] }) }, identity.secret);
+    signedPublishBody("searchable-two", fixtureCard({ name: "Chat Bot", capabilities: ["chat"] }), generateKeyPair()), identity.secret);
 
   const byName = await (await get(origin, "/api/agent-directory?q=weather")).json();
   assert.deepEqual(byName.agents.map(a => a.agentId), ["searchable-one"]);

@@ -48,7 +48,12 @@ export const agentPluginSchema = `
     owner_identity_id TEXT NOT NULL,
     published_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
-    withdrawn INTEGER NOT NULL DEFAULT 0 CHECK(withdrawn IN (0,1))
+    withdrawn INTEGER NOT NULL DEFAULT 0 CHECK(withdrawn IN (0,1)),
+    -- RC-2026-09-18-014: the key envelope for signed cards (base64 Ed25519
+    -- public key + base64 signature over the canonical card body). Legacy
+    -- rows backfill NULL and pin a key on their next owner-signed republish.
+    public_key TEXT,
+    signature TEXT
   );
   CREATE TABLE IF NOT EXISTS agent_webhook_subs (
     subscription_id TEXT PRIMARY KEY,
@@ -99,6 +104,14 @@ export class AgentPluginStore {
   // Hydrate the pure modules' Maps from SQLite. Called once from the store
   // open path after the schema is exec'd.
   load() {
+    // RC-2026-09-18-014: idempotent additive migration for the signed-card
+    // key envelope. CREATE TABLE IF NOT EXISTS cannot add columns to an
+    // existing table, so backfill them here (same pragma/ALTER pattern as
+    // the credentials migration in server/store.mjs). Legacy rows keep NULL
+    // and pin a key on their next owner-signed republish.
+    const cardColumns = new Set(this.db.prepare("PRAGMA table_info(agent_directory_cards)").all().map(c => c.name));
+    if (!cardColumns.has("public_key")) this.db.exec("ALTER TABLE agent_directory_cards ADD COLUMN public_key TEXT");
+    if (!cardColumns.has("signature")) this.db.exec("ALTER TABLE agent_directory_cards ADD COLUMN signature TEXT");
     this.keys.clear();
     this.cards.clear();
     this.subs.clear();
@@ -119,6 +132,10 @@ export class AgentPluginStore {
       this.cards.set(row.agent_id, {
         agentId: row.agent_id,
         card: JSON.parse(row.card_json),
+        // Legacy rows (published before signed cards) have NULL here and
+        // pin a key on their next owner-signed republish.
+        publicKey: row.public_key ?? undefined,
+        signature: row.signature ?? undefined,
         visibility: row.visibility,
         publishedAt: row.published_at,
         updatedAt: row.updated_at,
@@ -232,21 +249,27 @@ export class AgentPluginStore {
 
   // ---- Agent directory (public document; owner-scoped publish/withdraw) ----
 
-  publishCard({ identityId, agentId, card, visibility = "public" }) {
+  publishCard({ identityId, agentId, card, publicKey, signature, rotationSignature = null,
+    ownerRecovery = false, visibility = "public" }) {
     return this.mutate(() => {
       const existing = this.db.prepare("SELECT owner_identity_id AS ownerIdentityId FROM agent_directory_cards WHERE agent_id=?").get(agentId);
       if (existing && existing.ownerIdentityId !== identityId) {
         throw new AgentPluginError(409, "card_owned_by_another_identity",
           `Card "${agentId}" is published by another identity`);
       }
-      const doc = this.directory.publish({ agentId, card, visibility });
+      const doc = this.directory.publish({
+        agentId, card, visibility, publicKey, signature, rotationSignature,
+        allowRecovery: ownerRecovery,
+      });
       const entry = this.cards.get(agentId);
       this.db.prepare(`INSERT INTO agent_directory_cards
-        (agent_id, card_json, visibility, owner_identity_id, published_at, updated_at, withdrawn)
-        VALUES (?, ?, ?, ?, ?, ?, 0)
+        (agent_id, card_json, visibility, owner_identity_id, published_at, updated_at, withdrawn, public_key, signature)
+        VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
         ON CONFLICT(agent_id) DO UPDATE SET card_json=excluded.card_json, visibility=excluded.visibility,
-          updated_at=excluded.updated_at, withdrawn=0`)
-        .run(agentId, JSON.stringify(entry.card), entry.visibility, identityId, entry.publishedAt, entry.updatedAt);
+          updated_at=excluded.updated_at, withdrawn=0,
+          public_key=excluded.public_key, signature=excluded.signature`)
+        .run(agentId, JSON.stringify(entry.card), entry.visibility, identityId,
+          entry.publishedAt, entry.updatedAt, entry.publicKey, entry.signature);
       return doc;
     });
   }

@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { request } from "node:http";
 import { RoomStore } from "../server/store.mjs";
+import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { backupRoom } from "../server/backup.mjs";
 import { flagMessage } from "../server/inbox-spam.mjs";
@@ -21,7 +22,7 @@ function fixture(t) {
   return { ...f, directory };
 }
 
-test("online capture preserves all 58 tables, identity boundaries and exact retries through recovery and restart", async t => {
+test("online capture preserves all 63 tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t);
   const { identityId } = f.store.identities.create("Recovery agent");
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
@@ -59,8 +60,12 @@ test("online capture preserves all 58 tables, identity boundaries and exact retr
   // Seed one of each Lane D plug-in row so the capture covers agent_api_keys,
   // agent_directory_cards and agent_webhook_subs.
   f.store.agentPlugin.issueApiKey({ identityId, scopes: ["rooms:read"], label: "recovery-key" });
+  // RC-2026-09-18-014: the seeded card must be signed like any real publish.
+  const recoveryCard = { name: "Recovery Agent", description: "Synthetic recovery fixture agent.", capabilities: ["chat"], version: "1.0.0" };
+  const recoveryKeyPair = generateKeyPair();
   f.store.agentPlugin.publishCard({ identityId, agentId: "recovery-agent",
-    card: { name: "Recovery Agent", description: "Synthetic recovery fixture agent.", capabilities: ["chat"], version: "1.0.0" },
+    card: recoveryCard, publicKey: recoveryKeyPair.publicKey,
+    signature: signCard({ agentId: "recovery-agent", card: recoveryCard, privateKey: recoveryKeyPair.privateKey }),
     visibility: "public" });
   f.store.agentPlugin.subscribeWebhook({ identityId, url: "https://hooks.example.test/recovery", events: ["message.posted"] });
   // Seed one direct channel send so the capture covers direct_channel_sends.
@@ -97,6 +102,18 @@ test("online capture preserves all 58 tables, identity boundaries and exact retr
     .run(stitchAccount, stitchKey, `v1:${"b".repeat(64)}`, f.now());
   f.store.db.prepare(`INSERT INTO stitch_receipts(receipt_id,account_id,action,stitch_key,payload_json,created_at)
     VALUES('recovery-receipt',?,'link',?, '{}',?)`).run(stitchAccount, stitchKey, f.now());
+  // Seed one row per collab table so the capture covers them (Lane C created
+  // the tables but no fixture rows). Synthetic data only.
+  f.store.db.prepare(`INSERT INTO collab_assignments(room_id,thread_id,assignment_id,ops_json,record_json,clock_json,id_json,updated_at)
+    VALUES('commons','recovery-thread','recovery-assignment','[]','{"assignee":"recovery-agent"}','{}','{}',?)`).run(f.now());
+  f.store.db.prepare(`INSERT INTO collab_notes(room_id,note_id,thread_id,note_json,clock_json,id_json,created_at)
+    VALUES('commons','recovery-note','recovery-thread','{"body":"synthetic fixture note"}','{}','{}',?)`).run(f.now());
+  f.store.db.prepare(`INSERT INTO collab_draft_locks(room_id,lock_id,thread_id,lock_json,clock_json,id_json,expires_at,updated_at)
+    VALUES('commons','recovery-lock','recovery-thread','{"holder":"recovery-agent"}','{}','{}',?,?)`).run(f.now() + 60000, f.now());
+  f.store.db.prepare(`INSERT INTO collab_approvals(room_id,proposal_id,thread_id,ops_json,record_json,clock_json,id_json,status,created_at,updated_at)
+    VALUES('commons','recovery-proposal','recovery-thread','[]','{"title":"synthetic fixture proposal"}','{}','{}','pending',?,?)`).run(f.now(), f.now());
+  f.store.db.prepare(`INSERT INTO collab_routing_events(room_id,seq,kind,record_id,thread_id,agent_id,data_json,clock_json,id_json,created_at)
+    VALUES('commons',1,'assigned','recovery-assignment','recovery-thread','recovery-agent','{}','{}','{}',?)`).run(f.now());
   const recoveryHold = f.store.spamQuarantine.quarantine({ messageId: "recovery-quarantined", channel: "telegram",
     flag: flagMessage({ body: "Urgent! Log in here to confirm your identity and claim your free airdrop. Act now!", urls: ["https://evil-claim.xyz/verify"] }) });
   // Seed one thread split so the capture covers quarantine_thread_splits.
@@ -113,7 +130,7 @@ test("online capture preserves all 58 tables, identity boundaries and exact retr
     decision: { decision: "deliver", reason: "urgent SLA breach is always delivered" },
     prefsSnapshot: createNotifyPrefs().snapshot(f.emailProfile.accountId) });
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 58); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010)
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 63); // +3: agent_api_keys, agent_directory_cards, agent_webhook_subs (RC-2026-09-18-010); +5: stitch_* tables
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);

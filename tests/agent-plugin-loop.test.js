@@ -21,6 +21,7 @@ import {
 } from "../server/agent-plugin-manifest.mjs";
 import { createAgentApiKeys } from "../server/agent-api-keys.mjs";
 import { createAgentDirectory } from "../server/agent-directory.mjs";
+import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 import {
   createAgentWebhookSubscriptions, verifySignature,
 } from "../server/agent-webhook-subscriptions.mjs";
@@ -54,16 +55,20 @@ test("reference walkthrough: new agent plugs in end-to-end", t => {
 
   // --- Step 4: publish a card; another agent discovers it ---
   const directory = createAgentDirectory({ clock: now });
+  const loopCard = {
+    name: "New Agent",
+    description: "A third-party reference agent.",
+    url: "https://agents.example/new",
+    capabilities: ["summarize"],
+    skills: ["reference-loop"],
+    version: "1.0.0",
+  };
+  const loopKeyPair = generateKeyPair();
   directory.publish({
     agentId: "new-agent",
-    card: {
-      name: "New Agent",
-      description: "A third-party reference agent.",
-      url: "https://agents.example/new",
-      capabilities: ["summarize"],
-      skills: ["reference-loop"],
-      version: "1.0.0",
-    },
+    card: loopCard,
+    publicKey: loopKeyPair.publicKey,
+    signature: signCard({ agentId: "new-agent", card: loopCard, privateKey: loopKeyPair.privateKey }),
   });
   const publicDoc = directory.buildDocument({ serviceOrigin: ORIGIN });
   const found = publicDoc.agents.find(a => a.agentId === "new-agent");

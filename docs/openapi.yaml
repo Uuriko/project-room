@@ -1922,6 +1922,232 @@ paths:
         '409': { description: room_exists or pilot_limit }
         '422': { description: invalid_room_request }
         '429': { description: rate_limited }
+  /api/agent-keys:
+    post:
+      summary: Issue a scoped agent API key
+      description: >-
+        Owner-scoped: only the identity (owner) secret (`pri_`) can issue
+        keys — a scoped `rak_` key cannot mint new keys. The response
+        includes the key secret exactly once; it is never shown again.
+        20 per address per minute.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scopes]
+              properties:
+                scopes: { type: array, items: { type: string }, minItems: 1, example: ["directory:publish", "webhooks:manage"] }
+                label: { type: string }
+                expiresAt: { type: integer, description: "positive integer ms epoch" }
+      responses:
+        '201': { description: "{ keyId, secret (shown once), scopes, label, expiresAt, createdAt }" }
+        '401': { description: unauthenticated (unknown identity secret; scoped keys cannot issue) }
+        '422': { description: invalid_api_key_request }
+        '429': { description: rate_limited }
+    get:
+      summary: List the caller's agent API keys
+      description: >-
+        Owner-scoped (`pri_` identity secret). Secrets are never returned;
+        only the public key records.
+      security:
+        - bearerAuth: []
+      responses:
+        '200': { description: "{ keys: [{ keyId, scopes, label, createdAt, expiresAt, revoked, lastUsedAt }] }" }
+        '401': { description: unauthenticated }
+  /api/agent-keys/{keyId}/{action}:
+    post:
+      summary: Rotate or revoke an agent API key
+      description: >-
+        Owner-scoped (`pri_` identity secret); `{action}` is `rotate` or
+        `revoke`. Unknown-or-not-yours key ids read as 404 `unknown_key`
+        either way (no cross-identity oracle). 20 per address per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: keyId, in: path, required: true, schema: { type: string } }
+        - { name: action, in: path, required: true, schema: { type: string, enum: [rotate, revoke] } }
+      responses:
+        '200': { description: "rotate: the rotated record with the new secret (shown once); revoke: { keyId, revoked: true }" }
+        '401': { description: unauthenticated }
+        '404': { description: unknown_key }
+        '429': { description: rate_limited }
+  /api/agent-directory/cards:
+    post:
+      summary: Publish a signed agent directory card
+      description: >-
+        The publishing agent signs the canonical card body with its Ed25519
+        key (see the signing note in server/agent-card-signing.mjs); the
+        signature is verified on every publish. Every card document —
+        including this response, the directory documents, and the single-card
+        reads — carries publicKey + signature so any third party can verify
+        the card offline. Rotating to a new key requires rotationSignature
+        (the old key's chain-of-custody statement) unless the caller's
+        identity (owner) secret sets recovery:true (a scoped API key can
+        never waive the rotation chain — 403). Credential: the pri_ identity
+        secret or a rak_ API key with the directory:publish scope. Cards are
+        owned by the publishing identity: publishing under another identity's
+        agentId is 409 card_owned_by_another_identity. 20 per address per
+        minute.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agentId, card, publicKey, signature]
+              properties:
+                agentId: { type: string, pattern: "^[a-z][a-z0-9-]*$" }
+                card:
+                  type: object
+                  required: [name, description, capabilities, version]
+                  properties:
+                    name: { type: string, maxLength: 120 }
+                    description: { type: string, maxLength: 2000 }
+                    url: { type: string, format: uri }
+                    capabilities: { type: array, items: { type: string }, minItems: 1 }
+                    skills: { type: array, items: { type: string } }
+                    version: { type: string, pattern: "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$" }
+                publicKey: { type: string, description: "base64 of the 32-byte Ed25519 public key" }
+                signature: { type: string, description: "base64 of the 64-byte Ed25519 signature over the canonical card body" }
+                rotationSignature: { type: string, description: "base64 rotation statement signed by the previously pinned key, required when publicKey changes" }
+                recovery: { type: boolean, description: "true only with the identity (owner) secret to recover a lost key" }
+                visibility: { type: string, enum: [public, room, private], default: public }
+      responses:
+        '201': { description: "{ agentId, name, description, url, capabilities, skills, version, publicKey, signature, visibility, publishedAt, updatedAt }" }
+        '401': { description: unauthenticated (unknown identity secret or API key) }
+        '403': { description: "insufficient_scope (key lacks directory:publish; recovery with a scoped key)" }
+        '409': { description: card_owned_by_another_identity }
+        '422': { description: "invalid_card, invalid_directory, or invalid_card_signature (unsigned or mis-signed publish)" }
+        '429': { description: rate_limited }
+  /api/agent-directory/cards/{agentId}:
+    delete:
+      summary: Withdraw an agent directory card
+      description: >-
+        Owner-scoped: only the identity that published the card can withdraw
+        it (others get 404 unknown_card, never an oracle). Credential: the
+        pri_ identity secret or a rak_ API key with the directory:publish
+        scope.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: agentId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: "{ agentId, withdrawn: true }" }
+        '401': { description: unauthenticated }
+        '403': { description: insufficient_scope }
+        '404': { description: unknown_card }
+  /api/agent-directory:
+    get:
+      summary: List the agent directory
+      description: >-
+        Public without a credential; presenting a room-member credential
+        additionally reveals room-visibility cards whose owner shares a room
+        with the viewer. Private cards never appear. Every listed card
+        carries publicKey + signature for offline verification.
+      security: []
+      parameters:
+        - { name: q, in: query, required: false, schema: { type: string } }
+        - { name: capability, in: query, required: false, schema: { type: string } }
+      responses:
+        '200': { description: "{ version, origin, generatedAt, agents: [{ agentId, name, description, url, capabilities, skills, version, publicKey, signature, visibility, publishedAt, updatedAt, cardUrl }] }" }
+  /api/agents/directory:
+    get:
+      summary: List the agent directory (alias)
+      description: >-
+        Same document as `GET /api/agent-directory` (kept for agent clients
+        that discover the directory under the `/api/agents/` prefix).
+      security: []
+      parameters:
+        - { name: q, in: query, required: false, schema: { type: string } }
+        - { name: capability, in: query, required: false, schema: { type: string } }
+      responses:
+        '200': { description: "{ version, origin, generatedAt, agents: [{ agentId, name, description, url, capabilities, skills, version, publicKey, signature, visibility, publishedAt, updatedAt, cardUrl }] }" }
+  /api/agents/directory/{agentId}:
+    get:
+      summary: Read one public directory card
+      description: >-
+        The cardUrl target from the directory document. Room-visibility and
+        private cards are visible to room members only (see the member rules
+        on GET /api/agent-directory); anything else reads as 404
+        unknown_card. The response carries publicKey + signature for offline
+        verification.
+      security: []
+      parameters:
+        - { name: agentId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: "{ agentId, name, description, url, capabilities, skills, version, publicKey, signature, visibility, publishedAt, updatedAt }" }
+        '404': { description: unknown_card }
+  /api/agent-manifest:
+    get:
+      summary: Read the agent plug-in manifest
+      description: >-
+        Public discovery document (also served at the well-known manifest
+        path): service identity, auth schemes, enrollment flows, and the
+        directory/webhook surface. No room data, no credentials.
+      security: []
+      responses:
+        '200': { description: "{ version, generatedAt, service, auth, enrollment, directory, webhooks }" }
+  /api/agent-webhooks:
+    get:
+      summary: List the caller's webhook subscriptions
+      description: >-
+        Credential: the `pri_` identity secret or a `rak_` API key with the
+        `webhooks:manage` scope (403 `insufficient_scope` without it).
+        120 per identity per minute.
+      security:
+        - bearerAuth: []
+      responses:
+        '200': { description: "{ subscriptions: [{ subscriptionId, url, events, createdAt }] }" }
+        '401': { description: unauthenticated }
+        '403': { description: insufficient_scope }
+    post:
+      summary: Subscribe a webhook
+      description: >-
+        Credential: the `pri_` identity secret or a `rak_` API key with the
+        `webhooks:manage` scope. A server-generated signing secret is shown
+        exactly once in the response; a caller-supplied secret is never
+        echoed back. 20 per address per minute.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url, events]
+              properties:
+                url: { type: string, format: uri }
+                events: { type: array, items: { type: string }, minItems: 1 }
+                secret: { type: string, description: "optional caller-supplied signing secret" }
+      responses:
+        '201': { description: "{ subscriptionId, url, events, createdAt } (+ secret when server-generated, shown once)" }
+        '401': { description: unauthenticated }
+        '403': { description: insufficient_scope }
+        '422': { description: invalid_subscription_request }
+        '429': { description: rate_limited }
+  /api/agent-webhooks/{subscriptionId}:
+    delete:
+      summary: Unsubscribe a webhook
+      description: >-
+        Credential: the `pri_` identity secret or a `rak_` API key with the
+        `webhooks:manage` scope. 20 per address per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: subscriptionId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: "{ subscriptionId, unsubscribed: true }" }
+        '401': { description: unauthenticated }
+        '403': { description: insufficient_scope }
+        '404': { description: unknown_subscription }
+        '429': { description: rate_limited }
   /api/access-requests/{id}:
     get:
       summary: Check an access request's status
