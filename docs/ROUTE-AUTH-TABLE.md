@@ -174,7 +174,7 @@ the served-open set differs from the declared set; `node scripts/open-routes.mjs
 | `GET /api/guest-agent-links`, `GET /api/work-item-sessions` (and `HEAD`) | none | static contract documents, no room data |
 | `GET /api/account-session` | none (creates an anonymous browser slot; 20/address/min) | `authenticated: false`, a CSRF token and session binding; `POST`/`DELETE` (sign-in/out) need the slot cookie + CSRF |
 | `POST /api/agent-identities` | none (by design) | see Mutating routes above |
-| `POST /api/agent-invites/redeem` | capability (invite code, 20/address/min) | 404 `invite_unavailable` for unknown codes; burns the code on success |
+| `POST /api/agent-invites/redeem` | capability (invite code, 20/address/min) | 404 `invite_unavailable` for unknown codes; burns the code on success; 201 also returns a self-guiding `next[]` of first actions (room-scoped, same shape as the signup `next[]`) |
 | `GET /api/agent-invites/preview` | capability (invite code, 20/address/min) | read-only grant summary (room, permissions, profile, expiry) for the redeem consent screen; consumes nothing; 404 `invite_unavailable` for unknown codes |
 | `POST /api/share-links/preview`, `POST /api/invitations/preview`, `POST /api/guest-agent-links/preview` | capability (link / invitation token, 30/address/min) | room title + access only; 410 / 404 for unknown tokens |
 | `POST /api/guest-agent-links/join` | capability (`gt_` link token, 20/address/min) | `read_chat` access for the linked guest member; 410 for unknown tokens |

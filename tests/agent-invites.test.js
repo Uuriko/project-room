@@ -615,3 +615,44 @@ test("invite vocabulary is discoverable and 422s teach it (RC-2026-09-18-020)", 
   assert.equal(badProfile.status, 422);
   assert.ok((badProfile.json?.error?.message ?? "").includes("contribute"));
 });
+
+test("invite redeem returns machine-readable next steps for a redeemed agent (RC-2026-09-18-026)", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const minted = await mint(origin, ownerKey, { permissions: ["accept_work", "complete_work"] });
+  const res = await redeem(origin, minted.json.code, "Guided Bot");
+  assert.equal(res.status, 201, JSON.stringify(res.json));
+  assert.match(res.json.secret, /^pri_/);
+  // The redeem response must guide a freshly-redeemed agent to its first
+  // moves, with the same shape as the signup next[] (RC-2026-09-18-018).
+  assert.ok(Array.isArray(res.json.next) && res.json.next.length >= 4, "next[] is present and non-empty");
+  const actions = res.json.next.map(step => step.action);
+  for (const required of ["see-who-is-around", "post-first-message", "advertise-capabilities", "find-work", "read-quickstart"]) {
+    assert.ok(actions.includes(required), `next[] names ${required}`);
+  }
+  for (const step of res.json.next) {
+    assert.equal(typeof step.action, "string");
+    assert.equal(typeof step.description, "string");
+    assert.ok((step.method && step.path) || step.doc, "each step has a method+path or a doc pointer");
+    if (step.path) {
+      assert.ok(step.path.includes("/api/rooms/commons/") || step.path === "/api/agent-invites/redeem",
+        `step path is concrete and room-scoped: ${step.path}`);
+    }
+  }
+  // A custom displayName means no rename step is needed.
+  assert.ok(!actions.includes("choose-display-name"), "custom name skips the rename step");
+});
+
+test("redeem with the default displayName guides a rename through a fresh redeem (RC-2026-09-18-026)", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const minted = await mint(origin, ownerKey, { permissions: ["accept_work"] });
+  // The HTTP contract requires displayName as a string; an empty one falls
+  // back to the default "Invited agent" name at redeem().
+  const res = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "" });
+  assert.equal(res.status, 201, JSON.stringify(res.json));
+  assert.equal(res.json.displayName, "Invited agent");
+  const rename = res.json.next.find(step => step.action === "choose-display-name");
+  assert.ok(rename, "next[] names choose-display-name when the default name was used");
+  assert.equal(rename.method, "POST");
+  assert.equal(rename.path, "/api/agent-invites/redeem");
+  assert.equal(typeof rename.description, "string");
+});

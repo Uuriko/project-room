@@ -229,7 +229,7 @@ export class AgentInvites {
         fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       }
       const name = typeof displayName === "string" && displayName.trim() ? displayName.trim()
-        : row.display_name || "Invited agent";
+        : row.display_name || DEFAULT_INVITE_NAME;
       if (name.length > 80) fail(422, "invalid_invite_name", "displayName must be 1-80 characters");
       const identity = this.store.identities.create(name);
       const memberId = identity.identityId;
@@ -267,8 +267,11 @@ export class AgentInvites {
         WHERE code_hash=? AND redeemed_at IS NULL AND revoked_at IS NULL`).run(now, identity.identityId, row.code_hash);
       if (burned.changes !== 1) fail(409, "invite_already_used", "Invite code was already used");
       // No account session, no member_accounts row: the identity secret is the
-      // only credential. The secret is shown once, like identity-create.
-      return { identityId: identity.identityId, secret: identity.secret, roomId: row.room_id, memberId, displayName: name, permissions };
+      // only credential. The secret is shown once, like identity-create. The
+      // response carries the same machine-readable next[] shape as signup
+      // (RC-2026-09-18-018), tailored to the invite path, so a redeemed agent
+      // knows its first moves without asking a human.
+      return { identityId: identity.identityId, secret: identity.secret, roomId: row.room_id, memberId, displayName: name, permissions, next: redeemNext(row.room_id, name) };
     });
   }
 
@@ -334,3 +337,35 @@ export class AgentInvites {
       .map(row => view(row, now));
   }
 }
+
+// Machine-readable next steps for an agent that just redeemed an invite.
+// Same shape and vocabulary as SIGNUP_NEXT in agent-identities.mjs
+// (RC-2026-09-18-018) so the two entry paths feel like one product; the
+// steps are tailored to the invite path: this agent already has a room and
+// a member id, so the guidance is the room's first moves (meet the
+// members, say hello, advertise what you can do, find work). Room-scoped
+// paths are built with the joined room's id so every step is immediately
+// actionable — no room lookup first. A redeem cannot rename a member, so
+// when the name fell back to the default the first step explains how to
+// redo the redeem with the wanted displayName.
+const DEFAULT_INVITE_NAME = "Invited agent";
+const redeemNext = (roomId, displayName) => {
+  const room = `/api/rooms/${encodeURIComponent(roomId)}`;
+  const steps = [
+    Object.freeze({ action: "see-who-is-around", method: "GET", path: `${room}/presence`,
+      description: "List the room's members: who's online and who is holding which work sessions. Read this before you grab work." }),
+    Object.freeze({ action: "post-first-message", method: "POST", path: `${room}/commands`,
+      description: "Say hello to the room. Authenticate with the identity secret as Bearer <redacted>, and send { id: <uuid>, type: \"message.posted\", data: { messageId: <uuid>, body: \"hello\" } }; omit toMemberId to post to everyone." }),
+    Object.freeze({ action: "advertise-capabilities", method: "POST", path: `${room}/commands`,
+      description: "Publish your agent card: send { id: <uuid>, type: \"capabilities.advertised\", data: { capabilities: [\"web-research\", \"code-review\"] } } so other members know what to delegate to you." }),
+    Object.freeze({ action: "find-work", method: "GET", path: `${room}/work-sessions`,
+      description: "Work cards with status and holder. Claim a queued item by driving its session to processing; the claim is structural, not a convention." }),
+    Object.freeze({ action: "read-quickstart", doc: "docs/AGENT-QUICKSTART.md",
+      description: "Ten-minute quickstart: presence, work sessions, messaging, handoffs, and the rules of the road." }),
+  ];
+  if (displayName === DEFAULT_INVITE_NAME) {
+    steps.unshift(Object.freeze({ action: "choose-display-name", method: "POST", path: "/api/agent-invites/redeem",
+      description: "Joined as 'Invited agent'? Ask the inviter for a fresh one-time code and redeem again with { code, displayName: \"Your Name\" } — the displayName you pass becomes your member name." }));
+  }
+  return Object.freeze(steps);
+};
