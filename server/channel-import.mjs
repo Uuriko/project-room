@@ -1,10 +1,11 @@
 // Channel-agnostic fixture synchronization. No credentials, fetch, sockets or
 // send API: a bound adapter reads a recording and the account's importer
 // (store.email, i.e. store.connections) persists the resulting page.
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { emailDigest } from "./email-envelope.mjs";
 import { connectionState, profileChannel, requireContract } from "./channel-connection.mjs";
 import * as telegram from "./channel-adapters/telegram.mjs";
+import { webhookAcceptsHash } from "./channel-adapters/telegram-rotation.mjs";
 import { validId } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 
@@ -85,14 +86,15 @@ export class ChannelWebhookInbox {
   }
   #match(connectionId, secret) {
     if (!validId(connectionId) || !validateWebhookSecret(secret)) return null;
-    const presented = Buffer.from(ChannelWebhookInbox.hash(secret), "hex");
+    const presented = ChannelWebhookInbox.hash(secret);
     let found = null;
     // Connection IDs are only unique per account; compare every candidate in constant time.
     // The account's current auth epoch decides the state (connectionState): a
     // connection whose owner must reconnect refuses deliveries like a disconnected one.
+    // While a secret rotation is pending, the previous digest verifies too.
     for (const row of this.#store.db.prepare("SELECT c.account_id,c.data_json,a.auth_epoch FROM private_email_connections c JOIN accounts a ON a.id=c.account_id WHERE c.id=?").all(connectionId)) {
-      const connection = JSON.parse(row.data_json), stored = connection.webhook?.secretHash;
-      const ok = typeof stored === "string" && stored.length === 64 && timingSafeEqual(Buffer.from(stored, "hex"), presented);
+      const connection = JSON.parse(row.data_json);
+      const ok = webhookAcceptsHash(connection.webhook, presented, this.#store.now());
       if (ok && connectionState(connection, row.auth_epoch) === "active" && profileChannel(connection.profile) === "telegram") found = { accountId: row.account_id, connectionId, profile: connection.profile };
     }
     return found;

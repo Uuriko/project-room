@@ -45,13 +45,16 @@ const validConnectionRef = c => c === null || (id(c?.id) && Object.hasOwn(channe
   && connectionStates.includes(c.state) && Object.keys(c).length === 4);
 const isoTime = v => v === null || (typeof v === "string" && v.length <= 40 && Number.isFinite(Date.parse(v)));
 const liveStates = ["not_configured", "invalid", "configured"], webhookStates = ["unset", "set", "matches", "differs"];
+const rotationStates = ["none", "pending", "complete"];
+// The rotation view carries digests and states only; a value or hash in it is a contract violation.
+const validRotation = r => r?.contractVersion === 1 && rotationStates.includes(r.state) && isoTime(r.windowExpiresAt);
 // Live status carries binding names and states only; a value or hash in it is a contract violation.
 export const validLive = live => live === null || (live?.contractVersion === 1 && live.channel === "telegram" && liveStates.includes(live.state)
   && [live.bindings, live.missing, live.invalid].every(list => Array.isArray(list) && list.length <= 8 && list.every(n => /^[A-Z][A-Z0-9_]{1,63}$/.test(n)))
   && webhookStates.includes(live.webhook) && isoTime(live.webhookSetAt) && isoTime(live.lastUpdateReceivedAt) && revision(live.receivedUpdates)
   && (live.lastSendResult === null || (isoTime(live.lastSendResult.at) && ["accepted", "rejected", "failed"].includes(live.lastSendResult.outcome)
     && (live.lastSendResult.code === null || boundedText(live.lastSendResult.code, 64))))
-  && typeof live.importAvailable === "boolean");
+  && typeof live.importAvailable === "boolean" && validRotation(live.rotation));
 export const validConnectionRecord = (v, connectionId) => v.connection?.id === connectionId && validConnection(v.connection, v.viewer.accountId)
   && v.mode === "fixture" && typeof v.webhook === "boolean" && isoTime(v.webhookSetAt ?? null) && typeof v.syncAvailable === "boolean" && validLive(v.live ?? null);
 const validSendResult = r => r === null || (isoTime(r?.at) && ["accepted", "rejected", "failed"].includes(r.outcome) && (r.code === null || boundedText(r.code, 64)));

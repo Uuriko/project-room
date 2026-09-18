@@ -298,12 +298,15 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   // (binding state, webhook, last delivery, last send) and the import trigger.
   let connectionEpoch = 0; const connectionNotes = new Map(), connectionRecords = new Map(), removing = new Set();
   const when = value => value ? new Date(value).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "none yet";
+  const rotationLine = rotation => !rotation || rotation.state === "none" ? null : rotation.state === "pending"
+    ? "Secret rotation: pending · previous secret accepted until " + when(rotation.windowExpiresAt) : "Secret rotation: complete";
   const liveLines = live => !live ? [] : [
     live.state === "configured" ? "Live: configured" : live.state === "invalid" ? "Live: invalid binding · " + live.invalid.join(", ") : "Live: not configured · set " + live.missing.join(", "),
     { unset: "Webhook: not registered", set: "Webhook: secret stored " + when(live.webhookSetAt), matches: "Webhook: registered " + when(live.webhookSetAt), differs: "Webhook: stored secret differs from the binding · use Reconnect" }[live.webhook],
     "Last update received: " + when(live.lastUpdateReceivedAt),
-    "Last send: " + (live.lastSendResult ? live.lastSendResult.outcome + (live.lastSendResult.code ? " · " + live.lastSendResult.code : "") + " · " + when(live.lastSendResult.at) : "none yet")
-  ];
+    "Last send: " + (live.lastSendResult ? live.lastSendResult.outcome + (live.lastSendResult.code ? " · " + live.lastSendResult.code : "") + " · " + when(live.lastSendResult.at) : "none yet"),
+    rotationLine(live.rotation)
+  ].filter(Boolean);
   // Email has no live path yet: the mailbox is a recorded fixture until routing lands.
   const emailLines = record => [record.mode === "fixture" ? "Inbound: fixture mailbox · not yet routed" : "Inbound: routed", "Sending: not available",
     "Last update received: " + when(record.webhookSetAt ?? null).replace("none yet", "fixture only")];
