@@ -1,5 +1,18 @@
 const $ = selector => document.querySelector(selector);
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
+
+// Human #join/ links must keep the app path. `location.origin` alone drops `/room`
+// on www.getdasha.com and produces an incomplete join URL.
+export function humanJoinShareBase(locationLike = globalThis.location) {
+  const origin = locationLike?.origin ?? "";
+  const path = String(locationLike?.pathname ?? "").replace(/\/index\.html$/, "").replace(/\/$/, "") || "";
+  return `${origin}${path}`;
+}
+
+export function humanJoinShareUrl(token, purposePath = "", locationLike = globalThis.location) {
+  return `${humanJoinShareBase(locationLike)}/#join/${token}${purposePath}`;
+}
+
 export function consumeJoinFragment() {
   if (!location.hash.startsWith("#join/")) return null;
   const value = location.hash.slice(6);
@@ -230,7 +243,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       currentLink = { id: result.link.id, expiresAt: result.link.expiresAt, memberRevision: request.expectedMemberRevision };
       if (!checkResult()) return;
       const purposeItem = listPurposes().find(p => p.id === $("#share-link-purpose").value) ?? null;
-      $("#share-link-url").value = `${location.origin}/#join/${request.linkToken}${purposeItem ? `/work/${encodeURIComponent(purposeItem.id)}` : ""}`;
+      $("#share-link-url").value = humanJoinShareUrl(request.linkToken, purposeItem ? `/work/${encodeURIComponent(purposeItem.id)}` : "");
       $("#share-purpose-note").hidden = !purposeItem;
       if (purposeItem) $("#share-purpose-note").textContent = `Opens "${purposeItem.title}" after they join. Nothing else in the room is shared.`;
       $("#share-link-url").dataset.linkId = result.link.id;

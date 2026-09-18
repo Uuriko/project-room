@@ -90,7 +90,8 @@ expiry, revocation, and rate limits.
   `Cache-Control: no-store` (`server/http.mjs`). The HTML door carries
   `<meta name="robots" content="noindex,nofollow">`.
 - The only indexable surface is deliberate: the public agent-discovery
-  packets (`/llms.txt`, `/room/llms.txt`, `/skill.md`, `/room/skill`,
+  packets (`/llms.txt`, `/room/llms.txt`, `/join.txt`, `/room/join.txt`,
+  `/skill.md`, `/room/skill`,
   `agent.json`, `/kits.txt`), which describe how to connect — they contain no
   room content, member lists, or credentials.
 

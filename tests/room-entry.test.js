@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { roomEntry, publicRoomDoorHtml, isPublicRoomDoorPath, wantsPublicDoorHtml, PUBLIC_DOOR_PATHS, ROOM_DEEP_LINK_SCRIPT, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
+import { roomEntry, publicRoomDoorHtml, isPublicRoomDoorPath, wantsPublicDoorHtml, PUBLIC_DOOR_PATHS, ROOM_DEEP_LINK_SCRIPT, PUBLIC_DOOR_CSP, publicDoorHashForward } from "../deploy/room-entry.mjs";
 import { ROOM_ORIGIN, COMPUTE_DOOR, ROOM_PUBLIC_WWW } from "../deploy/agent-discovery.mjs";
 
 const FORBIDDEN = /Bearer |ROOM_AGENT_TOKEN|sk-|password|@gmail|John |Potter |Uuriko@|acct-|memberId":"[^c]/i;
@@ -18,6 +18,13 @@ test("unlisted entry opens the isolated Room without forwarding input or embeddi
   assert.match(html, /Paste your room key/);
   // Plain-language door copy: first-time visitors should not need to decode shorthand.
   assert.match(html, /Joining as a person or an agent is free\./);
+  assert.match(html, /href="#join-agent"/);
+  assert.match(html, />Paste a prompt</);
+  assert.match(html, /Join from your favorite agent app/);
+  assert.match(html, /Just paste a prompt\./);
+  assert.match(html, /Cursor · Grok Bot · ChatGPT · Codex · Claude · MCP/);
+  assert.match(html, /id="join-prompt"/);
+  assert.match(html, /<a href="\/room\/join.txt">join.txt<\/a>/);
   assert.match(html, /Connect an agent/);
   assert.match(html, /Invite teammates and AI agents to work on the same items together\./);
   assert.match(html, /Rooms are private by default\. Adding an agent never lists the room publicly\./);
@@ -75,6 +82,7 @@ test("entry handler leaves other Demigod pages and hosts to existing routing", (
   assert.equal(roomEntry(new Request("https://www.getdasha.com/room")), null);
   assert.equal(roomEntry(new Request("https://lobby.getdasha.com/room/llms.txt")), null);
   assert.notEqual(roomEntry(new Request("https://www.trydemigod.com/room/llms.txt")), null);
+  assert.notEqual(roomEntry(new Request("https://www.trydemigod.com/room/join.txt")), null);
   assert.notEqual(roomEntry(new Request("https://www.trydemigod.com/room/llms-full.txt")), null);
   assert.notEqual(roomEntry(new Request("https://www.trydemigod.com/room/skill.md")), null);
   assert.notEqual(roomEntry(new Request("https://www.trydemigod.com/room/AGENTS.md")), null);
@@ -113,6 +121,14 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(html, />Join</);
   // Plain-language door copy (same sentences as the Demigod entry).
   assert.match(html, /Joining as a person or an agent is free\./);
+  assert.match(html, /href="#join-agent"/);
+  assert.match(html, />Paste a prompt</);
+  assert.match(html, /id="join-agent"/);
+  assert.match(html, /Join from your favorite agent app/);
+  assert.match(html, /Just paste a prompt\./);
+  assert.match(html, /Cursor · Grok Bot · ChatGPT · Codex · Claude · MCP/);
+  assert.match(html, /id="join-prompt"/);
+  assert.match(html, /<a href="\/room\/join.txt">join.txt<\/a>/);
   assert.match(html, /href="#connect"/);
   assert.match(html, /Connect an agent/);
   assert.match(html, /id="connect"/);
@@ -120,8 +136,10 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(html, /href="#people"/);
   assert.match(html, />People</);
   assert.match(html, /id="people"/);
-  assert.match(html, /Open and People honor <code>#room\/\{roomId\}<\/code>/);
-  assert.match(html, /https:\/\/www\.getdasha\.com\/room#room\/\{roomId\}/);
+  assert.match(html, /Open this invite link to join as a person/);
+  assert.match(html, /Open and People honor <code>#room\/\{roomId\}<\/code> for members already in the room/);
+  assert.match(html, /that is not a shareable invite/);
+  assert.doesNotMatch(html, /Share <code>https:\/\/www\.getdasha\.com\/room#room\/\{roomId\}<\/code>/);
   assert.equal(ROOM_PUBLIC_WWW, "https://www.getdasha.com/room");
   assert.match(html, /Invite teammates and AI agents to work on the same items together\./);
   assert.match(html, /Rooms are private by default\. Adding an agent never lists the room publicly\./);
@@ -162,10 +180,85 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   const scriptHash = createHash("sha256").update(ROOM_DEEP_LINK_SCRIPT).digest("base64");
   assert.match(PUBLIC_DOOR_CSP, new RegExp(`script-src 'sha256-${scriptHash.replace(/[+/=]/g, "\\$&")}'`));
   assert.match(ROOM_DEEP_LINK_SCRIPT, /hashchange/);
+  assert.match(ROOM_DEEP_LINK_SCRIPT, /location\.replace/);
+  assert.match(html, /class="ghost join"/);
   assert.match(html, /class="ghost people"/);
   assert.equal((html.match(/<script>/g) || []).length, 1);
   assert.ok(html.includes(`<script>${ROOM_DEEP_LINK_SCRIPT}</script>`));
   assert.doesNotMatch(html, /Genie/);
   assert.equal(FORBIDDEN.test(html), false);
   assert.doesNotMatch(html, /dasha\.fun|iframe|walletconnect|Bearer |ROOM_AGENT_TOKEN|# Project Room|getone\.one|Amore/i);
+});
+
+function runDoorHash(hash) {
+  const hrefs = {
+    "a.open": ROOM_ORIGIN,
+    "a.people": "#people",
+    "a.join": `${ROOM_ORIGIN}/#join/`
+  };
+  const node = selector => hrefs[selector] === undefined ? null : {
+    getAttribute(name) { return name === "href" ? hrefs[selector] : ""; },
+    setAttribute(name, value) { if (name === "href") hrefs[selector] = value; }
+  };
+  let replaced = "";
+  const previous = {
+    location: Object.getOwnPropertyDescriptor(globalThis, "location"),
+    document: Object.getOwnPropertyDescriptor(globalThis, "document"),
+    addEventListener: Object.getOwnPropertyDescriptor(globalThis, "addEventListener")
+  };
+  Object.defineProperty(globalThis, "location", {
+    configurable: true, writable: true,
+    value: { hash, href: `https://www.getdasha.com/room${hash}`, replace(url) { replaced = url; } }
+  });
+  Object.defineProperty(globalThis, "document", {
+    configurable: true, writable: true,
+    value: { querySelector: node }
+  });
+  Object.defineProperty(globalThis, "addEventListener", {
+    configurable: true, writable: true,
+    value() {}
+  });
+  try {
+    publicDoorHashForward();
+    return { hrefs, replaced };
+  } finally {
+    for (const [key, descriptor] of Object.entries(previous)) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+  }
+}
+
+test("www /room #join/<token> writes the token onto Join and leaves the wrapper", () => {
+  const token = "A".repeat(43);
+  const result = runDoorHash(`#join/${token}`);
+  assert.equal(result.hrefs["a.join"], `${ROOM_ORIGIN}/#join/${token}`);
+  assert.equal(result.replaced, `${ROOM_ORIGIN}/#join/${token}`);
+  assert.equal(result.hrefs["a.open"], ROOM_ORIGIN);
+});
+
+test("www /room #join/<token>/work/<id> keeps the purpose path on the forwarded join", () => {
+  const token = "B".repeat(43);
+  const hash = `#join/${token}/work/item-1`;
+  const result = runDoorHash(hash);
+  assert.equal(result.hrefs["a.join"], `${ROOM_ORIGIN}/${hash}`);
+  assert.equal(result.replaced, `${ROOM_ORIGIN}/${hash}`);
+});
+
+test("www /room #join/ stub does not auto-leave the wrapper", () => {
+  const result = runDoorHash("#join/");
+  assert.equal(result.hrefs["a.join"], `${ROOM_ORIGIN}/#join/`);
+  assert.equal(result.replaced, "");
+});
+
+test("www /room #room/{id} still rewrites Open/People and does not follow Join", () => {
+  const result = runDoorHash("#room/commons");
+  assert.equal(result.hrefs["a.open"], `${ROOM_ORIGIN}/#room/commons`);
+  assert.equal(result.hrefs["a.people"], `${ROOM_ORIGIN}/#room/commons`);
+  assert.equal(result.hrefs["a.join"], `${ROOM_ORIGIN}/#join/`);
+  assert.equal(result.replaced, "");
+});
+
+test("door script bytes are the exported hash-forward function", () => {
+  assert.equal(ROOM_DEEP_LINK_SCRIPT, `(${publicDoorHashForward.toString()})();`);
 });

@@ -1260,6 +1260,267 @@ paths:
           description: agent_inbox_agent_only or insufficient_scope
         '422':
           description: invalid_inbox_selection
+  /api/rooms/{roomId}/work-claims:
+    get:
+      summary: List work claims
+      description: |
+        The room's work-claim registry (leases, delivery modes, review
+        policies). Lease expiry is evaluated on every request: expired claims
+        are auto-released before the list is built, and their ids are
+        returned in `swept`. Any room member may read; API keys need
+        `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: The room's work claims
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  swept:
+                    type: array
+                    items: { type: string }
+                    description: Claim ids auto-released by lease expiry on this read
+                  claims:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WorkClaim'
+        '401': { description: unauthenticated }
+    post:
+      summary: Register a work claim item
+      description: |
+        Creates an unclaimed work-claim item agents can then claim. `id`
+        matches [A-Za-z0-9_-]{1,128}. `reviewPolicy` overrides the room's
+        default review policy for this item. Duplicate ids get 409
+        `work_claim_exists`. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string, description: Claim id, pattern: '[A-Za-z0-9_-]{1,128}' }
+                title: { type: string }
+                reviewPolicy: { type: string, enum: [self_attested, distinct_member, independent_principal] }
+                note: { type: string }
+      responses:
+        '201':
+          description: The created unclaimed item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkClaim'
+        '401': { description: unauthenticated }
+        '409': { description: work_claim_exists }
+        '422': { description: invalid_claim_input }
+  /api/rooms/{roomId}/work-claims/sweep:
+    post:
+      summary: Release expired work-claim leases
+      description: |
+        Evaluates lease expiry across the room's claims (also evaluated
+        lazily on every work-claims request) and auto-releases expired
+        claims to unclaimed with a stamped history entry. Returns the ids
+        released by this sweep. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+      responses:
+        '200':
+          description: Sweep receipt
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  released:
+                    type: array
+                    items: { type: string }
+                  sweptAt: { type: string, format: date-time }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_claim_input }
+  /api/rooms/{roomId}/work-claims/{claimId}:
+    get:
+      summary: Read one work claim
+      description: Any room member may read; API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The work claim item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkClaim'
+        '401': { description: unauthenticated }
+        '404': { description: work_claim_not_found }
+  /api/rooms/{roomId}/work-claims/{claimId}/claim:
+    post:
+      summary: Claim work
+      description: |
+        Claims an unclaimed item for the calling member (the anti-collision
+        rule: an already-claimed item gets 409 `work_claim_conflict`).
+        `leaseHours` sets the claim lease in hours (default: the room's
+        configured default, else 24h; max 720h); `null` opts out of leases
+        entirely. The item records `claimedAt` and `leaseExpiresAt`. API
+        keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: string }
+                leaseHours: { type: [number, 'null'], minimum: 0, maximum: 720 }
+      responses:
+        '200':
+          description: The claimed item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkClaim'
+        '401': { description: unauthenticated }
+        '404': { description: work_claim_not_found }
+        '409': { description: work_claim_conflict }
+        '422': { description: invalid_claim_input }
+  /api/rooms/{roomId}/work-claims/{claimId}/update:
+    post:
+      summary: Update claimed work
+      description: |
+        Owner-only state transitions and notes (`403 work_not_owner`
+        otherwise). The `done` transition accepts `deliveryMode` (how the
+        work was delivered: `result`, `merged`, or `production`) and
+        `reviewedBy` (the attesting member), and enforces the item's review
+        policy: `self_attested` lets the claimant close; `distinct_member`
+        needs a different member's attestation; `independent_principal`
+        needs a different member holding the `verify` permission. A failing
+        attestation gets 403 `work_review_rejected`. API keys need
+        `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                state:
+                  type: string
+                  enum: [claimed, in_progress, blocked, done, unclaimed]
+                  description: unclaimed = release the claim
+                note: { type: string }
+                deliveryMode:
+                  type: string
+                  enum: [result, merged, production]
+                  description: Only on the done transition
+                reviewedBy:
+                  type: string
+                  description: Attesting member id; only on the done transition
+      responses:
+        '200':
+          description: The updated item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkClaim'
+        '401': { description: unauthenticated }
+        '403': { description: work_not_owner or work_review_rejected }
+        '404': { description: work_claim_not_found }
+        '422': { description: invalid_claim_input }
+  /api/rooms/{roomId}/work-claims/{claimId}/release:
+    post:
+      summary: Release a work claim
+      description: |
+        Owner-only; returns the item to unclaimed and clears the owner and
+        the lease. Equivalent to update with `state: unclaimed`. API keys
+        need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: string }
+      responses:
+        '200':
+          description: The released item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkClaim'
+        '401': { description: unauthenticated }
+        '403': { description: work_not_owner }
+        '404': { description: work_claim_not_found }
+        '422': { description: invalid_claim_input }
+  /api/rooms/{roomId}/work-claims/{claimId}/reassign:
+    post:
+      summary: Reassign a work claim
+      description: |
+        Owner-only; hands the claim to another member in the same state.
+        API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [newOwner]
+              properties:
+                newOwner: { type: string }
+                note: { type: string }
+      responses:
+        '200':
+          description: The reassigned item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkClaim'
+        '401': { description: unauthenticated }
+        '403': { description: work_not_owner }
+        '404': { description: work_claim_not_found }
+        '422': { description: invalid_claim_input }
   /api/health:
     get:
       summary: Liveness
@@ -4413,6 +4674,84 @@ paths:
         '200': { description: "{ contractVersion, roomId, workItemId, viewer*, selection, discussion, current, scope }" }
         '404': { description: work_not_found }
         '422': { description: invalid_discussion }
+  /api/rooms/{roomId}/activation-pack:
+    get:
+      summary: Room activation pack
+      description: |
+        One machine-readable fetch giving an agent everything it needs to
+        start working: the room record, the active member roster, open work
+        items with write-claim state, pinned resources, participation rules,
+        coordination norms, and an opaque event cursor. Rooms record no
+        repository head (repoHead is null); per-work write claims name their
+        repository and ref. Requires a room credential like every other
+        /api/rooms/{roomId} read.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Activation pack
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  room:
+                    type: object
+                    properties:
+                      slug: { type: string }
+                      title: { type: string }
+                      state: { type: string, enum: [active, archived] }
+                      kind: { type: string, enum: [personal, organization] }
+                      owner: { type: string }
+                  members:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        identityId: { type: [string, "null"] }
+                        handle: { type: string }
+                        kind: { type: string, enum: [human, agent] }
+                        permissions: { type: array, items: { type: string } }
+                  openWork:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        title: { type: string }
+                        state: { type: string, enum: [proposed, accepted, working, blocked] }
+                        claimant: { type: [string, "null"] }
+                        claimStatus: { type: [string, "null"], enum: [active, released, expired] }
+                        deliveryMode: { type: string, enum: [read, write] }
+                        reviewPolicy: { type: string, enum: [independent, owner, independent+owner, none] }
+                        leaseExpiresAt: { type: [string, "null"] }
+                  pinnedResources:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        messageId: { type: string }
+                        pinnedById: { type: string }
+                        pinnedAt: { type: string }
+                        authorId: { type: string }
+                        body: { type: string }
+                  repoHead: { type: "null", description: Rooms record no repository head }
+                  participationRules:
+                    type: object
+                    properties:
+                      requireIndependentReview: { type: boolean }
+                      requireOwnerDecision: { type: boolean }
+                  coordinationNorms:
+                    type: object
+                    properties:
+                      maxClaimsPerAgentPerCycle: { type: integer }
+                      releaseOnInactivityHours: { type: integer }
+                      stopAfterRepeatedNoopWakes: { type: boolean }
+                  eventCursor: { type: string }
+                  generatedAt: { type: string }
+        '401': { description: unauthenticated }
+        '404': { description: room_not_found }
 components:
   securitySchemes:
     queryAuth:
@@ -4607,6 +4946,33 @@ components:
         next:
           type: array
           items: { type: object }
+    WorkClaim:
+      description: |
+        A work-claim registry item. Claims carry a lease (`claimedAt` +
+        `leaseExpiresAt`; null `leaseExpiresAt` means no lease and the claim
+        never expires). The `done` transition records `deliveryMode` (how
+        the work was delivered) and `reviewedBy` (the attesting member, per
+        the item's `reviewPolicy`).
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        state: { type: string, enum: [unclaimed, claimed, in_progress, blocked, done] }
+        owner: { type: [string, 'null'] }
+        claimedAt: { type: [string, 'null'], format: date-time }
+        leaseExpiresAt: { type: [string, 'null'], format: date-time }
+        deliveryMode: { type: [string, 'null'], enum: [result, merged, production] }
+        reviewPolicy: { type: [string, 'null'], enum: [self_attested, distinct_member, independent_principal] }
+        reviewedBy: { type: [string, 'null'] }
+        history:
+          type: array
+          items:
+            type: object
+            properties:
+              at: { type: string, format: date-time }
+              agentId: { type: string }
+              action: { type: string }
+              note: { type: [string, 'null'] }
     SpendAllowanceReport:
       allOf:
         - type: object

@@ -23,7 +23,7 @@ On the welcome screen:
   key** to switch.
 - **Account key** — tap **Account key** (or open `?account=1`). Inbox
   works from account home without joining a room.
-- **Invitation** — paste the invite link in **Have an invite?**, or open
+- **Invitation** — paste the invite link in **Have an invite?** and choose **Open this invite link**, or open
   the link the owner sent. Guests get chat access for about eight hours
   in that browser.
 
@@ -57,7 +57,7 @@ draft**. No Room key in iMessage or WhatsApp.
 - Grok Build MCP until you import a private `connection.json` (see
   [ROOM-ROSTER.md](ROOM-ROSTER.md))
 
-Agents (no account): the door has **Connect an agent** (invite teammates / agents to edit Work Items together; private by default — guest-agent / Add agent don’t publish the room to lobby; Use my AI → paste the packet; Guest is owner-minted `ga1.`, not human `#join/`; Works with Claude Code · Codex · OpenCode · Cursor). Or fetch
+Agents (no account): the door has **Paste a prompt** (Join from your favorite agent app — Cursor · Grok Bot · ChatGPT · Codex · Claude · MCP; copy the textarea or `GET /room/join.txt`) and **Connect an agent** (invite teammates / agents to edit Work Items together; private by default — guest-agent / Add agent don’t publish the room to lobby; Use my AI → paste the packet; Guest is owner-minted `ga1.`, not human `#join/`; Works with Claude Code · Codex · OpenCode · Cursor). Or fetch
 https://project-room-staging.getdasha.workers.dev/llms.txt,
 `/llms-full.txt` or `/.well-known/agent.json`. First tools: `room_check_access`, `orient`.
 Public getdasha `/room` surfaces wait on the Instinct edge wrangle.
