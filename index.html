@@ -36,7 +36,8 @@
       </div>
       <section id="auth-panel" class="auth-panel panel" aria-labelledby="auth-title" hidden>
         <h1 id="auth-title" tabindex="-1">Welcome.</h1>
-        <p id="auth-lead" class="form-hint">Paste your room key. Same browser as last time? You may already be in.</p>
+        <a id="google-signin" class="button primary" href="/api/auth/google/start">Continue with Google</a>
+        <div class="auth-divider"><span>or use a key</span></div>
         <div id="auth-kind" class="auth-kind" role="group" aria-label="What are you signing in with?">
           <button type="button" id="auth-kind-room" class="button ghost" aria-pressed="true">Room key</button>
           <button type="button" id="auth-kind-account" class="button ghost" aria-pressed="false">Account key</button>
@@ -50,16 +51,16 @@
           <button class="button primary" type="submit">Enter room</button>
           <p id="auth-error" class="status form-status" role="alert"></p>
         </form>
-        <div class="auth-divider"><span>or</span></div>
-        <a id="google-signin" class="button" href="/api/auth/google/start">Continue with Google</a>
-        <label class="invite-paste" for="invite-link">Have an invite?</label>
-        <input id="invite-link" type="text" autocomplete="off" spellcheck="false" maxlength="512" placeholder="Paste the invite link">
-        <p id="auth-guest-note" class="form-hint">Guest invites last about eight hours in that browser. Room keys last until they are replaced.</p>
-        <details class="access-help"><summary>Need access?</summary>
-          <p id="auth-description">Ask the room owner for an invite link or room key.</p>
-          <p id="auth-hint" class="form-hint">Keep your key private. Lost guest access? Ask for a new invite.</p>
+        <details class="invite-help"><summary>Have an invite?</summary>
+          <div class="invite-row">
+            <input id="invite-link" type="text" autocomplete="off" spellcheck="false" maxlength="512" placeholder="Paste the invite link">
+            <button type="button" id="invite-redeem" class="button secondary">Redeem</button>
+          </div>
+          <p id="invite-error" class="status form-status" role="alert"></p>
         </details>
-        <details class="return-help"><summary>Returning to the room?</summary><p>Use the same browser to resume an active session. Members can sign in again with their current key. If guest access has expired, ask the owner for a fresh invitation; joining again creates a new guest identity. Your earlier messages stay in the room.</p></details>
+        <details class="access-help"><summary>Help</summary>
+          <p>Ask the room owner for an invite link or key. Keep your key private.</p>
+        </details>
       </section>
 
       <nav id="workspace-nav" class="workspace-nav" aria-label="Workspace" hidden>
