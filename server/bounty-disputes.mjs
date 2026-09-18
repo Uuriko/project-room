@@ -20,7 +20,8 @@
 //
 // All state is caller-owned (a Map); the module is pure and dependency-free.
 // Frozen outputs; malformed inputs and illegal transitions throw
-// DisputeError. Escrow/chain wiring is a later slice.
+// DisputeError. The escrow sees exactly one eventual onDisputeFinalized
+// callback per dispute (event-driven, never keeper-polled).
 const MAX_DISPUTE_COST_RATIO = 0.25;
 const STATES = Object.freeze([
   "opened", "challenged", "evidence", "adjudicating",
@@ -47,8 +48,18 @@ const nonEmptyString = (v, what) =>
   check(typeof v === "string" && v.length > 0, `${what} must be a non-empty string`);
 
 // Create a dispute manager. store is a caller-owned Map (disputeId -> dispute).
-export function createDisputes({ store } = {}) {
+// onDisputeFinalized, when given, is the single eventual escrow callback
+// (Kleros rule() / slop.cash shape): it fires exactly once per dispute when
+// the dispute reaches a terminal state, carrying the full frozen record so
+// the escrow can branch payout on outcome (upheld/rejected/split). It is
+// event-driven — fired inline by the transition, never keeper-polled — and
+// there is no parallel escrow authority: this one callback is the only
+// channel. If the handler throws, the dispute is still terminal (the machine
+// never gets stuck) and the error propagates to the caller.
+export function createDisputes({ store, onDisputeFinalized } = {}) {
   check(store === undefined || store instanceof Map, "store must be a Map if given");
+  check(onDisputeFinalized === undefined || typeof onDisputeFinalized === "function",
+    "onDisputeFinalized must be a function if given");
   const disputes = store ?? new Map();
   const checkId = id => nonEmptyString(id, "id");
   const get = disputeId => {
@@ -58,6 +69,25 @@ export function createDisputes({ store } = {}) {
   const set = dispute => disputes.set(dispute.disputeId, dispute);
   const requireState = (dispute, ...allowed) => {
     if (!allowed.includes(dispute.state)) illegal(dispute.disputeId, dispute.state, allowed.join("|"));
+  };
+
+  // Build the final packet and fire the escrow callback exactly once.
+  const notifyFinalized = (dispute, terminal) => {
+    if (dispute.notified) return dispute;
+    const notified = Object.freeze({ ...dispute, notified: true });
+    set(notified);
+    if (onDisputeFinalized) {
+      const packet = Object.freeze({ disputeId: notified.disputeId,
+        bountyId: notified.bountyId, kind: notified.kind, terminal,
+        outcome: notified.resolution ? notified.resolution.outcome : null,
+        reasonCodes: notified.resolution
+          ? notified.resolution.reasonCodes : Object.freeze([]),
+        tier: notified.tier, bondSnapshot: notified.bondSnapshot,
+        forfeitedBond: notified.forfeitedBond, recordedCost: notified.recordedCost,
+        escalations: notified.escalations });
+      onDisputeFinalized(packet);
+    }
+    return notified;
   };
 
   // Open a dispute against a bounty. bountyAmount is in the bounty's own units.
@@ -195,16 +225,17 @@ export function createDisputes({ store } = {}) {
   };
 
   // Optimistic finality: an unappealed decision finalizes to resolved.
-  // Enforcement executes exactly once (escrow wiring is a later slice).
+  // Fires the single onDisputeFinalized callback for the adjudicated path.
   const finalize = disputeId => {
     const current = get(disputeId);
     requireState(current, "decided");
     const updated = Object.freeze({ ...current, state: "resolved" });
     set(updated);
-    return updated;
+    return notifyFinalized(updated, "resolved");
   };
 
   // Disputant withdraws: bond forfeit (UMA _computeBurnedBond shape).
+  // The escrow is notified too — the bond forfeiture settles on this packet.
   const withdraw = (disputeId, { by } = {}) => {
     const current = get(disputeId);
     requireState(current, "opened", "challenged", "evidence", "adjudicating", "appealed");
@@ -214,7 +245,7 @@ export function createDisputes({ store } = {}) {
     const updated = Object.freeze({ ...current, state: "withdrawn", forfeitedBond,
       withdrawnBy: by ?? null });
     set(updated);
-    return updated;
+    return notifyFinalized(updated, "withdrawn");
   };
 
   // Record a dispute cost. Refuses when it would exceed the 25% cap — the cap
