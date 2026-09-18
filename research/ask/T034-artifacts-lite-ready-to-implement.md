@@ -5,7 +5,9 @@
 **Status:** Research on main · **implement not started** · this is the go/no-go checklist  
 **Plan refs:** T034 research ([#493](https://github.com/Uuriko/project-room/pull/493) →
 [`research/ASK-ARTIFACTS-LITE-2026-09-18.md`](../ASK-ARTIFACTS-LITE-2026-09-18.md)) ·
-**T034** (this page) · quiet-shell §7 item 7 (full panel = P1)  
+**T034** (this page) · **T081 implement gate**
+([ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md](../ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md)) ·
+quiet-shell §7 item 7 (full panel = P1)  
 **Cousin checklist:** [T033 ⌘K](T033-cmdk-ready-to-implement.md) — same gates; different files/IDs  
 **Tip (source):** `Uuriko/dasha-lobby` `e6da8311` (includes #248 Bonsai, #255 quiet-shell, #257 SSR Mac, #259 PH retire, #261 Motley humans, #264 Needle-out / bonsai grow)  
 **LIVE (probed 2026-09-18 ~01:32Z, T033):** still Typeform — `#step-model`, “Which model?”, meta `Start. Do. Provide. Pay. Credits.`, no `#ask-model`, no `ternary-bonsai-2-27b`. `/compute/humans` 404 (not #261 308).
@@ -141,5 +143,6 @@ Second a Genie.
 ---
 
 *End. Parent research: [`research/ASK-ARTIFACTS-LITE-2026-09-18.md`](../ASK-ARTIFACTS-LITE-2026-09-18.md).
+Later implement gate: [`ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md`](../ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md) (T081).
 Cousin go/no-go: [`T033-cmdk-ready-to-implement.md`](T033-cmdk-ready-to-implement.md).
 Quiet-shell: [`docs/ASK-QUIET-SHELL-V3.md`](../../docs/ASK-QUIET-SHELL-V3.md) §7 item 7 (full panel = P1).*
