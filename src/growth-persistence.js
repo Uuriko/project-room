@@ -10,8 +10,9 @@
 // "not restored" (missing file) or thrown as clear Errors for the caller to
 // catch — persistence failures must never crash the room path.
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
+import { randomUUID } from "node:crypto";
 import { createCollector } from "./growth-collector.js";
 import { validateEvent } from "./growth-events.js";
 
@@ -118,10 +119,21 @@ export function loadFromFile(filePath) {
 };
 
 // Write the collector's snapshot to a file, creating parent directories.
-// Throws on failure — the caller (server shutdown) must catch and log.
+// The write is atomic: the snapshot is staged to a unique temp file in the
+// same directory and then renamed over the target. A crash or SIGKILL
+// mid-write can only orphan the temp file — the previous snapshot is never
+// torn, so the next boot still restores cleanly. Throws on failure — the
+// caller (server shutdown) must catch and log.
 export function saveToFile(filePath, collector) {
   requireCollector(collector);
   mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
-  writeFileSync(filePath, snapshot(collector), { encoding: "utf8", mode: 0o600 });
+  const tmpPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(tmpPath, snapshot(collector), { encoding: "utf8", mode: 0o600 });
+    renameSync(tmpPath, filePath);
+  } catch (error) {
+    try { unlinkSync(tmpPath); } catch { /* best effort: never mask the real error */ }
+    throw error;
+  }
   return filePath;
 }
