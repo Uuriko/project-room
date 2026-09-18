@@ -66,7 +66,7 @@ test("coverage reports per-signal review coverage over the account's backlog", t
 });
 
 test("Confirm/Dismiss/Split verdicts land in the per-signal breakdown", t => {
-  const { f, account, token, binding, hold1, hold2 } = coverageFixture(t);
+  const { f, token, binding, hold1, hold2 } = coverageFixture(t);
   f.store.inbox.quarantineSplit(token, binding, { quarantineId: hold1.id });
   f.store.inbox.quarantineRelease(token, binding, { quarantineId: hold1.id });
   f.store.inbox.quarantineDismiss(token, binding, { quarantineId: hold2.id });
