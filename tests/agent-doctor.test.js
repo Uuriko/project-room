@@ -211,3 +211,37 @@ test("healthy doctor output carries no signature table", async t => {
   assert.equal(result.json.healthy, true);
   assert.equal(result.json.signatures, undefined);
 });
+
+test("doctor never echoes the credential in output, healthy or not (RC-2026-09-18-042)", async t => {
+  const fakeSecret = `pri_${"s".repeat(43)}`;
+  // Unhealthy path: unreachable origin with an env credential configured.
+  const bad = await doctor([], {
+    ROOM_AGENT_ORIGIN: "http://127.0.0.1:1",
+    ROOM_AGENT_ROOM: "my-den",
+    ROOM_AGENT_MEMBER: "ai_probe",
+    ROOM_AGENT_TOKEN: fakeSecret,
+  });
+  assert.equal(bad.status, 1);
+  assert.ok(!`${bad.text ?? ""}\n${bad.stderr ?? ""}`.includes(fakeSecret),
+    "unhealthy doctor output must never contain the credential");
+  // Healthy path: saved connection against a live server (dedicated fixture).
+  const directory = mkdtempSync(join(tmpdir(), "doctor-quiet-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  store.initialize(initialRoom("lab"));
+  const ownerLab = store.issueAccessKey("lab", "owner");
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); rmSync(directory, { recursive: true, force: true }); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const { identityId, secret } = await createAgentIdentity(origin, "Quiet Doctor Bot");
+  const owner = new RoomAgentClient({ origin, roomId: "lab", token: ownerLab, memberId: "owner" });
+  await owner.linkIdentity({ identityId, permissions: ["accept_work"] });
+  const base = mkdtempSync(join(tmpdir(), "doctor-secret-quiet-"));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const dir = join(base, "agent");
+  saveAgentConnection(dir, { version: 1, origin, roomId: "lab", memberId: identityId, token: secret });
+  const good = await doctor([], { ROOM_AGENT_CONFIG: dir });
+  assert.equal(good.status, 0, JSON.stringify(good.json ?? good.stderr));
+  assert.ok(!`${good.text ?? ""}`.includes(secret),
+    "healthy doctor output must never contain the credential");
+});

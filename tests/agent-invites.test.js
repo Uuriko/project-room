@@ -664,3 +664,23 @@ test("redeem with the default displayName guides a rename through a fresh redeem
   assert.equal(rename.path, "/api/agent-invites/redeem");
   assert.equal(typeof rename.description, "string");
 });
+
+test("consent screen names the room, grant, profile and expiry before any prompt (RC-2026-09-18-042)", async t => {
+  const { store, origin } = await serve(t);
+  store.initialize(initialRoom("lab"));
+  const ownerLab = store.issueAccessKey("lab", "owner");
+  const ownerEnv = { ROOM_AGENT_ROOM: "lab", ROOM_AGENT_MEMBER: "owner", ROOM_AGENT_TOKEN: ownerLab };
+  const minted = await cli(origin, ["invite-code", "profile:contribute", "60", "Consent Bot"], ownerEnv);
+  assert.equal(minted.status, 0, minted.stderr);
+  // --no aborts: the full grant summary still prints first, on stderr.
+  const declined = await cli(origin, ["redeem-invite", minted.json.code, "Consent Bot", "--no"]);
+  assert.notEqual(declined.status, 0);
+  const screen = declined.stderr;
+  assert.match(screen, new RegExp(`Invite ${minted.json.code} → room ".+" \\(lab\\)`),
+    "consent names the room title and id");
+  assert.match(screen, /This code grants: accept_work, complete_work\s+\(profile: contribute\)/,
+    "consent names the granted permissions and the standing profile");
+  assert.match(screen, /Expires in about \d+ minutes?\. Nothing else is granted\./,
+    "consent names the expiry and the closed grant");
+  assert.match(screen, /acts as itself, never as you/, "consent states no credential is shared");
+});
