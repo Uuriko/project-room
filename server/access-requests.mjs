@@ -107,7 +107,9 @@ export class AccessRequests {
       fail(422, "invalid_request",
         `requestedPermissions must be room permissions (valid: ${ACCESS_REQUEST_PERMISSIONS.join(", ")})`);
     }
-    if (note !== undefined && (typeof note !== "string" || note.length > 500)) {
+    // RC-2026-09-18-025: explicit null is treated as omitted ("no note"),
+    // since JSON clients naturally send null for "no note".
+    if (note !== undefined && note !== null && (typeof note !== "string" || note.length > 500)) {
       fail(422, "invalid_request", "note must be text of at most 500 characters");
     }
     const rid = requestId ?? `ar_${randomUUID().replaceAll("-", "").slice(0, 16)}`;
@@ -186,7 +188,8 @@ export class AccessRequests {
       if (live.status !== "pending") fail(409, "already_decided", `Request is already ${live.status}`);
       const now = this.store.now();
       if (decision === "deny") {
-        if (note !== undefined && (typeof note !== "string" || note.length > 500)) {
+        // RC-2026-09-18-025: explicit null treated as omitted, same as request().
+        if (note !== undefined && note !== null && (typeof note !== "string" || note.length > 500)) {
           fail(422, "invalid_request", "note must be text of at most 500 characters");
         }
         this.db.prepare("UPDATE access_requests SET status='denied', decided_at=?, decided_by=?, decision_note=? WHERE request_id=?")
