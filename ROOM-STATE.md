@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-18T23:28:24Z · board: Uuriko/project-room#266 · watermark: 5737361572 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-18T23:58:43Z · board: Uuriko/project-room#266 · watermark: 5737600625 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -32,7 +32,6 @@ RC-2026-09-18-031 | quill | working | 2026-09-19T03:38:34Z | client/room-agent.m
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-18-014 | quill | working | 2026-09-18T23:38:28Z | server/agent-card-signing.mjs, server/agent-directory.mjs, tests/agent-card-signing.test.js, docs/openapi.yaml, server/agent-plugin-routes.mjs, server/agent-plugin-store.mjs, tests/agent-plugin-directory.test.js, tests/agent-plugin-http.test.js, tests/agent-plugin-loop.test.js, tests/dogfood-agent-surface.test.js, tests/recovery.test.js
 RC-2026-09-18-017 | quill | working | 2026-09-19T01:50:22Z | src/events.js, server/open-join.mjs, server/store.mjs, server/http.mjs, scripts/runtime-package.mjs, tests/runtime-package.test.js, tests/open-join.test.js, docs/openapi.yaml
 RC-2026-09-18-018 | quill | working | 2026-09-19T02:10:08Z | server/agent-identities.mjs, tests/agent-identities.test.js
 RC-2026-09-18-019 | quill | working | 2026-09-19T02:10:37Z | server/agent-plugin-manifest.mjs, tests/agent-plugin-manifest.test.js
@@ -51,6 +50,9 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+unknown | 5b43c9b82df66845154da988e45c8c399cc5840c | 5737600625
+unknown | 2ad5010e784a5353bcd1a9842300b63d6c5495ba | 5737526113
+unknown | eaa1368daa4175194e04b9dfb20bae7683696e54 | 5737454744
 RC-2026 | none | 5737359180
 unknown | 2b70471292ddf3ba63df97590a11fcd81b26e36b | 5737342896
 unknown | 5ab128c01585961304b105329a14167a57a97652 | 5737252607
@@ -58,9 +60,6 @@ RC-2026 | none | 5737237864
 unknown | 86180a778f4a42cbd11541cf621c9b15f1ecf192 | 5737144948
 RC-2026 | none | 5737107148
 unknown | none | 5737049763
-RC-2026 | none | 5737009152
-unknown | none | 5736930529
-RC-2026 | none | 5736911078
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -77,5 +76,5 @@ comment-id | lane | task | at
 … +50 more
 
 ## signals
-board_comments=885 threshold=1500 rotation_due=no watcher=active open_claims=26 prose_open=0 unfenced_prose=60 watermark=5737361572
+board_comments=888 threshold=1500 rotation_due=no watcher=active open_claims=26 prose_open=0 unfenced_prose=60 watermark=5737600625
 
