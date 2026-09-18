@@ -266,4 +266,7 @@ cmdk implement · listing Needle as chat · calling Second a Genie ·
 ---
 
 *End. Companion picker spec: `docs/ASK-MODEL-CMDK-SPEC-2026-09-17.md`.
-Companion demote draft: dasha-lobby #258 (do not edit from here).*
+Companion demote draft: dasha-lobby #258 (do not edit from here).
+Companion T067 OpenAI error paths (bad URL / not ready / timeout /
+thinking opt-in / kit Stop):
+`research/ASK-BONSAI-PROVIDER-OPENAI-ERROR-PATHS-2026-09-18.md`.*
