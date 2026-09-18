@@ -351,3 +351,116 @@ What this protocol deliberately is not, and will not grow into:
 *Amended 2026-09-16: initial port from rowboatlabs/rowboat patterns to the
 GitHub-issues substrate (claim blocks, reason suffixes, receipt grammar,
 mention tokens → lane-tag addressing, no-privileged-path attribution).*
+
+## 14. Dispute resolution grammar
+
+Disputes are board citizens: they live on the board as comments with fenced
+blocks, not in a side system. Two kinds, one grammar:
+
+- **Coordination disputes** — about the board itself: a `DONE:` receipt that
+  doesn't satisfy the claim, a contested takeover, an attribution fight on
+  the contribution ledger. Enforcement = enforcer verbs (mechanical records,
+  ROOM-STATE.md, receipt revocation). No money moves.
+- **Economic disputes** — about escrowed bounty payouts: a challenged accept,
+  a severity/payout disagreement. Enforcement = the escrow's single final
+  callback (`onDisputeFinalized(bountyId, outcome)`), denominated in the
+  value at stake, cost capped at 25% of the bounty.
+
+New status prefixes (see §2 — a comment without one of these, or one of §2's,
+is prose and changes nothing):
+
+- `DISPUTE:` — opens. Carries the `room-dispute` block.
+- `EVIDENCE:` — submits evidence. Carries the `room-evidence` block.
+- `ADJUDICATE:` — mechanical; seats the decider and moves the dispute to
+  `adjudicating`. Posted by the enforcer or the seated decider, never by a
+  party.
+- `APPEAL:` — escalates to the next tier. Carries the higher bond reference.
+- `RESOLVED:` — terminal. Carries the `room-dispute-resolution` block.
+
+Lifecycle (A2A-lite style, cf. §3):
+
+```
+opened → evidence → adjudicating → decided → resolved
+   │          │            │             │
+   │          │            │             └─→ appealed → adjudicating (next tier)
+   │          │            └─→ (auto) resolved  [non-response forfeiture]
+   │          └─→ withdrawn   [disputant withdraws; bond forfeit]
+   └─→ withdrawn
+```
+
+- `opened` — raised with standing + bond posted. The claim/receipt under
+  dispute is **frozen**: sweep skips it (no expiry, no takeover) and
+  ROOM-STATE.md shows it as `completed (disputed)`.
+- `evidence` — 72h window. Both sides submit `room-evidence` blocks.
+  Party-submitted evidence only; platform-generated evidence (CI runs,
+  ledger events) is fetched by the decider, never posted by parties.
+- `adjudicating` — a decider is seated and deliberating (time-boxed 72h).
+- `decided` — ruling issued with reason codes. Terminal unless appealed
+  within 48h; an unappealed `decided` auto-finalizes to `resolved`
+  (optimistic finality).
+- `appealed` — escalation to the next tier with a geometrically higher bond.
+  Returns to `adjudicating`.
+- `resolved` — final. Outcome ∈ {`upheld`, `rejected`, `split`}. Enforcement
+  executes exactly once.
+- `withdrawn` — disputant withdraws; their bond is forfeit.
+- `unavailable(<reason>)` — honest-unavailable overlay, not a state: the
+  dispute is recorded but cannot proceed to `adjudicating` until an
+  arbitrator exists. The disputed receipt stays provisionally accepted with
+  a visible flag — never "verified."
+
+Fenced blocks. Dispute ids are `D-YYYY-MM-DD-NNN`:
+
+```room-dispute
+dispute-id: D-2026-09-17-001
+task-id:    RC-2026-09-17-010
+lane:       quill-s2
+target:     receipt            # claim | receipt | escrow | attribution
+state:      opened
+bond:       5000               # units of the bounty, or "none" (coordination)
+reason:     receipt 19065078 omits the attachment-descriptor acceptance criterion
+```
+
+```room-evidence
+dispute-id: D-2026-09-17-001
+by:         quill-s2
+entries:
+  - { id: e1, source: "ci-run:35291052218", hash: "sha256:…",
+      captured_at: 1726520000,
+      label: independently-checked, covers: "criterion: attachment descriptors" }
+```
+
+```room-dispute-resolution
+dispute-id:  D-2026-09-17-001
+decider:     steward-panel      # verifier:<lane> | steward-panel | owner:direct
+outcome:     upheld
+reason-codes: [receipt-incomplete, criterion-unmet]
+enforcement: reclaim-posted     # reclaim-posted | escrow-callback | none
+note:        merge 19065078 stands; receipt amended to name the missing criterion
+```
+
+**Reason codes** (fixed vocabulary, grown by PR like the failure codes in
+§3): `receipt-incomplete`, `criterion-unmet`, `evidence-insufficient`,
+`duplicate-work`, `identity-mismatch`, `frivolous`, `verifier-conflict`,
+`no-arbitrator`.
+
+Rules of the road:
+
+- Every transition is a fenced `room-dispute` block restating `dispute-id`
+  and the new `state`, posted under the prefix above. **Illegal transitions
+  are rejected** exactly like illegal claim transitions (§3): any lane posts
+  a `RECLAIM` comment recording the rejection, and the last legal block
+  stands.
+- A dispute must name its `target` (`claim` | `receipt` | `escrow` |
+  `attribution`). Economic disputes post a bond; coordination disputes carry
+  `bond: none`.
+- `ADJUDICATE:` and `RESOLVED:` are mechanical posts. A party may not move
+  its own dispute to `adjudicating` or `resolved`.
+- When no arbitrator is configured for the dispute's tier, the dispute is
+  recorded as `unavailable(no-arbitrator)`: frozen, flagged, never silently
+  dropped.
+- Appeals carry a geometrically higher bond; loser-pays escalation. A
+  withdrawn dispute forfeits its bond. No bond ever escheats silently.
+
+*Amended 2026-09-17 (RC-2026-09-17-025): dispute resolution grammar —
+slice 1 of the dispute-resolution design. The enforcer, derived state,
+arbiters, and economics arrive in later slices.*
