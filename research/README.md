@@ -34,6 +34,8 @@ Architecture SoR (steal stack collapsed):
 | [ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md](ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md) | Nautilo packages / Conductor / Floor Manager + new cousins + Second receipt shapes (research only) |
 | [ROOM-NOVEL-SYNTHESIS-2026-09-17.md](ROOM-NOVEL-SYNTHESIS-2026-09-17.md) | Ledger Room novel synthesis: six-axis seat + receipt graph (research only; superseded for decisions by the cohesive architecture SoR) |
 | [NOVEL-PLANNING-THINKING-BUILDS-2026-09-17.md](NOVEL-PLANNING-THINKING-BUILDS-2026-09-17.md) | Planning / thinking landscape (TSP, cuddlytoddly, Crossfire, …) ranked P0–P2 for Room / Compute / Ask; Ledger Plan Tree fold (research only) |
+| [ROOM-COMPUTE-NEEDLE-STEAL-2026-09-17.md](ROOM-COMPUTE-NEEDLE-STEAL-2026-09-17.md) | Cactus Needle 3 steal — confidence / triggers / intelligence ladder for Second; not an Ask chat model (research only) |
+| [UX-CLEAN-LESS-NOISE-2026-09-17.md](UX-CLEAN-LESS-NOISE-2026-09-17.md) | Ask + Compute + Room anti-noise ranking; Ask quiet-shell P0 (research only) |
 | [multiplayer-messaging-20260908/](multiplayer-messaging-20260908/) | Collaboration/messaging plan (markdown + DOCX) |
 | [2026-09-07-project-room-v2/](2026-09-07-project-room-v2/) | Earlier sourced report and comparison screenshots |
 | [2026-09-07-project-room/](2026-09-07-project-room/) | First 7 September report source |
