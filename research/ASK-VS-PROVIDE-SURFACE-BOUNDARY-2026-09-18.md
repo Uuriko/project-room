@@ -44,6 +44,7 @@ them.
 | Instinct wrangler | **Red.** Live `/compute` is still Typeform. No tip HTML. No wrangler. |
 | T032 / T033 ⌘K implement | **Cite only.** |
 | T068 / T069 battery / Prefer AC | **Not** this path. Provide operator copy stays on Provide. |
+| T083 soft-battery UX copy | **Cite only.** Runtime `On battery · paused`. Never block Ask. |
 
 Paths this fold owns:
 
@@ -152,7 +153,7 @@ Not deleted. Relocated.
 | Host / Marketplace | `#ask-host` / `#ask-ocm` in `#ask-nav`; More closed |
 | Capacity / fleet honesty | Compute `#honesty-panel` — T072 one line; expand is ids + measured tok/s |
 | Providers / market table | Provide / market surfaces (`dasha-compute-market-table` and cousins). Not `#ask-thread` |
-| Battery / Prefer AC / 24GB soft floor | Provide operator docs (T068 / T069 / T060). Not Ask canvas lecture |
+| Battery / Prefer AC / 24GB soft floor | Provide operator docs (T068 / T069 / T060 · T083 runtime `On battery · paused`). Not Ask canvas lecture. T083: never block Ask |
 
 Ask may **link** to Provide. It may not **paint** Provide.
 
