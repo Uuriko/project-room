@@ -4,6 +4,7 @@
 // reader exposes a "not configured" state instead of failing, and keeps the
 // values behind accessors so a serialized config never carries them.
 import { createHash } from "node:crypto";
+import { webhookRotationView } from "./telegram-rotation.mjs";
 
 export const telegramBindings = Object.freeze({ token: "TELEGRAM_BOT_TOKEN", webhookSecret: "TELEGRAM_WEBHOOK_SECRET", apiBase: "TELEGRAM_API_BASE" });
 export const telegramApiDefault = "https://api.telegram.org";
@@ -63,7 +64,7 @@ export class TelegramLiveStatus {
 }
 const iso = ms => Number.isSafeInteger(ms) ? new Date(ms).toISOString() : null;
 // What the connection card shows. Binding names and states only; never values or hashes.
-export function telegramLiveView({ config, connection, record, status = null, importAvailable = false }) {
+export function telegramLiveView({ config, connection, record, status = null, importAvailable = false, now = Date.now() }) {
   if (record.channel !== "telegram") return null;
   const live = status ? status.snapshot(record.accountId, record.id) : { lastUpdateReceivedAt: null, receivedUpdates: 0, lastSendResult: null };
   const storedHash = connection?.webhook?.secretHash ?? null;
@@ -71,5 +72,5 @@ export function telegramLiveView({ config, connection, record, status = null, im
   return { contractVersion: 1, channel: "telegram", state: config.state, bindings: config.bindings, missing: config.missing, invalid: config.invalid,
     webhook, webhookSetAt: iso(connection?.webhook?.updatedAt), lastUpdateReceivedAt: iso(live.lastUpdateReceivedAt), receivedUpdates: live.receivedUpdates,
     lastSendResult: live.lastSendResult ? { at: iso(live.lastSendResult.at), outcome: live.lastSendResult.outcome, code: live.lastSendResult.code } : null,
-    importAvailable };
+    importAvailable, rotation: webhookRotationView(connection?.webhook, now) };
 }
