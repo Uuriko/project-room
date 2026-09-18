@@ -186,7 +186,7 @@ test("a would-be hold is logged on the receipt; the message still lands in the i
   const f = fixture(t);
   const conn = tgConn(f.account.id);
   const envelope = tgEnvelope(conn, { from: impersonator, text: lureText });
-  const { receipt, sourceId } = importTelegram(f, envelope);
+  const { receipt } = importTelegram(f, envelope);
   assert.equal(receipt.spam.quarantine, true, "the fixture must trip the spam guard");
   const shadow = receipt.shadowQuarantine;
   assert.ok(shadow, "every scored import carries a shadow decision");
