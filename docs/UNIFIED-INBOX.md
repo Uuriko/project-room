@@ -207,6 +207,7 @@ readable as saved copies.
 | Add | `connection.configure` with `expectedRevision: 0` and a profile at revision 1 | **Add connection** under the connection cards: Telegram bot (connection id, bot id, bot username, optional name) or email mailbox (connection id, address, optional name) | `state: active`; at most 20 connections per account; one connection per bot id or mailbox (`email_mailbox_exists`) |
 | Update or re-add | `connection.configure` with the current revision | Add connection with an existing id | Profile revision moves; provider and external id may not change (`email_mailbox_changed`); a disconnected record becomes active again |
 | Register the webhook secret | `connection.webhook` (server side only) | **Reconnect** on a Telegram card when the bindings are set | Stores the SHA-256 of `TELEGRAM_WEBHOOK_SECRET`; the record's revision does not move |
+| Rotate the webhook secret | `connection.webhook.rotate` (server side only; Reconnect starts it when the binding changes) | **Reconnect** on a Telegram card after re-registering with `scripts/telegram-set-webhook.mjs` | Stores the new SHA-256 and keeps the old one accepted until `rotationExpiresAt`; `connection.webhook.complete` ends the window early; the card shows `live.rotation` as pending (with window expiry) or complete |
 | Import | `page.apply` under the import authority | **Reconnect** (drains verified webhook updates) | New or edited sources appear in the list |
 | Remove | `connection.disconnect` | **Remove**, then **Confirm remove** (or **Keep**) | `state: disconnected`; cards lose Reconnect and Remove; sources show "Disconnected · saved copy"; replies are refused with `channel_sending_unavailable`; a later `connection.configure` re-adds it |
 
@@ -255,7 +256,7 @@ responses.
 | Name | Where it lives | Who reads it | Never |
 | --- | --- | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | Worker secret / local env | `telegramConfig()` accessor; the transport puts it in the outbound URL only | in a response, a card, a journal or an error string (`redactTelegram`) |
-| `TELEGRAM_WEBHOOK_SECRET` | Worker secret / local env, and Telegram's `setWebhook` call | `connection.webhook` stores only its SHA-256; the webhook route compares hashes | in a response or card (`live.webhook` reports unset / set / matches / differs only) |
+| `TELEGRAM_WEBHOOK_SECRET` | Worker secret / local env, and Telegram's `setWebhook` call | `connection.webhook` stores only its SHA-256; the webhook route compares hashes; `scripts/telegram-rotate-webhook.mjs --generate` mints a fresh one | in a response or card (`live.webhook` reports unset / set / matches / differs only; `live.rotation` reports pending / complete with the window expiry) |
 | `TELEGRAM_API_BASE` | optional var | `telegramConfig()` | — |
 | Account access keys, session cookies, CSRF | browser + server session tables | every inbox route (`protectWrite`) | in URLs or bodies of inbox routes |
 

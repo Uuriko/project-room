@@ -4792,8 +4792,11 @@ paths:
         1. When `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET` are set and
            the active connection's stored webhook hash differs from the
            binding's SHA-256, the hash is (re)stored through the
-           `connection.webhook` journal action (`registered: true`). The
-           secret itself is never stored or returned.
+           `connection.webhook` journal action (`registered: true`). When a
+           previous hash is already stored, `connection.webhook.rotate`
+           starts a rotation instead: the new hash verifies at once and the
+           old one stays accepted until the rotation window ends (24h by
+           default). The secret itself is never stored or returned.
         2. Updates the webhook route already verified are drained through the
            same sync path as `/sync` (`updates: null`), one page per request;
            `receipt.complete: false` means more remain. The same requestId
