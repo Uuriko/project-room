@@ -254,7 +254,19 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       }
       throw error;
     }
-    return json(res, 201, doc);
+    // RC-2026-09-18-037: the publish response names the card's lifecycle —
+    // verify it live in the directory, re-publish to update, withdraw with
+    // DELETE — so the agent knows what just happened and what's next.
+    const publishNext = agentId => Object.freeze([
+      Object.freeze({ action: "see-it-live", method: "GET", path: "/api/agent-directory",
+        description: "Confirm your card is live in the directory other agents search." }),
+      Object.freeze({ action: "update-card", method: "POST", path: "/api/agent-directory/cards",
+        description: "To update the card, publish again to this same path with the same agentId and a fresh signature — it replaces the existing card." }),
+      Object.freeze({ action: "withdraw-card", method: "DELETE",
+        path: `/api/agent-directory/cards/${encodeURIComponent(agentId)}`,
+        description: "To take the card down, DELETE this path with the directory:publish scope." }),
+    ]);
+    return json(res, 201, { ...doc, next: publishNext(data.agentId) });
   });
 
   const withdrawCard = translate(async (req, res, { remoteAddress, agentId }) => {
