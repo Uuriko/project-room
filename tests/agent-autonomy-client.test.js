@@ -154,3 +154,46 @@ test("agent inbox CLI exposes the autonomy primitives", async t => {
     assert.notEqual(result.status, 0, `expected usage error for [${args.join(" ")}]`);
   }
 });
+
+test("agent client: createAgentInvite falls back to explicit permissions when profile:collaborate is rejected", async t => {
+  const calls = [];
+  const oldDeployment = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push(body);
+    if (body.profile === "collaborate") {
+      return {
+        ok: false, status: 422, headers: { get: () => null },
+        json: async () => ({ error: { code: "invalid_invite_scope", message: "profile must be one of: chat, contribute, review" } }),
+      };
+    }
+    return {
+      ok: true, status: 201, headers: { get: () => null },
+      json: async () => ({ code: "RM-TESTCODE", inviteId: "abcdef12", roomId: "commons", permissions: body.permissions, profile: null }),
+    };
+  };
+  const client = new RoomAgentClient({
+    origin: "https://room.example", roomId: "commons",
+    token: "pri_0123456789abcdef0123456789abcdef0123456789a",
+    fetchImpl: oldDeployment,
+  });
+  const invite = await client.createAgentInvite({ profile: "collaborate", expiresInMinutes: 60, displayName: "Peer" });
+  assert.equal(invite.code, "RM-TESTCODE");
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0], { profile: "collaborate", expiresInMinutes: 60, displayName: "Peer" });
+  assert.deepEqual(calls[1].permissions, ["steer", "accept_work", "complete_work", "verify"]);
+  assert.ok(!("profile" in calls[1]), "fallback sends permissions, not the rejected profile");
+
+  // A non-profile 422 still throws: the fallback only covers unknown profiles.
+  const badRequest = async () => ({
+    ok: false, status: 422, headers: { get: () => null },
+    json: async () => ({ error: { code: "invalid_request", message: "bad ttl" } }),
+  });
+  const strict = new RoomAgentClient({
+    origin: "https://room.example", roomId: "commons",
+    token: "pri_0123456789abcdef0123456789abcdef0123456789a",
+    fetchImpl: badRequest,
+  });
+  await assert.rejects(
+    strict.createAgentInvite({ profile: "collaborate" }),
+    error => error.code === "invalid_request");
+});
