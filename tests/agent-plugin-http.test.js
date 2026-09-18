@@ -385,6 +385,10 @@ test("subscribe/list/unsubscribe roundtrip; server secret shown once", async t =
   assert.equal(sub.agentId, identity.identityId);
   assert.deepEqual(sub.events, ["message.posted", "work.completed"]);
   assert.ok(typeof sub.secret === "string" && sub.secret.length >= 16, "server-generated signing secret shown once");
+  // RC-2026-09-18-039: the 201 names the secret's job and the debugging path.
+  assert.deepEqual(sub.next.map(n => n.action), ["store-secret", "verify-deliveries", "check-journal"]);
+  assert.ok(sub.next[0].description.includes("exactly once"));
+  assert.ok(sub.next[2].path.includes(`/api/agent-webhooks/${sub.subscriptionId}/deliveries`));
   assert.equal(sub.deliveries, 0);
 
   // A caller-supplied secret is never echoed back.
@@ -392,9 +396,15 @@ test("subscribe/list/unsubscribe roundtrip; server secret shown once", async t =
   const supplied = await (await post(origin, "/api/agent-webhooks",
     { url: "https://hooks.example.test/other", events: ["*"], secret: ownSecret }, identity.secret)).json();
   assert.ok(!("secret" in supplied), "caller-supplied secret is not echoed");
+  // RC-2026-09-18-039: with a caller-supplied secret there is nothing to store,
+  // so next[] skips store-secret.
+  assert.deepEqual(supplied.next.map(n => n.action), ["verify-deliveries", "check-journal"]);
 
   const listed = await (await get(origin, "/api/agent-webhooks", identity.secret)).json();
   assert.equal(listed.subscriptions.length, 2);
+  // RC-2026-09-18-047: the list teaches subscribe + journal.
+  assert.deepEqual(listed.next.map(n => n.action), ["check-journal", "check-journal"]);
+  assert.ok(listed.next[0].path.includes(`/api/agent-webhooks/${listed.subscriptions[0].subscriptionId}/deliveries`));
   assert.ok(!JSON.stringify(listed).includes(sub.secret), "signing secrets never appear in listings");
   const row = f.store.db.prepare("SELECT secret FROM agent_webhook_subs WHERE subscription_id=?").get(sub.subscriptionId);
   assert.equal(row.secret, sub.secret, "the signing secret persists for delivery signing");
@@ -447,6 +457,13 @@ test("webhook validation and cross-identity isolation", async t => {
   const origin = await startServer(t, f);
   const a = f.store.identities.create("hook-a");
   const b = f.store.identities.create("hook-b");
+
+  // RC-2026-09-18-047: an empty list teaches the subscribe endpoint.
+  const empty = await (await get(origin, "/api/agent-webhooks", a.secret)).json();
+  assert.deepEqual(empty.subscriptions, []);
+  assert.deepEqual(empty.next.map(n => n.action), ["subscribe"]);
+  assert.equal(empty.next[0].method, "POST");
+  assert.equal(empty.next[0].path, "/api/agent-webhooks");
 
   assert.equal(await errorCode(await post(origin, "/api/agent-webhooks",
     { url: "http://hooks.example.test/plain", events: ["message.posted"] }, a.secret)), "invalid_subscription", "http URLs are rejected");

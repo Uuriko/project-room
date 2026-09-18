@@ -312,7 +312,17 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   const listWebhooks = translate(async (req, res) => {
     const auth = agentAuth(req, requiredScope("webhooks:manage"));
     rate(`agent-webhooks-read:${auth.identityId}`, 120);
-    return json(res, 200, { subscriptions: store.agentPlugin.listWebhooks(auth.identityId) });
+    const subscriptions = store.agentPlugin.listWebhooks(auth.identityId);
+    // RC-2026-09-18-047: the list is where an agent discovers its
+    // subscriptions — teach the two things that matter: how to subscribe
+    // and where to debug deliveries.
+    const next = subscriptions.length === 0
+      ? [Object.freeze({ action: "subscribe", method: "POST", path: "/api/agent-webhooks",
+          description: "No subscriptions yet — POST { url, events } to subscribe. events uses dotted names (e.g. message.posted); a signing secret is shown exactly once in the 201." })]
+      : subscriptions.slice(0, 3).map(s => Object.freeze({ action: "check-journal", method: "GET",
+          path: `/api/agent-webhooks/${encodeURIComponent(s.subscriptionId)}/deliveries`,
+          description: `Delivery journal for ${s.subscriptionId}: pending/delivered/failed states, attempts, and errors.` }));
+    return json(res, 200, { subscriptions, next });
   });
 
   const subscribeWebhook = translate(async (req, res, { remoteAddress }) => {
@@ -340,8 +350,27 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       secret: data.secret ?? null,
     });
     // A server-generated signing secret is shown exactly once here; a
-    // caller-supplied one is never echoed back.
-    return json(res, 201, secretShownOnce ? { ...subscription, secret: secretShownOnce } : subscription);
+    // caller-supplied one is never echoed back. RC-2026-09-18-039: the
+    // response names the secret's job — store it now, verify HMAC on
+    // inbound deliveries, and check the journal for failures.
+    const subscribeNext = (subscriptionId, hasSecret) => {
+      const steps = [
+        Object.freeze({ action: "verify-deliveries", description:
+          "Verify inbound deliveries with HMAC-SHA256 over the payload using this subscription's signing secret." }),
+        Object.freeze({ action: "check-journal", method: "GET",
+          path: `/api/agent-webhooks/${encodeURIComponent(subscriptionId)}/deliveries`,
+          description: "Read the per-subscription delivery journal: delivery states (pending/delivered/failed), attempts, and errors." }),
+      ];
+      if (hasSecret) {
+        steps.unshift(Object.freeze({ action: "store-secret",
+          description: "Store this signing secret NOW — it is shown exactly once and never returned again. Losing it means recreating the subscription." }));
+      }
+      return Object.freeze(steps);
+    };
+    const responseBody = secretShownOnce
+      ? { ...subscription, secret: secretShownOnce, next: subscribeNext(subscription.subscriptionId, true) }
+      : { ...subscription, next: subscribeNext(subscription.subscriptionId, false) };
+    return json(res, 201, responseBody);
   });
 
   const unsubscribeWebhook = translate(async (req, res, { remoteAddress, subscriptionId }) => {

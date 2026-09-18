@@ -1,7 +1,7 @@
 import { workTemplate, WORK_TEMPLATES } from "../src/work-templates.js";
 import { roomTemplate, ROOM_TEMPLATES } from "../src/room-templates.js";
 import { projectBoard } from "../src/board.js";
-import { validId, PERMISSIONS, WORK_STATES } from "../src/events.js";
+import { validId, PERMISSIONS, WORK_STATES, AGENT_AUTONOMY_PERMISSIONS } from "../src/events.js";
 import { nextWorkStep, workActions, reusableWorkDefinition, workCollaboration } from "../src/workflow.js";
 import { isDeepStrictEqual } from "node:util";
 import { searchWork, completedResults, currentResult } from "../src/work-selectors.js";
@@ -556,6 +556,51 @@ export class RoomAgentClient {
   }
   // Personal to this credential's member, never included in shared orientation.
   reminders(request) { return this.#request("/reminders", request); }
+  // Work claims (RC-2026-09-18-041): the room's claim registry with leases,
+  // delivery modes and review policies. Claim/update/release/reassign are
+  // owner-gated server-side; reads need room membership only.
+  workClaims({ signal } = {}) { return this.#request("/work-claims", undefined, signal); }
+  workClaimCreate({ id, title, reviewPolicy, note } = {}, { signal } = {}) {
+    if (typeof id !== "string" || !id) throw new Error("Choose a work claim id");
+    return this.#request("/work-claims", { id,
+      ...(title === undefined ? {} : { title }),
+      ...(reviewPolicy === undefined ? {} : { reviewPolicy }),
+      ...(note === undefined ? {} : { note }) }, signal);
+  }
+  workClaimGet(id, { signal } = {}) { return this.#request(`/work-claims/${encodeURIComponent(id)}`, undefined, signal); }
+  claimWorkItem(id, { note, leaseHours, signal } = {}) {
+    return this.#request(`/work-claims/${encodeURIComponent(id)}/claim`,
+      { ...(note === undefined ? {} : { note }), ...(leaseHours === undefined ? {} : { leaseHours }) }, signal);
+  }
+  updateWorkItem(id, { state, note, deliveryMode, reviewedBy, signal } = {}) {
+    return this.#request(`/work-claims/${encodeURIComponent(id)}/update`,
+      { ...(state === undefined ? {} : { state }), ...(note === undefined ? {} : { note }),
+        ...(deliveryMode === undefined ? {} : { deliveryMode }),
+        ...(reviewedBy === undefined ? {} : { reviewedBy }) }, signal);
+  }
+  releaseWorkItem(id, { note, signal } = {}) {
+    return this.#request(`/work-claims/${encodeURIComponent(id)}/release`,
+      { ...(note === undefined ? {} : { note }) }, signal);
+  }
+  reassignWorkItem(id, { newOwner, note, signal } = {}) {
+    if (typeof newOwner !== "string" || !newOwner) throw new Error("Choose the new owner");
+    return this.#request(`/work-claims/${encodeURIComponent(id)}/reassign`,
+      { newOwner, ...(note === undefined ? {} : { note }) }, signal);
+  }
+  sweepWorkClaims({ signal } = {}) { return this.#request("/work-claims/sweep", {}, signal); }
+  // Convenience: claim, creating the item first when it does not exist yet.
+  async workClaim(id, { title, note, leaseHours, signal } = {}) {
+    try { return await this.claimWorkItem(id, { note, leaseHours, signal }); }
+    catch (error) {
+      if (!(error instanceof RoomClientError) || error.status !== 404) throw error;
+      await this.workClaimCreate({ id, title, note }, { signal });
+      return this.claimWorkItem(id, { note, leaseHours, signal });
+    }
+  }
+  async workComplete(id, { deliveryMode, note, reviewedBy, signal } = {}) {
+    return this.updateWorkItem(id, { state: "done", note, deliveryMode, reviewedBy, signal });
+  }
+  async workRelease(id, { note, signal } = {}) { return this.releaseWorkItem(id, { note, signal }); }
   // Selected task only; the normal authenticated snapshot never leaves this client.
   async workPacket(workItemId, options = {}) {
     return workPacket((await this.snapshot()).state, workItemId, options);
@@ -661,9 +706,30 @@ export class RoomAgentClient {
     return value;
   }
   async createAgentInvite({ permissions, profile, expiresInMinutes, displayName } = {}, { signal } = {}) {
-    const value = await this.#inviteAdmin("/agent-invites", { permissions, profile,
+    const attempt = body => this.#inviteAdmin("/agent-invites", body, { signal });
+    const options = {
       ...(expiresInMinutes === undefined ? {} : { expiresInMinutes }),
-      ...(displayName === undefined ? {} : { displayName }) }, { signal });
+      ...(displayName === undefined ? {} : { displayName }),
+    };
+    let value;
+    if (profile === "collaborate") {
+      try {
+        value = await attempt({ profile, ...options });
+      } catch (error) {
+        // Deployments older than the collaborate profile reject it with 422
+        // invalid_invite_scope. Fall back to the explicit permission set the
+        // profile maps to (AGENT_AUTONOMY_PERMISSIONS); the server still
+        // validates the minter's grant, so this widens nothing.
+        if (error?.code !== "invalid_invite_scope") throw error;
+        value = await attempt({ permissions: [...AGENT_AUTONOMY_PERMISSIONS], ...options });
+      }
+    } else {
+      value = await attempt({
+        ...(profile === undefined ? {} : { profile }),
+        ...(permissions === undefined ? {} : { permissions }),
+        ...options,
+      });
+    }
     if (typeof value?.code !== "string" || typeof value?.inviteId !== "string") {
       throw new RoomClientError(200, "invalid_response", "Room returned an invalid invite code");
     }
