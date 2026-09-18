@@ -58,7 +58,8 @@ runtime.
 ### Compute Provide / network (P1)
 
 11. **Provide = secondary door**: never compete with Ask first paint;
-    Typeform Provide stays off Ask canvas.
+    Typeform Provide stays off Ask canvas. Boundary (T074):
+    [ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md](ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md).
 12. **Network honesty strip**: one line `N Macs · models` expandable —
     not a capacity dashboard on Ask.
 13. **Model ladder labels**: Speed / Mid / Quality (map qwen3-4b /

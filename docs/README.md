@@ -84,6 +84,8 @@ PrismML Bonsai id map (T064, research; public ↔ PQ2_0 / PTQ1_0 / MLX):
 [ASK-PRISMML-BONSAI-ID-MAP-2026-09-18.md](../research/ASK-PRISMML-BONSAI-ID-MAP-2026-09-18.md).
 Ask ladder Advanced grouping + network honesty line (T071+T072, research; Advanced empty; cite #270/#269 canaries):
 [ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md](../research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md).
+Ask vs Provide surface boundary (T074, research; Ask never hosts Provide / Host / Marketplace / capacity dash / providers table; cite #268/#270/#255 tip canaries; T073 lobby canary spinning):
+[ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md](../research/ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md).
 Ask quiet-shell follow-ons (T044–T046, distinct from Artifacts-lite / regen / Bonsai RAM): [research/ask/](../research/ask/).
 
 ## The dated archive
