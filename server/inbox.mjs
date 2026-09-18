@@ -440,7 +440,8 @@ export class Inbox {
   // source ids a held or dismissed journal row resolves to. Resolution is
   // the same quarantineMatch() the review surface uses, so the message the
   // owner sees in the review UI is exactly the message the main inbox views
-  // (list, search, threads, read) hide. Released rows return to the inbox
+  // (list, search, threads, read, attachment listing + single attachment)
+  // hide. Released rows return to the inbox
   // with their flag intact, so they are never in this set. The review
   // surface itself (quarantineReview) stays the only view of held/dismissed
   // rows — nothing here deletes or moves the imported sources.
@@ -854,6 +855,11 @@ export class Inbox {
         const auth = this.auth(token, binding), row = this.source(auth.account.id, sourceId);
         const d = this.version(auth.account.id, row.id, row.revision);
         if (d.adapter !== "synthetic" && includeChannels !== true) fail(404, "inbox_source_not_found", "Source not found.");
+        // Quarantine visibility enforcement (residual from #564): attachment
+        // descriptors for a held or dismissed source must not surface — same
+        // 404 shape as the read path, so no metadata and no hint of the hold
+        // leaks through this listing.
+        if (this.quarantinedSourceIds(auth).has(sourceId)) fail(404, "inbox_source_not_found", "Source not found.");
         return { contractVersion: 1, viewer: viewer(auth), sourceId: row.id, attachments: this.attachmentDescriptors(d) };
       });
     }
@@ -862,6 +868,11 @@ export class Inbox {
         const auth = this.auth(token, binding), row = this.source(auth.account.id, sourceId);
         const d = this.version(auth.account.id, row.id, row.revision);
         if (d.adapter !== "synthetic" && includeChannels !== true) fail(404, "inbox_source_not_found", "Source not found.");
+        // Quarantine visibility enforcement (residual from #564): the single-
+        // attachment membership check is gated on the same quarantine check
+        // as the listing, so a held message's attachment id can neither be
+        // confirmed nor probed through this path.
+        if (this.quarantinedSourceIds(auth).has(sourceId)) fail(404, "inbox_source_not_found", "Source not found.");
         const found = this.attachmentDescriptors(d).find(a => a.id === attachmentId);
         if (!found) fail(404, "inbox_attachment_not_found", "Attachment not found.");
         return { contractVersion: 1, viewer: viewer(auth), sourceId: row.id, attachment: found,
