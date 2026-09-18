@@ -406,6 +406,42 @@ test("subscribe/list/unsubscribe roundtrip; server secret shown once", async t =
     [supplied.subscriptionId]);
 });
 
+test("delivery journal is readable by the owning identity; cross-identity reads 404", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const identity = f.store.identities.create("hook-journal");
+  const other = f.store.identities.create("hook-journal-other");
+
+  const subscribed = await post(origin, "/api/agent-webhooks",
+    { url: "https://hooks.example.test/agent", events: ["message.posted"] }, identity.secret);
+  assert.equal(subscribed.status, 201);
+  const { subscriptionId } = await subscribed.json();
+
+  // No auth, wrong identity, unknown id.
+  assert.equal((await get(origin, `/api/agent-webhooks/${subscriptionId}/deliveries`)).status, 401);
+  assert.equal(await errorCode(await get(origin, `/api/agent-webhooks/${subscriptionId}/deliveries`, other.secret)), "unknown_subscription");
+  assert.equal(await errorCode(await get(origin, "/api/agent-webhooks/sub_missing/deliveries", identity.secret)), "unknown_subscription");
+
+  // Empty journal reads clean.
+  const empty = await (await get(origin, `/api/agent-webhooks/${subscriptionId}/deliveries`, identity.secret)).json();
+  assert.equal(empty.subscriptionId, subscriptionId);
+  assert.deepEqual(empty.deliveries, []);
+
+  // Server-side dispatch writes journal entries the owner can read.
+  const delivery = f.store.agentPlugin.buildWebhookDelivery(subscriptionId, { eventType: "message.posted", data: { messageId: "m1" } });
+  f.store.agentPlugin.recordWebhookAttempt(delivery.deliveryId, { ok: false, error: "connection refused" });
+  const journal = await (await get(origin, `/api/agent-webhooks/${subscriptionId}/deliveries`, identity.secret)).json();
+  assert.equal(journal.deliveries.length, 1);
+  const entry = journal.deliveries[0];
+  assert.equal(entry.deliveryId, delivery.deliveryId);
+  assert.equal(entry.eventType, "message.posted");
+  assert.equal(entry.state, "failed");
+  assert.equal(entry.attempts, 1);
+  assert.equal(entry.error, "connection refused");
+  assert.ok(!("secret" in entry) && !("signature" in entry) && !("url" in entry),
+    "journal entries never carry secrets, signatures, or the endpoint URL");
+});
+
 test("webhook validation and cross-identity isolation", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
