@@ -136,8 +136,10 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(html, /href="#people"/);
   assert.match(html, />People</);
   assert.match(html, /id="people"/);
-  assert.match(html, /Open and People honor <code>#room\/\{roomId\}<\/code>/);
-  assert.match(html, /https:\/\/www\.getdasha\.com\/room#room\/\{roomId\}/);
+  assert.match(html, /Open this invite link to join as a person/);
+  assert.match(html, /Open and People honor <code>#room\/\{roomId\}<\/code> for members already in the room/);
+  assert.match(html, /that is not a shareable invite/);
+  assert.doesNotMatch(html, /Share <code>https:\/\/www\.getdasha\.com\/room#room\/\{roomId\}<\/code>/);
   assert.equal(ROOM_PUBLIC_WWW, "https://www.getdasha.com/room");
   assert.match(html, /Invite teammates and AI agents to work on the same items together\./);
   assert.match(html, /Rooms are private by default\. Adding an agent never lists the room publicly\./);

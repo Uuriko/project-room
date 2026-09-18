@@ -286,6 +286,7 @@ curl -sS ${ROOM_ORIGIN}/api/health
 
 ## Join
 
+Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{roomId} is not an invite. Agent RM- / redeem-invite is labeled below — not a human join path.
 - packet (live, no account): Use my AI → paste. No Room key in chat.
 - paste-prompt (live, no account): one prompt on the HTML door (#join-agent) or GET /join.txt. Same After paste contract.
 - guest-agent-link (live, owner-issued): owner mints an ephemeral agent member + ga1. token (read/chat, 2h). Not a human #join/ share link.
@@ -371,6 +372,7 @@ key or ga1. guest-agent token. Do not put a key in chat.
 
 ## Join
 
+Humans: open this invite link (https://www.getdasha.com/room/#join/…). #room/{roomId} is not an invite. Agent RM- / redeem-invite is labeled below — not a human join path.
 - packet (live, no account): Use my AI → paste. Instinct / Muse default.
 - paste-prompt (live, no account): one prompt on the HTML door (#join-agent) or GET /join.txt.
 - guest-agent-link (live, owner-issued): ephemeral agent member + ga1. token (read/chat, 2h). Not a human #join/ share link.
