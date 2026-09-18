@@ -51,6 +51,20 @@ export const unfencedAdditiveTables = Object.freeze([
   // path to it, and the journal's open→accepted→completed|released
   // transitions plus the one-open-handoff-per-thread rule are the gate.
   "inbox_handoffs",
+  // Lane C inbox collaboration (task RC-2026-09-18-011): collab_assignments,
+  // collab_notes, collab_draft_locks, collab_approvals, collab_routing_events.
+  // Purely additive and intentionally NOT fenced: older writers have no code
+  // path to them, and each journal verifies its own op log on replay.
+  // Sequenced after the Lane D agent_* entries (RC-2026-09-18-010), preserving
+  // their order.
+  "agent_api_keys",
+  "agent_directory_cards",
+  "agent_webhook_subs",
+  "collab_assignments",
+  "collab_notes",
+  "collab_draft_locks",
+  "collab_approvals",
+  "collab_routing_events",
   // spam_quarantine (spam-guard quarantine journal) is purely additive and
   // intentionally NOT fenced: same rationale — older writers have no code
   // path to it, and the journal's held→released|dismissed transitions plus
@@ -73,14 +87,7 @@ export const unfencedAdditiveTables = Object.freeze([
   "stitch_links",
   "stitch_revocations",
   "stitch_suggestions",
-  "stitch_receipts",
-  // Lane D agent plug-in tables (RC-2026-09-18-010): agent_api_keys,
-  // agent_directory_cards, agent_webhook_subs. Purely additive and
-  // intentionally NOT fenced — older writers have no code path to them, and
-  // the AgentPluginStore replays rows into the pure modules on open.
-  "agent_api_keys",
-  "agent_directory_cards",
-  "agent_webhook_subs"
+  "stitch_receipts"
 ]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables])]);
 const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables])]);

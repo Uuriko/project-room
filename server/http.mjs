@@ -6,6 +6,7 @@ import { clientAddress, STREAM_INTERVAL_DEFAULT_MS } from "./deployment.mjs";
 import { validId } from "../src/events.js";
 import { SyntheticInboxTransport, FixtureChannelSender, GmailSender, gmailCredentialsFor, sendTelegramDirect } from "./inbox-transport.mjs";
 import { validateDirectSend, recordDirectSend, completeDirectSend, publicDirectSend } from "./inbox-outbox.mjs";
+import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
 import { channelSyncLimits, syncTelegramConnection } from "./channel-import.mjs";
 import { telegramConfig, TelegramLiveStatus, telegramLiveView } from "./channel-adapters/telegram-config.mjs";
 import { TelegramTransport } from "./channel-adapters/telegram-transport.mjs";
@@ -1731,8 +1732,31 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
       const accessDecideMatch = /^\/api\/rooms\/([^/]{1,384})\/access-requests\/([^/]{1,64})\/decide$/.exec(url.pathname);
       const ownershipTransferMatch = /^\/api\/rooms\/([^/]{1,384})\/ownership\/transfer$/.exec(url.pathname);
-      if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !ownershipTransferMatch) reject(404, "not_found", "Not found");
-      const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? ownershipTransferMatch)[1]);
+      // Lane C inbox collaboration (task RC-2026-09-18-011): every collab
+      // route template below is documented in docs/openapi.yaml — the
+      // route-docs gate extracts these literals from this file.
+      const collabAssignmentsMatch = /^\/api\/rooms\/([^/]{1,384})\/collab\/assignments$/.exec(url.pathname);
+      const collabAssignmentReleaseMatch = /^\/api\/rooms\/([^/]{1,384})\/collab\/assignments\/([^/]{1,64})\/release$/.exec(url.pathname);
+      const collabNotesMatch = /^\/api\/rooms\/([^/]{1,384})\/collab\/notes$/.exec(url.pathname);
+      const collabLockAcquireMatch = /^\/api\/rooms\/([^/]{1,384})\/collab\/draft-locks\/acquire$/.exec(url.pathname);
+      const collabLockReleaseMatch = /^\/api\/rooms\/([^/]{1,384})\/collab\/draft-locks\/release$/.exec(url.pathname);
+      const collabLocksMatch = /^\/api\/rooms\/([^/]{1,384})\/collab\/draft-locks$/.exec(url.pathname);
+      const collabApprovalsMatch = /^\/api\/rooms\/([^/]{1,384})\/collab\/approvals$/.exec(url.pathname);
+      const collabApprovalDecideMatch = /^\/api\/rooms\/([^/]{1,384})\/collab\/approvals\/([^/]{1,64})\/decide$/.exec(url.pathname);
+      const collabApprovalResubmitMatch = /^\/api\/rooms\/([^/]{1,384})\/collab\/approvals\/([^/]{1,64})\/resubmit$/.exec(url.pathname);
+      const collabRoutingMentionsMatch = /^\/api\/rooms\/([^/]{1,384})\/collab\/routing\/mentions$/.exec(url.pathname);
+      const collabRoutingMatch = /^\/api\/rooms\/([^/]{1,384})\/collab\/routing$/.exec(url.pathname);
+      const collabRoutingResolveMatch = /^\/api\/rooms\/([^/]{1,384})\/collab\/routing\/([^/]{1,64})\/resolve$/.exec(url.pathname);
+      const collabRoutingPolicyMatch = /^\/api\/rooms\/([^/]{1,384})\/collab\/routing\/policy$/.exec(url.pathname);
+      const collabHandoffsMatch = /^\/api\/rooms\/([^/]{1,384})\/collab\/handoffs$/.exec(url.pathname);
+      const collabHandoffTransitionMatch = /^\/api\/rooms\/([^/]{1,384})\/collab\/handoffs\/([^/]{1,64})\/transition$/.exec(url.pathname);
+      const collabMatch = collabAssignmentsMatch ?? collabAssignmentReleaseMatch ?? collabNotesMatch
+        ?? collabLockAcquireMatch ?? collabLockReleaseMatch ?? collabLocksMatch ?? collabApprovalsMatch
+        ?? collabApprovalDecideMatch ?? collabApprovalResubmitMatch ?? collabRoutingMentionsMatch
+        ?? collabRoutingMatch ?? collabRoutingResolveMatch ?? collabRoutingPolicyMatch ?? collabHandoffsMatch
+        ?? collabHandoffTransitionMatch;
+      if (!match && !revokeMatch && !threadMatch && !accessDecideMatch && !ownershipTransferMatch && !collabMatch) reject(404, "not_found", "Not found");
+      const roomId = pathId((match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? ownershipTransferMatch ?? collabMatch)[1]);
       const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
       const threadMessageId = threadMatch ? pathId(threadMatch[2]) : null;
       const accessRequestId = accessDecideMatch ? pathId(accessDecideMatch[2]) : null;
@@ -1745,6 +1769,29 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
       rate(`read:${auth.credentialHash}`, 600);
       if (!["GET", "HEAD"].includes(req.method)) { protectWrite(req, auth, selected.bearer); rate(`write:${auth.credentialHash}`, 60); }
+      // Lane C inbox collaboration (task RC-2026-09-18-011): room-scoped
+      // collab routes share the credential, fence and rate-limit checks
+      // above; the handler maps pure-module errors to stable 4xx codes.
+      if (collabMatch) {
+        const collabRoute = collabAssignmentsMatch ? "assignments"
+          : collabAssignmentReleaseMatch ? "assignment-release"
+          : collabNotesMatch ? "notes"
+          : collabLockAcquireMatch ? "lock-acquire"
+          : collabLockReleaseMatch ? "lock-release"
+          : collabLocksMatch ? "lock-detect"
+          : collabApprovalsMatch ? "approvals"
+          : collabApprovalDecideMatch ? "approval-decide"
+          : collabApprovalResubmitMatch ? "approval-resubmit"
+          : collabRoutingMentionsMatch ? "routing-mentions"
+          : collabRoutingMatch ? "routing"
+          : collabRoutingResolveMatch ? "routing-resolve"
+          : collabRoutingPolicyMatch ? "routing-policy"
+          : collabHandoffsMatch ? "handoffs" : "handoff-transition";
+        const collabIdMatch = collabAssignmentReleaseMatch ?? collabApprovalDecideMatch ?? collabApprovalResubmitMatch
+          ?? collabRoutingResolveMatch ?? collabHandoffTransitionMatch;
+        return await handleInboxCollab({ req, res, url, store, roomId, auth, collabRoute,
+          collabId: collabIdMatch ? pathId(collabIdMatch[2]) : null, helpers: { json, reject, body } });
+      }
       if (route === "thread" && req.method === "GET") return json(res, 200, store.messageThread(selected.token, roomId, threadMessageId, fence));
       if (!route && req.method === "GET") {
         const params = url.searchParams;
