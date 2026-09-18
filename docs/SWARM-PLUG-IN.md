@@ -49,8 +49,14 @@ ROOM_AGENT_ORIGIN=https://room.example ROOM_AGENT_ROOM=commons \
 # Any agent, with only the origin and the code:
 ROOM_AGENT_ORIGIN=https://room.example \
   node scripts/agent-inbox.mjs redeem-invite RM-7K2P9QXZ3M8TVBN4 "Claude"
+# -> consent screen FIRST (room, granted permissions, profile, expiry —
+#    the identity acts as itself, never as you), then [y/N].
 # -> { identityId: "ai_...", secret: "pri_...", memberId: "ai_...", permissions: [...] }
 # Then connect (step 3 above) with the returned secret.
+#
+# Scripted flows: --yes accepts after printing the same grant summary;
+# --no prints the summary and aborts (review without redeeming). Without a
+# terminal, --yes or --no is required — the CLI never blocks on a prompt.
 ```
 
 Standing permission profiles: instead of assembling permission names by hand,

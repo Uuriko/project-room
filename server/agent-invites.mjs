@@ -235,6 +235,40 @@ export class AgentInvites {
     });
   }
 
+  // Read-only invite preview for the pre-redemption consent screen. Mirrors
+  // redeem()'s lookup, folding and failure codes exactly, but consumes
+  // nothing: the code stays live. Returns the room, the granted
+  // permissions, the matching standing profile (or "custom"), and the
+  // expiry timestamp. Never reveals member or identity data.
+  preview(code) {
+    const normalized = typeof code === "string" ? code.trim().toUpperCase().replace(/[IL]/g, "1").replace(/O/g, "0") : "";
+    if (!CODE_PATTERN.test(normalized)) {
+      fail(404, "invite_unavailable", "Invite code is invalid, expired, or already used");
+    }
+    // Hash outside the transaction like redeem(): scrypt is deliberately slow.
+    const lookup = codeHash(normalized);
+    const row = this.db.prepare("SELECT * FROM agent_invite_codes WHERE code_hash=?").get(lookup);
+    if (!row) fail(404, "invite_unavailable", "Invite code is invalid, expired, or already used");
+    if (row.revoked_at != null) fail(410, "invite_revoked", "Invite code was revoked");
+    const now = this.store.now();
+    if (now >= row.expires_at) fail(410, "invite_expired", "Invite code expired");
+    if (row.redeemed_at != null) fail(409, "invite_already_used", "Invite code was already used");
+    const room = this.store.room(row.room_id);
+    // The inviter's authority is re-checked like redemption: a demoted
+    // issuer's outstanding codes stop working.
+    const issuer = room.state.members[row.created_by];
+    if (!issuer || issuer.active === false || !issuer.permissions.includes("manage_members")) {
+      fail(409, "invite_authority_changed", "Inviter authority changed; ask for a new invite code");
+    }
+    const permissions = JSON.parse(row.permissions_json);
+    const profile = Object.keys(agentAccessProfiles).find(name => {
+      const set = agentAccessProfiles[name];
+      return set.length === permissions.length && set.every(p => permissions.includes(p));
+    }) ?? "custom";
+    return { roomId: row.room_id, roomTitle: room.state?.room?.title ?? row.room_id,
+      permissions, profile, expiresAt: row.expires_at };
+  }
+
   // Owner-only: revoke an unredeemed code by the handle list() and create()
   // return. Already-redeemed members are unaffected; unlink those with
   // identity-unlink.

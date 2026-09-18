@@ -24,10 +24,10 @@ async function cli(origin, args, env = {}) {
   // A saved connection and credential variables are mutually exclusive.
   const base = env.ROOM_AGENT_CONFIG === undefined ? { ROOM_AGENT_ORIGIN: origin } : {};
   try {
-    const { stdout } = await execFileAsync(process.execPath, ["scripts/agent-inbox.mjs", ...args], {
+    const { stdout, stderr } = await execFileAsync(process.execPath, ["scripts/agent-inbox.mjs", ...args], {
       env: { ...scrubbed, ...base, ...env }, encoding: "utf8", timeout: 30000, maxBuffer: 1024 * 1024,
     });
-    return { status: 0, json: JSON.parse(stdout) };
+    return { status: 0, json: JSON.parse(stdout), stderr: String(stderr) };
   } catch (error) { return { status: error.code ?? 1, stderr: String(error.stderr ?? error.message) }; }
 }
 
@@ -299,10 +299,12 @@ test("CLI: owner mints a code, a new AI redeems it and connects", async t => {
   const listed = await cli(origin, ["invite-codes"], ownerEnv);
   assert.equal(listed.status, 0, listed.stderr);
   assert.ok(listed.json.invites.some(row => row.inviteId === minted.json.inviteId && row.status === "active"));
-  // Redemption needs only the origin: no credential exists yet.
-  const redeemed = await cli(origin, ["redeem-invite", minted.json.code, "Plug Bot"]);
+  // Redemption needs only the origin: no credential exists yet. Scripted
+  // flows pass --yes; the grant summary still prints to stderr.
+  const redeemed = await cli(origin, ["redeem-invite", minted.json.code, "Plug Bot", "--yes"]);
   assert.equal(redeemed.status, 0, redeemed.stderr);
   assert.match(redeemed.json.secret, /^pri_/);
+  assert.match(redeemed.stderr, /This code grants: accept_work, complete_work/);
   const agentDir = mkdtempSync(join(tmpdir(), "invite-loop-"));
   t.after(() => rmSync(agentDir, { recursive: true, force: true }));
   const connected = await cli(origin, ["connect", join(agentDir, "agent")], {
@@ -316,7 +318,7 @@ test("CLI: owner mints a code, a new AI redeems it and connects", async t => {
   // The burned code cannot be revoked (already used) and cannot be reused.
   const revokeUsed = await cli(origin, ["invite-code-revoke", minted.json.inviteId], ownerEnv);
   assert.notEqual(revokeUsed.status, 0);
-  const reuse = await cli(origin, ["redeem-invite", minted.json.code, "Plug Bot"]);
+  const reuse = await cli(origin, ["redeem-invite", minted.json.code, "Plug Bot", "--yes"]);
   assert.notEqual(reuse.status, 0);
 });
 
@@ -378,4 +380,90 @@ test("CLI mints a code from a profile name and rejects unknown profiles", async 
   assert.equal(minted.json.profile, "review");
   const bad = await cli(origin, ["invite-code", "profile:admin"], ownerEnv);
   assert.notEqual(bad.status, 0);
+});
+
+test("preview returns the grant without consuming the code", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const minted = await mint(origin, ownerKey, { profile: "contribute", expiresInMinutes: 60, displayName: "Plug Bot" });
+  assert.equal(minted.status, 201, JSON.stringify(minted.json));
+  const preview = await get(origin, `/api/agent-invites/preview?code=${encodeURIComponent(minted.json.code)}`);
+  assert.equal(preview.status, 200, JSON.stringify(preview.json));
+  assert.equal(preview.json.roomId, "commons");
+  assert.equal(preview.json.roomTitle, "Project Room Commons");
+  assert.deepEqual(preview.json.permissions, ["accept_work", "complete_work"]);
+  assert.equal(preview.json.profile, "contribute");
+  assert.ok(preview.json.expiresAt > Date.now());
+  // Nothing sensitive leaks and nothing was consumed: the code still redeems.
+  assert.ok(!("secret" in preview.json) && !("identityId" in preview.json) && !("memberId" in preview.json));
+  const listed = await get(origin, "/api/rooms/commons/agent-invites", ownerKey);
+  assert.ok(listed.json.invites.some(row => row.inviteId === minted.json.inviteId && row.status === "active"));
+  const redeemed = await redeem(origin, minted.json.code);
+  assert.equal(redeemed.status, 201, JSON.stringify(redeemed.json));
+});
+
+test("preview folds failures like redeem: unknown, used, revoked, expired", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const preview = code => get(origin, `/api/agent-invites/preview?code=${encodeURIComponent(code)}`);
+  const unknown = await preview("RM-AAAAAAAAAAAAAAAA");
+  assert.equal(unknown.status, 404);
+  assert.equal(unknown.json.error.code, "invite_unavailable");
+  const minted = await mint(origin, ownerKey, { profile: "chat", expiresInMinutes: 60 });
+  assert.equal(minted.status, 201);
+  assert.equal((await redeem(origin, minted.json.code)).status, 201);
+  const used = await preview(minted.json.code);
+  assert.equal(used.status, 409);
+  assert.equal(used.json.error.code, "invite_already_used");
+  const minted2 = await mint(origin, ownerKey, { profile: "chat", expiresInMinutes: 60 });
+  await del(origin, "/api/rooms/commons/agent-invites", { inviteId: minted2.json.inviteId }, ownerKey);
+  const revoked = await preview(minted2.json.code);
+  assert.equal(revoked.status, 410);
+  assert.equal(revoked.json.error.code, "invite_revoked");
+  const minted3 = await mint(origin, ownerKey, { profile: "chat", expiresInMinutes: 60 });
+  assert.equal((await preview(minted3.json.code)).status, 200);
+});
+
+test("CLI consent: --yes prints the grant and redeems; --no aborts without creating anything", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const ownerEnv = { ROOM_AGENT_ROOM: "commons", ROOM_AGENT_MEMBER: "owner", ROOM_AGENT_TOKEN: ownerKey };
+  const minted = await cli(origin, ["invite-code", "profile:contribute", "60", "Consent Bot"], ownerEnv);
+  assert.equal(minted.status, 0, minted.stderr);
+  // --no: the consent screen prints, nothing is created, the code stays live.
+  const declined = await cli(origin, ["redeem-invite", minted.json.code, "Consent Bot", "--no"]);
+  assert.notEqual(declined.status, 0);
+  assert.match(declined.stderr, /This code grants: accept_work, complete_work/);
+  assert.match(declined.stderr, /profile: contribute/);
+  assert.match(declined.stderr, /acts as itself, never as you/);
+  assert.match(declined.stderr, /not redeemed/);
+  const listed = await cli(origin, ["invite-codes"], ownerEnv);
+  assert.ok(listed.json.invites.some(row => row.inviteId === minted.json.inviteId && row.status === "active"),
+    "declined code must stay active");
+  // --yes: the same summary prints, then the identity is created.
+  const accepted = await cli(origin, ["redeem-invite", minted.json.code, "Consent Bot", "--yes"]);
+  assert.equal(accepted.status, 0, accepted.stderr);
+  assert.match(accepted.json.secret, /^pri_/);
+  assert.match(accepted.stderr, /This code grants: accept_work, complete_work/);
+});
+
+test("CLI consent: non-interactive without --yes refuses instead of hanging", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const ownerEnv = { ROOM_AGENT_ROOM: "commons", ROOM_AGENT_MEMBER: "owner", ROOM_AGENT_TOKEN: ownerKey };
+  const minted = await cli(origin, ["invite-code", "profile:chat", "60", "Shy Bot"], ownerEnv);
+  assert.equal(minted.status, 0, minted.stderr);
+  // execFile stdin is a pipe, never a TTY: the CLI must not block on a prompt.
+  const refused = await cli(origin, ["redeem-invite", minted.json.code, "Shy Bot"]);
+  assert.notEqual(refused.status, 0);
+  assert.match(refused.stderr, /--yes/);
+  // The code survived the refusal and redeems fine with --yes.
+  const accepted = await cli(origin, ["redeem-invite", minted.json.code, "Shy Bot", "--yes"]);
+  assert.equal(accepted.status, 0, accepted.stderr);
+  assert.deepEqual(accepted.json.permissions, []);
+});
+
+test("CLI rejects --yes and --no together", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const ownerEnv = { ROOM_AGENT_ROOM: "commons", ROOM_AGENT_MEMBER: "owner", ROOM_AGENT_TOKEN: ownerKey };
+  const minted = await cli(origin, ["invite-code", "profile:chat", "60", "Fussy Bot"], ownerEnv);
+  assert.equal(minted.status, 0, minted.stderr);
+  const both = await cli(origin, ["redeem-invite", minted.json.code, "Fussy Bot", "--yes", "--no"]);
+  assert.notEqual(both.status, 0);
 });

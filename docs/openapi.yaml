@@ -1592,6 +1592,39 @@ paths:
         '410': { description: invite_revoked or invite_expired }
         '422': { description: invalid_invite or invalid_invite_name }
         '429': { description: rate_limited }
+  /api/agent-invites/preview:
+    get:
+      summary: Preview an agent invite code
+      description: >-
+        Open: the invite code is the credential (same format and failure
+        folding as the redeem route). Read-only: the code stays live and no
+        member or identity data is returned. Powers the redeem-invite consent
+        screen. 20 per address per minute.
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Room, granted permissions, matching profile and expiry
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [roomId, roomTitle, permissions, profile, expiresAt]
+                properties:
+                  roomId: { type: string }
+                  roomTitle: { type: string }
+                  permissions: { type: array, items: { type: string } }
+                  profile: { type: string, description: chat, contribute, review or custom }
+                  expiresAt: { type: integer }
+        '404': { description: invite_unavailable }
+        '409': { description: invite_already_used or invite_authority_changed }
+        '410': { description: invite_revoked or invite_expired }
+        '422': { description: invalid_invite }
+        '429': { description: rate_limited }
   /api/access-requests:
     post:
       summary: Request room access (self-serve)
