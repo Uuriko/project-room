@@ -119,7 +119,10 @@ runtime.
 Preserve IDs: `#step-ask`, `#ask-input`, `#ask-send`, `#ask-model`,
 stream contracts.
 Visual: black canvas, paper text, acid send only; composer bottom;
-messages max-width ~42rem; hover toolbar; New chat quiet top-right.
+messages max-width ~42rem; hover toolbar; New chat quiet top-right
+(T084 confirm if the thread has turns:
+[ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md](ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md)
+— never wipe without Esc/cancel).
 Deploy gate: tip
 [#246](https://github.com/Uuriko/dasha-lobby/pull/246) /
 [#249](https://github.com/Uuriko/dasha-lobby/pull/249) must be live

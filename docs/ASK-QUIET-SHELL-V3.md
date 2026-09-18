@@ -122,7 +122,7 @@ paint (header, nav, pills, status) on a desktop Ask viewport.
 | Composer | Sticky bottom |
 | Messages | Max-width ~42rem |
 | Toolbar | Hover / focus on the turn |
-| New chat | Quiet top-right (`#clear-chat` / New from #249) |
+| New chat | Quiet top-right (`#clear-chat` / New from #249). Confirm if turns: [ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md](../research/ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md) (T084) |
 
 No emerald brand wash. No feature grid. No IDE density.
 
@@ -183,6 +183,7 @@ From the research note. Do not sneak them into the polish PR.
 | T045 | Honesty receipt folds after complete; hover expand | Ask follow-on — [research/ask/T045-receipt-collapse.md](../research/ask/T045-receipt-collapse.md) |
 | T046 | No mid-stream tok/s essay (lint/test rule) | Ask follow-on — [research/ask/T046-no-midstream-toks.md](../research/ask/T046-no-midstream-toks.md) |
 | T082 | Stop / Regen / Copy / Edit keyboard map (Esc / R / C / E) | Ask follow-on — [research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md](../research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md) (cite #249 A1–A5 + §3.4; picker keys stay T032) |
+| T084 | New chat / Clear thread quiet confirm (Esc/cancel never wipes) | Ask follow-on — [research/ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md](../research/ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md) (cite #249 A7 New; T082 keeps no letter) |
 | T074 | Ask vs Provide surface boundary (doors / dash / table off canvas) | Ask follow-on — [research/ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md](../research/ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md) |
 | T081 | Artifacts-lite implement gate (claim blocked until live + Quill off HTML) | Ask follow-on — [research/ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md](../research/ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md) (cite #493/#507) |
 | T085 | `#ask-thread` GFM subset (fences / lists / bold / inline; links plain) | Ask follow-on — [research/ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md](../research/ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md) (cite T041 #269) |
