@@ -76,6 +76,7 @@ keydown tree later — not three products.
 | T044–T046 export / receipt / tok/s | **Cite.** Not a shortcut cheatsheet and not mid-stream copy. |
 | T071–T075 ladder / placement / boundary | **Cite only.** Not this path. |
 | T081 Artifacts-lite implement gate ([#521](https://github.com/Uuriko/project-room/pull/521), merge separately) | **Cite, do not rewrite.** Fence Copy is T034, not this `C`. |
+| T084 New chat / Clear thread confirm | **Sibling.** `#clear-chat` still has no letter. Quiet confirm + Esc/cancel are T084. |
 | T068 / T069 battery / Prefer AC | **Not** this path. |
 | **T073** capacity-dash canary (dasha-lobby [#275](https://github.com/Uuriko/dasha-lobby/pull/275)) | **Hands-off.** |
 | dasha-lobby [#260](https://github.com/Uuriko/dasha-lobby/pull/260) / [#262](https://github.com/Uuriko/dasha-lobby/pull/262) / [#266](https://github.com/Uuriko/dasha-lobby/pull/266) / [#274](https://github.com/Uuriko/dasha-lobby/pull/274) | **Quill owns** `dasha-compute.html` + embed. Hands-off. |
@@ -200,7 +201,7 @@ No Continue letter. Hover / focus on the `stopped` turn still shows
 - ⌘K / Ctrl+K / empty `/` (T032)
 - IME composition (`isComposing` / key 229)
 - Browser refresh (⌘R) / copy-with-selection / find (⌘F)
-- `#clear-chat` New (no letter)
+- `#clear-chat` New (no letter — confirm is T084)
 - Provide / Host / Marketplace / Needle
 - Typeform `#step-model` / `Start.` / `Do.` / “Which model?”
 

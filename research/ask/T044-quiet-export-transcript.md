@@ -4,7 +4,7 @@
 **Product:** getdasha.com/compute **Ask** (not Room)  
 **Status:** Spec ready · implement deferred · docs-only  
 **Plan refs:** T044 (this spec) · implement on `Uuriko/dasha-lobby` after quiet-shell tip is live  
-**Companions:** [ASK-QUIET-SHELL-V3.md](../../docs/ASK-QUIET-SHELL-V3.md) · [T045](T045-receipt-collapse.md) · [T046](T046-no-midstream-toks.md) · [ASK-MODEL-CMDK-SPEC-2026-09-17.md](../../docs/ASK-MODEL-CMDK-SPEC-2026-09-17.md)
+**Companions:** [ASK-QUIET-SHELL-V3.md](../../docs/ASK-QUIET-SHELL-V3.md) · [T045](T045-receipt-collapse.md) · [T046](T046-no-midstream-toks.md) · [ASK-MODEL-CMDK-SPEC-2026-09-17.md](../../docs/ASK-MODEL-CMDK-SPEC-2026-09-17.md) · T084 New confirm ([ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md](../ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md))
 
 Ask is Compute’s chat door. Compute ≠ Room. No Typeform `Start.` / `Do.` return.
 
@@ -35,7 +35,7 @@ This is **not** Room `GET /api/rooms/<id>/export` ([EXPORT-RETENTION-DELETION.md
 | Mid-stream (`askBusy`) | Hidden or disabled. Do not snapshot a live turn as Done. |
 | Typeform `#step-answer` / `#step-gate` / Provide / Pay | **No.** Ask-only. |
 
-**Preferred chrome:** one whisper control in `#step-ask .ask-top`, same row as `#clear-chat` / New — **only when `has-chat`**. Hover/focus reveals **JSON** and **MD**. Not a permanent icon rail. Not a starter chip.
+**Preferred chrome:** one whisper control in `#step-ask .ask-top`, same row as `#clear-chat` / New — **only when `has-chat`**. Hover/focus reveals **JSON** and **MD**. Not a permanent icon rail. Not a starter chip. New confirm (T084) must not steal this control.
 
 **Do not** hang Export on every `.ask-turn`. Per-turn Copy already covers one bubble ([#249](https://github.com/Uuriko/dasha-lobby/pull/249) A3).
 
