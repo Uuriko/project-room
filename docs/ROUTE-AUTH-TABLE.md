@@ -184,6 +184,12 @@ the served-open set differs from the declared set; `node scripts/open-routes.mjs
 | `POST /api/account-rooms` | account session cookie + `X-Session-Binding` + CSRF (`protectWrite`), 10/min per account | canonical account with an active human membership that is a room owner or holds `manage_members` (403 `room_creation_denied` otherwise, including provisional room-key accounts); the caller becomes member `owner` of the new room; client `roomId` is the idempotency key (200 `duplicate: true` on replay, 409 `room_exists` for a different room under that id); 409 `pilot_limit` at 100 memberships |
 | `GET /api/auth/recovery-codes/status` | account session cookie | `{ configured, remaining }` for the account's own recovery-code set; codes are never exposed (no re-display route) |
 | `POST /api/auth/password/change` | account session cookie + `Origin` (20/address/min) | verifies the current password, policy-checks the new one (10–256 characters), and replaces the stored scrypt verifier; the old password stops working immediately |
+| `GET /api/auth/methods` | account session cookie | the account's own login methods as safe descriptors (no verifiers) plus honest provider configuration status (GitHub, Google, passkey, mail) |
+| `POST /api/auth/methods/disable` · `POST /api/auth/methods/enable` | account session cookie + `Origin` (30/address/min) | flips the `disabled` flag on one of the account's own methods; the last active method cannot be disabled (409 `last_login_method`) |
+| `POST /api/auth/methods/remove` | account session cookie + `Origin` (30/address/min) | deletes one of the account's own methods (passkey credentials and recovery codes go with it); the last active method cannot be removed |
+| `POST /api/auth/password/set` | account session cookie + `Origin` (20/address/min) | attaches a first password method to an account that lacks one; 409 when one exists; requires a verified email on the account; password policy-checked and scrypt-hashed |
+| `GET /api/auth/github/link/start` | account session cookie (10/address/min) | starts GitHub OAuth with a link intent: the callback attaches the GitHub subject to the signed-in account (409 when linked elsewhere) instead of the sign-in find-or-provision order |
+| `GET /api/auth/google/link/start` | account session cookie (10/address/min) | starts Google OAuth with a link intent: the callback attaches the Google subject to the signed-in account (409 when linked elsewhere) instead of the sign-in find-or-provision order |
 
 ## Inbox connection routes (account session, not room credentials)
 

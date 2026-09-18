@@ -1,0 +1,253 @@
+// Multi-method sign-in / create-account surface (slice 7, RC-2026-09-17-016).
+//
+// Mounts into the auth panel next to the existing Google button and the
+// room/account key forms: email+password (create account or sign in), email
+// magic link, passkey, and recovery code, plus a GitHub OAuth button.
+// Browser flows use the cookie slot: this module never reads the HttpOnly
+// account cookie — it posts { ..., sessionRevision } with the CSRF token
+// from the account session, and the server resolves the slot from the
+// cookie (signInSlotToken in server/http.mjs). OAuth buttons drive the
+// start routes with fetch + manual redirect so the CSRF header rides along
+// and unconfigured providers surface an honest message instead of raw JSON.
+import { base64urlToBytes, bytesToBase64url, escapeHtml } from "./account-settings-ui.js";
+
+// Convert the server's authentication options into a PublicKeyCredentialRequestOptions.
+export function toAuthenticationPublicKey(options) {
+  return {
+    challenge: base64urlToBytes(options.challenge),
+    rpId: options.rpId,
+    allowCredentials: (options.allowCredentials ?? []).map(credential => ({
+      ...credential,
+      id: base64urlToBytes(credential.id)
+    })),
+    userVerification: options.userVerification,
+    timeout: options.timeout
+  };
+}
+
+// Encode the get() credential for POST /api/auth/passkey/authenticate/finish.
+export function toAuthenticationResponse(credential) {
+  const response = credential.response ?? {};
+  return {
+    id: credential.id,
+    rawId: bytesToBase64url(credential.rawId),
+    type: credential.type,
+    response: {
+      authenticatorData: bytesToBase64url(response.authenticatorData),
+      clientDataJSON: bytesToBase64url(response.clientDataJSON),
+      signature: bytesToBase64url(response.signature),
+      userHandle: response.userHandle == null ? null : bytesToBase64url(response.userHandle)
+    }
+  };
+}
+
+const METHOD_LABELS = { password: "Email + password", magic: "Magic link", passkey: "Passkey", recovery: "Recovery code" };
+
+export function createAuthSigninUI({ accountClient, ensureAccountSession, onSignedIn }) {
+  let container = null;
+  let activeMethod = null;
+  let passwordMode = "signup"; // or "login"
+  let passwordFields = { email: "", password: "" };
+  let magicPhase = "request"; // or "code"
+  let magicEmail = "";
+  let busy = false;
+
+  const statusNode = () => container?.querySelector("[data-signin-status]") ?? null;
+  function setStatus(text, error = false) {
+    const node = statusNode();
+    if (node) { node.textContent = text; node.classList.toggle("visible", Boolean(text)); node.classList.toggle("error", Boolean(text) && error); }
+  }
+  async function authedSession() {
+    await ensureAccountSession();
+    return accountClient.currentSession("signing in");
+  }
+  const api = (session, path, data) => accountClient.request(path, { method: "POST", session, data });
+  const failureText = error => error?.message || "Couldn\u2019t sign in. Try again.";
+
+  function shellHtml() {
+    return `<div class="auth-divider"><span>or sign in another way</span></div>
+      <div class="auth-oauth-row">
+        <button type="button" class="button secondary" data-oauth="github">Continue with GitHub</button>
+      </div>
+      <div class="auth-methods" role="group" aria-label="Other sign-in methods">
+        ${Object.entries(METHOD_LABELS).map(([method, label]) =>
+          `<button type="button" class="button ghost" data-method="${method}" aria-pressed="${method === activeMethod}">${label}</button>`).join("")}
+      </div>
+      <div data-signin-panel>${panelHtml()}</div>
+      <p class="status form-status" role="alert" data-signin-status></p>`;
+  }
+  function panelHtml() {
+    if (activeMethod === "password") return passwordHtml();
+    if (activeMethod === "magic") return magicHtml();
+    if (activeMethod === "passkey") return passkeyHtml();
+    if (activeMethod === "recovery") return recoveryHtml();
+    return "";
+  }
+  function passwordHtml() {
+    const signup = passwordMode === "signup";
+    return `<form data-signin-form="password" autocomplete="on">
+      <div class="auth-method-tabs" role="group" aria-label="Create account or sign in">
+        <button type="button" class="button ghost" data-password-mode="signup" aria-pressed="${signup}">Create account</button>
+        <button type="button" class="button ghost" data-password-mode="login" aria-pressed="${!signup}">Sign in</button>
+      </div>
+      <label>Email <input name="email" type="email" required autocomplete="email" maxlength="254" value="${escapeHtml(passwordFields.email)}"></label>
+      <label>Password <input name="password" type="password" required autocomplete="${signup ? "new-password" : "current-password"}" minlength="12" maxlength="256" value="${escapeHtml(passwordFields.password)}"></label>
+      <button class="button primary" type="submit" ${busy ? "disabled" : ""}>${signup ? "Create account" : "Sign in"}</button>
+    </form>`;
+  }
+  function magicHtml() {
+    if (magicPhase === "code") return `<form data-signin-form="magic-code" autocomplete="on">
+      <p class="form-hint">We emailed a sign-in code to ${escapeHtml(magicEmail)}. It expires in 15 minutes.</p>
+      <label>Sign-in code <input name="code" type="text" required autocomplete="one-time-code" inputmode="text" maxlength="128" placeholder="Paste the code"></label>
+      <button class="button primary" type="submit" ${busy ? "disabled" : ""}>Sign in</button>
+      <button type="button" class="text-button" data-magic-restart>Use a different email</button>
+    </form>`;
+    return `<form data-signin-form="magic-request" autocomplete="on">
+      <label>Email <input name="email" type="email" required autocomplete="email" maxlength="254" value="${escapeHtml(magicEmail)}"></label>
+      <button class="button primary" type="submit" ${busy ? "disabled" : ""}>Email me a sign-in code</button>
+    </form>`;
+  }
+  function passkeyHtml() {
+    const supported = typeof window !== "undefined" && typeof navigator !== "undefined" && !!window.PublicKeyCredential;
+    return `<form data-signin-form="passkey">
+      ${supported ? "" : `<p class="form-hint">This browser doesn\u2019t support passkeys.</p>`}
+      <button class="button primary" type="submit" ${busy || !supported ? "disabled" : ""}>Sign in with passkey</button>
+    </form>`;
+  }
+  function recoveryHtml() {
+    return `<form data-signin-form="recovery" autocomplete="on">
+      <p class="form-hint">Lost your other sign-in methods? Use one of your single-use recovery codes.</p>
+      <label>Email <input name="email" type="email" required autocomplete="email" maxlength="254"></label>
+      <label>Recovery code <input name="code" type="text" required autocomplete="off" spellcheck="false" maxlength="64" placeholder="xxxxxx-xxxxxx"></label>
+      <button class="button primary" type="submit" ${busy ? "disabled" : ""}>Sign in</button>
+    </form>`;
+  }
+
+  function render() { if (container) container.innerHTML = shellHtml(); }
+  function renderPanel() {
+    if (!container) return;
+    const panel = container.querySelector("[data-signin-panel]");
+    if (panel) panel.innerHTML = panelHtml();
+    else render();
+  }
+
+  function readForm(form) {
+    const values = {};
+    for (const input of form.querySelectorAll("input[name]")) values[input.name] = input.value;
+    return values;
+  }
+
+  async function finish(view) {
+    const session = view?.session ?? view;
+    if (!session?.authenticated || !session?.account) { setStatus("Sign-in didn\u2019t complete. Try again.", true); return; }
+    setStatus("");
+    await onSignedIn(session);
+  }
+
+  async function withBusy(fn) {
+    if (busy) return;
+    busy = true; renderPanel(); setStatus("");
+    try { await fn(); }
+    catch (error) { setStatus(failureText(error), true); }
+    finally { busy = false; renderPanel(); }
+  }
+
+  const onClick = async event => {
+    const methodButton = event.target?.closest?.("[data-method]");
+    if (methodButton) {
+      activeMethod = activeMethod === methodButton.dataset.method ? null : methodButton.dataset.method;
+      render();
+      return;
+    }
+    const modeButton = event.target?.closest?.("[data-password-mode]");
+    if (modeButton) {
+      const form = container?.querySelector('[data-signin-form="password"]');
+      if (form) passwordFields = { email: form.querySelector('[name="email"]')?.value ?? "", password: form.querySelector('[name="password"]')?.value ?? "" };
+      passwordMode = modeButton.dataset.passwordMode;
+      renderPanel();
+      return;
+    }
+    if (event.target?.closest?.("[data-magic-restart]")) {
+      magicPhase = "request";
+      renderPanel();
+      return;
+    }
+    const oauthButton = event.target?.closest?.("[data-oauth]");
+    if (oauthButton) {
+      // Direct navigation: the start route 302-redirects to GitHub when
+      // configured and serves an honest HTML landing page when it is not.
+      window.location.assign("/api/auth/github/start");
+    }
+  };
+
+  const onSubmit = async event => {
+    const form = event.target?.closest?.("[data-signin-form]");
+    if (!form || !container?.contains(form)) return;
+    event.preventDefault();
+    const kind = form.dataset.signinForm;
+    if (kind === "password") {
+      const { email, password } = readForm(form);
+      passwordFields = { email, password };
+      await withBusy(async () => {
+        const session = await authedSession();
+        const view = await api(session, `/api/auth/password/${passwordMode}`,
+          { email: email.trim(), password, sessionRevision: session.sessionRevision });
+        await finish(view);
+      });
+      return;
+    }
+    if (kind === "magic-request") {
+      const { email } = readForm(form);
+      await withBusy(async () => {
+        const session = await authedSession();
+        const reply = await api(session, "/api/auth/magic/request", { email: email.trim() });
+        if (reply?.status === "unavailable") { setStatus(reply.message || "Email delivery isn\u2019t configured on this Room.", true); return; }
+        magicEmail = email.trim();
+        magicPhase = "code";
+        renderPanel();
+        setStatus("");
+      });
+      return;
+    }
+    if (kind === "magic-code") {
+      const { code } = readForm(form);
+      await withBusy(async () => {
+        const session = await authedSession();
+        const view = await api(session, "/api/auth/magic/consume",
+          { email: magicEmail, code: code.trim(), sessionRevision: session.sessionRevision });
+        await finish(view);
+      });
+      return;
+    }
+    if (kind === "passkey") {
+      await withBusy(async () => {
+        const session = await authedSession();
+        const options = await api(session, "/api/auth/passkey/authenticate/options", {});
+        const credential = await navigator.credentials.get({ publicKey: toAuthenticationPublicKey(options) });
+        if (!credential) throw new Error("No passkey was selected.");
+        const view = await api(session, "/api/auth/passkey/authenticate/finish",
+          { challengeId: options.challengeId, response: toAuthenticationResponse(credential), sessionRevision: session.sessionRevision });
+        await finish(view);
+      });
+      return;
+    }
+    if (kind === "recovery") {
+      const { email, code } = readForm(form);
+      await withBusy(async () => {
+        const session = await authedSession();
+        const reply = await api(session, "/api/auth/recovery-codes/redeem",
+          { email: email.trim(), code: code.trim(), sessionRevision: session.sessionRevision });
+        await finish(reply);
+      });
+    }
+  };
+
+  return {
+    mount(target) {
+      container = target;
+      render();
+      container.addEventListener("click", onClick);
+      container.addEventListener("submit", onSubmit);
+    }
+  };
+}

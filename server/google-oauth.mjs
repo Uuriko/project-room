@@ -68,7 +68,7 @@ export class GoogleSignIn {
     this.#now = now;
   }
 
-  begin({ slotToken, expectedRevision }) {
+  begin({ slotToken, expectedRevision, link = false }) {
     if (!tokenPattern.test(slotToken || '') || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0)
       fail('google_session_required');
     for (const [key, entry] of this.#pending) {
@@ -78,7 +78,10 @@ export class GoogleSignIn {
     const state = randomBytes(32).toString('base64url');
     const verifier = randomBytes(32).toString('base64url');
     const expiresAt = this.#now() + 10 * 60 * 1000;
-    this.#pending.set(digest(state), { slotToken, expectedRevision, verifier, expiresAt });
+    // Link intent: the settings "connect Google" flow carries link=true so the
+    // callback attaches the Google subject to the signed-in account instead of
+    // the sign-in find-or-provision order.
+    this.#pending.set(digest(state), { slotToken, expectedRevision, verifier, expiresAt, link: link === true });
     const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     url.search = new URLSearchParams({
       client_id: this.#clientId, redirect_uri: this.#redirectUri, response_type: 'code',
@@ -186,6 +189,7 @@ export class GoogleSignIn {
     if (!scopes.includes('openid')) fail('google_scope_mismatch');
     const claims = await this.verifyIdToken(tokens.id_token);
     this.#pending.delete(key);
-    return { claims, idToken: tokens.id_token, slotToken: entry.slotToken, expectedRevision: entry.expectedRevision };
+    return { claims, idToken: tokens.id_token, slotToken: entry.slotToken, expectedRevision: entry.expectedRevision,
+      link: entry.link === true };
   }
 }
