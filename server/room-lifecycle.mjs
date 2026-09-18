@@ -10,10 +10,15 @@
 // lets a member end their own access without membership administration), so
 // it needs nothing here beyond the credential revocation `command()` already
 // performs when access ends.
+//
+// Schema-version bookkeeping lives in exactly one place: STORE_SCHEMA_VERSION
+// in server/writer-fence.mjs, advanced by the 0→34 migration chain in
+// server/store.mjs (recovery.mjs requires the version to equal it exactly).
+// This module owns the column and its data only — never PRAGMA user_version.
 import { EVENT_TYPES as T, PERMISSIONS, event, validId, ROOM_KINDS, roomKind, isRoomArchived } from "../src/events.js";
 import { ServiceError, provisionalAccountPrefix } from "./store.mjs";
 
-export const ROOM_LIFECYCLE_SCHEMA_VERSION = 28;
+export const ROOM_LIFECYCLE_MIGRATION = 28; // informational: which chain step introduced rooms.archived_at
 // Bounded pilot: memberships per account, counted before a room is created.
 export const ACCOUNT_ROOM_LIMIT = 100;
 const CREATE_FIELDS = Object.freeze(["roomId", "title", "purpose", "kind", "displayName"]);
@@ -22,14 +27,15 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 
 const hasArchivedColumn = db => /\barchived_at\b/.test(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='rooms'").get()?.sql ?? "");
 
-// Idempotent: a re-run on a migrated store changes nothing. Pre-v28 rooms have
-// no archive event, so the backfill matches no row; it is kept so the column
-// and the projection agree by construction on every path through here.
+// Idempotent data backfill: a re-run on a migrated store changes nothing.
+// Pre-v28 rooms have no archive event, so the backfill matches no row; it is
+// kept so the column and the projection agree by construction on every path
+// through here. Deliberately version-neutral: the 0→34 chain in store.mjs
+// owns PRAGMA user_version (see STORE_SCHEMA_VERSION in writer-fence.mjs).
 export function migrateRoomLifecycleV28(store) {
   store.transaction(() => {
     if (!hasArchivedColumn(store.db)) store.db.exec("ALTER TABLE rooms ADD COLUMN archived_at TEXT");
     store.db.prepare("UPDATE rooms SET archived_at=json_extract(projection,'$.room.archivedAt') WHERE archived_at IS NOT json_extract(projection,'$.room.archivedAt')").run();
-    if (store.storagePlatform.version(store.db) < ROOM_LIFECYCLE_SCHEMA_VERSION) store.storagePlatform.setVersion(store.db, ROOM_LIFECYCLE_SCHEMA_VERSION);
   });
 }
 
