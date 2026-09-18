@@ -29,6 +29,8 @@ import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { normalizeEmail } from "./account-login-methods.mjs";
 import { createPasskeyAuth, resolvePasskeyParams } from "./account-passkeys.mjs";
 import { hashPassword, verifyPassword, checkPasswordPolicy, DUMMY_PASSWORD_VERIFIER } from "../src/password-auth.mjs";
+import { buildGitHubAuthUrl, codeChallengeFor, createPendingStore, exchangeCodeForToken, fetchGitHubUser,
+  GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH } from "./github-oauth.mjs";
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -106,6 +108,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   googleAuth = null, directSendFetch = null,
   passkeyService = null, // test injection for the passkey routes; production uses createPasskeyAuth({ store })
   magicLinkMailer = null,
+  githubAuth = null,
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", growth = null }) {
   // Live Telegram bindings are read once (Worker secrets or local env); the
   // config never holds up startup and the card reports "not configured".
@@ -158,6 +161,73 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   let passkeyAuthService = null;
   const passkeys = () => passkeyService
     ?? (passkeyAuthService ??= createPasskeyAuth({ store }));
+  // GitHub sign-in is off unless the caller passes githubAuth
+  // ({ clientId, clientSecret, redirectUri?, fetchImpl? }). The pending
+  // state/PKCE table lives as long as this server instance, mirroring the
+  // Google helper above (one per Durable Object in production).
+  let githubOAuth = null;
+  const github = () => {
+    if (!githubAuth) return null;
+    if (!githubOAuth) {
+      const clientId = githubAuth.clientId, clientSecret = githubAuth.clientSecret;
+      let redirectUri = githubAuth.redirectUri || expectedOrigin() + GITHUB_CALLBACK_PATH;
+      try {
+        const parsed = new URL(redirectUri);
+        if (parsed.pathname !== GITHUB_CALLBACK_PATH || parsed.search || parsed.hash
+          || parsed.username || parsed.password
+          || !(parsed.protocol === "https:" || (parsed.protocol === "http:" && parsed.hostname === "127.0.0.1"))) {
+          throw new Error("bad redirect");
+        }
+        redirectUri = parsed.href;
+      } catch { throw new Error("Invalid GitHub authentication configuration"); }
+      if (typeof clientId !== "string" || !clientId || typeof clientSecret !== "string" || !clientSecret) {
+        throw new Error("Invalid GitHub authentication configuration");
+      }
+      githubOAuth = { clientId, clientSecret, redirectUri, fetchImpl: githubAuth.fetchImpl ?? fetch,
+        pending: createPendingStore({ now: () => store.now() }) };
+    }
+    return githubOAuth;
+  };
+  // GitHub subject -> account linking order (slice 4): an existing OAuth
+  // link wins; otherwise a primary verified email links to the account that
+  // already owns it; otherwise a github:<id> account is provisioned (with
+  // a magic-link method when the provider attested a verified email).
+  // linkOAuthMethod rejects cross-account subject reuse with a 409, which
+  // surfaces to the caller as-is.
+  const linkGitHubSubject = ({ subject, email }) => {
+    const logins = store.accountLogins;
+    const owner = logins.findAccountByOAuth("github", subject);
+    if (owner) {
+      const existing = logins.listMethods(owner).find(m => m.type === "oauth" && m.provider === "github" && !m.disabled);
+      return { accountId: owner, methodRef: existing ? existing.id : `github:${subject}` };
+    }
+    const normalized = email ? normalizeEmail(email) : null;
+    const emailOwner = normalized ? logins.findAccountByVerifiedEmail(normalized) : null;
+    if (emailOwner) {
+      const method = logins.linkOAuthMethod(emailOwner, { provider: "github", subject, email: normalized });
+      return { accountId: emailOwner, methodRef: method.id };
+    }
+    const accountId = `github:${subject}`;
+    if (!store.db.prepare("SELECT 1 FROM accounts WHERE id=?").get(accountId)) {
+      store.createAccount(accountId, "github-oauth");
+    }
+    const method = logins.linkOAuthMethod(accountId, { provider: "github", subject, email: normalized });
+    if (normalized) {
+      try { logins.linkMagicMethod(accountId, { email: normalized }); }
+      catch (error) {
+        if (!(error instanceof ServiceError) || error.code !== "login_method_exists") throw error;
+      }
+    }
+    return { accountId, methodRef: method.id };
+  };
+  const githubOAuthErrorMessage = code => ({
+    github_state_invalid: "This GitHub sign-in attempt is not valid; start again",
+    github_state_expired: "This GitHub sign-in attempt expired; start again",
+    github_consent_denied: "GitHub sign-in was not approved",
+    github_token_rejected: "GitHub did not accept this sign-in attempt; start again",
+    github_callback_invalid: "This GitHub callback is not valid",
+    github_provider_unavailable: "GitHub could not be reached; try again"
+  }[code] ?? "GitHub sign-in could not be completed");
   if (trustedLocalProxy && !origin?.startsWith("https://")) throw new Error("The deployment proxy requires a fixed HTTPS origin");
   if (!Number.isInteger(streamQueueCap) || streamQueueCap < 1) throw new Error("Stream queue cap must be a positive integer of bytes");
   if (!Number.isInteger(streamInterval) || streamInterval < 1) throw new Error("Stream interval must be a positive integer of milliseconds");
@@ -619,6 +689,75 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (policy) reject(422, policy.code, policy.message);
         store.accountLogins.setPasswordVerifier(session.account.id, hashPassword(data.newPassword));
         return json(res, 200, { status: "ok" });
+      }
+      // ---- GitHub OAuth (slice 4, RC-2026-09-17-013) ----
+      // GitHub sign-in (Clerk-free). The start route binds the browser's
+      // account session slot (passed as ?sessionToken=) into a single-use
+      // PKCE state and 302s to GitHub; the callback consumes the state,
+      // exchanges the code, links the verified GitHub subject into the
+      // multi-method login model, and upgrades the slot. The callback
+      // returns the upgraded session as JSON (a same-origin landing page
+      // is out of scope for this slice). Error responses never carry tokens.
+      if (url.pathname === GITHUB_START_PATH) {
+        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
+        const oauth = github();
+        if (!oauth) return json(res, 503, { status: "unavailable", reason: "github_not_configured",
+          error: { code: "github_not_configured", message: "GitHub sign-in is not configured" } });
+        rate(`github-start:${remoteAddress}`, 10);
+        const slotToken = url.searchParams.get("sessionToken");
+        const expectedRevision = store.accountSessionSlot(slotToken).sessionRevision;
+        const { state, codeVerifier } = oauth.pending.create({ sessionToken: slotToken, sessionRevision: expectedRevision });
+        const authorizationUrl = buildGitHubAuthUrl({ clientId: oauth.clientId, redirectUri: oauth.redirectUri,
+          state, codeChallenge: codeChallengeFor(codeVerifier) });
+        res.statusCode = 302;
+        res.setHeader("Location", authorizationUrl);
+        return res.end();
+      }
+      if (url.pathname === GITHUB_CALLBACK_PATH) {
+        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
+        const oauth = github();
+        if (!oauth) return json(res, 503, { status: "unavailable", reason: "github_not_configured",
+          error: { code: "github_not_configured", message: "GitHub sign-in is not configured" } });
+        rate(`github-callback:${remoteAddress}`, 20);
+        try {
+          if (url.searchParams.getAll("state").length > 1 || url.searchParams.getAll("code").length > 1) {
+            throw new GitHubOAuthError("github_callback_invalid");
+          }
+          const state = url.searchParams.get("state");
+          if (url.searchParams.get("error")) {
+            if (state) { try { oauth.pending.consume(state); } catch { /* burn what we can */ } }
+            throw new GitHubOAuthError("github_consent_denied");
+          }
+          const code = url.searchParams.get("code");
+          if (!code) throw new GitHubOAuthError("github_callback_invalid");
+          const pending = oauth.pending.consume(state); // 401 on replay, expiry, or mismatch
+          const accessToken = await exchangeCodeForToken({ code, codeVerifier: pending.codeVerifier,
+            clientId: oauth.clientId, clientSecret: oauth.clientSecret, redirectUri: oauth.redirectUri,
+            fetchFn: oauth.fetchImpl });
+          const ghUser = await fetchGitHubUser(accessToken, oauth.fetchImpl);
+          const subject = String(ghUser.id);
+          const linked = linkGitHubSubject({ subject, email: ghUser.email });
+          store.accountLogins.touchMethodByOAuth("github", subject);
+          const loggedIn = store.loginAccountSessionWithMethod(pending.sessionToken, linked.accountId,
+            pending.sessionRevision, { method: { kind: "oauth", ref: linked.methodRef } });
+          setCookie(res, accountCookieName, pending.sessionToken,
+            Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
+          return json(res, 200, {
+            status: "ok",
+            provider: "github",
+            account: { id: loggedIn.account.id, revision: loggedIn.account.revision },
+            sessionRevision: loggedIn.sessionRevision,
+            expiresAt: loggedIn.expiresAt,
+            method: { kind: "oauth", ref: linked.methodRef }
+          });
+        } catch (error) {
+          if (error instanceof GitHubOAuthError) {
+            const status = { github_state_invalid: 401, github_state_expired: 401, github_consent_denied: 401,
+              github_token_rejected: 401, github_callback_invalid: 422, github_provider_unavailable: 503 }[error.code] ?? 502;
+            throw new ServiceError(status, error.code, githubOAuthErrorMessage(error.code));
+          }
+          throw error;
+        }
       }
       if (url.pathname === "/api/ready" && ["GET", "HEAD"].includes(req.method)) {
         try {
