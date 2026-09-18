@@ -380,28 +380,33 @@ is prose and changes nothing):
 Lifecycle (A2A-lite style, cf. §3):
 
 ```
-opened → evidence → adjudicating → decided → resolved
-   │          │            │             │
-   │          │            │             └─→ appealed → adjudicating (next tier)
-   │          │            └─→ (auto) resolved  [non-response forfeiture]
-   │          └─→ withdrawn   [disputant withdraws; bond forfeit]
+opened → challenged → evidence → adjudicating → decided → resolved
+   │          │            │             │             │
+   │          │            │             │             └─→ appealed → adjudicating (next tier)
+   │          │            │             └─→ (enforcer) resolved  [non-response forfeiture]
+   │          │            └─→ withdrawn   [disputant withdraws; bond forfeit]
+   │          └─→ withdrawn
    └─→ withdrawn
 ```
 
 - `opened` — raised with standing + bond posted. The claim/receipt under
   dispute is **frozen**: sweep skips it (no expiry, no takeover) and
   ROOM-STATE.md shows it as `completed (disputed)`.
+- `challenged` — the challenge is raised against the frozen receipt/accept.
+  First evidence entry moves the dispute to `evidence`.
 - `evidence` — 72h window. Both sides submit `room-evidence` blocks.
   Party-submitted evidence only; platform-generated evidence (CI runs,
   ledger events) is fetched by the decider, never posted by parties.
 - `adjudicating` — a decider is seated and deliberating (time-boxed 72h).
 - `decided` — ruling issued with reason codes. Terminal unless appealed
-  within 48h; an unappealed `decided` auto-finalizes to `resolved`
-  (optimistic finality).
-- `appealed` — escalation to the next tier with a geometrically higher bond.
-  Returns to `adjudicating`.
-- `resolved` — final. Outcome ∈ {`upheld`, `rejected`, `split`}. Enforcement
-  executes exactly once.
+  within 48h; an unappealed `decided` finalizes to `resolved` (optimistic
+  finality). A `frivolous` ruling forfeits the bond and has no appeal as of
+  right.
+- `appealed` — escalation to the next tier with a geometrically higher bond
+  (2× the previous tier's bond; loser-pays the escalation). Returns to
+  `adjudicating`. The 25% cost cap spans the whole escalation.
+- `resolved` — final. Outcome ∈ {`upheld`, `rejected`, `split`,
+  `frivolous`}. Enforcement executes exactly once.
 - `withdrawn` — disputant withdraws; their bond is forfeit.
 - `unavailable(<reason>)` — honest-unavailable overlay, not a state: the
   dispute is recorded but cannot proceed to `adjudicating` until an
@@ -458,6 +463,32 @@ Rules of the road:
 - When no arbitrator is configured for the dispute's tier, the dispute is
   recorded as `unavailable(no-arbitrator)`: frozen, flagged, never silently
   dropped.
+
+**Implementation map.** The protocol above is implemented by two pure
+modules (no I/O, frozen outputs, caller-owned state):
+
+- `server/bounty-disputes.mjs` — the state machine (`createDisputes`):
+  transitions, bond snapshots, appeal bonds, the 25% cost cap, and the
+  single eventual `onDisputeFinalized` escrow callback. The callback fires
+  exactly once per dispute, event-driven by the terminal transition
+  (`finalize` or `withdraw`), never keeper-polled; the frozen packet
+  carries everything the escrow needs to branch payout
+  (`upheld`/`rejected`/`split`) and settle forfeiture. There is no
+  parallel escrow authority.
+- `server/dispute-arbiters.mjs` — the arbitration ladder: Tier 1 seats the
+  claim's named verifier with a separation-of-duties independence check
+  (same lane / shared runtime / shared credential chain / delegated-chain
+  overlap → ineligible); Tier 2 draws a 3-seat steward panel by
+  deterministic sortition seeded on the dispute id (trust `standard`+,
+  parties and executor excluded); Tier 3 is the owner, final. Pay is
+  outcome-independent: arbiters are paid from the dispute bond (economic)
+  or earn `verify` weight (coordination) regardless of the ruling.
+
+**Not yet built.** Time-box enforcement — non-response forfeiture when a
+dispute sits past its evidence/adjudication window, auto-finalization of
+an unappealed `decided`, and the missing-decision digest — is the
+`disputes-scan` enforcer verb (design slice 3, unclaimed). Until it lands,
+the windows above are policy, not machinery: nothing auto-transitions.
 - Appeals carry a geometrically higher bond; loser-pays escalation. A
   withdrawn dispute forfeits its bond. No bond ever escheats silently.
 
