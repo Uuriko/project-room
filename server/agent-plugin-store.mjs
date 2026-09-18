@@ -15,7 +15,7 @@
 // to the publishing agent identity. Cross-identity access reads as 404
 // (never an oracle); a publish colliding with another identity's card is
 // 409. Nothing here touches the network.
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createAgentApiKeys, ApiKeyError, API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { createAgentDirectory, DirectoryError } from "./agent-directory.mjs";
 import { buildPluginManifest, ManifestError } from "./agent-plugin-manifest.mjs";
@@ -264,6 +264,114 @@ export class AgentPluginStore {
       this.db.prepare("UPDATE agent_directory_cards SET withdrawn=1, updated_at=? WHERE agent_id=?")
         .run(entry.updatedAt, agentId);
       return result;
+    });
+  }
+
+  // Authenticate a presented HTTP credential ("rak_"+raw secret). The pure
+  // module keeps the raw-secret contract (tests pin it); the HTTP layer
+  // presents the rak_-prefixed credential, so the prefix is stripped here.
+  // Read-only: authenticate() runs inside read transactions, where the
+  // lastUsedAt write of verifyApiKeySecret would throw — so this path does
+  // the same constant-time hash comparison and revoked/expiry checks without
+  // updating lastUsedAt. Returns the public record or null (unknown,
+  // revoked, expired, or not a well-formed API-key credential).
+  verifyPresentedApiKey(presented) {
+    if (typeof presented !== "string" || !presented.startsWith(API_KEY_PREFIX)) return null;
+    const secret = presented.slice(API_KEY_PREFIX.length);
+    if (!secret) return null;
+    return this.store.readTransaction(() => {
+      const digest = createHash("sha256").update(secret).digest("hex");
+      for (const record of this.keys.values()) {
+        const stored = Buffer.from(record.keyHash, "hex");
+        const candidate = Buffer.from(digest, "hex");
+        if (stored.length === candidate.length && timingSafeEqual(stored, candidate)) {
+          if (record.revoked) return null;
+          if (record.expiresAt !== null && this.store.now() >= record.expiresAt) return null;
+          return Object.freeze({
+            keyId: record.keyId,
+            identityId: record.identityId,
+            scopes: Object.freeze([...record.scopes]),
+            label: record.label,
+            createdAt: record.createdAt,
+            expiresAt: record.expiresAt,
+            revoked: record.revoked,
+            lastUsedAt: record.lastUsedAt,
+          });
+        }
+      }
+      return null;
+    });
+  }
+
+  // True when the agent identity is linked to at least one room: the
+  // "room member" proof for the room-visibility directory read surface
+  // (RC-2026-09-18-012). Cards carry no room linkage, so a room card is
+  // visible only when the viewer and the card's owner share at least one
+  // room (checked per card by the shared-room join below).
+  identityIsRoomMember(identityId) {
+    return this.store.readTransaction(() =>
+      !!this.db.prepare("SELECT 1 FROM identity_links WHERE identity_id=? LIMIT 1").get(identityId));
+  }
+
+  // The frozen member directory document: public cards plus room-visibility
+  // cards whose owner shares a room with the viewer. Private cards stay
+  // invisible.
+  memberDirectoryDocument({ viewerIdentityId, serviceOrigin, query = "", capability = null }) {
+    return this.store.readTransaction(() => {
+      if (typeof serviceOrigin !== "string" || !/^https:\/\/\S+$/.test(serviceOrigin)) {
+        throw new AgentPluginError(422, "invalid_origin", "serviceOrigin must be an https URL");
+      }
+      const roomOwners = new Map(this.db.prepare(
+        "SELECT agent_id AS agentId, owner_identity_id AS ownerIdentityId FROM agent_directory_cards WHERE visibility='room' AND withdrawn=0"
+      ).all().map(row => [row.agentId, row.ownerIdentityId]));
+      const sharesRoom = new Map();
+      const visibleRoomCard = agent => {
+        if (!roomOwners.has(agent.agentId)) return false;
+        let shared = sharesRoom.get(agent.agentId);
+        if (shared === undefined) {
+          shared = !!this.db.prepare(
+            `SELECT 1 FROM identity_links a JOIN identity_links b ON a.room_id = b.room_id
+             WHERE a.identity_id=? AND b.identity_id=? LIMIT 1`
+          ).get(viewerIdentityId, roomOwners.get(agent.agentId));
+          sharesRoom.set(agent.agentId, shared);
+        }
+        return shared;
+      };
+      const agents = this.directory.list({ query, capability, includeNonPublic: true })
+        .filter(agent => agent.visibility === "public"
+          || (agent.visibility === "room" && visibleRoomCard(agent)))
+        .map(agent => ({
+          ...agent,
+          cardUrl: `${serviceOrigin}/api/agents/directory/${agent.agentId}`,
+        }));
+      return Object.freeze({
+        version: "1.0.0",
+        origin: serviceOrigin,
+        generatedAt: this.store.now(),
+        agents: Object.freeze(agents),
+      });
+    });
+  }
+
+  // A single member-visible card (public, or room-visibility when the viewer
+  // shares a room with the card's owner). Private, withdrawn, or
+  // room-invisible cards read as 404, exactly like unknown cards: no oracle.
+  memberCard(agentId, viewerIdentityId) {
+    return this.store.readTransaction(() => {
+      const entry = this.cards.get(agentId);
+      if (!entry || entry.withdrawn || entry.visibility === "private") {
+        throw new AgentPluginError(404, "unknown_card", `No member-visible card "${agentId}"`);
+      }
+      if (entry.visibility === "room") {
+        const owner = this.db.prepare("SELECT owner_identity_id AS ownerIdentityId FROM agent_directory_cards WHERE agent_id=?")
+          .get(agentId);
+        const shared = owner && !!this.db.prepare(
+          `SELECT 1 FROM identity_links a JOIN identity_links b ON a.room_id = b.room_id
+           WHERE a.identity_id=? AND b.identity_id=? LIMIT 1`
+        ).get(viewerIdentityId, owner.ownerIdentityId);
+        if (!shared) throw new AgentPluginError(404, "unknown_card", `No member-visible card "${agentId}"`);
+      }
+      return this.directory.get(agentId);
     });
   }
 

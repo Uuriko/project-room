@@ -1,10 +1,14 @@
 // HTTP routes for the Lane D agent plug-in surface (server/agent-plugin-store.mjs).
 //
-// Mutating routes authenticate the caller's agent identity: the pri_ identity
-// secret travels in the Authorization header (never a JSON body), resolved
-// with the existing AgentIdentities verifier — the same precedent as
-// /api/agent-rooms. The public directory document, single public cards and
-// the derived plug-in manifest are unauthenticated.
+// Mutating routes authenticate the caller's agent credential: the pri_
+// identity secret (owner, full permissions) or a rak_ API key scoped to its
+// stored scopes (Authorization header, never a JSON body), resolved with
+// the existing AgentIdentities verifier and the API-key store — the same
+// precedent as /api/agent-rooms. Key issuance/rotation/revocation stays
+// owner-only: a key can never mint keys. The public directory document,
+// single public cards and the derived plug-in manifest are unauthenticated;
+// presenting a valid room-member credential additionally reveals
+// room-visibility cards.
 //
 // Secrets are shown exactly once (at issue, rotate, and server-generated
 // webhook-secret subscribe); list outputs never include them. Pure-module
@@ -39,13 +43,68 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     }
   };
 
-  // pri_ identity secret (Authorization header only) -> { identityId, displayName }.
-  const identityAuth = req => {
+  // RC-2026-09-18-012: API-key scopes, mirroring server/token-scopes.mjs:
+  // exact match or "prefix:*" wildcard. scopes null = the owner identity
+  // secret (full permissions).
+  const grants = (scopes, required) => (scopes ?? []).some(scope =>
+    scope === required || (scope.endsWith(":*") && required.startsWith(scope.slice(0, -1))));
+
+  // Full agent credential: the pri_ identity secret (owner, full
+  // permissions) or a rak_ API key (scoped to its stored scopes).
+  // requiredScope denies scoped keys without it (403 insufficient_scope).
+  // Returns { identityId, keyId, scopes }; scopes is null for the owner.
+  const agentAuth = (req, requiredScope = null) => {
     const secret = bearer(req);
-    if (!secret || !secret.startsWith("pri_")) reject(401, "unauthenticated", "Agent identity secret required");
-    const resolved = store.identities.resolveGlobalIdentitySecret(secret);
-    if (!resolved) reject(401, "unauthenticated", "Unknown agent identity");
-    return resolved;
+    if (!secret) reject(401, "unauthenticated", "Agent credential required");
+    if (secret.startsWith("pri_")) {
+      const resolved = store.identities.resolveGlobalIdentitySecret(secret);
+      if (!resolved) reject(401, "unauthenticated", "Unknown agent identity");
+      return { identityId: resolved.identityId, keyId: null, scopes: null };
+    }
+    if (secret.startsWith("rak_")) {
+      const record = store.agentPlugin.verifyPresentedApiKey(secret);
+      if (!record) reject(401, "unauthenticated", "Unknown, revoked, or expired API key");
+      if (requiredScope && !grants(record.scopes, requiredScope))
+        reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
+      return { identityId: record.identityId, keyId: record.keyId, scopes: record.scopes };
+    }
+    reject(401, "unauthenticated", "Agent credential required");
+  };
+
+  // Owner-only: key issuance, rotation and revocation need the pri_ identity
+  // secret — an API key must never mint or manage keys (no privilege
+  // escalation through scoped credentials).
+  const ownerAuth = req => {
+    const auth = agentAuth(req);
+    if (auth.keyId !== null) reject(403, "insufficient_scope", "API keys cannot manage API keys; use the identity secret");
+    return auth;
+  };
+
+  // Optional member credential for the directory read surface. Null when no
+  // Authorization header is sent (the public view). A valid room-member
+  // credential upgrades the view to public + room-visibility cards:
+  // a pri_ identity linked to at least one room, or a rak_ key with the
+  // directory:read scope whose identity is room-linked. Invalid credentials
+  // are 401; valid credentials without membership (or a key without the
+  // scope) fall back to the public view — never an error, never a leak.
+  const memberAuth = req => {
+    if (!req.headers.authorization) return null;
+    const secret = bearer(req);
+    let identityId;
+    if (secret.startsWith("pri_")) {
+      const resolved = store.identities.resolveGlobalIdentitySecret(secret);
+      if (!resolved) reject(401, "unauthenticated", "Unknown agent identity");
+      identityId = resolved.identityId;
+    } else if (secret.startsWith("rak_")) {
+      const record = store.agentPlugin.verifyPresentedApiKey(secret);
+      if (!record) reject(401, "unauthenticated", "Unknown, revoked, or expired API key");
+      if (!grants(record.scopes, "directory:read")) return null;
+      identityId = record.identityId;
+    } else {
+      reject(401, "unauthenticated", "Agent credential required");
+    }
+    if (!store.agentPlugin.identityIsRoomMember(identityId)) return null;
+    return { identityId };
   };
 
   // The https origin the derived documents (manifest, directory) are built
@@ -62,7 +121,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
 
   const issueKey = translate(async (req, res, { remoteAddress }) => {
     rate(`agent-key-issue:${remoteAddress}`, 20);
-    const auth = identityAuth(req);
+    const auth = ownerAuth(req);
     const data = await body(req);
     const shape = data && (exact(data, ["scopes"]) || exact(data, ["scopes", "label"])
       || exact(data, ["scopes", "expiresAt"]) || exact(data, ["scopes", "label", "expiresAt"]));
@@ -83,14 +142,14 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   });
 
   const listKeys = translate(async (req, res) => {
-    const auth = identityAuth(req);
+    const auth = ownerAuth(req);
     rate(`agent-keys-read:${auth.identityId}`, 120);
     return json(res, 200, { keys: store.agentPlugin.listApiKeys(auth.identityId) });
   });
 
   const keyAction = translate(async (req, res, { remoteAddress, keyId, action }) => {
     rate(`agent-key-${action}:${remoteAddress}`, 20);
-    const auth = identityAuth(req);
+    const auth = ownerAuth(req);
     const result = action === "rotate"
       ? store.agentPlugin.rotateApiKey({ identityId: auth.identityId, keyId })
       : store.agentPlugin.revokeApiKey({ identityId: auth.identityId, keyId });
@@ -101,7 +160,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
 
   const publishCard = translate(async (req, res, { remoteAddress }) => {
     rate(`agent-directory-publish:${remoteAddress}`, 20);
-    const auth = identityAuth(req);
+    const auth = agentAuth(req, "directory:publish");
     const data = await body(req);
     if (!data || !(exact(data, ["agentId", "card"]) || exact(data, ["agentId", "card", "visibility"])))
       reject(422, "invalid_card", "agentId, card, and optional visibility are the accepted fields");
@@ -116,21 +175,32 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
 
   const withdrawCard = translate(async (req, res, { remoteAddress, agentId }) => {
     rate(`agent-directory-withdraw:${remoteAddress}`, 20);
-    const auth = identityAuth(req);
+    const auth = agentAuth(req, "directory:publish");
     return json(res, 200, store.agentPlugin.withdrawCard({ identityId: auth.identityId, agentId }));
   });
 
-  const publicDirectory = translate(async (req, res, { url }) => {
-    const doc = store.agentPlugin.publicDirectoryDocument({
+  // Directory reads: public without a credential; an authenticated room
+  // member additionally sees room-visibility cards. Private cards stay
+  // invisible on both views.
+  const directoryDocument = translate(async (req, res, { url }) => {
+    const member = memberAuth(req);
+    const args = {
       serviceOrigin: serviceOrigin(req),
       query: url.searchParams.get("q") ?? "",
       capability: url.searchParams.get("capability"),
-    });
+    };
+    const doc = member
+      ? store.agentPlugin.memberDirectoryDocument({ viewerIdentityId: member.identityId, ...args })
+      : store.agentPlugin.publicDirectoryDocument(args);
     return json(res, 200, doc);
   });
 
-  const publicCard = translate(async (req, res, { agentId }) =>
-    json(res, 200, store.agentPlugin.publicCard(agentId)));
+  const cardDocument = translate(async (req, res, { agentId }) => {
+    const member = memberAuth(req);
+    return json(res, 200, member
+      ? store.agentPlugin.memberCard(agentId, member.identityId)
+      : store.agentPlugin.publicCard(agentId));
+  });
 
   // ---- Plug-in manifest (derived; also at the module's well-known path) ----
 
@@ -143,14 +213,14 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   // ---- Per-agent webhook subscriptions ----
 
   const listWebhooks = translate(async (req, res) => {
-    const auth = identityAuth(req);
+    const auth = agentAuth(req, "webhooks:manage");
     rate(`agent-webhooks-read:${auth.identityId}`, 120);
     return json(res, 200, { subscriptions: store.agentPlugin.listWebhooks(auth.identityId) });
   });
 
   const subscribeWebhook = translate(async (req, res, { remoteAddress }) => {
     rate(`agent-webhook-subscribe:${remoteAddress}`, 20);
-    const auth = identityAuth(req);
+    const auth = agentAuth(req, "webhooks:manage");
     const data = await body(req);
     if (!data || !(exact(data, ["url", "events"]) || exact(data, ["url", "events", "secret"])))
       reject(422, "invalid_subscription_request", "url, events, and optional secret are the accepted fields");
@@ -171,7 +241,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
 
   const unsubscribeWebhook = translate(async (req, res, { remoteAddress, subscriptionId }) => {
     rate(`agent-webhook-unsubscribe:${remoteAddress}`, 20);
-    const auth = identityAuth(req);
+    const auth = agentAuth(req, "webhooks:manage");
     return json(res, 200, store.agentPlugin.unsubscribeWebhook({ identityId: auth.identityId, subscriptionId }));
   });
 
@@ -182,12 +252,12 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     const keyActionMatch = method === "POST" ? KEY_ACTION_ROUTE.exec(pathname) : null;
     if (keyActionMatch) { await keyAction(req, res, { remoteAddress, keyId: keyActionMatch[1], action: keyActionMatch[2] }); return true; }
     if (pathname === "/api/agent-directory/cards" && method === "POST") { await publishCard(req, res, { remoteAddress }); return true; }
-    if (pathname === "/api/agent-directory" && method === "GET") { await publicDirectory(req, res, { url }); return true; }
-    if (pathname === "/api/agents/directory" && method === "GET") { await publicDirectory(req, res, { url }); return true; }
+    if (pathname === "/api/agent-directory" && method === "GET") { await directoryDocument(req, res, { url }); return true; }
+    if (pathname === "/api/agents/directory" && method === "GET") { await directoryDocument(req, res, { url }); return true; }
     const cardMatch = method === "DELETE" ? CARD_ROUTE.exec(pathname) : null;
     if (cardMatch) { await withdrawCard(req, res, { remoteAddress, agentId: cardMatch[1] }); return true; }
     const publicCardMatch = method === "GET" ? PUBLIC_CARD_ROUTE.exec(pathname) : null;
-    if (publicCardMatch) { await publicCard(req, res, { agentId: publicCardMatch[1] }); return true; }
+    if (publicCardMatch) { await cardDocument(req, res, { agentId: publicCardMatch[1] }); return true; }
     if ((pathname === "/api/agent-manifest" || pathname === WELL_KNOWN_PATH) && method === "GET") { await manifest(req, res); return true; }
     if (pathname === "/api/agent-webhooks" && method === "GET") { await listWebhooks(req, res); return true; }
     if (pathname === "/api/agent-webhooks" && method === "POST") { await subscribeWebhook(req, res, { remoteAddress }); return true; }

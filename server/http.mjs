@@ -403,7 +403,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   }
   function bearer(req) {
     if (!req.headers.authorization) return null;
-    const match = /^Bearer ([A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43}|pri_[A-Za-z0-9_-]{43,128})$/.exec(req.headers.authorization);
+    // RC-2026-09-18-012: rak_ presented API-key credentials ("rak_"+secret)
+    // authenticate as the bound agent identity with its stored scopes; the
+    // keyId form (shorter) never verifies and reads as 401 downstream.
+    const match = /^Bearer ([A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43}|pri_[A-Za-z0-9_-]{43,128}|rak_[A-Za-z0-9_-]{16,128})$/.exec(req.headers.authorization);
     if (!match) reject(401, "unauthenticated", "Invalid Authorization header");
     return match[1];
   }
@@ -1726,7 +1729,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!identityId) reject(422, "invalid_request", "identityId query param is required");
         return json(res, 200, accessRequests.status(pathId(accessStatusMatch[1]), identityId));
       }
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -1769,6 +1772,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
       rate(`read:${auth.credentialHash}`, 600);
       if (!["GET", "HEAD"].includes(req.method)) { protectWrite(req, auth, selected.bearer); rate(`write:${auth.credentialHash}`, 60); }
+      // RC-2026-09-18-012: API-key callers are confined to their stored
+      // scopes on every room route — reads need rooms:read, writes need
+      // rooms:write. Owner identity secrets and room credentials are
+      // unaffected. The agent-inbox route is narrower than the room event
+      // log, so it carries its own inbox:read gate instead (see below): an
+      // inbox-only key must not imply rooms:read.
+      if (auth.kind === "api-key" && route !== "agent-inbox") {
+        const requiredScope = req.method === "GET" || req.method === "HEAD" ? "rooms:read" : "rooms:write";
+        const granted = (auth.apiKeyScopes ?? []).some(scope =>
+          scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
+        if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
+      }
       // Lane C inbox collaboration (task RC-2026-09-18-011): room-scoped
       // collab routes share the credential, fence and rate-limit checks
       // above; the handler maps pure-module errors to stable 4xx codes.
@@ -2112,6 +2127,23 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, store.eventsAfter(selected.token, roomId,
           Number(params.get("after") || 0), Number(params.get("limit") || 100),
           { actor: params.get("actor"), since: params.get("since"), until: params.get("until"), expectedSessionBinding: fence }));
+      }
+      if (route === "agent-inbox" && req.method === "GET") {
+        // RC-2026-09-18-012: agent-scoped unified inbox. Agent members only
+        // (owner identity credential or a scoped rak_ key with inbox:read);
+        // the human /api/inbox/* account-session surface is untouched.
+        if (auth.member.kind !== "agent") reject(403, "agent_inbox_agent_only", "The agent inbox is for agent members");
+        if (auth.kind === "api-key") {
+          const granted = (auth.apiKeyScopes ?? []).some(scope =>
+            scope === "inbox:read" || (scope.endsWith(":*") && "inbox:read".startsWith(scope.slice(0, -1))));
+          if (!granted) reject(403, "insufficient_scope", "API key lacks the inbox:read scope");
+        }
+        const params = url.searchParams;
+        if ([...params.keys()].some(key => !["limit", "auth"].includes(key) || params.getAll(key).length !== 1)
+          || params.has("limit") && (!/^[1-9]\d*$/.test(params.get("limit")) || Number(params.get("limit")) > 200))
+          reject(422, "invalid_inbox_selection", "Choose a limit of 1..200");
+        return json(res, 200, store.agentInbox(selected.token, roomId, {
+          limit: params.has("limit") ? Number(params.get("limit")) : 50, expectedSessionBinding: fence }));
       }
       if (route === "stream" && req.method === "GET") return stream(req, res, selected.token, roomId, Number(req.headers["last-event-id"] ?? url.searchParams.get("after") ?? 0), auth, operationId);
       if (route === "commands" && req.method === "POST") {
