@@ -12,6 +12,8 @@ import { assessThreadSla, slaTargets } from "./sla-clocks.mjs";
 import { buildMorningDigest } from "./morning-digest.mjs";
 import { inboxHandoffStatuses } from "./inbox-handoff.mjs";
 import { InboxStitchStore } from "./inbox-stitch-store.mjs";
+import { createNotifyPrefs } from "./notify-prefs.mjs";
+import { runImportGuards, replayImportedNotification, scoreImportedEnvelope } from "./inbox-import-guards.mjs";
 import { channels, connectionState, profileChannel } from "./channel-connection.mjs";
 import { prepareGraphReplyDraft, buildGraphReplyDraft, classifyGraphReplyCreation, classifyGraphReplyUpdateAcknowledgment, normalizeReplyObservation, prepareGraphReplyUpdate, buildGraphReplyUpdate, compareReplyUpdateEnvelope } from "./graph-reply-draft.mjs";
 import { isReplyAttempt, validateReplyAttempt, transitionReplyAttempt, replyObservationReviewable, isReplyUpdate, transitionReplyUpdate } from "./graph-reply-journal.mjs";
@@ -234,6 +236,12 @@ export class Inbox {
     // null to leave the stitcher inert (the default). Inert means
     // indexEnvelope no-ops and the read path returns empty stitched views.
     this.stitcher = new InboxStitchStore(this.db, stitch ?? { enabled: false });
+    // Notification prefs (quiet hours, per-connection batching — tasks 32/34):
+    // store-owned, one manager for every account; the account id doubles as
+    // the prefs user id (single-owner account). Preferences UI wiring is a
+    // later slice; until then the import path runs the decider on the owner's
+    // configured prefs, defaulting to deliver.
+    this.notifyPrefs = createNotifyPrefs({ store: new Map() });
   }
   // Cross-channel thread stitching (task #19): in-session participant brief
   // for the review queue. Resolved from the stored envelope at read time —
@@ -1039,6 +1047,14 @@ export class Inbox {
           try {
             this.stitcher.indexEnvelope(accountId, request.data.envelope, { sourceId });
           } catch { /* stitching is read-path enrichment; ingestion proceeds */ }
+          // Spam guard + quiet hours (tasks 32/34): the pure scorer and the
+          // notify decider run on every imported envelope. The spam flag is a
+          // pure function of the envelope; the decision journals the prefs
+          // snapshot it ran on, so Inbox.verify() replays both
+          // deterministically. Flag-only (task 33): nothing is held, hidden,
+          // or moved here — the scores are recorded on the receipt.
+          Object.assign(receipt, runImportGuards({ prefs: this.notifyPrefs, accountId,
+            envelope: request.data.envelope, at: now }));
         }
       } else if (["source.read", "source.unread"].includes(action)) {
         // Read state is a marker, not a content version: the source revision
@@ -1162,6 +1178,17 @@ export class Inbox {
         if (prior) require(this.version(row.account_id, request.sourceId, prior.revision).adapter === request.data.adapter);
         expected.revision = request.expectedRevision + 1;
         require(same(this.version(row.account_id, request.sourceId, expected.revision), request.data));
+        // Import-guard replay (tasks 32/34): the spam flag is a pure function
+        // of the envelope, and the notify decision is recomputed from the
+        // journaled prefs snapshot — the owner's live prefs may have changed
+        // since the import, so the snapshot (never this.notifyPrefs) is the
+        // decision's input. Receipts journaled before the guards existed skip
+        // the replay, like the additive read-marker table.
+        if (request.action === "source.import" && receipt.notify !== undefined) {
+          expected.spam = scoreImportedEnvelope(request.data.envelope);
+          expected.notify = replayImportedNotification({ snapshot: receipt.notify.prefs, accountId: row.account_id,
+            connectionId: receipt.notify.connectionId, urgent: receipt.notify.urgent, at: receipt.notify.at });
+        }
         sources.set(key, { account_id: row.account_id, id: request.sourceId, revision: expected.revision, created_at: prior?.created_at ?? row.at, updated_at: row.at }); versions++;
       } else if (["source.read", "source.unread"].includes(request.action)) {
         require(prior?.revision === request.expectedRevision);

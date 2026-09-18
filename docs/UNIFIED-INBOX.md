@@ -392,6 +392,19 @@ into, and neither touches login/auth.
   the morning digest. Re-deciding the same payload when the window ends
   returns `deliver`, which is how held items release.
 
+**Import wiring** (`server/inbox-import-guards.mjs`, tasks 32/34): the
+`source.import` branch of `Inbox.apply` — the single funnel every channel
+import lands through (email/Telegram fixtures, the webhook drain, the live
+poller) — runs both guards on every imported envelope. `scoreImportedEnvelope`
+maps the envelope onto a scannable message (Telegram envelopes also carry the
+room bot's name/handle for the impersonation signal) and journals
+`receipt.spam = { score, signals, quarantine }`; `decideImportedNotification`
+runs the store-owned notify-prefs manager (account id as user id) and journals
+`receipt.notify = { decision, reason, at, connectionId, urgent, prefs }`, the
+prefs snapshot included so the journal replay recomputes the decision from the
+recorded inputs. Flag-only (task 33): nothing is held, hidden, or moved —
+scoring never blocks ingestion (an unscannable envelope records score 0).
+
 ## Status: email is fixture only; Telegram is live once configured
 
 The email adapter reads recorded fixtures: no mailbox is polled and nothing is
