@@ -18,6 +18,7 @@ import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
 import { installInbox } from "./inbox-ui.js";
 import { createAccountSettingsUI } from "./account-settings-ui.js";
 import { createAuthSigninUI } from "./auth-signin-ui.js";
+import { stashPendingInvite, clearPendingInvite, takeRestoredInvite } from "./invite-context.js";
 
 const $ = selector => document.querySelector(selector);
 $("#skip-link").addEventListener("click", event => {
@@ -82,7 +83,11 @@ function accountSignIn() {
   return authKind === "account" || accountHomeFromLocation();
 }
 const initialJoinFragment = consumeJoinFragment();
-const initialInvitationFragment = consumeInvitationFragment();
+// A Google/GitHub OAuth round-trip drops the #invite/ fragment (it never
+// reaches the server). Restore a stashed invitation one-shot when landing
+// without a room context, so the dialog re-opens after OAuth sign-in.
+const initialInvitationFragment = consumeInvitationFragment()
+  || takeRestoredInvite({ storage: window.sessionStorage, hash: location.hash, search: location.search });
 let shareLinksUI = null;
 let portableWorkUI = null;
 let resultCopyUI = null;
@@ -759,6 +764,7 @@ function closeInvitation({ returnFocus = true } = {}) {
   invitation.version += 1;
   const selection = invitation.openerSelection;
   Object.assign(invitation, { phase: "idle", secret: null, preview: null, redemptionId: null, opener: null, openerSelection: null });
+  clearPendingInvite(window.sessionStorage);
   setInvitationFeedback("");
   $("#invitation-account-form").reset();
   if ($("#invitation-dialog").open) $("#invitation-dialog").close();
@@ -802,6 +808,9 @@ async function openInvitation(fragment) {
     opener,
     openerSelection
   });
+  // Mirror the live invitation so a Google/GitHub OAuth navigation (which
+  // drops the URL fragment) cannot lose it; cleared on close/accept.
+  if (fragment.valid) stashPendingInvite(window.sessionStorage, fragment.secret);
   setInvitationFeedback(fragment.valid ? "Checking the invitation without joining the Room…" : "This invitation link is unavailable.", !fragment.valid);
   renderInvitation();
   $("#connection-status").setAttribute("aria-live", "off");
@@ -866,6 +875,7 @@ async function moveCurrentRoomToAccount(loggedIn) {
 async function openAcceptedRoom(roomId, message, { acceptanceConfirmed = true } = {}) {
   invitation.phase = "opening";
   invitation.secret = null;
+  clearPendingInvite(window.sessionStorage);
   renderInvitation();
   setInvitationFeedback("");
   $("#invitation-dialog").close();
