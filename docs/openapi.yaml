@@ -1327,12 +1327,6 @@ paths:
         run low. 10 per address per minute plus a 10-attempts-per-15-minutes
         per-email-hint budget.
       security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
               required: [email, code, sessionToken, sessionRevision]
               properties:
                 email: { type: string }
@@ -1358,6 +1352,66 @@ paths:
       responses:
         '200': { description: "{ configured, remaining (null when no set) }" }
         '401': { description: unauthenticated }
+  /api/auth/magic/request:
+    post:
+      summary: Issue a magic-link sign-in code
+      description: >-
+        Passwordless sign-in, step 1. The anonymous slot cookie from `GET
+        /api/account-session` plus `Origin` and `X-CSRF-Token` are required.
+        When a mail provider is configured, a single-use 15-minute code is
+        issued and handed to the mailer (the code is never in the response);
+        when no provider is configured the route answers honestly with
+        `mail_not_configured` and issues nothing. The response shape is
+        identical whether or not the email already has an account, so nothing
+        reveals account existence. 5 per address per minute, 3 per email per
+        hour.
+      security:
+        - accountSession: []
+              required: [email]
+              properties:
+                email: { type: string }
+      responses:
+        '200': { description: "{ status: 'sent' } — or { status: 'unavailable', reason: 'mail_not_configured', message } when email delivery is not configured" }
+        '401': { description: account_session_required (no slot cookie) }
+        '403': { description: origin_denied or csrf_denied }
+        '422': { description: invalid_email_request or invalid_email }
+        '429': { description: rate_limited }
+  /api/auth/magic/consume:
+    post:
+      summary: Redeem a magic-link code and sign the slot in
+      description: >-
+        Passwordless sign-in, step 2. The anonymous slot's `sessionToken` and
+        `sessionRevision` from `GET /api/account-session` travel in the body
+        (plus the slot cookie, `Origin`, and `X-CSRF-Token`); the slot is
+        verified before any code is burned so a CSRF failure cannot consume a
+        one-time code.
+        A wrong, expired, already-consumed, or 5x-burnt code answers 401
+        invalid_magic_code. On success the account is found-or-created by
+        verified email (`email:<sha256hex>`), the magic method is linked, and
+        the slot is compare-and-swapped to the account exactly like `POST
+        /api/account-session` (method `{ kind: "magic" }`); a `room_session`
+        cookie for the same browser is revoked. 10 per address per minute,
+        10 per email per hour.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code, sessionToken, sessionRevision]
+              properties:
+                email: { type: string }
+                code: { type: string }
+                sessionToken: { type: string }
+                sessionRevision: { type: integer }
+      responses:
+        '201': { description: "{ authenticated: true, account: { id, revision, authEpoch }, csrf, sessionBinding, sessionRevision, expiresAt, authenticatedUntil } — Set-Cookie account_session" }
+        '401': { description: account_session_required (no slot cookie) or invalid_magic_code }
+        '403': { description: origin_denied or csrf_denied }
+        '409': { description: Stale expectedSessionRevision }
+        '422': { description: invalid_magic_login or invalid_session_revision or invalid_email }
         '429': { description: rate_limited }
   /api/auth/passkey/register/options:
     post:
