@@ -1996,13 +1996,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
          ORDER BY sequence DESC LIMIT ?`)
         .all(roomId, T.MESSAGE_POSTED, memberId, limit)
         .map(row => {
-          const event = JSON.parse(row.body);
+          const parsed = JSON.parse(row.body);
           return {
             sequence: row.sequence,
-            messageId: event.data.messageId ?? null,
-            from: event.actorId,
-            body: event.data.body,
-            at: event.at,
+            messageId: parsed.data.messageId ?? null,
+            from: parsed.actorId,
+            body: parsed.data.body,
+            at: parsed.at,
             channel: "room",
           };
         });
