@@ -147,7 +147,7 @@ test("uncommitted candidate packages cold in an isolated synthetic commit, inclu
   const directory = mkdtempSync(join(tmpdir(), "room-candidate-package-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const candidate = candidateRuntimeFixture(repository, directory), destination = join(directory, "runtime");
-  const receipt = createRuntimePackage({ ...candidate, destination }); assert.equal(receipt.files, 163); // +3 vs pre-handoff: inbox-handoff.mjs (task 23), inbox-stitch.mjs, inbox-stitch-store.mjs (task #19)
+  const receipt = createRuntimePackage({ ...candidate, destination }); assert.equal(receipt.files, 164); // +4 vs pre-handoff: inbox-handoff.mjs (task 23), inbox-stitch.mjs, inbox-stitch-store.mjs (task #19), spam-quarantine-journal.mjs
   const program = `
     import { RoomStore } from ${JSON.stringify(pathToFileURL(join(destination, "server/store.mjs")).href)};
     import { SyntheticInboxTransport } from ${JSON.stringify(pathToFileURL(join(destination, "server/inbox-transport.mjs")).href)};
