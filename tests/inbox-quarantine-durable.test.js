@@ -76,7 +76,7 @@ test("a tripped spam guard journals a held record in the durable journal on impo
   const f = fixture(t);
   const conn = tgConn(f.account.id);
   const envelope = tgEnvelope(conn, { from: spamFrom, text: spamText });
-  const { result } = importTelegram(f, envelope);
+  const { result, sourceId } = importTelegram(f, envelope);
   assert.equal(result.receipt.spam.quarantine, true, "the fixture text must trip the spam guard");
   assert.equal(result.receipt.spam.score >= 60, true);
   const held = f.store.spamQuarantine.held();
@@ -86,6 +86,8 @@ test("a tripped spam guard journals a held record in the durable journal on impo
     status: record.status, score: record.score, reviewedBy: record.reviewedBy },
     { messageId: envelope.message.id, channel: "telegram", connectionId: "telegram-guard",
       status: "held", score: result.receipt.spam.score, reviewedBy: null });
+  assert.equal(record.accountId, f.account.id, "the import journals the importing account (gap #2)");
+  assert.equal(record.sourceId, sourceId, "the import journals the inbox source id (gap #2)");
   assert.deepEqual(record.reason, result.receipt.spam.signals.map(s => ({ key: s.key, weight: s.weight, detail: s.detail })),
     "the journaled reason is the flag's signal list");
   assert.equal(sqlRows(f.store).length, 1, "the record is in the spam_quarantine table, not an in-memory queue");

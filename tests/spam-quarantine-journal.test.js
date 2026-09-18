@@ -94,11 +94,55 @@ test("review() bridges the in-memory queue's decision vocabulary", t => {
   rejects(Promise.resolve().then(() => f.journal().review(two.id, { decision: "nuke", reviewer: "owner" })), 422, "invalid_quarantine");
 });
 
+test("accountId/sourceId are explicit on write and read, null for legacy rows", t => {
+  const f = fixture(t);
+  const scoped = f.journal().quarantine(entry("msg-1", "telegram", { accountId: "acct-1", sourceId: "src-1", connectionId: "conn-1" }));
+  assert.deepEqual({ accountId: scoped.accountId, sourceId: scoped.sourceId, connectionId: scoped.connectionId },
+    { accountId: "acct-1", sourceId: "src-1", connectionId: "conn-1" });
+  const fetched = f.journal().get(scoped.id);
+  assert.equal(fetched.accountId, "acct-1");
+  assert.equal(fetched.sourceId, "src-1");
+  assert.deepEqual(f.journal().held().map(r => ({ accountId: r.accountId, sourceId: r.sourceId })),
+    [{ accountId: "acct-1", sourceId: "src-1" }], "list() exposes the scope fields");
+  const legacy = f.journal().quarantine(entry("msg-2"));
+  assert.equal(legacy.accountId, null, "rows filed without the scope fields read back null (backward compatible)");
+  assert.equal(legacy.sourceId, null);
+  assert.deepEqual(f.journal().verify(), { held: 2, released: 0, dismissed: 0 }, "null-scoped rows still verify");
+  const reopened = f.reopen();
+  assert.equal(reopened.get(scoped.id).sourceId, "src-1", "the scope fields survive a restart");
+});
+
+test("a pre-gap-#2 table converges on reopen: rows survive, new columns read back null", t => {
+  const f = fixture(t);
+  // Simulate a database written before the account_id/source_id columns:
+  // strip them, file a legacy row with raw SQL (as the old code did), then
+  // reopen through the normal path.
+  f.store.db.exec("ALTER TABLE spam_quarantine DROP COLUMN account_id");
+  f.store.db.exec("ALTER TABLE spam_quarantine DROP COLUMN source_id");
+  f.store.db.prepare(`INSERT INTO spam_quarantine (id,message_id,channel,connection_id,reason,score,quarantined_at,status,reviewed_by,reviewed_at,note,updated_at)
+    VALUES('qz-1','legacy-msg','telegram','conn-1','[{"key":"k","weight":80,"detail":"d"}]',80,?, 'held',NULL,NULL,NULL,?)`)
+    .run(Date.now(), Date.now());
+  const reopened = f.reopen();
+  assert.ok(reopened.verifySchema(), "migrated columns converge to the checked-in schema");
+  const held = reopened.held();
+  assert.equal(held.length, 1, "the legacy row survives the migration");
+  assert.equal(held[0].messageId, "legacy-msg");
+  assert.equal(held[0].accountId, null, "pre-column rows read back null account_id");
+  assert.equal(held[0].sourceId, null, "pre-column rows read back null source_id");
+  assert.deepEqual(reopened.verify(), { held: 1, released: 0, dismissed: 0 }, "legacy rows still verify after migration");
+  const fresh = reopened.quarantine(entry("new-msg", "email", { accountId: "acct-9", sourceId: "src-9" }));
+  assert.deepEqual({ accountId: fresh.accountId, sourceId: fresh.sourceId }, { accountId: "acct-9", sourceId: "src-9" });
+  assert.equal(fresh.id, "qz-2", "the id counter keeps counting across the migration");
+});
+
 test("validation rejects bad quarantine writes and reviews", async t => {
   const f = fixture(t);
   await rejects((async () => f.journal().quarantine(entry("msg-1", "telegram", { flag: clean() })))(), 422, "invalid_quarantine");
   await rejects((async () => f.journal().quarantine({ ...entry(""), }))(), 422, "invalid_quarantine");
   await rejects((async () => f.journal().quarantine(entry("msg-1", "x".repeat(200))))(), 422, "invalid_quarantine");
+  await rejects((async () => f.journal().quarantine(entry("msg-9", "telegram",
+    { accountId: "x".repeat(spamQuarantineLimits.accountIdChars + 1) })))(), 422, "invalid_quarantine");
+  await rejects((async () => f.journal().quarantine(entry("msg-9", "telegram", { sourceId: "" })))(), 422, "invalid_quarantine");
   const held = f.journal().quarantine(entry("msg-1"));
   await rejects((async () => f.journal().release(held.id, { reviewer: "" }))(), 422, "invalid_quarantine");
   await rejects((async () => f.journal().dismiss(held.id, { reviewer: "owner", note: "x".repeat(spamQuarantineLimits.noteChars + 1) }))(), 422, "invalid_quarantine");

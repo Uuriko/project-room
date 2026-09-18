@@ -97,18 +97,19 @@ export class SpamQuarantineJournal {
   // these objects and must not migrate, so allowAbsent accepts a wholly missing
   // schema; a partially present one still fails.
   // The table may have converged through migrateSpamQuarantineColumns's ALTER
-  // TABLE, which leaves the stored CREATE TABLE text without the new
-  // columns — so the table check compares the live column set via pragma,
-  // not the stored SQL. The index has no migration path, so it keeps the
-  // exact-text check.
+  // TABLE, which appends the new columns after the existing ones — so the
+  // table check compares the live column name set via pragma
+  // (order-insensitive), not the stored CREATE TABLE text. The index has no
+  // migration path, so it keeps the exact-text check.
   verifySchema({ allowAbsent = false } = {}) {
     const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
     const table = this.db.prepare("SELECT sql FROM sqlite_master WHERE name='spam_quarantine'").get()?.sql;
     const index = this.db.prepare("SELECT sql FROM sqlite_master WHERE name='spam_quarantine_held'").get()?.sql;
     if (allowAbsent && table === undefined && index === undefined) return false;
     if (table === undefined || index === undefined) throw new Error("Spam quarantine journal schema requires operator reconciliation");
-    const actualColumns = this.db.prepare("SELECT name FROM pragma_table_info('spam_quarantine') ORDER BY cid").all().map(r => r.name);
-    if (actualColumns.join(",") !== quarantineColumns(spamQuarantineSchema).join(","))
+    const actualColumns = this.db.prepare("SELECT name FROM pragma_table_info('spam_quarantine')").all().map(r => r.name);
+    const sorted = names => [...names].sort().join(",");
+    if (sorted(actualColumns) !== sorted(quarantineColumns(spamQuarantineSchema)))
       throw new Error("Spam quarantine journal schema requires operator reconciliation");
     const expectedIndex = "CREATE INDEX spam_quarantine_held ON spam_quarantine(status, quarantined_at)";
     if (normalize(index) !== normalize(expectedIndex))
