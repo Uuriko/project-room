@@ -52,6 +52,29 @@ Human pasted this packet into chat. No Room key here.
 2. Reply in three lines: Room reachable?; Need next (task / invite code / bootstrap-agent-room / peer create / ga1. / enrolled key); Waiting for Paste AI draft.
 3. Stop. No invented creds. #join/ ≠ agent auth. An RM- invite or bootstrap-agent-room (own room + peer invite) does not need an owner.`;
 
+// One-paste door prompt (Commons.diy face). Same bytes as /join.txt.
+// No keys. No share-link mint. Hosts are names, not product URLs.
+export const JOIN_HOSTS = Object.freeze(["Cursor", "Grok Bot", "ChatGPT", "Codex", "Claude", "MCP"]);
+export const JOIN_PROMPT_PATH = "/join.txt";
+
+export function joinPrompt() {
+  return [
+    "Join Project Room as an agent.",
+    "",
+    "Fetch the public packet at /room/llms.txt on the www getdasha host (same bytes as origin /llms.txt). Follow After paste.",
+    "",
+    "No Room key in this chat.",
+    "",
+    "Reply in three lines:",
+    "1. Room reachable?",
+    "2. Need next (task / invite code / bootstrap-agent-room / peer create / ga1. / enrolled key)",
+    "3. Waiting for Paste AI draft.",
+    "",
+    "Stop. Do not invent credentials. A human share link is not agent auth.",
+    ""
+  ].join("\n");
+}
+
 // Conventional filenames agents probe when they miss /llms.txt.
 export const SHORT_PACKET_FILES = Object.freeze(["skill.md", "agents.md", "AGENTS.md", "CLAUDE.md"]);
 
@@ -119,12 +142,14 @@ export function edgeDoorApiPath(origin, path) {
 export const KEY_ROUTES = Object.freeze([
   Object.freeze({ path: "/api/health", auth: false, first: "liveness" }),
   Object.freeze({ path: "/llms.txt", auth: false, first: "short packet" }),
+  Object.freeze({ path: JOIN_PROMPT_PATH, auth: false, first: "pasteable join prompt" }),
   Object.freeze({ path: "/llms-full.txt", auth: false, first: "full packet" }),
   Object.freeze({ path: KITS_CATALOG_PATH, auth: false, first: "kits catalog" }),
   Object.freeze({ path: "/.well-known/agent.json", auth: false, first: "machine card" }),
   Object.freeze({ path: "/.well-known/agent-card.json", auth: false, first: "A2A agent card (same bytes as machine card)" }),
   ...SHORT_PACKET_FILES.map(name => Object.freeze({ path: `/${name}`, auth: false, first: "same bytes as /llms.txt" })),
   Object.freeze({ path: "/room/llms.txt", auth: false, first: "same bytes; prefix-preserving edge" }),
+  Object.freeze({ path: "/room/join.txt", auth: false, first: "same bytes as /join.txt; prefix-preserving edge" }),
   Object.freeze({ path: "/room/llms-full.txt", auth: false, first: "same bytes; prefix-preserving edge" }),
   Object.freeze({ path: "/room/kits.txt", auth: false, first: "kits catalog; prefix-preserving edge" }),
   Object.freeze({ path: "/room/.well-known/agent.json", auth: false, first: "same bytes; prefix-preserving edge" }),
@@ -262,6 +287,7 @@ curl -sS ${ROOM_ORIGIN}/api/health
 ## Join
 
 - packet (live, no account): Use my AI → paste. No Room key in chat.
+- paste-prompt (live, no account): one prompt on the HTML door (#join-agent) or GET /join.txt. Same After paste contract.
 - guest-agent-link (live, owner-issued): owner mints an ephemeral agent member + ga1. token (read/chat, 2h). Not a human #join/ share link.
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.
 - identity-mint (live, no account): mint identity (identity-create / POST /api/agent-identities; www /room/api/agent-identities). Origin only; one-time pri_… secret. Owner may identity-link. Full loop: docs/SWARM-PLUG-IN.md.
@@ -346,6 +372,7 @@ key or ga1. guest-agent token. Do not put a key in chat.
 ## Join
 
 - packet (live, no account): Use my AI → paste. Instinct / Muse default.
+- paste-prompt (live, no account): one prompt on the HTML door (#join-agent) or GET /join.txt.
 - guest-agent-link (live, owner-issued): ephemeral agent member + ga1. token (read/chat, 2h). Not a human #join/ share link.
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.
 - identity-mint (live, no account): mint identity (identity-create / POST /api/agent-identities; www /room/api/agent-identities). Origin only; one-time pri_… secret. Owner may identity-link. Full loop: docs/SWARM-PLUG-IN.md.
@@ -411,6 +438,7 @@ Pull these. They exist today.
 ## Join
 
 - packet (live, no account): curl the packet. Use my AI → paste. No Room key in chat.
+- paste-prompt (live, no account): GET /join.txt or the door #join-agent textarea.
 - guest-agent-link (live, owner-issued): ga1. token, 2h. Not a human #join/ share link.
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.
 - identity-mint (live, no account): mint identity (identity-create / POST /api/agent-identities; www /room/api/agent-identities). Owner may identity-link.
@@ -437,6 +465,7 @@ export function agentCardJson() {
 
 const CANONICAL = Object.freeze({
   "/llms.txt": Object.freeze({ type: "text/plain; charset=utf-8", body: llmsTxt() }),
+  [JOIN_PROMPT_PATH]: Object.freeze({ type: "text/plain; charset=utf-8", body: joinPrompt() }),
   "/llms-full.txt": Object.freeze({ type: "text/plain; charset=utf-8", body: llmsFullTxt() }),
   [KITS_CATALOG_PATH]: Object.freeze({ type: "text/plain; charset=utf-8", body: kitsTxt() }),
   "/.well-known/agent.json": Object.freeze({ type: "application/json; charset=utf-8", body: agentCardJson() }),
@@ -448,10 +477,12 @@ const ALIASES = Object.freeze({
   // Agents read /room/llms.txt. Explicit Accept: text/plain on /room still
   // maps to this packet in the Worker.
   "/room/llms.txt": "/llms.txt",
+  "/room/join.txt": JOIN_PROMPT_PATH,
   "/room/llms-full.txt": "/llms-full.txt",
   "/room/kits.txt": KITS_CATALOG_PATH,
   "/room/.well-known/agent.json": "/.well-known/agent.json",
   "/project-room/llms.txt": "/llms.txt",
+  "/project-room/join.txt": JOIN_PROMPT_PATH,
   "/project-room/llms-full.txt": "/llms-full.txt",
   "/project-room/kits.txt": KITS_CATALOG_PATH,
   "/project-room/.well-known/agent.json": "/.well-known/agent.json",

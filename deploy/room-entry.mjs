@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { discoveryDoc, ROOM_ORIGIN, COMPUTE_DOOR, ROOM_PUBLIC_WWW } from "./agent-discovery.mjs";
+import { discoveryDoc, ROOM_ORIGIN, COMPUTE_DOOR, ROOM_PUBLIC_WWW, joinPrompt, JOIN_HOSTS } from "./agent-discovery.mjs";
 
 const DOOR_PAGES = new Set(["/room", "/room/", "/project-room", "/project-room/"]);
 export const PUBLIC_DOOR_PATHS = Object.freeze(["/room", "/room/"]);
@@ -86,6 +86,10 @@ p{margin:0 0 1rem;color:rgba(228,222,210,.82);max-width:34em}
 .works-with a{color:var(--mute)}
 .works-with a:hover{color:var(--clay)}
 .connect code{font-size:.9em;color:#E4DED2}
+.join-agent{margin:1.6rem 0 0;padding-top:1.35rem;border-top:1px solid rgba(228,222,210,.12);max-width:34em}
+.join-agent h2{margin:0 0 10px;font:650 11px/1.3 "Hanken Grotesk",system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}
+.join-hosts{margin:0 0 .75rem;font-size:13px;color:var(--mute)}
+.join-agent textarea{width:100%;box-sizing:border-box;min-height:12rem;margin:.4rem 0 .75rem;padding:.75rem .85rem;border:1px solid rgba(228,222,210,.22);border-radius:.4rem;background:#0a100e;color:#E4DED2;font:14px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;resize:vertical}
 .help a{color:var(--clay);text-decoration:none}
 footer{width:min(40rem,calc(100% - 2.5rem));margin:0 auto;padding:0 0 2.5rem;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute)}
 footer a{color:var(--clay);text-decoration:none}
@@ -99,6 +103,15 @@ a:focus-visible{outline:1px solid var(--clay);outline-offset:3px}
   <a class="open" href="${ROOM_ORIGIN}">Open Project Room</a>
   <p class="help">Paste your room key on the next screen, or open an invitation. Same browser as last time? You come back automatically.</p>
   <p class="help">Joining as a person or an agent is free.</p>
+  <p class="help"><a href="#join-agent">Paste a prompt</a> — Join from your favorite agent app.</p>
+  <section class="join-agent" id="join-agent" aria-labelledby="join-agent-title">
+    <h2 id="join-agent-title">Join from your favorite agent app</h2>
+    <p class="help">Just paste a prompt.</p>
+    <p class="join-hosts">${JOIN_HOSTS.join(" · ")}</p>
+    <label class="help" for="join-prompt">Copy this into a new chat</label>
+    <textarea id="join-prompt" readonly rows="12" spellcheck="false">${joinPrompt()}</textarea>
+    <p class="help">Your agent fetches the packet and says what it needs next. No Room key in chat. Same bytes: <a href="/room/join.txt">join.txt</a>.</p>
+  </section>
   <section class="connect" aria-labelledby="connect-agent">
     <h2 id="connect-agent">Connect an agent</h2>
     <p class="help">Invite teammates and AI agents to work on the same items together.</p>
@@ -157,6 +170,13 @@ h1{font-size:clamp(2.4rem,8vw,3.8rem);line-height:1.05;letter-spacing:-.04em;mar
 .compute{margin:2.2rem 0 0;font-size:13px;color:var(--mute)}
 .compute+.compute{margin-top:.5rem}
 .compute a{color:var(--acid);text-decoration:none}
+.join-agent{margin:0 0 1.6rem;padding-top:1.35rem;border-top:1px solid rgba(242,237,231,.12);max-width:34em}
+.join-agent h2{margin:0 0 10px;font:650 11px/1.3 Inter,ui-sans-serif,system-ui,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}
+.join-agent p{margin:0 0 .75rem;font-size:15px;color:rgba(242,237,231,.72)}
+.join-agent a{color:var(--acid);text-decoration:none}
+.join-hosts{margin:0 0 .75rem;font-size:13px;color:var(--mute)}
+.join-agent label{display:block;margin:0 0 .4rem;font-size:13px;color:var(--mute)}
+.join-agent textarea{width:100%;box-sizing:border-box;min-height:12rem;margin:0 0 .75rem;padding:.75rem .85rem;border:1px solid rgba(242,237,231,.22);border-radius:.4rem;background:#120e12;color:var(--paper);font:14px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;resize:vertical}
 a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
 </style></head><body>
 <main>
@@ -166,10 +186,19 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
   <div class="actions">
     <a class="open" href="${ROOM_ORIGIN}">Open</a>
     <a class="ghost" href="${ROOM_ORIGIN}/#join/">Join</a>
+    <a class="ghost" href="#join-agent">Paste a prompt</a>
     <a class="ghost" href="#connect">Connect an agent</a>
     <a class="ghost people" href="#people">People</a>
   </div>
   <p class="join-note">Joining as a person or an agent is free.</p>
+  <section class="join-agent" id="join-agent" aria-labelledby="join-agent-title">
+    <h2 id="join-agent-title">Join from your favorite agent app</h2>
+    <p>Just paste a prompt.</p>
+    <p class="join-hosts">${JOIN_HOSTS.join(" · ")}</p>
+    <label for="join-prompt">Copy this into a new chat</label>
+    <textarea id="join-prompt" readonly rows="12" spellcheck="false">${joinPrompt()}</textarea>
+    <p>Your agent fetches the packet and says what it needs next. No Room key in chat. Same bytes: <a href="/room/join.txt">join.txt</a>.</p>
+  </section>
   <section class="connect" id="connect" aria-labelledby="connect-agent">
     <h2 id="connect-agent">Connect an agent</h2>
     <p>Invite teammates and AI agents to work on the same items together.</p>

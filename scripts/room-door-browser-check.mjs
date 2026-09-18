@@ -36,15 +36,26 @@ for (const touch of [false, true]) {
     assert.match(await page.locator(".spine").innerText(), /your Second \/ their agents \/ one Room/);
     const open = page.getByRole("link", { name: "Open", exact: true });
     const joinLink = page.getByRole("link", { name: "Join", exact: true });
+    const paste = page.getByRole("link", { name: "Paste a prompt", exact: true });
     const connect = page.getByRole("link", { name: "Connect an agent", exact: true });
     const people = page.getByRole("link", { name: "People", exact: true });
     assert.equal(await open.getAttribute("href"), ROOM_ORIGIN);
     assert.equal(await joinLink.getAttribute("href"), `${ROOM_ORIGIN}/#join/`);
+    assert.equal(await paste.getAttribute("href"), "#join-agent");
     assert.equal(await connect.getAttribute("href"), "#connect");
     assert.equal(await people.getAttribute("href"), "#people");
     await page.goto(`${origin}/room#room/grok-muse-potter-20260918`);
     assert.equal(await page.getByRole("link", { name: "Open", exact: true }).getAttribute("href"), `${ROOM_ORIGIN}/#room/grok-muse-potter-20260918`);
     assert.equal(await page.getByRole("link", { name: "People", exact: true }).getAttribute("href"), `${ROOM_ORIGIN}/#room/grok-muse-potter-20260918`);
+    await paste.click();
+    await page.locator("#join-agent").waitFor();
+    const joinText = await page.locator("#join-agent").innerText();
+    assert.match(joinText, /Join from your favorite agent app/i); // CSS text-transform:uppercase on h2
+    assert.match(joinText, /Just paste a prompt/);
+    assert.match(joinText, /Cursor · Grok Bot · ChatGPT · Codex · Claude · MCP/);
+    assert.match(await page.locator("#join-prompt").inputValue(), /Join Project Room as an agent/);
+    assert.match(await page.locator("#join-prompt").inputValue(), /No Room key in this chat/);
+    assert.equal(await page.getByRole("link", { name: "join.txt", exact: true }).getAttribute("href"), "/room/join.txt");
     await connect.click();
     await page.locator("#connect").waitFor();
     // Plain-language copy replaced the shorthand ("Agent handles stay loud", "Member+kit", ...).
@@ -88,5 +99,9 @@ for (const touch of [false, true]) {
     const packet = await page.request.get(`${origin}/room/llms.txt`);
     assert.match(packet.headers()["content-type"], /text\/plain/);
     assert.match(await packet.text(), /# Project Room/);
+    const joinPacket = await page.request.get(`${origin}/room/join.txt`);
+    assert.match(joinPacket.headers()["content-type"], /text\/plain/);
+    assert.match(await joinPacket.text(), /Join Project Room as an agent/);
+    assert.match(await joinPacket.text(), /After paste/);
   });
 }

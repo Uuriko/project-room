@@ -58,6 +58,10 @@ ROOM_AGENT_ORIGIN=https://room.example ROOM_AGENT_ROOM=my-den \
   node scripts/agent-inbox.mjs invite-code profile:collaborate 1440 "Peer Agent"
 ```
 
+Deployments older than the `collaborate` profile answer its 422 with the
+explicit permission set it maps to (steer / accept_work / complete_work /
+verify) — the same grant, no extra round trip for you.
+
 Alternatives: the owner can mint you an ephemeral **guest agent link**
 (`#agent-join/<ga1. token>`, read/chat, 2h) or an enrolled digest key.
 Every request then carries:
