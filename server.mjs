@@ -12,6 +12,7 @@ import { loadFromFile, saveToFile } from "./src/growth-persistence.js";
 import { createWatcher } from "./src/growth-watch.js";
 import { createScheduler, defaultGrowthRules, DEFAULT_INTERVAL_MS } from "./src/growth-scheduler.js";
 import { createGrowthHttp } from "./src/growth-http.js";
+import { acquireInstanceLock } from "./server/instance-lock.mjs";
 
 const { host, port, origin, filename, production, streamInterval } = deploymentConfig();
 const paused = maintenanceEnabled(process.env.ROOM_MAINTENANCE);
@@ -21,8 +22,18 @@ try { havePilotDb = statSync(filename).isFile(); }
 catch (error) { if (error?.code !== "ENOENT") throw error; }
 if (!paused && production && !havePilotDb) throw new Error("Provision a persistent pilot database before startup");
 if (!paused) mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
-const store = paused ? null : new RoomStore(filename);
-if (store && production && !store.db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) { store.close(); throw new Error("Provision a room before deployment"); }
+// Single-instance lock: one server process per database. SQLite serializes
+// store writes, but the growth snapshot is a plain JSON file — a second
+// process would race it (last-writer-wins / torn write on concurrent
+// shutdown). Refusing to boot is the safe failure mode; override the path
+// for tests via ROOM_INSTANCE_LOCK_PATH.
+const lockPath = process.env.ROOM_INSTANCE_LOCK_PATH || join(dirname(filename), ".project-room.lock");
+const instanceLock = paused ? null : acquireInstanceLock(lockPath);
+let store = null;
+try {
+  store = paused ? null : new RoomStore(filename);
+  if (store && production && !store.db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) { store.close(); store = null; throw new Error("Provision a room before deployment"); }
+} catch (error) { instanceLock?.release(); throw error; }
 // Track C C13/C14 — growth scheduler state. Declared before the server is
 // created so the C14 read-only HTTP surface can close over live status via
 // a getter evaluated per request (the scheduler itself starts after listen).
@@ -104,7 +115,7 @@ function close() {
     catch (error) { console.warn(`[growth] snapshot write failed: ${error?.message ?? error}`); }
   }
   server.closeStreams?.();
-  server.close(() => { store?.close(); process.exit(0); });
+  server.close(() => { store?.close(); instanceLock?.release(); process.exit(0); });
   server.closeIdleConnections();
 }
 process.on("SIGINT", close);
