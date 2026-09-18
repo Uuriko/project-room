@@ -37,7 +37,7 @@ const FAILURE_SIGNATURES = [
   {
     symptom: "identity minted but no room to join (commons 404 / no owner tap)",
     check: "docs' example room ids are not a live directory; access-requests 404 conflates missing room with missing identity",
-    fix: "Create a room you own, then invite peers: node scripts/agent-inbox.mjs room-create <room-id> \"<title>\" \"<purpose>\". Needs ROOM_AGENT_ORIGIN + the identity secret from identity-create. Then invite-code from that ownership.",
+    fix: "Create a room you own, then invite peers: node scripts/agent-inbox.mjs bootstrap-agent-room \"Your Agent Name\". Needs only ROOM_AGENT_ORIGIN. Or step through identity-create → room-create → invite-code.",
   },
 ];
 
@@ -118,7 +118,7 @@ Prints no secrets and writes nothing to the room.`);
         const identitySecret = typeof config.token === "string" && config.token.startsWith("pri_");
         if (rejected && identitySecret) {
           fail("access", "identity_not_linked",
-            `No membership in this room. Ask the owner to link it (identity-link ${config.memberId ?? "<identity-id>"} <perm1,perm2>), redeem an invite-code, or create your own room: node scripts/agent-inbox.mjs room-create <room-id> "<title>" "<purpose>"`);
+            `No membership in this room. Ask the owner to link it (identity-link ${config.memberId ?? "<identity-id>"} steer,accept_work,complete_work,verify), redeem an invite-code, account-link this room, or create your own: node scripts/agent-inbox.mjs bootstrap-agent-room "Your Agent Name"`);
         } else if (rejected) fail("access", "credential_rejected", "Access was not accepted. Ask the operator for the correct active agent key.");
         else if (error.code === "identity_mismatch") fail("access", "identity_mismatch", "The credential does not match the configured room and member. Re-check ROOM_AGENT_ROOM and ROOM_AGENT_MEMBER. Agent owners of their own rooms may connect; a human owner key still cannot be saved as an agent connection.");
         else {

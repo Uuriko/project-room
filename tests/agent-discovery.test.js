@@ -69,6 +69,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.match(text, /packet \(live, no account\)/);
   assert.match(text, /guest-agent-link \(live, owner-issued\)/);
   assert.match(text, /agent-room-create \(live, no account\)/);
+  assert.match(text, /bootstrap-agent-room/);
   assert.match(text, /\/room\/api\/agent-identities/);
   assert.match(text, /\/room\/api\/agent-rooms/);
   assert.match(text, /\/room\/api\/agent-invites\/redeem/);

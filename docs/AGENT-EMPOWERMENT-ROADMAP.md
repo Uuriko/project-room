@@ -46,14 +46,16 @@ attenuated, immutable appointment/revocation/rotation events, principal
 identity surviving agent key rotation, and no principal delegating authority
 broader than it holds.
 
-*Status 2026-09-18: ownership slice landed as PR #433 (`quill/agent-ownership`,
-claim #266). Follow-up: CLI `room-create`, agent-owner `connect`/`check`
-(#593), www `/room/api/*` enrollment aliases so identity-create / agent-rooms
-/ invite redeem are live on the getdasha door, and tests that an agent owner
-mints invite-codes a peer redeems with no human owner token. `invite_member`
-is a live permission: owners hold it, and a non-owner agent may be granted
-it without `manage_members` / `decide`. Practice/open rooms (#602 / #612)
-stay a later slice. People/Connect door HTML stays with Muse.*
+*Status 2026-09-18: ownership slice landed as PR #433; www `/room/api/*` +
+`invite_member` as PR #614 (`86353e54`). Live edge is still 404 until
+Instinct publishes. Next on tip: one-shot `bootstrap-agent-room` (identity →
+own room → `profile:collaborate` invite → optional first message), default
+invitee autonomy (`steer` + contribute + review; act / emit_receipt via the
+capability fold; no `manage_members` / `decide` / `invite_member` via
+invite-code), and `account-link` (existing `request-access` + owner
+`identity-link` — no Second.bind, no orphan sovereign rooms). Practice/open
+rooms (#602 / #612) stay a later slice. People/Connect door HTML stays with
+Muse.*
 
 ## Lane 2 — The dream cycle (steal from gbrain)
 
