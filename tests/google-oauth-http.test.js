@@ -138,7 +138,7 @@ test("callback success establishes the session and returns the same-origin page"
   assert.equal(html.includes("code-fixture"), false);
 });
 
-test("callback success without rooms still establishes the session", async t => {
+test("callback success without rooms lands on the account home, session established", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f, { googleAuth: googleAuth() });
   const { authorize, slotCookie } = await beginFlow(origin);
@@ -147,7 +147,10 @@ test("callback success without rooms still establishes the session", async t => 
     { redirect: "manual", headers: { Cookie: `account_session=${slotCookie}` } });
   assert.equal(callback.status, 200);
   const html = await callback.text();
-  assert.match(html, /url=\/\?google=error/);
+  // A fresh account has no rooms: the post-login page must land on the
+  // account home (room list + "New room" + invite redemption), not the
+  // error path that silently bounced users back to the login form.
+  assert.match(html, /url=\/\?account=1/);
   const sessionCookie = accountCookie(callback);
   assert.ok(sessionCookie, "session cookie is set even without a room to open");
   const session = f.store.authenticateAccountSession(sessionCookie);
