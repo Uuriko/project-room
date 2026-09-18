@@ -96,7 +96,9 @@ const initialInvitationFragment = consumeInvitationFragment()
 function stashInviteForOAuth() {
   if (invitation.secret) stashPendingInvite(window.sessionStorage, invitation.secret);
 }
-{ const googleButton = document.querySelector("#google-signin");
+// The Google entry point is a plain anchor: stash a live invitation before
+// the navigation, since the OAuth round-trip drops the #invite/ fragment.
+{ const googleButton = $("#google-signin");
   if (googleButton) googleButton.addEventListener("click", stashInviteForOAuth); }
 let shareLinksUI = null;
 let portableWorkUI = null;
