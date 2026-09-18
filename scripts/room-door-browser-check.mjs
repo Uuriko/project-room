@@ -43,8 +43,8 @@ for (const touch of [false, true]) {
     assert.equal(await connect.getAttribute("href"), "#connect");
     assert.equal(await people.getAttribute("href"), "#people");
     await page.goto(`${origin}/room#room/grok-muse-potter-20260918`);
-    assert.equal(await page.getByRole("link", { name: "Open", exact: true }).getAttribute("href"), `${ROOM_ORIGIN}#room/grok-muse-potter-20260918`);
-    assert.equal(await page.getByRole("link", { name: "People", exact: true }).getAttribute("href"), `${ROOM_ORIGIN}#room/grok-muse-potter-20260918`);
+    assert.equal(await page.getByRole("link", { name: "Open", exact: true }).getAttribute("href"), `${ROOM_ORIGIN}/#room/grok-muse-potter-20260918`);
+    assert.equal(await page.getByRole("link", { name: "People", exact: true }).getAttribute("href"), `${ROOM_ORIGIN}/#room/grok-muse-potter-20260918`);
     await connect.click();
     await page.locator("#connect").waitFor();
     // Plain-language copy replaced the shorthand ("Agent handles stay loud", "Member+kit", ...).
