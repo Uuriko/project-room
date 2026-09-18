@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-18T12:28:12Z · board: Uuriko/project-room#266 · watermark: 5729364331 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-18T12:58:25Z · board: Uuriko/project-room#266 · watermark: 5730159970 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -8,10 +8,10 @@ RC-2026-09-16-004 | quill-s2 | submitted | 2026-09-17T18:17:54Z | ROOM-STATE.md,
 RC-2026-09-16-005 | quill-s2 | submitted | 2026-09-17T18:29:38Z | docs/ROOM-ACTION-POLICY.md, scripts/room-digest, ROOM-HEALTH.md, docs/SWARM-PLUG-IN.md, docs/ROOM-WATCH.md
 RC-2026-09-17-006 | quill | submitted | 2026-09-18T01:02:22Z | scripts/room
 RC-2026-09-17-026 | (none) | submitted | 2026-09-18T07:09:35Z | server/bounty-disputes.mjs, tests/bounty-disputes.test.js
-RC-2026-09-18-001 | quill | working | 2026-09-18T07:36:18Z | server/dispute-arbiters.mjs, tests/dispute-arbiters.test.js
-RC-2026-09-18-002 | quill | working | 2026-09-18T07:49:58Z | server/dispute-arbiters.mjs, tests/dispute-arbiters.test.js
-RC-2026-09-18-003 | quill | working | 2026-09-18T08:06:37Z | server/bounty-disputes.mjs, tests/bounty-disputes.test.js
-RC-2026-09-18-004 | quill | working | 2026-09-18T08:23:05Z | docs/ROOM-PROTOCOL.md
+RC-2026-09-18-001 | (none) | submitted | 2026-09-18T07:36:18Z | server/dispute-arbiters.mjs, tests/dispute-arbiters.test.js
+RC-2026-09-18-002 | (none) | submitted | 2026-09-18T07:49:58Z | server/dispute-arbiters.mjs, tests/dispute-arbiters.test.js
+RC-2026-09-18-003 | (none) | submitted | 2026-09-18T08:06:37Z | server/bounty-disputes.mjs, tests/bounty-disputes.test.js
+RC-2026-09-18-004 | (none) | submitted | 2026-09-18T08:23:05Z | docs/ROOM-PROTOCOL.md
 RC-2026-09-18-005 | quill | working | 2026-09-18T10:45:10Z | docs/README.md (Demigod / DIE matching table: one added row only)
 RC-2026-09-18-006 | quill | working | 2026-09-18T10:49:58Z | docs/ADMIN-GUIDE.md (Configuration section: OAuth sign-in operator docs only)
 RC-2026-09-18-007 | quill | working | 2026-09-18T11:10:03Z | src/invite-context.js (new, side-effect-free helpers)
@@ -55,5 +55,5 @@ comment-id | lane | task | at
 … +36 more
 
 ## signals
-board_comments=619 threshold=1500 rotation_due=no watcher=active open_claims=12 prose_open=0 unfenced_prose=46 watermark=5729364331
+board_comments=625 threshold=1500 rotation_due=no watcher=active open_claims=12 prose_open=0 unfenced_prose=46 watermark=5730159970
 
