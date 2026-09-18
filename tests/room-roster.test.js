@@ -161,7 +161,10 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /id="google-signin"/);
   assert.match(html, /Continue with Google/);
   assert.match(html, /id="invite-redeem"/);
-  assert.match(html, /Have an invite\?/);
+  assert.match(html, /Have an invite link\?/);
+  assert.match(html, /id="auth-room-hint"/);
+  assert.match(html, /id="auth-kind-hint"/);
+  assert.match(html, /id="clear-session-menu"/);
   assert.match(html, /id="share-link-intro"/);
   assert.match(html, /Send this link to a person/);
   assert.match(html, /data-room-section="people"/);
@@ -179,7 +182,8 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /How to invite someone/);
   assert.match(app, /How to add an agent/);
   assert.match(app, /How to open Inbox/);
-  assert.match(app, /Open this room/);
+  assert.match(app, /authPanelTitle/);
+  assert.match(app, /Open room/);
   assert.match(app, /data-empty-write/);
   assert.match(app, /data-empty-work/);
   assert.match(app, /Completed results appear here after work is finished/);

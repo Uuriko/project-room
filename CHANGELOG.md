@@ -7,8 +7,11 @@
   browser last-room / had-account hints restore an account cookie after
   close; Sign out and Clear session wipe those leftovers; extra sign-in
   methods sit behind “More sign-in options” without hiding the key form;
-  `doctor` probes `/room/api/health` on getdasha hosts. Audit:
-  `docs/ROOM-AUTH-SESSION-FRICTION-20260918.md`.
+  `doctor` probes `/room/api/health` on getdasha hosts. Door Open/People
+  hand off `?room=` plus `#room/` so in-app browsers that drop the hash
+  still reach the gate titled `Open room {id}`; Room vs Account key is
+  spelled out; the invite field sits below More options; logged-out
+  mobile ⋮ is hidden. Audit: `docs/ROOM-AUTH-SESSION-FRICTION-20260918.md`.
 - Repo hygiene: README no longer cites a stale schema number or a nonexistent
   root file; the seven dead `test-results/` screenshot links in the 9/7 browser
   checkpoint docs are annotated as local-only; new `docs/README.md` orients

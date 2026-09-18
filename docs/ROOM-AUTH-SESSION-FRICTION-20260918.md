@@ -138,6 +138,31 @@ so a healthy Worker looked unreachable.
 - `docs/AGENT-CONNECTION.md`, `docs/AGENT-QUICKSTART.md`, and
   `docs/agents/TROUBLESHOOTING.md` distinguish doctor vs check.
 
+## Browser UX report (sibling, 2026-09-18)
+
+Live dogfood on `www.getdasha.com/room#room/{id}` (Open → workers.dev app):
+
+1. **Open dropped the room.** Door script only set `#room/{id}` on
+   `a.open`. In-app browsers often drop the fragment on the
+   `www.getdasha.com` → `project-room-staging.getdasha.workers.dev` hop.
+   The auth gate then showed Welcome with no room id. **This PR:** Open
+   and People also set `?room={id}` (survives redirects), click-capture
+   as backup; the app keeps both in `history.replaceState`; the gate
+   title is `Open room {id}` with a one-line hint. Owner/title still
+   appear only after sign-in (no public room directory).
+2. **Auth clutter / key confusion.** Extra methods already sit behind
+   More. **This PR:** `#auth-kind-hint` states Room key (one room,
+   agents/guests) vs Account key (Google/email across rooms).
+3. **Invite field looked like the default entry.** It is a `<details>`
+   but sat above More options. **This PR:** moved below the extra
+   methods; quieter summary (“Have an invite link?”).
+4. **`POST /room/api/identity-create` 404** — alias in this PR; live
+   until parent deploys.
+
+P2 from the same report: mobile ⋮ was blank when logged out. **This PR:**
+hide `#session-menu` when empty; show **Clear saved session** in the
+overflow only when leftovers exist.
+
 ## Fixes in this PR (highest ROI, safe)
 
 1. Identity-create HTTP alias (canonical + `/room` prefix).
@@ -145,6 +170,8 @@ so a healthy Worker looked unreachable.
 3. Sign out / Clear session wipe hints and the account slot.
 4. First paint: extra methods collapsed; key path still one click.
 5. Doctor health prefix + documented saved-connection doctor path.
+6. Door Open/People `?room=` + `#room/` handoff; gate names `Open room {id}`.
+7. Room vs Account key hint; quieter invite field; empty mobile ⋮ hidden.
 
 ## Remaining P1s (not this PR)
 
@@ -158,14 +185,14 @@ so a healthy Worker looked unreachable.
    if the cookie Max-Age is longer. Needs a product call (slide vs
    re-auth vs remember-me), not a silent TTL bump.
 4. **Phase 0 #8/#9** — hands-off.
-5. **Live Worker lag** — `/room/api/identity-create` stays 404 until the
-   parent deploys this checkout. No wrangler from this agent.
+5. **Live Worker lag** — `/room/api/identity-create` and the door
+   `?room=` handoff stay on the old Worker until the parent deploys.
+   No wrangler from this agent.
 6. **Anonymous account-slot create** — `GET /api/account-session` still
    mints a slot when extra sign-in methods run. Cold first paint no longer
    calls it; a follow-up could make the GET read-only and POST the slot.
-7. **Mobile Sign out behind ⋮** — acceptable; Clear session is on the
-   auth panel. A dedicated desktop+mobile Sign out outside the overflow
-   is polish, not a blocker.
+7. **Room owner/title on the gate** — needs a public-safe preview route
+   (not this PR; invite-only). The id is now visible; the name is not.
 
 ## Coordination
 
@@ -184,7 +211,7 @@ so a healthy Worker looked unreachable.
 node --test tests/agent-identities.test.js tests/browser-session.test.js \
   tests/auth-signin-ui.test.js tests/agent-doctor.test.js \
   tests/invite-only-boundary.test.js tests/open-routes.test.js \
-  tests/room-roster.test.js
+  tests/room-roster.test.js tests/room-deep-link.test.js tests/room-entry.test.js
 node scripts/open-routes.mjs --check
 
 # After deploy, live www (do not commit the response secret):

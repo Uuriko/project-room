@@ -162,6 +162,8 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   const scriptHash = createHash("sha256").update(ROOM_DEEP_LINK_SCRIPT).digest("base64");
   assert.match(PUBLIC_DOOR_CSP, new RegExp(`script-src 'sha256-${scriptHash.replace(/[+/=]/g, "\\$&")}'`));
   assert.match(ROOM_DEEP_LINK_SCRIPT, /hashchange/);
+  assert.match(ROOM_DEEP_LINK_SCRIPT, /searchParams\.set\("room"/);
+  assert.match(ROOM_DEEP_LINK_SCRIPT, /click/);
   assert.match(html, /class="ghost people"/);
   assert.equal((html.match(/<script>/g) || []).length, 1);
   assert.ok(html.includes(`<script>${ROOM_DEEP_LINK_SCRIPT}</script>`));

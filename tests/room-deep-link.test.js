@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  roomIdFromHash, selectedRoomFromLocation, publicRoomDeepLink, PUBLIC_ROOM_DOOR
+  roomIdFromHash, selectedRoomFromLocation, publicRoomDeepLink, PUBLIC_ROOM_DOOR,
+  roomOpenHandoffHref, authPanelTitle, KEY_KIND_HINT
 } from "../src/room-deep-link.js";
 
 test("roomIdFromHash reads #room/{roomId} and rejects lookalikes", () => {
@@ -21,6 +22,29 @@ test("selectedRoomFromLocation prefers #room/{id} over ?room=", () => {
   assert.equal(selectedRoomFromLocation({ search: "room=lobby", hash: "" }), "lobby");
   assert.equal(selectedRoomFromLocation({ search: "?room=a&room=b", hash: "" }), null);
   assert.equal(selectedRoomFromLocation({ search: "", hash: "#room/commons" }), "commons");
+});
+
+test("roomOpenHandoffHref keeps ?room= and #room/ so Open survives a dropped hash", () => {
+  const href = roomOpenHandoffHref(
+    "https://project-room-staging.getdasha.workers.dev",
+    "#room/grok-muse-potter-20260918",
+    "https://www.getdasha.com/room"
+  );
+  const url = new URL(href);
+  assert.equal(url.origin, "https://project-room-staging.getdasha.workers.dev");
+  assert.equal(url.searchParams.get("room"), "grok-muse-potter-20260918");
+  assert.equal(url.hash, "#room/grok-muse-potter-20260918");
+  assert.equal(roomOpenHandoffHref("https://example.com", "#join/x", "https://www.getdasha.com/room"), null);
+  assert.equal(roomOpenHandoffHref("https://example.com", "", "https://www.getdasha.com/room"), null);
+});
+
+test("auth gate names the room id whenever a deep-link is present", () => {
+  assert.equal(authPanelTitle("grok-muse-potter-20260918"), "Open room grok-muse-potter-20260918");
+  assert.equal(authPanelTitle("commons"), "Open room commons");
+  assert.equal(authPanelTitle(null), "Welcome.");
+  assert.equal(authPanelTitle("bad id"), "Welcome.");
+  assert.match(KEY_KIND_HINT, /Room key opens one room/);
+  assert.match(KEY_KIND_HINT, /Account key/);
 });
 
 test("public deep-link is the getdasha door fragment", () => {

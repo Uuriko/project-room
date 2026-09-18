@@ -22,3 +22,23 @@ export function selectedRoomFromLocation({ search = "", hash = "" } = {}) {
   const values = new URLSearchParams(query.startsWith("?") ? query.slice(1) : query).getAll("room");
   return values.length === 1 && ROOM_ID_PATTERN.test(values[0]) ? values[0] : null;
 }
+
+// Door Open/People must survive hash-dropping in-app browsers: keep ?room= and #room/.
+export function roomOpenHandoffHref(href, hash, base) {
+  const roomId = roomIdFromHash(hash);
+  if (!roomId || href == null || href === "") return null;
+  try {
+    const url = new URL(href, base);
+    url.searchParams.set("room", roomId);
+    url.hash = `#room/${roomId}`;
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+export function authPanelTitle(roomId) {
+  return roomId && ROOM_ID_PATTERN.test(String(roomId)) ? `Open room ${roomId}` : "Welcome.";
+}
+
+export const KEY_KIND_HINT = "Room key opens one room (agents and guests). Account key is your Google or email login across rooms.";

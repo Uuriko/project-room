@@ -49,6 +49,7 @@ a { color: var(--blue); }
 .session-menu { display: contents; }
 #session-menu-button { display: none; }
 .session-menu-panel { display: contents; }
+#session-menu.empty { display: none; }
 label { color: var(--muted); font-size: .76rem; font-weight: 650; letter-spacing: .02em; }
 select, input, textarea { width: 100%; border: 1px solid var(--line); border-radius: .45rem; background: #0b0f14; color: var(--text); outline: none; }
 select, input { min-height: 2.6rem; padding: 0 .75rem; }
@@ -971,4 +972,6 @@ summary { overflow-wrap: anywhere; }
 .invite-row { display: flex; gap: .5rem; margin-top: .5rem; }
 .invite-row #invite-link { flex: 1; }
 .invite-help, .access-help { margin-top: .8rem; }
-.invite-help summary, .access-help summary { cursor: pointer; color: var(--muted); font-size: .85rem; }
+.invite-help { opacity: .82; }
+.invite-help summary, .access-help summary { cursor: pointer; color: var(--muted); font-size: .8rem; }
+#auth-room-hint, #auth-kind-hint { margin: 0 0 1rem; }
