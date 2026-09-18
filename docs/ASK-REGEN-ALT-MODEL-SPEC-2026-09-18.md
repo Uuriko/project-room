@@ -5,7 +5,7 @@
 **Status:** Spec ready · implement deferred (not this repo) · docs-only  
 **Plan ref:** T042 (this spec). Implement later on `Uuriko/dasha-lobby` after Instinct tips quiet-shell live.  
 **Baseline tip:** dasha-lobby `#246` / `#249` / `#255` on main (live may still lag Instinct wrangler).  
-**Cousins:** [ASK-QUIET-SHELL-V3.md](ASK-QUIET-SHELL-V3.md) · [ASK-MODEL-CMDK-SPEC-2026-09-17.md](ASK-MODEL-CMDK-SPEC-2026-09-17.md) · [ASK-CONTINUE-AFTER-STOP-SPEC-2026-09-18.md](ASK-CONTINUE-AFTER-STOP-SPEC-2026-09-18.md) · box `UX-CLEAN-LESS-NOISE-2026-09-17.md`
+**Cousins:** [ASK-QUIET-SHELL-V3.md](ASK-QUIET-SHELL-V3.md) · [ASK-MODEL-CMDK-SPEC-2026-09-17.md](ASK-MODEL-CMDK-SPEC-2026-09-17.md) · [ASK-CONTINUE-AFTER-STOP-SPEC-2026-09-18.md](ASK-CONTINUE-AFTER-STOP-SPEC-2026-09-18.md) · T082 action keys [ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md](../research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md) · box `UX-CLEAN-LESS-NOISE-2026-09-17.md`
 
 Artifacts-lite (Ask P1 panel) may land in parallel — **different path**. Do not edit those files from this fold.
 

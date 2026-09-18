@@ -91,7 +91,9 @@ paint (header, nav, pills, status) on a desktop Ask viewport.
 - No permanent icon rail under every message.
 - Stop while streaming remains the composer primary (from #249 A1).
 - Focus-visible hit targets stay ≥24px; hover-only is not an excuse
-  to drop keyboard access.
+  to drop keyboard access. Action chords (T082):
+  [ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md](../research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md)
+  — Esc Stop · R Regen · C Copy · E Edit. Picker keys stay T032.
 
 ### 3.5 Empty state = 1 line + ≤4 starters
 
@@ -176,6 +178,7 @@ From the research note. Do not sneak them into the polish PR.
 | T044 | Quiet export transcript JSON/MD (thread chrome; not empty-canvas) | Ask follow-on — [research/ask/T044-quiet-export-transcript.md](../research/ask/T044-quiet-export-transcript.md) |
 | T045 | Honesty receipt folds after complete; hover expand | Ask follow-on — [research/ask/T045-receipt-collapse.md](../research/ask/T045-receipt-collapse.md) |
 | T046 | No mid-stream tok/s essay (lint/test rule) | Ask follow-on — [research/ask/T046-no-midstream-toks.md](../research/ask/T046-no-midstream-toks.md) |
+| T082 | Stop / Regen / Copy / Edit keyboard map (Esc / R / C / E) | Ask follow-on — [research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md](../research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md) (cite #249 A1–A5 + §3.4; picker keys stay T032) |
 | T074 | Ask vs Provide surface boundary (doors / dash / table off canvas) | Ask follow-on — [research/ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md](../research/ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md) |
 
 #249 already shipped Stop / Regen / Copy / Edit / Enter+Shift+Enter /
