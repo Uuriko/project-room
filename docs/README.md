@@ -78,6 +78,10 @@ Bonsai 24GB soft limit + vs gemma3-27b ladder (T060+T065, research):
 [ASK-BONSAI-MAC24-AND-GEMMA-LADDER-2026-09-18.md](../research/ASK-BONSAI-MAC24-AND-GEMMA-LADDER-2026-09-18.md).
 Bonsai Mac provider OpenAI error paths (T067, research; thinking off; kit Stop obsolete):
 [ASK-BONSAI-PROVIDER-OPENAI-ERROR-PATHS-2026-09-18.md](../research/ASK-BONSAI-PROVIDER-OPENAI-ERROR-PATHS-2026-09-18.md).
+Pause-on-battery Provide + Prefer AC copy (T068+T069, research; no lecture):
+[ASK-PROVIDE-BATTERY-PREFER-AC-2026-09-18.md](../research/ASK-PROVIDE-BATTERY-PREFER-AC-2026-09-18.md).
+PrismML Bonsai id map (T064, research; public ↔ PQ2_0 / PTQ1_0 / MLX):
+[ASK-PRISMML-BONSAI-ID-MAP-2026-09-18.md](../research/ASK-PRISMML-BONSAI-ID-MAP-2026-09-18.md).
 Ask quiet-shell follow-ons (T044–T046, distinct from Artifacts-lite / regen / Bonsai RAM): [research/ask/](../research/ask/).
 
 ## The dated archive

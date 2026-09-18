@@ -264,6 +264,10 @@ in this fold.
 
 *End. Companion RAM note:
 `research/ASK-BONSAI-MAC24-AND-GEMMA-LADDER-2026-09-18.md`.
+Companion T068/T069 pause-on-battery + Prefer AC:
+`research/ASK-PROVIDE-BATTERY-PREFER-AC-2026-09-18.md`.
+Companion T064 PrismML id map:
+`research/ASK-PRISMML-BONSAI-ID-MAP-2026-09-18.md`.
 Public kit contrast: dasha-desk `compute/provider/agent.py` (Ollama
 v0.3). Live OpenAI helpers stay on the Mac; this repo keeps the
 error-path contract only.*

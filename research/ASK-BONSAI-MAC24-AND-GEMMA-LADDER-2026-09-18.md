@@ -269,4 +269,8 @@ cmdk implement · listing Needle as chat · calling Second a Genie ·
 Companion demote draft: dasha-lobby #258 (do not edit from here).
 Companion T067 OpenAI error paths (bad URL / not ready / timeout /
 thinking opt-in / kit Stop):
-`research/ASK-BONSAI-PROVIDER-OPENAI-ERROR-PATHS-2026-09-18.md`.*
+`research/ASK-BONSAI-PROVIDER-OPENAI-ERROR-PATHS-2026-09-18.md`.
+Companion T068/T069 pause-on-battery + Prefer AC (no lecture):
+`research/ASK-PROVIDE-BATTERY-PREFER-AC-2026-09-18.md`.
+Companion T064 PrismML id map:
+`research/ASK-PRISMML-BONSAI-ID-MAP-2026-09-18.md`.*
