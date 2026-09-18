@@ -58,6 +58,7 @@ this lane is docs/spec only. Pairs
 | [ROOM-KITS-CATALOG.md](ROOM-KITS-CATALOG.md) | Optional later rows only — not live doors |
 
 Jev + Codex same-rung spawn (research): [ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md).
+Jev compaction + Reflex on-device (research; sibling of #477): [ROOM-JEV-COMPACTION-REFLEX-STEAL-2026-09-18.md](../research/ROOM-JEV-COMPACTION-REFLEX-STEAL-2026-09-18.md).
 Master plan: [ROOM-STEALS-FULL-BUILD-2026-09-17.md](../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md).
 Novel synthesis (pre-collapse): [ROOM-NOVEL-SYNTHESIS-2026-09-17.md](../research/ROOM-NOVEL-SYNTHESIS-2026-09-17.md)
 — superseded for “what is Room” decisions by the cohesive architecture SoR.

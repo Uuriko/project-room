@@ -214,3 +214,4 @@ nicknames do not mint a new personal-agent product.
 | [ROOM-RECEIPT-GRAPH-V0.md](../docs/ROOM-RECEIPT-GRAPH-V0.md) | Spawn cites parent |
 | [ROOM-COHESIVE-ARCHITECTURE.md](../docs/ROOM-COHESIVE-ARCHITECTURE.md) | SoR |
 | [ROOM-STEALS-FULL-BUILD-2026-09-17.md](ROOM-STEALS-FULL-BUILD-2026-09-17.md) | Master plan index |
+| [ROOM-JEV-COMPACTION-REFLEX-STEAL-2026-09-18.md](ROOM-JEV-COMPACTION-REFLEX-STEAL-2026-09-18.md) | Sibling: Jev tool-trace compaction + Reflex on-device (keepCall/keepResult; no summary) |

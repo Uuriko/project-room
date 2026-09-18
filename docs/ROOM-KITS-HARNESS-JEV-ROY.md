@@ -70,7 +70,10 @@ TypeSafe System One evaluation model (`typesafe-ai/jev` on Vercel AI
 Gateway). **No text generation.** Shared `state` + typed questions
 (boolean / choice / score) → answers + probabilities in parallel.
 Not Browser Use “Jev Ultrafast”. Research:
-[ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md).
+[ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md)
+(scorer / router / spawn). Compaction sibling:
+[ROOM-JEV-COMPACTION-REFLEX-STEAL-2026-09-18.md](../research/ROOM-JEV-COMPACTION-REFLEX-STEAL-2026-09-18.md)
+(`noul` keepCall / keepResult; Reflex on-device).
 
 Optional operator TypeSafe / Vercel key. Do not require Jev SaaS.
 When the key is absent, every Jev path is inert + reason — same
@@ -82,9 +85,11 @@ honesty as a missing harness dialect. Do not invent keys in chat.
 | Scorer rung | Closed-set dimensions (orphan-claim / people-data-safe) may pin `model: jev` ([ROOM-SCORER.md](ROOM-SCORER.md)) |
 | Pre-Ask / Compute gate | Cheap route Hosted vs Community vs refuse; classify intent (code / bug / explain). Research only — not a Compute Start blob |
 | Capacity eligibility | Parallel booleans per host / provider state (P1) |
+| Tool-trace compaction | Score `tool_use` / `tool_result`; drop or truncate stale tools; text stays verbatim. Room `ledger.compact` / optional Ask export. Research only. Do not fork the Claude plugin. |
 
 Keep the LLM judge for open-ended scorer essays. Do not replace Ask
 chat with Jev. Calibrate probabilities on labeled Room receipts.
+Do not replace honesty receipts with lossy summaries.
 
 ## Roy ladder
 
