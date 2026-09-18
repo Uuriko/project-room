@@ -22,6 +22,7 @@ Docs only. No people-data. First slice `die-packet-brief-status`.
 | [DEMIGOD-E2E-SLICE-CLI-2026-09-18.md](DEMIGOD-E2E-SLICE-CLI-2026-09-18.md) | Now-slice CLI map for `die-packet-brief-status` (script names + kill-switches; local prototype; companion to #531) |
 | [DEMIGOD-E2E-KILL-SWITCHES-2026-09-18.md](DEMIGOD-E2E-KILL-SWITCHES-2026-09-18.md) | Six human kill-switches (send_ticket → invoice + freeze-band ack); local blocked send_* via state-machine.json + kill-switch-ledger.mjs; measure one Lightfield hire |
 | [DEMIGOD-E2E-NEXT-OPERATOR-2026-09-18.md](DEMIGOD-E2E-NEXT-OPERATOR-2026-09-18.md) | Next operator desk: ticket-draft schema (KILL_SWITCH send_ticket; no people fields); freeze-band ack human gate; consent/intro/invoice stay draft; Now→Next→Later; measure one Lightfield hire (Shipped ≠ Measured) |
+| [DEMIGOD-E2E-OPTIMIZE-2026-09-18.md](DEMIGOD-E2E-OPTIMIZE-2026-09-18.md) | Optimize steals: HumanLayer gates, Factory blocklist, Horton queue, company waterfall, Stripe draft→send; stage allow/ask/block; Lightfield hire funnel; honesty ~34/100 draft factory (not production E2E) |
 
 ## Research index
 
