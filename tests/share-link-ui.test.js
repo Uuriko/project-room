@@ -188,6 +188,63 @@ test("invitation UI writes a path-aware www /room join URL", async () => {
     await node("#share-link-form").handlers.submit({ preventDefault() {} });
     assert.equal(node("#share-link-url").value, `https://www.getdasha.com/room/#join/${created.linkToken}`);
     assert.doesNotMatch(node("#share-link-url").value, /^https:\/\/www\.getdasha\.com\/#join\//);
+    assert.doesNotMatch(node("#share-link-url").value, /#room\//);
+    ui.resetManagement();
+  } finally {
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+  }
+});
+
+test("mint unlocks Create before a hanging clipboard write and never uses origin-only #join/", async () => {
+  const nodes = new Map();
+  const node = selector => {
+    if (!nodes.has(selector)) nodes.set(selector, {
+      value: "", textContent: "", hidden: false, disabled: false, open: false, dataset: {}, handlers: {},
+      classList: { toggle() {} },
+      addEventListener(type, handler) { this.handlers[type] = handler; },
+      contains() { return false; }, replaceChildren() {}, showModal() { this.open = true; }, close() { this.open = false; },
+      focus() {},
+    });
+    return nodes.get(selector);
+  };
+  let finishClipboard;
+  const globals = {
+    document: { querySelector: node }, window: { addEventListener() {} },
+    location: { hostname: "www.getdasha.com", origin: "https://www.getdasha.com", pathname: "/room/" },
+    navigator: { clipboard: { writeText: () => new Promise(resolve => { finishClipboard = resolve; }) } }
+  };
+  const previous = new Map(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const member = { id: "owner", kind: "human", revision: 1, permissions: ["manage_members"] };
+  const session = { member };
+  let created;
+  const client = {
+    session, ownsAccountSession: () => true, generation: 0, path: suffix => suffix,
+    async request(path, options) {
+      if (options?.method === "POST") {
+        created = structuredClone(options.data);
+        return { link: { id: "hang-link", status: "active", expiresAt: options.data.expiresAt } };
+      }
+      return { links: [] };
+    },
+  };
+  try {
+    for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+    const ui = installShareLinks({ client, accountClient: {}, getState: () => ({ members: { owner: member } }), getSession: () => session, openRoom() {} });
+    node("#share-link-expiry").value = "24";
+    node("#share-link-limit").value = "2";
+    await node("#invite-people-button").handlers.click();
+    const minted = node("#share-link-form").handlers.submit({ preventDefault() {} });
+    await Promise.resolve();
+    assert.equal(node("#share-link-create").disabled, false, "Create is usable while clipboard is still pending");
+    assert.equal(node("#share-link-status").textContent, "Link ready.");
+    assert.equal(node("#share-link-url").value, `https://www.getdasha.com/room/#join/${created.linkToken}`);
+    assert.doesNotMatch(node("#share-link-url").value, /^https:\/\/www\.getdasha\.com\/#join\//);
+    finishClipboard();
+    await minted;
+    assert.equal(node("#share-link-status").textContent, "Copied. They open this invite link.");
     ui.resetManagement();
   } finally {
     for (const [key, descriptor] of previous) {

@@ -257,15 +257,21 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       expiryTimer = setTimeout(checkResult, Math.max(0, currentLink.expiresAt - Date.now()));
       expiryTimer.unref?.();
       updateCopyControls();
-      let copied = false;
-      const clipboard = globalThis.navigator?.clipboard;
-      if (inviteUrl && clipboard?.writeText) {
-        try { await clipboard.writeText(inviteUrl); copied = true; } catch { /* fall back to Copy */ }
-      }
-      if (!managementCurrent(version, generation)) { sync(); return; }
-      status(copied ? "Copied. They open this invite link." : "Link ready.");
+      // Unlock the dialog before clipboard. A hanging writeText (or a test
+      // stub that waits for finish) must not keep Create disabled.
+      status("Link ready.");
       $("#share-link-copy").focus();
+      creationBusy(false);
       list(version, generation).catch(() => {});
+      const clipboard = globalThis.navigator?.clipboard;
+      if (!copying && inviteUrl && clipboard?.writeText) {
+        try {
+          await clipboard.writeText(inviteUrl);
+          if (managementCurrent(version, generation) && currentLink && $("#share-link-url").value === inviteUrl) {
+            status("Copied. They open this invite link.");
+          }
+        } catch { /* Copy button remains */ }
+      }
     } catch (error) { if (managementCurrent(version, generation)) { managementError(error); status(invitationManagementFailureMessage(error, "create")); } else sync(); }
     finally { if (managementCurrent(version, generation)) creationBusy(false); }
   });
