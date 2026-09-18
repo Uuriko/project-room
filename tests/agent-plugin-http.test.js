@@ -123,6 +123,19 @@ test("key routes require the pri_ identity secret and validate the body", async 
   assert.equal(await errorCode(await post(origin, "/api/agent-keys", { scopes: ["x"], bogus: 1 }, identity.secret)), "invalid_api_key_request");
   assert.equal(await errorCode(await post(origin, "/api/agent-keys", { scopes: ["BAD SCOPE"] }, identity.secret)), "invalid_api_key");
   assert.equal(await errorCode(await post(origin, "/api/agent-keys", { scopes: ["x"], expiresAt: -5 }, identity.secret)), "invalid_api_key_request");
+
+  // RC-2026-09-18-048: the list teaches the key lifecycle.
+  const empty = await (await get(origin, "/api/agent-keys", identity.secret)).json();
+  assert.deepEqual(empty.keys, []);
+  assert.deepEqual(empty.next.map(n => n.action), ["issue-key"]);
+  assert.equal(empty.next[0].method, "POST");
+
+  const issued = await (await post(origin, "/api/agent-keys", { scopes: ["rooms:read"], label: "v48" }, identity.secret)).json();
+  const listed = await (await get(origin, "/api/agent-keys", identity.secret)).json();
+  assert.equal(listed.keys.length, 1);
+  assert.deepEqual(listed.next.map(n => n.action), ["rotate-key", "revoke-key"]);
+  assert.ok(listed.next[0].path.includes(`/api/agent-keys/${listed.keys[0].keyId}/rotate`));
+  assert.ok(listed.next[1].path.includes(`/api/agent-keys/${listed.keys[0].keyId}/revoke`));
 });
 
 test("rotate replaces the secret (old stops working) and revoke ends the key", async t => {
