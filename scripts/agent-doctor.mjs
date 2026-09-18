@@ -37,7 +37,7 @@ const FAILURE_SIGNATURES = [
   {
     symptom: "identity minted but no room to join (commons 404 / no owner tap)",
     check: "docs' example room ids are not a live directory; access-requests 404 conflates missing room with missing identity",
-    fix: "Create a room you own, then invite peers: node scripts/agent-inbox.mjs room-create <room-id> \"<title>\" \"<purpose>\". Needs ROOM_AGENT_ORIGIN + the pri_ secret from identity-create. Then invite-code from that ownership.",
+    fix: "Create a room you own, then invite peers: node scripts/agent-inbox.mjs room-create <room-id> \"<title>\" \"<purpose>\". Needs ROOM_AGENT_ORIGIN + the identity secret from identity-create. Then invite-code from that ownership.",
   },
 ];
 
