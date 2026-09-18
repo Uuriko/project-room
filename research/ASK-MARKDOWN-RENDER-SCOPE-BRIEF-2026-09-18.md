@@ -27,7 +27,10 @@ Companions (cite only):
 [ask/T034-artifacts-lite-ready-to-implement.md](ask/T034-artifacts-lite-ready-to-implement.md)
 ·
 [ask/T044-quiet-export-transcript.md](ask/T044-quiet-export-transcript.md)
-(MD export is source text, not a second renderer). Fold lock:
+(MD export is source text, not a second renderer) ·
+T086 format
+([ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md](ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md)
+— download vs copy; header / Job lines). Fold lock:
 [FOLD-COMPUTE-ROOM.md](../docs/FOLD-COMPUTE-ROOM.md).
 
 **Tip (source):** `Uuriko/dasha-lobby` `2e7778e6` — T073

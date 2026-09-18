@@ -122,7 +122,10 @@ Visual: black canvas, paper text, acid send only; composer bottom;
 messages max-width ~42rem; hover toolbar; New chat quiet top-right
 (T084 confirm if the thread has turns:
 [ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md](ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md)
-— never wipe without Esc/cancel).
+— never wipe without Esc/cancel); Export MD is a thread
+**download**, not per-turn Copy (T086, cite T044
+[#496](https://github.com/Uuriko/project-room/pull/496):
+[ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md](ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md)).
 Deploy gate: tip
 [#246](https://github.com/Uuriko/dasha-lobby/pull/246) /
 [#249](https://github.com/Uuriko/dasha-lobby/pull/249) must be live
