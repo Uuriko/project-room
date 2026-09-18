@@ -68,7 +68,7 @@ test("review lists held items with scores, reasons, sender, channel and age", t 
 });
 
 test("review is account-scoped: another account never sees or touches these holds", t => {
-  const { f, token, binding, hold1 } = quarantineFixture(t);
+  const { f, token: _token, binding: _binding, hold1 } = quarantineFixture(t);
   const other = f.store.createAccount("quarantine-stranger", "stranger");
   const otherKey = f.store.issueAccountAccessKey(other.id);
   const slot = f.store.createAccountSessionSlot();
@@ -282,7 +282,6 @@ const item = id => ({ id, messageId: "m-" + id, channel: "telegram", connectionI
   reviewedBy: null, reviewedAt: null, note: null, updatedAt: 1, sender: "Spammer", subject: null, excerpt: "test",
   source: { id: "src-" + id } });
 function harnessResponse(path) {
-  const session = { account: { id: "owner", authEpoch: 2 }, sessionRevision: 4, sessionBinding: "b".repeat(64) };
   const viewer = { accountId: "owner", authEpoch: 2, sessionBinding: "b".repeat(64), sessionRevision: 4 };
   if (path.startsWith("/api/inbox/quarantine?")) return { contractVersion: 1, viewer, status: "held",
     counts: { held: 2, released: 0, dismissed: 0 }, items: [item("qz-1"), item("qz-2")] };
