@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-18T21:28:05Z · board: Uuriko/project-room#266 · watermark: 5736378121 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-18T21:57:42Z · board: Uuriko/project-room#266 · watermark: 5736663031 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -27,6 +27,7 @@ RC-2026-09-18-020 | quill | working | 2026-09-19T02:13:56Z | server/agent-invite
 RC-2026-09-18-021 | quill | working | 2026-09-19T02:14:48Z | server/agent-rooms.mjs, tests/agent-rooms.test.js
 RC-2026-09-18-022 | quill | working | 2026-09-19T02:15:31Z | server/access-requests.mjs, tests/access-requests.test.js
 RC-2026-09-18-023 | quill | working | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
+RC-2026-09-18-031 | quill | working | 2026-09-19T03:38:34Z | client/room-agent.mjs, scripts/agent-inbox.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
@@ -38,6 +39,7 @@ RC-2026-09-18-020 | quill | working | 2026-09-19T02:13:56Z | server/agent-invite
 RC-2026-09-18-021 | quill | working | 2026-09-19T02:14:48Z | server/agent-rooms.mjs, tests/agent-rooms.test.js
 RC-2026-09-18-022 | quill | working | 2026-09-19T02:15:31Z | server/access-requests.mjs, tests/access-requests.test.js
 RC-2026-09-18-023 | quill | working | 2026-09-19T02:16:06Z | server/inbox-collab-routes.mjs, tests/inbox-collab-http.test.js
+RC-2026-09-18-031 | quill | working | 2026-09-19T03:38:34Z | client/room-agent.mjs, scripts/agent-inbox.mjs, tests/agent-autonomy-client.test.js, docs/AGENT-QUICKSTART.md
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -48,6 +50,9 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026 | 9ddd9537c3b05e9247744db04caf78f24c868199 | 5736607484
+RC-2026 | none | 5736589665
+RC-2026 | none | 5736474664
 RC-2026 | none | 5736367501
 RC-2026 | none | 5736243187
 RC-2026 | none | 5736236081
@@ -55,12 +60,10 @@ RC-2026 | none | 5736099519
 RC-2026 | none | 5735990874
 RC-2026 | fa745461884cf5534b2e181d89515a136bd1908e | 5735981733
 RC-2026 | none | 5735869745
-RC-2026 | none | 5735756517
-RC-2026 | none | 5735756283
-RC-2026 | none | 5735750802
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
+5736663031 | jill | - | 2026-09-18T21:55:44Z
 5735996178 | jill | - | 2026-09-18T20:48:32Z
 5735872587 | quill | - | 2026-09-18T20:35:42Z
 5734936494 | jill | - | 2026-09-18T19:10:59Z
@@ -70,9 +73,8 @@ comment-id | lane | task | at
 5734686428 | Jillian | - | 2026-09-18T18:49:30Z
 5734603544 | Jillian | - | 2026-09-18T18:42:33Z
 5734107950 | Jillian | - | 2026-09-18T18:01:21Z
-5733245279 | quill | RC-2026-09-18-013 | 2026-09-18T16:50:12Z
-… +48 more
+… +49 more
 
 ## signals
-board_comments=819 threshold=1500 rotation_due=no watcher=active open_claims=24 prose_open=0 unfenced_prose=58 watermark=5736378121
+board_comments=831 threshold=1500 rotation_due=no watcher=active open_claims=25 prose_open=0 unfenced_prose=59 watermark=5736663031
 
