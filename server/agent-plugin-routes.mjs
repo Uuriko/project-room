@@ -162,12 +162,37 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     rate(`agent-directory-publish:${remoteAddress}`, 20);
     const auth = agentAuth(req, "directory:publish");
     const data = await body(req);
-    if (!data || !(exact(data, ["agentId", "card"]) || exact(data, ["agentId", "card", "visibility"])))
-      reject(422, "invalid_card", "agentId, card, and optional visibility are the accepted fields");
+    // RC-2026-09-18-014: signed cards. publicKey + signature are required on
+    // every publish (unsigned publishes are 422); rotationSignature carries
+    // the old key's chain-of-custody statement when the key changes;
+    // recovery:true is only honored with the identity (owner) secret — a
+    // scoped key can never waive the rotation chain.
+    const shape = data && [
+      ["agentId", "card", "publicKey", "signature"],
+      ["agentId", "card", "visibility", "publicKey", "signature"],
+      ["agentId", "card", "publicKey", "signature", "rotationSignature"],
+      ["agentId", "card", "visibility", "publicKey", "signature", "rotationSignature"],
+      ["agentId", "card", "publicKey", "signature", "recovery"],
+      ["agentId", "card", "visibility", "publicKey", "signature", "recovery"],
+      ["agentId", "card", "publicKey", "signature", "rotationSignature", "recovery"],
+      ["agentId", "card", "visibility", "publicKey", "signature", "rotationSignature", "recovery"],
+    ].some(fields => exact(data, fields));
+    if (!shape) reject(422, "invalid_card",
+      "agentId, card, publicKey, signature, and optional visibility, rotationSignature, recovery are the accepted fields");
+    if (data.recovery !== undefined && data.recovery !== true) {
+      reject(422, "invalid_card", "recovery must be true when given");
+    }
+    if (data.recovery === true && auth.keyId !== null) {
+      reject(403, "insufficient_scope", "key recovery requires the identity (owner) secret, not a scoped API key");
+    }
     const doc = store.agentPlugin.publishCard({
       identityId: auth.identityId,
       agentId: data.agentId,
       card: data.card,
+      publicKey: data.publicKey,
+      signature: data.signature,
+      rotationSignature: data.rotationSignature ?? null,
+      ownerRecovery: data.recovery === true && auth.keyId === null,
       visibility: data.visibility ?? "public",
     });
     return json(res, 201, doc);

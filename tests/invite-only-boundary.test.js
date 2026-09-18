@@ -17,10 +17,17 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { openRoutes, routeCandidates, routeKey } from "../scripts/open-routes.mjs";
+import { pluginRouteTemplates } from "../scripts/route-docs-check.mjs";
 
 const read = path => readFileSync(new URL(path, import.meta.url), "utf8");
 const DECLARED_OPEN = openRoutes(read("../docs/openapi.yaml"));
-const SERVED_CANDIDATES = routeCandidates(read("../server/http.mjs"));
+const SERVED_CANDIDATES = [
+  ...routeCandidates(read("../server/http.mjs")),
+  // The agent plug-in surface is mounted through a single delegation in
+  // server/http.mjs; its templates are extracted from
+  // server/agent-plugin-routes.mjs (same extraction as route-docs-check.mjs).
+  ...pluginRouteTemplates(read("../server/agent-plugin-routes.mjs")),
+];
 assert.ok(DECLARED_OPEN.length >= 10, "openapi open-route parse sanity");
 assert.ok(SERVED_CANDIDATES.length >= 60 && SERVED_CANDIDATES.includes("/api/health") && SERVED_CANDIDATES.includes("/api/rooms/{id}/commands"),
   "server route extraction sanity");
@@ -32,6 +39,13 @@ const PROBES = {
   "GET /api/health": [undefined, 200],
   "GET /api/version": [undefined, 200],
   "GET /api/ready": [undefined, 200],
+  // Agent directory reads: public documents without a credential; an
+  // unknown card id reads as 404 unknown_card (never an oracle).
+  "GET /api/agent-directory": [undefined, 200],
+  "GET /api/agents/directory": [undefined, 200],
+  "GET /api/agents/directory/{}": [undefined, 404],
+  // Plug-in manifest: public discovery document, no room data.
+  "GET /api/agent-manifest": [undefined, 200],
   "GET /api/guest-agent-links": [undefined, 200],
   "GET /api/work-item-sessions": [undefined, 200],
   // Anonymous browser slot: authenticated:false and a CSRF token, nothing else.

@@ -12,6 +12,7 @@ import { randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 
 async function startServer(t) {
   const f = createAcceptanceFixture();
@@ -159,8 +160,14 @@ async function publishCards(t) {
   // directory surface (public view) but holds no room membership.
   const stranger = store.identities.create("dogfood dir stranger");
   const pub = async (agentId, visibility) => {
-    const res = await post(origin, "/api/agent-directory/cards",
-      { agentId, card: cardFields(`Dogfood ${agentId}`), visibility }, member.secret);
+    // RC-2026-09-18-014: publishes must be signed (fresh keypair per card).
+    const card = cardFields(`Dogfood ${agentId}`);
+    const keyPair = generateKeyPair();
+    const res = await post(origin, "/api/agent-directory/cards", {
+      agentId, card, visibility,
+      publicKey: keyPair.publicKey,
+      signature: signCard({ agentId, card, privateKey: keyPair.privateKey }),
+    }, member.secret);
     assert.equal(res.status, 201, `publish ${visibility}: ${await errCode(res)}`);
     return agentId;
   };

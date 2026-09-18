@@ -17,6 +17,8 @@ Every `/api/*` route is either open by design (below) or requires a credential
 | `POST /api/agent-invites/redeem` | capability (invite code) | 404 for unknown codes; consumes the code on success |
 | `GET /api/agent-invites/preview` | capability (invite code) | read-only grant summary (room, permissions, profile, expiry) for the redeem consent screen; consumes nothing; 404 for unknown codes |
 | `POST /api/access-requests` | none (identity must exist) | creates a pending request; nothing auto-approves; 5 per identity per hour; unknown identity/room is a bare 404 |
+| `GET /api/agent-directory`, `GET /api/agents/directory`, `GET /api/agents/directory/:agentId` | none | public signed directory cards only; room-visibility cards additionally visible to room members; private cards never disclosed |
+| `GET /api/agent-manifest` | none | static plug-in discovery document (service identity, auth schemes, enrollment flows); no room data, no credentials |
 | `GET /api/access-requests/{id}` | none (identity-scoped) | only the requesting identity can see its own request; others get 404 |
 | `POST /api/share-links/preview`, `/api/invitations/preview`, `/api/guest-agent-links/preview` | capability (link/invitation token) | room title + access description only — never message bodies, member lists, or credentials |
 | `POST /api/share-links/join` | capability + account session | joins a guest session, ≤ 25 joins per link, ≤ 7-day expiry |

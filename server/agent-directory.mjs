@@ -1,4 +1,18 @@
+import {
+  isValidPublicKey,
+  verifyCardSignature,
+  verifyKeyRotation,
+} from "./agent-card-signing.mjs";
+
 // HTTP-ready agent directory (lane D).
+//
+// Cards are SIGNED (RC-2026-09-18-014, research rec A4): publish requires a
+// valid Ed25519 signature over the canonical card body, and every card doc
+// exposes publicKey + signature so any third party can verify the card
+// offline. Key rotation is a chain of custody — a new key must be authorized
+// by the old key's rotation signature, unless the caller is the owning
+// identity's owner running an explicit recovery (allowRecovery, enforced by
+// the store/HTTP layer, never by this pure module on its own authority).
 //
 // src/agent-card-registry.mjs is an in-memory card registry for A2A
 // negotiation. This module is the public-facing directory surface a
@@ -64,21 +78,57 @@ export function createAgentDirectory({ store, clock } = {}) {
     capabilities: Object.freeze([...entry.card.capabilities]),
     skills: Object.freeze([...(entry.card.skills ?? [])]),
     version: entry.card.version,
+    // The key envelope: any reader can recompute the canonical card body
+    // (see agent-card-signing.mjs) and verify the signature offline.
+    publicKey: entry.publicKey ?? null,
+    signature: entry.signature ?? null,
     visibility: entry.visibility,
     publishedAt: entry.publishedAt,
     updatedAt: entry.updatedAt,
   });
 
-  // Publish (or republish) a card document for an agent.
-  const publish = ({ agentId, card, visibility = "public" }) => {
+  // Publish (or republish) a card document for an agent. publicKey/signature
+  // are required: the signature must verify against publicKey over the
+  // canonical card body. Rotating to a new key requires rotationSignature —
+  // the old key's signature over the rotation statement — unless
+  // allowRecovery (the owning identity's owner explicitly recovering a lost
+  // key; the store/HTTP layer decides when that is legitimate). A stored
+  // card with no pinned key yet (published before signing existed) pins the
+  // new key on its next publish.
+  const publish = ({ agentId, card, visibility = "public", publicKey = null, signature = null,
+    rotationSignature = null, allowRecovery = false }) => {
     check(typeof agentId === "string" && AGENT_ID_PATTERN.test(agentId),
       "agentId must match ^[a-z][a-z0-9-]*$");
     check(VISIBILITIES.includes(visibility), `visibility must be one of ${VISIBILITIES.join(", ")}`);
     validateCard(card);
+    if (!isValidPublicKey(publicKey)) {
+      fail("invalid_card_signature",
+        "publish requires publicKey (base64 Ed25519) and a valid signature over the card body");
+    }
+    if (!verifyCardSignature({ agentId, card, publicKey, signature })) {
+      fail("invalid_card_signature", "signature does not verify against publicKey over the card body");
+    }
     const existing = entries.get(agentId);
+    // Chain of custody: a pinned key can only be replaced by the old key's
+    // rotation signature (or an owner-signed recovery). This applies even
+    // when the old card was withdrawn — withdrawing must not become a way
+    // to launder a key swap. A stored card with no pinned key yet
+    // (published before signing existed) pins the new key on its next
+    // publish.
+    if (existing && existing.publicKey && existing.publicKey !== publicKey
+      && !allowRecovery
+      && !verifyKeyRotation({
+        agentId, card, newPublicKey: publicKey,
+        oldPublicKey: existing.publicKey, rotationSignature,
+      })) {
+      fail("invalid_card_signature",
+        "rotating the card key requires the old key's rotation signature (or an owner-signed recovery)");
+    }
     const entry = {
       agentId,
       card: { ...card },
+      publicKey,
+      signature,
       visibility,
       publishedAt: existing?.publishedAt ?? now(),
       updatedAt: now(),
