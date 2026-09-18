@@ -58,6 +58,14 @@ test("shared mapper keeps error.code/message and adds status/reason/hint/next", 
   const missing = agentErrorAx({ httpStatus: 404, code: "work_not_found", message: "Work item not found in this Room", roomId: "commons" });
   assertAx(missing, { reason: "work_not_found" });
   assert.ok(missing.next.some(step => step.tool === "room_list_work"));
+  // RC-2026-09-18-035: an unknown-member rejection teaches the member lookup,
+  // not the stale-revision advice.
+  const unknownMember = agentErrorAx({ httpStatus: 422, code: "command_rejected", message: "Unknown member: m_unknown", roomId: "commons" });
+  assertAx(unknownMember, { reason: "unknown_member" });
+  assert.ok(unknownMember.hint.includes("not in this room"));
+  assert.ok(unknownMember.next.some(step => step.path === "/api/rooms/commons/presence"));
+  assert.ok(!unknownMember.next.some(step => step.tool === "room_read_work"),
+    "unknown member must not point at a work re-read");
   const refused = agentErrorAx({ httpStatus: 0, code: "invalid_work_action", message: "" });
   assertAx(refused, { reason: "input_refused" });
   assert.equal(agentErrorAx({ httpStatus: 500, code: "internal_error", message: "" }).status, "failed");
