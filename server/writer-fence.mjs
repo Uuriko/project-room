@@ -56,6 +56,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // path to it, and the journal's held→released|dismissed transitions plus
   // the reviews-are-final rule are the gate.
   "spam_quarantine",
+  // sla_breach_alerts (SLA-breach alert journal, task 26) is purely additive
+  // and intentionally NOT fenced: same rationale — older writers have no code
+  // path to it, and the journal's immutable receipts plus the per-produced-
+  // record idempotency key are the gate.
+  "sla_breach_alerts",
   // Cross-channel thread stitching (task #19): stitch_identities,
   // stitch_links, stitch_revocations, stitch_suggestions, stitch_receipts.
   // Hash-only, purely additive, intentionally NOT fenced — older writers

@@ -398,45 +398,53 @@ export class Inbox {
         return fallback();
       }
     }
+    // Shared thread pipeline: store rows -> visible infos -> reply index ->
+    // messages -> built threads. threads() and slaThreadScan() both ride it,
+    // so the SLA sweep clocks exactly the threads the thread view shows: same
+    // store scan, same visibility rule (channel sources need the reading
+    // view), same reply threading. Read-only; never writes.
+    threadPipeline(auth, { sourceId = null, include = false } = {}) {
+      // A scoped lookup names an existing source in this account (404 when
+      // unknown, 422 when malformed); the thread returned is the full
+      // conversation containing it, built from the same visible set as the
+      // unscoped view. When the source is not visible in this view (a
+      // channel source without a reading view, or a malformed version),
+      // the scope matches nothing and the result is empty.
+      if (sourceId) this.source(auth.account.id, sourceId);
+      const rows = this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? ORDER BY updated_at DESC,id LIMIT 5000").all(auth.account.id);
+      const infos = [];
+      for (const row of rows) {
+        try {
+          const d = this.version(auth.account.id, row.id, row.revision);
+          if (d.adapter !== "synthetic" && !include) continue;
+          infos.push({ row, adapter: d.adapter, envelope: d.envelope, channel: d.envelope?.channel ?? null });
+        } catch { /* malformed version: skip, never break the thread view */ }
+      }
+      const replyIndex = new Map();
+      const keys = infos.map(info => this.threadKeyOf(info, replyIndex));
+      for (const [info, key] of infos.map((info, i) => [info, keys[i]])) {
+        if (key.internetId && key.connectionId) replyIndex.set(`email:${key.connectionId}:${key.internetId}`, key.id);
+        if (key.channelId && info.channel) replyIndex.set(info.channel + ":" + key.channelId, key.id);
+      }
+      // Re-resolve replies now that the index is complete (targets may sort after the reply).
+      const messages = infos.map((info, i) => {
+        const key = this.threadKeyOf(info, replyIndex);
+        return { id: key.id, occurredAt: key.occurredAt, threadId: key.threadId, inReplyTo: key.inReplyTo };
+      });
+      const built = buildThreads(messages);
+      const scoped = sourceId
+        ? built.filter(thread => thread.entries.some(entry => entry.message.id === sourceId))
+        : built;
+      return { rows, infos, scoped, infosById: new Map(infos.map(info => [info.row.id, info])) };
+    }
     threads(token, binding, { sourceId = null, limit = null, includeChannels = false } = {}) {
       return this.store.readTransaction(() => {
         const auth = this.auth(token, binding), take = threadLimitOf(limit);
         const include = includeChannels === true;
-        // A scoped lookup names an existing source in this account (404 when
-        // unknown, 422 when malformed); the thread returned is the full
-        // conversation containing it, built from the same visible set as the
-        // unscoped view. When the source is not visible in this view (a
-        // channel source without a reading view, or a malformed version),
-        // the scope matches nothing and the result is empty.
-        if (sourceId) this.source(auth.account.id, sourceId);
-        const rows = this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? ORDER BY updated_at DESC,id LIMIT 5000").all(auth.account.id);
-        const infos = [];
-        for (const row of rows) {
-          try {
-            const d = this.version(auth.account.id, row.id, row.revision);
-            if (d.adapter !== "synthetic" && !include) continue;
-            infos.push({ row, adapter: d.adapter, envelope: d.envelope, channel: d.envelope?.channel ?? null });
-          } catch { /* malformed version: skip, never break the thread view */ }
-        }
-        const replyIndex = new Map();
-        const keys = infos.map(info => this.threadKeyOf(info, replyIndex));
-        for (const [info, key] of infos.map((info, i) => [info, keys[i]])) {
-          if (key.internetId && key.connectionId) replyIndex.set(`email:${key.connectionId}:${key.internetId}`, key.id);
-          if (key.channelId && info.channel) replyIndex.set(info.channel + ":" + key.channelId, key.id);
-        }
-        // Re-resolve replies now that the index is complete (targets may sort after the reply).
-        const messages = infos.map((info, i) => {
-          const key = this.threadKeyOf(info, replyIndex);
-          return { id: key.id, occurredAt: key.occurredAt, threadId: key.threadId, inReplyTo: key.inReplyTo };
-        });
-        const built = buildThreads(messages);
-        const scoped = sourceId
-          ? built.filter(thread => thread.entries.some(entry => entry.message.id === sourceId))
-          : built;
+        const { rows, infos, scoped, infosById } = this.threadPipeline(auth, { sourceId, include });
         const ctx = { connections: new Map(), include, readAt: this.readMarkers(auth.account.id),
           sentIds: include ? this.sentProviderIds(auth.account.id) : new Set() };
         const byId = new Map(rows.map(row => [row.id, row]));
-        const infosById = new Map(infos.map(info => [info.row.id, info]));
         const threads = scoped.slice(0, take).map(thread => ({
           threadId: thread.threadId, messageCount: thread.messageCount, depth: thread.depth,
           firstAt: thread.firstAt, lastAt: thread.lastAt,
@@ -463,11 +471,14 @@ export class Inbox {
         return { contractVersion: 1, viewer: viewer(auth), threads, stitchedThreads, total: scoped.length };
       });
     }
-    // Per-channel SLA assessment for one built thread. Direction comes from
-    // the stored envelope: owner-sent is outbound, messages addressing the
-    // owner are inbound, everything else is skipped (no one owes a reply).
-    // Pure view over stored facts; never a stored flag.
-    slaAssessment(infosById, thread, sentIds) {
+    // Clock input for one built thread: the { threadId, channel, messages }
+    // shape assessThreadSla takes, or null when the thread carries nothing to
+    // clock. Direction comes from the stored envelope: owner-sent is
+    // outbound, messages addressing the owner are inbound, everything else
+    // is skipped (no one owes a reply). Pure view over stored facts; never a
+    // stored flag. Shared by the thread list's inline SLA field and the SLA
+    // sweep's thread scan, so both clock the same messages.
+    slaClockInput(infosById, thread, sentIds) {
       const addressOf = value => (value?.address ?? "").toLowerCase();
       const directionOf = info => {
         try {
@@ -499,10 +510,44 @@ export class Inbox {
       }
       if (!messages.length || !channelCounts.size) return null;
       const channel = [...channelCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+      return { threadId: thread.threadId ?? "thread:" + messages[0].id, channel, messages };
+    }
+    // Per-channel SLA assessment for one built thread: the clock input run
+    // through assessThreadSla. Null when the thread carries nothing to clock.
+    slaAssessment(infosById, thread, sentIds) {
+      const input = this.slaClockInput(infosById, thread, sentIds);
+      if (!input) return null;
       try {
-        return assessThreadSla({ threadId: thread.threadId ?? "thread:" + messages[0].id,
-          channel, messages, now: Date.now(), targets: slaTargets });
+        return assessThreadSla({ ...input, now: Date.now(), targets: slaTargets });
       } catch { return null; } // clock skew (now < latest inbound): omit rather than lie
+    }
+    // SLA sweep thread scan (task 26): the assess-shaped thread list the
+    // SlaSweeper's readThreads hook enumerates. Rides threadPipeline, so the
+    // sweep clocks exactly the threads the thread view shows — same store,
+    // same visibility, same message->direction mapping. Owner-session bound
+    // like the thread view; an empty store honestly scans to zero threads,
+    // never invented ones. includeChannels defaults true: the sweep is
+    // omnichannel, and channel rows still need the negotiated reading view.
+    // The bound is the sweep producer's 10000-thread contract, not the UI
+    // thread list's page cap — the sweep must see every open thread.
+    slaThreadScan(token, binding, { includeChannels = true, limit = null } = {}) {
+      return this.store.readTransaction(() => {
+        const auth = this.auth(token, binding);
+        const take = limit === null || limit === undefined ? 10000
+          : (Number.isInteger(limit) && limit >= 1 && limit <= 10000 ? limit
+            : fail(422, "invalid_limit", "limit must be an integer 1..10000"));
+        const include = includeChannels === true;
+        const { scoped, infosById } = this.threadPipeline(auth, { include });
+        const sentIds = include ? this.sentProviderIds(auth.account.id) : new Set();
+        const threads = [];
+        for (const thread of scoped.slice(0, take)) {
+          const input = this.slaClockInput(infosById, thread, sentIds);
+          if (input) threads.push(Object.freeze({ threadId: input.threadId, channel: input.channel,
+            messages: Object.freeze(input.messages.map(message => Object.freeze({ ...message }))) }));
+        }
+        return Object.freeze({ contractVersion: 1, viewer: viewer(auth),
+          threads: Object.freeze(threads), total: scoped.length });
+      });
     }
     // Morning digest (task 21): the overnight arrivals across channels as a
     // daily brief, built from the thread view and the pure digest builder.

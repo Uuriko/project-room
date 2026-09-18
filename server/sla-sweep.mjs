@@ -19,7 +19,11 @@
 // likewise injected (`deliver`): without it the alert ledger still updates
 // (dedupe stays correct) but routing reports `sla_deliver_unavailable`. The
 // sweeper never pushes a byte itself; the owner wires `deliver` to their chosen
-// channel (e.g. the in-app notification feed). Frozen outputs; malformed
+// channel (e.g. the in-app notification feed). The real hooks live in
+// server/sla-sweep-hooks.mjs: createInboxThreadReader (the owner's live
+// threads from Inbox.slaThreadScan) and createSlaBreachDeliver (breach
+// records the urgent path delivers, journaled in-app via
+// server/sla-breach-journal.mjs). Frozen outputs; malformed
 // inputs throw SlaSweepError. No login/auth code, no credentials.
 import { createSlaBreachProducer, SLA_BREACH_KIND } from "./sla-urgent-notify.mjs";
 import { createNotifyPrefs } from "./notify-prefs.mjs";
