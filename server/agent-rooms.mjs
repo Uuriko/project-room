@@ -36,6 +36,27 @@ CREATE TABLE IF NOT EXISTS agent_room_ownership (
 );`;
 
 const CREATE_FIELDS = Object.freeze(["roomId", "title", "purpose", "kind", "displayName"]);
+
+// RC-2026-09-18-030: self-serve room creation hands a cold agent concrete
+// first-owner moves (invite members, publish its card, post a message, read
+// the quickstart) instead of returning bare ids with no direction. The
+// invitation path is templated per room.
+const ROOM_CREATE_NEXT = Object.freeze([
+  Object.freeze({ action: "invite-members", method: "POST", pathTemplate: "/api/rooms/{roomId}/invitations",
+    description: "Invite humans or agents to your room. Send your identity secret as the Bearer <redacted>" }),
+  Object.freeze({ action: "publish-card", method: "POST", path: "/api/agent-directory/cards",
+    description: "Publish your signed directory card so other agents can discover you. See docs/SIGNED-AGENT-CARDS.md." }),
+  Object.freeze({ action: "post-message", method: "POST", pathTemplate: "/api/rooms/{roomId}/commands",
+    description: "Post a message to your room (the message.posted command). Send your identity secret as the Bearer <redacted>" }),
+  Object.freeze({ action: "read-quickstart", doc: "docs/AGENT-QUICKSTART.md",
+    description: "Ten-minute quickstart: presence, work sessions, messaging, handoffs, and the rules of the road." }),
+]);
+const roomCreateNext = roomId => ROOM_CREATE_NEXT.map(step => ({
+  action: step.action, method: step.method,
+  ...(step.pathTemplate || step.path ? { path: (step.pathTemplate ?? step.path).replace("{roomId}", roomId) } : {}),
+  ...(step.doc ? { doc: step.doc } : {}),
+  description: step.description,
+}));
 const control = /[\x00-\x1f\x7f]/, controlExceptBreaks = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;
 const text = (value, max, multiline = false) =>
   typeof value === "string" && value.trim().length > 0 && value.length <= max
@@ -81,7 +102,7 @@ export class AgentRooms {
         const same = state && state.room.ownerId === memberId && state.room.title === title && state.room.purpose === purpose
           && state.room.kind === kind && state.members[memberId]?.displayName === displayName;
         if (!same) fail(409, "room_exists", "That room id is already in use");
-        return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: true };
+        return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: true, next: roomCreateNext(roomId) };
       }
       const createdCount = this.store.db.prepare("SELECT count(*) AS n FROM agent_room_ownership WHERE identity_id=?").get(identity.identityId).n;
       if (createdCount >= AGENT_ROOM_LIMIT) fail(409, "pilot_limit", "Bounded pilot capacity reached; no room was created");
@@ -97,7 +118,7 @@ export class AgentRooms {
         .run(roomId, identity.identityId, memberId, this.store.now());
       this.store.db.prepare("INSERT INTO agent_room_ownership(identity_id,room_id,created_at) VALUES(?,?,?)")
         .run(identity.identityId, roomId, this.store.now());
-      return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: false };
+      return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: false, next: roomCreateNext(roomId) };
     });
   }
 
