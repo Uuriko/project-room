@@ -6,7 +6,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { RoomStore, ServiceError } from "../server/store.mjs";
 import { flagMessage, quarantineThreshold } from "../server/inbox-spam.mjs";
