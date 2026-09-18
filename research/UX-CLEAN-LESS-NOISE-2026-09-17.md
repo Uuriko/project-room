@@ -51,6 +51,8 @@ runtime.
    thread, not as a scroll bomb inside the bubble.
    **Lite P0** (collapse + opt-in panel) is
    [ASK-ARTIFACTS-LITE-2026-09-18.md](ASK-ARTIFACTS-LITE-2026-09-18.md);
+   implement gate (T081, cite #493/#507):
+   [ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md](ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md);
    auto-open / HTML preview stay P1.
 8. **History sidebar icon-only** until hover; auto-title chats; search
    later.

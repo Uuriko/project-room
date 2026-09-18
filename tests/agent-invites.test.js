@@ -313,8 +313,13 @@ test("CLI: owner mints a code, a new AI redeems it and connects", async t => {
   assert.equal(connected.status, 0, connected.stderr);
   const checked = await cli(origin, ["check"], { ROOM_AGENT_CONFIG: join(agentDir, "agent") });
   assert.equal(checked.status, 0, checked.stderr);
-  assert.equal(checked.json.status, "credential_accepted");
-  assert.deepEqual(checked.json.permissions, ["accept_work", "complete_work"]);
+  assert.equal(checked.json.type, "agent_connection_ladder");
+  assert.equal(checked.json.status, "verified");
+  assert.equal(checked.json.memberId, redeemed.json.memberId);
+  assert.deepEqual(checked.json.rungs.map(rung => rung.name), ["access", "read", "write"]);
+  assert.ok(checked.json.rungs.every(rung => rung.ok));
+  assert.match(checked.json.rungs[0].detail, /accept_work,complete_work/);
+  assert.equal(checked.json.summary, "3/3 — you're live in #commons");
   // The burned code cannot be revoked (already used) and cannot be reused.
   const revokeUsed = await cli(origin, ["invite-code-revoke", minted.json.inviteId], ownerEnv);
   assert.notEqual(revokeUsed.status, 0);
@@ -466,4 +471,84 @@ test("CLI rejects --yes and --no together", async t => {
   assert.equal(minted.status, 0, minted.stderr);
   const both = await cli(origin, ["redeem-invite", minted.json.code, "Fussy Bot", "--yes", "--no"]);
   assert.notEqual(both.status, 0);
+});
+
+// check returns machine-readable JSON even when a rung fails (the first
+// failing rung stops the ladder and names the doctor repair).
+async function cliJson(origin, args, env = {}) {
+  const scrubbed = { ...process.env };
+  for (const name of Object.keys(scrubbed)) if (name.startsWith("ROOM_AGENT_")) delete scrubbed[name];
+  const base = env.ROOM_AGENT_CONFIG === undefined ? { ROOM_AGENT_ORIGIN: origin } : {};
+  const parse = text => { try { return JSON.parse(text); } catch { return null; } };
+  try {
+    const { stdout, stderr } = await execFileAsync(process.execPath, ["scripts/agent-inbox.mjs", ...args], {
+      env: { ...scrubbed, ...base, ...env }, encoding: "utf8", timeout: 30000, maxBuffer: 1024 * 1024,
+    });
+    return { status: 0, json: parse(stdout), stderr: String(stderr) };
+  } catch (error) {
+    return { status: error.code ?? 1, json: parse(error.stdout), stderr: String(error.stderr ?? error.message) };
+  }
+}
+
+async function ladderAgent(t, origin, ownerKey) {
+  const ownerEnv = { ROOM_AGENT_ROOM: "commons", ROOM_AGENT_MEMBER: "owner", ROOM_AGENT_TOKEN: ownerKey };
+  const minted = await cli(origin, ["invite-code", "accept_work", "60", "Ladder Bot"], ownerEnv);
+  assert.equal(minted.status, 0, minted.stderr);
+  const redeemed = await cli(origin, ["redeem-invite", minted.json.code, "Ladder Bot", "--yes"]);
+  assert.equal(redeemed.status, 0, redeemed.stderr);
+  const agentDir = mkdtempSync(join(tmpdir(), "check-ladder-"));
+  t.after(() => rmSync(agentDir, { recursive: true, force: true }));
+  const connected = await cli(origin, ["connect", join(agentDir, "agent")], {
+    ROOM_AGENT_ROOM: "commons", ROOM_AGENT_MEMBER: redeemed.json.memberId, ROOM_AGENT_TOKEN: redeemed.json.secret,
+  });
+  assert.equal(connected.status, 0, connected.stderr);
+  return { ROOM_AGENT_CONFIG: join(agentDir, "agent") };
+}
+
+test("check runs the verification ladder: 3/3 for a fully plugged-in agent", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const agentEnv = await ladderAgent(t, origin, ownerKey);
+  const checked = await cliJson(origin, ["check"], agentEnv);
+  assert.equal(checked.status, 0, checked.stderr);
+  assert.equal(checked.json.type, "agent_connection_ladder");
+  assert.equal(checked.json.status, "verified");
+  assert.deepEqual(checked.json.rungs.map(rung => rung.name), ["access", "read", "write"]);
+  assert.ok(checked.json.rungs.every(rung => rung.ok), JSON.stringify(checked.json.rungs));
+  assert.match(checked.json.rungs[1].detail, /roster readable/);
+  assert.equal(checked.json.summary, "3/3 — you're live in #commons");
+});
+
+test("check ladder stops at the first failing rung and names the doctor repair", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const ownerEnv = { ROOM_AGENT_ROOM: "commons", ROOM_AGENT_MEMBER: "owner", ROOM_AGENT_TOKEN: ownerKey };
+  const minted = await cli(origin, ["invite-code", "accept_work", "60", "Fail Bot"], ownerEnv);
+  assert.equal(minted.status, 0, minted.stderr);
+  const redeemed = await cli(origin, ["redeem-invite", minted.json.code, "Fail Bot", "--yes"]);
+  assert.equal(redeemed.status, 0, redeemed.stderr);
+  // Valid format, wrong value: config parsing passes, the access probe fails.
+  const tampered = redeemed.json.secret.slice(0, -1) + (redeemed.json.secret.endsWith("A") ? "B" : "A");
+  const checked = await cliJson(origin, ["check"], {
+    ROOM_AGENT_ORIGIN: origin, ROOM_AGENT_ROOM: "commons",
+    ROOM_AGENT_MEMBER: redeemed.json.memberId, ROOM_AGENT_TOKEN: tampered,
+  });
+  assert.equal(checked.status, 1);
+  assert.equal(checked.json.type, "agent_connection_ladder");
+  assert.equal(checked.json.status, "failed");
+  assert.deepEqual(checked.json.rungs.map(rung => rung.name), ["access"]);
+  assert.equal(checked.json.rungs[0].ok, false);
+  assert.match(checked.json.summary, /0\/1 — access failed/);
+  assert.match(checked.json.summary, /doctor/);
+});
+
+test("check ladder write probe is draft-only: wrote=false, nothing sent", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const agentEnv = await ladderAgent(t, origin, ownerKey);
+  const checked = await cliJson(origin, ["check"], agentEnv);
+  assert.equal(checked.status, 0, checked.stderr);
+  const write = checked.json.rungs.find(rung => rung.name === "write");
+  assert.ok(write, "expected a write rung");
+  assert.equal(write.ok, true);
+  assert.equal(write.wrote, false, "the write probe must never write to a real room");
+  assert.match(write.detail, /draft-only/);
+  assert.match(write.detail, /never sent/);
 });
