@@ -156,6 +156,6 @@ Forbidden on Ask:
 
 ## 8. Stay-outs
 
-T044 export chrome · T046 mid-stream lint · T034 Artifacts-lite · T042 / T043 Regen / Continue · T060 / T065 Bonsai RAM · `#honesty-panel` network strip (Compute P1) · Room Done chip.
+T044 export chrome · T046 mid-stream lint · T034 Artifacts-lite · T042 / T043 Regen / Continue · T060 / T065 Bonsai RAM · `#honesty-panel` network strip (Compute P1 — T072: [ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md](../ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md)) · Room Done chip.
 
 *End. Parent: quiet-shell “one word” stream + honesty after the fact.*

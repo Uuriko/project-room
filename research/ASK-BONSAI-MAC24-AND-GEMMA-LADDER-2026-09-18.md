@@ -273,4 +273,6 @@ thinking opt-in / kit Stop):
 Companion T068/T069 pause-on-battery + Prefer AC (no lecture):
 `research/ASK-PROVIDE-BATTERY-PREFER-AC-2026-09-18.md`.
 Companion T064 PrismML id map:
-`research/ASK-PRISMML-BONSAI-ID-MAP-2026-09-18.md`.*
+`research/ASK-PRISMML-BONSAI-ID-MAP-2026-09-18.md`.
+Companion T071/T072 Advanced grouping + network honesty line:
+`research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md`.*
