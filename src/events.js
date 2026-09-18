@@ -55,7 +55,7 @@ export const EVENT_TYPES = Object.freeze({
 // is event-sourced (room.policy_set) and lives on the projection; work recorded
 // before a flip keeps the requirements it was recorded with. Off is the default
 // and the pre-policy behaviour: the proposer chooses per item.
-export const ROOM_POLICY_FIELDS = Object.freeze(["requireIndependentReview", "requireOwnerDecision"]);
+export const ROOM_POLICY_FIELDS = Object.freeze(["requireIndependentReview", "requireOwnerDecision", "openJoin"]);
 
 export function roomPolicy(state) {
   const stored = state?.room?.policy ?? {};
@@ -326,12 +326,19 @@ function setRoomPolicy(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
   if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may set room policy");
   for (const field of ROOM_POLICY_FIELDS) {
+    // openJoin arrived later (Uuriko/project-room#612): room.policy_set
+    // events and clients from before it simply leave the room closed.
+    if (field === "openJoin" && incoming.data[field] === undefined) continue;
     if (typeof incoming.data[field] !== "boolean") throw new Error(`Room policy requires ${field} as true or false`);
   }
   const previous = state.room.policy ?? null;
   state.room.policy = {
     requireIndependentReview: incoming.data.requireIndependentReview,
     requireOwnerDecision: incoming.data.requireOwnerDecision,
+    // Kept conditional so projections from before this field (Uuriko/project-room#612)
+    // rebuild byte-identically: an undefined openJoin serializes away in JSON
+    // but stays an own property in a pure-JS replay, breaking deep equality.
+    ...(incoming.data.openJoin === undefined ? {} : { openJoin: incoming.data.openJoin }),
     revision: (previous?.revision ?? 0) + 1,
     setById: incoming.actorId,
     setAt: incoming.at

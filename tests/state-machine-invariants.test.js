@@ -50,7 +50,7 @@ for (let seed = 1; seed <= 16; seed++) test(`seeded work lifecycle preserves rep
     const policy = { id: `${id}-policy`, idempotencyKey: `${id}-policy-key`, roomId: ROOM, actorId: "potter", type: T.ROOM_POLICY_SET,
       at: new Date(Date.UTC(2026, 8, 10, 11, 0, 0)).toISOString(), causationId: null, data: { requireIndependentReview: true, requireOwnerDecision: true } };
     state = applyEvent(state, policy); history.push(policy);
-    assert.deepEqual(roomPolicy(state), { requireIndependentReview: true, requireOwnerDecision: true });
+    assert.deepEqual(roomPolicy(state), { requireIndependentReview: true, requireOwnerDecision: true, openJoin: false });
   }
   send("potter", T.WORK_PROPOSED, { workItemId: id, title: `Random lifecycle ${seed}`, definitionOfDone: "Exact evidence survives replay",
     accountableMemberId: "codex", verifierMemberId: "instinct", independentVerificationRequired: !policyOn,

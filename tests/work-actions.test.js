@@ -113,9 +113,9 @@ function policyFixture(t) {
 
 test("room policy: altered client fields cannot disable the independent gate or the owner decision", t => {
   const f = policyFixture(t);
-  assert.deepEqual(roomPolicy(f.state()), { requireIndependentReview: false, requireOwnerDecision: false }, "off is the default");
+  assert.deepEqual(roomPolicy(f.state()), { requireIndependentReview: false, requireOwnerDecision: false, openJoin: false }, "off is the default");
   f.setPolicy("owner", { requireIndependentReview: true, requireOwnerDecision: true });
-  assert.deepEqual(roomPolicy(f.state()), { requireIndependentReview: true, requireOwnerDecision: true });
+  assert.deepEqual(roomPolicy(f.state()), { requireIndependentReview: true, requireOwnerDecision: true, openJoin: false });
   assert.equal(f.state().room.policy.revision, 1); assert.equal(f.state().room.policy.setById, "owner");
   // A client that claims neither requirement still records both; the owner is the default decision-maker.
   const { command, receipt } = f.propose("owner", "forced", { independentVerificationRequired: false, ownerDecisionRequired: false, verifierMemberId: "reviewer" });
@@ -171,7 +171,7 @@ test("room policy: work recorded before a flip keeps its recorded requirements; 
 
 test("room policy: only the room owner sets it, and the command shape is strict", t => {
   const f = policyFixture(t);
-  const on = { requireIndependentReview: true, requireOwnerDecision: true };
+  const on = { requireIndependentReview: true, requireOwnerDecision: true, openJoin: false };
   assert.throws(() => f.setPolicy("guest", on), { status: 422, code: "command_rejected", message: /Only the Room owner may set room policy/ });
   assert.throws(() => f.setPolicy("reviewer", on), /Only the Room owner may set room policy/);
   assert.equal(f.state().room.policy, undefined, "a refused policy leaves no trace");

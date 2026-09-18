@@ -1,6 +1,6 @@
 import { CHARTER_TYPE, CHARTER_FIELDS, charterContext, validateCharterData, confirmsCharter } from "./room-charter.js";
 import { retryUnconfirmed } from "./client.js";
-import { EVENT_TYPES as T, ROOM_POLICY_FIELDS, roomPolicy } from "./events.js";
+import { EVENT_TYPES as T, roomPolicy } from "./events.js";
 
 // Room review policy (issue #6 A4 follow-up): the owner sets it here instead of
 // by hand-written command; everyone else sees the policy in force, read only.
@@ -18,7 +18,11 @@ export function policyKey(policy) {
 }
 export function policyCommand(key) {
   if (!POLICY_OPTIONS[key]) throw new Error("Choose a review policy");
-  return { id: crypto.randomUUID(), type: T.ROOM_POLICY_SET, data: Object.fromEntries(ROOM_POLICY_FIELDS.map((field, i) => [field, POLICY_OPTIONS[key][i]])) };
+  // The review-policy UI manages only the two review gates; openJoin
+  // (Uuriko/project-room#612) is toggled elsewhere and must not be clobbered
+  // by mapping the two-element option tuples over all ROOM_POLICY_FIELDS.
+  const [requireIndependentReview, requireOwnerDecision] = POLICY_OPTIONS[key];
+  return { id: crypto.randomUUID(), type: T.ROOM_POLICY_SET, data: { requireIndependentReview, requireOwnerDecision } };
 }
 
 export function installRoomInstructions({ client, getState, onSaved }) {
