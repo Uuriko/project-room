@@ -230,8 +230,13 @@ export async function requestAccess(origin, { roomId, identityId, displayName, r
       method: "POST", redirect: "error", credentials: "omit",
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ roomId, identityId, displayName, requestedPermissions,
-        ...(note === undefined ? {} : { note }), ...(requestId === undefined ? {} : { requestId }) }),
+      // POST /api/access-requests uses exact() — all six keys must be present.
+      body: JSON.stringify({
+        roomId, identityId, displayName, requestedPermissions,
+        note: typeof note === "string" ? note : "",
+        requestId: typeof requestId === "string" && requestId ? requestId
+          : `ar_${randomUUID().replaceAll("-", "").slice(0, 16)}`,
+      }),
     });
   } catch (error) {
     if (error instanceof RoomClientError) throw error;

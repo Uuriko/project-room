@@ -5,7 +5,14 @@ import { ServiceError } from "./store.mjs";
 const hash = value => createHash("sha256").update(value).digest("hex");
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const integer = value => Number.isSafeInteger(value) && value >= 0;
-const access = Object.freeze({ chat: [], contribute: ["accept_work", "complete_work"], review: ["verify"] });
+const access = Object.freeze({
+  chat: [],
+  contribute: ["accept_work", "complete_work"],
+  review: ["verify"],
+  // Autonomy-biased default for agent-to-agent invites: work + steer + verify.
+  // Still attenuated — no manage_members / decide / write_external / invite_member.
+  collaborate: ["steer", "accept_work", "complete_work", "verify"],
+});
 // Standing permission profiles shared by owner sponsorship and agent invite
 // codes. Names map server-side to fixed permission sets, so a request can
 // never widen authority by renaming or editing a profile.

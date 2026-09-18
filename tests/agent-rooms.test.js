@@ -11,8 +11,10 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { AgentRooms, agentRoomSchema } from "../server/agent-rooms.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
-import { PERMISSIONS, ROOM_KINDS } from "../src/events.js";
+import { PERMISSIONS, AGENT_AUTONOMY_PERMISSIONS, ROOM_KINDS, validId } from "../src/events.js";
 import { RoomAgentClient, createAgentIdentity, createAgentRoom, redeemAgentInvite } from "../client/room-agent.mjs";
+import { parseBootstrapArgs, parseAccountLinkArgs, slugRoomId, roomDeepLink } from "../scripts/bootstrap-agent-room.mjs";
+import { canAct, canEmitReceipt, canInviteMember, memberCapabilities } from "../member-capabilities/src/index.js";
 
 const execFileAsync = promisify(execFile);
 async function cli(origin, args, env = {}) {
@@ -445,6 +447,92 @@ test("CLI: identity-create → room-create → invite-code → peer redeem-invit
   assert.notEqual((await cli(origin, ["room-create", "nope"])).status, 0);
   assert.notEqual((await cli(origin, ["room-create", "a-room", "Title", "Purpose"], {})).status, 0,
     "room-create without a pri_ secret must fail");
+});
+
+test("bootstrap arg parse: generated room id, flags, and account-link defaults", () => {
+  const parsed = parseBootstrapArgs(["Grok Bot", "--hello", "--invite-name", "Muse"]);
+  assert.equal(parsed.displayName, "Grok Bot");
+  assert.equal(parsed.hello, true);
+  assert.equal(parsed.inviteName, "Muse");
+  assert.equal(parsed.kind, "personal");
+  assert.ok(validId(parsed.roomId));
+  assert.equal(parseBootstrapArgs([]), null);
+  assert.equal(parseBootstrapArgs(["--hello"]), null);
+  assert.equal(slugRoomId("Grok Bot", "abcd"), "grok-bot-abcd");
+  assert.equal(roomDeepLink("https://www.getdasha.com", "den-1"), "https://www.getdasha.com/room#room/den-1");
+  const link = parseAccountLinkArgs(["commons", "ai_x", "Peer"]);
+  assert.deepEqual(link.permissions, [...AGENT_AUTONOMY_PERMISSIONS]);
+  assert.equal(parseAccountLinkArgs(["commons"]), null);
+});
+
+test("CLI: bootstrap-agent-room one-shot → peer redeem → check + orient + hello", async t => {
+  const { store, origin } = await httpFixture(t);
+  const boot = await cli(origin, [
+    "bootstrap-agent-room", "Grok Bot", "boot-den", "Boot Den", "One-shot autonomy room",
+    "--hello", "--invite-name", "Muse",
+  ]);
+  assert.equal(boot.status, 0, boot.stderr);
+  assert.equal(boot.json.type, "agent_room_bootstrap");
+  assert.match(boot.json.identity.identityId, /^ai_/);
+  assert.match(boot.json.identity.secret, /^pri_/);
+  assert.equal(boot.json.room.roomId, "boot-den");
+  assert.equal(boot.json.room.ownerMemberId, boot.json.identity.identityId);
+  assert.equal(boot.json.room.deepLink, `${origin}/#room/boot-den`);
+  assert.equal(boot.json.invite.profile, "collaborate");
+  assert.deepEqual(boot.json.invite.permissions, [...AGENT_AUTONOMY_PERMISSIONS]);
+  assert.match(boot.json.invite.code, /^RM-/);
+  assert.equal(boot.json.hello.posted, true);
+  assert.ok(boot.json.ownerPermissions.includes("invite_member"));
+  assert.ok(boot.json.ownerPermissions.includes("manage_members"));
+  const owner = store.roomAuthority("boot-den").members[boot.json.identity.identityId];
+  assert.deepEqual(memberCapabilities(owner, { ownerId: boot.json.identity.identityId }).bits,
+    ["read", "act", "emit_receipt", "invite_member"]);
+  assert.equal(canInviteMember(owner, { ownerId: boot.json.identity.identityId }), true);
+
+  const redeemed = await cli(origin, ["redeem-invite", boot.json.invite.code, "Muse", "--yes"]);
+  assert.equal(redeemed.status, 0, redeemed.stderr);
+  assert.equal(redeemed.json.roomId, "boot-den");
+  assert.deepEqual(redeemed.json.permissions, [...AGENT_AUTONOMY_PERMISSIONS]);
+  assert.ok(!redeemed.json.permissions.includes("manage_members"));
+  assert.ok(!redeemed.json.permissions.includes("decide"));
+  assert.ok(!redeemed.json.permissions.includes("invite_member"));
+  const peerMember = store.roomAuthority("boot-den").members[redeemed.json.identityId];
+  assert.deepEqual(memberCapabilities(peerMember).bits, ["read", "act", "emit_receipt"]);
+  assert.equal(canAct(peerMember), true);
+  assert.equal(canEmitReceipt(peerMember), true);
+  assert.equal(canInviteMember(peerMember), false);
+
+  const peerDir = mkdtempSync(join(tmpdir(), "bootstrap-peer-"));
+  t.after(() => rmSync(peerDir, { recursive: true, force: true }));
+  const peerConnected = await cli(origin, ["connect", join(peerDir, "muse")], {
+    ROOM_AGENT_ROOM: "boot-den",
+    ROOM_AGENT_MEMBER: redeemed.json.identityId,
+    ROOM_AGENT_TOKEN: redeemed.json.secret,
+  });
+  assert.equal(peerConnected.status, 0, peerConnected.stderr);
+  const peerChecked = await cli(origin, ["check"], { ROOM_AGENT_CONFIG: join(peerDir, "muse") });
+  assert.equal(peerChecked.status, 0, peerChecked.stderr);
+  assert.equal(peerChecked.json.status, "verified");
+  const oriented = await cli(origin, ["orient"], { ROOM_AGENT_CONFIG: join(peerDir, "muse") });
+  assert.equal(oriented.status, 0, oriented.stderr);
+  assert.equal(oriented.json.roomId, "boot-den");
+
+  assert.notEqual((await cli(origin, ["bootstrap-agent-room"])).status, 0);
+  assert.notEqual((await cli(origin, ["bootstrap-agent-room", "Nope"], { ROOM_AGENT_ORIGIN: "" })).status, 0,
+    "bootstrap without ROOM_AGENT_ORIGIN must fail");
+});
+
+test("CLI: account-link requests autonomy perms into a human-owned room", async t => {
+  const { origin } = await httpFixture(t);
+  const minted = await cli(origin, ["identity-create", "Visitor"]);
+  assert.equal(minted.status, 0, minted.stderr);
+  const asked = await cli(origin, ["account-link", "commons", minted.json.identityId, "Visitor"]);
+  assert.equal(asked.status, 0, asked.stderr);
+  assert.equal(asked.json.type, "agent_account_link_request");
+  assert.equal(asked.json.roomId, "commons");
+  assert.deepEqual(asked.json.requestedPermissions, [...AGENT_AUTONOMY_PERMISSIONS]);
+  assert.match(asked.json.ownerApprove, /identity-link/);
+  assert.match(asked.json.note, /Second\.bind/);
 });
 
 test("room-create kind 422 teaches the allowed kinds (RC-2026-09-18-021)", async t => {

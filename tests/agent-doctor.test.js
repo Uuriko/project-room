@@ -122,7 +122,7 @@ test("doctor tells an unlinked identity exactly what the owner must run", async 
   assert.equal(check(result, "credential").ok, true);
   assert.equal(check(result, "access").detail, "identity_not_linked");
   assert.match(result.json.repair, /identity-link/);
-  assert.match(result.json.repair, /room-create/);
+  assert.match(result.json.repair, /bootstrap-agent-room/);
   assert.ok(result.json.repair.includes(identityId));
   assert.ok(!JSON.stringify(result.json).includes(secret), "doctor must never print the secret");
 });
@@ -182,6 +182,7 @@ test("signature table covers the no-room-to-join silent failure", async () => {
   assert.equal(result.status, 1);
   const noRoom = result.json.signatures.find(entry => entry.symptom.includes("no room to join"));
   assert.ok(noRoom, "expected a no-room-to-join signature");
+  assert.match(noRoom.fix, /bootstrap-agent-room/);
   assert.match(noRoom.fix, /room-create/);
 });
 

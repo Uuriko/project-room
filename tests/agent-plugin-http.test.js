@@ -38,6 +38,7 @@ const del = (origin, path, secret = null) => fetch(`${origin}${path}`, {
 });
 
 const errorCode = async res => (await res.json()).error?.code;
+const errorMessage = async res => (await res.json()).error?.message ?? "";
 
 const fixtureCard = (overrides = {}) => ({
   name: "Fixture Agent",
@@ -229,6 +230,21 @@ test("unsigned and mis-signed publishes are rejected with 422", async t => {
   tampered.card = fixtureCard({ description: "Tampered after signing." });
   assert.equal(await errorCode(await post(origin, "/api/agent-directory/cards", tampered, identity.secret)),
     "invalid_card_signature");
+
+  // RC-2026-09-18-027: every publish-path 422 points at the signing guide.
+  const shapeMsg = await errorMessage(await post(origin, "/api/agent-directory/cards",
+    { agentId: "doc-pointer-agent", card: fixtureCard() }, identity.secret));
+  assert.ok(shapeMsg.includes("docs/SIGNED-AGENT-CARDS.md"),
+    `shape 422 teaches where to look: ${shapeMsg}`);
+  const badKey = signedPublishBody("badkey-agent", fixtureCard(), keyPair);
+  badKey.publicKey = "not-canonical-base64!!!";
+  const badKeyRes = await post(origin, "/api/agent-directory/cards", badKey, identity.secret);
+  assert.equal(badKeyRes.status, 422);
+  assert.equal(await errorCode(await post(origin, "/api/agent-directory/cards", badKey, identity.secret)),
+    "invalid_card_signature");
+  const badKeyMsg = await errorMessage(badKeyRes);
+  assert.ok(badKeyMsg.includes("docs/SIGNED-AGENT-CARDS.md"),
+    `invalid_card_signature 422 teaches where to look: ${badKeyMsg}`);
 });
 
 test("key rotation over HTTP requires the old key's rotation signature", async t => {
