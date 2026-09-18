@@ -152,7 +152,7 @@ test("doctor appends the failure-signature table after the repair step", async (
   assert.equal(result.json.healthy, false);
   // The table never replaces the primary repair step: repair comes first.
   assert.deepEqual(Object.keys(result.json), ["healthy", "checks", "repair", "signatures"]);
-  assert.equal(result.json.signatures.length, 5);
+  assert.equal(result.json.signatures.length, 7);
   for (const entry of result.json.signatures) {
     assert.ok(typeof entry.symptom === "string" && entry.symptom.length > 0);
     assert.ok(typeof entry.check === "string" && entry.check.length > 0);
