@@ -1,10 +1,11 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { ServiceError } from "./store.mjs";
 import { clientAddress, STREAM_INTERVAL_DEFAULT_MS } from "./deployment.mjs";
 import { validId } from "../src/events.js";
-import { SyntheticInboxTransport, FixtureChannelSender } from "./inbox-transport.mjs";
+import { SyntheticInboxTransport, FixtureChannelSender, GmailSender, gmailCredentialsFor, sendTelegramDirect } from "./inbox-transport.mjs";
+import { validateDirectSend, recordDirectSend, completeDirectSend, publicDirectSend } from "./inbox-outbox.mjs";
 import { channelSyncLimits, syncTelegramConnection } from "./channel-import.mjs";
 import { telegramConfig, TelegramLiveStatus, telegramLiveView } from "./channel-adapters/telegram-config.mjs";
 import { TelegramTransport } from "./channel-adapters/telegram-transport.mjs";
@@ -85,7 +86,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   loadAsset = path => readFile(new URL(path, assetRoot)), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
   telegram = telegramConfig(), telegramStatus = new TelegramLiveStatus(), channelTransports = null,
-  googleAuth = null,
+  googleAuth = null, directSendFetch = null,
   passkeyService = null, // test injection for the passkey routes; production uses createPasskeyAuth({ store })
   magicLinkMailer = null,
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", growth = null }) {
@@ -865,6 +866,35 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // the queued attempt, so this only dispatches or reconciles it.
           protectWrite(req, auth, false); rate(`inbox-channel-send:${auth.account.id}`, 30);
           const data = await body(req);
+          // Direct send: {channel, to, subject, body, threadId?} — compose freely
+          // and deliver through the live provider now. The attempt is journaled
+          // pending → sent|failed; unconnected channels fail honestly, never fake.
+          if (data && typeof data === "object" && !Array.isArray(data) && typeof data.channel === "string") {
+            rate(`inbox-direct-send:${auth.account.id}`, 20);
+            validateDirectSend(data);
+            const fetchImpl = directSendFetch ?? fetch;
+            const sendId = randomUUID();
+            const bodyHash = createHash("sha256").update(data.body, "utf8").digest("hex");
+            recordDirectSend(store.db, { id: sendId, accountId: auth.account.id, channel: data.channel,
+              to: data.to, subject: data.subject, bodyHash, threadId: data.threadId ?? null, at: store.now() });
+            let providerId = null, sendError = null;
+            try {
+              if (data.channel === "gmail") {
+                const sender = new GmailSender({ fetchImpl, credentialProvider: () => gmailCredentialsFor(store, auth.account.id) });
+                providerId = (await sender.send({ to: data.to, subject: data.subject, body: data.body })).id;
+              } else {
+                providerId = (await sendTelegramDirect({ config: telegram, to: data.to, text: data.body, fetchImpl })).messageId;
+                telegramStatus.sent(auth.account.id, null, { at: store.now(), outcome: "sent", code: "direct" });
+              }
+            } catch (error) { sendError = error; }
+            const settled = completeDirectSend(store.db, sendId, sendError
+              ? { status: "failed", errorCode: sendError instanceof ServiceError ? sendError.code : "channel_send_failed", at: store.now() }
+              : { status: "sent", providerId, at: store.now() });
+            if (sendError) throw sendError;
+            return json(res, 200, { contractVersion: 1,
+              viewer: { accountId: auth.account.id, authEpoch: auth.account.authEpoch, sessionBinding: auth.sessionBinding, sessionRevision: auth.sessionRevision },
+              send: publicDirectSend(settled) });
+          }
           if (!data || !exact(data, ["action", "sourceId", "sendId"]) || !["dispatch", "reconcile"].includes(data.action)
             || !validId(data.sourceId) || !validId(data.sendId)) reject(422, "invalid_inbox_send", "Choose the existing channel reply.");
           const sender = channelSendFor(data.sourceId);
