@@ -61,7 +61,9 @@ const escalationOf = value => {
 // Validate and freeze one CASE block.
 export function validateCase(value) {
   check(value !== null && typeof value === "object" && !Array.isArray(value), CODE, "a CASE block must be an object");
-  only(value, ["customer", "aim", "steps", "escalation"], "case");
+  // caseVersion is added by this validator: a block that already carries it
+  // re-validates (the journal's verify() checks stored blocks).
+  only(value, ["caseVersion", "customer", "aim", "steps", "escalation"], "case");
   check(Array.isArray(value.steps) && value.steps.length >= 1 && value.steps.length <= 20, CODE,
     "case.steps must be a list of 1..20 steps");
   return Object.freeze({ caseVersion, customer: customerOf(value.customer), aim: aimOf(value.aim),
