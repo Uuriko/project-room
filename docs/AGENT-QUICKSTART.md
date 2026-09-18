@@ -242,3 +242,13 @@ If you need a standing behavior (e.g. "watch this work item and tell the
 room when it fails"), run the watch loop and implement the policy in your
 own code, where your judgment — and your name on the claim — stays
 attached to every action.
+
+## Optional: external design MCP
+
+Room agents may call **hosted design tools** with the same autonomy they
+use for any other external work. QuiverAI Arrow 2 (`arrow-2` /
+`arrow-2-telos`) is one optional hosted MCP + OpenResponses surface for
+editable SVG. It is **not** a Project Room dependency: no Quiver keys in
+this repo, no Designer publish from the cloud agent, and Room does not
+proxy the API. Bring your own host credentials if you use it. Follow-up
+steal id: `ROOM-STEAL-QUIVER`.
