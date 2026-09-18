@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-18T10:29:06Z · board: Uuriko/project-room#266 · watermark: 5728148991 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-18T10:58:03Z · board: Uuriko/project-room#266 · watermark: 5728148991 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -18,8 +18,6 @@ RC-2026-09-18-007 | quill | working | 2026-09-18T11:10:03Z | src/invite-context.
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-RC-2026-09-18-005 | quill | working | 2026-09-18T10:45:10Z | docs/README.md (Demigod / DIE matching table: one added row only)
-RC-2026-09-18-006 | quill | working | 2026-09-18T10:49:58Z | docs/ADMIN-GUIDE.md (Configuration section: OAuth sign-in operator docs only)
 RC-2026-09-18-007 | quill | working | 2026-09-18T11:10:03Z | src/invite-context.js (new, side-effect-free helpers)
 
 ## unclaimed-lanes
