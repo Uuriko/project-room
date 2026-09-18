@@ -214,7 +214,13 @@ test("approvals: propose, human decide, agent self-approval refused", async t =>
   const selfApprove = await post(f, `${base}/approvals/${proposalId}/decide`, agentToken,
     { decision: "approve" });
   assert.equal(selfApprove.status, 403);
-  assert.equal(await codeOf(selfApprove), "human_required");
+  // RC-2026-09-18-023: the denial explains the boundary and the unlock.
+  const denial = await selfApprove.json();
+  assert.equal(denial.error.code, "human_required");
+  assert.ok(denial.error.message.includes("cannot clear its own draft"),
+    "denial states the trust boundary");
+  assert.ok(denial.error.message.includes("/collab/approvals/"),
+    "denial names the verdict call a human must make");
   // A human approves.
   const approved = await post(f, `${base}/approvals/${proposalId}/decide`, f.humanKey,
     { decision: "approve", note: "looks good" });
