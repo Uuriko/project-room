@@ -38,9 +38,14 @@ export const invitationJournalSchema = `
 
 export function validateInvitationSnapshot(record, audits) {
   assert(exact(record, [...scopeKeys, ...stateKeys]));
-  for (const key of ["id", "room_id", "intended_account_id", "intended_member_id", "issuer_account_id", "issuer_member_id", "issue_request_id"]) assert(validId(record[key]));
+  // Agent-issued invitations (room owner on a bearer with no account) record a
+  // null issuer account and auth epoch; the member id stays the authority.
+  const agentIssued = record.issuer_account_id === null;
+  for (const key of ["id", "room_id", "intended_account_id", "intended_member_id", "issuer_member_id", "issue_request_id"]) assert(validId(record[key]));
+  if (agentIssued) assert(record.issuer_account_id === null && record.issuer_account_auth_epoch === null);
+  else { assert(validId(record.issuer_account_id)); assert(integer(record.issuer_account_auth_epoch)); }
   for (const key of ["token_hash", "issue_fingerprint"]) assert(typeof record[key] === "string" && hashPattern.test(record[key]));
-  for (const key of ["issuer_account_auth_epoch", "issuer_member_revision", "created_at", "expires_at"]) assert(integer(record[key]));
+  for (const key of ["issuer_member_revision", "created_at", "expires_at"]) assert(integer(record[key]));
   assert(bounded(record.intended_display_name, 256) && record.expires_at > record.created_at);
   const policy = INVITATION_ROLE_POLICIES[record.role_policy_version];
   assert(policy && Object.hasOwn(policy, record.intended_role));
@@ -55,8 +60,13 @@ export function validateInvitationSnapshot(record, audits) {
   assert(Array.isArray(audits) && audits.length === (record.status === "pending" ? 1 : 2));
   for (const [index, audit] of audits.entries()) {
     assert(exact(audit, auditKeys) && audit.invitation_id === record.id && audit.sequence === index + 1);
-    assert(validId(audit.actor_account_id) && validId(audit.actor_member_id));
-    assert(integer(audit.actor_auth_epoch) && integer(audit.actor_session_revision) && integer(audit.at));
+    // The issued event of an agent-issued invitation carries a null actor
+    // account/epoch; every other event has a real account actor.
+    const agentActor = agentIssued && index === 0;
+    if (agentActor) assert(audit.actor_account_id === null && audit.actor_auth_epoch === null);
+    else assert(validId(audit.actor_account_id) && integer(audit.actor_auth_epoch));
+    assert(validId(audit.actor_member_id));
+    assert(integer(audit.actor_session_revision) && integer(audit.at));
   }
   const first = audits[0];
   assert(first.type === "issued" && first.invitation_revision === 0 && first.at === record.created_at);

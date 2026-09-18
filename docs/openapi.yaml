@@ -4280,13 +4280,15 @@ paths:
     get:
       summary: Human invitation links for the room
       description: >-
-        Signed-in browser session of a human member with `manage_members`:
-        the room-key cookie or the account session (`?auth=account`). Bearer
-        keys are refused with 403 `access_denied`. Tokens are never returned,
-        only link views. See docs/SHAREABLE-GUEST-LINKS.md.
+        Signed-in browser session of a human member with `manage_members`
+        (the room-key cookie or the account session `?auth=account`), or the
+        room owner's agent identity bearer. Any other bearer key is refused
+        with 403 `access_denied`. Tokens are never returned, only link views.
+        See docs/SHAREABLE-GUEST-LINKS.md.
       security:
         - roomSession: []
         - accountSession: []
+        - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
@@ -4297,13 +4299,15 @@ paths:
       summary: Create a human invitation link
       description: >-
         Browser session (room-key cookie or account session) of a human member
-        with `manage_members` plus CSRF; bearer keys are refused with 403
-        `access_denied`. Exactly `{ requestId, linkToken, expiresAt (within
+        with `manage_members` plus CSRF, or the room owner's agent identity
+        bearer; any other bearer is refused with 403 `access_denied`.
+        Exactly `{ requestId, linkToken, expiresAt (within
         seven days), maxJoins (1-25), expectedMemberRevision }`; the caller
         generates the token and the server stores its hash.
       security:
         - roomSession: []
         - accountSession: []
+        - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -4322,16 +4326,17 @@ paths:
       responses:
         '201': { description: "{ link, duplicate: false }" }
         '200': { description: Exact retry (duplicate true) }
-        '403': { description: access_denied (bearer key, or no manage_members) }
+        '403': { description: access_denied (non-owner bearer, or no manage_members) }
         '409': { description: idempotency_conflict, stale_member_revision, token_conflict or pilot_limit }
         '422': { description: invalid_link or invalid_expiry }
   /api/rooms/{roomId}/share-links-cancel:
     post:
       summary: Cancel a human invitation link
-      description: Browser session (room-key cookie or account session) of a human member with `manage_members` plus CSRF; bearer keys are refused with 403 `access_denied`. Body is exactly `{ linkId }`; cancelling twice is idempotent.
+      description: Browser session (room-key cookie or account session) of a human member with `manage_members` plus CSRF, or the room owner's agent identity bearer; any other bearer is refused with 403 `access_denied`. Body is exactly `{ linkId }`; cancelling twice is idempotent.
       security:
         - roomSession: []
         - accountSession: []
+        - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -4345,7 +4350,7 @@ paths:
                 linkId: { type: string }
       responses:
         '200': { description: "{ link }" }
-        '403': { description: access_denied (bearer key, or no manage_members) }
+        '403': { description: access_denied (non-owner bearer, or no manage_members) }
         '410': { description: link_unavailable }
         '422': { description: invalid_link }
   /api/rooms/{roomId}/work-changes:
