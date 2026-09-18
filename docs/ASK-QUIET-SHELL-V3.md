@@ -169,13 +169,14 @@ From the research note. Do not sneak them into the polish PR.
 | 8 | History sidebar icon-only | Ask P1 |
 | 9 | Follow-up chips after reply (3 max) | Ask P1 |
 | 10 | Branch from edit (quiet fork, no banner) | Ask P1 |
-| 11 | Provide as secondary door (keep off Ask canvas) | Compute P1 |
+| 11 | Provide as secondary door (keep off Ask canvas) | Compute P1 — boundary: [ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md](../research/ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md) (T074; T073 lobby canary spinning) |
 | 12 | Network honesty strip `N Macs · models` | Compute P1 — spec: [ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md](../research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md) (T072) |
 | 13 | Speed / Mid / Quality ladder labels | Compute P1 — spec: [ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md](../research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md) (T071; Advanced empty until #258) |
 | 14–16 | Room tiered transparency / collapsible tools / Needle confidence | Room P2 — [ROOM-NEEDLE-CONFIDENCE-TRIGGERS-V0.md](ROOM-NEEDLE-CONFIDENCE-TRIGGERS-V0.md) |
 | T044 | Quiet export transcript JSON/MD (thread chrome; not empty-canvas) | Ask follow-on — [research/ask/T044-quiet-export-transcript.md](../research/ask/T044-quiet-export-transcript.md) |
 | T045 | Honesty receipt folds after complete; hover expand | Ask follow-on — [research/ask/T045-receipt-collapse.md](../research/ask/T045-receipt-collapse.md) |
 | T046 | No mid-stream tok/s essay (lint/test rule) | Ask follow-on — [research/ask/T046-no-midstream-toks.md](../research/ask/T046-no-midstream-toks.md) |
+| T074 | Ask vs Provide surface boundary (doors / dash / table off canvas) | Ask follow-on — [research/ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md](../research/ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md) |
 
 #249 already shipped Stop / Regen / Copy / Edit / Enter+Shift+Enter /
 stream-safe MD / New. v3 **does not restyle those into a new product**.

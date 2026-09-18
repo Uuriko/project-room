@@ -47,6 +47,8 @@ a dashboard, never a lecture.
 | T044–T046 export / receipt / tok/s | **Cite.** T072 steals T045’s fold; T046 still bans mid-stream tok/s. |
 | T042 / T043 Regen / Continue | **Not** this path. |
 | T068 / T069 battery / Prefer AC | **Not** this path. |
+| T074 Ask vs Provide boundary | **Cite only.** [ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md](ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md). Empty canvas / thread never host Provide doors, Host marketplace, capacity dash, or providers table. |
+| T073 no-capacity-dash canary | **dasha-lobby, spinning.** Hands-off. |
 | dasha-lobby [#258](https://github.com/Uuriko/dasha-lobby/pull/258) | **Cite, do not edit / undraft.** Demote waits until Bonsai stays advertised. |
 | dasha-lobby [#260](https://github.com/Uuriko/dasha-lobby/pull/260) | **Quill owns** `dasha-compute.html` + embed. No live HTML here. |
 | Instinct wrangler | **Red.** Live `/compute` is still Typeform. No tip HTML. No wrangler. |
@@ -259,4 +261,6 @@ Artifacts-lite · listing Needle as chat · calling Second a Genie ·
 *End. Companion picker spec: `docs/ASK-MODEL-CMDK-SPEC-2026-09-17.md`.
 Companion T033 gate: `research/ask/T033-cmdk-ready-to-implement.md`.
 Companion demote draft: dasha-lobby #258 (do not edit / undraft).
-Companion canaries: dasha-lobby #270 T030 · #269 T050.*
+Companion canaries: dasha-lobby #270 T030 · #269 T050.
+Companion T074 Ask vs Provide boundary:
+`research/ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md`.*
