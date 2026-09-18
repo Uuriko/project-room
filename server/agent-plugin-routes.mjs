@@ -340,8 +340,27 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       secret: data.secret ?? null,
     });
     // A server-generated signing secret is shown exactly once here; a
-    // caller-supplied one is never echoed back.
-    return json(res, 201, secretShownOnce ? { ...subscription, secret: secretShownOnce } : subscription);
+    // caller-supplied one is never echoed back. RC-2026-09-18-039: the
+    // response names the secret's job — store it now, verify HMAC on
+    // inbound deliveries, and check the journal for failures.
+    const subscribeNext = (subscriptionId, hasSecret) => {
+      const steps = [
+        Object.freeze({ action: "verify-deliveries", description:
+          "Verify inbound deliveries with HMAC-SHA256 over the payload using this subscription's signing secret." }),
+        Object.freeze({ action: "check-journal", method: "GET",
+          path: `/api/agent-webhooks/${encodeURIComponent(subscriptionId)}/deliveries`,
+          description: "Read the per-subscription delivery journal: delivery states (pending/delivered/failed), attempts, and errors." }),
+      ];
+      if (hasSecret) {
+        steps.unshift(Object.freeze({ action: "store-secret",
+          description: "Store this signing secret NOW — it is shown exactly once and never returned again. Losing it means recreating the subscription." }));
+      }
+      return Object.freeze(steps);
+    };
+    const responseBody = secretShownOnce
+      ? { ...subscription, secret: secretShownOnce, next: subscribeNext(subscription.subscriptionId, true) }
+      : { ...subscription, next: subscribeNext(subscription.subscriptionId, false) };
+    return json(res, 201, responseBody);
   });
 
   const unsubscribeWebhook = translate(async (req, res, { remoteAddress, subscriptionId }) => {

@@ -385,6 +385,10 @@ test("subscribe/list/unsubscribe roundtrip; server secret shown once", async t =
   assert.equal(sub.agentId, identity.identityId);
   assert.deepEqual(sub.events, ["message.posted", "work.completed"]);
   assert.ok(typeof sub.secret === "string" && sub.secret.length >= 16, "server-generated signing secret shown once");
+  // RC-2026-09-18-039: the 201 names the secret's job and the debugging path.
+  assert.deepEqual(sub.next.map(n => n.action), ["store-secret", "verify-deliveries", "check-journal"]);
+  assert.ok(sub.next[0].description.includes("exactly once"));
+  assert.ok(sub.next[2].path.includes(`/api/agent-webhooks/${sub.subscriptionId}/deliveries`));
   assert.equal(sub.deliveries, 0);
 
   // A caller-supplied secret is never echoed back.
@@ -392,6 +396,9 @@ test("subscribe/list/unsubscribe roundtrip; server secret shown once", async t =
   const supplied = await (await post(origin, "/api/agent-webhooks",
     { url: "https://hooks.example.test/other", events: ["*"], secret: ownSecret }, identity.secret)).json();
   assert.ok(!("secret" in supplied), "caller-supplied secret is not echoed");
+  // RC-2026-09-18-039: with a caller-supplied secret there is nothing to store,
+  // so next[] skips store-secret.
+  assert.deepEqual(supplied.next.map(n => n.action), ["verify-deliveries", "check-journal"]);
 
   const listed = await (await get(origin, "/api/agent-webhooks", identity.secret)).json();
   assert.equal(listed.subscriptions.length, 2);
