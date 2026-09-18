@@ -417,7 +417,7 @@ test("journal rows filed without an import receipt get shadow null", t => {
 });
 
 test("a re-import shows the latest shadow decision, not the first", t => {
-  const { f, account, token, binding, conn, sourceId } = shadowFixture(t);
+  const { f, token, binding, conn, sourceId } = shadowFixture(t);
   const review1 = f.store.inbox.quarantineReview(token, binding, {});
   assert.equal(review1.items[0].shadow.wouldHold, true);
   // Re-import the same source as a reply: the shadow decision on the new
@@ -439,8 +439,7 @@ test("a re-import shows the latest shadow decision, not the first", t => {
 });
 
 test("GET /api/inbox/quarantine exposes the shadow context over HTTP", async t => {
-  const { f, account, token, binding } = shadowFixture(t);
-  void f; void account;
+  const { f, token, binding } = shadowFixture(t);
   const server = createRoomServer({ store: f.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
