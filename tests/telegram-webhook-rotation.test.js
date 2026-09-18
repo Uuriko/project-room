@@ -149,7 +149,7 @@ test("connection.webhook.rotate validates its inputs", t => {
   assert.throws(() => rotate({ secretHash: newHash, previousSecretHash: oldHash, rotationExpiresAt: Date.now() - 1000 }), { code: "invalid_email_import" }, "window in the past");
   assert.throws(() => rotate({ secretHash: newHash, previousSecretHash: oldHash, rotationExpiresAt: Date.now() + 8 * 24 * 3600_000 }), { code: "invalid_email_import" }, "window beyond the max");
   assert.throws(() => f.apply({ action: "connection.webhook.rotate", requestId: randomUUID(), connectionId: "no-such-connection",
-    expectedRevision: 1, secretHash: newHash, previousSecretHash: oldHash, rotationExpiresAt: Date.now() + 3600_000 }), { code: "channel_connection_not_found" });
+    expectedRevision: 0, secretHash: newHash, previousSecretHash: oldHash, rotationExpiresAt: Date.now() + 3600_000 }), { code: "channel_connection_not_found" });
   assert.throws(() => f.apply({ action: "connection.webhook.complete", requestId: randomUUID(), connectionId: f.telegram.connection.id, expectedRevision: 1 }),
     { code: "webhook_rotation_not_pending" }, "completing with nothing pending");
 });
