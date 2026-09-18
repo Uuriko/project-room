@@ -89,6 +89,8 @@ Ask ladder Advanced grouping + network honesty line (T071+T072, research; Advanc
 Ask vs Provide surface boundary (T074, research; Ask never hosts Provide / Host / Marketplace / capacity dash / providers table; cite #268/#270/#255 tip canaries; T073 lobby canary spinning):
 [ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md](../research/ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md).
 Ask quiet-shell follow-ons (T044–T046, distinct from Artifacts-lite / regen / Bonsai RAM): [research/ask/](../research/ask/).
+Ask Advanced ladder UX brief (T075, research; Speed/Mid/Quality picker placement; never dump a model essay on the empty canvas; cross-link #518):
+[ASK-ADVANCED-LADDER-UX-BRIEF-2026-09-18.md](../research/ASK-ADVANCED-LADDER-UX-BRIEF-2026-09-18.md).
 
 ## The dated archive
 
