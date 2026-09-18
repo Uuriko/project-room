@@ -324,3 +324,17 @@ test("agent inbox: scoped key needs inbox:read; humans are refused", async t => 
     403, "human member");
   assert.equal(human.error?.code, "agent_inbox_agent_only");
 });
+
+test("agent inbox: cold room with no prior collab writes returns 200", async t => {
+  // RC-2026-09-18-013: the first per-room collab access lazily replays the
+  // journal in a WRITE transaction; agentInbox must not 500 when that replay
+  // has never run (no collab writes yet in this room/process).
+  const { origin, store, keys } = await startServer(t);
+  const agent = linkAgent(store, keys.owner, "dogfood inbox cold", "inboxcold");
+  const inbox = await must(await get(origin, "/api/rooms/commons/agent-inbox", agent.secret),
+    200, "cold-room inbox");
+  assert.equal(inbox.agentId, "inboxcold");
+  assert.deepEqual(inbox.directMessages, []);
+  assert.deepEqual(inbox.assignments, []);
+  assert.deepEqual(inbox.mentions, []);
+});
