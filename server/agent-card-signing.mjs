@@ -88,6 +88,13 @@ const canonicalize = value => {
   return value;
 };
 
+// Normalize the optional card fields exactly the way the public directory
+// document does (server/agent-directory.mjs cardDoc): url defaults to null,
+// skills defaults to []. Without this, a card signed with those fields
+// omitted verifies against the submitted shape but fails offline verification
+// against the normalized public document readers actually see.
+const normalizeCardBody = card => ({ ...card, url: card.url ?? null, skills: card.skills ?? [] });
+
 // The exact bytes a card signature covers. agentId is bound into the
 // payload; only CARD_BODY_FIELDS of the card are covered.
 export function canonicalCardBytes({ agentId, card }) {
@@ -98,8 +105,9 @@ export function canonicalCardBytes({ agentId, card }) {
     fail("invalid_signing_input", "card must be an object");
   }
   const body = { agentId };
+  const normalized = normalizeCardBody(card);
   for (const field of CARD_BODY_FIELDS) {
-    if (card[field] !== undefined) body[field] = card[field];
+    if (normalized[field] !== undefined) body[field] = normalized[field];
   }
   return Buffer.from(JSON.stringify(canonicalize(body)), "utf8");
 }
@@ -114,8 +122,9 @@ export function rotationBytes({ agentId, card, newPublicKey }) {
     fail("invalid_signing_input", "newPublicKey must be a valid Ed25519 public key");
   }
   const cardBody = {};
+  const normalized = card !== null && typeof card === "object" ? normalizeCardBody(card) : {};
   for (const field of CARD_BODY_FIELDS) {
-    if (card !== null && typeof card === "object" && card[field] !== undefined) cardBody[field] = card[field];
+    if (normalized[field] !== undefined) cardBody[field] = normalized[field];
   }
   const payload = {
     type: "agent-card-key-rotation",

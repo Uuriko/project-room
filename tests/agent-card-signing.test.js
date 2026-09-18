@@ -242,3 +242,38 @@ test("legacy card (no pinned key) pins the new key on its next publish", () => {
     agentId: "legacy-agent", card: CARD, publicKey: doc.publicKey, signature: doc.signature,
   }));
 });
+
+// ---- canonicalization regression: omitted optional fields ----
+
+test("card signed with url/skills omitted verifies against the normalized public document", () => {
+  const dir = createAgentDirectory({});
+  const kp = generateKeyPair();
+  // Publisher omits the optional fields entirely.
+  const sparse = { name: "Sparse Agent", description: "Omits optional fields.", capabilities: ["chat"], version: "1.0.0" };
+  const doc = signedPublish(dir, { agentId: "sparse-agent", card: sparse, keyPair: kp });
+  // The public document normalizes url -> null and skills -> [].
+  assert.equal(doc.url, null);
+  assert.deepEqual(doc.skills, []);
+  // Offline verification against the public document shape must hold.
+  assert.ok(verifyCardSignature({
+    agentId: "sparse-agent", card: doc, publicKey: doc.publicKey, signature: doc.signature,
+  }), "signature must verify against the normalized public document");
+  // And the exact submitted shape still verifies too.
+  assert.ok(verifyCardSignature({
+    agentId: "sparse-agent", card: sparse, publicKey: doc.publicKey, signature: doc.signature,
+  }));
+});
+
+test("rotation statement normalizes omitted url/skills the same way", () => {
+  const oldKp = generateKeyPair(); const newKp = generateKeyPair();
+  const sparse = { name: "Sparse Agent", description: "Omits optional fields.", capabilities: ["chat"], version: "1.0.0" };
+  const rotationSignature = signKeyRotation({
+    agentId: "sparse-agent", card: sparse, newPublicKey: newKp.publicKey, oldPrivateKey: oldKp.privateKey,
+  });
+  // A verifier holding the normalized public-document card must accept it.
+  const normalized = { ...sparse, url: null, skills: [] };
+  assert.ok(verifyKeyRotation({
+    agentId: "sparse-agent", card: normalized, newPublicKey: newKp.publicKey,
+    oldPublicKey: oldKp.publicKey, rotationSignature,
+  }));
+});
