@@ -22,6 +22,19 @@ const importAuthority = Symbol("private email importer");
 const replyAuthority = Symbol("private fixture reply driver");
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
+// Stitch store errors carry stable machine codes; translate the expected
+// owner/API failures to HTTP statuses here so they never surface as 500s.
+// Auth/session behavior is untouched: this only runs after this.auth().
+const stitchResult = fn => {
+  try { return fn(); }
+  catch (error) {
+    if (error?.code === "stitch_not_enabled") fail(409, error.code, "Cross-channel stitching is not enabled for this room.");
+    if (error?.code === "stitch_suggestion_not_found") fail(404, error.code, "That stitch suggestion was not found.");
+    if (error?.code === "stitch_suggestion_resolved") fail(409, error.code, "That stitch suggestion is already resolved.");
+    if (error?.code === "stitch_invalid_input") fail(422, error.code, "That stitch request is not valid.");
+    throw error;
+  }
+};
 const canonical = value => Array.isArray(value) ? "[" + value.map(canonical).join(",") + "]" : value && typeof value === "object"
   ? "{" + Object.keys(value).sort().map(k => JSON.stringify(k) + ":" + canonical(value[k])).join(",") + "}" : JSON.stringify(value);
 const digest = value => createHash("sha256").update(canonical(value)).digest("hex");
@@ -259,21 +272,22 @@ export class Inbox {
   stitchConfirm(token, binding, { suggestionId } = {}) {
     return this.store.transaction(() => {
       const auth = this.auth(token, binding);
-      const result = this.stitcher.confirm(auth.account.id, { suggestionId, confirmedBy: auth.account.id });
+      const result = stitchResult(() => this.stitcher.confirm(auth.account.id, { suggestionId, confirmedBy: auth.account.id }));
       return { contractVersion: 1, viewer: viewer(auth), ...result };
     });
   }
   stitchDismiss(token, binding, { suggestionId } = {}) {
     return this.store.transaction(() => {
       const auth = this.auth(token, binding);
-      const result = this.stitcher.dismiss(auth.account.id, { suggestionId });
+      const result = stitchResult(() => this.stitcher.dismiss(auth.account.id, { suggestionId }));
       return { contractVersion: 1, viewer: viewer(auth), ...result };
     });
   }
   stitchSplit(token, binding, { stitchKey, sourceId, channel, reason, scope } = {}) {
     return this.store.transaction(() => {
       const auth = this.auth(token, binding);
-      const result = this.stitcher.split(auth.account.id, { stitchKey, sourceId, channel, reason, scope });
+      const result = stitchResult(() => this.stitcher.split(auth.account.id,
+        { stitchKey, sourceId, channel, reason, scope }));
       return { contractVersion: 1, viewer: viewer(auth), ...result };
     });
   }

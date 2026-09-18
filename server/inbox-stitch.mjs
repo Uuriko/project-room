@@ -238,15 +238,17 @@ export function scorePair(a = {}, b = {}) {
   return { score, bucket, components: Object.freeze({ ...components }) };
 }
 
-// Pure stitched-timeline merge. threads: [{ threadId, entries: [{ message:
-// { id, occurredAt }, depth }] }]. resolvers: linkOf(sourceId) -> stitch key
-// or null; channelOf(sourceId) -> channel or null. Returns stitched timelines
-// for stitch keys spanning >= 2 channels: { stitchKey, channels, sources,
-// provisional, entries: [{ sourceId, occurredAt, channel, depth, stitched,
-// sourceThreadId }] }, entries interleaved chronologically, depth 0
-// (cross-channel inReplyTo does not exist). Single-channel groups are
-// skipped, not errors: stitching is cross-channel by definition.
-// Quarantined links never reach this function (the store filters them).
+// Pure stitched-timeline merge. threads: [{ threadId, entries }] where each
+// entry is either the buildThreads shape { message: { id, occurredAt },
+// depth } or the flattened store shape { sourceId, occurredAt }.
+// resolvers: linkOf(sourceId) -> stitch key or null; channelOf(sourceId) ->
+// channel or null. Returns stitched timelines for stitch keys spanning >= 2
+// channels: { stitchKey, channels, sources, provisional, entries:
+// [{ sourceId, occurredAt, channel, depth, stitched, sourceThreadId }] },
+// entries interleaved chronologically, depth 0 (cross-channel inReplyTo does
+// not exist). Single-channel groups are skipped, not errors: stitching is
+// cross-channel by definition. Quarantined links never reach this function
+// (the store filters them).
 export function stitchThreads(threads, { linkOf, channelOf } = {}) {
   check(Array.isArray(threads), "threads must be an array");
   check(typeof linkOf === "function" && typeof channelOf === "function", "linkOf and channelOf resolvers required");
@@ -254,7 +256,7 @@ export function stitchThreads(threads, { linkOf, channelOf } = {}) {
   for (const thread of threads) {
     if (!thread || !Array.isArray(thread.entries)) continue;
     for (const entry of thread.entries) {
-      const sourceId = entry?.message?.id;
+      const sourceId = entry?.message?.id ?? entry?.sourceId;
       if (!sourceId) continue;
       let key = null;
       try { key = linkOf(sourceId); } catch { continue; }
@@ -263,7 +265,7 @@ export function stitchThreads(threads, { linkOf, channelOf } = {}) {
       if (!group) { group = { stitchKey: key, entries: [] }; groups.set(key, group); }
       let channel = null;
       try { channel = channelOf(sourceId); } catch { /* unknown channel */ }
-      group.entries.push({ sourceId, occurredAt: entry.message.occurredAt ?? null, channel,
+      group.entries.push({ sourceId, occurredAt: entry.message?.occurredAt ?? entry.occurredAt ?? null, channel,
         depth: 0, stitched: true, sourceThreadId: thread.threadId ?? null });
     }
   }
