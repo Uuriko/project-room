@@ -7,6 +7,7 @@ import { validId } from "../src/events.js";
 import { SyntheticInboxTransport, FixtureChannelSender, GmailSender, gmailCredentialsFor, sendTelegramDirect } from "./inbox-transport.mjs";
 import { validateDirectSend, recordDirectSend, completeDirectSend, publicDirectSend } from "./inbox-outbox.mjs";
 import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
+import { buildActivationPack } from "./room-activation-pack.mjs"; // Room activation pack (quill lane, RC-2026-09-18-040).
 import { channelSyncLimits, syncTelegramConnection } from "./channel-import.mjs";
 import { telegramConfig, TelegramLiveStatus, telegramLiveView } from "./channel-adapters/telegram-config.mjs";
 import { TelegramTransport } from "./channel-adapters/telegram-transport.mjs";
@@ -1737,7 +1738,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!identityId) reject(422, "invalid_request", "identityId query param is required");
         return json(res, 200, accessRequests.status(pathId(accessStatusMatch[1]), identityId));
       }
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|stream|cursor|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|onboarding-funnel|export|import|charter|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -1875,6 +1876,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "capabilities" && req.method === "GET") {
         const search = url.searchParams.get("search");
         return json(res, 200, store.capabilities(selected.token, roomId, { search, expectedSessionBinding: fence }));
+      }
+      // ROOM ACTIVATION PACK — quill lane: one machine-readable fetch giving
+      // an agent everything it needs to start working (roster, open work with
+      // claim state, pins, participation rules, coordination norms, event
+      // cursor). Rides the standard room credential funnel above; unknown
+      // rooms answer 404 room_not_found from the store.
+      if (route === "activation-pack" && req.method === "GET") {
+        return json(res, 200, buildActivationPack(store, roomId));
       }
       if (route === "onboarding-funnel" && req.method === "GET") {
         return json(res, 200, store.onboardingFunnel(selected.token, roomId, fence));
