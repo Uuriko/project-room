@@ -512,52 +512,55 @@ export class Inbox {
         return fallback();
       }
     }
-    threads(token, binding, { sourceId = null, limit = null, includeChannels = false } = {}) {
+    threadPipeline(auth, { sourceId = null, include = false } = {}) {
+      // A scoped lookup names an existing source in this account (404 when
+      // unknown, 422 when malformed); the thread returned is the full
+      // conversation containing it, built from the same visible set as the
+      // unscoped view. When the source is not visible in this view (a
+      // channel source without a reading view, or a malformed version),
+      // the scope matches nothing and the result is empty.
+      if (sourceId) this.source(auth.account.id, sourceId);
+      const rows = this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? ORDER BY updated_at DESC,id LIMIT 5000").all(auth.account.id);
+      const infos = [];
+      for (const row of rows) {
+        try {
+          const d = this.version(auth.account.id, row.id, row.revision);
+          if (d.adapter !== "synthetic" && !include) continue;
+          infos.push({ row, adapter: d.adapter, envelope: d.envelope, channel: d.envelope?.channel ?? null });
+        } catch { /* malformed version: skip, never break the thread view */ }
+      }
+      const replyIndex = new Map();
+      const keys = infos.map(info => this.threadKeyOf(info, replyIndex));
+      for (const [info, key] of infos.map((info, i) => [info, keys[i]])) {
+        if (key.internetId && key.connectionId) replyIndex.set(`email:${key.connectionId}:${key.internetId}`, key.id);
+        if (key.channelId && info.channel) replyIndex.set(info.channel + ":" + key.channelId, key.id);
+      }
+      // Re-resolve replies now that the index is complete (targets may sort after the reply).
+      // Quarantine review splits: a split source is forced into its own
+      // singleton thread at read time. The stored provider thread and
+      // reply keys are untouched — only the grouping key changes, so the
+      // rest of the conversation keeps its native thread.
+      const splitIds = this.store.quarantineSplits.splitSourceIds(auth.account.id);
+      const messages = infos.map((info, i) => {
+        const key = this.threadKeyOf(info, replyIndex);
+        if (splitIds.has(info.row.id)) return { id: key.id, occurredAt: key.occurredAt,
+          threadId: `quarantine-split:${info.row.id}`, inReplyTo: null };
+        return { id: key.id, occurredAt: key.occurredAt, threadId: key.threadId, inReplyTo: key.inReplyTo };
+      });
+      const built = buildThreads(messages);
+      const scoped = sourceId
+        ? built.filter(thread => thread.entries.some(entry => entry.message.id === sourceId))
+        : built;
+      return { rows, infos, scoped, infosById: new Map(infos.map(info => [info.row.id, info])) };
+    }
+        threads(token, binding, { sourceId = null, limit = null, includeChannels = false } = {}) {
       return this.store.readTransaction(() => {
         const auth = this.auth(token, binding), take = threadLimitOf(limit);
         const include = includeChannels === true;
-        // A scoped lookup names an existing source in this account (404 when
-        // unknown, 422 when malformed); the thread returned is the full
-        // conversation containing it, built from the same visible set as the
-        // unscoped view. When the source is not visible in this view (a
-        // channel source without a reading view, or a malformed version),
-        // the scope matches nothing and the result is empty.
-        if (sourceId) this.source(auth.account.id, sourceId);
-        const rows = this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? ORDER BY updated_at DESC,id LIMIT 5000").all(auth.account.id);
-        const infos = [];
-        for (const row of rows) {
-          try {
-            const d = this.version(auth.account.id, row.id, row.revision);
-            if (d.adapter !== "synthetic" && !include) continue;
-            infos.push({ row, adapter: d.adapter, envelope: d.envelope, channel: d.envelope?.channel ?? null });
-          } catch { /* malformed version: skip, never break the thread view */ }
-        }
-        const replyIndex = new Map();
-        const keys = infos.map(info => this.threadKeyOf(info, replyIndex));
-        for (const [info, key] of infos.map((info, i) => [info, keys[i]])) {
-          if (key.internetId && key.connectionId) replyIndex.set(`email:${key.connectionId}:${key.internetId}`, key.id);
-          if (key.channelId && info.channel) replyIndex.set(info.channel + ":" + key.channelId, key.id);
-        }
-        // Re-resolve replies now that the index is complete (targets may sort after the reply).
-        // Quarantine review splits: a split source is forced into its own
-        // singleton thread at read time. The stored provider thread and
-        // reply keys are untouched — only the grouping key changes, so the
-        // rest of the conversation keeps its native thread.
-        const splitIds = this.store.quarantineSplits.splitSourceIds(auth.account.id);
-        const messages = infos.map((info, i) => {
-          const key = this.threadKeyOf(info, replyIndex);
-          if (splitIds.has(info.row.id)) return { id: key.id, occurredAt: key.occurredAt,
-            threadId: `quarantine-split:${info.row.id}`, inReplyTo: null };
-          return { id: key.id, occurredAt: key.occurredAt, threadId: key.threadId, inReplyTo: key.inReplyTo };
-        });
-        const built = buildThreads(messages);
-        const scoped = sourceId
-          ? built.filter(thread => thread.entries.some(entry => entry.message.id === sourceId))
-          : built;
+        const { rows, infos, scoped, infosById } = this.threadPipeline(auth, { sourceId, include });
         const ctx = { connections: new Map(), include, readAt: this.readMarkers(auth.account.id),
           sentIds: include ? this.sentProviderIds(auth.account.id) : new Set() };
         const byId = new Map(rows.map(row => [row.id, row]));
-        const infosById = new Map(infos.map(info => [info.row.id, info]));
         const threads = scoped.slice(0, take).map(thread => ({
           threadId: thread.threadId, messageCount: thread.messageCount, depth: thread.depth,
           firstAt: thread.firstAt, lastAt: thread.lastAt,

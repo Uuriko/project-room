@@ -1,4 +1,4 @@
-# Morning digest + per-channel SLA clocks (tasks 21, 24)
+# Morning digest + per-channel SLA clocks (tasks 21, 24, 26)
 
 ## What this is
 
@@ -54,9 +54,11 @@ The defaults are the task-25 *example values*, not a decided policy —
 John sets the responsiveness bar. `slaTargets` is a frozen constant; wiring
 owner-configured targets into the store is a later slice.
 
-**Direction** is derived from stored envelopes in `Inbox.slaAssessment`:
+**Direction** is derived from stored envelopes in `Inbox.slaClockInput`:
 owner-sent is outbound; messages addressing the owner (`inboxNeedsYou`)
 are inbound; everything else is skipped. Pure view, never a stored flag.
+`Inbox.slaAssessment` (the thread list's inline field) and the sweep's thread
+scan share it, so both clock the same messages.
 
 ## Wiring (all additive)
 
@@ -64,8 +66,21 @@ are inbound; everything else is skipped. Pure view, never a stored flag.
   in the thread list (task 24). `null` when the thread carries nothing to clock.
 - `GET /api/inbox/digest` → `Inbox.digest()` → `buildMorningDigest` (task 21).
   Channel sources need the reading view, like the thread list.
+- The SLA sweep's hooks are live (task 26): `Inbox.slaThreadScan` enumerates
+  the genuinely live threads from the inbox's own thread store — the same
+  pipeline as the thread view (same rows, same visibility, same
+  message→direction mapping), projected to the clocks' assess shape. An
+  empty store scans to zero threads; it never invents them.
+- `createInboxThreadReader` / `createSlaBreachDeliver` in
+  `server/sla-sweep-hooks.mjs` wire the sweep's injected authorities:
+  `readThreads` from the owner's session-bound thread scan, `deliver` into
+  the durable in-app `sla_breach_alerts` journal (`server/sla-breach-journal.mjs`,
+  `store.slaBreachAlerts`), recording each delivered breach's decision,
+  reason, and prefs snapshot — the urgent path's terminal sink. Urgent
+  breaches still bypass quiet hours; an explicit muted-all still mutes.
+  In-app first: delivery channel and push are task 22's call.
 - `scripts/runtime-package.mjs` and `tests/runtime-package.test.js` register
-  the two new server modules.
+  the new server modules.
 
 ## Open taps (John's call)
 

@@ -9,6 +9,7 @@ import { RoomStore } from "../server/store.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { backupRoom } from "../server/backup.mjs";
 import { flagMessage } from "../server/inbox-spam.mjs";
+import { createNotifyPrefs } from "../server/notify-prefs.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { createRecoveryFixture } from "../scripts/recovery-fixture.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
@@ -89,14 +90,23 @@ test("online capture preserves all 54 tables, identity boundaries and exact retr
     .run(stitchAccount, stitchKey, `v1:${"b".repeat(64)}`, f.now());
   f.store.db.prepare(`INSERT INTO stitch_receipts(receipt_id,account_id,action,stitch_key,payload_json,created_at)
     VALUES('recovery-receipt',?,'link',?, '{}',?)`).run(stitchAccount, stitchKey, f.now());
-  // Seed one held quarantine record so the capture covers spam_quarantine.
   const recoveryHold = f.store.spamQuarantine.quarantine({ messageId: "recovery-quarantined", channel: "telegram",
     flag: flagMessage({ body: "Urgent! Log in here to confirm your identity and claim your free airdrop. Act now!", urls: ["https://evil-claim.xyz/verify"] }) });
   // Seed one thread split so the capture covers quarantine_thread_splits.
   f.store.quarantineSplits.split({ accountId: f.owner.session.account.id, quarantineId: recoveryHold.id,
     sourceId: "recovery-source", priorThread: "recovery-thread", reviewer: f.owner.session.account.id, reason: "recovery fixture" });
+  // Seed one delivered SLA-breach alert so the capture covers sla_breach_alerts.
+  f.store.slaBreachAlerts.notify({ accountId: f.emailProfile.accountId,
+    record: { kind: "sla_breach", urgent: true, threadId: "recovery-thread", channel: "email",
+      elapsedMs: 25 * 3600 * 1000, targetMs: 24 * 3600 * 1000,
+      awaitingSince: new Date(f.now() - 25 * 3600 * 1000).toISOString(),
+      deadlineAt: new Date(f.now() - 3600 * 1000).toISOString(),
+      producedAt: new Date(f.now()).toISOString(),
+      summary: "SLA breached on email: thread recovery-thread waiting 25h (target 24h)" },
+    decision: { decision: "deliver", reason: "urgent SLA breach is always delivered" },
+    prefsSnapshot: createNotifyPrefs().snapshot(f.emailProfile.accountId) });
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 54); // +1: quarantine_thread_splits
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 55); // +1: quarantine_thread_splits
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);

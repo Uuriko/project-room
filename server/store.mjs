@@ -23,6 +23,7 @@ import { Attention, attentionSchema } from "./attention.mjs";
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
 import { SpamQuarantineJournal, spamQuarantineSchema } from "./spam-quarantine-journal.mjs";
 import { QuarantineThreadSplits, quarantineThreadSplitSchema } from "./quarantine-thread-splits.mjs";
+import { SlaBreachAlertJournal, slaBreachAlertSchema } from "./sla-breach-journal.mjs";
 import { InboxHandoffJournal, inboxHandoffSchema } from "./inbox-handoff.mjs";
 import { accessRequestSchema } from "./access-requests.mjs";
 import { agentRoomSchema } from "./agent-rooms.mjs";
@@ -345,7 +346,8 @@ export class RoomStore {
     this.connections = this.email; // Every channel connection (email, Telegram) shares the importer.
     this.channelUpdates = new ChannelUpdateJournal(this); // B20: durable webhook update journal.
     this.spamQuarantine = new SpamQuarantineJournal(this); // Durable spam-guard quarantine journal (PR #554 queue, now restart-safe).
-    this.quarantineSplits = new QuarantineThreadSplits(this); // Thread-split records for the quarantine review UI (owner "split" action).
+this.quarantineSplits = new QuarantineThreadSplits(this); // Thread-split records for the quarantine review UI (owner "split" action).
+this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-app sink for SLA-breach deliver.
     this.handoffs = new InboxHandoffJournal(this); // Task 23: durable agent handoff journal.
     const version = this.storagePlatform.version(this.db);
     // Supported schema versions are the contiguous range 0..STORE_SCHEMA_VERSION.
@@ -475,10 +477,12 @@ export class RoomStore {
       // IF NOT EXISTS is idempotent, no schema version bump, and the table is
       // intentionally outside the writer fence (see unfencedAdditiveTables).
       this.db.exec(spamQuarantineSchema);
-      // Quarantine thread-split records are purely additive as well:
+// Quarantine thread-split records are purely additive as well:
       // IF NOT EXISTS is idempotent, no schema version bump, and the table is
       // intentionally outside the writer fence (see unfencedAdditiveTables).
       this.db.exec(quarantineThreadSplitSchema);
+// The SLA-breach alert journal (task 26) follows the same additive pattern:
+      this.db.exec(slaBreachAlertSchema);
       // The agent handoff journal (task 23) follows the same additive pattern:
       // IF NOT EXISTS is idempotent, no schema version bump, and the table is
       // intentionally outside the writer fence (see unfencedAdditiveTables).
