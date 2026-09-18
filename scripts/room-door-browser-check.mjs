@@ -50,7 +50,7 @@ for (const touch of [false, true]) {
     await paste.click();
     await page.locator("#join-agent").waitFor();
     const joinText = await page.locator("#join-agent").innerText();
-    assert.match(joinText, /Join from your favorite agent app/);
+    assert.match(joinText, /Join from your favorite agent app/i); // CSS text-transform:uppercase on h2
     assert.match(joinText, /Just paste a prompt/);
     assert.match(joinText, /Cursor · Grok Bot · ChatGPT · Codex · Claude · MCP/);
     assert.match(await page.locator("#join-prompt").inputValue(), /Join Project Room as an agent/);
