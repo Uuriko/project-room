@@ -14,6 +14,12 @@
 // message off its thread; the review state stays held, so a split item
 // still needs Confirm or Dismiss.
 //
+// Each card also shows the shadow enforcement-hold context: whether
+// auto-quarantine would actually have held the message under enforcement
+// (score ≥ threshold, no hard gate blocked) or which gate blocked it. The
+// shadow precision report measures over reviewed would-be holds only, so
+// this line tells the reviewer what their verdict means for the report.
+//
 // Honest scope: a verdict is a visibility change for the main inbox views
 // (server/inbox.mjs quarantinedSourceIds): held and dismissed messages are
 // held out of list/search/threads/read, released messages return. The
@@ -25,6 +31,13 @@ export function installQuarantineReview({ api, ownerKey }) {
   const text = (selector, value) => { $(selector).textContent = value; };
   const owns = () => ownerKey() !== null;
   const channelLabel = { email: "Email", telegram: "Telegram", whatsapp: "WhatsApp" };
+  // Hard-gate names (policy §2.3) in the reviewer's words: the precision
+  // report measures over reviewed would-be holds, so a blocked card's
+  // verdict labels differently (false_negative / true_negative) than a
+  // would-hold card's (true/false positive).
+  const gateLabel = { allowlisted: "owner allowlist", existingThread: "existing-thread reply",
+    verifiedConnector: "verified connector", serviceNotification: "service notification",
+    flagOnlyChannel: "flag-only channel" };
   let epoch = 0, busy = new Set(), armed = new Set();
   const ageOf = at => {
     const ms = Date.now() - at;
@@ -85,6 +98,22 @@ export function installQuarantineReview({ api, ownerKey }) {
       reasons.append(entry);
     }
     card.append(reasons);
+    // Enforcement-hold context: would auto-quarantine actually have held
+    // this message, or did a hard gate block it? The shadow precision
+    // report counts only reviewed would-be holds, so this line tells the
+    // reviewer what their verdict means for the report.
+    const shadowLine = document.createElement("p"); shadowLine.className = "form-hint";
+    const shadow = item.shadow ?? null;
+    if (shadow === null) {
+      shadowLine.textContent = "No shadow decision recorded for this import — whether enforcement would hold it is unknown.";
+    } else if (shadow.wouldHold) {
+      shadowLine.textContent = `Auto-quarantine would hold this message (policy ${shadow.policyVersion ?? "unknown"}, threshold ${shadow.threshold ?? 60}).`;
+    } else if (shadow.gateBlock) {
+      shadowLine.textContent = `Auto-quarantine would not hold — blocked by the ${gateLabel[shadow.gateBlock] ?? shadow.gateBlock} gate.`;
+    } else {
+      shadowLine.textContent = "Auto-quarantine would not hold (shadow score below the hold threshold).";
+    }
+    card.append(shadowLine);
     const meta = document.createElement("p"); meta.className = "form-hint";
     const metaParts = [`Held ${new Date(item.quarantinedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`];
     if (item.split) metaParts.push(`Split off its thread ${ageOf(item.split.splitAt)} by ${item.split.reviewer}${item.split.reason ? ` — ${item.split.reason}` : ""}`);
