@@ -1,0 +1,12 @@
+{
+  "kind": "scorer.verdict",
+  "scorer": "orphan-claim",
+  "subjectKind": "ledger.compact",
+  "subjectFixture": "ledger-compact.orphan-fail.json",
+  "label": "orphan_claim",
+  "score": 0.0,
+  "passingScore": 1.0,
+  "reason": "ledger.compact asserts a scored tool ledger without parentReceiptId. Same rule as delegation.spawn without parent.",
+  "citedReceiptIds": [],
+  "completedAt": "2026-09-18T00:00:00.000Z"
+}

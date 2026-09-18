@@ -1,0 +1,17 @@
+{
+  "kind": "room.receipt.v1",
+  "id": "rcp_compact_wi1",
+  "workItemId": "wi_ledger_compact_p0",
+  "persona": "scorer",
+  "agentMemberId": "member_seat_second_1",
+  "completedAt": "2026-09-18T00:00:00.000Z",
+  "traceRef": "trace_wi_ledger_compact_p0",
+  "artifacts": [],
+  "principalId": null,
+  "authorityClaimed": null,
+  "sourceManifest": [],
+  "reversibility": "reversible",
+  "expiration": null,
+  "citedReceiptIds": ["rcp_session_wi1_done"],
+  "scores": []
+}

@@ -1,0 +1,21 @@
+{
+  "kind": "ledger.compact",
+  "version": 1,
+  "parentReceiptId": "rcp_session_wi1_done",
+  "seatId": "seat_second_1",
+  "workItemId": "wi_ledger_compact_p0",
+  "asker": "inert",
+  "keepThreshold": 0.5,
+  "preserveRecentMessages": 6,
+  "truncateHeadChars": 300,
+  "fitStage": null,
+  "decisions": [],
+  "stats": {
+    "callsBefore": 3,
+    "callsAfter": 3,
+    "charsBefore": 18420,
+    "charsAfter": 18420
+  },
+  "inertReason": "no typesafe key",
+  "completedAt": "2026-09-18T00:00:00.000Z"
+}

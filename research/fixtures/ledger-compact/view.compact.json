@@ -1,0 +1,45 @@
+{
+  "kind": "ledger.view.compact",
+  "version": 1,
+  "parentReceiptId": "rcp_session_wi1_done",
+  "compactReceiptId": "rcp_compact_wi1",
+  "workItemId": "wi_ledger_compact_p0",
+  "seatId": "seat_second_1",
+  "pinned": {
+    "firstEnvelopeId": "env_mission_first",
+    "preserveRecentMessages": 6,
+    "recentEnvelopeIds": [
+      "env_recent_1",
+      "env_recent_2",
+      "env_recent_3",
+      "env_recent_4",
+      "env_recent_5",
+      "env_recent_6"
+    ]
+  },
+  "citedReceiptIds": ["rcp_session_wi1_done", "rcp_spawn_review"],
+  "tools": [
+    {
+      "toolUseId": "toolu_read_1",
+      "tool": "Read",
+      "receiptId": "rcp_tool_read_1",
+      "action": "keep",
+      "call": "verbatim",
+      "result": "verbatim",
+      "chars": 1480
+    },
+    {
+      "toolUseId": "toolu_bash_1",
+      "tool": "Bash",
+      "receiptId": "rcp_tool_bash_1",
+      "action": "truncate",
+      "call": "verbatim",
+      "result": "head",
+      "resultHeadChars": 300,
+      "resultNote": "ok, 8420 chars (truncated)",
+      "chars": 416
+    }
+  ],
+  "droppedFromView": ["toolu_screenshot_1"],
+  "delegationSpawnId": "rcp_spawn_review"
+}
