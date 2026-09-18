@@ -37,6 +37,28 @@ Key configuration surfaces:
 - `docs/ROUTE-AUTH-TABLE.md` — which routes require which credentials.
 - `docs/INVITE-ONLY-CHECKLIST.md` — invite-only boundary verification.
 
+### OAuth sign-in (Google / GitHub)
+
+OAuth sign-in is code-complete but stays disabled until an operator registers
+the OAuth apps and sets the Worker secrets. With no secrets configured, the
+start routes answer honestly: API clients get
+`503 { status: "unavailable", reason: "google_not_configured" }` (GitHub
+likewise); browser navigations get a readable "isn't configured" page instead.
+
+- **Google** — register an OAuth client (Google Cloud Console → APIs &
+  Services → Credentials) with the authorized redirect URI
+  `<room-origin>/api/auth/google/callback`, then set the Worker secrets
+  `ROOM_GOOGLE_CLIENT_ID` and `ROOM_GOOGLE_CLIENT_SECRET`.
+- **GitHub** — register an OAuth app (GitHub Settings → Developer settings)
+  with the authorization callback URL
+  `<room-origin>/api/auth/github/callback`, then set the Worker secrets
+  `GITHUB_OAUTH_CLIENT_ID` and `GITHUB_OAUTH_CLIENT_SECRET`.
+- Secrets are set on the deployment (e.g. `wrangler secret put` for the
+  Cloudflare Worker) — never in the repo, chat, or issue comments. One GitHub
+  OAuth app carries a single callback URL, so staging and production need
+  separate apps; a Google OAuth client allows multiple authorized redirect
+  URIs on one client.
+
 ## Health checks
 
 - `GET /api/health` — liveness (bare `/health` is 404 by contract;
