@@ -147,7 +147,7 @@ test("uncommitted candidate packages cold in an isolated synthetic commit, inclu
   const directory = mkdtempSync(join(tmpdir(), "room-candidate-package-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const candidate = candidateRuntimeFixture(repository, directory), destination = join(directory, "runtime");
-  const receipt = createRuntimePackage({ ...candidate, destination }); assert.equal(receipt.files, 200); // +2 SLA hook files +2 quarantine review files +1 shadow instrumentation +6 sms/messenger channel files +1 quarantine-review-coverage +7 Lane D agent plug-in modules +5 Lane C collab pure modules +2 Lane C collab store/routes (RC-2026-09-18-011) +1 SLA dashboard module +1 Ed25519 card signing (RC-2026-09-18-014) +1 CASE handoff contract (RC-2026-09-18-015) +1 csv-export (send-journal audit export) +1 bootstrap-agent-room
+  const receipt = createRuntimePackage({ ...candidate, destination }); assert.equal(receipt.files, 203); // +2 SLA hook files +2 quarantine review files +1 shadow instrumentation +6 sms/messenger channel files +1 quarantine-review-coverage +7 Lane D agent plug-in modules +5 Lane C collab pure modules +2 Lane C collab store/routes (RC-2026-09-18-011) +1 SLA dashboard module +1 Ed25519 card signing (RC-2026-09-18-014) +1 CASE handoff contract (RC-2026-09-18-015) +1 csv-export (send-journal audit export) +1 bootstrap-agent-room +1 room-deep-link +1 agent-invite-ui (PR #626, landed unbumped) +1 room-norms (RC-2026-09-18-043)
   const program = `
     import { RoomStore } from ${JSON.stringify(pathToFileURL(join(destination, "server/store.mjs")).href)};
     import { SyntheticInboxTransport } from ${JSON.stringify(pathToFileURL(join(destination, "server/inbox-transport.mjs")).href)};
