@@ -628,6 +628,77 @@ export class Inbox {
           channel, messages, now: Date.now(), targets: slaTargets });
       } catch { return null; } // clock skew (now < latest inbound): omit rather than lie
     }
+    slaClockInput(infosById, thread, sentIds) {
+      const addressOf = value => (value?.address ?? "").toLowerCase();
+      const directionOf = info => {
+        try {
+          if (info.adapter === "email") {
+            const envelope = readEmailEnvelope(info.envelope);
+            const own = new Set([envelope.connection.identity, ...(envelope.connection.aliases ?? [])].map(addressOf));
+            const from = addressOf(envelope.message.from);
+            if (own.has(from)) return "outbound";
+            return envelope.message.to.some(a => own.has(addressOf(a))) ? "inbound" : "skip";
+          }
+          if (info.adapter !== "synthetic") {
+            const envelope = readChannelEnvelope(info.envelope);
+            const identity = envelope.connection?.identity, from = envelope.message?.from;
+            if (from && identity && String(from.id) === String(identity.id)) return "outbound";
+            return inboxNeedsYou({ adapter: info.adapter, envelope: info.envelope }, sentIds) ? "inbound" : "skip";
+          }
+        } catch { /* malformed envelope: skip, never break the thread view */ }
+        return "skip";
+      };
+      const channelCounts = new Map(), messages = [];
+      for (const entry of thread.entries) {
+        const info = infosById.get(entry.message.id);
+        if (!info) continue;
+        const channel = info.adapter === "email" ? "email" : info.channel;
+        if (channel) channelCounts.set(channel, (channelCounts.get(channel) ?? 0) + 1);
+        const direction = directionOf(info);
+        if (direction === "skip") continue;
+        messages.push({ id: entry.message.id, occurredAt: entry.message.occurredAt, direction });
+      }
+      if (!messages.length || !channelCounts.size) return null;
+      const channel = [...channelCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+      return { threadId: thread.threadId ?? "thread:" + messages[0].id, channel, messages };
+    }
+    // Per-channel SLA assessment for one built thread: the clock input run
+    // through assessThreadSla. Null when the thread carries nothing to clock.
+    slaAssessment(infosById, thread, sentIds) {
+      const input = this.slaClockInput(infosById, thread, sentIds);
+      if (!input) return null;
+      try {
+        return assessThreadSla({ ...input, now: Date.now(), targets: slaTargets });
+      } catch { return null; } // clock skew (now < latest inbound): omit rather than lie
+    }
+    // SLA sweep thread scan (task 26): the assess-shaped thread list the
+    // SlaSweeper's readThreads hook enumerates. Rides threadPipeline, so the
+    // sweep clocks exactly the threads the thread view shows — same store,
+    // same visibility, same message->direction mapping. Owner-session bound
+    // like the thread view; an empty store honestly scans to zero threads,
+    // never invented ones. includeChannels defaults true: the sweep is
+    // omnichannel, and channel rows still need the negotiated reading view.
+    // The bound is the sweep producer's 10000-thread contract, not the UI
+    // thread list's page cap — the sweep must see every open thread.
+    slaThreadScan(token, binding, { includeChannels = true, limit = null } = {}) {
+      return this.store.readTransaction(() => {
+        const auth = this.auth(token, binding);
+        const take = limit === null || limit === undefined ? 10000
+          : (Number.isInteger(limit) && limit >= 1 && limit <= 10000 ? limit
+            : fail(422, "invalid_limit", "limit must be an integer 1..10000"));
+        const include = includeChannels === true;
+        const { scoped, infosById } = this.threadPipeline(auth, { include });
+        const sentIds = include ? this.sentProviderIds(auth.account.id) : new Set();
+        const threads = [];
+        for (const thread of scoped.slice(0, take)) {
+          const input = this.slaClockInput(infosById, thread, sentIds);
+          if (input) threads.push(Object.freeze({ threadId: input.threadId, channel: input.channel,
+            messages: Object.freeze(input.messages.map(message => Object.freeze({ ...message }))) }));
+        }
+        return Object.freeze({ contractVersion: 1, viewer: viewer(auth),
+          threads: Object.freeze(threads), total: scoped.length });
+      });
+    }
     // Morning digest (task 21): the overnight arrivals across channels as a
     // daily brief, built from the thread view and the pure digest builder.
     // In-app delivery first: format, delivery channel, and daily time are
