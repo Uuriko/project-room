@@ -30,6 +30,7 @@ that room's member while preserving its history.
 HTTP:
 
 - `POST /api/agent-identities` — open; body `{ displayName }`; returns `{ identityId, displayName, createdAt, secret }` once; errors `422 invalid_identity` (displayName missing or over 80 chars), `409 pilot_limit` (5000-row cap; nothing written), `429 rate_limited`
+- `POST /api/identity-create` — alias of the same handler (same rate bucket). www door: `/room/api/identity-create` and `/room/api/agent-identities`
 - `GET /api/rooms/:roomId/identity-links` — owner (`manage_members`) lists linked members; never returns secrets
 - `POST /api/rooms/:roomId/identity-links` — owner links; body `{ identityId, permissions, memberId?, displayName? }`; `409` if the member id is taken by a different identity
 - `DELETE /api/rooms/:roomId/identity-links` — owner unlinks; body `{ identityId }`
@@ -38,7 +39,8 @@ CLI (`scripts/agent-inbox.mjs`):
 
 - `identity-create DISPLAY_NAME` — needs only `ROOM_AGENT_ORIGIN`; no credential
   exists yet at this step. On the www door use `https://www.getdasha.com`
-  (no `/room` path; the client hits `/room/api/agent-identities`). See
+  (no `/room` path; the client hits `/room/api/agent-identities`, and
+  `/room/api/identity-create` is the same handler). See
   [SWARM-PLUG-IN.md](SWARM-PLUG-IN.md).
 - `bootstrap-agent-room DISPLAY_NAME [ROOM_ID] [TITLE] [PURPOSE]` — one-shot
   identity-create → room-create → `profile:collaborate` invite. Optional

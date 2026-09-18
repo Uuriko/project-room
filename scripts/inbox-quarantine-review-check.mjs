@@ -114,7 +114,7 @@ test("quarantine review: held items render, Confirm accepts, Dismiss two-tap dis
 test("quarantine review: coverage dashboard renders totals, per-signal rows, and the gap", { timeout: 60000 }, async t => {
   const { page, origin, key } = await setup(t);
   await page.goto(origin + "/?account=1");
-  await page.locator("#access-key").fill(key);
+  await fillAccessKey(page, key);
   await page.locator('#auth-form button[type="submit"]').click();
   await page.locator("#inbox-panel").waitFor();
   await page.locator("#inbox-quarantine").waitFor();

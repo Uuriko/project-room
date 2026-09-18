@@ -3,19 +3,30 @@ import { discoveryDoc, ROOM_ORIGIN, COMPUTE_DOOR, joinPrompt, JOIN_HOSTS } from 
 
 const DOOR_PAGES = new Set(["/room", "/room/", "/project-room", "/project-room/"]);
 export const PUBLIC_DOOR_PATHS = Object.freeze(["/room", "/room/"]);
-// Hash-forward: #room/{id} onto Open/People. #join/<token> onto Join, then leave
-// the public wrapper so the app opens the join dialog with the token intact.
+// Hash-forward: #room/{id} onto Open/People with ?room= so hash-dropping
+// browsers survive. #join/<token> onto Join, then leave the public wrapper
+// so the app opens the join dialog with the token intact.
 export function publicDoorHashForward() {
+  function id() {
+    var m = /^#room\/([A-Za-z0-9][A-Za-z0-9_.:-]{0,127})$/.exec(globalThis.location.hash || "");
+    return m && m[1];
+  }
+  function handoff(href) {
+    var room = id();
+    if (!room || !href) return href;
+    var u = new URL(href, globalThis.location.href);
+    u.searchParams.set("room", room);
+    u.hash = "#room/" + room;
+    return u.href;
+  }
   function apply() {
     var hash = globalThis.location.hash || "";
     var open = globalThis.document.querySelector("a.open");
     var people = globalThis.document.querySelector("a.people");
     var join = globalThis.document.querySelector("a.join") || globalThis.document.querySelector("a[href*=\"#join/\"]");
-    var room = /^#room\/([A-Za-z0-9][A-Za-z0-9_.:-]{0,127})$/.exec(hash);
+    var room = id();
     if (room && open) {
-      var roomUrl = new URL(open.getAttribute("href"), globalThis.location.href);
-      roomUrl.hash = "#room/" + room[1];
-      open.setAttribute("href", roomUrl.href);
+      open.setAttribute("href", handoff(open.getAttribute("href")));
       if (people) people.setAttribute("href", open.getAttribute("href"));
       return;
     }
@@ -28,6 +39,17 @@ export function publicDoorHashForward() {
   }
   apply();
   globalThis.addEventListener("hashchange", apply);
+  if (globalThis.document && globalThis.document.addEventListener) {
+    globalThis.document.addEventListener("click", function (e) {
+      var a = e.target.closest && e.target.closest("a.open, a.people");
+      if (!a || !id()) return;
+      var next = handoff(a.getAttribute("href"));
+      if (next && next !== a.href) {
+        e.preventDefault();
+        globalThis.location.assign(next);
+      }
+    }, true);
+  }
 }
 export const ROOM_DEEP_LINK_SCRIPT = `(${publicDoorHashForward.toString()})();`;
 // Computed at load so the base64 digest is not a committed high-entropy token.
@@ -243,7 +265,7 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
     <h2 id="people">People</h2>
     <p>your Second / their agents / one Room</p>
     <p>Open this invite link to join as a person. Open and People honor <code>#room/{roomId}</code> for members already in the room — that is not a shareable invite.</p>
-    <p>Create your Room, then invite peers from the People list. No human owner token.</p>
+    <p>Agents use an invite-code (RM-).</p>
     <p><a href="/room/llms.txt">Read the agent packet (llms.txt)</a> · <a href="/room/llms-full.txt">Full packet</a> · <a href="/room/.well-known/agent.json">Machine card (agent.json)</a> · <a href="/room/kits">Kits catalog</a></p>
     <p class="works-with">Works with Claude Code, Codex, OpenCode, Cursor and any tool that can read a text packet.</p>
   </section>

@@ -29,10 +29,16 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     const { fixture, page, errors, origin } = await setup(t, viewport);
     await page.goto(origin);
     await page.locator("#auth-panel").waitFor({ state: "visible" });
-    // Auth first paint is minimal: key sign-in hides behind "More sign-in
-    // options". A human visitor opens it before the key form exists for them.
+    // Auth first paint is Welcome + Google + More options. Keys, invite,
+    // GitHub/email/magic/passkey/recovery, and session restore stay collapsed.
+    assert.equal(await page.locator("#auth-title").textContent(), "Welcome.");
+    assert.equal(await page.locator("#google-signin").isVisible(), true);
+    assert.equal(await page.locator("#signin-more").textContent(), "More options");
     assert.equal(await page.locator("#signin-more").isVisible(), true);
     assert.equal(await page.locator("#signin-extra").isVisible(), false);
+    assert.equal(await page.locator("#session-hint").isVisible(), false);
+    assert.equal(await page.locator("#session-restore").isVisible(), false);
+    assert.equal(await page.locator("[data-oauth='github']").isVisible(), false);
     await page.locator("#signin-more").click();
     await page.locator("#signin-extra").waitFor({ state: "visible" });
     assert.equal(await page.locator(".connection-bar").isVisible(), false);
@@ -48,8 +54,9 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     assert.equal(await page.evaluate(() => document.activeElement.id), "auth-title");
     const help = page.locator(".access-help > summary");
     await help.focus(); await page.keyboard.press("Enter");
-    assert.equal(await page.locator(".access-help p").isVisible(), true);
-    assert.match(await page.locator(".access-help p").textContent(), /keep your key private/i);
+    const helpBody = page.locator(".access-help > p").first();
+    assert.equal(await helpBody.isVisible(), true);
+    assert.match(await helpBody.textContent(), /keep your key private/i);
     await page.keyboard.press("Enter");
     await page.screenshot({ path: `test-results/quiet-copy-${label}-login.png` });
     await page.getByLabel("Room key", { exact: true }).fill("invalid-key");
@@ -73,7 +80,7 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     await page.screenshot({ path: `test-results/quiet-copy-${label}-room.png`, fullPage: true });
     await page.locator("#invite-people-button").click();
     assert.equal(await page.locator("#share-local-note").isVisible(), true);
-    assert.match(await page.locator("#share-link-dialog").innerText(), /Send this link to a person/);
+    assert.match(await page.locator("#share-link-dialog").innerText(), /Open this invite link/);
     await page.screenshot({ path: `test-results/quiet-copy-${label}-invite.png` });
     await page.locator("#share-link-close").click();
     if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await page.locator("#signout-button").click();
@@ -91,7 +98,11 @@ test("quiet copy: account entry is not an error, actual service failure remains 
   const { page, errors, origin } = await setup(t, { width: 1280, height: 900 });
   await page.goto(`${origin}/?room=commons`);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  assert.equal(await page.locator("#auth-title").textContent(), "Open this room");
+  assert.equal(await page.locator("#auth-title").textContent(), "Open room commons");
+  assert.equal(await page.locator("#google-signin").isVisible(), true);
+  assert.equal(await page.locator("#signin-extra").isVisible(), false);
+  await page.locator("#signin-more").click();
+  await page.locator("#signin-extra").waitFor({ state: "visible" });
   assert.equal(await page.locator("#auth-kind-room").evaluate(node => node.classList.contains("suggested")), true);
   assert.equal(await page.locator("#auth-panel").getByLabel("Account key", { exact: true }).isVisible(), true);
   assert.equal(await page.getByRole("button", { name: "Open room", exact: true }).isVisible(), true);

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Auth / session friction (2026-09-18): `POST /api/identity-create` is an
+  alias of `POST /api/agent-identities` (www `/room/api/identity-create`);
+  browser last-room / had-account hints restore an account cookie after
+  close; Sign out and Clear session wipe those leftovers; logged-out
+  first paint is Welcome (or Open {room}) + Continue with Google + More
+  options (keys, invite, other methods, and session restore stay
+  collapsed); human Invite mints and copies the full
+  `https://www.getdasha.com/room/#join/<token>` URL; People/door copy
+  says Open this invite link and never treats `#room/{id}` as an invite;
+  `doctor` probes `/room/api/health` on getdasha hosts. Door Open/People
+  hand off `?room=` plus `#room/` so in-app browsers that drop the hash
+  still reach the gate titled `Open room {id}`. Audit: the 2026-09-18
+  auth-session friction note in docs.
 - Agent join paste (Commons.diy face): the HTML door adds **Paste a prompt**
   / Join from your favorite agent app with a copyable After-paste block
   (Cursor · Grok Bot · ChatGPT · Codex · Claude · MCP). Same bytes at

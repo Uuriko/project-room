@@ -377,7 +377,7 @@ test("advertised door root serves the HTML door; packets stay at /room/llms.txt"
 test("edge door predicate: getdasha /room only, prefix preserved", () => {
   assert.deepEqual([...EDGE_DOOR_HOSTS], ["getdasha.com", "www.getdasha.com"]);
   for (const host of EDGE_DOOR_HOSTS) {
-    for (const path of ["/room", "/room/", "/room/llms.txt", "/room/join.txt", "/room/llms-full.txt", "/room/.well-known/agent.json", "/room/skill.md", "/room/skill", "/room/agent.json", "/room/health", "/room/kits", "/room/apps", "/room/tools", "/room/api/agent-rooms", "/room/api/agent-identities", "/room/api/agent-invites/redeem"]) {
+    for (const path of ["/room", "/room/", "/room/llms.txt", "/room/join.txt", "/room/llms-full.txt", "/room/.well-known/agent.json", "/room/skill.md", "/room/skill", "/room/agent.json", "/room/health", "/room/kits", "/room/apps", "/room/tools", "/room/api/agent-rooms", "/room/api/agent-identities", "/room/api/identity-create", "/room/api/agent-invites/redeem"]) {
       assert.equal(isEdgeDoorUrl(`https://${host}${path}`), true, `${host}${path}`);
     }
   }

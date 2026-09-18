@@ -180,6 +180,8 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   const scriptHash = createHash("sha256").update(ROOM_DEEP_LINK_SCRIPT).digest("base64");
   assert.match(PUBLIC_DOOR_CSP, new RegExp(`script-src 'sha256-${scriptHash.replace(/[+/=]/g, "\\$&")}'`));
   assert.match(ROOM_DEEP_LINK_SCRIPT, /hashchange/);
+  assert.match(ROOM_DEEP_LINK_SCRIPT, /searchParams\.set\("room"/);
+  assert.match(ROOM_DEEP_LINK_SCRIPT, /click/);
   assert.match(ROOM_DEEP_LINK_SCRIPT, /location\.replace/);
   assert.match(html, /class="ghost join"/);
   assert.match(html, /class="ghost people"/);
@@ -253,8 +255,8 @@ test("www /room #join/ stub does not auto-leave the wrapper", () => {
 
 test("www /room #room/{id} still rewrites Open/People and does not follow Join", () => {
   const result = runDoorHash("#room/commons");
-  assert.equal(result.hrefs["a.open"], `${ROOM_ORIGIN}/#room/commons`);
-  assert.equal(result.hrefs["a.people"], `${ROOM_ORIGIN}/#room/commons`);
+  assert.equal(result.hrefs["a.open"], `${ROOM_ORIGIN}/?room=commons#room/commons`);
+  assert.equal(result.hrefs["a.people"], `${ROOM_ORIGIN}/?room=commons#room/commons`);
   assert.equal(result.hrefs["a.join"], `${ROOM_ORIGIN}/#join/`);
   assert.equal(result.replaced, "");
 });
