@@ -45,7 +45,8 @@ Architecture SoR (steal stack collapsed):
 | [ASK-BONSAI-PROVIDER-OPENAI-ERROR-PATHS-2026-09-18.md](ASK-BONSAI-PROVIDER-OPENAI-ERROR-PATHS-2026-09-18.md) | T067: Mac provider OpenAI backend error paths for ternary-bonsai-2-27b (bad URL, model not ready, timeout, enable_thinking opt-in, kit obsolete Stop). Docs only; no Mac paste / no Potter keys |
 | [ASK-PROVIDE-BATTERY-PREFER-AC-2026-09-18.md](ASK-PROVIDE-BATTERY-PREFER-AC-2026-09-18.md) | T068+T069: pause-on-battery Community Provide (soft) + Prefer AC whisper (no lecture). Links T060/T067. Docs only |
 | [ASK-PRISMML-BONSAI-ID-MAP-2026-09-18.md](ASK-PRISMML-BONSAI-ID-MAP-2026-09-18.md) | T064: public `ternary-bonsai-2-27b` ↔ PrismML PQ2_0 / PTQ1_0 / MLX 2-bit. Docs only; missing on main before this note |
-| [ask/](ask/) | Ask quiet-shell follow-ons (docs only): [T044 export transcript](ask/T044-quiet-export-transcript.md) · [T045 receipt collapse](ask/T045-receipt-collapse.md) · [T046 no mid-stream tok/s](ask/T046-no-midstream-toks.md) |
+| [ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md](ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md) | T071+T072: Speed/Mid/Quality + empty Advanced grouping; network honesty one expandable `N Macs · models` line. Cites #270 T030 pill / #269 T050 Community chip canaries. Docs only; no HTML / no #258 undraft |
+| [ask/](ask/) | Ask quiet-shell follow-ons (docs only): [T044 export transcript](ask/T044-quiet-export-transcript.md) · [T045 receipt collapse](ask/T045-receipt-collapse.md) · [T046 no mid-stream tok/s](ask/T046-no-midstream-toks.md) · T071/T072 ladder + network line (parent note above) |
 | [multiplayer-messaging-20260908/](multiplayer-messaging-20260908/) | Collaboration/messaging plan (markdown + DOCX) |
 | [2026-09-07-project-room-v2/](2026-09-07-project-room-v2/) | Earlier sourced report and comparison screenshots |
 | [2026-09-07-project-room/](2026-09-07-project-room/) | First 7 September report source |

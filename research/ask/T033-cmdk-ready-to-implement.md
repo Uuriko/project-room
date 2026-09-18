@@ -3,7 +3,7 @@
 **Date:** 2026-09-18  
 **Product:** getdasha.com/compute **Ask** (not Room)  
 **Status:** Spec on main · **implement not started** · this is the go/no-go checklist  
-**Plan refs:** T032 spec ([#491](https://github.com/Uuriko/project-room/pull/491) → [`docs/ASK-MODEL-CMDK-SPEC-2026-09-17.md`](../../docs/ASK-MODEL-CMDK-SPEC-2026-09-17.md)) · **T033** (this page) · T071 ladder  
+**Plan refs:** T032 spec ([#491](https://github.com/Uuriko/project-room/pull/491) → [`docs/ASK-MODEL-CMDK-SPEC-2026-09-17.md`](../../docs/ASK-MODEL-CMDK-SPEC-2026-09-17.md)) · **T033** (this page) · T071 ladder ([ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md](../ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md))  
 **Tip (source):** `Uuriko/dasha-lobby` `e6da8311` (includes #248 Bonsai, #255 quiet-shell, #257 SSR Mac, #259 PH retire, #261 Motley humans, #264 Needle-out / bonsai grow)  
 **LIVE (probed 2026-09-18 ~01:32Z):** still Typeform — `#step-model`, “Which model?”, meta `Start. Do. Provide. Pay. Credits.`, no `#ask-model`, no `ternary-bonsai-2-27b`. `/compute/humans` 404 (not #261 308).
 

@@ -170,8 +170,8 @@ From the research note. Do not sneak them into the polish PR.
 | 9 | Follow-up chips after reply (3 max) | Ask P1 |
 | 10 | Branch from edit (quiet fork, no banner) | Ask P1 |
 | 11 | Provide as secondary door (keep off Ask canvas) | Compute P1 |
-| 12 | Network honesty strip `N Macs · models` | Compute P1 |
-| 13 | Speed / Mid / Quality ladder labels | Compute P1 |
+| 12 | Network honesty strip `N Macs · models` | Compute P1 — spec: [ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md](../research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md) (T072) |
+| 13 | Speed / Mid / Quality ladder labels | Compute P1 — spec: [ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md](../research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md) (T071; Advanced empty until #258) |
 | 14–16 | Room tiered transparency / collapsible tools / Needle confidence | Room P2 — [ROOM-NEEDLE-CONFIDENCE-TRIGGERS-V0.md](ROOM-NEEDLE-CONFIDENCE-TRIGGERS-V0.md) |
 | T044 | Quiet export transcript JSON/MD (thread chrome; not empty-canvas) | Ask follow-on — [research/ask/T044-quiet-export-transcript.md](../research/ask/T044-quiet-export-transcript.md) |
 | T045 | Honesty receipt folds after complete; hover expand | Ask follow-on — [research/ask/T045-receipt-collapse.md](../research/ask/T045-receipt-collapse.md) |
