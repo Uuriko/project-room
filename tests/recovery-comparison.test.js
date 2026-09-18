@@ -31,9 +31,9 @@ const compare = (older, reference) => {
   return result;
 };
 
-test('equal independently captured data is not permission to reopen; all 47 tables are compared', async t => {
+test('equal independently captured data is not permission to reopen; all 54 tables are compared', async t => {
   const f = await fixture(t), reference = await f.capture(), report = compare(f.older, reference);
-  assert.equal(report.status, 'no_stored_differences'); assert.equal(report.tables.length, 47);
+  assert.equal(report.status, 'no_stored_differences'); assert.equal(report.tables.length, 54); // +1 vs 53: quarantine_thread_splits (was 47, stale)
   assert.equal(report.history.equalRooms, 2); assert.equal(report.history.olderHistoryIsPrefix, true);
   assert.equal(report.accessDifferences, false);
   assert.ok(report.tables.every(row => row.added + row.removed + row.changed === 0));
