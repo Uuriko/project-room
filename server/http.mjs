@@ -39,7 +39,7 @@ const bindingPattern = /^[a-f0-9]{64}$/;
 const assets = new Map([
   ["/", ["index.html", "text/html"]], ["/index.html", ["index.html", "text/html"]],
   ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js", "agent-connections.js", "return-brief.js", "work-selectors.js", "work-status.js", "work-packet.js", "portable-work.js", "reminders.js", "reminder-time.js", "room-charter.js", "room-instructions.js", "reply-requests.js", "work-help.js", "help-offers.js", "work-item-session.js", "work-loops.js", "work-recipes.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
-  ...["inbox-client.js", "inbox-ui.js", "inbox-send-ui.js", "room-roster.js", "account-settings-ui.js", "auth-signin-ui.js", "invite-context.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
+  ...["inbox-client.js", "inbox-ui.js", "inbox-quarantine-ui.js", "inbox-send-ui.js", "room-roster.js", "account-settings-ui.js", "auth-signin-ui.js", "invite-context.js"].map(name => [`/src/${name}`, [`src/${name}`, "text/javascript"]]),
   ["/src/styles.css", ["src/styles.css", "text/css"]]
 ]);
 const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -1085,6 +1085,34 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             reject(422, "invalid_stitch_split", "Choose the stitched identity to split.");
           return json(res, 200, store.inbox.stitchSplit(token, binding,
             { stitchKey: data.stitchKey, sourceId: data.sourceId, channel: data.channel, reason: data.reason, scope: data.scope }));
+        }
+        // Held-message quarantine review (owner review surface): the four
+        // routes ride the existing account-session auth, and the three
+        // mutations reuse account session + CSRF + the same inbox rate
+        // limit as every other inbox write.
+        if (url.pathname === "/api/inbox/quarantine" && req.method === "GET")
+          return json(res, 200, store.inbox.quarantineReview(token, binding,
+            { status: url.searchParams.get("status") ?? undefined, limit: url.searchParams.get("limit") }));
+        if (url.pathname === "/api/inbox/quarantine/release" && req.method === "POST") {
+          protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
+          const data = await body(req);
+          if (!data || !(exact(data, ["quarantineId"]) || exact(data, ["quarantineId", "note"])) || typeof data.quarantineId !== "string" || (data.note !== undefined && data.note !== null && typeof data.note !== "string"))
+            reject(422, "invalid_quarantine_release", "Choose the held message to confirm.");
+          return json(res, 200, store.inbox.quarantineRelease(token, binding, { quarantineId: data.quarantineId, note: data.note }));
+        }
+        if (url.pathname === "/api/inbox/quarantine/dismiss" && req.method === "POST") {
+          protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
+          const data = await body(req);
+          if (!data || !(exact(data, ["quarantineId"]) || exact(data, ["quarantineId", "note"])) || typeof data.quarantineId !== "string" || (data.note !== undefined && data.note !== null && typeof data.note !== "string"))
+            reject(422, "invalid_quarantine_dismiss", "Choose the held message to dismiss.");
+          return json(res, 200, store.inbox.quarantineDismiss(token, binding, { quarantineId: data.quarantineId, note: data.note }));
+        }
+        if (url.pathname === "/api/inbox/quarantine/split" && req.method === "POST") {
+          protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
+          const data = await body(req);
+          if (!data || !(exact(data, ["quarantineId"]) || exact(data, ["quarantineId", "note"])) || typeof data.quarantineId !== "string" || (data.note !== undefined && data.note !== null && typeof data.note !== "string"))
+            reject(422, "invalid_quarantine_split", "Choose the held message to split.");
+          return json(res, 200, store.inbox.quarantineSplit(token, binding, { quarantineId: data.quarantineId, note: data.note }));
         }
         // Morning digest (task 21): the overnight arrivals across channels as
         // an in-app daily brief. Channel sources need the reading view, like

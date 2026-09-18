@@ -22,6 +22,7 @@ import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.m
 import { Attention, attentionSchema } from "./attention.mjs";
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
 import { SpamQuarantineJournal, spamQuarantineSchema } from "./spam-quarantine-journal.mjs";
+import { QuarantineThreadSplits, quarantineThreadSplitSchema } from "./quarantine-thread-splits.mjs";
 import { SlaBreachAlertJournal, slaBreachAlertSchema } from "./sla-breach-journal.mjs";
 import { InboxHandoffJournal, inboxHandoffSchema } from "./inbox-handoff.mjs";
 import { accessRequestSchema } from "./access-requests.mjs";
@@ -345,7 +346,8 @@ export class RoomStore {
     this.connections = this.email; // Every channel connection (email, Telegram) shares the importer.
     this.channelUpdates = new ChannelUpdateJournal(this); // B20: durable webhook update journal.
     this.spamQuarantine = new SpamQuarantineJournal(this); // Durable spam-guard quarantine journal (PR #554 queue, now restart-safe).
-    this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-app sink for SLA-breach deliver.
+this.quarantineSplits = new QuarantineThreadSplits(this); // Thread-split records for the quarantine review UI (owner "split" action).
+this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-app sink for SLA-breach deliver.
     this.handoffs = new InboxHandoffJournal(this); // Task 23: durable agent handoff journal.
     const version = this.storagePlatform.version(this.db);
     // Supported schema versions are the contiguous range 0..STORE_SCHEMA_VERSION.
@@ -384,6 +386,7 @@ export class RoomStore {
         // migrates, so verify it only when present.
         this.channelUpdates.verifySchema({ allowAbsent: true });
         this.handoffs.verifySchema({ allowAbsent: true }); // Task 23: purely additive, like the channel journal.
+        this.quarantineSplits.verifySchema({ allowAbsent: true }); // Quarantine thread splits: additive, read-only never migrates.
         verifyRoomLifecycle(this);
         this.moderation.verifySchema({ allowAbsent: true }); // E4 message reports: additive at v27 as well.
         return;
@@ -474,9 +477,11 @@ export class RoomStore {
       // IF NOT EXISTS is idempotent, no schema version bump, and the table is
       // intentionally outside the writer fence (see unfencedAdditiveTables).
       this.db.exec(spamQuarantineSchema);
-      // The SLA-breach alert journal (task 26) follows the same additive pattern:
+// Quarantine thread-split records are purely additive as well:
       // IF NOT EXISTS is idempotent, no schema version bump, and the table is
       // intentionally outside the writer fence (see unfencedAdditiveTables).
+      this.db.exec(quarantineThreadSplitSchema);
+// The SLA-breach alert journal (task 26) follows the same additive pattern:
       this.db.exec(slaBreachAlertSchema);
       // The agent handoff journal (task 23) follows the same additive pattern:
       // IF NOT EXISTS is idempotent, no schema version bump, and the table is
@@ -528,6 +533,8 @@ export class RoomStore {
       verifyAttachmentSchema(this.db);
       this.channelUpdates.verifySchema();
       this.channelUpdates.verify();
+      this.quarantineSplits.verifySchema();
+      this.quarantineSplits.verify();
       verifyRoomLifecycle(this);
     }); } catch (error) { this.db.close(); throw error; }
   }

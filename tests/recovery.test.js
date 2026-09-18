@@ -90,9 +90,11 @@ test("online capture preserves all 54 tables, identity boundaries and exact retr
     .run(stitchAccount, stitchKey, `v1:${"b".repeat(64)}`, f.now());
   f.store.db.prepare(`INSERT INTO stitch_receipts(receipt_id,account_id,action,stitch_key,payload_json,created_at)
     VALUES('recovery-receipt',?,'link',?, '{}',?)`).run(stitchAccount, stitchKey, f.now());
-  // Seed one held quarantine record so the capture covers spam_quarantine.
-  f.store.spamQuarantine.quarantine({ messageId: "recovery-quarantined", channel: "telegram",
+  const recoveryHold = f.store.spamQuarantine.quarantine({ messageId: "recovery-quarantined", channel: "telegram",
     flag: flagMessage({ body: "Urgent! Log in here to confirm your identity and claim your free airdrop. Act now!", urls: ["https://evil-claim.xyz/verify"] }) });
+  // Seed one thread split so the capture covers quarantine_thread_splits.
+  f.store.quarantineSplits.split({ accountId: f.owner.session.account.id, quarantineId: recoveryHold.id,
+    sourceId: "recovery-source", priorThread: "recovery-thread", reviewer: f.owner.session.account.id, reason: "recovery fixture" });
   // Seed one delivered SLA-breach alert so the capture covers sla_breach_alerts.
   f.store.slaBreachAlerts.notify({ accountId: f.emailProfile.accountId,
     record: { kind: "sla_breach", urgent: true, threadId: "recovery-thread", channel: "email",
@@ -104,7 +106,7 @@ test("online capture preserves all 54 tables, identity boundaries and exact retr
     decision: { decision: "deliver", reason: "urgent SLA breach is always delivered" },
     prefsSnapshot: createNotifyPrefs().snapshot(f.emailProfile.accountId) });
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 54);
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 55); // +1: quarantine_thread_splits
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);

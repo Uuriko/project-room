@@ -735,6 +735,23 @@ summary { overflow-wrap: anywhere; }
 .inbox-row-meta { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
 .inbox-channel-badge, .inbox-needs-you { font-size: .7rem; letter-spacing: .02em; text-transform: uppercase; padding: .05rem .4rem; border-radius: .4rem; border: 1px solid var(--line); color: var(--muted); }
 .inbox-needs-you { border-color: currentColor; color: var(--text); font-weight: 550; }
+/* Held-message quarantine review. Same card language as the connections
+   cards; the item keeps score, signals, and the three review actions
+   (Confirm / Dismiss / Split) together so the verdict is one tap. */
+.inbox-quarantine { margin: .75rem .75rem 0; font-size: .85rem; }
+.inbox-quarantine-header { display: flex; align-items: center; gap: .5rem; }
+.inbox-quarantine-header h2 { margin: 0; }
+.inbox-quarantine-header select { font: inherit; font-size: .8rem; padding: .2rem .3rem; }
+#inbox-quarantine-count:empty { display: none; }
+#inbox-quarantine-list { display: grid; gap: .6rem; margin-top: .5rem; }
+.inbox-quarantine-item { border: 1px solid var(--line); border-radius: .5rem; padding: .6rem .7rem; display: grid; gap: .4rem; }
+.inbox-quarantine-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem .6rem; }
+.inbox-quarantine-subject { font-weight: 600; }
+.inbox-quarantine-signals { margin: 0; padding: 0; list-style: none; display: grid; gap: .25rem; font-size: .8rem; color: var(--muted); }
+.inbox-quarantine-signals li { display: flex; gap: .4rem; align-items: baseline; }
+.inbox-quarantine-actions { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+.inbox-quarantine-note { width: 100%; box-sizing: border-box; font: inherit; font-size: .85rem; padding: .4rem .5rem; border: 1px solid var(--line); border-radius: .4rem; }
+.inbox-quarantine-warning { font-size: .8rem; color: var(--warn, #a35b00); }
 #inbox-attention-count:empty { display: none; }
 #inbox-attention-count { font-size: .8rem; color: var(--muted); }
 .inbox-add-connection { margin: .75rem .75rem 0; font-size: .85rem; }

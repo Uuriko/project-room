@@ -1,5 +1,6 @@
 import { InboxClient, inboxTextVersion } from "./inbox-client.js";
 import { installInboxSend, installInboxReplyReview } from "./inbox-send-ui.js";
+import { installQuarantineReview } from "./inbox-quarantine-ui.js";
 import { validId } from "./events.js";
 
 export function installInbox({ account, room, getRoom, onShared, onOpenWork, onAccountEnded = () => room.endAccess(), onRooms = () => {}, onNavigate = () => {} }) {
@@ -25,6 +26,9 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     const id = selected, d = drafts.get(id); if (!d || !owns()) return;
     await review(id, d); if (owns() && selected === id) render();
   }, onChannelSend: () => loadConnections() });
+  // Held-message quarantine review (owner review surface): mounted after
+  // ownerKey exists so the section always reads the live owner epoch.
+  const quarantineUI = installQuarantineReview({ api, ownerKey: () => owns() ? owner : null });
   function persistShare(request = null) {
     // Only operation metadata; never private bodies, addresses, CSRF or access keys.
     // Sanitize to a whitelist of known-safe fields: a caller bug that attaches
@@ -444,6 +448,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     show("inbox"); text("#inbox-status", "Loading…");
     const turn = ++epoch;
     loadConnections();
+    quarantineUI.refresh();
     try {
       const result = await api.list(); if (!owns() || turn !== epoch) return;
       rows = result.sources; nextCursor = result.nextCursor ?? null; searchQuery = null;
