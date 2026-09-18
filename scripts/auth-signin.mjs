@@ -5,16 +5,17 @@
 export async function fillAccessKey(page, value) {
   const more = page.locator('#signin-more');
   const key = page.locator('#access-key');
-  // If the key field is already visible there is nothing to expand.
-  if (!(await key.isVisible())) {
-    // Otherwise wait for the first-paint panel, open "More sign-in options",
-    // and wait for the key field to appear — exactly as a human visitor does.
-    // (An immediate isVisible check above avoids racing a panel that has not
-    // rendered yet: checking the toggle too early used to skip the expansion
-    // and then time out filling the hidden field.)
-    await more.waitFor({ state: 'visible' });
-    await more.click();
-    await key.waitFor({ state: 'visible' });
-  }
+  const extra = page.locator('#signin-extra');
+  // The key form lives behind "More sign-in options" on first paint. Wait for
+  // the panel to settle, then open the section only if it is actually
+  // collapsed — never toggle blindly. Right after sign-out the panel can
+  // appear with the section already open, and a stray click would close it
+  // again (that race timed out the guest re-sign-in in
+  // help-invitation-browser-check).
+  await more.waitFor({ state: 'attached' });
+  await extra.waitFor({ state: 'attached' });
+  await more.waitFor({ state: 'visible' });
+  if (await extra.isHidden()) await more.click();
+  await key.waitFor({ state: 'visible' });
   await key.fill(value);
 }
