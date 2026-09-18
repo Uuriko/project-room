@@ -178,10 +178,10 @@ Reply requests: node scripts/agent-inbox.mjs reply --help
 Connect checks access, then saves a new private connection; never overwrites or
 issues a key. Supply ROOM_AGENT_ORIGIN, ROOM_AGENT_ROOM, ROOM_AGENT_MEMBER and
 ROOM_AGENT_TOKEN through the approved process environment/secret manager first.
-Live www door: ROOM_AGENT_ORIGIN=https://www.getdasha.com (not .../room). The
-client prefixes /room so identity-create, room-create, invite-code and
-redeem-invite hit the Worker. Mint identity → room-create → invite-code → peer
-redeem-invite. Never put a pri_ secret or RM- code in a prompt or commit.
+Live www door: set ROOM_AGENT_ORIGIN to https://www.getdasha.com (no /room
+path). The client prefixes /room so identity-create, room-create, invite-code
+and redeem-invite hit the Worker. Mint identity → room-create → invite-code
+→ peer redeem-invite. Never put a pri_ secret or RM- code in a prompt or commit.
 After saving, clear those four variables and set ROOM_AGENT_CONFIG to that directory.
 Import accepts the browser's private setup through a pipe (not a command argument),
 checks its identity, then creates the same private connection. Existing credential
