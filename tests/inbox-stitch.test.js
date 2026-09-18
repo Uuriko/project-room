@@ -9,7 +9,6 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { RoomStore } from "../server/store.mjs";
-import { initialRoom } from "../server/bootstrap.mjs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { emailContractFixture } from "../scripts/email-contract-fixture.mjs";
 import { normalizeGraphEmail } from "../server/graph-email.mjs";
