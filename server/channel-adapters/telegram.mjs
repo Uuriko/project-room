@@ -189,11 +189,20 @@ export class RecordedTelegramBot {
   }
   sent() { return [...this.#sent.values()].map(row => structuredClone(row.envelope)); }
 }
+// A reader is anything that can page update batches like the Bot API does:
+// getUpdates({ offset }) -> { ok: true, result: [...] }, a page-size `limit`,
+// and the send-side submit/lookup pair the bound adapter exposes. The recorded
+// bot and the live getUpdates poller both satisfy it.
+export const isTelegramReader = value => value !== null && typeof value === "object"
+  && typeof value.getUpdates === "function" && Number.isSafeInteger(value.limit) && value.limit > 0
+  && typeof value.submit === "function" && typeof value.lookup === "function";
 // Bound adapter: the uniform interface every channel driver presents to the importer.
+// `close` is present only when the reader has a lifecycle (the live poller does);
+// fixture readers never need it.
 export function bind({ reader, connection }) {
-  requireContract(reader instanceof RecordedTelegramBot, "telegram_fixture_reader_required");
+  requireContract(isTelegramReader(reader), "telegram_reader_required");
   const profile = telegramConnection(connection), latest = new Map();
-  return {
+  const adapter = {
     channel, provider,
     normalize: raw => normalizeTelegramUpdate(profile, raw),
     sourceId: messageId => telegramSourceId(profile, messageId),
@@ -208,4 +217,6 @@ export function bind({ reader, connection }) {
     submit: request => reader.submit(request),
     lookup: request => reader.lookup(request)
   };
+  if (typeof reader.close === "function") adapter.close = () => reader.close();
+  return adapter;
 }
