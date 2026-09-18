@@ -150,6 +150,11 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /id="room-guide"/);
   assert.match(html, /Inbox uses <strong>Account key<\/strong>/);
   assert.match(html, /id="people-hint"/);
+  assert.match(html, /id="invite-agents-button"/);
+  assert.match(html, /id="create-room-details"/);
+  assert.match(html, /id="agent-invite-dialog"/);
+  assert.match(html, /bootstrap-agent-room/);
+  assert.match(html, /#room\/\{roomId\}/);
   assert.match(html, /Write to the room/);
   assert.match(html, /id="google-signin"/);
   assert.match(html, /Continue with Google/);

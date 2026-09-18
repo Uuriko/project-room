@@ -19,6 +19,8 @@ import { installInbox } from "./inbox-ui.js";
 import { createAccountSettingsUI } from "./account-settings-ui.js";
 import { createAuthSigninUI } from "./auth-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite } from "./invite-context.js";
+import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash } from "./room-deep-link.js";
+import { installAgentInvites } from "./agent-invite-ui.js";
 
 const $ = selector => document.querySelector(selector);
 $("#skip-link").addEventListener("click", event => {
@@ -30,7 +32,6 @@ $("#skip-link").addEventListener("click", event => {
 });
 const setText = (selector, text) => { const node = $(selector); if (node.textContent !== text) node.textContent = text; };
 const invitationTokenPattern = /^[A-Za-z0-9_-]{43}$/;
-const roomIdPattern = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 function consumeInvitationFragment() {
   if (!location.hash.startsWith("#invite/")) return null;
   const candidate = location.hash.slice("#invite/".length);
@@ -40,8 +41,7 @@ function consumeInvitationFragment() {
     : { valid: false, secret: null };
 }
 function selectedRoomFromLocation() {
-  const values = new URLSearchParams(location.search).getAll("room");
-  return values.length === 1 && roomIdPattern.test(values[0]) ? values[0] : null;
+  return roomFromLocation({ search: location.search, hash: location.hash });
 }
 function accountHomeFromLocation() {
   const values = new URLSearchParams(location.search).getAll("account");
@@ -105,6 +105,7 @@ let portableWorkUI = null;
 let resultCopyUI = null;
 let remindersUI = null;
 let agentConnectionsUI = null;
+let agentInvitesUI = null;
 let instructionsUI = null;
 let inboxUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
@@ -176,6 +177,7 @@ const client = new RoomClient({
     remindersUI?.sync();
     syncNotifications();
     agentConnectionsUI?.sync();
+    agentInvitesUI?.sync();
     updatePeopleHint();
     if (firstSnapshot) showRoomGuide();
     instructionsUI?.sync();
@@ -222,6 +224,7 @@ const client = new RoomClient({
     remindersUI?.reset();
     resetNotifications();
     agentConnectionsUI?.reset();
+    agentInvitesUI?.reset();
     instructionsUI?.reset();
     if (!keepAccount) clearPrivateWorkspace({ preservePending: leavingPage });
     else inboxUI?.detachRoom();
@@ -301,6 +304,7 @@ const briefView = new ReturnBrief(client, {
 });
 remindersUI = installReminders({ client, getState: () => state, onSaved: text => notice(text) });
 agentConnectionsUI = installAgentConnections({ client, getState: () => state });
+agentInvitesUI = installAgentInvites({ client, getState: () => state, getSession: () => session });
 instructionsUI = installRoomInstructions({ client, getState: () => state, onSaved: text => notice(text) });
 portableWorkUI = installPortableWork({ client, getState: () => state, onSaved: messageId => {
   const visible = conversation?.byId.has(messageId);
@@ -677,7 +681,7 @@ function setAuthKind(kind) {
 }
 function updatePeopleHint() {
   const hint = $("#people-hint");
-  if (hint) hint.textContent = "Agent handles stay loud. Done lands as a receipt.";
+  if (hint) hint.textContent = "your Second / their agents / one Room. Agent handles stay loud. Done lands as a receipt. Create your Room (bootstrap-agent-room / POST /room/api/agent-rooms), then invite peers.";
 }
 function dismissRoomGuide() {
   if ($("#room-guide")) $("#room-guide").hidden = true;
@@ -1479,6 +1483,14 @@ function decodeFragment(value) {
 function revealLocationHash() {
   if (!state || !location.hash) return;
   const hash = location.hash;
+  const deepRoom = roomIdFromHash(hash);
+  if (deepRoom) {
+    if (state.room?.id === deepRoom) {
+      $("#people-panel").open = true;
+      focusRecord($("#people-panel > summary"));
+    }
+    return;
+  }
   if (hash === "#pr-view/inbox") { inboxUI?.open(); return; }
   if (hash === "#pr-view/rooms") { inboxUI?.showRooms(); return; }
   const current = /^#pr-record\/(message|work|member|event|room)\/(.+)$/.exec(hash);
@@ -2359,10 +2371,12 @@ function roomActionEntries() {
     { id: "catch-up", label: "Catch me up", words: "updates attention needs me reminders", target: "#return-brief-panel > summary", reveal: "#return-brief-panel" },
     { id: "work", label: "View work", words: "tasks projects", target: "#work-view-work", activate: true },
     { id: "results", label: "View results", words: "completed approved finished artifacts", target: "#work-view-results", activate: true },
-    { id: "people", label: "People & agents", words: "members collaborators team", target: "#people-panel > summary", reveal: "#people-panel" },
+    { id: "people", label: "People & agents", words: "members collaborators team second", target: "#people-panel > summary", reveal: "#people-panel" },
     { id: "new-work", label: "New work", words: "create task request", target: "#new-work-button", activate: true },
     { id: "invite", label: "Invite people", words: "share join link", target: "#invite-people-button", activate: true },
-    { id: "agent", label: "Add agent", words: "ai assistant mcp tools instinct muse grok build grokbot grok bot connect", target: "#connect-agent-button", reveal: "#people-panel", activate: true },
+    { id: "invite-agents", label: "Invite agents", words: "invite code redeem collaborate contribute bootstrap", target: "#invite-agents-button", reveal: "#people-panel", activate: true },
+    { id: "create-room", label: "Create Room", words: "bootstrap-agent-room agent-rooms pri_ own room", target: "#create-room-details > summary", reveal: "#people-panel" },
+    { id: "agent", label: "Add agent", words: "ai assistant mcp tools instinct muse grok build grokbot grok bot connect wake pull desktop takeover", target: "#connect-agent-button", reveal: "#people-panel", activate: true },
     { id: "how-invite", label: "How to invite someone", words: "how guest eight hours link help", always: true },
     { id: "how-agent", label: "How to add an agent", words: "how connect instinct muse grok help", always: true },
     { id: "how-inbox", label: "How to open Inbox", words: "how inbox mail email account", always: true },
