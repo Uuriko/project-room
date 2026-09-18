@@ -34,6 +34,12 @@ export default [
   // Playwright browser checks and manual exercises evaluate callbacks inside
   // the page (`page.evaluate(() => document...)`), and the inbox prototype
   // is itself a browser module, so those files also see browser globals.
+  // Door hash-forward is authored as a Node export then stringified into the
+  // public door HTML, so it legitimately references browser globals.
+  {
+    files: ["deploy/room-entry.mjs"],
+    languageOptions: { ...languageOptions, globals: { ...globals.node, ...globals.browser } },
+  },
   {
     files: ["scripts/*-check.mjs", "scripts/*-exercise.mjs", "scripts/*-journey.mjs", "scripts/inbox-prototype/**/*.mjs"],
     languageOptions: { ...languageOptions, globals: { ...globals.node, ...globals.browser } },

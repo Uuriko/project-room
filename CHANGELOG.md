@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Agent join paste (Commons.diy face): the HTML door adds **Paste a prompt**
+  / Join from your favorite agent app with a copyable After-paste block
+  (Cursor · Grok Bot · ChatGPT · Codex · Claude · MCP). Same bytes at
+  `/join.txt` and `/room/join.txt`. No keys. Hands-off #628 share links.
 - Repo hygiene: README no longer cites a stale schema number or a nonexistent
   root file; the seven dead `test-results/` screenshot links in the 9/7 browser
   checkpoint docs are annotated as local-only; new `docs/README.md` orients
