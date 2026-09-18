@@ -78,6 +78,9 @@ test("quarantine review: held items render, Confirm accepts, Dismiss two-tap dis
   assert.ok(firstCard.includes("Telegram"), "channel renders");
   assert.ok(firstCard.includes("Browser check signal prize_bait"), "signal reason renders");
   assert.ok(firstCard.includes("@spammerbrowser") || firstCard.includes("Spammer"), "sender renders");
+  // The fixture journals holds directly (no import receipts), so the shadow
+  // enforcement-hold context is honest absence, not a verdict.
+  assert.ok(firstCard.includes("No shadow decision recorded"), "shadow absence renders");
 
   // Confirm removes the item from held and shows it in released history.
   await card(page, 0).getByRole("button", { name: "Confirm", exact: true }).click();

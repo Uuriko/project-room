@@ -313,7 +313,7 @@ function clientHarness() {
 const item = id => ({ id, messageId: "m-" + id, channel: "telegram", connectionId: "c1",
   reason: [{ key: "k", weight: 80, detail: "why" }], score: 80, quarantinedAt: 1, status: "held",
   reviewedBy: null, reviewedAt: null, note: null, updatedAt: 1, sender: "Spammer", subject: null, excerpt: "test",
-  source: { id: "src-" + id } });
+  source: { id: "src-" + id }, shadow: null });
 function harnessResponse(path) {
   const viewer = { accountId: "owner", authEpoch: 2, sessionBinding: "b".repeat(64), sessionRevision: 4 };
   if (path.startsWith("/api/inbox/quarantine?")) return { contractVersion: 1, viewer, status: "held",
@@ -352,4 +352,124 @@ test("quarantine client validates release, dismiss and split responses", async (
     status: "held", counts: { held: 1, released: 0, dismissed: 0 }, items: [{ id: "qz-x" }] });
   await assert.rejects(new InboxClient(bad.account).quarantine({}),
     error => error.code === "invalid_inbox_response");
+});
+
+// --- shadow enforcement-hold context ----------------------------------------
+// The review surface joins each journal row to the source.import receipt's
+// shadowQuarantine decision so the reviewer sees whether auto-quarantine
+// would actually have held the message (the precision report measures over
+// reviewed would-be holds only). Rows filed without an import receipt get
+// shadow: null — honest absence, not a verdict.
+
+// A body that trips the scorer on the real import path (score 69 >= 60):
+// credential harvest + urgency + suspicious TLD + bot-spam phrasing.
+const phishingBody = "Security alert: log in below to verify your account immediately — click the link https://evil-xyz.top/login";
+
+function shadowFixture(t, extra = {}) {
+  const f = createAcceptanceFixture();
+  t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const account = f.store.accountForMember("commons", "owner");
+  const key = f.store.issueAccountAccessKey(account.id);
+  const slot = f.store.createAccountSessionSlot();
+  const session = { token: slot.token, ...f.store.loginAccountSession(slot.token, key, 0) };
+  const token = session.token, binding = session.sessionBinding;
+  const conn = { accountId: account.id, id: "tg-shadow-conn", revision: 1, channel: "telegram", provider: "telegram-bot",
+    externalId: "7000000005", identity: { kind: "bot", id: "7000000005", handle: "@shadow_bot", displayName: "Shadow Bot" },
+    capabilities: { read: true, send: false, threads: true, edit: false } };
+  const envelope = normalizeTelegramUpdate(conn, { update_id: 950000,
+    message: { message_id: 500, date: 1788948000, chat: { id: 5000000400, type: "private", first_name: "Spammer" },
+      from: { id: 5000000021, is_bot: false, first_name: "Spammer", username: "spammershadow" },
+      text: phishingBody, ...extra } });
+  const sourceId = telegramSourceId(conn, "5000000400:500");
+  f.store.transaction(() => f.store.inbox.importSource(token, { action: "source.import", requestId: randomUUID(),
+    sourceId, expectedRevision: 0, data: { adapter: "telegram", envelope } }, binding));
+  return { f, account, token, binding, conn, sourceId };
+}
+
+test("import-path holds carry the shadow would-hold decision", t => {
+  const { f, token, binding } = shadowFixture(t);
+  // The import path journals the tripped message itself (score 69 >= 60).
+  const review = f.store.inbox.quarantineReview(token, binding, {});
+  assert.equal(review.items.length, 1);
+  const item = review.items[0];
+  assert.equal(item.score, 69);
+  assert.deepEqual(item.shadow, { policyVersion: "v1", threshold: 60, wouldHold: true, gateBlock: null });
+});
+
+test("a gate-blocked hold shows wouldHold false with the blocking gate", t => {
+  // A reply to an existing thread trips the scorer but the existingThread
+  // gate blocks enforcement: wouldHold false, gateBlock names the gate.
+  const { f, token, binding } = shadowFixture(t, { reply_to_message: { message_id: 499 } });
+  const review = f.store.inbox.quarantineReview(token, binding, {});
+  assert.equal(review.items.length, 1);
+  const item = review.items[0];
+  assert.equal(item.score, 69);
+  assert.deepEqual(item.shadow, { policyVersion: "v1", threshold: 60, wouldHold: false, gateBlock: "existingThread" });
+});
+
+test("journal rows filed without an import receipt get shadow null", t => {
+  const { f, token, binding, hold1 } = quarantineFixture(t);
+  // The fixture journals directly (no accountId/sourceId, no import
+  // receipt): the join has nothing to read, so shadow is honest absence.
+  const review = f.store.inbox.quarantineReview(token, binding, {});
+  const item = review.items.find(i => i.id === hold1.id);
+  assert.equal(item.shadow, null);
+});
+
+test("a re-import shows the latest shadow decision, not the first", t => {
+  const { f, account, token, binding, conn, sourceId } = shadowFixture(t);
+  const review1 = f.store.inbox.quarantineReview(token, binding, {});
+  assert.equal(review1.items[0].shadow.wouldHold, true);
+  // Re-import the same source as a reply: the shadow decision on the new
+  // receipt is gate-blocked; the review card must show the current one.
+  const envelope = normalizeTelegramUpdate(conn, { update_id: 950001,
+    message: { message_id: 500, date: 1788948100, chat: { id: 5000000400, type: "private", first_name: "Spammer" },
+      from: { id: 5000000021, is_bot: false, first_name: "Spammer", username: "spammershadow" },
+      text: phishingBody, reply_to_message: { message_id: 499 } } });
+  f.store.transaction(() => f.store.inbox.importSource(token, { action: "source.import", requestId: randomUUID(),
+    sourceId, expectedRevision: 1, data: { adapter: "telegram", envelope } }, binding));
+  const review2 = f.store.inbox.quarantineReview(token, binding, {});
+  // The re-import trips again, so a second hold is journaled; both rows
+  // join to the same source, so both show the latest (gate-blocked) decision.
+  assert.equal(review2.items.length, 2);
+  for (const row of review2.items) {
+    assert.deepEqual(row.shadow,
+      { policyVersion: "v1", threshold: 60, wouldHold: false, gateBlock: "existingThread" });
+  }
+});
+
+test("GET /api/inbox/quarantine exposes the shadow context over HTTP", async t => {
+  const { f, account, token, binding } = shadowFixture(t);
+  void f; void account;
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const origin = "http://127.0.0.1:" + server.address().port;
+  const creds = { cookie: `account_session=${token}`, binding };
+  const res = await get(origin, "/api/inbox/quarantine", creds);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.items.length, 1);
+  assert.deepEqual(body.items[0].shadow,
+    { policyVersion: "v1", threshold: 60, wouldHold: true, gateBlock: null });
+});
+
+test("quarantine client accepts shadow context and rejects malformed shadow", async () => {
+  const { account } = clientHarness();
+  const client = new InboxClient(account);
+  const good = clientHarness();
+  good.account.request = async () => ({ contractVersion: 1,
+    viewer: { accountId: "owner", authEpoch: 2, sessionBinding: "b".repeat(64), sessionRevision: 4 },
+    status: "held", counts: { held: 1, released: 0, dismissed: 0 },
+    items: [{ ...item("qz-s"), shadow: { policyVersion: "v1", threshold: 60, wouldHold: true, gateBlock: null } }] });
+  const backlog = await new InboxClient(good.account).quarantine({});
+  assert.deepEqual(backlog.items[0].shadow.wouldHold, true);
+  const malformed = clientHarness();
+  malformed.account.request = async () => ({ contractVersion: 1,
+    viewer: { accountId: "owner", authEpoch: 2, sessionBinding: "b".repeat(64), sessionRevision: 4 },
+    status: "held", counts: { held: 1, released: 0, dismissed: 0 },
+    items: [{ ...item("qz-s"), shadow: { wouldHold: "yes" } }] });
+  await assert.rejects(new InboxClient(malformed.account).quarantine({}),
+    error => error.code === "invalid_inbox_response");
+  void client;
 });
