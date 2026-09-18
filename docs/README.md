@@ -59,6 +59,7 @@ this lane is docs/spec only. Pairs
 | [ASK-CONTINUE-AFTER-STOP-SPEC-2026-09-18.md](ASK-CONTINUE-AFTER-STOP-SPEC-2026-09-18.md) | T043 — hover Continue after Stop; append, do not duplicate the partial |
 | [ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md](../research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md) | T082 — Stop / Regen / Copy / Edit keyboard map (Esc / R / C / E); cite Ask v2 #249 + quiet-shell §3.4; picker keys stay T032 |
 | [ASK-ARTIFACTS-LITE-2026-09-18.md](../research/ASK-ARTIFACTS-LITE-2026-09-18.md) | Ask Artifacts-lite P0 — collapse long fences → opt-in side/bottom panel (research; implement later on dasha-lobby) |
+| [ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md](../research/ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md) | T085 — `#ask-thread` GFM subset (fences, lists, bold, inline code); links stay plain; cite T041 tip canary #269 |
 | [examples/scorers/](examples/scorers/) | Default scorer stubs (task-compliance, efficiency, procedure-compliance, people-data-safe, orphan-claim) |
 | [ROOM-KITS-CATALOG.md](ROOM-KITS-CATALOG.md) | Optional later rows only — not live doors |
 
@@ -77,6 +78,8 @@ Ask / Compute / Room anti-noise: [UX-CLEAN-LESS-NOISE-2026-09-17.md](../research
 Ask Artifacts-lite (long fences, P0): [ASK-ARTIFACTS-LITE-2026-09-18.md](../research/ASK-ARTIFACTS-LITE-2026-09-18.md).
 Ask Artifacts-lite implement gate (T081, cite #493/#507; claim blocked until live quiet-shell + Quill off HTML):
 [ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md](../research/ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md).
+Ask markdown render scope (T085, research; cite T041 tip canary #269; fences / lists / bold / inline code ship; links stay plain):
+[ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md](../research/ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md).
 Bonsai 24GB soft limit + vs gemma3-27b ladder (T060+T065, research):
 [ASK-BONSAI-MAC24-AND-GEMMA-LADDER-2026-09-18.md](../research/ASK-BONSAI-MAC24-AND-GEMMA-LADDER-2026-09-18.md).
 Bonsai Mac provider OpenAI error paths (T067, research; thinking off; kit Stop obsolete):

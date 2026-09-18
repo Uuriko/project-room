@@ -53,6 +53,9 @@ runtime.
    [ASK-ARTIFACTS-LITE-2026-09-18.md](ASK-ARTIFACTS-LITE-2026-09-18.md);
    implement gate (T081, cite #493/#507):
    [ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md](ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md);
+   `#ask-thread` GFM subset (T085, cite T041 #269):
+   [ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md](ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md)
+   — fences / lists ship; links stay plain;
    auto-open / HTML preview stay P1.
 8. **History sidebar icon-only** until hover; auto-title chats; search
    later.
