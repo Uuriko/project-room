@@ -150,7 +150,8 @@ pack. Orphan claims fail
 | `citedReceiptIds` | Ids of prior `room.receipt.v1` objects this receipt relied on. Empty is honest first hop. No self-cite. DAG, not a mash. Receipt ids only — not chips, chat mentions, or Compute jobs. |
 
 Full rules: [ROOM-RECEIPT-GRAPH-V0.md](ROOM-RECEIPT-GRAPH-V0.md).
-Scorers never rewrite this field.
+Scorers never rewrite this field. A `delegation.spawn` hop cites
+`parentReceiptId` — [ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md).
 
 ### `cua` (optional)
 

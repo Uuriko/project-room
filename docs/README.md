@@ -41,21 +41,33 @@ this lane is docs/spec only. Pairs
 | [ROOM-COHESIVE-ARCHITECTURE.md](ROOM-COHESIVE-ARCHITECTURE.md) | **SoR** — collapses steal stack into one product (Second · Connect · ledger) |
 | [ROOM-RECEIPT-V1.md](ROOM-RECEIPT-V1.md) | `room.receipt.v1` Done receipt (evidence; chip = face) |
 | [ROOM-RECEIPT-GRAPH-V0.md](ROOM-RECEIPT-GRAPH-V0.md) | `citedReceiptIds[]` DAG; orphan claims fail the scorer |
-| [ROOM-SCORER.md](ROOM-SCORER.md) | Warp-shaped LLM judge; one dimension per scorer |
-| [ROOM-PERSONAS-FACTORY.md](ROOM-PERSONAS-FACTORY.md) | Personas + hraness parallelism |
-| [ROOM-KITS-HARNESS-JEV-ROY.md](ROOM-KITS-HARNESS-JEV-ROY.md) | Skillbox-shaped kits, harness-bridge Connect shape, Jev, Roy ladder |
+| [ROOM-SCORER.md](ROOM-SCORER.md) | Warp-shaped LLM judge; one dimension per scorer; Jev cheap closed-set rung |
+| [ROOM-PERSONAS-FACTORY.md](ROOM-PERSONAS-FACTORY.md) | Personas + hraness parallelism + same-rung spawn + named specialists + meter honesty |
+| [ROOM-KITS-HARNESS-JEV-ROY.md](ROOM-KITS-HARNESS-JEV-ROY.md) | Skillbox-shaped kits, harness-bridge Connect shape, Jev (recommend / scorer / pre-Ask), Roy ladder |
 | [ROOM-TRUST-HANDOFF-V0.md](ROOM-TRUST-HANDOFF-V0.md) | Trust Handoff Protocol v0 (principal, authority, reversibility, expiration) |
 | [ROOM-ATTENTION-PRESENCE-V0.md](ROOM-ATTENTION-PRESENCE-V0.md) | Attention modes (all / mentions / none) + host presence (Alook; not People-rail HTML) |
+| [ROOM-NAUTILO-STEAL.md](ROOM-NAUTILO-STEAL.md) | Nautilo (agentsea) P0–P2 steals: **Second**, Smart Routing, messenger receipts |
+| [ROOM-SECOND-V0.md](ROOM-SECOND-V0.md) | Second product spec v0 — personal loyal seat; never Genie in product copy |
+| [ROOM-PERSONAL-GENIE-SEAT-V0.md](ROOM-PERSONAL-GENIE-SEAT-V0.md) | Redirect — **Second** is canonical |
 | [ROOM-ARTIFACT-MATURITY.md](ROOM-ARTIFACT-MATURITY.md) | Five-rung ladder; Room Done defaults to Live Note / Discussion Paper |
+| [ROOM-PLAN-TREE-V0.md](ROOM-PLAN-TREE-V0.md) | Ledger Plan Tree — Mission Envelope as governed plan tree; accept before tools |
+| [ROOM-DEBATE-MODE-V0.md](ROOM-DEBATE-MODE-V0.md) | Proposer vs challenger (+ optional judge) → action-plan receipt |
+| [ROOM-NEEDLE-CONFIDENCE-TRIGGERS-V0.md](ROOM-NEEDLE-CONFIDENCE-TRIGGERS-V0.md) | Needle-shaped tool honesty — `confidence` + `suppressed_calls`, trigger regex, ladder as leases; not an Ask chat model |
+| [ASK-QUIET-SHELL-V3.md](ASK-QUIET-SHELL-V3.md) | Ask quiet-shell P0 — chrome ≤15%, model in composer, hover actions; tip #246/#249 must deploy first |
 | [examples/scorers/](examples/scorers/) | Default scorer stubs (task-compliance, efficiency, procedure-compliance, people-data-safe, orphan-claim) |
 | [ROOM-KITS-CATALOG.md](ROOM-KITS-CATALOG.md) | Optional later rows only — not live doors |
 
+Jev + Codex same-rung spawn (research): [ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md).
 Master plan: [ROOM-STEALS-FULL-BUILD-2026-09-17.md](../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md).
 Novel synthesis (pre-collapse): [ROOM-NOVEL-SYNTHESIS-2026-09-17.md](../research/ROOM-NOVEL-SYNTHESIS-2026-09-17.md)
 — superseded for “what is Room” decisions by the cohesive architecture SoR.
 Cua desktop contract: [ROOM-CUA-DESKTOP.md](ROOM-CUA-DESKTOP.md) ([#454](https://github.com/Uuriko/project-room/pull/454)).
 Second + Nautilo steal specs land in [#467](https://github.com/Uuriko/project-room/pull/467)
 (`ROOM-SECOND-V0`, `ROOM-NAUTILO-STEAL`) and hang off this spine.
+Planning / thinking cousin pass: [NOVEL-PLANNING-THINKING-BUILDS-2026-09-17.md](../research/NOVEL-PLANNING-THINKING-BUILDS-2026-09-17.md)
+(Ledger Plan Tree + Debate Mode).
+Needle steal (tool/extract, not Ask chat): [ROOM-COMPUTE-NEEDLE-STEAL-2026-09-17.md](../research/ROOM-COMPUTE-NEEDLE-STEAL-2026-09-17.md).
+Ask / Compute / Room anti-noise: [UX-CLEAN-LESS-NOISE-2026-09-17.md](../research/UX-CLEAN-LESS-NOISE-2026-09-17.md).
 
 ## The dated archive
 

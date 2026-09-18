@@ -7,7 +7,9 @@
 
 This file is the dated research copy of the architecture SoR. Prefer
 [docs/ROOM-COHESIVE-ARCHITECTURE.md](../docs/ROOM-COHESIVE-ARCHITECTURE.md)
-when deciding what ships and what does not.
+when deciding what ships and what does not. Same-rung spawn / Jev
+rung / `delegation.spawn` fold:
+[ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md).
 
 This document collapses the steal stack into **one** product. Prefer it over scattered synthesis notes when deciding what ships and what does not.
 

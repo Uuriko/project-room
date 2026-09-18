@@ -72,8 +72,14 @@ The rest of the pack is unchanged: [ROOM-RECEIPT-V1.md](ROOM-RECEIPT-V1.md).
 6. **Scorers append only.** They never rewrite `id`,
    `citedReceiptIds`, artifacts, `cua`, `traceRef`, or Interlateral
    honesty fields ([ROOM-SCORER.md](ROOM-SCORER.md)).
-7. **People-data ban.** Receipt ids only. No faces, PII, private
+7. **Spawn cites parent.** A `delegation.spawn` receipt names
+   `parentReceiptId` (and cites that id). Same-rung specialist
+   children are still a graph hop — not anonymous workers.
+   Research: [ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md).
+8. **People-data ban.** Receipt ids only. No faces, PII, private
    inbox, emails, account ids, or display names in ids or reasons.
+   Specialist nicknames on `delegation.spawn` are display skin on
+   the later People-rail face, not receipt ids.
 
 A Synthesis Memo ([ROOM-ARTIFACT-MATURITY.md](ROOM-ARTIFACT-MATURITY.md)
 rung 3) cites the parallel-thread receipts it merged. Humans approve

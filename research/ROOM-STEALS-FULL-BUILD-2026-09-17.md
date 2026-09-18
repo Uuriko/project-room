@@ -19,7 +19,8 @@ Pairs with:
 - [#457](https://github.com/Uuriko/project-room/pull/457) — Warp Scorers
   + Skillbox + harness-bridge research map
 - [ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md](ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md)
-  — cousin landscape (Oasis, agensis, Agent Room, Alook, HumanLayer)
+  — cousin landscape (Oasis, agensis, Agent Room, Alook, HumanLayer, Nautilo,
+  qm, Dust, Magentic-UI, Greenroom, AgentsMesh)
 - [ROOM-NOVEL-SYNTHESIS-2026-09-17.md](ROOM-NOVEL-SYNTHESIS-2026-09-17.md)
   — Ledger Room fold (six-axis seat + receipt graph; superseded for
   decisions by the cohesive architecture SoR)
@@ -28,6 +29,10 @@ Pairs with:
 - [#466](https://github.com/Uuriko/project-room/pull/466) — receipt graph
 - [#467](https://github.com/Uuriko/project-room/pull/467) — Second +
   Nautilo steal (`ROOM-SECOND-V0`, `ROOM-NAUTILO-STEAL`)
+- [ROOM-NAUTILO-STEAL.md](../docs/ROOM-NAUTILO-STEAL.md) — **Second**
+  + org harness (docs only)
+- [ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md](ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md)
+  — deep architecture + new cousins (docs only)
 
 No deploy.
 
@@ -40,10 +45,13 @@ No deploy.
 | 3 | [Kitze Skillbox](https://github.com/kitze/skillbox) (MIT) | Versioned skills + MCP + Jev router |
 | 4 | [0xSero harness-bridge](https://github.com/0xSero/harness-bridge) | Any harness ↔ any compatible endpoint |
 | 5 | Roy model rank | Ladder astra > glm > dsv; default = fast dsv |
-| 6 | TypeSafe Jev | Typed kit recommend without 30-turn search |
+| 6 | TypeSafe Jev | Typed kit recommend + cheap closed-set scorer / pre-Ask router (`typesafe-ai/jev`; no text generation) — [ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md) |
 | 7 | [hraness factory](https://x.com/hraness/status/2100358405911105590) | N× parallel agents; model-limit honesty |
 | 8 | [Interlateral](https://interlateral.com/) / Stanford FutureLaw report | Trust Handoff, Agent Interaction Receipt, Artifact Maturity Ladder |
 | 9 | Cousin landscape (Oasis, agensis, Agent Room, Alook, HumanLayer, Factory.ai, Dust) | Shared-room cousins; steal membership / authority / artifact patterns — see [ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md](ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md) |
+| 10 | [Nautilo](https://nautilo.ai) / [agentsea/nautilo](https://github.com/agentsea/nautilo) (MIT) | Closest open multi-user + multi-agent Room peer; Nautilo Genie → Room **Second**; Smart Routing; harness-of-harnesses; Secretary; privacy ladder — [ROOM-NAUTILO-STEAL.md](../docs/ROOM-NAUTILO-STEAL.md) · [ROOM-SECOND-V0.md](../docs/ROOM-SECOND-V0.md) · [ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md](ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md) |
+| 11 | Deep-pass cousins (qm, Dust, Magentic-UI, Greenroom, AgentsMesh, Patchwork, KaibanJS, Nomos, ai-room) | Personal/shared scopes, dual permissions, human takeover, wake≠spawn, Autopilot handback — [ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md](ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md) |
+| 12 | Codex ChatGPT Web + TypeSafe Jev ([@miu21590](https://x.com/miu21590/status/2100630512536564085) · [miuuyy/codex-chatgpt-web](https://github.com/miuuyy/codex-chatgpt-web) · [`typesafe-ai/jev`](https://vercel.com/ai-gateway/models/jev)) | Same-rung factory spawn; named specialist seats; Jev cheap scorer/router; `delegation.spawn`; meter honesty (Hosted / Community / Web). **Second** never Genie — [ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md) |
 
 ## Cua files (merged)
 
@@ -129,10 +137,13 @@ Contracts:
 
 ### G. Competitive / cousin landscape (research only)
 
-Oasis, agensis, Agent Room, Alook, HumanLayer, Factory.ai, Dust.
-Steal membership / authority / attention / artifact patterns. Room
-stays the project ledger — not an IDE, marketplace, or canvas chat
-hub. Closest name collision: Agent Room (coding-agent mesh).
+Oasis, agensis, Agent Room, Alook, HumanLayer, Factory.ai, Dust,
+Nautilo (agentsea), qm, Magentic-UI, Greenroom, AgentsMesh,
+Patchwork, KaibanJS, Nomos, ai-room. Steal membership / authority /
+attention / artifact / Second patterns. Room stays the project ledger —
+not an IDE, marketplace, canvas chat hub, Slack-as-SoR, or Nautilo
+Genie org harness. Closest name collision: Agent Room (coding-agent
+mesh). Closest open peer: Nautilo. Room personal seat name: **Second**.
 
 Research:
 [ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md](ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md)
@@ -156,6 +167,41 @@ Six-axis seat (identity · membership · authority · attention ·
 memory · presence) stays on
 [ROOM-ATTENTION-PRESENCE-V0.md](../docs/ROOM-ATTENTION-PRESENCE-V0.md).
 People-rail chips are later Muse.
+
+### I. Nautilo steal (Second + org harness)
+
+Closest open multi-user + multi-agent Room peer. Docs only. Does not
+take Instinct Phase 0 #8 / #9 or Muse UI trees. Room language is
+**Second** (never Genie).
+
+Contracts:
+
+- [ROOM-NAUTILO-STEAL.md](../docs/ROOM-NAUTILO-STEAL.md)
+- [ROOM-SECOND-V0.md](../docs/ROOM-SECOND-V0.md)
+- [ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md](ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md)
+
+Nautilo delta (Ledger Room): Second, messenger receipts from Second,
+human takeover, progressive tools, quiet events, preflights — see
+the landscape subsection
+[Nautilo delta](ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md#nautilo-delta-ledger-room).
+Deep-pass cousins (qm / Dust / Magentic-UI / Greenroom / AgentsMesh)
+are rows only — not live doors.
+
+### J. Codex same-rung spawn + TypeSafe Jev (research)
+
+Same-rung specialist spawn (not always cheaper models); named
+`room` seats (not a second personal agent); Jev as cheap closed-set
+scorer + pre-Ask router; `delegation.spawn` cites parent; meter
+honesty (`hosted` / `community` / `web`). Docs only. Room language
+is **Second** (never Genie). Do not productize Web-quota tricks.
+Do not replace Ask chat with Jev.
+
+Research: [ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md)
+
+Contracts patched: [ROOM-SCORER.md](../docs/ROOM-SCORER.md) ·
+[ROOM-PERSONAS-FACTORY.md](../docs/ROOM-PERSONAS-FACTORY.md) ·
+[ROOM-KITS-HARNESS-JEV-ROY.md](../docs/ROOM-KITS-HARNESS-JEV-ROY.md) ·
+[ROOM-SECOND-V0.md](../docs/ROOM-SECOND-V0.md).
 
 ## Catalog face (not live doors)
 
@@ -214,9 +260,14 @@ shelf.
 | `docs/ROOM-KITS-HARNESS-JEV-ROY.md` | Kits / harness / Jev / Roy |
 | `research/ROOM-HRANESS-STEAL-2026-09-17.md` | hraness factory steal |
 | `research/ROOM-INTERLATERAL-RESEARCH-2026-09-17.md` | Interlateral → Room research (attached source) |
-| `research/ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md` | Cousin landscape (Oasis / agensis / Agent Room / Alook / HumanLayer) |
+| `research/ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md` | Cousin landscape (Oasis / agensis / Agent Room / Alook / HumanLayer / Nautilo / qm / Dust / Magentic-UI / Greenroom / AgentsMesh) |
+| `research/ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md` | Nautilo packages + Conductor / Floor Manager + new cousins + receipt shapes |
 | `research/ROOM-NOVEL-SYNTHESIS-2026-09-17.md` | Ledger Room novel synthesis |
+| `research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md` | Codex same-rung spawn + Jev scorer/router + `delegation.spawn` + meter honesty |
 | `docs/ROOM-RECEIPT-GRAPH-V0.md` | `citedReceiptIds[]` DAG; orphan claims fail |
+| `docs/ROOM-NAUTILO-STEAL.md` | Nautilo P0–P2 steals + Ledger Room delta |
+| `docs/ROOM-SECOND-V0.md` | Second product spec v0 (never Genie in product copy) |
+| `docs/ROOM-PERSONAL-GENIE-SEAT-V0.md` | Redirect — Second is canonical |
 | `docs/ROOM-TRUST-HANDOFF-V0.md` | Trust Handoff Protocol v0 |
 | `docs/ROOM-ARTIFACT-MATURITY.md` | Five-rung artifact ladder |
 | `docs/examples/scorers/*/scorer.md` | Five default scorer stubs (incl. orphan-claim) |

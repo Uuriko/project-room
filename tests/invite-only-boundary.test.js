@@ -49,6 +49,12 @@ const PROBES = {
   "POST /api/session": [{ accessKey: token() }, 401],
   // Provider webhook: per-connection secret header is the credential; 409 until a webhook inbox is wired.
   "POST /api/inbox/webhooks/{}": [{ update_id: 1 }, 409],
+  // Recovery-code redeem: unknown email and wrong code share the 401 shape (slice 6).
+  "POST /api/auth/recovery-codes/redeem": [{ email: "probe@example.com", code: "nope", sessionToken: token(), sessionRevision: 0 }, 401],
+  // Passkey authentication (slice 5): the anonymous ceremony step issues a challenge...
+  "POST /api/auth/passkey/authenticate/options": [{}, 200],
+  // ...and the finish step rejects an unknown challenge id with the same 401 shape as a failed assertion.
+  "POST /api/auth/passkey/authenticate/finish": [{ challengeId: "nope", response: {}, sessionToken: token(), sessionRevision: 0 }, 401],
 };
 
 async function serve(t) {

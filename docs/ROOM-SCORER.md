@@ -24,6 +24,10 @@ receipts that scorers judge:
 [ROOM-CUA-DESKTOP.md](ROOM-CUA-DESKTOP.md)
 ([#454](https://github.com/Uuriko/project-room/pull/454)).
 
+Jev cheap closed-set rung (research):
+[ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md).
+TypeSafe `typesafe-ai/jev` — not Browser Use “Jev Ultrafast”.
+
 ## What
 
 LLM-as-judge agents grade **past** Work Item sessions. One dimension per
@@ -72,7 +76,7 @@ Default stubs live under [examples/scorers/](examples/scorers/).
 | `labels` | Closed set. Each has `value` + numeric `score`. Not a free-text grade. |
 | `passingScore` | Inclusive threshold. `passed` iff `score >= passingScore`. |
 | `samplingRate` | Integer percent of eligible Done receipts to sample (5–25 typical). |
-| `model` | Judge model pin. Prefer Roy `fast-default` ([ROOM-KITS-HARNESS-JEV-ROY.md](ROOM-KITS-HARNESS-JEV-ROY.md)). |
+| `model` | Judge model pin. Prefer Roy `fast-default` for open-ended essays. Closed-set dimensions may pin `jev` when a TypeSafe / Gateway key is present ([ROOM-KITS-HARNESS-JEV-ROY.md](ROOM-KITS-HARNESS-JEV-ROY.md)). Absent key → `fast-default`. |
 | `selfImprovement` | If `true`, recurring fails may open a PR on Room instructions / skills. **Human merge only. Never auto-merge.** |
 
 Body after the frontmatter is the rubric. The judge returns **exactly
@@ -90,6 +94,9 @@ one** label from `labels`.
 
 One dimension per file. Do not collapse these into one mega-judge.
 
+Closed-set labels (`orphan-claim`, `people-data-safe`) may use the
+**Jev rung** below. Open-ended rubrics stay on the LLM judge.
+
 ## Runtime
 
 1. Work Item → Done + `room.receipt.v1` (the **Done receipt**; the
@@ -105,10 +112,36 @@ Do not score every chat turn. Do not stuff this into Compute Start.
 Failure click-through (product face later): open the scorer run beside
 the original Work Item thread. No opaque “72% quality” badge.
 
+## Jev rung (cheap closed-set)
+
+TypeSafe Jev (`typesafe-ai/jev` on Vercel AI Gateway) is a
+**decision** model: shared `state` + typed questions (boolean /
+choice / score) → answers + probabilities. No free-form text. Do not
+replace Ask chat. Do not invent TypeSafe keys in chat.
+
+Use Jev when the scorer’s `labels` are already a closed set and a
+text essay is overkill — especially
+[orphan-claim](examples/scorers/orphan-claim/scorer.md) and
+[people-data-safe](examples/scorers/people-data-safe/scorer.md). Keep
+the LLM judge for open-ended dimensions (efficiency, procedure,
+task-compliance prose).
+
+When the operator key is absent, the Jev path is inert + reason and
+the scorer falls back to Roy `fast-default` — same honesty as a
+missing harness dialect
+([ROOM-KITS-HARNESS-JEV-ROY.md](ROOM-KITS-HARNESS-JEV-ROY.md)).
+
+Calibrate probabilities on labeled Room receipts. Workflow evals
+measure agreement with frontier consensus, not ground truth.
+
+`receipt.scores[].model` records `jev` or `fast-default`. Scorers
+still append only.
+
 ## Cost
 
 Target ≤3–5% of Room agent tokens. Prefer the Roy fast-default model
-for judges. Sampling exists to keep that bound honest.
+for open-ended judges; prefer Jev for closed-set pins so the bound
+stays honest. Sampling exists to keep that bound honest.
 
 ## Stay-outs
 

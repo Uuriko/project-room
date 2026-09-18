@@ -187,6 +187,7 @@ Design comments are Room events on the design artifact — not orphan Notion.
 | --- | --- |
 | `Second.bind` / `Second.unbind` | Personal seat attach / detach |
 | `delegation.messenger` | Messenger round-trip or timeout/deny |
+| `delegation.spawn` | Named specialist `room` seat (same-rung allowed). Cites parent. Never a second Second; never Genie. [ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md) |
 | `disclosure.deny` | Secretary block (user-visible one-liner + reasonCode) |
 | `human.takeover` / `human.release` | Owner grabs / returns surface |
 | `tool.lease` | Progressive activation set changes (P1) |
@@ -211,7 +212,7 @@ Wire shapes: see `research/ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md` §6 ([#4
 | Slack bot presence | Six/seven-axis seats + receipts | Coarse bot badge |
 | Capacity = vanity token meters | Progressive leases + host limits | Token dashboards as success metric |
 | Auto-merge scorer self-improve | Human-merge kit PR only | Silent instruction overwrite |
-| Opaque delegation | `delegation.messenger` + cites | Black-box “the agent handled it” |
+| Opaque delegation | `delegation.messenger` / `delegation.spawn` + cites | Black-box “the agent handled it” |
 | People-data in screenshots | `peopleData: false` required | Fleet/CUA traces with PII |
 | Compute Start blob inside Room | Separate Compute supplier | Room owns run factory |
 | Reimplement Nautilo monorepo | Steal seams only | Bun/Fastify/Logto clone |
@@ -225,7 +226,7 @@ Mapped to existing specs and PRs. Docs/contracts first; Muse owns People-rail / 
 | Phase | Ship | Specs / PRs | Stay-outs |
 | --- | --- | --- | --- |
 | **P0** | Second bind + Smart Routing 0\|1 + receipt kinds for messenger / deny / takeover; Connect modes named as one surface; receipt.v1 + RPI-lite template; CUA kit docs | `ROOM-SECOND-V0` · `ROOM-ATTENTION-PRESENCE-V0` · `ROOM-RECEIPT-V1` · **#467 Second** · **#466 synthesis/Ledger** · **#454 CUA** | Muse UI; people-data; auto-merge; Genie copy |
-| **P1** | Progressive `tool.lease` on Capacity; harness-of-harnesses (Second → CUA/Codex/Claude); Quiet Events (bell ≠ mute approvals); orphan-claim scorer; presence/catchup honesty | `ROOM-SCORER` · `ROOM-HRANESS-STEAL` · `ROOM-KITS-HARNESS-JEV-ROY` · `ROOM-PERSONAS-FACTORY` | Eager tool dump; fake App Store; rename models |
+| **P1** | Progressive `tool.lease` on Capacity; harness-of-harnesses (Second → CUA/Codex/Claude); Quiet Events (bell ≠ mute approvals); orphan-claim scorer; same-rung `delegation.spawn` + named specialists + meter honesty; Jev closed-set scorer / pre-Ask gate (research); presence/catchup honesty | `ROOM-SCORER` · `ROOM-HRANESS-STEAL` · `ROOM-KITS-HARNESS-JEV-ROY` · `ROOM-PERSONAS-FACTORY` · `ROOM-JEV-CODEX-SPAWN-STEAL` | Eager tool dump; fake App Store; rename models; Web-quota as a product feature; Genie copy |
 | **P2** | Stenographer-style event enrichment; Lattice-style protected memory only when crypto story is honest; deeper Desktop relay split; optional first-party creative apps | Nautilo deep cousins P2 list | Film editor as Room P0; E2E theater |
 
 ### PR spine (project-room)
@@ -278,7 +279,7 @@ Already covered in deep cousins / landscape — do not re-rank: Interlateral, Oa
 
 - [ ] One personal Second per human; no Genie in fixtures/copy  
 - [ ] Connect documented as **one** surface with four modes  
-- [ ] Messenger / deny / takeover are typed receipts on the graph  
+- [ ] Messenger / deny / takeover / spawn are typed receipts on the graph  
 - [ ] Synthesis ≠ personal seat; specialists ≠ peer humans  
 - [ ] Capacity = leases + limits, not a second attention product  
 - [ ] P0→P2 maps to #454 / #466 / #467 + existing specs  
@@ -300,6 +301,7 @@ Already covered in deep cousins / landscape — do not re-rank: Interlateral, Oa
 | [ROOM-RECEIPT-V1.md](ROOM-RECEIPT-V1.md) | `room.receipt.v1` |
 | [ROOM-SCORER.md](ROOM-SCORER.md) | Scorers + RPI accountability |
 | [ROOM-PERSONAS-FACTORY.md](ROOM-PERSONAS-FACTORY.md) | Room-seat spawn path |
+| [ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md) | Same-rung spawn · named specialists · Jev scorer/router · `delegation.spawn` · meter honesty |
 | `docs/ROOM-NAUTILO-STEAL.md` | Nautilo steal map ([#467](https://github.com/Uuriko/project-room/pull/467)) |
 | `research/ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md` | Research + JSON shapes ([#467](https://github.com/Uuriko/project-room/pull/467)) |
 | [ROOM-NOVEL-SYNTHESIS-2026-09-17.md](../research/ROOM-NOVEL-SYNTHESIS-2026-09-17.md) | Pre-collapse synthesis (superseded for decisions by this doc) |

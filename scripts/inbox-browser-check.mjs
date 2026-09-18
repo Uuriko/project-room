@@ -903,13 +903,36 @@ test("real inbox: unknown share survives reload as metadata and never posts twic
   let lost = false; const ids = [], before = f.store.room("commons").sequence;
   await p.route("**/api/inbox/commands", async route => {
     ids.push(route.request().postDataJSON().requestId);
-    if (!lost) { lost = true; await route.fetch(); await route.abort(); } else await route.continue();
+    if (!lost) {
+      lost = true;
+      // Simulate a lost acknowledgement: let the server apply the share, then abort
+      // the browser's request. Abort in a finally so a fetch failure can never leave
+      // the route unhandled and hang the share flow.
+      try { await route.fetch(); } finally { await route.abort(); }
+    } else await route.continue();
   });
   await p.locator("#inbox-ask").click(); await p.locator("#inbox-share-paragraphs input").first().check();
   await p.locator("#inbox-share-confirm").click(); await p.getByRole("button", { name: "Confirm share", exact: true }).waitFor();
   assert.equal(f.store.room("commons").sequence, before + 1);
-  const stored = await p.evaluate(() => sessionStorage.getItem("project-room:pending-private-share:v1"));
-  assert.equal(stored.includes("4200"), false); assert.equal(stored.includes("maya@"), false);
+  // Wait for the pending-share metadata from THIS attempt to settle in storage before
+  // asserting on it, so the read cannot race the client's write under CI load.
+  const shareKey = "project-room:pending-private-share:v1";
+  await p.waitForFunction(([key, requestId]) => {
+    try { return JSON.parse(sessionStorage.getItem(key))?.request?.requestId === requestId; }
+    catch { return false; }
+  }, [shareKey, ids[0]], { timeout: 5000 });
+  const storedRaw = await p.evaluate(key => sessionStorage.getItem(key), shareKey);
+  const stored = JSON.parse(storedRaw);
+  // Only retry metadata may survive: assert the exact schema so a future product change
+  // that adds a field to the persisted share fails loudly instead of leaking silently.
+  assert.deepEqual(Object.keys(stored).sort(), ["owner", "request"]);
+  assert.deepEqual(Object.keys(stored.request).sort(),
+    ["action", "audienceVersion", "paragraphs", "requestId", "roomId", "sourceId", "sourceRevision"]);
+  assert.equal(stored.request.requestId, ids[0]);
+  assert.deepEqual(stored.request.paragraphs, [0]);
+  // And no private source text or sender address may appear anywhere in it.
+  assert.equal(storedRaw.includes("4200"), false, `private budget leaked into pending-share storage: ${storedRaw}`);
+  assert.equal(storedRaw.includes("maya@"), false, `sender address leaked into pending-share storage: ${storedRaw}`);
   await p.reload(); await p.locator("#nav-inbox").waitFor(); await f.inbox();
   await p.locator("#inbox-ask").click(); await p.getByRole("button", { name: "Confirm share", exact: true }).waitFor();
   assert.equal(await p.locator("#inbox-share-paragraphs input").count(), 0);

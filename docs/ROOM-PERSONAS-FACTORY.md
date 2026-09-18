@@ -12,6 +12,8 @@ Master plan:
 
 hraness steal:
 [ROOM-HRANESS-STEAL-2026-09-17.md](../research/ROOM-HRANESS-STEAL-2026-09-17.md).
+Same-rung spawn + named specialists + meter honesty:
+[ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md).
 
 Receipts: [ROOM-RECEIPT-V1.md](ROOM-RECEIPT-V1.md). Scorers:
 [ROOM-SCORER.md](ROOM-SCORER.md). Model honesty:
@@ -54,6 +56,49 @@ marketplace role.
 
 Do not copy Devin branding. Do not pretend unlimited Astra. Do not
 stuff the swarm into Compute Start.
+
+## Same-rung spawn (Codex + Jev steal)
+
+Second or factory `foreman` may spawn N specialist `room` seats on
+the **same Roy ladder rung** — not always a cheaper model. Codex
+(ChatGPT Web) showed a parent on GPT 6 Pro spawning same-rung
+children; Room keeps that option and receipts it.
+
+- Spawn is a `room` seat, not a second personal agent.
+- Product noun stays **Second**. Never Genie.
+- Nautilo Conductor / Floor Manager is *who wakes* (0 or 1 per
+  inbound human message). This section is *who is spawned and at
+  what rung*.
+
+Receipt: `delegation.spawn` (sibling of `delegation.messenger`) with
+`parentReceiptId`, `modelRung`, `role`, `sameRung`, `meter`. Shape:
+[ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md).
+Orphan spawn fails
+[orphan-claim](examples/scorers/orphan-claim/scorer.md).
+
+## Named specialist seats
+
+Nicknames on spawn (shot/log examples: Schrödinger / Parfit) — not
+anonymous workers. Nickname is display skin. `seat.kind` stays
+`room`. Later People-rail face + receipt graph (Muse chrome, not
+this contract). Do not mint a new personal-agent product from a
+nickname.
+
+## Meter honesty
+
+Label which bill each spawned seat burns. Ask / Compute already
+separates Hosted vs Community Mac; Room seats should say the same.
+
+| `meter` | Burns |
+| --- | --- |
+| `hosted` | Operator / getdasha hosted run |
+| `community` | Community Mac / BYO host |
+| `web` | Separate Web / Codex-class quota |
+
+Surface the split. Do not advertise a parent meter at 0% while
+children burn another bill as a product feature. Fail-loud when a
+meter is exhausted — same as hraness limit honesty. Never rename a
+model to hide a limit.
 
 ## Runs board (product face later)
 

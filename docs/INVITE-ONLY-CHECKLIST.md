@@ -27,6 +27,9 @@ Every `/api/*` route is either open by design (below) or requires a credential
 | `POST /api/inbox/connections/commands` | account session + CSRF (owner) | 401/422 without a session; only `connection.configure` (own account id) and `connection.disconnect` are accepted; webhook hashes and import pages are refused with 422 |
 | `POST /api/inbox/channel-sends` | account session + CSRF (owner) | 401/422 without a session, 404 for another account's source; only dispatches or reconciles a reply the journal already holds; nothing leaves the process until the Telegram bindings are set |
 | `GET /api/account-session` | none | creates an anonymous browser slot (20/address/min) and returns `authenticated: false`, a CSRF token and the session binding; the slot grants nothing until `POST` signs in with an account key (slot cookie + CSRF required) |
+| `POST /api/auth/recovery-codes/redeem` | capability (verified email hint + recovery code; 10/address/min + 10/email-hint/15min) | 401 `invalid_recovery_code` for unknown email, no set, or wrong code alike; a successful redeem burns the code and upgrades the caller's session slot |
+| `POST /api/auth/passkey/authenticate/options` | none (same-origin POST, 20/address/min) | anonymous WebAuthn ceremony step; issues a single-use challenge and returns the `get()` options; grants nothing |
+| `POST /api/auth/passkey/authenticate/finish` | verified passkey assertion + slot token in the body (same-origin POST, 10/address/min) | 401 `passkey_verification_failed` for bad challenges, failed assertions, or unknown credentials alike; a successful assertion upgrades the caller's anonymous slot |
 | everything else (`/api/rooms/*`, `/api/inbox`, `/api/account-rooms`, `POST`/`DELETE /api/account-session`) | room credential or account session | 401/422 without one |
 
 The open rows are derived, not hand-kept: `docs/openapi.yaml` marks each open

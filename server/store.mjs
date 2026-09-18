@@ -31,6 +31,7 @@ import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs
 import { GuestAgentLinks, isRoomAccessToken } from "./guest-agent-links.mjs";
 import { AgentIdentities, agentIdentitySchema, isIdentitySecret } from "./agent-identities.mjs";
 import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
+import { AccountLoginMethods, accountLoginMethodsSchema } from "./account-login-methods.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
 import { charterContext, charterFromEvent } from "../src/room-charter.js";
 import { REPLY_FIELDS, REPLY_POLICY_VERSION, replyPostMode } from "../src/reply-requests.js";
@@ -315,6 +316,7 @@ export class RoomStore {
     this.shareLinks = new ShareLinks(this);
     this.identities = new AgentIdentities(this);
     this.invites = new AgentInvites(this);
+    this.accountLogins = new AccountLoginMethods(this);
     this.reminders = new Reminders(this);
     this.notifications = new Notifications(this);
     this.moderation = new Moderation(this);
@@ -403,6 +405,7 @@ export class RoomStore {
       CREATE TABLE projection_checkpoints (room_id TEXT PRIMARY KEY REFERENCES rooms(id), sequence INTEGER NOT NULL, projection TEXT NOT NULL);
       ${invitationSchema}
       ${agentIdentitySchema}
+      ${accountLoginMethodsSchema}
       ${agentInviteSchema}`);
       this.storagePlatform.setVersion(this.db, 4);
     }
@@ -455,10 +458,12 @@ export class RoomStore {
       // the writer fence (see unfencedAdditiveTables). Applied here (not only in
       // createRoomServer) so store-only fixtures and the recovery audit see it.
       this.db.exec(accessRequestSchema);
-      // Agent room creation provenance: purely additive, intentionally outside
-      // the writer fence (see unfencedAdditiveTables). Applied here (not only in
-      // createRoomServer) so store-only fixtures and the recovery audit see it.
       this.db.exec(agentRoomSchema);
+      // Multi-method login tables (slice 1): purely additive, intentionally
+      // outside the writer fence like access_requests above — older writers
+      // have no code path to them, and method rows are always scoped to an
+      // existing account.
+      this.db.exec(accountLoginMethodsSchema);
       ensureAttachmentSchema(this.db); // Converge the deployed v28-v33 attachment lineage before installing v34 fences.
       // Idempotent: recreates fences for tables the additive schemas just
       // (re)created, and refuses a file whose existing triggers drifted.
@@ -916,6 +921,32 @@ export class RoomStore {
         WHERE hash=? AND revision=?`).run(revision, access.account.id, access.account.authEpoch, access.credentialHash, Math.min(slot.expiresAt, access.expiresAt, this.now() + 8 * 3600000), slot.credentialHash, expectedRevision);
       // Switching browser identity and retiring its former Room credential are one
       // commit. A storage failure must not report a rejected login after switching.
+      if (revokeRoomToken !== null) {
+        if (typeof revokeRoomToken !== "string" || !tokenPattern.test(revokeRoomToken)) fail(422, "invalid_credential", "Invalid prior Room credential");
+        this.revoke(revokeRoomToken);
+      }
+      return this.authenticateAccountSession(slotToken);
+    });
+  }
+  // Slice 1 shared primitive: every login method (password, magic link, OAuth,
+  // passkey, recovery code) upgrades the anonymous account-session slot into an
+  // authenticated account session once its own verification has passed. `method`
+  // is a short audit descriptor: { kind, ref } (ref is a public handle such as
+  // the login-methods row id, never a secret).
+  loginAccountSessionWithMethod(slotToken, accountId, expectedRevision, { method, revokeRoomToken = null } = {}) {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) fail(422, "invalid_session_revision", "A current account session revision is required");
+    if (method == null || typeof method !== "object" || typeof method.kind !== "string" || method.kind.trim() === "") fail(422, "invalid_login_method", "A verified login method is required");
+    if (typeof accountId !== "string" || !validId(accountId)) fail(422, "invalid_account_id", "A valid account is required");
+    return this.transaction(() => {
+      const slot = this.accountSessionSlot(slotToken);
+      if (slot.sessionRevision !== expectedRevision) fail(409, "stale_session_revision", "Account session changed; refresh before signing in");
+      const account = this.account(accountId);
+      if (!account.active) fail(403, "access_denied", "Active account required");
+      const revision = expectedRevision + 1;
+      const authenticatedUntil = Math.min(slot.expiresAt, this.now() + 8 * 3600000);
+      const parentCredentialHash = hash(this.insertAccountCredential(accountId, authenticatedUntil));
+      this.db.prepare(`UPDATE account_session_slots SET revision=?,account_id=?,account_auth_epoch=?,parent_credential_hash=?,authenticated_until=?
+        WHERE hash=? AND revision=?`).run(revision, accountId, account.authEpoch, parentCredentialHash, authenticatedUntil, slot.credentialHash, expectedRevision);
       if (revokeRoomToken !== null) {
         if (typeof revokeRoomToken !== "string" || !tokenPattern.test(revokeRoomToken)) fail(422, "invalid_credential", "Invalid prior Room credential");
         this.revoke(revokeRoomToken);

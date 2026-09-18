@@ -48,6 +48,9 @@ paths.add('server/attachment-schema.mjs');
   for (const path of ['server/channel-adapters/telegram-config.mjs', 'server/channel-adapters/telegram-transport.mjs', 'scripts/telegram-set-webhook.mjs']) paths.add(path);
   paths.add('server/spend-allowance.mjs');
   paths.add('server/pins.mjs');
+  paths.add('server/account-login-methods.mjs'); // Multi-method login model (imported by server/store.mjs)
+  paths.add('server/account-passkeys.mjs'); // Passkey auth wiring (slice 5; imported by server/http.mjs)
+  paths.add('src/passkey-login.mjs'); // WebAuthn logic (imported by server/account-passkeys.mjs)
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
   // No private state, credentials, docs or real checkout Git metadata.
   for (const path of paths) {

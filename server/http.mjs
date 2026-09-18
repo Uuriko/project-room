@@ -23,6 +23,10 @@ import { AgentRooms } from "./agent-rooms.mjs";
 import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
 import { listPins, setPin } from "./pins.mjs";
 import { GoogleSignIn, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage } from "./google-oauth.mjs";
+import { createMagicLinkMailer, magicLinkUnavailable } from "./magic-links.mjs";
+import { createRateLimiter } from "./identity-ratelimit.mjs";
+import { normalizeEmail } from "./account-login-methods.mjs";
+import { createPasskeyAuth, resolvePasskeyParams } from "./account-passkeys.mjs";
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -81,6 +85,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
   telegram = telegramConfig(), telegramStatus = new TelegramLiveStatus(), channelTransports = null,
   googleAuth = null,
+  passkeyService = null, // test injection for the passkey routes; production uses createPasskeyAuth({ store })
+  magicLinkMailer = null,
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", growth = null }) {
   // Live Telegram bindings are read once (Worker secrets or local env); the
   // config never holds up startup and the card reports "not configured".
@@ -89,6 +95,21 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // The sign-in helper is created lazily so its PKCE/state table lives as long
   // as this server instance (one per Durable Object in production).
   let googleSignIn = null;
+  // Magic-link mailer (slice 3). Unconfigured by default: the routes say so
+  // honestly (mail_not_configured) and never pretend a code was sent.
+  const magicMailer = magicLinkMailer ?? createMagicLinkMailer();
+  if (typeof magicMailer.isConfigured !== "function" || typeof magicMailer.sendMagicLink !== "function") {
+    throw new Error("magicLinkMailer must come from createMagicLinkMailer()");
+  }
+  // Per-email buckets (hourly) complement the per-address rate() limits below.
+  const magicRequestEmailLimiter = createRateLimiter({ capacity: 3, refillPerSecond: 3 / 3600 });
+  const magicConsumeEmailLimiter = createRateLimiter({ capacity: 10, refillPerSecond: 10 / 3600 });
+  const magicEmailLimit = (limiter, normalized) => {
+    const checked = limiter.check(rateHash(normalized));
+    if (!checked.allowed) {
+      throw new ServiceError(429, "rate_limited", checked.message, { "Retry-After": String(Math.ceil(checked.retryAfterMs / 1000)) });
+    }
+  };
   const google = () => {
     if (!googleAuth) return null;
     googleSignIn ??= new GoogleSignIn({ clientId: googleAuth.clientId, clientSecret: googleAuth.clientSecret,
@@ -96,6 +117,28 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       fetchImpl: googleAuth.fetchImpl ?? fetch, now: () => store.now() });
     return googleSignIn;
   };
+  // ---- Recovery codes (slice 6, RC-2026-09-17-015) ----
+  //
+  // Last-resort sign-in for the multi-method login program. A generated set
+  // is shown exactly once (never re-displayed, never logged); redeeming one
+  // code upgrades an anonymous slot into the account session. Generate and
+  // status need an authenticated account session; redeem resolves the account
+  // from a verified email hint — the client never supplies a raw account id.
+  // The redeem budget is 10 attempts per 15 minutes per email hint (per-IP
+  // limits ride on the shared rate() family at the route itself).
+  const recoveryRedeemLimiter = createRateLimiter({ capacity: 10, refillPerSecond: 10 / (15 * 60) });
+  const recoveryRedeemAllowed = emailHint => {
+    const verdict = recoveryRedeemLimiter.check(`recovery-redeem:${rateHash(emailHint)}`);
+    if (!verdict.allowed) reject(429, "rate_limited", verdict.message);
+  };
+  // Long-lived passkey auth service (slice 5, RC-2026-09-17-014): one challenge
+  // store per server instance (one per Durable Object in production) so
+  // registration/authentication ceremonies survive across the options and
+  // finish calls.
+  // passkeyService is a test injection point for stubbed verification.
+  let passkeyAuthService = null;
+  const passkeys = () => passkeyService
+    ?? (passkeyAuthService ??= createPasskeyAuth({ store }));
   if (trustedLocalProxy && !origin?.startsWith("https://")) throw new Error("The deployment proxy requires a fixed HTTPS origin");
   if (!Number.isInteger(streamQueueCap) || streamQueueCap < 1) throw new Error("Stream queue cap must be a positive integer of bytes");
   if (!Number.isInteger(streamInterval) || streamInterval < 1) throw new Error("Stream interval must be a positive integer of milliseconds");
@@ -388,12 +431,152 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return finishGoogle("/?google=error");
         }
       }
+      // ---- Magic link auth (slice 3, RC-2026-09-17-012) ----
+      //
+      // Passwordless email sign-in. POST /api/auth/magic/request issues a
+      // single-use code and hands it to the mailer seam; POST
+      // /api/auth/magic/consume redeems it with { email, code, sessionToken,
+      // sessionRevision }, provisions/links the account, and upgrades the
+      // named account-session slot (same login call as the /api/account-session
+      // POST, with method { kind: "magic" }). The slot is verified before any
+      // code is burned so a CSRF failure cannot consume a one-time code.
+      //
+      // Codes are never returned in API responses — only through the
+      // mailer. When no mail provider is configured the request route says
+      // so honestly (mail_not_configured) and issues nothing. Both routes
+      // ride the browser's account slot + CSRF like every other cookie
+      // session write; the response shape never reveals whether the email
+      // already has an account.
+      if (url.pathname === "/api/auth/magic/request" || url.pathname === "/api/auth/magic/consume") {
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        checkOrigin(req, true);
+        const slotToken = cookie(req, accountCookieName);
+        if (!slotToken) reject(401, "account_session_required", "Start an account browser session before signing in");
+        const slot = store.accountSessionSlot(slotToken);
+        protectWrite(req, slot, false);
+        if (url.pathname === "/api/auth/magic/request") {
+          const data = await body(req);
+          if (!exact(data, ["email"]) || typeof data.email !== "string") reject(422, "invalid_email_request", "An email address is required");
+          const normalized = normalizeEmail(data.email);
+          if (!normalized) reject(422, "invalid_email", "A valid email address is required");
+          rate(`magic-request:${remoteAddress}`, 5);
+          magicEmailLimit(magicRequestEmailLimiter, normalized);
+          if (!magicMailer.isConfigured()) return json(res, 200, magicLinkUnavailable());
+          const issued = store.accountLogins.issueMagicCode({ email: normalized });
+          await magicMailer.sendMagicLink({ to: normalized, code: issued.code, expiresAt: issued.expiresAt });
+          return json(res, 200, { status: "sent" });
+        }
+        const data = await body(req);
+        if (!exact(data, ["email", "code", "sessionToken", "sessionRevision"])
+          || typeof data.email !== "string" || typeof data.code !== "string"
+          || typeof data.sessionToken !== "string" || !Number.isSafeInteger(data.sessionRevision)) {
+          reject(422, "invalid_magic_login", "Email, code, session token, and current session revision are required");
+        }
+        const normalized = normalizeEmail(data.email);
+        if (!normalized) reject(422, "invalid_email", "A valid email address is required");
+        rate(`magic-consume:${remoteAddress}`, 10);
+        magicEmailLimit(magicConsumeEmailLimiter, normalized);
+        // The slot is verified before any code is burned so a CSRF failure
+        // cannot consume a one-time code.
+        const consumeSlot = store.accountSessionSlot(data.sessionToken);
+        protectWrite(req, consumeSlot, false);
+        // The model burns the code window on failure (401 invalid_magic_code)
+        // after 5 wrong attempts / 15-minute expiry / single use.
+        store.accountLogins.consumeMagicCode({ email: normalized, code: data.code });
+        // Magic links prove email ownership, so find-or-create by verified
+        // email is safe. A password account on the same address links to the
+        // same account instead of forking a new one.
+        let accountId = store.accountLogins.findAccountByVerifiedEmail(normalized);
+        if (!accountId) {
+          const derived = `email:${createHash("sha256").update(normalized, "utf8").digest("hex")}`;
+          try { store.createAccount(derived, "magic-link"); }
+          catch (error) { if (!(error instanceof ServiceError) || error.status !== 409) throw error; }
+          accountId = derived;
+        }
+        let method = store.accountLogins.listMethods(accountId).find(row => row.type === "magic" && row.email === normalized);
+        if (!method) method = store.accountLogins.linkMagicMethod(accountId, { email: normalized });
+        store.accountLogins.touchMethod(accountId, method.id);
+        const oldRoomToken = cookie(req, roomCookieName);
+        const loggedIn = store.loginAccountSessionWithMethod(data.sessionToken, accountId, data.sessionRevision, {
+          method: { kind: "magic", ref: method.id },
+          revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null
+        });
+        setCookie(res, accountCookieName, data.sessionToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
+        return json(res, 201, accountView(loggedIn));
+      }
       if (url.pathname === "/api/ready" && ["GET", "HEAD"].includes(req.method)) {
         try {
           if (store.storageStatus?.().unavailable) return json(res, 503, { status: "unavailable", reason: "storage_unavailable" }, req.method === "HEAD");
           if (!store.db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) throw new Error("No room");
           return json(res, 200, { status: "ready" }, req.method === "HEAD");
         } catch { return json(res, 503, { status: "unavailable" }, req.method === "HEAD"); }
+      }
+      // ---- Passkey auth (slice 5, RC-2026-09-17-014) ----
+      const passkeyUnavailable = () => json(res, 503, { status: "unavailable", reason: "passkey_not_configured" });
+      if (url.pathname === "/api/auth/passkey/register/options" && req.method === "POST") {
+        checkOrigin(req, true);
+        const slotToken = cookie(req, accountCookieName);
+        if (!slotToken) reject(401, "account_session_required", "Sign in before registering a passkey");
+        const auth = store.authenticateAccountSession(slotToken); // 401 unless the slot is authenticated
+        protectWrite(req, auth, false);
+        rate(`passkey-register-options:${auth.account.id}`, 10);
+        const params = resolvePasskeyParams(expectedOrigin());
+        if (!params) return passkeyUnavailable();
+        const data = await body(req);
+        if (data.userName !== undefined && typeof data.userName !== "string") {
+          reject(422, "invalid_passkey_request", "userName must be a string");
+        }
+        if (data.authenticatorSelection !== undefined
+          && (data.authenticatorSelection === null || typeof data.authenticatorSelection !== "object")) {
+          reject(422, "invalid_passkey_request", "authenticatorSelection must be an object");
+        }
+        return json(res, 200, passkeys().beginRegistration({ accountId: auth.account.id, rpId: params.rpId,
+          rpName: params.rpId, userName: data.userName ?? auth.account.id, authenticatorSelection: data.authenticatorSelection }));
+      }
+      if (url.pathname === "/api/auth/passkey/register/finish" && req.method === "POST") {
+        checkOrigin(req, true);
+        const slotToken = cookie(req, accountCookieName);
+        if (!slotToken) reject(401, "account_session_required", "Sign in before registering a passkey");
+        const auth = store.authenticateAccountSession(slotToken);
+        protectWrite(req, auth, false);
+        rate(`passkey-register-finish:${auth.account.id}`, 10);
+        const params = resolvePasskeyParams(expectedOrigin());
+        if (!params) return passkeyUnavailable();
+        const data = await body(req);
+        if (!exact(data, ["challengeId", "response"]) || typeof data.challengeId !== "string"
+          || data.response === null || typeof data.response !== "object") {
+          reject(422, "invalid_passkey_response", "A challenge id and credential response are required");
+        }
+        return json(res, 201, passkeys().finishRegistration({ accountId: auth.account.id, challengeId: data.challengeId,
+          response: data.response, expectedOrigin: params.origin, rpId: params.rpId }));
+      }
+      if (url.pathname === "/api/auth/passkey/authenticate/options" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`passkey-auth-options:${remoteAddress}`, 20);
+        const params = resolvePasskeyParams(expectedOrigin());
+        if (!params) return passkeyUnavailable();
+        await body(req); // discoverable-credential flow: the JSON body carries no required fields
+        return json(res, 200, passkeys().beginAuthentication({ rpId: params.rpId }));
+      }
+      if (url.pathname === "/api/auth/passkey/authenticate/finish" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`passkey-auth-finish:${remoteAddress}`, 10);
+        const params = resolvePasskeyParams(expectedOrigin());
+        if (!params) return passkeyUnavailable();
+        const data = await body(req);
+        if (!exact(data, ["challengeId", "response", "sessionToken", "sessionRevision"])
+          || typeof data.challengeId !== "string" || data.response === null || typeof data.response !== "object"
+          || typeof data.sessionToken !== "string" || typeof data.sessionRevision !== "number") {
+          reject(422, "invalid_passkey_response", "A challenge id, credential response, and session are required");
+        }
+        const verified = passkeys().finishAuthentication({ challengeId: data.challengeId, response: data.response,
+          expectedOrigin: params.origin, rpId: params.rpId });
+        const oldRoomToken = cookie(req, roomCookieName);
+        const loggedIn = store.loginAccountSessionWithMethod(data.sessionToken, verified.accountId, data.sessionRevision, {
+          method: { kind: "passkey", ref: verified.methodRef },
+          revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null
+        });
+        return json(res, 200, accountView(loggedIn));
       }
       // Track C C14 — read-only growth analytics surface. The handler is a
       // pure read over the collector/scheduler; unknown /growth subpaths 404
@@ -665,6 +848,70 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return json(res, 200, accountView(store.logoutAccountSession(slotToken, data.expectedSessionRevision)));
         }
         reject(405, "method_not_allowed", "Method not allowed");
+      }
+      // ---- Recovery codes (slice 6, RC-2026-09-17-015) ----
+      //
+      // generate: an authenticated account session mints (or regenerates) the
+      // set; the plaintext codes leave in exactly this one response and are
+      // never logged or re-displayed. Regenerating invalidates the set that
+      // was shown before. redeem: the account is resolved from the verified
+      // email hint; a wrong code and an unknown email return the same 401
+      // shape, and a successful redeem burns the code, records the method
+      // use, and upgrades the caller's session slot. status: authenticated
+      // sessions see only the configured/remaining counts, never the codes.
+      if (url.pathname === "/api/auth/recovery-codes/generate" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`recovery-codes-generate:${remoteAddress}`, 10);
+        const auth = store.authenticateAccountSession(cookie(req, accountCookieName));
+        protectWrite(req, auth, false);
+        const { codes, count } = store.accountLogins.generateRecoveryCodes(auth.account.id);
+        return json(res, 200, { codes, count, generatedAt: new Date(store.now()).toISOString(),
+          warning: "Save these now \u2014 they are shown once and each works a single time. Regenerating invalidates the previous set." });
+      }
+      if (url.pathname === "/api/auth/recovery-codes/status" && req.method === "GET") {
+        rate(`recovery-codes-status:${remoteAddress}`, 30);
+        const auth = store.authenticateAccountSession(cookie(req, accountCookieName));
+        const configured = store.accountLogins.listMethods(auth.account.id)
+          .some(method => method.type === "recovery-code-set" && !method.disabled);
+        const remaining = configured ? store.accountLogins.recoveryCodesRemaining(auth.account.id) : null;
+        return json(res, 200, { configured, remaining });
+      }
+      if (url.pathname === "/api/auth/recovery-codes/redeem" && req.method === "POST") {
+        checkOrigin(req, true);
+        rate(`recovery-redeem:${remoteAddress}`, 10);
+        const data = await body(req);
+        if (!exact(data, ["email", "code", "sessionToken", "sessionRevision"])
+          || typeof data.email !== "string" || typeof data.code !== "string"
+          || typeof data.sessionToken !== "string" || !Number.isSafeInteger(data.sessionRevision)) {
+          reject(422, "invalid_recovery_redeem", "An email, recovery code, session token, and current session revision are required");
+        }
+        const email = normalizeEmail(data.email);
+        if (email === null) reject(422, "invalid_email", "A valid email address is required");
+        // The slot is verified before any code is burned so a CSRF failure
+        // cannot consume a one-time code.
+        const slot = store.accountSessionSlot(data.sessionToken);
+        protectWrite(req, slot, false);
+        recoveryRedeemAllowed(email);
+        const accountId = store.accountLogins.findAccountByVerifiedEmail(email);
+        let redemption;
+        try {
+          if (accountId === null) reject(401, "invalid_recovery_code", "That recovery code is not valid");
+          redemption = store.accountLogins.consumeRecoveryCode(accountId, data.code);
+        } catch (error) {
+          // No set and a wrong code answer identically: there is no oracle.
+          if (error instanceof ServiceError && (error.code === "invalid_recovery_code" || error.code === "login_method_not_found")) {
+            reject(401, "invalid_recovery_code", "That recovery code is not valid");
+          }
+          throw error;
+        }
+        const method = store.accountLogins.listMethods(accountId)
+          .find(candidate => candidate.type === "recovery-code-set" && !candidate.disabled);
+        if (method) store.accountLogins.touchMethod(accountId, method.id);
+        const loggedIn = store.loginAccountSessionWithMethod(data.sessionToken, accountId, data.sessionRevision, {
+          method: { kind: "recovery-code", ref: method ? method.id : "recovery-code-set" }
+        });
+        setCookie(res, accountCookieName, data.sessionToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
+        return json(res, 200, { remaining: redemption.remaining, session: accountView(loggedIn) });
       }
       if (url.pathname === "/api/guest-agent-links" && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, guestAgentLinkContract(), req.method === "HEAD");
