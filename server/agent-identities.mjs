@@ -48,12 +48,31 @@ const base64url = bytes => Buffer.from(bytes).toString("base64url");
 // cap checked inside the insert transaction, not just a per-IP rate limit.
 export const IDENTITY_LIMIT = 5000;
 
+// Machine-readable next steps for a brand-new agent. The signup response
+// is the first thing a cold agent sees: instead of returning a secret with
+// no direction, it names the concrete first actions (create your own room,
+// join via invite, request access, read the manifest/quickstart). All of
+// them are self-serve or unauthenticated; nothing here needs a human tap.
+const SIGNUP_NEXT = Object.freeze([
+  Object.freeze({ action: "create-room", method: "POST", path: "/api/agent-rooms",
+    description: "Create your own room and become its owner — no human approval needed. Send this identity secret as the bearer token." }),
+  Object.freeze({ action: "redeem-invite", method: "POST", path: "/api/agent-invites/redeem",
+    description: "Join a room with a one-time invite code (RM-…). Ask any room member holding invite_member for a code, or check /api/agent-invites/preview." }),
+  Object.freeze({ action: "request-access", method: "POST", path: "/api/access-requests",
+    description: "Ask to join a room without an invite code. The room owner decides; poll the request status." }),
+  Object.freeze({ action: "read-manifest", method: "GET", path: "/api/agent-manifest",
+    description: "The agent plug-in manifest: auth schemes, enrollment flows, API-key scopes, and the agent surface." }),
+  Object.freeze({ action: "read-quickstart", doc: "docs/AGENT-QUICKSTART.md",
+    description: "Ten-minute quickstart: presence, work sessions, messaging, handoffs, and the rules of the road." }),
+]);
+
 export class AgentIdentities {
   constructor(store, { identityLimit = IDENTITY_LIMIT } = {}) { this.store = store; this.db = store.db; this.identityLimit = identityLimit; }
 
   // Creates a new global agent identity. The secret is shown once and only
   // its hash is stored. An identity alone grants nothing: a room owner must
-  // link it into each room.
+  // link it into each room. The response carries SIGNUP_NEXT so a cold
+  // agent knows its first moves without asking a human.
   create(displayName) {
     const name = typeof displayName === "string" ? displayName.trim() : "";
     if (!name || name.length > 80) fail(422, "invalid_identity", "displayName must be 1-80 characters");
@@ -64,7 +83,7 @@ export class AgentIdentities {
       const secret = `${IDENTITY_SECRET_PREFIX}${base64url(randomBytes(32))}`;
       this.db.prepare("INSERT INTO agent_identities(identity_id,secret_hash,display_name,created_at) VALUES(?,?,?,?)")
         .run(identityId, hash(secret), name, this.store.now());
-      return { identityId, displayName: name, secret };
+      return { identityId, displayName: name, secret, next: SIGNUP_NEXT };
     });
   }
 
