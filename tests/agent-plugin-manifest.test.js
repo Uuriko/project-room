@@ -51,3 +51,22 @@ test("build rejects non-https origins and bad room ids", t => {
   assert.throws(() => buildPluginManifest({ serviceOrigin: ORIGIN, roomId: "" }), ManifestError);
   assert.throws(() => buildPluginManifest({ serviceOrigin: ORIGIN, clock: "nope" }), ManifestError);
 });
+
+test("manifest documents the API-key scope vocabulary and it matches enforcement (RC-2026-09-18-019)", async t => {
+  const { buildPluginManifest, validatePluginManifest } = await import("../server/agent-plugin-manifest.mjs");
+  const { API_KEY_SCOPES } = await import("../server/agent-api-keys.mjs");
+  const manifest = buildPluginManifest({ serviceOrigin: "https://room.example" });
+  assert.equal(validatePluginManifest(manifest), true);
+  // the vocabulary is present, described, and non-empty
+  const vocab = manifest.auth.apiKeyScopes;
+  assert.ok(Array.isArray(vocab.scopes) && vocab.scopes.length > 0);
+  assert.deepEqual(vocab.scopes.map(s => s.scope).sort(), API_KEY_SCOPES.map(s => s.scope).sort());
+  for (const entry of vocab.scopes) {
+    assert.ok(entry.description && entry.description.length > 0, `${entry.scope} has a description`);
+    assert.ok(Array.isArray(entry.routes) && entry.routes.length > 0, `${entry.scope} names its routes`);
+  }
+  assert.ok(typeof vocab.wildcard === "string" && vocab.wildcard.includes(":*"));
+  // stripping the vocabulary fails validation: it is a required field
+  assert.throws(() => validatePluginManifest({ ...manifest, auth: { schemes: manifest.auth.schemes } }),
+    /apiKeyScopes/);
+});

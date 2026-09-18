@@ -24,6 +24,30 @@ const IDENTITY_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const SCOPE_PATTERN = /^[a-z0-9:_*-]+$/;
 const MIN_SECRET_ENTROPY_BYTES = 24;
 
+// The documented API-key scope vocabulary (RC-2026-09-18-019). These are
+// the scopes the agent plug-in surface actually enforces — the single
+// source of truth: the HTTP routes (server/agent-plugin-routes.mjs) and
+// the agent manifest (server/agent-plugin-manifest.mjs) both read from
+// here, so the documented vocabulary can never drift from enforcement.
+// Issuance stays permissive on unknown scope strings (a key with an
+// unknown scope simply grants nothing); the 403 insufficient_scope error
+// names the required scope so a mis-scoped key is self-diagnosing.
+export const API_KEY_SCOPES = Object.freeze([
+  Object.freeze({
+    scope: "directory:publish",
+    description: "Publish and withdraw this identity's agent directory cards (signed cards).",
+    routes: ["POST /api/agent-directory/cards", "DELETE /api/agent-directory/cards/:agentId"],
+  }),
+  Object.freeze({
+    scope: "webhooks:manage",
+    description: "Subscribe to, list, and delete this identity's webhook subscriptions.",
+    routes: ["GET /api/agent-webhooks", "POST /api/agent-webhooks", "DELETE /api/agent-webhooks/:id"],
+  }),
+]);
+// A scope ending in ":*" (e.g. "agent:*") grants every scope sharing its
+// prefix, including scopes added in the future.
+export const API_KEY_SCOPE_WILDCARD_NOTE = "prefix:* wildcard grants every scope with that prefix";
+
 const sha256 = text => createHash("sha256").update(text).digest("hex");
 
 // Create an agent API-key manager. store is a caller-owned Map (keyId -> record).

@@ -329,3 +329,25 @@ test("identity-link rejects bad arglists at the CLI boundary", async t => {
     assert.match(r.stderr, /usage_error/);
   }
 });
+
+test("identity-create returns machine-readable next steps for a cold agent (RC-2026-09-18-018)", async t => {
+  const { origin } = await serve(t);
+  const created = await fetch(`${origin}/api/agent-identities`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin },
+    body: JSON.stringify({ displayName: "Cold Start Bot" })
+  });
+  assert.equal(created.status, 201);
+  const value = await created.json();
+  assert.match(value.secret, /^pri_/);
+  // The signup response must guide a brand-new agent to its first actions.
+  assert.ok(Array.isArray(value.next) && value.next.length >= 4, "next[] is present and non-empty");
+  const actions = value.next.map(step => step.action);
+  for (const required of ["create-room", "redeem-invite", "request-access", "read-manifest"]) {
+    assert.ok(actions.includes(required), `next[] names ${required}`);
+  }
+  for (const step of value.next) {
+    assert.equal(typeof step.action, "string");
+    assert.equal(typeof step.description, "string");
+    assert.ok((step.method && step.path) || step.doc, "each step has a method+path or a doc pointer");
+  }
+});

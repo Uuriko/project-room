@@ -30,6 +30,13 @@ const memberCan = (authority, memberId, permission) => {
   const member = authority?.members?.[memberId];
   return Array.isArray(member?.permissions) && member.permissions.includes(permission);
 };
+// Room permission vocabulary, mirrored from PERMISSIONS in src/events.js
+// (same Workers-bundle reason as above). access requests and approvals are
+// validated against this so an invalid name fails fast with a 422 that
+// teaches the vocabulary, instead of pending and failing opaquely later.
+// tests/access-requests.test.js asserts this stays in sync with PERMISSIONS.
+export const ACCESS_REQUEST_PERMISSIONS = Object.freeze(
+  ["steer", "decide", "manage_members", "manage_claims", "accept_work", "complete_work", "verify", "write_external", "invite_member"]);
 
 export const accessRequestSchema = `
   CREATE TABLE IF NOT EXISTS access_requests (
@@ -92,6 +99,13 @@ export class AccessRequests {
     if (!Array.isArray(requestedPermissions) || !requestedPermissions.length
       || !requestedPermissions.every(p => typeof p === "string" && p.length > 0 && p.length <= 64)) {
       fail(422, "invalid_request", "requestedPermissions must be a non-empty array of permission strings");
+    }
+    // RC-2026-09-18-022: validate names up front. An unknown name (e.g.
+    // "read") used to pend and fail opaquely at approval; now the 422
+    // teaches the vocabulary immediately.
+    if (!requestedPermissions.every(p => ACCESS_REQUEST_PERMISSIONS.includes(p))) {
+      fail(422, "invalid_request",
+        `requestedPermissions must be room permissions (valid: ${ACCESS_REQUEST_PERMISSIONS.join(", ")})`);
     }
     if (note !== undefined && (typeof note !== "string" || note.length > 500)) {
       fail(422, "invalid_request", "note must be text of at most 500 characters");
@@ -183,7 +197,13 @@ export class AccessRequests {
       // the agent asked for is not enforced — the owner is sovereign — but
       // the request records what was asked).
       const grants = Array.isArray(permissions) && permissions.length ? permissions : JSON.parse(row.requested_permissions);
-      if (!grants.every(p => typeof p === "string" && p.length > 0)) fail(422, "invalid_request", "permissions must be permission strings");
+      // RC-2026-09-18-022: the approval grant is validated too, so a
+      // hand-written approval can never mint a member with nonsense
+      // permissions. (Requests validated at request() time already pass.)
+      if (!grants.every(p => typeof p === "string" && ACCESS_REQUEST_PERMISSIONS.includes(p))) {
+        fail(422, "invalid_request",
+          `permissions must be room permissions (valid: ${ACCESS_REQUEST_PERMISSIONS.join(", ")})`);
+      }
       const identities = this.store.identities;
       const linked = identities.link(token, roomId, {
         identityId: row.identity_id,

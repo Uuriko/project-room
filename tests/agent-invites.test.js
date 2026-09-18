@@ -591,3 +591,27 @@ test("check ladder write probe is draft-only: wrote=false, nothing sent", async 
   assert.match(write.detail, /draft-only/);
   assert.match(write.detail, /never sent/);
 });
+
+test("invite vocabulary is discoverable and 422s teach it (RC-2026-09-18-020)", async t => {
+  const { store, origin, ownerKey } = await serve(t);
+  // The module-level vocabulary names every profile and permission.
+  const vocab = store.invites.vocabulary();
+  assert.deepEqual(Object.keys(vocab.profiles).sort(), ["chat", "contribute", "review"]);
+  for (const [name, entry] of Object.entries(vocab.profiles)) {
+    assert.ok(Array.isArray(entry.permissions), `${name} lists permissions`);
+    assert.ok(entry.description && entry.description.length > 0, `${name} is described`);
+  }
+  assert.ok(vocab.permissions.includes("accept_work") && vocab.permissions.includes("invite_member"));
+  assert.deepEqual(vocab.neverGrant.sort(), ["decide", "invite_member", "manage_members"]);
+  // A minter guessing generic names gets the vocabulary in the error.
+  const bad = await post(origin, "/api/rooms/commons/agent-invites", { permissions: ["read", "write"] }, ownerKey);
+  assert.equal(bad.status, 422);
+  assert.equal(bad.json?.error?.code, "invalid_invite_scope");
+  const message = bad.json?.error?.message ?? "";
+  assert.ok(message.includes("accept_work"), "422 names real permissions");
+  assert.ok(message.includes("chat"), "422 names the profiles");
+  // Unknown profile names the valid profiles too.
+  const badProfile = await post(origin, "/api/rooms/commons/agent-invites", { profile: "admin" }, ownerKey);
+  assert.equal(badProfile.status, 422);
+  assert.ok((badProfile.json?.error?.message ?? "").includes("contribute"));
+});
