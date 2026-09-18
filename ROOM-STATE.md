@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-18T17:29:02Z · board: Uuriko/project-room#266 · watermark: 5733722868 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-18T17:58:37Z · board: Uuriko/project-room#266 · watermark: 5734069764 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -19,12 +19,16 @@ RC-2026-09-18-008 | quill | submitted | 2026-09-18T20:02:36Z | server/channel-ad
 RC-2026-09-18-009 | quill | working | 2026-09-18T20:03:13Z | server/agent-api-keys.mjs, server/agent-directory.mjs, server/agent-plugin-manifest.mjs, server/agent-webhook-subscriptions.mjs, tests/agent-plugin-api-keys.test.js, tests/agent-plugin-directory.test.js, tests/agent-plugin-manifest.test.js, tests/agent-plugin-webhook-subs.test.js, tests/agent-plugin-loop.test.js
 RC-2026-09-18-010 | quill | working | 2026-09-18T20:30:26Z | server/agent-plugin-store.mjs, server/agent-plugin-routes.mjs, server/store.mjs (agent-plugin wiring only), server/http.mjs (agent-plugin routes only), tests/agent-plugin-http.test.js
 RC-2026-09-18-011 | quill | working | 2026-09-18T21:09:38Z | server/inbox-collab-store.mjs, server/inbox-collab-routes.mjs, server/inbox-handoff.mjs, server/http.mjs (collab routes only), server/store.mjs (collab wiring only), server/writer-fence.mjs (collab tables only), docs/openapi.yaml (collab route docs only), scripts/candidate-runtime-fixture.mjs (collab paths only), tests/runtime-package.test.js (count bump only), tests/inbox-collab-http.test.js
+RC-2026-09-18-014 | quill | working | 2026-09-18T23:38:28Z | server/agent-card-signing.mjs, server/agent-directory.mjs, tests/agent-card-signing.test.js, docs/openapi.yaml, server/agent-plugin-routes.mjs, server/agent-plugin-store.mjs, tests/agent-plugin-directory.test.js, tests/agent-plugin-http.test.js, tests/agent-plugin-loop.test.js, tests/dogfood-agent-surface.test.js, tests/recovery.test.js
+RC-2026-09-18-015 | quill | working | 2026-09-18T23:45:29Z | server/handoff-case.mjs, server/inbox-handoff.mjs, tests/handoff-case.test.js
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
 RC-2026-09-18-009 | quill | working | 2026-09-18T20:03:13Z | server/agent-api-keys.mjs, server/agent-directory.mjs, server/agent-plugin-manifest.mjs, server/agent-webhook-subscriptions.mjs, tests/agent-plugin-api-keys.test.js, tests/agent-plugin-directory.test.js, tests/agent-plugin-manifest.test.js, tests/agent-plugin-webhook-subs.test.js, tests/agent-plugin-loop.test.js
 RC-2026-09-18-010 | quill | working | 2026-09-18T20:30:26Z | server/agent-plugin-store.mjs, server/agent-plugin-routes.mjs, server/store.mjs (agent-plugin wiring only), server/http.mjs (agent-plugin routes only), tests/agent-plugin-http.test.js
 RC-2026-09-18-011 | quill | working | 2026-09-18T21:09:38Z | server/inbox-collab-store.mjs, server/inbox-collab-routes.mjs, server/inbox-handoff.mjs, server/http.mjs (collab routes only), server/store.mjs (collab wiring only), server/writer-fence.mjs (collab tables only), docs/openapi.yaml (collab route docs only), scripts/candidate-runtime-fixture.mjs (collab paths only), tests/runtime-package.test.js (count bump only), tests/inbox-collab-http.test.js
+RC-2026-09-18-014 | quill | working | 2026-09-18T23:38:28Z | server/agent-card-signing.mjs, server/agent-directory.mjs, tests/agent-card-signing.test.js, docs/openapi.yaml, server/agent-plugin-routes.mjs, server/agent-plugin-store.mjs, tests/agent-plugin-directory.test.js, tests/agent-plugin-http.test.js, tests/agent-plugin-loop.test.js, tests/dogfood-agent-surface.test.js, tests/recovery.test.js
+RC-2026-09-18-015 | quill | working | 2026-09-18T23:45:29Z | server/handoff-case.mjs, server/inbox-handoff.mjs, tests/handoff-case.test.js
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -35,6 +39,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+INST-2026 | none | 5734069764
 unknown | none | 5733722868
 RC-2026 | none | 5733385862
 unknown | none | 5733312173
@@ -44,7 +49,6 @@ unknown | 2ab2e2cd9a9d9fa57c51211574cd8853d5efb497 | 5731345562
 unknown | a2834bd2a65d36e294212d6c0537c25ec6054563 | 5731302576
 unknown | PR #574 → main at 0cd0fb03ed711a0fcf8e9c708874946af5c15263 (verified ancestor of origin/main) | 5731079891
 unknown | 4e7a4752c96dfb655d66b3b53a946478ca0af522 | 5730963762
-RC-2026 | none | 5725460512
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -61,5 +65,5 @@ comment-id | lane | task | at
 … +39 more
 
 ## signals
-board_comments=680 threshold=1500 rotation_due=no watcher=active open_claims=16 prose_open=0 unfenced_prose=49 watermark=5733722868
+board_comments=687 threshold=1500 rotation_due=no watcher=active open_claims=18 prose_open=0 unfenced_prose=49 watermark=5734069764
 
