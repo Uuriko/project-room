@@ -74,6 +74,12 @@ test("issue shows the secret once; list never shows it; storage is hash-only", a
   assert.equal(typeof key.secret, "string");
   assert.ok(key.secret.length >= 16, "secret carries real entropy");
   assert.ok(!("keyHash" in key), "hash never leaves the server");
+  // RC-2026-09-18-024: the 201 carries the presentation-ready credential.
+  assert.equal(key.credential, `rak_${key.secret}`, "credential is the exact Authorization-header value");
+  // The raw secret alone is not a valid presented credential: auth requires the prefix.
+  assert.equal(f.store.agentPlugin.verifyPresentedApiKey(key.secret), null);
+  const presented = f.store.agentPlugin.verifyPresentedApiKey(key.credential);
+  assert.equal(presented?.keyId, key.keyId, "the credential authenticates end to end");
 
   const listed = await get(origin, "/api/agent-keys", identity.secret);
   assert.equal(listed.status, 200);
@@ -119,6 +125,11 @@ test("rotate replaces the secret (old stops working) and revoke ends the key", a
   const rotatedBody = await rotated.json();
   assert.ok(rotatedBody.secret && rotatedBody.secret !== issuedSecret, "rotation shows a new secret once");
   assert.ok(!("keyHash" in rotatedBody));
+  // RC-2026-09-18-024: rotation also carries the presentation-ready credential.
+  assert.equal(rotatedBody.credential, `rak_${rotatedBody.secret}`);
+  const rotatedPresented = f.store.agentPlugin.verifyPresentedApiKey(rotatedBody.credential);
+  assert.equal(rotatedPresented?.keyId, keyId, "the rotated credential authenticates");
+  assert.equal(f.store.agentPlugin.verifyPresentedApiKey(rotatedBody.secret), null, "raw secret without prefix is rejected");
 
   assert.equal(f.store.agentPlugin.verifyApiKeySecret(issuedSecret), null, "the old secret no longer verifies");
   const verified = f.store.agentPlugin.verifyApiKeySecret(rotatedBody.secret);
@@ -263,7 +274,7 @@ test("owner-signed recovery rotates a lost key; scoped keys cannot", async t => 
   const scoped = await (await post(origin, "/api/agent-keys",
     { scopes: ["directory:publish"] }, identity.secret)).json();
   assert.equal(await errorCode(await post(origin, "/api/agent-directory/cards",
-    signedPublishBody("recover-agent", fixtureCard(), newKp, { recovery: true }), `rak_${scoped.secret}`)),
+    signedPublishBody("recover-agent", fixtureCard(), newKp, { recovery: true }), scoped.credential)),
     "insufficient_scope");
 
   // The identity (owner) secret can recover the lost key.
