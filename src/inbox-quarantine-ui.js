@@ -9,16 +9,17 @@
 // installInbox and refreshes whenever the inbox list loads.
 //
 // Confirm accepts the message into the inbox (owner verdict: not spam).
-// Dismiss drops the review item as spam — the record stays for audit.
-// Split separates the held message off its thread; the review state stays
-// held, so a split item still needs Confirm or Dismiss.
+// Dismiss drops the review item as spam — the record stays for audit, and
+// the message stays out of the inbox read paths. Split separates the held
+// message off its thread; the review state stays held, so a split item
+// still needs Confirm or Dismiss.
 //
-// Honest scope: the quarantine policy is flag-only (AUTO-QUARANTINE-POLICY.md
-// is a proposal, not an enforcement). These actions record the owner's
-// verdict on the held backlog; they do not hide, move, or mute the message
-// itself anywhere. Dismiss arms on the first click (two deliberate taps,
-// like the connection "Remove" flow) — a dismissal is a verdict, not a
-// glance.
+// Honest scope: a verdict is a visibility change for the main inbox views
+// (server/inbox.mjs quarantinedSourceIds): held and dismissed messages are
+// held out of list/search/threads/read, released messages return. The
+// review surface itself stays the only view that shows held/dismissed rows.
+// Dismiss arms on the first click (two deliberate taps, like the
+// connection "Remove" flow) — a dismissal is a verdict, not a glance.
 export function installQuarantineReview({ api, ownerKey }) {
   const $ = selector => document.querySelector(selector);
   const text = (selector, value) => { $(selector).textContent = value; };

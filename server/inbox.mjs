@@ -306,8 +306,11 @@ export class Inbox {
   // journals. Confirming accepts the message back into the inbox (the
   // verdict "not spam"); dismissing drops it from the review backlog as spam
   // and keeps the audit record; splitting separates the source from its
-  // native thread. Nothing here moves, mutes, or deletes the imported
-  // message — the review verdicts are flags, not visibility changes.
+  // native thread. A verdict is a visibility change for the main inbox
+  // read paths (quarantinedSourceIds): held and dismissed sources are held
+  // out of list/search/threads/read, released sources return — but nothing
+  // here moves, mutes, or deletes the imported message itself, and this
+  // review surface stays the only view that shows held/dismissed rows.
   quarantineReview(token, binding, { status = "held", limit = null } = {}) {
     return this.store.readTransaction(() => {
       const auth = this.auth(token, binding);
@@ -431,6 +434,29 @@ export class Inbox {
     } catch { return null; }
     return null;
   }
+  // Quarantine visibility enforcement (policy docs/AUTO-QUARANTINE-POLICY.md
+  // §1, §3: held is held out of the main inbox, dismissed stays out): the
+  // source ids a held or dismissed journal row resolves to. Resolution is
+  // the same quarantineMatch() the review surface uses, so the message the
+  // owner sees in the review UI is exactly the message the main inbox views
+  // (list, search, threads, read) hide. Released rows return to the inbox
+  // with their flag intact, so they are never in this set. The review
+  // surface itself (quarantineReview) stays the only view of held/dismissed
+  // rows — nothing here deletes or moves the imported sources.
+  quarantinedSourceIds(auth) {
+    const ids = new Set();
+    // Fast path: counts() is one GROUP BY; when nothing is held or
+    // dismissed, skip the per-row source scan entirely.
+    const counts = this.store.spamQuarantine.counts();
+    for (const status of ["held", "dismissed"]) {
+      if (!counts[status]) continue;
+      for (const item of this.store.spamQuarantine.list({ status, limit: null })) {
+        const source = this.quarantineMatch(auth, item);
+        if (source) ids.add(source.id);
+      }
+    }
+    return ids;
+  }
   auth(token, binding, roomId = null) {
     if (typeof binding !== "string" || !/^[a-f0-9]{64}$/.test(binding)) fail(422, "session_binding_required", "Current account session binding required.");
     return this.store.authenticateAccountSession(token, roomId, binding);
@@ -480,7 +506,13 @@ export class Inbox {
       params.push(take + 1);
       const rows = this.db.prepare(sql).all(...params);
       const hasMore = rows.length > take, page = hasMore ? rows.slice(0, take) : rows;
-      const sources = page.map(row => this.sourceSummary(auth, row, ctx)).filter(Boolean);
+      // Quarantine visibility enforcement: held and dismissed sources are
+      // held out of the list. The cursor stays on the raw page (it already
+      // can point past invisible channel rows), so pagination semantics are
+      // unchanged — a page may simply return fewer visible sources.
+      const quarantined = this.quarantinedSourceIds(auth);
+      const sources = page.map(row => this.sourceSummary(auth, row, ctx))
+        .filter(summary => summary && !quarantined.has(summary.id));
       const last = page[page.length - 1];
       return { contractVersion: 1, viewer: viewer(auth), sources,
         nextCursor: hasMore && last ? encodeCursor({ updatedAt: last.updated_at, id: last.id }) : null };
@@ -539,14 +571,20 @@ export class Inbox {
       // the scope matches nothing and the result is empty.
       if (sourceId) this.source(auth.account.id, sourceId);
       const rows = this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? ORDER BY updated_at DESC,id LIMIT 5000").all(auth.account.id);
-      const infos = [];
+      const rawInfos = [];
       for (const row of rows) {
         try {
           const d = this.version(auth.account.id, row.id, row.revision);
           if (d.adapter !== "synthetic" && !include) continue;
-          infos.push({ row, adapter: d.adapter, envelope: d.envelope, channel: d.envelope?.channel ?? null });
+          rawInfos.push({ row, adapter: d.adapter, envelope: d.envelope, channel: d.envelope?.channel ?? null });
         } catch { /* malformed version: skip, never break the thread view */ }
       }
+      // Quarantine visibility enforcement: held and dismissed sources are
+      // excluded before threading, so they never appear in a thread — not
+      // as entries and not as reply parents. The review surface is the
+      // only view that shows them.
+      const quarantined = this.quarantinedSourceIds(auth);
+      const infos = rawInfos.filter(info => !quarantined.has(info.row.id));
       const replyIndex = new Map();
       const keys = infos.map(info => this.threadKeyOf(info, replyIndex));
       for (const [info, key] of infos.map((info, i) => [info, keys[i]])) {
@@ -837,9 +875,14 @@ export class Inbox {
       const take = searchLimitOf(limit), include = includeChannels;
       const rows = this.db.prepare("SELECT * FROM private_inbox_sources WHERE account_id=? ORDER BY updated_at DESC,id LIMIT 5000").all(auth.account.id);
       const byId = new Map(rows.map(row => [row.id, row]));
+      // Quarantine visibility enforcement: held and dismissed sources are
+      // excluded from the search index before the query runs, so totals and
+      // results only ever reflect visible sources.
+      const quarantined = this.quarantinedSourceIds(auth);
       const messages = [];
       for (const row of rows) {
         if (sourceId && row.id !== sourceId) continue;
+        if (quarantined.has(row.id)) continue;
         const d = this.version(auth.account.id, row.id, row.revision);
         if (d.adapter !== "synthetic" && !include) continue;
         const body = searchText(d);
@@ -857,6 +900,11 @@ export class Inbox {
   read(token, sourceId, binding, { emailView = false, excerptView = false } = {}) {
     return this.store.readTransaction(() => {
       const auth = this.auth(token, binding), row = this.source(auth.account.id, sourceId);
+      // Quarantine visibility enforcement: a held or dismissed source reads
+      // as not-found, exactly like an unknown source — no content and no
+      // hint of the hold leaks through the read path. The review surface is
+      // where quarantined messages are viewed.
+      if (this.quarantinedSourceIds(auth).has(sourceId)) fail(404, "inbox_source_not_found", "Source not found.");
       const draft = this.db.prepare("SELECT revision,source_revision,body,updated_at FROM private_inbox_drafts WHERE account_id=? AND source_id=?").get(auth.account.id, sourceId);
       const data = this.version(auth.account.id, row.id, row.revision);
       const source = emailView && data.adapter === "email" ? this.emailView(auth, row, data.envelope, excerptView)
