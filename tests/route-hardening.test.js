@@ -186,6 +186,30 @@ test("L4: the NDJSON import refuses an oversized Content-Length before reading",
   assert.equal(wrongType.status, 415);
 });
 
+test("L4: the server destroys an oversized request's socket after the 413", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const { hostname, port } = new URL(origin);
+  const socket = connect(Number(port), hostname);
+  let response = "";
+  const closed = new Promise(resolve => socket.on("close", resolve));
+  await new Promise((resolve, reject) => { socket.on("connect", resolve); socket.on("error", reject); });
+  socket.on("data", chunk => { response += chunk.toString(); });
+  socket.write([
+    "POST /api/rooms/commons/import HTTP/1.1",
+    `Host: ${new URL(origin).host}`,
+    `Origin: ${origin}`,
+    `Content-Length: ${8 * 1024 * 1024 + 1}`,
+    `Authorization: Bearer ${ownerKey}`,
+    "Content-Type: application/x-ndjson",
+    "", "",
+  ].join("\r\n"));
+  const outcome = await Promise.race([closed.then(() => "closed"), new Promise(resolve => setTimeout(() => resolve("open"), 4000))]);
+  socket.destroy();
+  assert.equal(status({ response }), 413, "the client still receives the 413 refusal");
+  assert.match(response, /"code":"too_large"/);
+  assert.equal(outcome, "closed", "the server destroys the socket instead of letting the client hold the connection");
+});
+
 test("L4: an import whose client stops sending fails at once with 400 aborted", async t => {
   const { origin, ownerKey, request, accountKey } = await serve(t);
   const account = await loginAccount(request, accountKey);
