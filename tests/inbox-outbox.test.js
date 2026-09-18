@@ -175,6 +175,14 @@ test("unchanged provider acceptance does not grow the journal on every status ch
 });
 test("full pilot capacity never prevents settling an already reserved reply", async t => {
   const f = setup(t);
+  // The fill loop below issues ~5000 sequential applies, one SQLite transaction
+  // each. Under the store's synchronous=FULL every commit fsyncs, which costs
+  // tens of ms per apply on slow-fsync disks and turns this loop into minutes
+  // of uninterrupted synchronous event-loop blocking (it starved the whole
+  // root suite). This test verifies the capacity boundary, not crash
+  // durability, and the database is disposable (rmSync'd in t.after), so relax
+  // fsync for this fixture only. Every assertion below is unchanged.
+  f.store.db.exec("PRAGMA synchronous=NORMAL");
   for (let revision = 1; revision < 4998; revision++) f.apply({ action: "draft.save", requestId: "capacity-" + revision,
     sourceId: "note", sourceRevision: 1, expectedRevision: revision, body: "Final capacity reply" });
   const request = f.reserve(); f.apply(request);
