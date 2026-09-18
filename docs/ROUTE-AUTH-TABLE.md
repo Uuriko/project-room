@@ -173,8 +173,8 @@ the served-open set differs from the declared set; `node scripts/open-routes.mjs
 | `POST /api/inbox/webhooks/:connectionId` | per-connection webhook secret header | see Inbox connection routes below |
 | `POST /api/auth/recovery-codes/redeem` | capability (verified email hint + recovery code; 10/address/min + 10/email-hint/15min) | open by design: the same 401 `invalid_recovery_code` for unknown email, no set, or wrong code; a successful redeem burns the code and upgrades the caller's session slot |
 | `POST /api/auth/passkey/authenticate/options` | none (anonymous ceremony step, same-origin POST; 20/address/min) | open by design: issues the WebAuthn authentication challenge (discoverable-credential flow); grants nothing by itself |
-| `POST /api/auth/passkey/authenticate/finish` | verified passkey assertion + slot token in the body (same-origin POST; 10/address/min) | open by design: verifies the assertion, resolves the account from the credential id, and upgrades the caller's anonymous slot; the same 401 `passkey_verification_failed` shape for bad challenges, failed assertions, and unknown credentials |
-
+| `POST /api/auth/passkey/authenticate/finish` | verified passkey assertion + slot token in the body (same-origin POST; 10/address/min) | open by design: verifies the assertion, resolves the account from the credential id, and upgrades the caller's anonymous slot; the same 401 `passkey_verification_failed` shape for bad challenges, failed assertions, and unknown credentials || `POST /api/auth/password/signup` | none (10/address/min) | open by design: provisions an `email:<sha256>` account and links password + magic-link methods; an invalid session slot leaves the account unprovisioned; duplicate email is 409 `already_registered` |
+| `POST /api/auth/password/login` | none (60/address/min + 10/email/min) | open by design: the same 401 `invalid_credentials` for unknown email, wrong password, or no password set; a successful login upgrades the caller's session slot |
 ## Account routes (account session, not room credentials)
 
 | Method + route | Credential | Store-level authorization |
@@ -182,6 +182,7 @@ the served-open set differs from the declared set; `node scripts/open-routes.mjs
 | `GET /api/account-rooms` | account session cookie + `X-Session-Binding` | the account's own current memberships only (a left or revoked membership disappears on the next read); each entry carries `kind` and `archived` |
 | `POST /api/account-rooms` | account session cookie + `X-Session-Binding` + CSRF (`protectWrite`), 10/min per account | canonical account with an active human membership that is a room owner or holds `manage_members` (403 `room_creation_denied` otherwise, including provisional room-key accounts); the caller becomes member `owner` of the new room; client `roomId` is the idempotency key (200 `duplicate: true` on replay, 409 `room_exists` for a different room under that id); 409 `pilot_limit` at 100 memberships |
 | `GET /api/auth/recovery-codes/status` | account session cookie | `{ configured, remaining }` for the account's own recovery-code set; codes are never exposed (no re-display route) |
+| `POST /api/auth/password/change` | account session cookie + `Origin` (20/address/min) | verifies the current password, policy-checks the new one (10–256 characters), and replaces the stored scrypt verifier; the old password stops working immediately |
 
 ## Inbox connection routes (account session, not room credentials)
 
