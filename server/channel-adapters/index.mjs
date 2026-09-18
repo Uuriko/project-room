@@ -8,9 +8,11 @@ import * as email from "./email.mjs";
 import * as telegram from "./telegram.mjs";
 import * as gmail from "./gmail.mjs";
 import * as whatsapp from "./whatsapp.mjs";
+import * as discord from "./discord.mjs";
+import * as slack from "./slack.mjs";
 import { ContractError, channelProviders, profileChannel } from "../channel-connection.mjs";
 
-export const channelAdapters = Object.freeze(new Map([email, telegram, gmail, whatsapp].map(adapter => [adapter.provider, adapter])));
+export const channelAdapters = Object.freeze(new Map([email, telegram, gmail, whatsapp, discord, slack].map(adapter => [adapter.provider, adapter])));
 for (const [channel, providers] of Object.entries(channelProviders)) {
   for (const provider of providers) if (channelAdapters.get(provider)?.channel !== channel) throw new Error(`Channel adapter missing for ${provider}`);
 }
