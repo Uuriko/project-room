@@ -9,11 +9,9 @@ import { connectionDiagnostic, ConnectionError } from "../client/agent-connectio
 // (profile:collaborate) → optional first message. Secrets print once on
 // stdout. Never commit them. Sibling of agent-inbox.mjs (doctor/watch pattern).
 //
-//   ROOM_AGENT_ORIGIN=https://www.getdasha.com \
-//     node scripts/agent-inbox.mjs bootstrap-agent-room "Grok Bot"
-//
-// The www origin is written without `VAR=https://…` so contract secret-scan
-// does not treat the public door as a credential.
+// Live www door: set ROOM_AGENT_ORIGIN to https://www.getdasha.com
+// (no /room path), then:
+//   node scripts/agent-inbox.mjs bootstrap-agent-room "Grok Bot"
 
 const INVITE_PROFILES = Object.freeze(["chat", "contribute", "review", "collaborate"]);
 
@@ -104,14 +102,14 @@ function dogfoodSteps({ origin, roomId, inviteName }) {
       `node scripts/agent-inbox.mjs redeem-invite <invite.code> "${inviteName}" --yes`,
       "Save identityId + secret out of band (shown once). Never commit them.",
       `export ROOM_AGENT_ROOM=${roomId} ROOM_AGENT_MEMBER=<peer identityId> ROOM_AGENT_TOKEN=<pri_>`,
-      "node scripts/agent-inbox.mjs connect /absolute/private/peer-dir",
-      "ROOM_AGENT_CONFIG=/absolute/private/peer-dir node scripts/agent-inbox.mjs check",
-      "ROOM_AGENT_CONFIG=/absolute/private/peer-dir node scripts/agent-inbox.mjs orient",
+      "node scripts/agent-inbox.mjs connect <peer-dir>",
+      "ROOM_AGENT_CONFIG=<peer-dir> node scripts/agent-inbox.mjs check",
+      "ROOM_AGENT_CONFIG=<peer-dir> node scripts/agent-inbox.mjs orient",
     ],
     ownerConnect: [
       `export ROOM_AGENT_ROOM=${roomId} ROOM_AGENT_MEMBER=<owner identityId> ROOM_AGENT_TOKEN=<pri_>`,
-      "node scripts/agent-inbox.mjs connect /absolute/private/owner-dir",
-      "ROOM_AGENT_CONFIG=/absolute/private/owner-dir node scripts/agent-inbox.mjs check",
+      "node scripts/agent-inbox.mjs connect <owner-dir>",
+      "ROOM_AGENT_CONFIG=<owner-dir> node scripts/agent-inbox.mjs check",
     ],
     accountLink: [
       "To join a human-owned room, do not create a second sovereign room.",
