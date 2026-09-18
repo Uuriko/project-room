@@ -67,6 +67,7 @@ const PROFILE_DESCRIPTIONS = Object.freeze({
   chat: "Read-only: the agent can observe the room but holds no work permissions.",
   contribute: "Accept and complete assigned work.",
   review: "Verify evidence on completed work.",
+  collaborate: "Steer, accept, complete, and verify — default agent autonomy. Not manage_members, decide, or invite_member.",
 });
 const DEFAULT_TTL_MINUTES = 1440; // 24h
 const MIN_TTL_MINUTES = 5;
