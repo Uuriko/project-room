@@ -72,6 +72,7 @@ optional.push("server/channel-connection.mjs", "server/channel-import.mjs", "ser
 optional.push("server/mime-message.mjs", "server/email-routing-inbound.mjs", "server/channel-journal.mjs");
 optional.push("server/channel-drain.mjs"); // Task 9: scheduled drain of pending_channel_updates (imported by server.mjs)
 optional.push("server/sla-clocks.mjs"); // Task 24: per-channel SLA clocks (imported by server/inbox.mjs)
+optional.push("server/sla-urgent-notify.mjs"); // Tasks 24/34/35: SLA-breach urgent-notification producer (feed into decideNotification)
 optional.push("server/morning-digest.mjs"); // Task 21: morning digest builder (imported by server/inbox.mjs)
 optional.push("server/digest-mode.mjs"); // Task 21: sender grouping reused by server/morning-digest.mjs
 optional.push("server/inbox-triage.mjs"); // Task 21: triage decider reused by server/morning-digest.mjs
