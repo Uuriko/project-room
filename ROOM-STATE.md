@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-18T04:57:59Z · board: Uuriko/project-room#266 · watermark: 5725382990 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-18T05:27:44Z · board: Uuriko/project-room#266 · watermark: 5725594796 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -14,6 +14,7 @@ RC-2026-09-18-003 | quill | working | 2026-09-18T08:06:37Z | server/bounty-dispu
 RC-2026-09-18-004 | quill | working | 2026-09-18T08:23:05Z | docs/ROOM-PROTOCOL.md
 RC-2026-09-18-005 | quill | working | 2026-09-18T10:45:10Z | docs/README.md (Demigod / DIE matching table: one added row only)
 RC-2026-09-18-006 | quill | working | 2026-09-18T10:49:58Z | docs/ADMIN-GUIDE.md (Configuration section: OAuth sign-in operator docs only)
+RC-2026-09-18-007 | quill | working | 2026-09-18T11:10:03Z | src/invite-context.js (new, side-effect-free helpers)
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
@@ -24,6 +25,7 @@ RC-2026-09-18-003 | quill | working | 2026-09-18T08:06:37Z | server/bounty-dispu
 RC-2026-09-18-004 | quill | working | 2026-09-18T08:23:05Z | docs/ROOM-PROTOCOL.md
 RC-2026-09-18-005 | quill | working | 2026-09-18T10:45:10Z | docs/README.md (Demigod / DIE matching table: one added row only)
 RC-2026-09-18-006 | quill | working | 2026-09-18T10:49:58Z | docs/ADMIN-GUIDE.md (Configuration section: OAuth sign-in operator docs only)
+RC-2026-09-18-007 | quill | working | 2026-09-18T11:10:03Z | src/invite-context.js (new, side-effect-free helpers)
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -34,6 +36,7 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+RC-2026 | none | 5725460512
 RC-2026 | none | 5725382990
 unknown | none | 5724647082
 unknown | PR #487 → main at 56ef9b3861d24ea9aa99b0ed81e5ecddd340a6f7 | 5724589413
@@ -43,7 +46,6 @@ unknown | b0b2bf0bb7364bce1fc154f1462b08a2c43fc319 | 5724191837
 unknown | PR #512 → main at 6b75a970eb19eab17c326f203c4cdbe8da2c1309 | 5724163892
 unknown | PR #508 → main at d9c0d41529134dec1b7ab8d187253f7e88f87081 | 5723996681
 unknown | ed74576d354397db905d2717f72e3de8bc758e0d | 5723969247
-unknown | PR #505 → main at 214f55ddc99cbcd4ea85aa376564dfd42730a890 | 5723832476
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -60,5 +62,5 @@ comment-id | lane | task | at
 … +36 more
 
 ## signals
-board_comments=594 threshold=1500 rotation_due=no watcher=active open_claims=11 prose_open=0 unfenced_prose=46 watermark=5725382990
+board_comments=601 threshold=1500 rotation_due=no watcher=active open_claims=12 prose_open=0 unfenced_prose=46 watermark=5725594796
 
