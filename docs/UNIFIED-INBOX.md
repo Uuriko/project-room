@@ -347,6 +347,43 @@ owner drains the journal from anywhere through `POST
 local recordings), and the bot token and `setWebhook` registration follow the
 Live Telegram steps below; the bindings are set by John or Grok, never in code.
 
+## Spam guard and quiet hours
+
+Inbound scoring extends `server/inbox-spam.mjs` and notification delivery
+extends `server/notify-prefs.mjs`; both are pure modules the import path calls
+into, and neither touches login/auth.
+
+**Spam guard** (`server/inbox-spam.mjs`):
+- `flagMessage(value, { context })` — the original body-only scan is unchanged
+  when `context` is omitted. The context adds sender-reputation scoring
+  (`reputationScore` 0..100), bulk-pattern detection (`recipients`,
+  `burstCount`), and Telegram signals: bot impersonation (`botName`/`botHandle`/
+  `senderHandle`), giveaway/airdrop lures, `t.me` join lures, and generic
+  bot-spam phrasing.
+- `createSenderReputation()` — per-sender history with outcomes
+  `clean | flagged | quarantined | spam_confirmed`; labels `unknown | trusted |
+  neutral | watch | bad`. A single `spam_confirmed` or three quarantines marks
+  a sender `bad`, which feeds the `bad_reputation` signal (25) on future mail.
+- `createQuarantineQueue()` — quarantined mail is **never silently dropped**:
+  it enters an owner-review queue as `pending` and stays there until an owner
+  `review()`s it `release` (back to the inbox) or `confirm_spam`. Records are
+  final and retained after review, with reviewer and timestamp. Auto-quarantine
+  policy itself is John's call (task 33); the guard ships flag-only by default.
+
+**Quiet hours** (`server/notify-prefs.mjs`):
+- `setQuietHours(userId, { start, end, tz })` — a half-open local window
+  `[start, end)` ("HH:MM", IANA tz; overnight wrap supported; `start === end`
+  disables).
+- `setConnection(userId, { connectionId, channel, batching, quietHours })` —
+  per-connection schedule with optional quiet-hours override and
+  `batching: immediate | digest`.
+- `decideNotification(userId, { connectionId, urgent, at })` returns one of
+  `deliver | hold | muted`: muted levels silence everything; `urgent: true`
+  (set by the SLA-breach path) delivers even in quiet hours; non-urgent pings
+  inside quiet hours — or on a `digest`-batched connection — are `hold`ed for
+  the morning digest. Re-deciding the same payload when the window ends
+  returns `deliver`, which is how held items release.
+
 ## Status: email is fixture only; Telegram is live once configured
 
 The email adapter reads recorded fixtures: no mailbox is polled and nothing is
