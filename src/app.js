@@ -19,8 +19,9 @@ import { installInbox } from "./inbox-ui.js";
 import { createAccountSettingsUI } from "./account-settings-ui.js";
 import { createAuthSigninUI } from "./auth-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite } from "./invite-context.js";
-import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash } from "./room-deep-link.js";
+import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanelTitle, KEY_KIND_HINT } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
+import { rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, clearBrowserSessionHints, SESSION_HINT_COPY } from "./browser-session.js";
 
 const $ = selector => document.querySelector(selector);
 $("#skip-link").addEventListener("click", event => {
@@ -168,6 +169,7 @@ const client = new RoomClient({
     $(".connection-bar").hidden = false;
     $("#signout-button").hidden = false; $("#signout-button").disabled = signoutLoading;
     $("#account-settings-button").hidden = false;
+    syncSessionMenu();
     $("#identity-label").textContent = displayName(session.member.id);
     $("#identity-label").title = `${memberLabel(session.member.id)} · ${kindLabel(session.member.kind)}`;
     $("#cursor-label").textContent = `Your caught-up marker: ${snapshot.cursor} · room event ${snapshot.sequence}`;
@@ -179,7 +181,10 @@ const client = new RoomClient({
     agentConnectionsUI?.sync();
     agentInvitesUI?.sync();
     updatePeopleHint();
-    if (firstSnapshot) showRoomGuide();
+    if (firstSnapshot) {
+      rememberLastRoom(roomId, undefined, state.room?.title);
+      showRoomGuide();
+    }
     instructionsUI?.sync();
     resultCopyUI?.sync();
     portableWorkUI?.sync();
@@ -226,7 +231,10 @@ const client = new RoomClient({
     agentConnectionsUI?.reset();
     agentInvitesUI?.reset();
     instructionsUI?.reset();
-    if (!keepAccount) clearPrivateWorkspace({ preservePending: leavingPage });
+    if (!keepAccount) {
+      clearPrivateWorkspace({ preservePending: leavingPage });
+      if (pendingSignout || endedContext === "account-switch") clearBrowserSessionHints();
+    }
     else inboxUI?.detachRoom();
     workDraftId = null; replyToId = null; workFormEpoch++; setWorkRetry(false);
     syncRoomLifecycle();
@@ -241,6 +249,7 @@ const client = new RoomClient({
     workFormOpener = null; clearNotice();
     $("#main").hidden = true; $("#auth-panel").hidden = false; $("#signout-button").hidden = true;
     $("#account-settings-button").hidden = true;
+    syncSessionMenu();
     $("#auth-panel").setAttribute("aria-busy", pendingSignout ? "true" : "false");
     $("#identity-label").textContent = "Not signed in";
     $("#identity-label").removeAttribute("title");
@@ -342,6 +351,7 @@ const signinUI = createAuthSigninUI({
   }
 });
 signinUI.mount($("#auth-signin-ui"));
+if ($("#session-hint")) $("#session-hint").textContent = SESSION_HINT_COPY;
 function openAccountSettings() {
   setSessionMenuOpen(false);
   if (!accountClient.session?.authenticated) return;
@@ -366,8 +376,10 @@ function endAccountAccess() {
 }
 function showAccountWorkspace() {
   if (!accountClient.session?.authenticated) return;
+  rememberAccountHint();
   $("#auth-panel").hidden = true; $("#signout-button").hidden = false; $("#signout-button").disabled = signoutLoading;
   $("#account-settings-button").hidden = false;
+  syncSessionMenu();
   if (!state) {
     $("#identity-label").textContent = "Personal account";
     $("#identity-label").title = accountClient.session.account.id;
@@ -660,17 +672,96 @@ function setInvitationFeedback(text, error = false) {
     });
   }
 }
+function roomHandoffLocation(roomId) {
+  // In-app navigation keeps the historical ?room= contract. Door Open/People
+  // already attach both ?room= and #room/ so hash-dropping browsers survive.
+  return `${location.pathname}?room=${encodeURIComponent(roomId)}`;
+}
 function configureAuthPanel(roomId = selectedRoomFromLocation()) {
   const accountMode = accountSignIn();
-  $("#auth-title").textContent = roomId && accountMode ? "Open this room" : "Welcome.";
+  const roomTitle = readLastRoomTitle(roomId);
+  $("#auth-title").textContent = authPanelTitle(roomId, roomTitle);
+  const roomHint = $("#auth-room-hint");
+  if (roomHint) {
+    roomHint.hidden = true;
+    roomHint.textContent = "";
+  }
+  if ($("#auth-kind-hint")) $("#auth-kind-hint").textContent = KEY_KIND_HINT;
   $("#access-key-label").textContent = accountMode ? "Account key" : "Room key";
   $("#auth-kind-room")?.setAttribute("aria-pressed", accountMode ? "false" : "true");
   $("#auth-kind-account")?.setAttribute("aria-pressed", accountMode ? "true" : "false");
   $("#auth-kind-room")?.classList.toggle("suggested", Boolean(accountMode && roomId));
   $("#auth-form button[type='submit']").textContent = accountMode ? (roomId ? "Open room" : "Sign in") : "Enter room";
-  // If the visitor clearly came for a key or invite flow, skip the collapsed first paint.
-  const cameForKeys = accountMode || (typeof location !== "undefined" && location.hash.startsWith("#invite/"));
-  if (cameForKeys) setSigninExtra(true);
+  // OAuth invite stash lands on #invite/<43-char>. Keep first paint collapsed otherwise.
+  if (typeof location !== "undefined" && location.hash.startsWith("#invite/")) setSigninExtra(true);
+  syncSessionRestore();
+  syncSessionMenu();
+}
+function syncSessionRestore() {
+  const lastRoom = readLastRoom();
+  const account = Boolean(accountClient.session?.authenticated);
+  const panel = $("#session-restore");
+  if (panel) panel.hidden = !lastRoom && !account;
+  const reopen = $("#reopen-last-room");
+  if (reopen) {
+    reopen.hidden = !lastRoom;
+    const title = readLastRoomTitle(lastRoom);
+    reopen.textContent = lastRoom ? `Reopen ${title || `#${lastRoom}`}` : "Reopen last room";
+  }
+  const cont = $("#continue-account");
+  if (cont) cont.hidden = !account;
+  syncSessionMenu();
+}
+function syncSessionMenu() {
+  const menu = $("#session-menu");
+  const signedIn = Boolean(state || accountClient.session?.authenticated);
+  const leftovers = Boolean(readLastRoom() || readAccountHint());
+  const clearBtn = $("#clear-session-menu");
+  if (clearBtn) clearBtn.hidden = signedIn || !leftovers;
+  menu?.classList.toggle("empty", !signedIn && !leftovers);
+}
+async function reopenRememberedRoom() {
+  const lastRoom = readLastRoom();
+  if (!lastRoom || signoutLoading || busy) return;
+  setFormStatus($("#auth-error"), "");
+  try {
+    const account = await ensureAccountSession().catch(() => null);
+    if (account?.authenticated) {
+      history.replaceState(history.state, "", roomHandoffLocation(lastRoom));
+      configureAuthPanel(lastRoom);
+      await client.restore(lastRoom);
+      return;
+    }
+    await client.restore();
+  } catch (error) {
+    setFormStatus($("#auth-error"), [401, 403].includes(error.status)
+      ? `This browser could not reopen #${lastRoom}. Sign in again.`
+      : unreachableRoomMessage(error), true);
+    syncSessionRestore();
+  }
+}
+async function continueAccountSession() {
+  if (signoutLoading || busy) return;
+  try {
+    const account = await ensureAccountSession();
+    if (account?.authenticated) showAccountWorkspace();
+    else setFormStatus($("#auth-error"), "Sign in to continue to your rooms.", true);
+  } catch (error) {
+    setFormStatus($("#auth-error"), [401, 403].includes(error.status)
+      ? "Sign in to continue to your rooms."
+      : unreachableRoomMessage(error), true);
+  }
+  syncSessionRestore();
+}
+async function clearSavedBrowserSession() {
+  if (signoutLoading || busy) return;
+  clearBrowserSessionHints();
+  if (accountClient.session) {
+    try { await accountClient.logout(); } catch { /* slot may already be anonymous */ }
+    endAccountAccess();
+  }
+  syncSessionRestore();
+  setFormStatus($("#auth-error"), "Saved session on this browser was cleared.", true);
 }
 function setAuthKind(kind) {
   authKind = kind === "account" ? "account" : "room";
@@ -684,7 +775,7 @@ function setAuthKind(kind) {
 }
 function updatePeopleHint() {
   const hint = $("#people-hint");
-  if (hint) hint.textContent = "your Second / their agents / one Room. Agent handles stay loud. Done lands as a receipt. Create your Room (bootstrap-agent-room / POST /room/api/agent-rooms), then invite peers.";
+  if (hint) hint.textContent = "your Second / their agents / one Room. Agent handles stay loud. Done lands as a receipt. Create your Room (bootstrap-agent-room / POST /room/api/agent-rooms), then invite peers. Invite a person: they Open this invite link. Agents use an invite-code (RM-).";
 }
 function dismissRoomGuide() {
   if ($("#room-guide")) $("#room-guide").hidden = true;
@@ -900,7 +991,7 @@ async function openAcceptedRoom(roomId, message, { acceptanceConfirmed = true } 
   $("#invitation-account-form").reset();
   accessEndContext = acceptanceConfirmed ? "accepted-room-switch" : "invited-room-switch";
   client.endAccess();
-  history.replaceState(history.state, "", `${location.pathname}?room=${encodeURIComponent(roomId)}`);
+  history.replaceState(history.state, "", roomHandoffLocation(roomId));
   configureAuthPanel(roomId);
   try {
     const restored = await client.restore(roomId);
@@ -1898,7 +1989,7 @@ function setSigninExtra(open) {
   if (!extra || !toggle) return;
   extra.hidden = !open;
   toggle.setAttribute("aria-expanded", open ? "true" : "false");
-  toggle.textContent = open ? "Fewer sign-in options" : "More sign-in options";
+  toggle.textContent = open ? "Fewer options" : "More options";
 }
 $("#signin-more")?.addEventListener("click", () => {
   const extra = $("#signin-extra");
@@ -1906,6 +1997,9 @@ $("#signin-more")?.addEventListener("click", () => {
 });
 $("#auth-kind-room")?.addEventListener("click", () => setAuthKind("room"));
 $("#auth-kind-account")?.addEventListener("click", () => setAuthKind("account"));
+$("#reopen-last-room")?.addEventListener("click", () => { void reopenRememberedRoom(); });
+$("#continue-account")?.addEventListener("click", () => { void continueAccountSession(); });
+$("#clear-session")?.addEventListener("click", () => { void clearSavedBrowserSession(); });
 $("#access-key-reveal")?.addEventListener("click", () => {
   const field = $("#access-key"), show = field.type === "password";
   field.type = show ? "text" : "password";
@@ -1930,7 +2024,7 @@ function redeemInviteInput() {
   const err = $("#invite-error");
   const secret = inviteSecretFromText(input?.value ?? "");
   if (!secret) {
-    if (err) err.textContent = "That doesn't look like an invite link. Paste the full link you were given.";
+    if (err) err.textContent = "That doesn't look like an invite link. Paste the full invite link.";
     return;
   }
   if (err) err.textContent = "";
@@ -1971,6 +2065,7 @@ const setSessionMenuOpen = open => {
   sessionMenuButton.setAttribute("aria-expanded", String(open));
 };
 sessionMenuButton.addEventListener("click", () => setSessionMenuOpen(!sessionMenu.classList.contains("open")));
+$("#clear-session-menu")?.addEventListener("click", () => { setSessionMenuOpen(false); void clearSavedBrowserSession(); });
 document.addEventListener("keydown", event => {
   if (event.key === "Escape" && sessionMenu.classList.contains("open")) {
     setSessionMenuOpen(false);
@@ -3761,7 +3856,7 @@ shareLinksUI = installShareLinks({ client, accountClient, getState: () => state,
     }
     accessEndContext = "accepted-room-switch";
     client.endAccess();
-    history.replaceState(history.state, "", roomMode ? location.pathname : `${location.pathname}?room=${encodeURIComponent(roomId)}`);
+    history.replaceState(history.state, "", roomMode ? location.pathname : roomHandoffLocation(roomId));
     configureAuthPanel(roomMode ? null : roomId);
     const restored = await client.restore(roomMode ? null : roomId);
     if (!restored) throw new Error("Browser identity changed. Reopen the invitation.");
@@ -3799,7 +3894,34 @@ if (initialInvitationFragment) openInvitation(initialInvitationFragment);
     else await client.restore(requestedRoom);
     return;
   }
-  await client.restore();
+  try {
+    await client.restore();
+    return;
+  } catch (error) {
+    if (![401, 403].includes(error.status)) throw error;
+  }
+  if (readLastRoom() || readAccountHint()) {
+    let account = null;
+    try { account = await ensureAccountSession(); } catch { account = null; }
+    if (account?.authenticated) {
+      const lastRoom = readLastRoom();
+      if (lastRoom) {
+        try {
+          history.replaceState(history.state, "", roomHandoffLocation(lastRoom));
+          configureAuthPanel(lastRoom);
+          await client.restore(lastRoom);
+          return;
+        } catch (error) {
+          if (![401, 403].includes(error.status)) throw error;
+        }
+      }
+      showAccountWorkspace();
+      syncSessionRestore();
+      return;
+    }
+  }
+  syncSessionRestore();
+  throw Object.assign(new Error("sign in required"), { status: 401 });
 })().catch(error => {
   if (accountClient.session?.authenticated && [401, 403].includes(error.status)) {
     showAccountWorkspace(); confirmAccount(); return;

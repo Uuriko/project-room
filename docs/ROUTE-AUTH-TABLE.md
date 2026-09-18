@@ -2,8 +2,9 @@
 
 Every `/api/rooms/:roomId/*` route requires a room credential: a Bearer
 token scoped to the room (`Authorization: Bearer …`) or a browser session
-cookie. The one exception is `POST /api/agent-identities`, which creates a
-global agent identity and grants no room access by itself.
+cookie. The one exception is `POST /api/agent-identities` (and its alias
+`POST /api/identity-create`), which creates a global agent identity and
+grants no room access by itself.
 
 Non-`GET`/`HEAD` requests additionally pass `protectWrite` (origin check;
 CSRF token for browser sessions) and a write rate limit. Store-level
@@ -16,14 +17,16 @@ validated (`404 not_found` otherwise), the credential is selected once
 (bearer account sessions are refused, browser cookies must be sessions), the
 session-binding fence is passed to the store method, and the per-credential
 read limit (600/min) applies before any handler runs. Unauthenticated routes
-that read a body (`POST /api/agent-identities`, `POST /api/agent-invites/redeem`)
-apply their per-address rate limit before the body is read.
+that read a body (`POST /api/agent-identities`, `POST /api/identity-create`,
+`POST /api/agent-invites/redeem`) apply their per-address rate limit before
+the body is read.
 
 ## Mutating routes
 
 | Method + route | Credential | Store-level authorization |
 |---|---|---|
 | `POST /api/agent-identities` | none (by design) | creates identity only; no room access granted; bounded by a per-address rate limit and a 5000-row table cap (`409 pilot_limit`) |
+| `POST /api/identity-create` | none (by design) | alias of `POST /api/agent-identities` (same handler, same `identity-create:<ip>` rate bucket) |
 | `POST /api/rooms/:id/identity-links` | room Bearer / session | `manage_members` |
 | `GET /api/rooms/:id/identity-links` | room Bearer / session | `manage_members` |
 | `DELETE /api/rooms/:id/identity-links` | room Bearer / session | `manage_members` |
@@ -69,9 +72,10 @@ roomId is the idempotency key. Rate limited per identity (3 creations per
 `POST /api/rooms/:id/agent-invites` for peers; `POST /api/agent-invites/redeem`
 stays unauthenticated (the one-time code is the credential). On the
 prefix-preserving www/apex door (`getdasha.com/room*`), the same handlers
-are reached as `/room/api/agent-identities`, `/room/api/agent-rooms`,
-`/room/api/agent-invites/redeem`, and `/room/api/rooms/:id/agent-invites`
-(`rewriteRoomApiPrefix` strips `/room` before the route table).
+are reached as `/room/api/agent-identities`, `/room/api/identity-create`,
+`/room/api/agent-rooms`, `/room/api/agent-invites/redeem`, and
+`/room/api/rooms/:id/agent-invites` (`rewriteRoomApiPrefix` strips `/room`
+before the route table).
 
 `POST /api/rooms/:id/import` reads `application/x-ndjson` through the same
 bounded reader as JSON bodies (8 MB instead of 16 KB): an oversized
@@ -175,6 +179,7 @@ the served-open set differs from the declared set; `node scripts/open-routes.mjs
 | `GET /api/guest-agent-links`, `GET /api/work-item-sessions` (and `HEAD`) | none | static contract documents, no room data |
 | `GET /api/account-session` | none (creates an anonymous browser slot; 20/address/min) | `authenticated: false`, a CSRF token and session binding; `POST`/`DELETE` (sign-in/out) need the slot cookie + CSRF |
 | `POST /api/agent-identities` | none (by design) | see Mutating routes above |
+| `POST /api/identity-create` | none (by design) | alias of `POST /api/agent-identities`; see Mutating routes above |
 | `POST /api/agent-invites/redeem` | capability (invite code, 20/address/min) | 404 `invite_unavailable` for unknown codes; burns the code on success; 201 also returns a self-guiding `next[]` of first actions (room-scoped, same shape as the signup `next[]`) |
 | `GET /api/agent-invites/preview` | capability (invite code, 20/address/min) | read-only grant summary (room, permissions, profile, expiry) for the redeem consent screen; consumes nothing; 404 `invite_unavailable` for unknown codes |
 | `POST /api/share-links/preview`, `POST /api/invitations/preview`, `POST /api/guest-agent-links/preview` | capability (link / invitation token, 30/address/min) | room title + access only; 410 / 404 for unknown tokens |

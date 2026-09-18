@@ -63,6 +63,7 @@ test("the real spec declares the account-session inbox routes guarded and the we
   assert.deepEqual(by("POST", "/api/inbox/connections/{id}/reconnect"), ["accountSession"]);
   assert.deepEqual(by("POST", "/api/inbox/webhooks/{connectionId}"), []);
   assert.deepEqual(by("POST", "/api/agent-identities"), []);
+  assert.deepEqual(by("POST", "/api/identity-create"), []);
   assert.equal(by("POST", "/api/rooms/{roomId}/commands"), null);
 });
 

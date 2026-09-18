@@ -330,6 +330,45 @@ test("identity-link rejects bad arglists at the CLI boundary", async t => {
   }
 });
 
+test("POST /api/identity-create is the same handler as /api/agent-identities", async t => {
+  const { origin } = await serve(t);
+  const created = await fetch(`${origin}/api/identity-create`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin },
+    body: JSON.stringify({ displayName: "Alias Bot" })
+  });
+  assert.equal(created.status, 201);
+  const value = await created.json();
+  assert.match(value.identityId, /^ai_/);
+  assert.match(value.secret, /^pri_/);
+  assert.equal(value.displayName, "Alias Bot");
+  assert.ok(Array.isArray(value.next) && value.next.length >= 4);
+  const missing = await fetch(`${origin}/api/identity-create`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin },
+    body: JSON.stringify({})
+  });
+  assert.equal(missing.status, 422);
+  assert.equal((await missing.json()).error.code, "invalid_identity");
+});
+
+test("POST /room/api/identity-create aliases the www enrollment path", async t => {
+  const { origin } = await serve(t);
+  const created = await fetch(`${origin}/room/api/identity-create`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin },
+    body: JSON.stringify({ displayName: "Edge Alias" })
+  });
+  assert.equal(created.status, 201);
+  const value = await created.json();
+  assert.match(value.identityId, /^ai_/);
+  assert.match(value.secret, /^pri_/);
+  const canonical = await fetch(`${origin}/api/agent-identities`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin },
+    body: JSON.stringify({ displayName: "Canonical Twin" })
+  });
+  assert.equal(canonical.status, 201);
+  const twin = await canonical.json();
+  assert.notEqual(value.identityId, twin.identityId);
+});
+
 test("identity-create returns machine-readable next steps for a cold agent (RC-2026-09-18-018)", async t => {
   const { origin } = await serve(t);
   const created = await fetch(`${origin}/api/agent-identities`, {

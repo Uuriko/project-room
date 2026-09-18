@@ -29,6 +29,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('src/account-settings-ui.js');
   paths.add('src/auth-signin-ui.js'); // Multi-method sign-in / create-account UI (imported by src/app.js, slice 7)
   paths.add('src/room-deep-link.js');
+  paths.add('src/browser-session.js');
   paths.add('src/agent-invite-ui.js');
   paths.add('deploy/agent-discovery.mjs');
   paths.add('deploy/room-entry.mjs');

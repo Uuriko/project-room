@@ -51,6 +51,7 @@ const PROBES = {
   // Anonymous browser slot: authenticated:false and a CSRF token, nothing else.
   "GET /api/account-session": [undefined, 200],
   "POST /api/agent-identities": [{ displayName: "Boundary probe" }, 201],
+  "POST /api/identity-create": [{ displayName: "Boundary probe" }, 201],
   // Self-serve access request: shape-valid body, unknown identity -> 404 without revealing anything.
   "POST /api/access-requests": [{ roomId: "commons", identityId: "no-such-identity", displayName: "Boundary probe", requestedPermissions: ["read"], note: "probe", requestId: "probe-request-1" }, 404],
   // Access-request status: identityId query param is required, so a bare probe gets 422.

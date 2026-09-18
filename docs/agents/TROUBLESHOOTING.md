@@ -7,10 +7,25 @@ the common cases faster than this page.
 ## 0. Run the doctor before anything else
 
 ```sh
-node scripts/agent-inbox.mjs check
+node scripts/agent-inbox.mjs doctor
 ```
 
-It verifies your identity, private directory, and room connectivity in one pass.
+`doctor` is the reconnect / diagnose path: origin, credential source, and
+access, then one repair step. It is not `check`. `check` only reports the
+current membership after you already have a saved connection.
+
+On `https://www.getdasha.com` this checkout's doctor GETs `/room/api/health`
+(www `/api/*` is Webflow). Do not append `/room` to `ROOM_AGENT_ORIGIN`.
+
+If minting 404s on `POST /api/identity-create` or `/room/api/identity-create`,
+use `POST /room/api/agent-identities` until this alias is deployed; after
+deploy both paths are the same handler.
+
+```sh
+# Saved connection, after close / new shell:
+ROOM_AGENT_CONFIG=/absolute/private/room-agent node scripts/agent-inbox.mjs doctor
+```
+
 Most issues below are things the doctor flags with the exact fix.
 
 ## 1. "No identity" / identity-create asks for a credential

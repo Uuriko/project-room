@@ -13,6 +13,13 @@ import { createRoomServer } from "../server/http.mjs";
 import { hashPassword } from "../src/password-auth.mjs";
 import { fillAccessKey } from "./auth-signin.mjs";
 
+async function expandSignInOptions(page) {
+  const more = page.locator("#signin-more");
+  const extra = page.locator("#signin-extra");
+  if (await more.count() && await extra.isHidden()) await more.click();
+  await extra.waitFor({ state: "visible" });
+}
+
 async function setup(t) {
   const f = createAcceptanceFixture();
   const accountId = "slice7-browser";
@@ -59,8 +66,8 @@ test("account settings: methods render, disable/enable/remove, recovery codes, h
   assert.ok((await body.textContent()).includes("browser@example.invalid"));
 
   // Honest provider-unconfigured states (no OAuth or mail bindings in the fixture).
-  for (const note of ["GitHub sign-in isn\u2019t configured on this Room.",
-    "Google sign-in isn\u2019t configured on this Room.", "Email delivery isn\u2019t configured on this Room"]) {
+  for (const note of ["GitHub sign-in isn’t configured on this Room.",
+    "Google sign-in isn’t configured on this Room.", "Email delivery isn’t configured on this Room"]) {
     await body.getByText(note, { exact: false }).first().waitFor();
   }
 
@@ -101,6 +108,7 @@ test("sign-in UI: password signup, magic honest-unconfigured, recovery-code logi
   // 1. Email+password create-account through the real UI lands on the account workspace.
   const signup = await freshPage();
   await signup.goto(origin + "/?account=1");
+  await expandSignInOptions(signup);
   await signup.getByRole("button", { name: "Email + password" }).click();
   await signup.locator('[data-signin-form="password"] [name="email"]').fill("signin-browser@example.invalid");
   await signup.locator('[data-signin-form="password"] [name="password"]').fill("fixture-password-browser-1");
@@ -110,6 +118,7 @@ test("sign-in UI: password signup, magic honest-unconfigured, recovery-code logi
   // 2. Magic link is honest when no mail provider is configured.
   const magic = await freshPage();
   await magic.goto(origin + "/?account=1");
+  await expandSignInOptions(magic);
   await magic.getByRole("button", { name: "Magic link" }).click();
   await magic.locator('[data-signin-form="magic-request"] [name="email"]').fill("magic-browser@example.invalid");
   await magic.locator('[data-signin-form="magic-request"] button[type="submit"]').click();
@@ -123,6 +132,7 @@ test("sign-in UI: password signup, magic honest-unconfigured, recovery-code logi
   assert.ok(codes.length >= 1);
   const recovery = await freshPage();
   await recovery.goto(origin + "/?account=1");
+  await expandSignInOptions(recovery);
   await recovery.getByRole("button", { name: "Recovery code" }).click();
   await recovery.locator('[data-signin-form="recovery"] [name="email"]').fill("recovery-browser@example.invalid");
   await recovery.locator('[data-signin-form="recovery"] [name="code"]').fill(codes[0]);
@@ -135,17 +145,19 @@ test("sign-in UI: password signup, magic honest-unconfigured, recovery-code logi
   // of sending the user to GitHub.
   const github = await freshPage();
   await github.goto(origin + "/?account=1");
+  await expandSignInOptions(github);
   await Promise.all([
     github.waitForURL("**/api/auth/github/start"),
     github.getByRole("button", { name: "Continue with GitHub" }).click(),
   ]);
-  await github.getByRole("heading", { name: "GitHub sign-in isn\u2019t configured" }).waitFor();
+  await github.getByRole("heading", { name: "GitHub sign-in isn’t configured" }).waitFor();
   await github.getByRole("link", { name: "Back to sign-in" }).click();
   await github.waitForURL("**/?account=1");
 
   // 5. The passkey form renders (headless Chromium has no authenticator to complete with).
   const passkey = await freshPage();
   await passkey.goto(origin + "/?account=1");
+  await expandSignInOptions(passkey);
   await passkey.getByRole("button", { name: "Passkey" }).click();
   await passkey.locator('[data-signin-form="passkey"]').waitFor();
 });
@@ -170,6 +182,7 @@ test("sign-in UI: magic-link happy path with a configured mailer, password login
   f.store.accountLogins.linkMagicMethod(magicId, { email: "magic-browser@example.invalid" });
   const magic = await freshPage();
   await magic.goto(origin + "/?account=1");
+  await expandSignInOptions(magic);
   await magic.getByRole("button", { name: "Magic link" }).click();
   await magic.locator('[data-signin-form="magic-request"] [name="email"]').fill("magic-browser@example.invalid");
   await magic.locator('[data-signin-form="magic-request"] button[type="submit"]').click();
@@ -186,6 +199,7 @@ test("sign-in UI: magic-link happy path with a configured mailer, password login
   f.store.accountLogins.linkPasswordMethod(pwId, { email: "pw-browser@example.invalid", verifier: hashPassword("fixture-password-login") });
   const login = await freshPage();
   await login.goto(origin + "/?account=1");
+  await expandSignInOptions(login);
   await login.getByRole("button", { name: "Email + password" }).click();
   await login.locator('[data-password-mode="login"]').click();
   await login.locator('[data-signin-form="password"] [name="email"]').fill("pw-browser@example.invalid");

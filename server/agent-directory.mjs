@@ -35,6 +35,7 @@ const check = (condition, message) => { if (!condition) fail("invalid_directory"
 const AGENT_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const VISIBILITIES = ["public", "room", "private"];
+const TRUST_STATUSES = ["active", "paused", "revoked"];
 
 const validateCard = card => {
   check(card !== null && typeof card === "object", "card must be an object");
@@ -63,10 +64,47 @@ const freezeDeep = node => {
   return node;
 };
 
+// Validate one trust-evidence record from the trust source. Returns a frozen
+// record, or null when the source has nothing for the agent. Trust evidence
+// is host-supplied (approver, authority envelope, lifecycle status, last
+// seen) — it is never self-asserted by the card publisher.
+const validateTrust = record => {
+  if (record === null || record === undefined) return null;
+  check(record !== null && typeof record === "object", "trust() must return an object or null");
+  const {
+    approvedBy = null,
+    approvedAt = null,
+    grants = [],
+    status = "active",
+    lastSeenAt = null,
+  } = record;
+  check(approvedBy === null || (typeof approvedBy === "string" && approvedBy.length > 0),
+    "trust.approvedBy must be a non-empty string or null");
+  check(approvedAt === null || (typeof approvedAt === "number" && approvedAt > 0),
+    "trust.approvedAt must be a positive number or null");
+  check(Array.isArray(grants) && grants.every(g => typeof g === "string" && g.length > 0),
+    "trust.grants must be a string array");
+  check(TRUST_STATUSES.includes(status),
+    `trust.status must be one of ${TRUST_STATUSES.join(", ")}`);
+  check(lastSeenAt === null || (typeof lastSeenAt === "number" && lastSeenAt > 0),
+    "trust.lastSeenAt must be a positive number or null");
+  return Object.freeze({
+    approvedBy,
+    approvedAt,
+    grants: Object.freeze([...grants]),
+    status,
+    lastSeenAt,
+  });
+};
+
 // Create an agent directory. store is a caller-owned Map (agentId -> entry).
-export function createAgentDirectory({ store, clock } = {}) {
+// trust is an optional function (agentId) => trust-evidence record or null,
+// letting the host attach verifiable trust evidence to each card document.
+// Without it, cards carry trust: null and the surface is unchanged.
+export function createAgentDirectory({ store, clock, trust } = {}) {
   check(store === undefined || store instanceof Map, "store must be a Map if given");
   check(clock === undefined || typeof clock === "function", "clock must be a function if given");
+  check(trust === undefined || typeof trust === "function", "trust must be a function if given");
   const entries = store ?? new Map();
   const now = clock ?? Date.now;
 
@@ -82,6 +120,10 @@ export function createAgentDirectory({ store, clock } = {}) {
     // (see agent-card-signing.mjs) and verify the signature offline.
     publicKey: entry.publicKey ?? null,
     signature: entry.signature ?? null,
+    // Host-supplied trust evidence: who approved this agent, when, with what
+    // authority envelope, its current lifecycle status, and when it was last
+    // seen. Null when the host supplies no trust source.
+    trust: validateTrust(trust ? trust(entry.agentId) : null),
     visibility: entry.visibility,
     publishedAt: entry.publishedAt,
     updatedAt: entry.updatedAt,

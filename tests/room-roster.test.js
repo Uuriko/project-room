@@ -81,6 +81,8 @@ test("reconnect copy is secret-free and names the host snippets", () => {
   assert.equal(/token/i.test(copy), false);
   assert.match(claudeMcpAddCommand(placeholderSnippetPaths()), /claude mcp add --transport stdio/);
   assert.match(reconnectCopy({ displayName: "Muse" }), /Use my AI/);
+  assert.match(copy, /agent-inbox\.mjs doctor/);
+  assert.match(reconnectCopy({ displayName: "Muse" }), /doctor/);
 });
 
 test("CLI prints Muse packet route and refuses to write host config", () => {
@@ -159,12 +161,18 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /id="google-signin"/);
   assert.match(html, /Continue with Google/);
   assert.match(html, /id="signin-more"/);
-  assert.match(html, /More sign-in options/);
+  assert.match(html, /More options/);
   assert.match(html, /id="signin-extra"/);
   assert.match(html, /id="invite-redeem"/);
-  assert.match(html, /Have an invite\?/);
+  assert.match(html, />Open this invite link</);
+  assert.match(html, /Have an invite/);
+  assert.match(html, /Open this invite link to invite a person/);
+  assert.doesNotMatch(html, /share <code>https:\/\/www\.getdasha\.com\/room#room\/\{roomId\}/);
+  assert.match(html, /id="auth-room-hint"/);
+  assert.match(html, /id="auth-kind-hint"/);
+  assert.match(html, /id="clear-session-menu"/);
   assert.match(html, /id="share-link-intro"/);
-  assert.match(html, /Send this link to a person/);
+  assert.match(html, /Open this invite link/);
   assert.match(html, /data-room-section="people"/);
   assert.match(html, /id="agent-import-checklist"/);
   assert.match(html, /id="agent-connect-route"/);
@@ -180,7 +188,8 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /How to invite someone/);
   assert.match(app, /How to add an agent/);
   assert.match(app, /How to open Inbox/);
-  assert.match(app, /Open this room/);
+  assert.match(app, /authPanelTitle/);
+  assert.match(app, /Open room/);
   assert.match(app, /data-empty-write/);
   assert.match(app, /data-empty-work/);
   assert.match(app, /Completed results appear here after work is finished/);
@@ -221,6 +230,11 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /reactionPills/);
   assert.doesNotMatch(app, /details class="reactions"/);
   assert.doesNotMatch(app, /reaction-menu/);
+  assert.match(html, /id="session-hint"/);
+  assert.match(html, /id="session-restore"/);
+  assert.match(html, /id="reopen-last-room"/);
+  assert.match(html, /id="continue-account"/);
+  assert.match(html, /id="clear-session"/);
   assert.match(html, /id="people-panel"/);
   assert.match(html, /id="connect-agent-button"/);
   assert.match(html, /id="message-input"/);
