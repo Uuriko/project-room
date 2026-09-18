@@ -1,7 +1,9 @@
-// Channel registry: provider -> adapter module. Every adapter is fixture driven
-// and exposes { channel, provider, readEnvelope, sourceId, scope, bind }.
+// Channel registry: provider -> adapter module. Every adapter exposes
+// { channel, provider, readEnvelope, sourceId, scope, bind }.
 // bind({ reader, connection, ... }) returns the uniform driver interface
-// { channel, provider, normalize(raw), changes({ cursor }), hydrate(id), submit(), lookup() }.
+// { channel, provider, normalize(raw), changes({ cursor }), hydrate(id), submit(), lookup() },
+// plus close() when the reader has a lifecycle (the live Telegram poller).
+// Readers start as fixtures; live drivers slot into the same bind.
 import * as email from "./email.mjs";
 import * as telegram from "./telegram.mjs";
 import * as gmail from "./gmail.mjs";

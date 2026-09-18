@@ -65,7 +65,7 @@ export async function prepareChannelFixturePage({ store, token, binding, connect
 }
 export const telegramFolderId = "updates"; // One getUpdates stream per bot.
 export async function prepareTelegramFixturePage({ store, token, binding, connectionId, reader, requestId = randomUUID(), reset = false }) {
-  requireContract(reader instanceof telegram.RecordedTelegramBot, "telegram_fixture_reader_required");
+  requireContract(telegram.isTelegramReader(reader), "telegram_reader_required");
   const captured = store.email.state(token, connectionId, telegramFolderId, binding);
   requireContract(emailDigest(reader.connection) === emailDigest(captured.connection.profile), "telegram_recording_scope_changed");
   const adapter = telegram.bind({ reader, connection: captured.connection.profile });
