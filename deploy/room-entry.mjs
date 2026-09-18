@@ -7,27 +7,27 @@ export const PUBLIC_DOOR_PATHS = Object.freeze(["/room", "/room/"]);
 // the public wrapper so the app opens the join dialog with the token intact.
 export function publicDoorHashForward() {
   function apply() {
-    var hash = location.hash || "";
-    var open = document.querySelector("a.open");
-    var people = document.querySelector("a.people");
-    var join = document.querySelector("a.join") || document.querySelector("a[href*=\"#join/\"]");
+    var hash = globalThis.location.hash || "";
+    var open = globalThis.document.querySelector("a.open");
+    var people = globalThis.document.querySelector("a.people");
+    var join = globalThis.document.querySelector("a.join") || globalThis.document.querySelector("a[href*=\"#join/\"]");
     var room = /^#room\/([A-Za-z0-9][A-Za-z0-9_.:-]{0,127})$/.exec(hash);
     if (room && open) {
-      var roomUrl = new URL(open.getAttribute("href"), location.href);
+      var roomUrl = new URL(open.getAttribute("href"), globalThis.location.href);
       roomUrl.hash = "#room/" + room[1];
       open.setAttribute("href", roomUrl.href);
       if (people) people.setAttribute("href", open.getAttribute("href"));
       return;
     }
     if (hash.indexOf("#join/") === 0 && hash.length > 6 && join) {
-      var joinUrl = new URL(join.getAttribute("href"), location.href);
+      var joinUrl = new URL(join.getAttribute("href"), globalThis.location.href);
       joinUrl.hash = hash;
       join.setAttribute("href", joinUrl.href);
-      location.replace(joinUrl.href);
+      globalThis.location.replace(joinUrl.href);
     }
   }
   apply();
-  addEventListener("hashchange", apply);
+  globalThis.addEventListener("hashchange", apply);
 }
 export const ROOM_DEEP_LINK_SCRIPT = `(${publicDoorHashForward.toString()})();`;
 // Computed at load so the base64 digest is not a committed high-entropy token.
