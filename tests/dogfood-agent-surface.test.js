@@ -127,7 +127,7 @@ test("api key: revoked key is 401; keys can never manage keys", async t => {
     403, "key issuing a key");
   assert.equal(issue.error?.code, "insufficient_scope");
 
-  const revoked = await must(await post(origin, `/api/agent-keys/${key.keyId}/revoke`, {}, agent.secret),
+  await must(await post(origin, `/api/agent-keys/${key.keyId}/revoke`, {}, agent.secret),
     200, "revoke");
   const after = await must(await get(origin, "/api/rooms/commons/events?after=0&limit=5", key.presented),
     401, "revoked key");
@@ -199,7 +199,7 @@ test("directory: non-member identity sees public cards only", async t => {
 });
 
 test("directory: scoped key needs directory:read for the member view", async t => {
-  const { origin, store, keys, member, publicId, roomId } = await publishCards(t);
+  const { origin, member, publicId, roomId } = await publishCards(t);
   const withRead = await issueKey(origin, member.secret, ["rooms:read", "directory:read"]);
   const list = await get(origin, "/api/agent-directory", withRead.presented);
   assert.equal(list.status, 200);
@@ -305,7 +305,7 @@ test("agent inbox: own DMs, assignments and mentions across channels", async t =
 });
 
 test("agent inbox: scoped key needs inbox:read; humans are refused", async t => {
-  const { origin, store, keys, agent } = await inboxSetup(t);
+  const { origin, keys, agent } = await inboxSetup(t);
   const scoped = await issueKey(origin, agent.secret, ["inbox:read"]);
   assert.equal((await get(origin, "/api/rooms/commons/agent-inbox", scoped.presented)).status, 200);
 
