@@ -1,5 +1,5 @@
 # ROOM-STATE — machine board
-<!-- generated: 2026-09-18T13:58:06Z · board: Uuriko/project-room#266 · watermark: 5730963762 · by: scripts/room rebuild · do-not-hand-edit -->
+<!-- generated: 2026-09-18T14:28:09Z · board: Uuriko/project-room#266 · watermark: 5731345562 · by: scripts/room rebuild · do-not-hand-edit -->
 
 ## open
 task-id | lane | state | lease-expires-utc | files
@@ -15,10 +15,12 @@ RC-2026-09-18-004 | (none) | submitted | 2026-09-18T08:23:05Z | docs/ROOM-PROTOC
 RC-2026-09-18-005 | quill | working | 2026-09-18T10:45:10Z | docs/README.md (Demigod / DIE matching table: one added row only)
 RC-2026-09-18-006 | quill | working | 2026-09-18T10:49:58Z | docs/ADMIN-GUIDE.md (Configuration section: OAuth sign-in operator docs only)
 RC-2026-09-18-007 | quill | working | 2026-09-18T11:10:03Z | src/invite-context.js (new, side-effect-free helpers)
+RC-2026-09-18-008 | quill | submitted | 2026-09-18T20:02:36Z | server/channel-adapters/sms.mjs, server/channel-adapters/messenger.mjs, server/sms-ingest.mjs, server/messenger-ingest.mjs, server/sms-outbound.mjs, server/messenger-outbound.mjs, server/channel-connection.mjs, server/channel-adapters/index.mjs, tests/channel-sms-adapter.test.js, tests/channel-messenger-adapter.test.js, tests/sms-ingest.test.js, tests/messenger-ingest.test.js, tests/sms-messenger-outbound.test.js
+RC-2026-09-18-009 | quill | working | 2026-09-18T20:03:13Z | server/agent-api-keys.mjs, server/agent-directory.mjs, server/agent-plugin-manifest.mjs, server/agent-webhook-subscriptions.mjs, tests/agent-plugin-api-keys.test.js, tests/agent-plugin-directory.test.js, tests/agent-plugin-manifest.test.js, tests/agent-plugin-webhook-subs.test.js, tests/agent-plugin-loop.test.js
 
 ## expiring-soon (<6h)
 task-id | lane | state | lease-expires-utc | files
-(none)
+RC-2026-09-18-009 | quill | working | 2026-09-18T20:03:13Z | server/agent-api-keys.mjs, server/agent-directory.mjs, server/agent-plugin-manifest.mjs, server/agent-webhook-subscriptions.mjs, tests/agent-plugin-api-keys.test.js, tests/agent-plugin-directory.test.js, tests/agent-plugin-manifest.test.js, tests/agent-plugin-webhook-subs.test.js, tests/agent-plugin-loop.test.js
 
 ## unclaimed-lanes
 lane | focus | trust
@@ -29,6 +31,9 @@ Jillian | documentation | standard
 
 ## recent-receipts
 task-id | merged | comment-id
+unknown | 2ab2e2cd9a9d9fa57c51211574cd8853d5efb497 | 5731345562
+unknown | a2834bd2a65d36e294212d6c0537c25ec6054563 | 5731302576
+unknown | PR #574 → main at 0cd0fb03ed711a0fcf8e9c708874946af5c15263 (verified ancestor of origin/main) | 5731079891
 unknown | 4e7a4752c96dfb655d66b3b53a946478ca0af522 | 5730963762
 RC-2026 | none | 5725460512
 RC-2026 | none | 5725382990
@@ -36,9 +41,6 @@ unknown | none | 5724647082
 unknown | PR #487 → main at 56ef9b3861d24ea9aa99b0ed81e5ecddd340a6f7 | 5724589413
 unknown | decfaba890f9483b45c476cd0efb2c2b0f518ae3 | 5724390154
 unknown | PR #516 → main at bcdbb5d3503ad6809e2f74202ccd9bdd95286e4a | 5724335044
-unknown | b0b2bf0bb7364bce1fc154f1462b08a2c43fc319 | 5724191837
-unknown | PR #512 → main at 6b75a970eb19eab17c326f203c4cdbe8da2c1309 | 5724163892
-unknown | PR #508 → main at d9c0d41529134dec1b7ab8d187253f7e88f87081 | 5723996681
 
 ## prose-claims-needing-fence
 comment-id | lane | task | at
@@ -55,5 +57,5 @@ comment-id | lane | task | at
 … +37 more
 
 ## signals
-board_comments=632 threshold=1500 rotation_due=no watcher=active open_claims=12 prose_open=0 unfenced_prose=47 watermark=5730963762
+board_comments=645 threshold=1500 rotation_due=no watcher=active open_claims=14 prose_open=0 unfenced_prose=47 watermark=5731345562
 
