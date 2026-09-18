@@ -24,6 +24,7 @@ Docs only. No people-data. First slice `die-packet-brief-status`.
 | [DEMIGOD-E2E-NEXT-OPERATOR-2026-09-18.md](DEMIGOD-E2E-NEXT-OPERATOR-2026-09-18.md) | Next operator desk: ticket-draft schema (KILL_SWITCH send_ticket; no people fields); freeze-band ack human gate; consent/intro/invoice stay draft; Now→Next→Later; measure one Lightfield hire (Shipped ≠ Measured) |
 | [DEMIGOD-E2E-OPTIMIZE-2026-09-18.md](DEMIGOD-E2E-OPTIMIZE-2026-09-18.md) | Optimize steals: HumanLayer gates, Factory blocklist, Horton queue, company waterfall, Stripe draft→send; stage allow/ask/block; Lightfield hire funnel; honesty ~34/100 draft factory (not production E2E) |
 | [DIE-CLAY-APOLLO-GAP-2026-09-18.md](DIE-CLAY-APOLLO-GAP-2026-09-18.md) | Clay/Apollo **company-only** gap map; honesty **28/100** Clay company tables; Apollo people NEVER; firmographics bridge exists locally (docs only; no people-data) |
+| [DIE-DEMIGOD-OPTIMIZE-PLAN-2026-09-18.md](DIE-DEMIGOD-OPTIMIZE-PLAN-2026-09-18.md) | DIE+Demigod optimize plan: Wave 1 ATS/techStack/auto-ticket; Wave 2 opt-in/dual-yes; Wave 3 Lightfield measure; no people-data |
 
 ## Research index
 
