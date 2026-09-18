@@ -5,6 +5,7 @@ import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { googleConfig } from '../server/google-oauth.mjs';
 import { ChannelWebhookInbox } from '../server/channel-import.mjs';
+import { ChannelDrainer } from '../server/channel-drain.mjs';
 import { DurableDatabase, durableStorage } from './storage.mjs';
 import { bootstrapRoom } from './bootstrap.mjs';
 import { maintenanceEnabled, maintenanceResponse } from '../server/maintenance.mjs';
@@ -42,7 +43,7 @@ export class ProjectRoom {
       googleAuth,
       // Verified provider webhook updates are journaled in the Durable Object's
       // SQLite (pending_channel_updates), so they survive eviction and restart.
-      channelWebhooks: new ChannelWebhookInbox(this.store),
+      channelWebhooks: (this.channelWebhooks = new ChannelWebhookInbox(this.store)),
       resolveRequestSignal: () => this.requestSignals.getStore(),
       loadAsset: async path => {
         const response = await env.ASSETS.fetch(new Request(new URL('/' + path, env.ROOM_ORIGIN)));
@@ -77,6 +78,16 @@ export class ProjectRoom {
       }
       return null;
     });
+  }
+  // Task 9 — auto-drain RPC for the Worker's cron trigger. Scans the webhook
+  // journal and poison-screens pending slices (both session-free, so they run
+  // on schedule); the inbox import itself still needs an owner session (B20
+  // system import authority), so slices without one are honestly deferred,
+  // never imported. Runs in the DO so no connection data leaves it.
+  async drainChannelBacklog() {
+    if (this.paused) throw new Error('Room paused');
+    const drainer = new ChannelDrainer({ store: this.store, webhooks: this.channelWebhooks });
+    return drainer.tick();
   }
   // E1 — RPC: hand an accepted, already-routed message to the importer. Needs
   // the system import authority from B20; until then it parks the request so
@@ -146,5 +157,14 @@ export default {
     if (!routed.decision.accept) { message.setReject(routed.decision.reason); return; }
     try { await room.importRoutedEmail(routed); }
     catch { message.setReject(emailRoutingRejections.unavailable); }
+  },
+
+  // Task 9 — Worker cron (see triggers.crons in wrangler.jsonc): drain the
+  // Telegram webhook journal on a schedule. The tick runs inside the Durable
+  // Object via RPC; a failing tick is logged, never retried by the cron.
+  async scheduled(event, env, ctx) {
+    if (maintenanceEnabled(env.ROOM_MAINTENANCE)) return;
+    ctx.waitUntil(env.ROOM.getByName('invite-only-pilot').drainChannelBacklog()
+      .catch(error => console.warn(`[channel-drain] cron tick failed: ${error?.message ?? error}`)));
   }
 };
