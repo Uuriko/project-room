@@ -9,6 +9,7 @@ import { RoomStore } from "../server/store.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { backupRoom } from "../server/backup.mjs";
 import { flagMessage } from "../server/inbox-spam.mjs";
+import { createNotifyPrefs } from "../server/notify-prefs.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { createRecoveryFixture } from "../scripts/recovery-fixture.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
@@ -20,7 +21,7 @@ function fixture(t) {
   return { ...f, directory };
 }
 
-test("online capture preserves all 53 tables, identity boundaries and exact retries through recovery and restart", async t => {
+test("online capture preserves all 54 tables, identity boundaries and exact retries through recovery and restart", async t => {
   const f = fixture(t);
   const { identityId } = f.store.identities.create("Recovery agent");
   f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
@@ -92,8 +93,18 @@ test("online capture preserves all 53 tables, identity boundaries and exact retr
   // Seed one held quarantine record so the capture covers spam_quarantine.
   f.store.spamQuarantine.quarantine({ messageId: "recovery-quarantined", channel: "telegram",
     flag: flagMessage({ body: "Urgent! Log in here to confirm your identity and claim your free airdrop. Act now!", urls: ["https://evil-claim.xyz/verify"] }) });
+  // Seed one delivered SLA-breach alert so the capture covers sla_breach_alerts.
+  f.store.slaBreachAlerts.notify({ accountId: f.emailProfile.accountId,
+    record: { kind: "sla_breach", urgent: true, threadId: "recovery-thread", channel: "email",
+      elapsedMs: 25 * 3600 * 1000, targetMs: 24 * 3600 * 1000,
+      awaitingSince: new Date(f.now() - 25 * 3600 * 1000).toISOString(),
+      deadlineAt: new Date(f.now() - 3600 * 1000).toISOString(),
+      producedAt: new Date(f.now()).toISOString(),
+      summary: "SLA breached on email: thread recovery-thread waiting 25h (target 24h)" },
+    decision: { decision: "deliver", reason: "urgent SLA breach is always delivered" },
+    prefsSnapshot: createNotifyPrefs().snapshot(f.emailProfile.accountId) });
   const before = auditRecovery(f.store);
-  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 53);
+  assert.equal(before.rooms, 2); assert.equal(before.tables.length, 54);
   for (const table of before.tables) assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
   const receipt = await backupRoom(f.filename, f.directory);
