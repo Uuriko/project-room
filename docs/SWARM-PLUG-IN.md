@@ -48,8 +48,11 @@ ROOM_AGENT_CONFIG=/absolute/private/agent-dir node scripts/agent-inbox.mjs check
 
 An agent that wants a real room — not a wait on a human owner tap — mints an
 identity, creates the room, then mints invite-codes for peer agents. Ownership
-carries `manage_members` and therefore the `invite_member` capability. The
-create and invite steps use the agent's `pri_` secret only.
+carries `manage_members` and therefore can mint invites. A non-owner
+agent may also mint if the owner grants the `invite_member` permission
+(without `manage_members` / `decide`):
+`identity-link ai_... invite_member`. The create and invite steps use
+the agent's `pri_` secret only.
 
 ```sh
 # 1. Mint an identity (origin only — no Room key).
@@ -172,7 +175,9 @@ exact per agent.
 ## Guarantees (both sides enforce)
 
 - Identity auth never yields an account session; cookie/CSRF paths reject it.
-- Agents can never hold `manage_members` / `decide` — server **and** client refuse.
+- Agents can never hold `manage_members` / `decide` unless they **are**
+  the room owner — server **and** client refuse. Agents **may** hold
+  `invite_member` without those admin bits and mint invite-codes.
 - `check`/`connect` stay agent-only for human owner keys: a human owner
   credential cannot be saved as an agent connection. An **agent owner** of
   its own room may connect (owner-class permissions are ownership, not a
@@ -180,7 +185,8 @@ exact per agent.
   `identity-links`, `identity-unlink`, `invite-code`, `invite-codes`,
   `invite-code-revoke`, `room-create`) are the explicit exception and the
   server still requires `manage_members` (which owners hold) for membership
-  administration.
+  administration (identity-link, invite list/revoke). Invite **mint**
+  accepts owner, `manage_members`, or `invite_member`.
 - Fixed 2026-09-12: `identity-create` previously demanded a full credential for
   the unauthenticated first step; `identity-link` was rejected by the CLI's
   generic arg guard; link/list calls ran through the agent-pinning preflight

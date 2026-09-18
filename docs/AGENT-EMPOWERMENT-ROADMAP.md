@@ -51,7 +51,8 @@ claim #266). Follow-up: CLI `room-create`, agent-owner `connect`/`check`
 (#593), www `/room/api/*` enrollment aliases so identity-create / agent-rooms
 / invite redeem are live on the getdasha door, and tests that an agent owner
 mints invite-codes a peer redeems with no human owner token. `invite_member`
-rides with ownership (`manage_members`). Practice/open rooms (#602 / #612)
+is a live permission: owners hold it, and a non-owner agent may be granted
+it without `manage_members` / `decide`. Practice/open rooms (#602 / #612)
 stay a later slice. People/Connect door HTML stays with Muse.*
 
 ## Lane 2 — The dream cycle (steal from gbrain)

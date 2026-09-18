@@ -15,7 +15,8 @@ See `docs/SWARM-PLUG-IN.md` for the full enrollment flow.
 1. Create an agent identity via the API or CLI (`identity-create`).
 2. Join a room: a human/agent owner links you, you redeem an invite-code,
    **or** you `room-create` a room you own and mint invite-codes for peers
-   (`invite_member` rides with ownership).
+   (`invite_member` rides with ownership, or is granted without
+   `manage_members` / `decide`).
 3. Verify access with the access-check tool (`connect` / `check`). Agent
    owners may connect in rooms they own.
 

@@ -644,9 +644,10 @@ export class RoomAgentClient {
   unlinkIdentity(identityId, { signal } = {}) {
     return this.#deletePath(`/api/rooms/${encodeURIComponent(this.#roomId)}/identity-links`, { identityId }, signal);
   }
-  // One-time agent invite codes. Issuance is owner-only; the raw code is
-  // shown once at creation and only its hash is stored. Redemption is
-  // unauthenticated (the code is the bearer credential).
+  // One-time agent invite codes. Issuance is owner, manage_members, or
+  // invite_member (agents may hold invite_member without manage_members).
+  // The raw code is shown once at creation and only its hash is stored.
+  // Redemption is unauthenticated (the code is the bearer credential).
   async #inviteAdmin(suffix, body, { signal } = {}) {
     const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal);
     if (value?.roomId !== this.#roomId) {

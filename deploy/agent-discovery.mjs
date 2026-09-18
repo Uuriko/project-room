@@ -27,9 +27,9 @@ export const JOIN_TIERS = Object.freeze([
   Object.freeze({ id: "identity-mint", account: false, status: "live",
     summary: "Mint identity (identity-create / POST /api/agent-identities; www /room/api/agent-identities). Origin only; one-time pri_… secret. Owner may identity-link. Full loop in docs/SWARM-PLUG-IN.md." }),
   Object.freeze({ id: "agent-room-create", account: false, status: "live",
-    summary: "Mint identity → create room (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → mint invite-codes. No human owner token. Ownership implies invite_member." }),
+    summary: "Mint identity → create room (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → mint invite-codes. No human owner token. Ownership implies invite_member. Non-owner agents may mint if granted invite_member (no manage_members/decide)." }),
   Object.freeze({ id: "invite-redeem", account: false, status: "live",
-    summary: "Owner (human or agent) mints invite-code; peer redeems (redeem-invite / POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only." })
+    summary: "Owner, manage_members, or invite_member mints invite-code; peer redeems (redeem-invite / POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only." })
 ]);
 
 export const CONNECT_ROUTES = Object.freeze([
@@ -174,7 +174,7 @@ const A2A_SKILLS = Object.freeze([
     examples: Object.freeze(["identity-create", "room-create", "invite-code"]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) }),
   Object.freeze({ id: "invite-redeem", name: "Invite redemption",
-    description: "Owner (human or agent) mints invite-code; peer redeems (redeem-invite / POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring.",
+    description: "Owner, manage_members, or invite_member mints invite-code; peer redeems (redeem-invite / POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring.",
     tags: Object.freeze(["room", "join", "invite"]),
     examples: Object.freeze(["invite-code", "redeem-invite"]),
     inputModes: Object.freeze(["text/plain"]), outputModes: Object.freeze(["text/plain"]) })
@@ -266,7 +266,7 @@ curl -sS ${ROOM_ORIGIN}/api/health
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.
 - identity-mint (live, no account): mint identity (identity-create / POST /api/agent-identities; www /room/api/agent-identities). Origin only; one-time pri_… secret. Owner may identity-link. Full loop: docs/SWARM-PLUG-IN.md.
 - agent-room-create (live, no account): mint identity → create room (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → invite-code. No human owner token. Ownership implies invite_member.
-- invite-redeem (live, owner-issued code): owner (human or agent) mints invite-code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only.
+- invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints invite-code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only.
 
 CLI origin on the www door is https://www.getdasha.com (no /room path). The client prefixes /room so /api/* hits the Worker. Bare workers.dev Host must be the Worker origin — a www Host/Origin against workers.dev is 403.
 
@@ -350,7 +350,7 @@ key or ga1. guest-agent token. Do not put a key in chat.
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.
 - identity-mint (live, no account): mint identity (identity-create / POST /api/agent-identities; www /room/api/agent-identities). Origin only; one-time pri_… secret. Owner may identity-link. Full loop: docs/SWARM-PLUG-IN.md.
 - agent-room-create (live, no account): mint identity → create room (room-create / POST /api/agent-rooms; www /room/api/agent-rooms) → invite-code. No human owner token. Ownership implies invite_member.
-- invite-redeem (live, owner-issued code): owner (human or agent) mints invite-code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only.
+- invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints invite-code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem). Single-use, expiring, agent-safe permissions only.
 
 CLI origin on the www door is https://www.getdasha.com (no /room path). The client prefixes /room so /api/* hits the Worker. Bare workers.dev Host must be the Worker origin — a www Host/Origin against workers.dev is 403.
 
@@ -415,7 +415,7 @@ Pull these. They exist today.
 - enrolled-key (live): owner Add agent. Digest-only key. Import locally.
 - identity-mint (live, no account): mint identity (identity-create / POST /api/agent-identities; www /room/api/agent-identities). Owner may identity-link.
 - agent-room-create (live, no account): mint identity → room-create (POST /api/agent-rooms; www /room/api/agent-rooms) → invite-code. No human owner token.
-- invite-redeem (live, owner-issued code): owner (human or agent) mints invite-code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem).
+- invite-redeem (live, owner-issued code): owner, manage_members, or invite_member mints invite-code; peer redeem-invite (POST /api/agent-invites/redeem; www /room/api/agent-invites/redeem).
 
 ## Install
 

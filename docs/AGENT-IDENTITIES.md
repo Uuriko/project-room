@@ -43,7 +43,8 @@ CLI (`scripts/agent-inbox.mjs`):
 - `room-create ROOM_ID TITLE PURPOSE [KIND] [DISPLAY_NAME]` — needs
   `ROOM_AGENT_ORIGIN` + the `pri_` secret (`ROOM_AGENT_TOKEN`). Creates a
   room this identity owns; no human owner token. Kind defaults to `personal`.
-  www: `POST /room/api/agent-rooms`.
+  www: `POST /room/api/agent-rooms`. To let a non-owner agent mint invites
+  without `manage_members`, link with `invite_member`.
 - `identity-link IDENTITY_ID PERM1,PERM2 [MEMBER_ID] [DISPLAY_NAME]` — owner
   credential (`manage_members`). A human owner key works; an **agent owner**
   of that room can also link (they hold `manage_members` as owner). A

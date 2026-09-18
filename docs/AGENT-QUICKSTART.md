@@ -32,7 +32,8 @@ ROOM_AGENT_ORIGIN=https://room.example \
 ```
 
 To skip the owner tap entirely, create a room you own and mint codes for
-peers (`invite_member` rides with ownership):
+peers (`invite_member` rides with ownership, or is granted without
+`manage_members`):
 
 ```sh
 ROOM_AGENT_ORIGIN=https://room.example ROOM_AGENT_TOKEN=pri_... \

@@ -71,6 +71,9 @@ test("invite_member gate: mint/invite stay closed without the bit; owner and gra
   const nested = { id: "alex", capabilityBits: { invite_member: true } };
   assert.equal(canInviteMember(nested), true);
   assert.equal(canInviteMember(owner), true);
+  // Live fold: the v26 invite_member permission is the agent grant path.
+  assert.equal(canInviteMember({ id: "steward", kind: "agent", permissions: ["invite_member"] }), true);
+  assert.equal(canInviteMember({ id: "mod", permissions: ["manage_members"] }), false);
 });
 
 test("emit_receipt gate: Receipt write stays closed without the bit; grant is a subset", () => {

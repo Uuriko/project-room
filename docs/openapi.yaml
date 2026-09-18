@@ -3996,11 +3996,14 @@ paths:
     post:
       summary: Mint a one-time agent invite code
       description: >-
-        Member with `manage_members`; a non-owner cannot grant permissions it
-        does not hold (403 invite_scope_exceeded). Body names either
-        `permissions` (unique room permissions, never manage_members or
-        decide) or a `profile` (chat, contribute, review), plus optional
-        `expiresInMinutes` and `displayName`. The raw code (RM-…) is
+        Owner, `manage_members`, or `invite_member` (agents may hold
+        `invite_member` without `manage_members`/`decide`). A `manage_members`
+        non-owner cannot grant permissions it does not hold (403
+        invite_scope_exceeded); `invite_member`-only may grant standing
+        agent-safe profiles (chat/contribute/review). Body names either
+        `permissions` (unique room permissions, never manage_members, decide,
+        or invite_member) or a `profile` (chat, contribute, review), plus
+        optional `expiresInMinutes` and `displayName`. The raw code (RM-…) is
         returned once.
       parameters:
         - $ref: '#/components/parameters/RoomId'

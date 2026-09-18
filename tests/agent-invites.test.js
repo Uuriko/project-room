@@ -156,8 +156,8 @@ test("minting is owner-only and can never grant administration", async t => {
   assert.equal(linked.status, 201);
   const denied = await mint(origin, id.json.secret, { permissions: ["accept_work"] });
   assert.equal(denied.status, 403);
-  // manage_members, decide, and unknown permissions are rejected at issuance.
-  for (const permissions of [["manage_members"], ["decide"], ["accept_work", "manage_members"], ["fly"], []]) {
+  // manage_members, decide, invite_member, and unknown permissions are rejected at issuance.
+  for (const permissions of [["manage_members"], ["decide"], ["invite_member"], ["accept_work", "manage_members"], ["fly"], []]) {
     const bad = await mint(origin, ownerKey, { permissions });
     assert.equal(bad.status, 422, JSON.stringify(permissions));
   }
@@ -272,6 +272,37 @@ test("list is the audit trail: creation, redemption, revocation, expiry", async 
     { identityId: id.json.identityId, permissions: ["accept_work"] }, ownerKey);
   assert.equal(linked.status, 201);
   assert.equal((await get(origin, "/api/rooms/commons/agent-invites", id.json.secret)).status, 403);
+});
+
+test("an agent with invite_member (no manage_members/decide) mints; a peer redeems and checks", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const inviter = await post(origin, "/api/agent-identities", { displayName: "Inviter Bot" });
+  assert.equal(inviter.status, 201);
+  const linked = await post(origin, "/api/rooms/commons/identity-links",
+    { identityId: inviter.json.identityId, permissions: ["invite_member"] }, ownerKey);
+  assert.equal(linked.status, 201, JSON.stringify(linked.json));
+  const minted = await mint(origin, inviter.json.secret, { profile: "contribute", expiresInMinutes: 60, displayName: "Peer Bot" });
+  assert.equal(minted.status, 201, JSON.stringify(minted.json));
+  assert.match(minted.json.code, /^RM-/);
+  assert.deepEqual(minted.json.permissions, ["accept_work", "complete_work"]);
+  const wide = await mint(origin, inviter.json.secret, { permissions: ["write_external"] });
+  assert.equal(wide.status, 403);
+  assert.equal(wide.json.error.code, "invite_scope_exceeded");
+  const redeemed = await redeem(origin, minted.json.code, "Peer Bot");
+  assert.equal(redeemed.status, 201, JSON.stringify(redeemed.json));
+  const { RoomAgentClient } = await import("../client/room-agent.mjs");
+  const peer = new RoomAgentClient({
+    origin, roomId: "commons", token: redeemed.json.secret, memberId: redeemed.json.memberId
+  });
+  const checked = await peer.checkConnection();
+  assert.equal(checked.status, "credential_accepted");
+  assert.deepEqual(checked.permissions, ["accept_work", "complete_work"]);
+  const oriented = await peer.orient();
+  assert.equal(oriented.roomId, "commons");
+  assert.equal(oriented.member.id, redeemed.json.memberId);
+  assert.ok(!checked.permissions.includes("manage_members"));
+  assert.ok(!checked.permissions.includes("decide"));
+  assert.ok(!checked.permissions.includes("invite_member"));
 });
 
 test("a demoted issuer's outstanding codes stop working", async t => {
