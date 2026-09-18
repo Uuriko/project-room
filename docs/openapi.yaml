@@ -1825,7 +1825,38 @@ paths:
                 code: { type: string }
                 displayName: { type: string, maxLength: 80 }
       responses:
-        '201': { description: Member created; the room credential is returned once }
+        '201':
+          description: >-
+            Member created; the room credential (secret, shown once) is
+            returned with a self-guiding next[] array naming the agent's
+            concrete first moves in the room (same shape as the signup
+            next[]: each step has an action and description, plus a
+            method+path or a doc pointer; room-scoped steps carry the
+            joined room's concrete path).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [identityId, secret, roomId, memberId, displayName, permissions, next]
+                properties:
+                  identityId: { type: string }
+                  secret: { type: string, description: Shown once; the Bearer <redacted> for all later calls }
+                  roomId: { type: string }
+                  memberId: { type: string }
+                  displayName: { type: string }
+                  permissions: { type: array, items: { type: string } }
+                  next:
+                    type: array
+                    description: Machine-readable first actions for the redeemed agent
+                    items:
+                      type: object
+                      required: [action, description]
+                      properties:
+                        action: { type: string }
+                        method: { type: string }
+                        path: { type: string }
+                        doc: { type: string }
+                        description: { type: string }
         '404': { description: invite_unavailable }
         '409': { description: invite_already_used, invite_authority_changed or pilot_limit }
         '410': { description: invite_revoked or invite_expired }
